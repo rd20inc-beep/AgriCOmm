@@ -1,0 +1,39 @@
+{
+  "name": "AGRI COMMODITIES",
+  "tagline": "Serving Natural Nutrition",
+  "address": "Suite No. 1012, 10th Floor, Uni Plaza, I.I. Chundrigar Road, Karachi-74000, Pakistan",
+  "phone": "+92 21 32426534",
+  "email": "info@agririce.com",
+  "website": "www.agririce.com",
+  "ntn": "1251720-8",
+  "proprietor": "Akmal Amin Paracha",
+  "proprietorCnic": "42301-19553677",
+  "logo": "/logo.jpg",
+  "bank": {
+    "name": "Bank Al Habib Limited",
+    "branch": "New Challi Branch",
+    "address": "Karachi - Pakistan",
+    "account": "0081 0046 0701",
+    "swift": "BAHLPKKAXXX",
+    "iban": "PK84 BAHL 1015-0081-0046-0701"
+  },
+  "defaults": {
+    "hsCode": "1006-3090",
+    "origin": "Pakistan",
+    "portOfLoading": "Karachi, Pakistan",
+    "incoterm": "FOB",
+    "currency": "USD"
+  },
+  "expenseCategories": [
+    { "key": "utilities", "label": "Utilities", "subcategories": ["Electricity", "Water", "Gas", "Internet", "Telephone"] },
+    { "key": "rent", "label": "Rent", "subcategories": ["Office Rent", "Warehouse Rent", "Equipment Rent", "Vehicle Rent"] },
+    { "key": "travel", "label": "Travel", "subcategories": ["Local Travel", "Domestic Travel", "International Travel", "Fuel/Petrol", "Accommodation"] },
+    { "key": "marketing", "label": "Marketing", "subcategories": ["Advertising", "Printing", "Events", "Social Media", "Promotions"] },
+    { "key": "maintenance", "label": "Maintenance", "subcategories": ["Building Repairs", "Equipment Repairs", "Vehicle Maintenance", "IT Support"] },
+    { "key": "officeSupplies", "label": "Office Supplies", "subcategories": ["Stationery", "Computer Equipment", "Furniture", "Kitchen Supplies"] },
+    { "key": "legal", "label": "Legal/Professional", "subcategories": ["Legal Fees", "Accounting Fees", "Consulting", "Audit"] },
+    { "key": "bankCharges", "label": "Bank Charges", "subcategories": ["Transaction Fees", "Account Charges", "Wire Transfer Fees"] },
+    { "key": "insurance", "label": "Insurance", "subcategories": ["Business Insurance", "Vehicle Insurance", "Health Insurance"] },
+    { "key": "taxes", "label": "Taxes", "subcategories": ["Income Tax", "Sales Tax", "Property Tax", "License Fees"] }
+  ]
+}

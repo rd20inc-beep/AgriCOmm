@@ -1,0 +1,317 @@
+[
+  {
+    "id": 1,
+    "name": "1121 Basmati Brown Rice",
+    "code": "PRD-20251230-180141-ef4ec719",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 2,
+    "name": "1121 Basmati Parboiled Rice",
+    "code": "PRD-20251230-180141-09b8114a",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 3,
+    "name": "1121 Basmati Steam Rice",
+    "code": "PRD-20251230-180141-c94bbd82",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 4,
+    "name": "1121 Basmati White Rice",
+    "code": "PRD-20251230-180141-24995d12",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 5,
+    "name": "386 Basmati Rice",
+    "code": "PRD-20251230-180143-6b0bacd0",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 6,
+    "name": "Basmati Rice",
+    "code": "PRD-20251025-000001-0001",
+    "grade": "Premium",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 8,
+    "name": "C9 Long Grain Parboiled Rice",
+    "code": "PRD-20251230-180141-97e0769b",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 9,
+    "name": "C9 Long Grain White Rice",
+    "code": "PRD-20251230-180141-240516d5",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 10,
+    "name": "D-98 Basmati White Rice",
+    "code": "PRD-20251230-180141-b0b75d59",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 11,
+    "name": "D.R. Long Grain Parboiled Rice",
+    "code": "PRD-20251230-180141-0e57207d",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 12,
+    "name": "D.R. Long Grain White Rice",
+    "code": "PRD-20251230-180141-d144dfe6",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 13,
+    "name": "IRRI-6 Long Grain Brown Rice",
+    "code": "PRD-20251230-180142-52e68525",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 14,
+    "name": "IRRI-6 Long Grain Parboiled Rice",
+    "code": "PRD-20251230-180142-1ca1edb1",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 15,
+    "name": "IRRI-6 Long Grain White Rice",
+    "code": "PRD-20251230-180142-d206680d",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 16,
+    "name": "IRRI-9 Long Grain Brown Rice",
+    "code": "PRD-20251230-180142-4e7cf8b6",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 17,
+    "name": "IRRI-9 Long Grain Parboiled Rice",
+    "code": "PRD-20251230-180142-ac156017",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 18,
+    "name": "IRRI-9 Long Grain White Rice",
+    "code": "PRD-20251230-180142-bd501c4b",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 19,
+    "name": "Jasmine Rice",
+    "code": "PRD-20251025-000002-0002",
+    "grade": "Grade A",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 20,
+    "name": "KS-282 Long Grain Brown Rice",
+    "code": "PRD-20251230-180142-5f4e6475",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 21,
+    "name": "KS-282 Long Grain Parboiled Rice",
+    "code": "PRD-20251230-180142-d13c000b",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 22,
+    "name": "KS-282 Long Grain White Rice",
+    "code": "PRD-20251230-180142-85fe7152",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 23,
+    "name": "Long Grain White Rice",
+    "code": "PRD-20251025-000003-0003",
+    "grade": "Standard",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 24,
+    "name": "PK-386 Long Grain Brown Rice",
+    "code": "PRD-20251230-180142-eddab699",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 25,
+    "name": "PK-386 Long Grain Parboiled Rice",
+    "code": "PRD-20251230-180142-22e6f74f",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 26,
+    "name": "PK-386 Long Grain White Rice",
+    "code": "PRD-20251230-180142-0f3c30e3",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 27,
+    "name": "Parboiled Rice",
+    "code": "PRD-20251025-000004-0004",
+    "grade": "Grade B",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 30,
+    "name": "Super Basmati Rice",
+    "code": "PRD-20251230-180143-57071cb5",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 31,
+    "name": "Super Fine Long Grain White Rice",
+    "code": "PRD-20251230-180142-34706eb9",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 32,
+    "name": "Super Kernel Basmati Brown Rice",
+    "code": "PRD-20251230-180143-a8c68b0e",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 33,
+    "name": "Super Kernel Basmati Parboiled Rice",
+    "code": "PRD-20251230-180143-c7b2a94a",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 34,
+    "name": "Super Kernel Basmati White Rice",
+    "code": "PRD-20251230-180143-ab0b1472",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 35,
+    "name": "blended basmati rice 70-30",
+    "code": "PRD-20260305-084353-9a534f5e",
+    "grade": "",
+    "category": "Rice",
+    "description": "",
+    "isByproduct": false
+  },
+  {
+    "id": 7,
+    "name": "Broken Rice",
+    "code": "PROD-BROKEN-RICE",
+    "grade": "Standard",
+    "category": "By-Product",
+    "description": "Grains broken during milling - used for feed, breweries, food processing",
+    "isByproduct": true
+  },
+  {
+    "id": 28,
+    "name": "Rice Bran",
+    "code": "PROD-RICE-BRAN",
+    "grade": "Standard",
+    "category": "By-Product",
+    "description": "Outer brown layer from polishing - used for oil extraction, animal feed",
+    "isByproduct": true
+  },
+  {
+    "id": 29,
+    "name": "Rice Husk",
+    "code": "PROD-RICE-HUSK",
+    "grade": "Standard",
+    "category": "By-Product",
+    "description": "Hard outer shell from de-husking - used for boiler fuel, power generation",
+    "isByproduct": true
+  }
+]

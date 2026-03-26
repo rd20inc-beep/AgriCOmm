@@ -1,0 +1,167 @@
+[
+  {
+    "id": 1,
+    "uid": "PA-005",
+    "name": "BAHL Agri Commodities",
+    "type": "bank",
+    "accountNumber": "0081-0046-07-01",
+    "bankName": "Bank Al Habib Limited (BAHL)",
+    "branch": "",
+    "currency": "PKR",
+    "currentBalance": -16912000.0
+  },
+  {
+    "id": 2,
+    "uid": "PA-013",
+    "name": "Meezan Bank ARC International",
+    "type": "bank",
+    "accountNumber": "PK77MEZN000099090112096441",
+    "bankName": "Meezan Bank",
+    "branch": "",
+    "currency": "PKR",
+    "currentBalance": 8260000.0
+  },
+  {
+    "id": 3,
+    "uid": "PA-015",
+    "name": "Office Petty Cash",
+    "type": "cash",
+    "accountNumber": "-",
+    "bankName": "Cash",
+    "branch": "",
+    "currency": "PKR",
+    "currentBalance": 0.0
+  },
+  {
+    "id": 4,
+    "uid": "PA-014",
+    "name": "Meezan Bank Agri Commodities",
+    "type": "bank",
+    "accountNumber": "PK04MEZN0099090110395308",
+    "bankName": "Meezan Bank",
+    "branch": "",
+    "currency": "PKR",
+    "currentBalance": 0.0
+  },
+  {
+    "id": 5,
+    "uid": "PA-012",
+    "name": "Meezan Bank AAP Personal",
+    "type": "bank",
+    "accountNumber": "PK04MEZN0099090112025435",
+    "bankName": "Meezan Bank",
+    "branch": "",
+    "currency": "PKR",
+    "currentBalance": 0.0
+  },
+  {
+    "id": 6,
+    "uid": "PA-011",
+    "name": "MCB AAP Dollar",
+    "type": "bank",
+    "accountNumber": "PK57MUCB002591840100",
+    "bankName": "Muslim Commercial Bank (MCB)",
+    "branch": "",
+    "currency": "USD",
+    "currentBalance": 0.0
+  },
+  {
+    "id": 7,
+    "uid": "PA-010",
+    "name": "MCB AAP",
+    "type": "bank",
+    "accountNumber": "0025-9184-0100-0888",
+    "bankName": "Muslim Commercial Bank (MCB)",
+    "branch": "",
+    "currency": "PKR",
+    "currentBalance": 0.0
+  },
+  {
+    "id": 8,
+    "uid": "PA-009",
+    "name": "HMB Agri Commodities",
+    "type": "bank",
+    "accountNumber": "0156-0271-4018-3179",
+    "bankName": "Habib Metropolitan Bank (HMB)",
+    "branch": "",
+    "currency": "PKR",
+    "currentBalance": 0.0
+  },
+  {
+    "id": 9,
+    "uid": "PA-008",
+    "name": "HBL Agri Commodities",
+    "type": "bank",
+    "accountNumber": "0000047900439203",
+    "bankName": "Habib Bank Limited (HBL)",
+    "branch": "",
+    "currency": "PKR",
+    "currentBalance": 0.0
+  },
+  {
+    "id": 10,
+    "uid": "PA-007",
+    "name": "HBL ARC International",
+    "type": "bank",
+    "accountNumber": "PK55HABB0000047900404303",
+    "bankName": "Habib Bank Limited (HBL)",
+    "branch": "",
+    "currency": "PKR",
+    "currentBalance": 0.0
+  },
+  {
+    "id": 11,
+    "uid": "PA-006",
+    "name": "HBL AAP Personal",
+    "type": "bank",
+    "accountNumber": "0000047900403603",
+    "bankName": "Habib Bank Limited (HBL)",
+    "branch": "",
+    "currency": "PKR",
+    "currentBalance": 0.0
+  },
+  {
+    "id": 12,
+    "uid": "PA-004",
+    "name": "BAHL AAP Saving",
+    "type": "bank",
+    "accountNumber": "1015007100462601-2",
+    "bankName": "Bank Al Habib Limited (BAHL)",
+    "branch": "",
+    "currency": "PKR",
+    "currentBalance": 0.0
+  },
+  {
+    "id": 13,
+    "uid": "PA-003",
+    "name": "BAHL AAP Dollar",
+    "type": "bank",
+    "accountNumber": "0015-0419-004626-01-2",
+    "bankName": "Bank Al Habib Limited (BAHL)",
+    "branch": "",
+    "currency": "USD",
+    "currentBalance": 0.0
+  },
+  {
+    "id": 14,
+    "uid": "PA-002",
+    "name": "BAHL AAP Current",
+    "type": "bank",
+    "accountNumber": "1015-0081-0046-2601",
+    "bankName": "Bank Al Habib Limited (BAHL)",
+    "branch": "",
+    "currency": "PKR",
+    "currentBalance": 0.0
+  },
+  {
+    "id": 15,
+    "uid": "PA-001",
+    "name": "Askari Bank Agri Commodities",
+    "type": "bank",
+    "accountNumber": "PK53ASCM0000570100577840",
+    "bankName": "Askari Bank",
+    "branch": "",
+    "currency": "PKR",
+    "currentBalance": 0.0
+  }
+]

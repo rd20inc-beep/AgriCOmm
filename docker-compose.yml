@@ -1,0 +1,71 @@
+# Copy backend/.env.example to .env in the project root and configure
+# your secrets before running docker-compose up.
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:16-alpine
+    container_name: riceflow-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-riceflow_erp}
+      POSTGRES_USER: ${DB_USER:-riceflow}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-riceflow_secure_2026}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-riceflow} -d ${DB_NAME:-riceflow_erp}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: riceflow-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: ${PORT:-3001}
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-riceflow_erp}
+      DB_USER: ${DB_USER:-riceflow}
+      DB_PASSWORD: ${DB_PASSWORD:-riceflow_secure_2026}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-24h}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_SENDER_NAME: ${SMTP_SENDER_NAME:-AGRI COMMODITIES}
+      SMTP_SENDER_EMAIL: ${SMTP_SENDER_EMAIL:-info@agririce.com}
+    ports:
+      - "3001:3001"
+    volumes:
+      - uploads:/app/uploads
+
+  # Frontend (Nginx serving built static files)
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: riceflow-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+volumes:
+  pgdata:
+  uploads:

@@ -1,0 +1,182 @@
+[
+  {
+    "id": 1,
+    "name": "BOPP Bag 25kg (Printed)",
+    "category": "branded",
+    "sizeKg": 25.0,
+    "material": "BOPP",
+    "description": "Printed BOPP laminated bag",
+    "unit": "pcs",
+    "reorderLevel": 200
+  },
+  {
+    "id": 3,
+    "name": "BOPP Bag 5kg (Printed)",
+    "category": "branded",
+    "sizeKg": 5.0,
+    "material": "BOPP",
+    "description": "Printed retail BOPP bag",
+    "unit": "pcs",
+    "reorderLevel": 500
+  },
+  {
+    "id": 5,
+    "name": "Export Bag 25kg",
+    "category": "branded",
+    "sizeKg": 25.0,
+    "material": "Woven PP",
+    "description": "Export quality printed bag",
+    "unit": "pcs",
+    "reorderLevel": 200
+  },
+  {
+    "id": 7,
+    "name": "Thread Roll",
+    "category": "consumable",
+    "sizeKg": null,
+    "material": "",
+    "description": "Stitching thread for bag sealing",
+    "unit": "pcs",
+    "reorderLevel": 50
+  },
+  {
+    "id": 9,
+    "name": "Bardana 100kg",
+    "category": "empty",
+    "sizeKg": 100.0,
+    "material": "PP/Jute",
+    "description": "General purpose 100kg bardana",
+    "unit": "pcs",
+    "reorderLevel": 50
+  },
+  {
+    "id": 10,
+    "name": "Bardana 50kg",
+    "category": "empty",
+    "sizeKg": 50.0,
+    "material": "PP/Jute",
+    "description": "General purpose 50kg bardana",
+    "unit": "pcs",
+    "reorderLevel": 50
+  },
+  {
+    "id": 11,
+    "name": "Jute Bag 50kg",
+    "category": "empty",
+    "sizeKg": 50.0,
+    "material": "Jute",
+    "description": "Traditional jute gunny bag",
+    "unit": "pcs",
+    "reorderLevel": 200
+  },
+  {
+    "id": 13,
+    "name": "Jute Bori 100kg",
+    "category": "empty",
+    "sizeKg": 100.0,
+    "material": "Jute",
+    "description": "Traditional 100kg jute bori/bag",
+    "unit": "pcs",
+    "reorderLevel": 50
+  },
+  {
+    "id": 14,
+    "name": "Jute Bori 50kg",
+    "category": "empty",
+    "sizeKg": 50.0,
+    "material": "Jute",
+    "description": "Traditional 50kg jute bori/bag",
+    "unit": "pcs",
+    "reorderLevel": 50
+  },
+  {
+    "id": 15,
+    "name": "Katta 100kg",
+    "category": "empty",
+    "sizeKg": 100.0,
+    "material": "PP Woven",
+    "description": "Standard 100kg PP woven katta for wholesale rice",
+    "unit": "pcs",
+    "reorderLevel": 100
+  },
+  {
+    "id": 16,
+    "name": "Katta 25kg",
+    "category": "empty",
+    "sizeKg": 25.0,
+    "material": "PP Woven",
+    "description": "Standard 25kg PP woven katta",
+    "unit": "pcs",
+    "reorderLevel": 100
+  },
+  {
+    "id": 17,
+    "name": "Katta 50kg",
+    "category": "empty",
+    "sizeKg": 50.0,
+    "material": "PP Woven",
+    "description": "Standard 50kg PP woven katta",
+    "unit": "pcs",
+    "reorderLevel": 100
+  },
+  {
+    "id": 18,
+    "name": "Liner Bag 50kg",
+    "category": "empty",
+    "sizeKg": 50.0,
+    "material": "Plastic",
+    "description": "Inner plastic liner for moisture protection",
+    "unit": "pcs",
+    "reorderLevel": 300
+  },
+  {
+    "id": 20,
+    "name": "PP Bag 100kg (Empty)",
+    "category": "empty",
+    "sizeKg": 100.0,
+    "material": "PP",
+    "description": "Standard 100kg polypropylene bag for rice",
+    "unit": "pcs",
+    "reorderLevel": 100
+  },
+  {
+    "id": 21,
+    "name": "PP Bag 10kg (Empty)",
+    "category": "empty",
+    "sizeKg": 10.0,
+    "material": "PP",
+    "description": "Standard 10kg polypropylene bag",
+    "unit": "pcs",
+    "reorderLevel": 300
+  },
+  {
+    "id": 23,
+    "name": "PP Bag 25kg (Empty)",
+    "category": "empty",
+    "sizeKg": 25.0,
+    "material": "PP",
+    "description": "Standard 25kg polypropylene bag",
+    "unit": "pcs",
+    "reorderLevel": 500
+  },
+  {
+    "id": 25,
+    "name": "PP Bag 50kg (Empty)",
+    "category": "empty",
+    "sizeKg": 50.0,
+    "material": "PP",
+    "description": "Standard 50kg polypropylene bag",
+    "unit": "pcs",
+    "reorderLevel": 500
+  },
+  {
+    "id": 27,
+    "name": "PP Bag 5kg (Empty)",
+    "category": "empty",
+    "sizeKg": 5.0,
+    "material": "PP",
+    "description": "Standard 5kg polypropylene bag",
+    "unit": "pcs",
+    "reorderLevel": 300
+  }
+]
