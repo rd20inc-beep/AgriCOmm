@@ -206,23 +206,10 @@ export default function ExportOrderDetail() {
         bank_reference: advanceBankRef,
         notes: advanceNotes,
       });
-      // Sync local state from the API response
-      const updated = res?.data?.data?.order;
+      // Sync local state from the API response (api client returns parsed JSON directly)
+      const updated = res?.data?.order;
       if (updated) {
-        updateExportOrder(order.id, {
-          advanceReceived: parseFloat(updated.advance_received) || amount,
-          advanceDate: updated.advance_date || advanceDate,
-          status: updated.status || 'Advance Received',
-          currentStep: updated.current_step || Math.max(order.currentStep, 3),
-        });
-      } else {
-        // Fallback if API doesn't return order
-        updateExportOrder(order.id, {
-          advanceReceived: amount,
-          advanceDate: advanceDate,
-          status: 'Advance Received',
-          currentStep: Math.max(order.currentStep, 3),
-        });
+        setApiOrder(transformOrder(updated));
       }
       addActivityToOrder(order.id, {
         date: today(),
@@ -230,11 +217,6 @@ export default function ExportOrderDetail() {
         by: 'Export Manager',
       });
       addToast('Advance payment confirmed successfully');
-      // If milling already linked, advance further
-      if (order.millingOrderId) {
-        updateExportOrder(order.id, { status: 'In Milling', currentStep: Math.max(5, order.currentStep) });
-      }
-      fetchOrderDetail(); // Refresh this order immediately
       refreshFromApi('orders'); // Refresh orders + receivables
       refreshFromApi('finance'); // Refresh finance dashboard
     } catch (err) {
