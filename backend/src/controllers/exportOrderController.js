@@ -394,13 +394,14 @@ const exportOrderController = {
 
         await trx('export_order_costs').insert(costRows);
 
-        // Insert initial status history
+        // Insert initial status history (log actual status, not always Draft)
+        const initialStatus = requestedStatus || 'Draft';
         await trx('export_order_status_history').insert({
           order_id: order.id,
           from_status: null,
-          to_status: 'Draft',
+          to_status: initialStatus,
           changed_by: req.user.id,
-          reason: 'Order created',
+          reason: initialStatus === 'Draft' ? 'Order saved as draft' : 'Order created',
         });
 
         // Auto-create document checklist for export order

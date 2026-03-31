@@ -122,6 +122,7 @@ export default function FinanceConfirmations() {
       date: new Date().toISOString().split('T')[0],
       paymentMethod: 'Bank Transfer',
       bankAccount: '',
+      bankAccountId: '',
       bankReference: '',
       notes: '',
     });
@@ -155,66 +156,30 @@ export default function FinanceConfirmations() {
       return;
     }
 
-    if (milestoneType === 'advance') {
-      const newTotal = selectedOrder.advanceReceived + amount;
-      const isFull = newTotal >= selectedOrder.advanceExpected;
-      updateExportOrder(selectedOrder.id, {
-        advanceReceived: Math.min(newTotal, selectedOrder.advanceExpected),
-        advanceDate: formData.date,
-        ...(isFull ? { status: 'Advance Received', currentStep: Math.max(selectedOrder.currentStep, 3) } : {}),
-      });
-      addActivityToOrder(selectedOrder.id, {
-        date: formData.date,
-        action: `${isFull ? 'Advance' : 'Partial advance'} of ${formatCurrency(amount)} confirmed via ${formData.paymentMethod}. Account: ${formData.bankAccount || 'N/A'}. Ref: ${formData.bankReference || 'N/A'}`,
-        by: 'Finance Manager',
-      });
-      addToast(`${isFull ? 'Advance' : 'Partial advance'} of ${formatCurrency(amount)} confirmed for ${selectedOrder.id}`);
-      // If milling already linked, advance further
-      if (isFull && selectedOrder.millingOrderId) {
-        updateExportOrder(selectedOrder.id, { status: 'In Milling', currentStep: Math.max(3, selectedOrder.currentStep) });
-      }
-    } else {
-      const newTotal = selectedOrder.balanceReceived + amount;
-      const isFull = newTotal >= selectedOrder.balanceExpected;
-      updateExportOrder(selectedOrder.id, {
-        balanceReceived: Math.min(newTotal, selectedOrder.balanceExpected),
-        balanceDate: formData.date,
-        ...(isFull ? { status: 'Ready to Ship', currentStep: Math.max(selectedOrder.currentStep, 6) } : {}),
-      });
-      addActivityToOrder(selectedOrder.id, {
-        date: formData.date,
-        action: `${isFull ? 'Balance' : 'Partial balance'} of ${formatCurrency(amount)} confirmed via ${formData.paymentMethod}. Account: ${formData.bankAccount || 'N/A'}. Ref: ${formData.bankReference || 'N/A'}`,
-        by: 'Finance Manager',
-      });
-      addToast(`${isFull ? 'Balance' : 'Partial balance'} of ${formatCurrency(amount)} confirmed for ${selectedOrder.id}`);
-      if (isFull) {
-        addActivityToOrder(selectedOrder.id, {
-          date: formData.date,
-          action: 'Balance confirmed — final export documents unlocked',
-          by: 'System',
-        });
-        addToast('Final export documents unlocked', 'info');
-      }
-    }
-
-    recordPayment(selectedOrder.id, milestoneType, amount, formData.paymentMethod, formData.bankReference, formData.bankAccount);
+    // Backend-first: call API, then update UI only on success
     try {
       const endpoint = milestoneType === 'advance' ? 'confirm-advance' : 'confirm-balance';
       await api.post(`/api/export-orders/${selectedOrder.dbId || selectedOrder.id}/${endpoint}`, {
-        amount: parseFloat(formData.receivedAmount),
+        amount,
         payment_date: formData.date,
         payment_method: formData.paymentMethod,
-        bank_account_id: null,
+        bank_account_id: formData.bankAccountId || null,
         bank_reference: formData.bankReference,
         notes: formData.notes,
       });
-      refreshFromApi('orders');  // Refresh orders + receivables
-      refreshFromApi('finance'); // Refresh all finance data
-    } catch (err) { console.warn('API payment confirm failed:', err.message); }
+
+      const label = milestoneType === 'advance' ? 'Advance' : 'Balance';
+      addToast(`${label} payment of ${formatCurrency(amount)} confirmed for ${selectedOrder.id}`);
+      recordPayment(selectedOrder.id, milestoneType, amount, formData.paymentMethod, formData.bankReference, formData.bankAccount);
+      refreshFromApi('orders');
+      refreshFromApi('finance');
+    } catch (err) {
+      addToast(`Payment confirmation failed: ${err.message || 'Server error'}`, 'error');
+    }
     closeModal();
   }
 
-  function handleMarkPartial() {
+  async function handleMarkPartial() {
     if (!selectedOrder) return;
     const amount = parseFloat(formData.receivedAmount);
     if (isNaN(amount) || amount <= 0) {
@@ -222,43 +187,41 @@ export default function FinanceConfirmations() {
       return;
     }
 
-    if (milestoneType === 'advance') {
-      updateExportOrder(selectedOrder.id, {
-        advanceReceived: selectedOrder.advanceReceived + amount,
-        advanceDate: formData.date,
+    // Backend-first: same endpoint handles partial payments (doesn't auto-transition if not full)
+    try {
+      const endpoint = milestoneType === 'advance' ? 'confirm-advance' : 'confirm-balance';
+      await api.post(`/api/export-orders/${selectedOrder.dbId || selectedOrder.id}/${endpoint}`, {
+        amount,
+        payment_date: formData.date,
+        payment_method: formData.paymentMethod,
+        bank_account_id: formData.bankAccountId || null,
+        bank_reference: formData.bankReference,
+        notes: formData.notes,
       });
-      addActivityToOrder(selectedOrder.id, {
-        date: formData.date,
-        action: `Partial advance of ${formatCurrency(amount)} received (total now: ${formatCurrency(selectedOrder.advanceReceived + amount)} of ${formatCurrency(selectedOrder.advanceExpected)})`,
-        by: 'Finance Manager',
-      });
-      addToast(`Partial advance of ${formatCurrency(amount)} recorded for ${selectedOrder.id}`, 'warning');
-    } else {
-      updateExportOrder(selectedOrder.id, {
-        balanceReceived: selectedOrder.balanceReceived + amount,
-        balanceDate: formData.date,
-      });
-      addActivityToOrder(selectedOrder.id, {
-        date: formData.date,
-        action: `Partial balance of ${formatCurrency(amount)} received (total now: ${formatCurrency(selectedOrder.balanceReceived + amount)} of ${formatCurrency(selectedOrder.balanceExpected)})`,
-        by: 'Finance Manager',
-      });
-      addToast(`Partial balance of ${formatCurrency(amount)} recorded for ${selectedOrder.id}`, 'warning');
-    }
 
-    recordPayment(selectedOrder.id, milestoneType + ' (partial)', amount, formData.paymentMethod, formData.bankReference, formData.bankAccount);
+      const label = milestoneType === 'advance' ? 'advance' : 'balance';
+      addToast(`Partial ${label} of ${formatCurrency(amount)} recorded for ${selectedOrder.id}`, 'warning');
+      recordPayment(selectedOrder.id, milestoneType + ' (partial)', amount, formData.paymentMethod, formData.bankReference, formData.bankAccount);
+      refreshFromApi('orders');
+      refreshFromApi('finance');
+    } catch (err) {
+      addToast(`Partial payment failed: ${err.message || 'Server error'}`, 'error');
+    }
     closeModal();
   }
 
-  function handlePutOnHold() {
+  async function handlePutOnHold() {
     if (!selectedOrder) return;
-    updateExportOrder(selectedOrder.id, { status: 'On Hold' });
-    addActivityToOrder(selectedOrder.id, {
-      date: formData.date,
-      action: `Order put on hold by Finance. Reason: ${formData.notes || 'Payment issue'}`,
-      by: 'Finance Manager',
-    });
-    addToast(`${selectedOrder.id} placed on hold`, 'warning');
+    try {
+      await api.put(`/api/export-orders/${selectedOrder.dbId || selectedOrder.id}/status`, {
+        status: 'Cancelled',
+        notes: `Put on hold by Finance. Reason: ${formData.notes || 'Payment issue'}`,
+      });
+      addToast(`${selectedOrder.id} cancelled due to payment hold`, 'warning');
+      refreshFromApi('orders');
+    } catch (err) {
+      addToast(`Failed to update order: ${err.message || 'Server error'}`, 'error');
+    }
     closeModal();
   }
 
@@ -723,13 +686,16 @@ export default function FinanceConfirmations() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Receiving Bank Account</label>
               <select
-                value={formData.bankAccount}
-                onChange={(e) => setFormData({ ...formData, bankAccount: e.target.value })}
+                value={formData.bankAccountId}
+                onChange={(e) => {
+                  const acct = bankAccountsList.find(a => String(a.id) === e.target.value);
+                  setFormData({ ...formData, bankAccountId: e.target.value, bankAccount: acct ? acct.name : '' });
+                }}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
               >
                 <option value="">Select account...</option>
                 {(bankAccountsList || []).map(a => (
-                  <option key={a.id} value={a.name}>
+                  <option key={a.id} value={a.id}>
                     {a.name} ({a.currency}) — {a.bankName}
                   </option>
                 ))}

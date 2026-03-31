@@ -226,14 +226,20 @@ export default function ExportOrderDetail() {
     setShowAdvanceModal(false);
   };
 
-  const handleRequestBalance = () => {
-    addActivityToOrder(order.id, {
-      date: today(),
-      action: 'Balance payment request sent to customer',
-      by: 'Export Manager',
-    });
+  const handleRequestBalance = async () => {
     if (order.status !== 'Awaiting Balance') {
-      updateExportOrder(order.id, { status: 'Awaiting Balance' });
+      try {
+        await api.put(`/api/export-orders/${order.dbId || order.id}/status`, {
+          status: 'Awaiting Balance',
+          notes: 'Balance payment request sent to customer',
+        });
+        fetchOrderDetail();
+        refreshFromApi('orders');
+      } catch (err) {
+        addToast(`Failed to update status: ${err.message || 'Server error'}`, 'error');
+        setShowBalanceModal(false);
+        return;
+      }
     }
     addToast('Balance payment request sent');
     setShowBalanceModal(false);
@@ -320,14 +326,18 @@ export default function ExportOrderDetail() {
     setShowShipmentModal(false);
   };
 
-  const handlePutOnHold = () => {
-    updateExportOrder(order.id, { status: 'On Hold' });
-    addActivityToOrder(order.id, {
-      date: today(),
-      action: 'Order put on hold',
-      by: 'Export Manager',
-    });
-    addToast('Order placed on hold');
+  const handlePutOnHold = async () => {
+    try {
+      await api.put(`/api/export-orders/${order.dbId || order.id}/status`, {
+        status: 'Cancelled',
+        notes: 'Order cancelled / put on hold',
+      });
+      addToast('Order has been cancelled');
+      fetchOrderDetail();
+      refreshFromApi('orders');
+    } catch (err) {
+      addToast(`Failed to cancel order: ${err.message || 'Server error'}`, 'error');
+    }
     setShowHoldModal(false);
   };
 
@@ -410,12 +420,14 @@ export default function ExportOrderDetail() {
     // Auto-progress: if all required docs approved and order is in Docs In Preparation, advance to Awaiting Balance
     const updatedDocsCheck = { ...(order.documents || {}), [docKey]: { ...(order.documents?.[docKey] || {}), status: 'Approved' } };
     if (allDocsApproved(updatedDocsCheck) && order.status === 'Docs In Preparation') {
-      updateExportOrder(order.id, { status: 'Awaiting Balance', currentStep: Math.max(order.currentStep, 5) });
-      addActivityToOrder(order.id, { date: today(), action: 'All required documents approved - order advanced to Awaiting Balance', by: 'System' });
-    }
-    if (allDocsFinal(updatedDocsCheck) && order.status === 'Awaiting Balance') {
-      updateExportOrder(order.id, { status: 'Ready to Ship', currentStep: Math.max(order.currentStep, 6) });
-      addActivityToOrder(order.id, { date: today(), action: 'All documents finalized - order ready to ship', by: 'System' });
+      try {
+        await api.put(`/api/export-orders/${order.dbId || order.id}/status`, {
+          status: 'Awaiting Balance',
+          notes: 'All required documents approved',
+        });
+        fetchOrderDetail();
+        refreshFromApi('orders');
+      } catch (_err) { /* status transition will be retried on next action */ }
     }
   };
 
@@ -429,13 +441,21 @@ export default function ExportOrderDetail() {
   const canRequestBalance = order.advanceReceived >= order.advanceExpected && order.balanceReceived < order.balanceExpected && !['Draft', 'Awaiting Advance', 'Closed', 'Cancelled'].includes(order.status);
   const canCreateMilling = order.advanceReceived >= order.advanceExpected && !order.millingOrderId && !['Draft', 'Closed', 'Cancelled'].includes(order.status);
   const canUpdateShipment = !['Draft', 'Awaiting Advance', 'Closed', 'Cancelled'].includes(order.status);
-  const canPutOnHold = !['Closed', 'Cancelled', 'On Hold'].includes(order.status);
+  const canPutOnHold = !['Closed', 'Cancelled'].includes(order.status);
   const canCloseOrder = order.status === 'Arrived' || (order.balanceReceived >= order.balanceExpected && order.status === 'Shipped');
 
-  const handleCloseOrder = () => {
-    updateExportOrder(order.id, { status: 'Closed', currentStep: 9 });
-    addActivityToOrder(order.id, { date: today(), action: 'Order closed with full settlement', by: 'Export Manager' });
-    addToast(`Order ${order.id} has been closed`);
+  const handleCloseOrder = async () => {
+    try {
+      await api.put(`/api/export-orders/${order.dbId || order.id}/status`, {
+        status: 'Closed',
+        notes: 'Order closed with full settlement',
+      });
+      addToast(`Order ${order.id} has been closed`);
+      fetchOrderDetail();
+      refreshFromApi('orders');
+    } catch (err) {
+      addToast(`Failed to close order: ${err.message || 'Server error'}`, 'error');
+    }
     setShowActions(false);
   };
 
