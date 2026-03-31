@@ -3,18 +3,22 @@ import { Check } from 'lucide-react';
 import { workflowSteps } from './constants';
 
 export default function WorkflowTimeline({ order }) {
+  // Derive active step from status for accuracy (currentStep may be stale)
+  const statusStep = workflowSteps.find(s => s.status === order.status);
+  const activeStep = statusStep ? statusStep.step : (order.currentStep || 1);
+
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
       <div className="flex items-center justify-between overflow-x-auto">
         {workflowSteps.map((step, index) => {
-          const isCompleted = order.currentStep > step.step;
-          const isCurrent = order.currentStep === step.step;
-          const isUpcoming = order.currentStep < step.step;
+          const isCompleted = activeStep > step.step;
+          const isCurrent = activeStep === step.step;
+          const isUpcoming = activeStep < step.step;
           const daysSinceCreated = Math.floor((new Date() - new Date(order.createdAt)) / (1000 * 60 * 60 * 24));
           const isOverdue = isCurrent && daysSinceCreated > 14 && step.step >= 2 && step.step <= 6;
 
           return (
-            <div key={step.key} className="flex items-center flex-1 last:flex-none">
+            <div key={step.step} className="flex items-center flex-1 last:flex-none">
               <div className="flex flex-col items-center min-w-[80px]">
                 <div
                   className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${

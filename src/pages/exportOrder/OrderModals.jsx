@@ -9,6 +9,7 @@ export function AdvancePaymentModal({
   advanceAmount, setAdvanceAmount,
   advanceDate, setAdvanceDate,
   advanceMethod, setAdvanceMethod,
+  advanceBankAccountId, setAdvanceBankAccountId,
   advanceBankRef, setAdvanceBankRef,
   advanceNotes, setAdvanceNotes,
   bankAccountsList,
@@ -50,11 +51,13 @@ export function AdvancePaymentModal({
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Receiving Bank Account</label>
           <select
+            value={advanceBankAccountId || ''}
+            onChange={e => setAdvanceBankAccountId(e.target.value)}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
           >
             <option value="">Select account...</option>
             {(bankAccountsList || []).map(a => (
-              <option key={a.id} value={a.name}>{a.name} ({a.currency}) — {a.bankName}</option>
+              <option key={a.id} value={a.id}>{a.name} ({a.currency}) — {a.bankName}</option>
             ))}
           </select>
         </div>

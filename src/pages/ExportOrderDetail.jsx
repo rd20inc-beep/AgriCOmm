@@ -68,6 +68,7 @@ export default function ExportOrderDetail() {
   const [advanceAmount, setAdvanceAmount] = useState('');
   const [advanceDate, setAdvanceDate] = useState('');
   const [advanceMethod, setAdvanceMethod] = useState('Bank Transfer');
+  const [advanceBankAccountId, setAdvanceBankAccountId] = useState('');
   const [advanceBankRef, setAdvanceBankRef] = useState('');
   const [advanceNotes, setAdvanceNotes] = useState('');
 
@@ -153,6 +154,7 @@ export default function ExportOrderDetail() {
     setAdvanceAmount(order.advanceExpected);
     setAdvanceDate(today());
     setAdvanceMethod('Bank Transfer');
+    setAdvanceBankAccountId('');
     setAdvanceBankRef('');
     setAdvanceNotes('');
     setShowAdvanceModal(true);
@@ -199,6 +201,7 @@ export default function ExportOrderDetail() {
         amount,
         payment_date: advanceDate,
         payment_method: advanceMethod,
+        bank_account_id: advanceBankAccountId || null,
         bank_reference: advanceBankRef,
         notes: advanceNotes,
       });
@@ -548,6 +551,8 @@ export default function ExportOrderDetail() {
         setAdvanceDate={setAdvanceDate}
         advanceMethod={advanceMethod}
         setAdvanceMethod={setAdvanceMethod}
+        advanceBankAccountId={advanceBankAccountId}
+        setAdvanceBankAccountId={setAdvanceBankAccountId}
         advanceBankRef={advanceBankRef}
         setAdvanceBankRef={setAdvanceBankRef}
         advanceNotes={advanceNotes}

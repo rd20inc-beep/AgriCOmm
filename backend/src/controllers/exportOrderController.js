@@ -789,6 +789,13 @@ const exportOrderController = {
           });
         }
 
+        // Credit bank account balance if a bank account was selected
+        if (bank_account_id) {
+          await trx('bank_accounts')
+            .where({ id: bank_account_id })
+            .increment('current_balance', parseFloat(amount));
+        }
+
         // Add status history if status changed
         if (advanceFull && ['Awaiting Advance', 'Draft'].includes(order.status)) {
           await trx('export_order_status_history').insert({
@@ -904,6 +911,13 @@ const exportOrderController = {
             status: newOutstanding <= 0 ? 'Received' : 'Partial',
             updated_at: trx.fn.now(),
           });
+        }
+
+        // Credit bank account balance if a bank account was selected
+        if (bank_account_id) {
+          await trx('bank_accounts')
+            .where({ id: bank_account_id })
+            .increment('current_balance', parseFloat(amount));
         }
 
         if (balanceFull && order.status === 'Awaiting Balance') {
