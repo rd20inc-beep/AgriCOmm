@@ -12,7 +12,8 @@ const STATUS_TRANSITIONS = {
   'Procurement Pending': ['In Milling'],
   'In Milling': ['Docs In Preparation'],
   'Docs In Preparation': ['Awaiting Balance'],
-  'Awaiting Balance': ['Shipped'],
+  'Awaiting Balance': ['Ready to Ship'],
+  'Ready to Ship': ['Shipped'],
   'Shipped': ['Arrived'],
   'Arrived': ['Closed'],
   'Closed': [],
@@ -28,9 +29,10 @@ const STATUS_STEP = {
   'In Milling': 5,
   'Docs In Preparation': 6,
   'Awaiting Balance': 7,
-  'Shipped': 8,
-  'Arrived': 9,
-  'Closed': 10,
+  'Ready to Ship': 8,
+  'Shipped': 9,
+  'Arrived': 10,
+  'Closed': 11,
 };
 
 async function generateOrderNo(trx) {
@@ -43,6 +45,21 @@ async function generateOrderNo(trx) {
   }
   const num = maxNum;
   return `EX-${String(num + 1).padStart(3, '0')}`;
+}
+
+async function generatePaymentNo(trx, prefix = 'PAY') {
+  const last = await trx('payments')
+    .select('payment_no')
+    .where('payment_no', 'like', `${prefix}-%`)
+    .orderBy('id', 'desc')
+    .first();
+
+  if (!last || !last.payment_no) {
+    return `${prefix}-001`;
+  }
+
+  const num = parseInt(last.payment_no.replace(`${prefix}-`, ''), 10) || 0;
+  return `${prefix}-${String(num + 1).padStart(3, '0')}`;
 }
 
 const exportOrderController = {
@@ -741,6 +758,32 @@ const exportOrderController = {
         return res.status(404).json({ success: false, message: 'Export order not found.' });
       }
 
+      if (['Closed', 'Cancelled'].includes(order.status)) {
+        return res.status(400).json({
+          success: false,
+          message: `Cannot confirm advance for an order in '${order.status}' status.`,
+        });
+      }
+
+      const outstandingAdvance = Math.max(
+        0,
+        parseFloat(order.advance_expected || 0) - parseFloat(order.advance_received || 0)
+      );
+
+      if (outstandingAdvance <= 0.01) {
+        return res.status(400).json({
+          success: false,
+          message: 'Advance has already been fully received for this order.',
+        });
+      }
+
+      if (parseFloat(amount) - outstandingAdvance > 0.01) {
+        return res.status(400).json({
+          success: false,
+          message: `Advance confirmation exceeds outstanding amount of ${outstandingAdvance.toFixed(2)}.`,
+        });
+      }
+
       const newAdvanceReceived = parseFloat(order.advance_received || 0) + parseFloat(amount);
       const advanceFull = newAdvanceReceived >= parseFloat(order.advance_expected || 0);
 
@@ -760,14 +803,17 @@ const exportOrderController = {
 
         await trx('export_orders').where({ id: order.id }).update(updateData);
 
-        // Create payment record (unique per payment)
-        const paySeq = await trx('payments').count('id as c').first();
-        const advPayNo = `PA-${(parseInt(paySeq?.c || 0) + 1)}`;
+        const advReceivable = await trx('receivables')
+          .where({ order_id: order.id, type: 'Advance' })
+          .first();
+
+        const advPayNo = await generatePaymentNo(trx, 'PAY');
         await trx('payments').insert({
           payment_no: advPayNo,
           type: 'receipt',
+          linked_receivable_id: advReceivable ? advReceivable.id : null,
           amount: parseFloat(amount),
-          currency: 'USD',
+          currency: order.currency || 'USD',
           payment_method: payment_method || null,
           bank_account_id: bank_account_id || null,
           bank_reference: bankRef,
@@ -777,8 +823,6 @@ const exportOrderController = {
         });
 
         // Update receivable record
-        const advReceivable = await trx('receivables')
-          .where({ order_id: order.id, type: 'Advance' }).first();
         if (advReceivable) {
           const newReceived = parseFloat(advReceivable.received_amount || 0) + parseFloat(amount);
           const newOutstanding = Math.max(0, parseFloat(advReceivable.expected_amount) - newReceived);
@@ -827,7 +871,7 @@ const exportOrderController = {
       try {
         await accountingService.autoPost(db, {
           triggerEvent: 'advance_receipt', entity: 'export',
-          amount: parseFloat(amount), currency: 'USD',
+          amount: parseFloat(amount), currency: order.currency || 'USD',
           refType: 'Export Order', refNo: order.order_no,
           description: `Adv rcpt ${order.order_no}`, userId: req.user?.id,
         });
@@ -867,6 +911,32 @@ const exportOrderController = {
         return res.status(404).json({ success: false, message: 'Export order not found.' });
       }
 
+      if (['Closed', 'Cancelled'].includes(order.status)) {
+        return res.status(400).json({
+          success: false,
+          message: `Cannot confirm balance for an order in '${order.status}' status.`,
+        });
+      }
+
+      const outstandingBalance = Math.max(
+        0,
+        parseFloat(order.balance_expected || 0) - parseFloat(order.balance_received || 0)
+      );
+
+      if (outstandingBalance <= 0.01) {
+        return res.status(400).json({
+          success: false,
+          message: 'Balance has already been fully received for this order.',
+        });
+      }
+
+      if (parseFloat(amount) - outstandingBalance > 0.01) {
+        return res.status(400).json({
+          success: false,
+          message: `Balance confirmation exceeds outstanding amount of ${outstandingBalance.toFixed(2)}.`,
+        });
+      }
+
       const id = order.id; // resolved numeric ID
       const newBalanceReceived = parseFloat(order.balance_received || 0) + parseFloat(amount);
       const balanceFull = newBalanceReceived >= parseFloat(order.balance_expected || 0);
@@ -879,19 +949,23 @@ const exportOrderController = {
         };
 
         if (balanceFull && order.status === 'Awaiting Balance') {
-          updateData.status = 'Shipped';
-          updateData.current_step = STATUS_STEP['Shipped'] || 8;
+          updateData.status = 'Ready to Ship';
+          updateData.current_step = STATUS_STEP['Ready to Ship'] || 8;
         }
 
         await trx('export_orders').where({ id }).update(updateData);
 
-        const balPaySeq = await trx('payments').count('id as c').first();
-        const balPayNo = `PB-${(parseInt(balPaySeq?.c || 0) + 1)}`;
+        const balReceivable = await trx('receivables')
+          .where({ order_id: id, type: 'Balance' })
+          .first();
+
+        const balPayNo = await generatePaymentNo(trx, 'PAY');
         await trx('payments').insert({
           payment_no: balPayNo,
           type: 'receipt',
+          linked_receivable_id: balReceivable ? balReceivable.id : null,
           amount: parseFloat(amount),
-          currency: 'USD',
+          currency: order.currency || 'USD',
           payment_method: payment_method || null,
           bank_account_id: bank_account_id || null,
           bank_reference: bankRef,
@@ -901,8 +975,6 @@ const exportOrderController = {
         });
 
         // Update receivable record
-        const balReceivable = await trx('receivables')
-          .where({ order_id: id, type: 'Balance' }).first();
         if (balReceivable) {
           const newReceived = parseFloat(balReceivable.received_amount || 0) + parseFloat(amount);
           const newOutstanding = Math.max(0, parseFloat(balReceivable.expected_amount) - newReceived);
@@ -925,7 +997,7 @@ const exportOrderController = {
           await trx('export_order_status_history').insert({
             order_id: id,
             from_status: order.status,
-            to_status: 'Shipped',
+            to_status: 'Ready to Ship',
             changed_by: req.user.id,
             reason: `Balance payment of ${amount} confirmed`,
           });
@@ -936,7 +1008,7 @@ const exportOrderController = {
       try {
         await accountingService.autoPost(db, {
           triggerEvent: 'balance_receipt', entity: 'export',
-          amount: parseFloat(amount), currency: 'USD',
+          amount: parseFloat(amount), currency: order.currency || 'USD',
           refType: 'Export Order', refNo: order.order_no,
           description: `Bal rcpt ${order.order_no}`, userId: req.user?.id,
         });

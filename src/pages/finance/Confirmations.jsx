@@ -32,7 +32,7 @@ function daysSince(dateStr) {
 }
 
 export default function FinanceConfirmations() {
-  const { exportOrders, updateExportOrder, addActivityToOrder, addToast, settings, bankAccountsList: contextBankAccounts, refreshFromApi } = useApp();
+  const { exportOrders, addToast, settings, bankAccountsList: contextBankAccounts, refreshFromApi } = useApp();
 
   // Fetch bank accounts directly — bypasses TanStack Query caching issues
   const [bankAccountsList, setBankAccountsList] = useState([]);

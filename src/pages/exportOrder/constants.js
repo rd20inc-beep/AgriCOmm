@@ -7,9 +7,10 @@ export const workflowSteps = [
   { step: 5, label: 'In Milling', status: 'In Milling' },
   { step: 6, label: 'Docs Preparation', status: 'Docs In Preparation' },
   { step: 7, label: 'Awaiting Balance', status: 'Awaiting Balance' },
-  { step: 8, label: 'Shipped', status: 'Shipped' },
-  { step: 9, label: 'Arrived', status: 'Arrived' },
-  { step: 10, label: 'Closed', status: 'Closed' },
+  { step: 8, label: 'Ready to Ship', status: 'Ready to Ship' },
+  { step: 9, label: 'Shipped', status: 'Shipped' },
+  { step: 10, label: 'Arrived', status: 'Arrived' },
+  { step: 11, label: 'Closed', status: 'Closed' },
 ];
 
 export const documentLabels = {

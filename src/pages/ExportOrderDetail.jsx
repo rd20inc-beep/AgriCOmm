@@ -267,12 +267,18 @@ export default function ExportOrderDetail() {
 
       const batchNo = res?.data?.batch?.batch_no || res?.data?.batch?.id || 'New';
 
-      // Update the export order to link to the milling batch
+      // Link the milling batch first, then advance workflow through the backend state machine
       const orderId = order.dbId || order.id;
       await api.put(`/api/export-orders/${orderId}`, {
         milling_order_id: res?.data?.batch?.id || null,
-        status: 'In Milling',
-      }).catch(() => {}); // non-critical
+      });
+
+      if (['Advance Received', 'Procurement Pending'].includes(order.status)) {
+        await api.put(`/api/export-orders/${orderId}/status`, {
+          status: 'In Milling',
+          notes: `Milling batch ${batchNo} created`,
+        });
+      }
 
       // Refresh UI immediately
       fetchOrderDetail();
@@ -288,41 +294,36 @@ export default function ExportOrderDetail() {
     }
   };
 
-  const handleUpdateShipment = () => {
-    const updates = {
-      vesselName: shipVessel,
-      bookingNo: shipBooking,
-      etd: shipETD,
-      atd: shipATD,
-      eta: shipETA,
-      ata: shipATA,
-      destinationPort: shipDestPort,
-    };
+  const handleUpdateShipment = async () => {
+    try {
+      await api.put(`/api/export-orders/${order.dbId || order.id}`, {
+        vessel_name: shipVessel || null,
+        booking_no: shipBooking || null,
+        etd: shipETD || null,
+        atd: shipATD || null,
+        eta: shipETA || null,
+        ata: shipATA || null,
+        destination_port: shipDestPort || null,
+      });
 
-    // Determine status based on shipment progress
-    if (shipATA) {
-      updates.status = 'Arrived';
-      updates.currentStep = 8;
-    } else if (shipATD) {
-      if (!['Arrived', 'Completed'].includes(order.status)) {
-        updates.status = 'Shipped';
-        updates.currentStep = 7;
+      if (shipATA && order.status === 'Shipped') {
+        await api.put(`/api/export-orders/${order.dbId || order.id}/status`, {
+          status: 'Arrived',
+          notes: `Shipment arrived on ${shipATA}`,
+        });
+      } else if (shipATD && order.status === 'Ready to Ship') {
+        await api.put(`/api/export-orders/${order.dbId || order.id}/status`, {
+          status: 'Shipped',
+          notes: `Shipment departed on ${shipATD}`,
+        });
       }
+
+      fetchOrderDetail();
+      refreshFromApi('orders');
+      addToast('Shipment details updated');
+    } catch (err) {
+      addToast(`Failed to update shipment: ${err.message || 'Server error'}`, 'error');
     }
-
-    updateExportOrder(order.id, updates);
-
-    const parts = [];
-    if (shipVessel) parts.push(`Vessel: ${shipVessel}`);
-    if (shipATD) parts.push(`Departed: ${shipATD}`);
-    if (shipATA) parts.push(`Arrived: ${shipATA}`);
-    addActivityToOrder(order.id, {
-      date: today(),
-      action: `Shipment updated${parts.length ? ': ' + parts.join(', ') : ''}`,
-      by: 'Export Manager',
-    });
-
-    addToast('Shipment details updated');
     setShowShipmentModal(false);
   };
 

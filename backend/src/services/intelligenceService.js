@@ -1504,7 +1504,7 @@ const intelligenceService = {
       .count('id as count')
       .sum('contract_value as total_value')
       .groupBy('status')
-      .orderByRaw("CASE status WHEN 'Draft' THEN 1 WHEN 'Awaiting Advance' THEN 2 WHEN 'Advance Received' THEN 3 WHEN 'In Milling' THEN 4 WHEN 'Docs In Preparation' THEN 5 WHEN 'Awaiting Balance' THEN 6 WHEN 'Shipped' THEN 7 WHEN 'Arrived' THEN 8 WHEN 'Closed' THEN 9 ELSE 10 END");
+      .orderByRaw("CASE status WHEN 'Draft' THEN 1 WHEN 'Awaiting Advance' THEN 2 WHEN 'Advance Received' THEN 3 WHEN 'Procurement Pending' THEN 4 WHEN 'In Milling' THEN 5 WHEN 'Docs In Preparation' THEN 6 WHEN 'Awaiting Balance' THEN 7 WHEN 'Ready to Ship' THEN 8 WHEN 'Shipped' THEN 9 WHEN 'Arrived' THEN 10 WHEN 'Closed' THEN 11 ELSE 12 END");
 
     // Exceptions summary
     const exceptionsData = await db('exception_inbox')

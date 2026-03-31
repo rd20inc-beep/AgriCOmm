@@ -29,7 +29,8 @@ const createExportOrder = Joi.object({
   notes: Joi.string().allow('', null),
   status: Joi.string().valid(
     'Draft', 'Awaiting Advance', 'Advance Received', 'Procurement Pending',
-    'In Milling', 'Docs In Preparation', 'Awaiting Balance', 'Shipped', 'Arrived', 'Closed', 'Cancelled'
+    'In Milling', 'Docs In Preparation', 'Awaiting Balance', 'Ready to Ship',
+    'Shipped', 'Arrived', 'Closed', 'Cancelled'
   ).default('Draft'),
   // Bag specification
   bag_type: Joi.string().max(100).allow('', null),

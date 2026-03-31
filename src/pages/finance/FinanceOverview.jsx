@@ -118,6 +118,7 @@ export default function FinanceOverview() {
       'In Milling',
       'Docs In Preparation',
       'Awaiting Balance',
+      'Ready to Ship',
       'Shipped',
     ];
     const workingCapital = exportOrders
