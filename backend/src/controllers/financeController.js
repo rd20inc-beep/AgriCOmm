@@ -194,7 +194,7 @@ const financeController = {
           .sum('outstanding as total')
           .first(),
         db('export_orders')
-          .whereIn('status', ['Draft', 'Confirmed', 'Advance Invoiced'])
+          .whereIn('status', ['Draft', 'Awaiting Advance'])
           .count('id as count')
           .first(),
       ]);
@@ -241,11 +241,11 @@ const financeController = {
       ] = await Promise.all([
         db('export_orders').count('id as count').first(),
         db('export_orders')
-          .whereNotIn('status', ['Completed', 'Cancelled'])
+          .whereNotIn('status', ['Closed', 'Cancelled'])
           .count('id as count')
           .first(),
         db('export_orders')
-          .where('status', 'Completed')
+          .where('status', 'Closed')
           .sum('contract_value as total')
           .first(),
         db('receivables')

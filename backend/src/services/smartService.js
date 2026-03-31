@@ -749,7 +749,7 @@ const smartService = {
     // 3. Estimate timeline from historical data
     const timelineData = await db('export_orders')
       .where('product_id', productId)
-      .where('status', 'Completed')
+      .where('status', 'Closed')
       .select(
         db.raw("AVG(EXTRACT(DAY FROM (etd::timestamp - created_at::timestamp))) as avg_days_to_ship"),
         db.raw("AVG(EXTRACT(DAY FROM (ata::timestamp - etd::timestamp))) as avg_transit_days")
@@ -1277,7 +1277,7 @@ const smartService = {
 
     // Get active export orders with their costs
     const orders = await db('export_orders as eo')
-      .whereNotIn('eo.status', ['Completed', 'Cancelled'])
+      .whereNotIn('eo.status', ['Closed', 'Cancelled'])
       .where('eo.contract_value', '>', 0)
       .select(
         'eo.id',

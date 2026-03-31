@@ -4,20 +4,33 @@ const accountingService = require('../services/accountingService');
 const documentService = require('../services/documentService');
 const automationService = require('../services/automationService');
 
-// Valid status transitions
+// Valid status transitions — aligned with frontend workflowSteps & schema validation
 const STATUS_TRANSITIONS = {
-  'Draft': ['Confirmed'],
-  'Confirmed': ['Advance Invoiced'],
-  'Advance Invoiced': ['Advance Received'],
-  'Advance Received': ['In Milling', 'Processing'],
-  'In Milling': ['Processing'],
-  'Processing': ['Ready to Ship'],
-  'Ready to Ship': ['Shipped'],
-  'Shipped': ['Balance Invoiced'],
-  'Balance Invoiced': ['Balance Received'],
-  'Balance Received': ['Completed'],
-  'Completed': [],
+  'Draft': ['Awaiting Advance'],
+  'Awaiting Advance': ['Advance Received'],
+  'Advance Received': ['Procurement Pending', 'In Milling'],
+  'Procurement Pending': ['In Milling'],
+  'In Milling': ['Docs In Preparation'],
+  'Docs In Preparation': ['Awaiting Balance'],
+  'Awaiting Balance': ['Shipped'],
+  'Shipped': ['Arrived'],
+  'Arrived': ['Closed'],
+  'Closed': [],
   'Cancelled': [],
+};
+
+// Map status to workflow step number
+const STATUS_STEP = {
+  'Draft': 1,
+  'Awaiting Advance': 2,
+  'Advance Received': 3,
+  'Procurement Pending': 4,
+  'In Milling': 5,
+  'Docs In Preparation': 6,
+  'Awaiting Balance': 7,
+  'Shipped': 8,
+  'Arrived': 9,
+  'Closed': 10,
 };
 
 async function generateOrderNo(trx) {
@@ -558,6 +571,7 @@ const exportOrderController = {
       await db.transaction(async (trx) => {
         await trx('export_orders').where({ id }).update({
           status,
+          current_step: STATUS_STEP[status] || order.current_step,
           updated_at: trx.fn.now(),
         });
 
@@ -738,8 +752,9 @@ const exportOrderController = {
         };
 
         // Auto-transition status if advance fully received
-        if (advanceFull && order.status === 'Advance Invoiced') {
+        if (advanceFull && ['Awaiting Advance', 'Draft'].includes(order.status)) {
           updateData.status = 'Advance Received';
+          updateData.current_step = STATUS_STEP['Advance Received'] || 3;
         }
 
         await trx('export_orders').where({ id: order.id }).update(updateData);
@@ -775,7 +790,7 @@ const exportOrderController = {
         }
 
         // Add status history if status changed
-        if (advanceFull && order.status === 'Advance Invoiced') {
+        if (advanceFull && ['Awaiting Advance', 'Draft'].includes(order.status)) {
           await trx('export_order_status_history').insert({
             order_id: order.id,
             from_status: order.status,
@@ -855,8 +870,9 @@ const exportOrderController = {
           updated_at: trx.fn.now(),
         };
 
-        if (balanceFull && order.status === 'Balance Invoiced') {
-          updateData.status = 'Balance Received';
+        if (balanceFull && order.status === 'Awaiting Balance') {
+          updateData.status = 'Shipped';
+          updateData.current_step = STATUS_STEP['Shipped'] || 8;
         }
 
         await trx('export_orders').where({ id }).update(updateData);
@@ -890,11 +906,11 @@ const exportOrderController = {
           });
         }
 
-        if (balanceFull && order.status === 'Balance Invoiced') {
+        if (balanceFull && order.status === 'Awaiting Balance') {
           await trx('export_order_status_history').insert({
             order_id: id,
             from_status: order.status,
-            to_status: 'Balance Received',
+            to_status: 'Shipped',
             changed_by: req.user.id,
             reason: `Balance payment of ${amount} confirmed`,
           });

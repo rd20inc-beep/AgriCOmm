@@ -90,7 +90,7 @@ const automationService = {
     cutoff.setDate(cutoff.getDate() - thresholdDays);
 
     const overdueOrders = await db('export_orders')
-      .where('status', 'Advance Invoiced')
+      .where('status', 'Awaiting Advance')
       .where('created_at', '<', cutoff.toISOString())
       .select('*');
 
@@ -136,7 +136,7 @@ const automationService = {
     cutoff.setDate(cutoff.getDate() - thresholdDays);
 
     const overdueOrders = await db('export_orders')
-      .where('status', 'Balance Invoiced')
+      .where('status', 'Awaiting Balance')
       .where('updated_at', '<', cutoff.toISOString())
       .select('*');
 
@@ -177,7 +177,7 @@ const automationService = {
   async scanMissingDocuments() {
     // Find orders with shipment likely approaching (status in certain states)
     const orders = await db('export_orders')
-      .whereIn('status', ['Ready to Ship', 'Processing', 'In Milling'])
+      .whereIn('status', ['Docs In Preparation', 'In Milling'])
       .select('*');
 
     let processed = 0;
@@ -345,7 +345,7 @@ const automationService = {
     const minMargin = setting ? parseFloat(setting.value) : 5;
 
     const activeOrders = await db('export_orders')
-      .whereNotIn('status', ['Completed', 'Cancelled', 'Draft'])
+      .whereNotIn('status', ['Closed', 'Cancelled', 'Draft'])
       .select('*');
 
     let processed = 0;

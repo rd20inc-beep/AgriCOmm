@@ -194,34 +194,49 @@ export default function ExportOrderDetail() {
 
   const handleConfirmAdvance = async () => {
     const amount = parseFloat(advanceAmount) || 0;
-    updateExportOrder(order.id, {
-      advanceReceived: amount,
-      advanceDate: advanceDate,
-      status: 'Advance Received',
-      currentStep: Math.max(order.currentStep, 3),
-    });
-    addActivityToOrder(order.id, {
-      date: today(),
-      action: `Advance payment confirmed: $${amount.toLocaleString()} via ${advanceMethod}${advanceBankRef ? ` (Ref: ${advanceBankRef})` : ''}${advanceNotes ? ` - ${advanceNotes}` : ''}`,
-      by: 'Export Manager',
-    });
-    addToast('Advance payment confirmed successfully');
-    // If milling already linked, advance further
-    if (order.millingOrderId) {
-      updateExportOrder(order.id, { status: 'In Milling', currentStep: Math.max(3, order.currentStep) });
-    }
     try {
-      await api.post(`/api/export-orders/${order.dbId || order.id}/confirm-advance`, {
-        amount: parseFloat(advanceAmount),
+      const res = await api.post(`/api/export-orders/${order.dbId || order.id}/confirm-advance`, {
+        amount,
         payment_date: advanceDate,
         payment_method: advanceMethod,
         bank_reference: advanceBankRef,
         notes: advanceNotes,
       });
+      // Sync local state from the API response
+      const updated = res?.data?.data?.order;
+      if (updated) {
+        updateExportOrder(order.id, {
+          advanceReceived: parseFloat(updated.advance_received) || amount,
+          advanceDate: updated.advance_date || advanceDate,
+          status: updated.status || 'Advance Received',
+          currentStep: updated.current_step || Math.max(order.currentStep, 3),
+        });
+      } else {
+        // Fallback if API doesn't return order
+        updateExportOrder(order.id, {
+          advanceReceived: amount,
+          advanceDate: advanceDate,
+          status: 'Advance Received',
+          currentStep: Math.max(order.currentStep, 3),
+        });
+      }
+      addActivityToOrder(order.id, {
+        date: today(),
+        action: `Advance payment confirmed: $${amount.toLocaleString()} via ${advanceMethod}${advanceBankRef ? ` (Ref: ${advanceBankRef})` : ''}${advanceNotes ? ` - ${advanceNotes}` : ''}`,
+        by: 'Export Manager',
+      });
+      addToast('Advance payment confirmed successfully');
+      // If milling already linked, advance further
+      if (order.millingOrderId) {
+        updateExportOrder(order.id, { status: 'In Milling', currentStep: Math.max(5, order.currentStep) });
+      }
       fetchOrderDetail(); // Refresh this order immediately
       refreshFromApi('orders'); // Refresh orders + receivables
       refreshFromApi('finance'); // Refresh finance dashboard
-    } catch (err) { console.warn('API advance confirm failed:', err.message); }
+    } catch (err) {
+      console.warn('API advance confirm failed:', err.message);
+      addToast('Failed to confirm advance payment', 'error');
+    }
     setShowAdvanceModal(false);
   };
 

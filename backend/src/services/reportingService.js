@@ -24,9 +24,9 @@ const reportingService = {
           WHEN 'Awaiting Advance' THEN 2
           WHEN 'Advance Received' THEN 3
           WHEN 'In Milling' THEN 4
-          WHEN 'Docs In Prep' THEN 5
-          WHEN 'Awaiting Balance' THEN 6
-          WHEN 'Ready to Ship' THEN 7
+          WHEN 'Procurement Pending' THEN 5
+          WHEN 'Docs In Preparation' THEN 6
+          WHEN 'Awaiting Balance' THEN 7
           WHEN 'Shipped' THEN 8
           WHEN 'Arrived' THEN 9
           WHEN 'Closed' THEN 10
@@ -77,7 +77,7 @@ const reportingService = {
     const procurementStarted = await baseQuery.clone()
       .where(function () {
         this.whereNotNull('milling_order_id')
-          .orWhereIn('status', ['In Milling', 'Docs In Prep', 'Awaiting Balance', 'Ready to Ship', 'Shipped', 'Arrived', 'Closed']);
+          .orWhereIn('status', ['Procurement Pending', 'In Milling', 'Docs In Preparation', 'Awaiting Balance', 'Shipped', 'Arrived', 'Closed']);
       })
       .count('id as count')
       .sum('contract_value as value')
