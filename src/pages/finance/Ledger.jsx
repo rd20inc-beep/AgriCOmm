@@ -52,7 +52,7 @@ export default function Ledger() {
       }
       return true;
     });
-  }, [entityFilter, refTypeFilter, dateFrom, dateTo, searchTerm]);
+  }, [journalEntries, entityFilter, refTypeFilter, dateFrom, dateTo, searchTerm]);
 
   function openDetail(journal) {
     setSelectedJournal(journal);

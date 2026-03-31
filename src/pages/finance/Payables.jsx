@@ -114,7 +114,7 @@ export default function Payables() {
           (p.linkedRef && p.linkedRef.toLowerCase().includes(term))
         );
       });
-  }, [activeTab, searchTerm, entityFilter, categoryFilter, statusFilter]);
+  }, [payables, activeTab, searchTerm, entityFilter, categoryFilter, statusFilter]);
 
   const tabCounts = useMemo(() => {
     const counts = {};

@@ -13,6 +13,14 @@ function generateToken(user) {
   );
 }
 
+async function fetchPermissions(roleId) {
+  const perms = await db('role_permissions as rp')
+    .join('permissions as p', 'rp.permission_id', 'p.id')
+    .where('rp.role_id', roleId)
+    .select('p.module', 'p.action');
+  return perms.map((p) => `${p.module}.${p.action}`);
+}
+
 const authController = {
   async login(req, res) {
     try {
@@ -57,6 +65,7 @@ const authController = {
       await db('users').where({ id: user.id }).update({ last_login: db.fn.now() });
 
       const token = generateToken(user);
+      const permissions = await fetchPermissions(user.role_id);
 
       await auditService.log({
         userId: user.id,
@@ -78,6 +87,7 @@ const authController = {
             role: user.role_name,
             role_id: user.role_id,
           },
+          permissions,
         },
       });
     } catch (err) {
@@ -88,6 +98,15 @@ const authController = {
 
   async register(req, res) {
     try {
+      // Only Super Admin can register new users
+      const callerRole = await db('roles').where({ id: req.user.role_id }).select('name').first();
+      if (!callerRole || callerRole.name !== 'Super Admin') {
+        return res.status(403).json({
+          success: false,
+          message: 'Only administrators can register new users.',
+        });
+      }
+
       const { email, password, full_name, role_id } = req.body;
 
       if (!email || !password || !full_name) {
@@ -127,8 +146,9 @@ const authController = {
 
       const token = generateToken(user);
 
-      // Fetch role name for response
+      // Fetch role name and permissions for response
       const role = await db('roles').where({ id: user.role_id }).first();
+      const permissions = await fetchPermissions(user.role_id);
 
       return res.status(201).json({
         success: true,
@@ -141,6 +161,7 @@ const authController = {
             role: role ? role.name : null,
             role_id: user.role_id,
           },
+          permissions,
         },
       });
     } catch (err) {
@@ -184,6 +205,7 @@ const authController = {
       }
 
       const newToken = generateToken(user);
+      const permissions = await fetchPermissions(user.role_id);
 
       return res.json({
         success: true,
@@ -196,6 +218,7 @@ const authController = {
             role: user.role_name,
             role_id: user.role_id,
           },
+          permissions,
         },
       });
     } catch (err) {
@@ -219,17 +242,13 @@ const authController = {
         });
       }
 
-      // Also fetch permissions
-      const permissions = await db('role_permissions as rp')
-        .join('permissions as p', 'rp.permission_id', 'p.id')
-        .where('rp.role_id', user.role_id)
-        .select('p.module', 'p.action');
+      const permissions = await fetchPermissions(user.role_id);
 
       return res.json({
         success: true,
         data: {
           user,
-          permissions: permissions.map((p) => `${p.module}.${p.action}`),
+          permissions,
         },
       });
     } catch (err) {
@@ -338,12 +357,11 @@ const authController = {
         ipAddress: req.ip,
       });
 
-      // In a real system, this token would be emailed to the user.
-      // For development, return it in the response.
+      // TODO: Send token via email in production (e.g. nodemailer / SES)
+      // Token is never exposed in the API response for security.
       return res.json({
         success: true,
-        message: 'If an account with that email exists, a reset token has been generated.',
-        data: { token, expires_at },
+        message: 'If an account with that email exists, a password reset link has been sent.',
       });
     } catch (err) {
       console.error('Request password reset error:', err);

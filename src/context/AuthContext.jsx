@@ -90,10 +90,14 @@ export function AuthProvider({ children }) {
 
       if (res.ok) {
         const json = await res.json();
-        // Backend returns { success, data: { token, user } }
+        // Backend returns { success, data: { token, user, permissions } }
         const payload = json.data || json;
         const newToken = payload.token;
         const userData = payload.user;
+        // Merge permissions into user object so hasPermission() works immediately
+        if (payload.permissions && userData) {
+          userData.permissions = payload.permissions;
+        }
         if (newToken) {
           localStorage.setItem('riceflow_token', newToken);
           setToken(newToken);

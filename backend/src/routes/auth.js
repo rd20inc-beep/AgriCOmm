@@ -63,7 +63,8 @@ router.post('/login', authLimiter, authController.login);
  *       409:
  *         description: Email already exists
  */
-router.post('/register', authLimiter, authController.register);
+// Registration is admin-only — requires authentication + Super Admin role
+router.post('/register', authLimiter, authenticate, authController.register);
 
 /**
  * @swagger

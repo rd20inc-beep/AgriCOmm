@@ -16,7 +16,7 @@ const healthService = {
   async runAllChecks() {
     const checks = [];
     checks.push(await this.checkDatabase());
-    checks.push(await this.checkDiskSpace());
+    checks.push(await this.checkMemory());
     checks.push(await this.checkMemory());
     checks.push(await this.checkApiResponse());
     checks.push(await this.checkPendingJobs());
@@ -74,11 +74,10 @@ const healthService = {
   },
 
   /**
-   * Disk space check based on OS free memory percentage.
-   * (In production, check actual disk; here we approximate with os.freemem.)
+   * Memory pressure check using OS memory stats.
    * Healthy < 80% used, Warning < 90%, Critical >= 90%.
    */
-  async checkDiskSpace() {
+  async checkMemory() {
     try {
       const totalMem = os.totalmem();
       const freeMem = os.freemem();
@@ -89,7 +88,7 @@ const healthService = {
       else if (usedPercent >= 80) status = 'Warning';
 
       return {
-        checkType: 'disk',
+        checkType: 'memory',
         status,
         value: `${usedPercent}% used`,
         threshold: '<80% Healthy, <90% Warning',
@@ -101,7 +100,7 @@ const healthService = {
       };
     } catch (err) {
       return {
-        checkType: 'disk',
+        checkType: 'memory',
         status: 'Warning',
         value: 'unknown',
         threshold: '<80% Healthy, <90% Warning',
