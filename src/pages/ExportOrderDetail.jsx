@@ -20,10 +20,8 @@ import {
   ExpenseModal,
   InvoicePreviewModal,
   OrderEmailComposer,
-  tabList,
+  getVisibleTabs,
   today,
-  allDocsApproved,
-  allDocsFinal,
   documentLabels,
 } from './exportOrder';
 
@@ -94,22 +92,24 @@ export default function ExportOrderDetail() {
   const listOrder = exportOrders.find(o => o.id === id || String(o.dbId) === id);
 
   // Fetch full order detail from API (costs, documents, status history)
-  function fetchOrderDetail() {
+  async function fetchOrderDetail() {
     setApiLoading(true);
-    api.get(`/api/export-orders/${id}`)
-      .then(res => {
-        const raw = res?.data?.order;
-        if (raw) {
-          raw.costs = res.data.costs || raw.costs;
-          raw.documents = res.data.documents || raw.documents;
-          raw.status_history = res.data.statusHistory || raw.status_history;
-          raw.packingLines = res.data.packingLines || [];
-          raw.purchaseLots = res.data.purchaseLots || [];
-          setApiOrder(transformOrder(raw));
-        }
-      })
-      .catch(() => {})
-      .finally(() => setApiLoading(false));
+    try {
+      const res = await api.get(`/api/export-orders/${id}`);
+      const raw = res?.data?.order;
+      if (raw) {
+        raw.costs = res.data.costs || raw.costs;
+        raw.documents = res.data.documents || raw.documents;
+        raw.status_history = res.data.statusHistory || raw.status_history;
+        raw.packingLines = res.data.packingLines || [];
+        raw.purchaseLots = res.data.purchaseLots || [];
+        setApiOrder(transformOrder(raw));
+      }
+    } catch (_) {
+      // Leave the existing order visible if the refetch fails.
+    } finally {
+      setApiLoading(false);
+    }
   }
 
   // Fetch on mount and when ID changes
@@ -144,6 +144,16 @@ export default function ExportOrderDetail() {
     );
   }
 
+  // Compute visible tabs based on workflow status
+  const visibleTabs = getVisibleTabs(order.status);
+
+  // Reset activeTab if it's no longer visible after a status change
+  React.useEffect(() => {
+    if (order && !visibleTabs.find(t => t.key === activeTab)) {
+      setActiveTab(visibleTabs[0]?.key || 'overview');
+    }
+  }, [order?.status]);
+
   const totalCosts = Object.values(order.costs || {}).reduce((sum, c) => sum + (parseFloat(c) || 0), 0);
   const grossProfit = (parseFloat(order.contractValue) || 0) - totalCosts;
   const marginPct = order.contractValue > 0 ? ((grossProfit / (parseFloat(order.contractValue) || 1)) * 100).toFixed(1) : '0.0';
@@ -152,7 +162,7 @@ export default function ExportOrderDetail() {
   // --- Modal openers (reset form state then show) ---
 
   const openAdvanceModal = () => {
-    setAdvanceAmount(order.advanceExpected);
+    setAdvanceAmount(Math.max(0, (order.advanceExpected || 0) - (order.advanceReceived || 0)));
     setAdvanceDate(today());
     setAdvanceMethod('Bank Transfer');
     setAdvanceBankAccountId('');
@@ -211,6 +221,7 @@ export default function ExportOrderDetail() {
       if (updated) {
         setApiOrder(transformOrder(updated));
       }
+      await fetchOrderDetail();
       addActivityToOrder(order.id, {
         date: today(),
         action: `Advance payment confirmed: $${amount.toLocaleString()} via ${advanceMethod}${advanceBankRef ? ` (Ref: ${advanceBankRef})` : ''}${advanceNotes ? ` - ${advanceNotes}` : ''}`,
@@ -221,28 +232,45 @@ export default function ExportOrderDetail() {
       refreshFromApi('finance'); // Refresh finance dashboard
     } catch (err) {
       console.warn('API advance confirm failed:', err.message);
-      addToast('Failed to confirm advance payment', 'error');
+      addToast(err?.data?.message || 'Failed to confirm advance payment', 'error');
     }
     setShowAdvanceModal(false);
   };
 
   const handleRequestBalance = async () => {
     if (order.status !== 'Awaiting Balance') {
-      try {
-        await api.put(`/api/export-orders/${order.dbId || order.id}/status`, {
-          status: 'Awaiting Balance',
-          notes: 'Balance payment request sent to customer',
-        });
-        fetchOrderDetail();
-        refreshFromApi('orders');
-      } catch (err) {
-        addToast(`Failed to update status: ${err.message || 'Server error'}`, 'error');
-        setShowBalanceModal(false);
-        return;
-      }
+      addToast('Balance can only be requested after all required documents are approved.', 'error');
+      setShowBalanceModal(false);
+      return;
     }
-    addToast('Balance payment request sent');
+    try {
+      await api.post(`/api/export-orders/${order.dbId || order.id}/request-balance`, {
+        notes: 'Balance payment requested from order detail',
+      });
+      addToast('Balance payment request sent');
+      await fetchOrderDetail();
+      refreshFromApi('orders');
+    } catch (err) {
+      addToast(`Failed to request balance: ${err.message || 'Server error'}`, 'error');
+    }
     setShowBalanceModal(false);
+  };
+
+  const handleStartDocsPreparation = async () => {
+    try {
+      const res = await api.post(`/api/export-orders/${order.dbId || order.id}/start-docs`, {
+        notes: 'Document preparation started from order detail',
+      });
+      const updatedOrder = res?.data?.order;
+      if (updatedOrder) {
+        setApiOrder(transformOrder(updatedOrder));
+      }
+      await fetchOrderDetail();
+      refreshFromApi('orders');
+      addToast('Document preparation started');
+    } catch (err) {
+      addToast(`Failed to start document preparation: ${err.message || 'Server error'}`, 'error');
+    }
   };
 
   const handleCreateMilling = async () => {
@@ -266,22 +294,13 @@ export default function ExportOrderDetail() {
       });
 
       const batchNo = res?.data?.batch?.batch_no || res?.data?.batch?.id || 'New';
-
-      // Link the milling batch first, then advance workflow through the backend state machine
-      const orderId = order.dbId || order.id;
-      await api.put(`/api/export-orders/${orderId}`, {
-        milling_order_id: res?.data?.batch?.id || null,
-      });
-
-      if (['Advance Received', 'Procurement Pending'].includes(order.status)) {
-        await api.put(`/api/export-orders/${orderId}/status`, {
-          status: 'In Milling',
-          notes: `Milling batch ${batchNo} created`,
-        });
+      const updatedOrder = res?.data?.order;
+      if (updatedOrder) {
+        setApiOrder(transformOrder(updatedOrder));
       }
 
       // Refresh UI immediately
-      fetchOrderDetail();
+      await fetchOrderDetail();
       addMillingBatch({});
       refreshFromApi('orders');
 
@@ -296,7 +315,7 @@ export default function ExportOrderDetail() {
 
   const handleUpdateShipment = async () => {
     try {
-      await api.put(`/api/export-orders/${order.dbId || order.id}`, {
+      const res = await api.put(`/api/export-orders/${order.dbId || order.id}/shipment`, {
         vessel_name: shipVessel || null,
         booking_no: shipBooking || null,
         etd: shipETD || null,
@@ -304,23 +323,20 @@ export default function ExportOrderDetail() {
         eta: shipETA || null,
         ata: shipATA || null,
         destination_port: shipDestPort || null,
+        notes: shipATA
+          ? `Shipment arrived on ${shipATA}`
+          : shipATD
+          ? `Shipment departed on ${shipATD}`
+          : null,
       });
 
-      if (shipATA && order.status === 'Shipped') {
-        await api.put(`/api/export-orders/${order.dbId || order.id}/status`, {
-          status: 'Arrived',
-          notes: `Shipment arrived on ${shipATA}`,
-        });
-      } else if (shipATD && order.status === 'Ready to Ship') {
-        await api.put(`/api/export-orders/${order.dbId || order.id}/status`, {
-          status: 'Shipped',
-          notes: `Shipment departed on ${shipATD}`,
-        });
+      const updatedOrder = res?.data?.order;
+      if (updatedOrder) {
+        setApiOrder(transformOrder(updatedOrder));
       }
-
-      fetchOrderDetail();
+      await fetchOrderDetail();
       refreshFromApi('orders');
-      addToast('Shipment details updated');
+      addToast(res?.data?.transitioned_to ? `Shipment updated: ${res.data.transitioned_to}` : 'Shipment details updated');
     } catch (err) {
       addToast(`Failed to update shipment: ${err.message || 'Server error'}`, 'error');
     }
@@ -363,52 +379,34 @@ export default function ExportOrderDetail() {
   };
 
   const handleDocumentUpload = async (docKey) => {
-    const updatedDocs = {
-      ...order.documents,
-      [docKey]: {
-        status: 'Draft Uploaded',
-        uploadedBy: 'Export Manager',
-        date: today(),
-      },
-    };
-    updateExportOrder(order.id, { documents: updatedDocs });
-    addActivityToOrder(order.id, {
-      date: today(),
-      action: `${documentLabels[docKey]} draft uploaded`,
-      by: 'Export Manager',
-    });
-    addToast(`${documentLabels[docKey]} uploaded`);
     try {
-      await api.post(`/api/export-orders/${order.dbId || order.id}/documents`, {
+      await api.post(`/api/export-orders/${order.dbId || order.id}/documents/upload`, {
         doc_type: docKey,
-        status: 'Draft Uploaded',
         uploaded_by: 'Export Manager',
       });
-    } catch (err) { console.warn('API doc upload failed:', err.message); }
+      await fetchOrderDetail();
+      refreshFromApi('orders');
+      addToast(`${documentLabels[docKey]} uploaded`);
+    } catch (err) {
+      console.warn('API doc upload failed:', err.message);
+      addToast(`Failed to upload ${documentLabels[docKey]}`, 'error');
+    }
   };
 
   const handleDocumentApprove = async (docKey) => {
-    const updatedDocs = {
-      ...order.documents,
-      [docKey]: {
-        ...(order.documents?.[docKey] || {}),
-        status: 'Approved',
-      },
-    };
-    updateExportOrder(order.id, { documents: updatedDocs });
-    addActivityToOrder(order.id, {
-      date: today(),
-      action: `${documentLabels[docKey]} approved`,
-      by: 'Export Manager',
-    });
-    addToast(`${documentLabels[docKey]} approved`);
     try {
-      await api.post(`/api/export-orders/${order.dbId || order.id}/documents`, {
+      await api.post(`/api/export-orders/${order.dbId || order.id}/documents/approve`, {
         doc_type: docKey,
-        status: 'Approved',
         uploaded_by: 'Export Manager',
       });
-    } catch (err) { console.warn('API doc approve failed:', err.message); }
+      await fetchOrderDetail();
+      refreshFromApi('orders');
+      addToast(`${documentLabels[docKey]} approved`);
+    } catch (err) {
+      console.warn('API doc approve failed:', err.message);
+      addToast(`Failed to approve ${documentLabels[docKey]}`, 'error');
+      return;
+    }
     // GAP 26: BL Draft approved → balance collection reminder
     if (docKey === 'blDraft' && order.balanceReceived < order.balanceExpected) {
       addToast('Balance collection reminder sent to customer', 'info');
@@ -417,18 +415,6 @@ export default function ExportOrderDetail() {
         action: 'BL Draft approved — balance collection reminder triggered',
         by: 'System',
       });
-    }
-    // Auto-progress: if all required docs approved and order is in Docs In Preparation, advance to Awaiting Balance
-    const updatedDocsCheck = { ...(order.documents || {}), [docKey]: { ...(order.documents?.[docKey] || {}), status: 'Approved' } };
-    if (allDocsApproved(updatedDocsCheck) && order.status === 'Docs In Preparation') {
-      try {
-        await api.put(`/api/export-orders/${order.dbId || order.id}/status`, {
-          status: 'Awaiting Balance',
-          notes: 'All required documents approved',
-        });
-        fetchOrderDetail();
-        refreshFromApi('orders');
-      } catch (_err) { /* status transition will be retried on next action */ }
     }
   };
 
@@ -439,9 +425,10 @@ export default function ExportOrderDetail() {
 
   // Workflow gating - determine which actions are allowed
   const canConfirmAdvance = order.advanceReceived < order.advanceExpected && ['Awaiting Advance', 'Draft'].includes(order.status);
-  const canRequestBalance = order.advanceReceived >= order.advanceExpected && order.balanceReceived < order.balanceExpected && !['Draft', 'Awaiting Advance', 'Closed', 'Cancelled'].includes(order.status);
+  const canStartDocs = order.status === 'In Milling';
+  const canRequestBalance = order.status === 'Awaiting Balance' && order.balanceReceived < order.balanceExpected;
   const canCreateMilling = order.advanceReceived >= order.advanceExpected && !order.millingOrderId && !['Draft', 'Closed', 'Cancelled'].includes(order.status);
-  const canUpdateShipment = !['Draft', 'Awaiting Advance', 'Closed', 'Cancelled'].includes(order.status);
+  const canUpdateShipment = ['Ready to Ship', 'Shipped'].includes(order.status);
   const canPutOnHold = !['Closed', 'Cancelled'].includes(order.status);
   const canCloseOrder = order.status === 'Arrived' || (order.balanceReceived >= order.balanceExpected && order.status === 'Shipped');
 
@@ -475,12 +462,14 @@ export default function ExportOrderDetail() {
         onShowInvoicePreview={() => setShowInvoicePreview(true)}
         onShowEmailComposer={() => setShowEmailComposer(true)}
         canConfirmAdvance={canConfirmAdvance}
+        canStartDocs={canStartDocs}
         canRequestBalance={canRequestBalance}
         canCreateMilling={canCreateMilling}
         canUpdateShipment={canUpdateShipment}
         canPutOnHold={canPutOnHold}
         canCloseOrder={canCloseOrder}
         onOpenAdvanceModal={openAdvanceModal}
+        onStartDocsPreparation={handleStartDocsPreparation}
         onOpenBalanceModal={openBalanceModal}
         onOpenMillingModal={openMillingModal}
         onOpenShipmentModal={openShipmentModal}
@@ -491,9 +480,9 @@ export default function ExportOrderDetail() {
       {/* Workflow Timeline */}
       <WorkflowTimeline order={order} />
 
-      {/* Tabs */}
+      {/* Tabs — only show tabs relevant to the current workflow stage */}
       <div className="flex items-center gap-1 border-b border-gray-200 overflow-x-auto">
-        {tabList.map(tab => (
+        {visibleTabs.map(tab => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
@@ -533,8 +522,10 @@ export default function ExportOrderDetail() {
             linkedBatch={linkedBatch}
             purchaseLots={order.purchaseLots || []}
             onCreateMilling={openMillingModal}
+            onStartDocsPreparation={handleStartDocsPreparation}
             onLinkExternalPurchase={() => { addToast('External purchase linked'); addActivityToOrder(order.id, { date: today(), action: 'External purchase linked to order', by: 'Export Manager' }); }}
             canCreateMilling={canCreateMilling}
+            canStartDocs={canStartDocs}
           />
         )}
         {activeTab === 'documents' && <DocumentsTab order={order} onUpload={handleDocumentUpload} onApprove={handleDocumentApprove} onPreviewInvoice={() => setShowInvoicePreview(true)} />}

@@ -16,4 +16,4 @@ export {
   InvoicePreviewModal,
   OrderEmailComposer,
 } from './OrderModals';
-export { workflowSteps, documentLabels, tabList, today, allDocsApproved, allDocsFinal } from './constants';
+export { workflowSteps, documentLabels, tabList, getVisibleTabs, today, allDocsApproved, allDocsFinal } from './constants';
