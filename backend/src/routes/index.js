@@ -17,6 +17,7 @@ router.use('/inventory', authenticate, require('./inventory'));
 router.use('/lot-inventory', authenticate, require('./lotInventory'));
 router.use('/local-sales', authenticate, require('./localSales'));
 router.use('/finance', authenticate, require('./finance'));
+router.use('/advances', authenticate, require('./advances'));
 router.use('/procurement', authenticate, require('./procurement'));
 router.use('/admin', authenticate, require('./admin'));
 router.use('/audit-logs', authenticate, require('./auditLogs'));
