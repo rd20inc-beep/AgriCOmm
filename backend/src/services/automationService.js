@@ -563,7 +563,7 @@ const automationService = {
     }
 
     // Create task: "Prepare final documents"
-    const taskNo = `TSK-AUTO-${Date.now()}`;
+    const taskNo = `TSK-${Date.now().toString(36).toUpperCase()}`;
     const docOfficers = await trx('users').where({ role_id: 7, is_active: true }).first();
     await trx('tasks_assignments').insert({
       task_no: taskNo,
@@ -589,7 +589,7 @@ const automationService = {
 
     // Create task for finance: follow up balance collection
     const financeManagers = await trx('users').where({ role_id: 3, is_active: true }).first();
-    const taskNo = `TSK-AUTO-${Date.now()}`;
+    const taskNo = `TSK-${Date.now().toString(36).toUpperCase()}`;
     await trx('tasks_assignments').insert({
       task_no: taskNo,
       title: `Follow up balance collection for ${order.order_no}`,
@@ -624,7 +624,7 @@ const automationService = {
 
       // Create task: arrange internal transfer
       const invOfficers = await trx('users').where({ role_id: 6, is_active: true }).first();
-      const taskNo = `TSK-AUTO-${Date.now()}`;
+      const taskNo = `TSK-${Date.now().toString(36).toUpperCase()}`;
       await trx('tasks_assignments').insert({
         task_no: taskNo,
         title: `Arrange internal transfer for ${batch.batch_no}`,

@@ -76,7 +76,7 @@ exports.up = async function (knex) {
   // 6. Task Assignments
   await knex.schema.createTable('tasks_assignments', (t) => {
     t.increments('id').primary();
-    t.string('task_no', 20).unique();
+    t.string('task_no', 50).unique();
     t.string('title', 255).notNullable();
     t.text('description');
     t.string('linked_type', 30);
