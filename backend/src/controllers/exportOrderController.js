@@ -3,37 +3,9 @@ const inventoryService = require('../services/inventoryService');
 const accountingService = require('../services/accountingService');
 const documentService = require('../services/documentService');
 const automationService = require('../services/automationService');
-
-// Valid status transitions — aligned with frontend workflowSteps & schema validation
-const STATUS_TRANSITIONS = {
-  'Draft': ['Awaiting Advance'],
-  'Awaiting Advance': ['Advance Received'],
-  'Advance Received': ['Procurement Pending', 'In Milling'],
-  'Procurement Pending': ['In Milling'],
-  'In Milling': ['Docs In Preparation'],
-  'Docs In Preparation': ['Awaiting Balance'],
-  'Awaiting Balance': ['Ready to Ship'],
-  'Ready to Ship': ['Shipped'],
-  'Shipped': ['Arrived'],
-  'Arrived': ['Closed'],
-  'Closed': [],
-  'Cancelled': [],
-};
-
-// Map status to workflow step number
-const STATUS_STEP = {
-  'Draft': 1,
-  'Awaiting Advance': 2,
-  'Advance Received': 3,
-  'Procurement Pending': 4,
-  'In Milling': 5,
-  'Docs In Preparation': 6,
-  'Awaiting Balance': 7,
-  'Ready to Ship': 8,
-  'Shipped': 9,
-  'Arrived': 10,
-  'Closed': 11,
-};
+const emailService = require('../services/emailService');
+const workflowService = require('../services/exportOrderWorkflowService');
+const { MONEY_EPSILON, settledAmount, getStepForStatus } = workflowService;
 
 async function generateOrderNo(trx) {
   // Get the highest order number by parsing the numeric part
@@ -60,6 +32,71 @@ async function generatePaymentNo(trx, prefix = 'PAY') {
 
   const num = parseInt(last.payment_no.replace(`${prefix}-`, ''), 10) || 0;
   return `${prefix}-${String(num + 1).padStart(3, '0')}`;
+}
+
+async function applyDocumentAction({ orderRef, userId, docType, targetStatus, filePath, version, notes }) {
+  const isNumeric = /^\d+$/.test(String(orderRef));
+  const whereClause = isNumeric ? { id: parseInt(orderRef) } : { order_no: orderRef };
+  const order = await db('export_orders').where(whereClause).first();
+  if (!order) {
+    const err = new Error('Export order not found.');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const existing = await db('export_order_documents')
+    .where({ order_id: order.id, doc_type: docType })
+    .first();
+
+  let doc;
+  let orderStatusChanged = false;
+
+  await db.transaction(async (trx) => {
+    if (existing) {
+      [doc] = await trx('export_order_documents')
+        .where({ id: existing.id })
+        .update({
+          status: targetStatus || existing.status,
+          file_path: filePath || existing.file_path,
+          version: version || existing.version,
+          notes: notes != null ? notes : existing.notes,
+          updated_at: trx.fn.now(),
+        })
+        .returning('*');
+    } else {
+      [doc] = await trx('export_order_documents')
+        .insert({
+          order_id: order.id,
+          doc_type: docType,
+          status: targetStatus || 'Pending',
+          uploaded_by: userId,
+          upload_date: trx.fn.now(),
+          file_path: filePath || null,
+          version: version || 1,
+          notes: notes || null,
+        })
+        .returning('*');
+    }
+
+    const fulfilledStatuses = new Set(['Approved', 'Final']);
+    await trx('document_checklists')
+      .where({ linked_type: 'export_order', linked_id: order.id, doc_type: docType })
+      .update({
+        is_fulfilled: fulfilledStatuses.has(doc.status),
+        updated_at: trx.fn.now(),
+      });
+
+    if (fulfilledStatuses.has(doc.status)) {
+      const transition = await workflowService.maybePromoteAfterDocuments(trx, {
+        order,
+        userId,
+        reason: 'All required documents approved',
+      });
+      orderStatusChanged = transition.changed;
+    }
+  });
+
+  return { doc, orderStatusChanged };
 }
 
 const exportOrderController = {
@@ -365,7 +402,7 @@ const exportOrderController = {
             shipment_eta: shipment_eta || null,
             source: source || 'Internal Mill',
             status: requestedStatus || 'Draft',
-            current_step: requestedStatus === 'Awaiting Advance' ? 2 : 1,
+            current_step: getStepForStatus(requestedStatus || 'Draft', 1),
             notes: notes || null,
             created_by: req.user.id,
             // Bag specification
@@ -517,6 +554,15 @@ const exportOrderController = {
       delete updates.order_no;
       delete updates.created_at;
       delete updates.created_by;
+      delete updates.status;
+      delete updates.current_step;
+      delete updates.vessel_name;
+      delete updates.booking_no;
+      delete updates.etd;
+      delete updates.atd;
+      delete updates.eta;
+      delete updates.ata;
+      delete updates.destination_port;
 
       // Recalculate totals if price or qty changed
       if (updates.qty_mt || updates.price_per_mt) {
@@ -567,61 +613,13 @@ const exportOrderController = {
         return res.status(404).json({ success: false, message: 'Export order not found.' });
       }
 
-      const allowed = STATUS_TRANSITIONS[order.status] || [];
-      if (!allowed.includes(status)) {
-        return res.status(400).json({
-          success: false,
-          message: `Cannot transition from '${order.status}' to '${status}'. Allowed: ${allowed.join(', ') || 'none'}.`,
-        });
-      }
-
-      // When transitioning to Shipped, check document completeness
-      if (status === 'Shipped') {
-        const docsComplete = await documentService.isDocumentationComplete('export_order', order.id);
-        if (!docsComplete) {
-          return res.status(400).json({
-            success: false,
-            message: 'Cannot ship: required export documents are not all approved. Check document checklist.',
-          });
-        }
-      }
-
       await db.transaction(async (trx) => {
-        await trx('export_orders').where({ id }).update({
-          status,
-          current_step: STATUS_STEP[status] || order.current_step,
-          updated_at: trx.fn.now(),
-        });
-
-        await trx('export_order_status_history').insert({
-          order_id: id,
-          from_status: order.status,
-          to_status: status,
-          changed_by: req.user.id,
+        await workflowService.transitionOrder(trx, {
+          order,
+          toStatus: status,
+          userId: req.user.id,
           reason: notes || null,
         });
-
-        // When marking as shipped, dispatch inventory
-        if (status === 'Shipped') {
-          const exportLot = await trx('inventory_lots')
-            .where({ entity: 'export', type: 'finished', reserved_against: order.order_no })
-            .first();
-
-          if (exportLot) {
-            await inventoryService.dispatchForShipment(trx, {
-              orderId: order.id,
-              lotId: exportLot.id,
-              qtyMT: order.qty_mt,
-              userId: req.user?.id,
-            });
-          }
-
-          // Trigger automation: shipment departed
-          await automationService.onShipmentDeparted(trx, {
-            orderId: parseInt(id),
-            userId: req.user.id,
-          });
-        }
       });
 
       const updated = await db('export_orders').where({ id }).first();
@@ -631,7 +629,194 @@ const exportOrderController = {
         data: { order: updated },
       });
     } catch (err) {
+      if (err.statusCode) {
+        return res.status(err.statusCode).json({ success: false, message: err.message });
+      }
       console.error('Export order updateStatus error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  async updateShipment(req, res) {
+    try {
+      const { id } = req.params;
+      const {
+        vessel_name,
+        booking_no,
+        etd,
+        atd,
+        eta,
+        ata,
+        destination_port,
+        notes,
+      } = req.body;
+
+      const order = await db('export_orders').where({ id }).first();
+      if (!order) {
+        return res.status(404).json({ success: false, message: 'Export order not found.' });
+      }
+
+      if (['Closed', 'Cancelled'].includes(order.status)) {
+        return res.status(400).json({
+          success: false,
+          message: `Cannot update shipment for an order in '${order.status}' status.`,
+        });
+      }
+
+      let transitionedTo = null;
+
+      await db.transaction(async (trx) => {
+        await trx('export_orders').where({ id }).update({
+          vessel_name: vessel_name || null,
+          booking_no: booking_no || null,
+          etd: etd || null,
+          atd: atd || null,
+          eta: eta || null,
+          ata: ata || null,
+          destination_port: destination_port || null,
+          updated_at: trx.fn.now(),
+        });
+
+        let currentOrder = {
+          ...order,
+          vessel_name: vessel_name || null,
+          booking_no: booking_no || null,
+          etd: etd || null,
+          atd: atd || null,
+          eta: eta || null,
+          ata: ata || null,
+          destination_port: destination_port || null,
+        };
+
+        if (ata) {
+          if (currentOrder.status === 'Shipped') {
+            currentOrder = await workflowService.transitionOrder(trx, {
+              order: currentOrder,
+              toStatus: 'Arrived',
+              userId: req.user.id,
+              reason: notes || `Shipment arrived on ${ata}`,
+            });
+            transitionedTo = 'Arrived';
+          } else if (currentOrder.status !== 'Arrived') {
+            const err = new Error(`Cannot mark arrival while order is in '${currentOrder.status}' status.`);
+            err.statusCode = 400;
+            throw err;
+          }
+        } else if (atd) {
+          if (currentOrder.status === 'Ready to Ship') {
+            currentOrder = await workflowService.transitionOrder(trx, {
+              order: currentOrder,
+              toStatus: 'Shipped',
+              userId: req.user.id,
+              reason: notes || `Shipment departed on ${atd}`,
+            });
+            transitionedTo = 'Shipped';
+          } else if (currentOrder.status !== 'Shipped') {
+            const err = new Error(`Cannot mark shipment departure while order is in '${currentOrder.status}' status.`);
+            err.statusCode = 400;
+            throw err;
+          }
+        }
+      });
+
+      const updated = await db('export_orders').where({ id }).first();
+      return res.json({
+        success: true,
+        data: { order: updated, transitioned_to: transitionedTo },
+      });
+    } catch (err) {
+      if (err.statusCode) {
+        return res.status(err.statusCode).json({ success: false, message: err.message });
+      }
+      console.error('Export order updateShipment error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  async startDocsPreparation(req, res) {
+    try {
+      const { id } = req.params;
+      const { notes } = req.body;
+
+      const order = await db('export_orders').where({ id }).first();
+      if (!order) {
+        return res.status(404).json({ success: false, message: 'Export order not found.' });
+      }
+
+      await db.transaction(async (trx) => {
+        await workflowService.transitionOrder(trx, {
+          order,
+          toStatus: 'Docs In Preparation',
+          userId: req.user.id,
+          reason: notes || 'Document preparation started',
+        });
+      });
+
+      const updated = await db('export_orders').where({ id }).first();
+      return res.json({
+        success: true,
+        data: { order: updated },
+      });
+    } catch (err) {
+      if (err.statusCode) {
+        return res.status(err.statusCode).json({ success: false, message: err.message });
+      }
+      console.error('Export order startDocsPreparation error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  async requestBalance(req, res) {
+    try {
+      const rawId = req.params.id;
+      const isNumeric = /^\d+$/.test(rawId);
+      const whereClause = isNumeric ? { id: parseInt(rawId) } : { order_no: rawId };
+      const { notes } = req.body;
+
+      const order = await db('export_orders').where(whereClause).first();
+      if (!order) {
+        return res.status(404).json({ success: false, message: 'Export order not found.' });
+      }
+
+      if (order.status !== 'Awaiting Balance') {
+        return res.status(400).json({
+          success: false,
+          message: `Balance can only be requested while order is in 'Awaiting Balance', not '${order.status}'.`,
+        });
+      }
+
+      const outstandingBalance = Math.max(
+        0,
+        settledAmount(order.balance_expected) - settledAmount(order.balance_received)
+      );
+      if (outstandingBalance <= MONEY_EPSILON) {
+        return res.status(400).json({
+          success: false,
+          message: 'Balance has already been fully received for this order.',
+        });
+      }
+
+      try {
+        await emailService.sendBalanceReminder({ orderId: order.id, userId: req.user.id });
+      } catch (err) {
+        console.error('Balance reminder email failed:', err.message);
+      }
+
+      await db('export_order_status_history').insert({
+        order_id: order.id,
+        from_status: order.status,
+        to_status: order.status,
+        changed_by: req.user.id,
+        reason: notes || 'Balance payment requested',
+      });
+
+      const updated = await db('export_orders').where({ id: order.id }).first();
+      return res.json({
+        success: true,
+        data: { order: updated, requested_amount: outstandingBalance },
+      });
+    } catch (err) {
+      console.error('Export order requestBalance error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
   },
@@ -685,58 +870,71 @@ const exportOrderController = {
     }
   },
 
-  async addDocument(req, res) {
+  async uploadDocument(req, res) {
     try {
       const { id } = req.params;
-      const { doc_type, status: docStatus, file_path, version, notes } = req.body;
-
-      if (!doc_type) {
-        return res.status(400).json({ success: false, message: 'doc_type is required.' });
-      }
-
-      const order = await db('export_orders').where({ id }).first();
-      if (!order) {
-        return res.status(404).json({ success: false, message: 'Export order not found.' });
-      }
-
-      // Upsert by doc_type
-      const existing = await db('export_order_documents')
-        .where({ order_id: id, doc_type })
-        .first();
-
-      let doc;
-      if (existing) {
-        [doc] = await db('export_order_documents')
-          .where({ id: existing.id })
-          .update({
-            status: docStatus || existing.status,
-            file_path: file_path || existing.file_path,
-            version: version || existing.version,
-            notes: notes != null ? notes : existing.notes,
-            updated_at: db.fn.now(),
-          })
-          .returning('*');
-      } else {
-        [doc] = await db('export_order_documents')
-          .insert({
-            order_id: id,
-            doc_type,
-            status: docStatus || 'pending',
-            uploaded_by: req.user.id,
-            upload_date: db.fn.now(),
-            file_path: file_path || null,
-            version: version || 1,
-            notes: notes || null,
-          })
-          .returning('*');
-      }
-
-      return res.json({
-        success: true,
-        data: { document: doc },
+      const { doc_type, file_path, version, notes } = req.body;
+      const result = await applyDocumentAction({
+        orderRef: id,
+        userId: req.user.id,
+        docType: doc_type,
+        targetStatus: 'Draft Uploaded',
+        filePath: file_path,
+        version,
+        notes,
       });
+      return res.json({ success: true, data: { document: result.doc, order_status_changed: result.orderStatusChanged } });
     } catch (err) {
-      console.error('Export order addDocument error:', err);
+      if (err.statusCode) {
+        return res.status(err.statusCode).json({ success: false, message: err.message });
+      }
+      console.error('Export order uploadDocument error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  async approveDocument(req, res) {
+    try {
+      const { id } = req.params;
+      const { doc_type, file_path, version, notes } = req.body;
+      const result = await applyDocumentAction({
+        orderRef: id,
+        userId: req.user.id,
+        docType: doc_type,
+        targetStatus: 'Approved',
+        filePath: file_path,
+        version,
+        notes,
+      });
+      return res.json({ success: true, data: { document: result.doc, order_status_changed: result.orderStatusChanged } });
+    } catch (err) {
+      if (err.statusCode) {
+        return res.status(err.statusCode).json({ success: false, message: err.message });
+      }
+      console.error('Export order approveDocument error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  async finalizeDocument(req, res) {
+    try {
+      const { id } = req.params;
+      const { doc_type, file_path, version, notes } = req.body;
+      const result = await applyDocumentAction({
+        orderRef: id,
+        userId: req.user.id,
+        docType: doc_type,
+        targetStatus: 'Final',
+        filePath: file_path,
+        version,
+        notes,
+      });
+      return res.json({ success: true, data: { document: result.doc, order_status_changed: result.orderStatusChanged } });
+    } catch (err) {
+      if (err.statusCode) {
+        return res.status(err.statusCode).json({ success: false, message: err.message });
+      }
+      console.error('Export order finalizeDocument error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
   },
@@ -765,43 +963,34 @@ const exportOrderController = {
         });
       }
 
-      const outstandingAdvance = Math.max(
-        0,
-        parseFloat(order.advance_expected || 0) - parseFloat(order.advance_received || 0)
-      );
+      const expectedAdvance = settledAmount(order.advance_expected);
+      const receivedAdvance = settledAmount(order.advance_received);
+      const confirmedAmount = settledAmount(amount);
+      const outstandingAdvance = Math.max(0, settledAmount(expectedAdvance - receivedAdvance));
 
-      if (outstandingAdvance <= 0.01) {
+      if (outstandingAdvance <= MONEY_EPSILON) {
         return res.status(400).json({
           success: false,
           message: 'Advance has already been fully received for this order.',
         });
       }
 
-      if (parseFloat(amount) - outstandingAdvance > 0.01) {
+      if (confirmedAmount - outstandingAdvance > MONEY_EPSILON) {
         return res.status(400).json({
           success: false,
           message: `Advance confirmation exceeds outstanding amount of ${outstandingAdvance.toFixed(2)}.`,
         });
       }
 
-      const newAdvanceReceived = parseFloat(order.advance_received || 0) + parseFloat(amount);
-      const advanceFull = newAdvanceReceived >= parseFloat(order.advance_expected || 0);
+      const newAdvanceReceived = settledAmount(receivedAdvance + confirmedAmount);
 
       await db.transaction(async (trx) => {
         // Update order advance fields
-        const updateData = {
+        await trx('export_orders').where({ id: order.id }).update({
           advance_received: newAdvanceReceived,
           advance_date: payment_date || trx.fn.now(),
           updated_at: trx.fn.now(),
-        };
-
-        // Auto-transition status if advance fully received
-        if (advanceFull && ['Awaiting Advance', 'Draft'].includes(order.status)) {
-          updateData.status = 'Advance Received';
-          updateData.current_step = STATUS_STEP['Advance Received'] || 3;
-        }
-
-        await trx('export_orders').where({ id: order.id }).update(updateData);
+        });
 
         const advReceivable = await trx('receivables')
           .where({ order_id: order.id, type: 'Advance' })
@@ -812,7 +1001,7 @@ const exportOrderController = {
           payment_no: advPayNo,
           type: 'receipt',
           linked_receivable_id: advReceivable ? advReceivable.id : null,
-          amount: parseFloat(amount),
+          amount: confirmedAmount,
           currency: order.currency || 'USD',
           payment_method: payment_method || null,
           bank_account_id: bank_account_id || null,
@@ -824,12 +1013,12 @@ const exportOrderController = {
 
         // Update receivable record
         if (advReceivable) {
-          const newReceived = parseFloat(advReceivable.received_amount || 0) + parseFloat(amount);
-          const newOutstanding = Math.max(0, parseFloat(advReceivable.expected_amount) - newReceived);
+          const newReceived = settledAmount(parseFloat(advReceivable.received_amount || 0) + confirmedAmount);
+          const newOutstanding = Math.max(0, settledAmount(parseFloat(advReceivable.expected_amount) - newReceived));
           await trx('receivables').where({ id: advReceivable.id }).update({
             received_amount: newReceived,
             outstanding: newOutstanding,
-            status: newOutstanding <= 0 ? 'Received' : 'Partial',
+            status: newOutstanding <= MONEY_EPSILON ? 'Received' : 'Partial',
             updated_at: trx.fn.now(),
           });
         }
@@ -838,19 +1027,15 @@ const exportOrderController = {
         if (bank_account_id) {
           await trx('bank_accounts')
             .where({ id: bank_account_id })
-            .increment('current_balance', parseFloat(amount));
+            .increment('current_balance', confirmedAmount);
         }
 
-        // Add status history if status changed
-        if (advanceFull && ['Awaiting Advance', 'Draft'].includes(order.status)) {
-          await trx('export_order_status_history').insert({
-            order_id: order.id,
-            from_status: order.status,
-            to_status: 'Advance Received',
-            changed_by: req.user.id,
-            reason: `Advance payment of ${amount} confirmed`,
-          });
-        }
+        await workflowService.maybePromoteAfterAdvance(trx, {
+          order,
+          newAdvanceReceived,
+          userId: req.user.id,
+          reason: `Advance payment of ${confirmedAmount} confirmed`,
+        });
 
         // Reserve stock if available
         try {
@@ -871,14 +1056,14 @@ const exportOrderController = {
       try {
         await accountingService.autoPost(db, {
           triggerEvent: 'advance_receipt', entity: 'export',
-          amount: parseFloat(amount), currency: order.currency || 'USD',
+          amount: confirmedAmount, currency: order.currency || 'USD',
           refType: 'Export Order', refNo: order.order_no,
           description: `Adv rcpt ${order.order_no}`, userId: req.user?.id,
         });
       } catch (e) { console.warn('Advance journal failed:', e.message); }
       try {
         await automationService.onAdvanceConfirmed(db, {
-          orderId: order.id, amount: parseFloat(amount), userId: req.user.id,
+          orderId: order.id, amount: confirmedAmount, userId: req.user.id,
         });
       } catch (e) { console.warn('Advance automation failed:', e.message); }
 
@@ -918,19 +1103,19 @@ const exportOrderController = {
         });
       }
 
-      const outstandingBalance = Math.max(
-        0,
-        parseFloat(order.balance_expected || 0) - parseFloat(order.balance_received || 0)
-      );
+      const expectedBalance = settledAmount(order.balance_expected);
+      const receivedBalance = settledAmount(order.balance_received);
+      const confirmedAmount = settledAmount(amount);
+      const outstandingBalance = Math.max(0, settledAmount(expectedBalance - receivedBalance));
 
-      if (outstandingBalance <= 0.01) {
+      if (outstandingBalance <= MONEY_EPSILON) {
         return res.status(400).json({
           success: false,
           message: 'Balance has already been fully received for this order.',
         });
       }
 
-      if (parseFloat(amount) - outstandingBalance > 0.01) {
+      if (confirmedAmount - outstandingBalance > MONEY_EPSILON) {
         return res.status(400).json({
           success: false,
           message: `Balance confirmation exceeds outstanding amount of ${outstandingBalance.toFixed(2)}.`,
@@ -938,22 +1123,14 @@ const exportOrderController = {
       }
 
       const id = order.id; // resolved numeric ID
-      const newBalanceReceived = parseFloat(order.balance_received || 0) + parseFloat(amount);
-      const balanceFull = newBalanceReceived >= parseFloat(order.balance_expected || 0);
+      const newBalanceReceived = settledAmount(receivedBalance + confirmedAmount);
 
       await db.transaction(async (trx) => {
-        const updateData = {
+        await trx('export_orders').where({ id }).update({
           balance_received: newBalanceReceived,
           balance_date: payment_date || trx.fn.now(),
           updated_at: trx.fn.now(),
-        };
-
-        if (balanceFull && order.status === 'Awaiting Balance') {
-          updateData.status = 'Ready to Ship';
-          updateData.current_step = STATUS_STEP['Ready to Ship'] || 8;
-        }
-
-        await trx('export_orders').where({ id }).update(updateData);
+        });
 
         const balReceivable = await trx('receivables')
           .where({ order_id: id, type: 'Balance' })
@@ -964,7 +1141,7 @@ const exportOrderController = {
           payment_no: balPayNo,
           type: 'receipt',
           linked_receivable_id: balReceivable ? balReceivable.id : null,
-          amount: parseFloat(amount),
+          amount: confirmedAmount,
           currency: order.currency || 'USD',
           payment_method: payment_method || null,
           bank_account_id: bank_account_id || null,
@@ -976,12 +1153,12 @@ const exportOrderController = {
 
         // Update receivable record
         if (balReceivable) {
-          const newReceived = parseFloat(balReceivable.received_amount || 0) + parseFloat(amount);
-          const newOutstanding = Math.max(0, parseFloat(balReceivable.expected_amount) - newReceived);
+          const newReceived = settledAmount(parseFloat(balReceivable.received_amount || 0) + confirmedAmount);
+          const newOutstanding = Math.max(0, settledAmount(parseFloat(balReceivable.expected_amount) - newReceived));
           await trx('receivables').where({ id: balReceivable.id }).update({
             received_amount: newReceived,
             outstanding: newOutstanding,
-            status: newOutstanding <= 0 ? 'Received' : 'Partial',
+            status: newOutstanding <= MONEY_EPSILON ? 'Received' : 'Partial',
             updated_at: trx.fn.now(),
           });
         }
@@ -990,32 +1167,29 @@ const exportOrderController = {
         if (bank_account_id) {
           await trx('bank_accounts')
             .where({ id: bank_account_id })
-            .increment('current_balance', parseFloat(amount));
+            .increment('current_balance', confirmedAmount);
         }
 
-        if (balanceFull && order.status === 'Awaiting Balance') {
-          await trx('export_order_status_history').insert({
-            order_id: id,
-            from_status: order.status,
-            to_status: 'Ready to Ship',
-            changed_by: req.user.id,
-            reason: `Balance payment of ${amount} confirmed`,
-          });
-        }
+        await workflowService.maybePromoteAfterBalance(trx, {
+          order,
+          newBalanceReceived,
+          userId: req.user.id,
+          reason: `Balance payment of ${confirmedAmount} confirmed`,
+        });
       });
 
       // Auto-post journal & automation OUTSIDE transaction (non-blocking)
       try {
         await accountingService.autoPost(db, {
           triggerEvent: 'balance_receipt', entity: 'export',
-          amount: parseFloat(amount), currency: order.currency || 'USD',
+          amount: confirmedAmount, currency: order.currency || 'USD',
           refType: 'Export Order', refNo: order.order_no,
           description: `Bal rcpt ${order.order_no}`, userId: req.user?.id,
         });
       } catch (e) { console.warn('Balance journal failed:', e.message); }
       try {
         await automationService.onBalanceConfirmed(db, {
-          orderId: order.id, amount: parseFloat(amount), userId: req.user.id,
+          orderId: order.id, amount: confirmedAmount, userId: req.user.id,
         });
       } catch (e) { console.warn('Balance automation failed:', e.message); }
 

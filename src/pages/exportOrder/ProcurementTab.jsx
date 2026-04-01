@@ -1,9 +1,9 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import StatusBadge from '../../components/StatusBadge';
-import { Package, Plus, ExternalLink, Warehouse, Scale } from 'lucide-react';
+import { Package, Plus, ExternalLink, Warehouse, Scale, FileText } from 'lucide-react';
 
-export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], onCreateMilling, onLinkExternalPurchase, canCreateMilling }) {
+export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], onCreateMilling, onStartDocsPreparation, onLinkExternalPurchase, canCreateMilling, canStartDocs }) {
   const estimatedRawQty = Math.round(order.qtyMT / 0.75);
 
   // Split lots into finished (main product) and byproducts
@@ -122,18 +122,28 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Linked Milling Order</h3>
         {order.millingOrderId ? (
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-lg font-bold text-gray-900">{order.millingOrderId}</p>
               <p className="text-sm text-gray-500">Linked to this export order</p>
             </div>
-            <Link
-              to={`/milling/${order.millingOrderId}`}
-              className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 text-sm font-medium"
-            >
-              View Details
-              <ExternalLink className="w-3.5 h-3.5" />
-            </Link>
+            <div className="flex items-center gap-2">
+              <button
+                disabled={!canStartDocs}
+                onClick={onStartDocsPreparation}
+                className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${canStartDocs ? 'bg-violet-600 text-white hover:bg-violet-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
+              >
+                <FileText className="w-4 h-4" />
+                Start Docs
+              </button>
+              <Link
+                to={`/milling/${order.millingOrderId}`}
+                className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 text-sm font-medium"
+              >
+                View Details
+                <ExternalLink className="w-3.5 h-3.5" />
+              </Link>
+            </div>
           </div>
         ) : (
           <div className="text-center py-6">

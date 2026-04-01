@@ -2,6 +2,7 @@ const db = require('../config/database');
 const inventoryService = require('../services/inventoryService');
 const accountingService = require('../services/accountingService');
 const automationService = require('../services/automationService');
+const workflowService = require('../services/exportOrderWorkflowService');
 
 /** Resolve batch param to numeric ID (supports both "9" and "M-226") */
 async function resolveBatchId(idParam) {
@@ -142,6 +143,31 @@ const millingController = {
       }
 
       const result = await db.transaction(async (trx) => {
+        let linkedOrder = null;
+        if (linked_export_order_id) {
+          linkedOrder = await trx('export_orders').where({ id: linked_export_order_id }).first();
+          if (!linkedOrder) {
+            const err = new Error('Linked export order not found.');
+            err.statusCode = 404;
+            throw err;
+          }
+
+          if (linkedOrder.milling_order_id) {
+            const err = new Error('A milling batch is already linked to this export order.');
+            err.statusCode = 400;
+            throw err;
+          }
+
+          const existingBatch = await trx('milling_batches')
+            .where({ linked_export_order_id })
+            .first();
+          if (existingBatch) {
+            const err = new Error('A milling batch is already linked to this export order.');
+            err.statusCode = 400;
+            throw err;
+          }
+        }
+
         const batchNo = await generateBatchNo(trx);
 
         const [batch] = await trx('milling_batches')
@@ -156,14 +182,45 @@ const millingController = {
           })
           .returning('*');
 
-        return batch;
+        let updatedOrder = null;
+        if (linkedOrder) {
+          await trx('export_orders').where({ id: linkedOrder.id }).update({
+            milling_order_id: batch.id,
+            updated_at: trx.fn.now(),
+          });
+
+          if (workflowService.canTransition(linkedOrder.status, 'In Milling')) {
+            updatedOrder = await workflowService.transitionOrder(trx, {
+              order: linkedOrder,
+              toStatus: 'In Milling',
+              userId: req.user.id,
+              reason: `Milling batch ${batch.batch_no} created`,
+            });
+          } else if (linkedOrder.status === 'In Milling') {
+            updatedOrder = {
+              ...linkedOrder,
+              milling_order_id: batch.id,
+            };
+          } else {
+            const err = new Error(
+              `Cannot start milling for an order in '${linkedOrder.status}' status.`
+            );
+            err.statusCode = 400;
+            throw err;
+          }
+        }
+
+        return { batch, order: updatedOrder };
       });
 
       return res.status(201).json({
         success: true,
-        data: { batch: result },
+        data: result,
       });
     } catch (err) {
+      if (err.statusCode) {
+        return res.status(err.statusCode).json({ success: false, message: err.message });
+      }
       console.error('Milling batch create error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }

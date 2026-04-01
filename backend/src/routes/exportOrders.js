@@ -63,17 +63,53 @@ router.put(
   auditAction('update_status', 'export_order', (req) => req.params.id),
   controller.updateStatus
 );
+router.put(
+  '/:id/shipment',
+  authorize('export_orders', 'approve'),
+  validate(schemas.updateExportShipment),
+  auditAction('update_shipment', 'export_order', (req) => req.params.id),
+  controller.updateShipment
+);
+router.post(
+  '/:id/start-docs',
+  authorize('export_orders', 'approve'),
+  validate(schemas.exportOrderAction),
+  auditAction('start_docs', 'export_order', (req) => req.params.id),
+  controller.startDocsPreparation
+);
+router.post(
+  '/:id/request-balance',
+  authorizeAny(['export_orders', 'confirm_balance'], ['finance', 'confirm_payment']),
+  validate(schemas.exportOrderAction),
+  auditAction('request_balance', 'export_order', (req) => req.params.id),
+  controller.requestBalance
+);
+router.post(
+  '/:id/documents/upload',
+  authorize('export_orders', 'edit'),
+  validate(schemas.exportOrderDocumentAction),
+  auditAction('upload_document', 'export_order', (req) => req.params.id),
+  controller.uploadDocument
+);
+router.post(
+  '/:id/documents/approve',
+  authorize('export_orders', 'edit'),
+  validate(schemas.exportOrderDocumentAction),
+  auditAction('approve_document', 'export_order', (req) => req.params.id),
+  controller.approveDocument
+);
+router.post(
+  '/:id/documents/finalize',
+  authorize('export_orders', 'edit'),
+  validate(schemas.exportOrderDocumentAction),
+  auditAction('finalize_document', 'export_order', (req) => req.params.id),
+  controller.finalizeDocument
+);
 router.post(
   '/:id/costs',
   authorize('export_orders', 'edit'),
   auditAction('add_cost', 'export_order', (req) => req.params.id),
   controller.addCost
-);
-router.post(
-  '/:id/documents',
-  authorize('export_orders', 'edit'),
-  auditAction('add_document', 'export_order', (req) => req.params.id),
-  controller.addDocument
 );
 router.post(
   '/:id/confirm-advance',

@@ -67,7 +67,7 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
                   </button>
                 </>
               )}
-              {doc.status === 'Approved' && (
+              {['Approved', 'Final'].includes(doc.status) && (
                 <span className="inline-flex items-center gap-1 text-xs text-green-600 font-medium">
                   <CheckCircle className="w-3 h-3" />
                   Complete

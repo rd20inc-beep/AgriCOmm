@@ -127,17 +127,6 @@ export function useUpdateOrderStatus() {
   });
 }
 
-export function useUpdateOrderDocument() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, data }) => exportOrdersApi.updateDocument(id, data),
-    onSuccess: (_, { id }) => {
-      qc.invalidateQueries({ queryKey: queryKeys.orders.detail(id) });
-      qc.invalidateQueries({ queryKey: queryKeys.documents.all });
-    },
-  });
-}
-
 // ===================== MILLING =====================
 
 export function useMillingBatches(params = {}, opts = {}) {

@@ -14,6 +14,7 @@ export default function OrderHeader({
   onShowInvoicePreview,
   onShowEmailComposer,
   canConfirmAdvance,
+  canStartDocs,
   canRequestBalance,
   canCreateMilling,
   canUpdateShipment,
@@ -25,6 +26,7 @@ export default function OrderHeader({
   onOpenShipmentModal,
   onOpenHoldModal,
   onCloseOrder,
+  onStartDocsPreparation,
 }) {
   return (
     <div className="flex flex-col sm:flex-row items-start justify-between gap-4">
@@ -72,6 +74,7 @@ export default function OrderHeader({
           <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
             <div className="py-1">
               <button disabled={!canConfirmAdvance} className={`w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 ${!canConfirmAdvance ? 'opacity-50 cursor-not-allowed' : ''}`} onClick={() => { if (!canConfirmAdvance) return; onOpenAdvanceModal(); setShowActions(false); }}>Confirm Advance Payment</button>
+              <button disabled={!canStartDocs} className={`w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 ${!canStartDocs ? 'opacity-50 cursor-not-allowed' : ''}`} onClick={() => { if (!canStartDocs) return; onStartDocsPreparation(); setShowActions(false); }}>Start Docs Preparation</button>
               <button disabled={!canRequestBalance} className={`w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 ${!canRequestBalance ? 'opacity-50 cursor-not-allowed' : ''}`} onClick={() => { if (!canRequestBalance) return; onOpenBalanceModal(); setShowActions(false); }}>Request Balance Payment</button>
               <button disabled={!canCreateMilling} className={`w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 ${!canCreateMilling ? 'opacity-50 cursor-not-allowed' : ''}`} onClick={() => { if (!canCreateMilling) return; onOpenMillingModal(); setShowActions(false); }}>Create Milling Demand</button>
               <button disabled={!canUpdateShipment} className={`w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 ${!canUpdateShipment ? 'opacity-50 cursor-not-allowed' : ''}`} onClick={() => { if (!canUpdateShipment) return; onOpenShipmentModal(); setShowActions(false); }}>Update Shipment</button>

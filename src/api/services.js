@@ -15,7 +15,6 @@ export const exportOrdersApi = {
   confirmAdvance: (id, data) => api.post(`/api/export-orders/${id}/confirm-advance`, data),
   confirmBalance: (id, data) => api.post(`/api/export-orders/${id}/confirm-balance`, data),
   addCost: (id, data) => api.post(`/api/export-orders/${id}/costs`, data),
-  updateDocument: (id, data) => api.post(`/api/export-orders/${id}/documents`, data),
 };
 
 // ========== MILLING ==========

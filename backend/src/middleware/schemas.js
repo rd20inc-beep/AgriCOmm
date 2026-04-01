@@ -61,6 +61,28 @@ const createExportOrder = Joi.object({
   })).allow(null),
 });
 
+const updateExportShipment = Joi.object({
+  vessel_name: Joi.string().allow('', null),
+  booking_no: Joi.string().allow('', null),
+  etd: Joi.date().iso().allow(null, ''),
+  atd: Joi.date().iso().allow(null, ''),
+  eta: Joi.date().iso().allow(null, ''),
+  ata: Joi.date().iso().allow(null, ''),
+  destination_port: Joi.string().allow('', null),
+  notes: Joi.string().allow('', null),
+});
+
+const exportOrderAction = Joi.object({
+  notes: Joi.string().allow('', null),
+});
+
+const exportOrderDocumentAction = Joi.object({
+  doc_type: Joi.string().required(),
+  file_path: Joi.string().allow('', null),
+  version: Joi.number().integer().min(1).allow(null),
+  notes: Joi.string().allow('', null),
+});
+
 // ===================== PAYMENTS =====================
 
 const recordPayment = Joi.object({
@@ -166,6 +188,9 @@ const recordYield = Joi.object({
 
 module.exports = {
   createExportOrder,
+  updateExportShipment,
+  exportOrderAction,
+  exportOrderDocumentAction,
   recordPayment,
   createJournal,
   stockAdjustment,

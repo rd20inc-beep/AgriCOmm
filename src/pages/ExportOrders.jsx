@@ -13,15 +13,17 @@ const tabs = [
   { key: 'Procurement', label: 'Procurement' },
   { key: 'Docs Pending', label: 'Docs Pending' },
   { key: 'Awaiting Balance', label: 'Awaiting Balance' },
+  { key: 'Ready to Ship', label: 'Ready to Ship' },
   { key: 'Shipped', label: 'Shipped' },
 ];
 
 function matchesTab(order, tab) {
   if (tab === 'All') return true;
-  if (tab === 'Awaiting Advance') return order.status === 'Awaiting Advance' || order.status === 'Advance Received';
-  if (tab === 'Procurement') return order.status === 'Procurement Pending' || order.status === 'In Milling';
+  if (tab === 'Awaiting Advance') return order.status === 'Awaiting Advance';
+  if (tab === 'Procurement') return ['Advance Received', 'Procurement Pending', 'In Milling'].includes(order.status);
   if (tab === 'Docs Pending') return order.status === 'Docs In Preparation';
   if (tab === 'Awaiting Balance') return order.status === 'Awaiting Balance';
+  if (tab === 'Ready to Ship') return order.status === 'Ready to Ship';
   if (tab === 'Shipped') return order.status === 'Shipped' || order.status === 'Arrived';
   return false;
 }
@@ -34,10 +36,11 @@ export default function ExportOrders() {
   const urlStatus = urlParams.get('status');
   const [activeTab, setActiveTab] = useState(() => {
     if (!urlStatus) return 'All';
-    if (urlStatus === 'Awaiting Advance' || urlStatus === 'Advance Received') return 'Awaiting Advance';
-    if (urlStatus === 'Procurement Pending' || urlStatus === 'In Milling') return 'Procurement';
+    if (urlStatus === 'Awaiting Advance') return 'Awaiting Advance';
+    if (urlStatus === 'Advance Received' || urlStatus === 'Procurement Pending' || urlStatus === 'In Milling') return 'Procurement';
     if (urlStatus === 'Docs In Preparation') return 'Docs Pending';
     if (urlStatus === 'Awaiting Balance') return 'Awaiting Balance';
+    if (urlStatus === 'Ready to Ship') return 'Ready to Ship';
     if (urlStatus === 'Shipped' || urlStatus === 'Arrived') return 'Shipped';
     return 'All';
   });
