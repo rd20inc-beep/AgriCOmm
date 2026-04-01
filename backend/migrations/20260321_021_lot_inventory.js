@@ -71,6 +71,9 @@ exports.up = function (knex) {
       table.string('payment_status', 30).nullable(); // Paid, Partial, Unpaid
       table.decimal('paid_amount', 15, 2).defaultTo(0);
       table.decimal('due_amount', 15, 2).defaultTo(0);
+
+      // Notes
+      table.text('notes').nullable();
     })
 
     // ─── Lot Transactions Ledger ───
