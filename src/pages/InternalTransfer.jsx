@@ -1,15 +1,31 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ArrowRightLeft, Package, DollarSign, Calendar, Warehouse, CheckCircle, Building2 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import api from '../api/client';
 import StatusBadge from '../components/StatusBadge';
 
 const PKR_RATE = 280; // PKR per USD
 
-const initialTransfers = [];
-
 export default function InternalTransfer() {
-  const { millingBatches, exportOrders, addToast, updateExportOrder, addActivityToOrder } = useApp();
-  const [transfers, setTransfers] = useState(initialTransfers);
+  const { millingBatches, exportOrders, addToast, refreshFromApi } = useApp();
+  const [transfers, setTransfers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  // Load transfers from backend
+  useEffect(() => {
+    api.get('/api/finance/internal-transfers', { limit: 100 })
+      .then(res => {
+        setTransfers(res?.data?.transfers || []);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  function reload() {
+    api.get('/api/finance/internal-transfers', { limit: 100 })
+      .then(res => setTransfers(res?.data?.transfers || []))
+      .catch(() => {});
+  }
 
   const completedBatches = millingBatches.filter(b => b.status === 'Completed');
   const activeExportOrders = exportOrders.filter(o =>
@@ -23,7 +39,7 @@ export default function InternalTransfer() {
     transferPrice: '',
     dispatchDate: '',
   });
-  const [showSuccess, setShowSuccess] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const selectedBatch = completedBatches.find(b => b.id === form.batchNo);
   const selectedOrder = activeExportOrders.find(o => o.id === form.exportOrder);
@@ -38,53 +54,52 @@ export default function InternalTransfer() {
 
   const handleChange = (field, value) => {
     setForm(prev => ({ ...prev, [field]: value }));
-    if (showSuccess) setShowSuccess(false);
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.batchNo || !form.exportOrder || !form.qtyMT || !form.transferPrice || !form.dispatchDate) {
       addToast('Please fill in all required fields', 'error');
       return;
     }
 
-    const transferId = `TRF-${String(transfers.length + 1).padStart(3, '0')}`;
-    const newTransfer = {
-      id: transferId,
-      batchNo: form.batchNo,
-      exportOrder: form.exportOrder,
-      product: productName || 'Finished Rice',
-      qtyMT: qty,
-      pricePerMT: price,
-      totalAmount,
-      dispatchDate: form.dispatchDate,
-      warehouseFrom: 'Mill Finished Goods',
-      warehouseTo: 'Export Dispatch',
-      status: 'In Transit',
-    };
-    setTransfers(prev => [newTransfer, ...prev]);
+    // Resolve numeric IDs from the batch/order objects
+    const batch = completedBatches.find(b => b.id === form.batchNo);
+    const order = activeExportOrders.find(o => o.id === form.exportOrder);
+    const batchId = batch?.dbId || parseInt(form.batchNo) || null;
+    const orderId = order?.dbId || parseInt(form.exportOrder) || null;
+    const usdEquiv = Math.round(totalAmount / PKR_RATE);
 
-    // Update export order costs (convert PKR to USD for export books)
-    if (selectedOrder) {
-      const currentRiceCost = selectedOrder.costs.rice || 0;
-      const usdAmount = Math.round(totalAmount / PKR_RATE);
-      updateExportOrder(form.exportOrder, {
-        costs: { ...selectedOrder.costs, rice: currentRiceCost + usdAmount },
+    setSubmitting(true);
+    try {
+      const res = await api.post('/api/finance/internal-transfers', {
+        batch_id: batchId,
+        export_order_id: orderId,
+        product_name: productName || 'Finished Rice',
+        qty_mt: qty,
+        transfer_price_pkr: price,
+        total_value_pkr: totalAmount,
+        usd_equivalent: usdEquiv,
+        pkr_rate: PKR_RATE,
+        dispatch_date: form.dispatchDate,
+        status: 'In Transit',
       });
-      addActivityToOrder(form.exportOrder, {
-        date: form.dispatchDate,
-        action: `Internal transfer ${transferId}: ${qty} MT received from ${form.batchNo} at Rs ${Math.round(price).toLocaleString()}/MT (USD equiv: $${Math.round(price / PKR_RATE)}/MT)`,
-        by: 'Inventory Officer',
-      });
+
+      const t = res?.data?.transfer;
+      addToast(`Transfer ${t?.transfer_no || ''} created: ${qty} MT dispatched`, 'success');
+      setForm({ batchNo: '', exportOrder: '', qtyMT: '', transferPrice: '', dispatchDate: '' });
+      reload();
+      refreshFromApi('orders');
+      refreshFromApi('finance');
+    } catch (err) {
+      addToast(err.message || 'Failed to create transfer', 'error');
+    } finally {
+      setSubmitting(false);
     }
-
-    addToast(`Transfer ${transferId} created: ${qty} MT from ${form.batchNo} to ${form.exportOrder}`, 'success');
-    setShowSuccess(true);
-    setForm({ batchNo: '', exportOrder: '', qtyMT: '', transferPrice: '', dispatchDate: '' });
   };
 
-  const formatPKR = (value) => 'Rs ' + Math.round(value).toLocaleString('en-PK');
-  const formatUSD = (value) => '$' + value.toLocaleString('en-US');
+  const formatPKR = (value) => 'Rs ' + Math.round(parseFloat(value) || 0).toLocaleString('en-PK');
+  const formatUSD = (value) => '$' + (parseFloat(value) || 0).toLocaleString('en-US');
 
   return (
     <div className="space-y-6">
@@ -209,20 +224,14 @@ export default function InternalTransfer() {
               </div>
             </div>
 
-            {showSuccess && (
-              <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-4 py-3 text-sm text-green-700">
-                <CheckCircle className="w-4 h-4 text-green-600" />
-                Transfer created successfully!
-              </div>
-            )}
-
             <div className="flex justify-end">
               <button
                 type="submit"
-                className="inline-flex items-center gap-2 bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
+                disabled={submitting}
+                className="inline-flex items-center gap-2 bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm disabled:opacity-50"
               >
                 <ArrowRightLeft className="w-4 h-4" />
-                Create Transfer
+                {submitting ? 'Creating...' : 'Create Transfer'}
               </button>
             </div>
           </form>
@@ -318,21 +327,27 @@ export default function InternalTransfer() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {transfers.map(t => (
-                <tr key={t.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-4 py-3 font-medium text-blue-600">{t.id}</td>
-                  <td className="px-4 py-3 text-gray-900">{t.batchNo}</td>
-                  <td className="px-4 py-3 text-gray-900">{t.exportOrder}</td>
-                  <td className="px-4 py-3 text-gray-600">{t.product}</td>
-                  <td className="px-4 py-3 text-right text-gray-900 font-medium">{t.qtyMT}</td>
-                  <td className="px-4 py-3 text-right text-gray-900">{formatPKR(t.pricePerMT)}</td>
-                  <td className="px-4 py-3 text-right text-gray-900 font-medium">{formatPKR(t.totalAmount)}</td>
-                  <td className="px-4 py-3 text-gray-600">{t.dispatchDate}</td>
-                  <td className="px-4 py-3 text-center">
-                    <StatusBadge status={t.status} />
-                  </td>
-                </tr>
-              ))}
+              {loading ? (
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-400">Loading...</td></tr>
+              ) : transfers.length === 0 ? (
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-400">No transfers yet</td></tr>
+              ) : (
+                transfers.map(t => (
+                  <tr key={t.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-4 py-3 font-medium text-blue-600">{t.transfer_no}</td>
+                    <td className="px-4 py-3 text-gray-900">{t.batch_no || `B-${t.batch_id}`}</td>
+                    <td className="px-4 py-3 text-gray-900">{t.export_order_no || `#${t.export_order_id}`}</td>
+                    <td className="px-4 py-3 text-gray-600">{t.product_name}</td>
+                    <td className="px-4 py-3 text-right text-gray-900 font-medium">{parseFloat(t.qty_mt).toFixed(1)}</td>
+                    <td className="px-4 py-3 text-right text-gray-900">{formatPKR(t.transfer_price_pkr)}</td>
+                    <td className="px-4 py-3 text-right text-gray-900 font-medium">{formatPKR(t.total_value_pkr)}</td>
+                    <td className="px-4 py-3 text-gray-600">{t.dispatch_date}</td>
+                    <td className="px-4 py-3 text-center">
+                      <StatusBadge status={t.status} />
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
