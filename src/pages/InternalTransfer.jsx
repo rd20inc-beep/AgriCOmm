@@ -5,60 +5,7 @@ import StatusBadge from '../components/StatusBadge';
 
 const PKR_RATE = 280; // PKR per USD
 
-const initialTransfers = [
-  {
-    id: 'TRF-001',
-    batchNo: 'M-201',
-    exportOrder: 'EX-101',
-    product: 'Long Grain Parboiled 5%',
-    qtyMT: 50,
-    pricePerMT: 72800,
-    totalAmount: 3640000,
-    dispatchDate: '2026-02-10',
-    warehouseFrom: 'Mill Finished Goods',
-    warehouseTo: 'Export Dispatch',
-    status: 'Completed',
-  },
-  {
-    id: 'TRF-002',
-    batchNo: 'M-202',
-    exportOrder: 'EX-103',
-    product: 'Long Grain Parboiled 15%',
-    qtyMT: 97.5,
-    pricePerMT: 68880,
-    totalAmount: 6715800,
-    dispatchDate: '2026-02-20',
-    warehouseFrom: 'Mill Finished Goods',
-    warehouseTo: 'Export Dispatch',
-    status: 'Completed',
-  },
-  {
-    id: 'TRF-003',
-    batchNo: 'M-205',
-    exportOrder: 'EX-106',
-    product: 'Long Grain Parboiled 25%',
-    qtyMT: 73.8,
-    pricePerMT: 62720,
-    totalAmount: 4628736,
-    dispatchDate: '2026-03-06',
-    warehouseFrom: 'Mill Finished Goods',
-    warehouseTo: 'Export Dispatch',
-    status: 'In Transit',
-  },
-  {
-    id: 'TRF-004',
-    batchNo: 'M-198',
-    exportOrder: 'EX-109',
-    product: 'Long Grain Parboiled 5%',
-    qtyMT: 80,
-    pricePerMT: 72800,
-    totalAmount: 5824000,
-    dispatchDate: '2026-01-28',
-    warehouseFrom: 'Mill Finished Goods',
-    warehouseTo: 'Export Dispatch',
-    status: 'Completed',
-  },
-];
+const initialTransfers = [];
 
 export default function InternalTransfer() {
   const { millingBatches, exportOrders, addToast, updateExportOrder, addActivityToOrder } = useApp();
