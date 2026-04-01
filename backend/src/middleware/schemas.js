@@ -64,6 +64,9 @@ const createExportOrder = Joi.object({
 const updateExportShipment = Joi.object({
   vessel_name: Joi.string().allow('', null),
   booking_no: Joi.string().allow('', null),
+  container_no: Joi.string().allow('', null),
+  bl_number: Joi.string().allow('', null),
+  shipping_line: Joi.string().allow('', null),
   etd: Joi.date().iso().allow(null, ''),
   atd: Joi.date().iso().allow(null, ''),
   eta: Joi.date().iso().allow(null, ''),

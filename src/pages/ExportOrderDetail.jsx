@@ -77,6 +77,9 @@ export default function ExportOrderDetail() {
   // Shipment form state
   const [shipVessel, setShipVessel] = useState('');
   const [shipBooking, setShipBooking] = useState('');
+  const [shipContainer, setShipContainer] = useState('');
+  const [shipBL, setShipBL] = useState('');
+  const [shipLine, setShipLine] = useState('');
   const [shipETD, setShipETD] = useState('');
   const [shipATD, setShipATD] = useState('');
   const [shipETA, setShipETA] = useState('');
@@ -184,6 +187,9 @@ export default function ExportOrderDetail() {
   const openShipmentModal = () => {
     setShipVessel(order.vesselName || '');
     setShipBooking(order.bookingNo || '');
+    setShipContainer(order.containerNo || '');
+    setShipBL(order.blNumber || '');
+    setShipLine(order.shippingLine || '');
     setShipETD(order.etd || '');
     setShipATD(order.atd || '');
     setShipETA(order.eta || '');
@@ -321,6 +327,9 @@ export default function ExportOrderDetail() {
       const res = await api.put(`/api/export-orders/${order.dbId || order.id}/shipment`, {
         vessel_name: shipVessel || null,
         booking_no: shipBooking || null,
+        container_no: shipContainer || null,
+        bl_number: shipBL || null,
+        shipping_line: shipLine || null,
         etd: shipETD || null,
         atd: shipATD || null,
         eta: shipETA || null,
@@ -587,6 +596,12 @@ export default function ExportOrderDetail() {
         setShipVessel={setShipVessel}
         shipBooking={shipBooking}
         setShipBooking={setShipBooking}
+        shipContainer={shipContainer}
+        setShipContainer={setShipContainer}
+        shipBL={shipBL}
+        setShipBL={setShipBL}
+        shipLine={shipLine}
+        setShipLine={setShipLine}
         shipETD={shipETD}
         setShipETD={setShipETD}
         shipATD={shipATD}

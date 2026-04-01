@@ -29,6 +29,9 @@ exports.up = async function (knex) {
     t.string('source', 30).defaultTo('Internal Mill');
     t.string('vessel_name', 255);
     t.string('booking_no', 100);
+    t.string('container_no', 100);
+    t.string('bl_number', 100);
+    t.string('shipping_line', 255);
     t.date('etd');
     t.date('atd');
     t.date('eta');
