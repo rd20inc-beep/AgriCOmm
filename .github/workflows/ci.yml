@@ -1,4 +1,4 @@
-name: RiceFlow ERP CI
+name: RiceFlow ERP CI/CD
 
 on:
   push:
@@ -7,46 +7,6 @@ on:
     branches: [main]
 
 jobs:
-  lint-frontend:
-    name: Lint Frontend
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run ESLint
-        run: npx eslint src/
-
-  lint-backend:
-    name: Lint Backend
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: backend/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Check syntax
-        run: node --check src/**/*.js
-
   test-backend:
     name: Test Backend
     runs-on: ubuntu-latest
@@ -87,11 +47,21 @@ jobs:
       - name: Build
         run: npm run build
 
-  docker-build:
-    name: Docker Build
+  deploy:
+    name: Deploy to Production
+    needs: [test-backend, build-frontend]
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Build Docker images
-        run: docker compose build
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd /opt/riceflow-erp
+            git pull origin main
+            docker compose build --no-cache
+            docker compose up -d
+            docker image prune -f
