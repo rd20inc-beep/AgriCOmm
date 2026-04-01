@@ -404,9 +404,10 @@ const millingController = {
         updated_at: db.fn.now(),
       };
 
-      // Auto-complete if output recorded and currently In Progress
-      if (totalOutput > 0 && batch.status === 'In Progress') {
+      // Auto-complete if output recorded (from Pending or In Progress)
+      if (totalOutput > 0 && ['Pending', 'In Progress'].includes(batch.status)) {
         updateData.status = 'Completed';
+        updateData.completed_at = db.fn.now();
       }
 
       const updated = await db.transaction(async (trx) => {
@@ -481,7 +482,7 @@ const millingController = {
         }
 
         // Trigger automation if batch completed
-        if (totalOutput > 0 && batch.status === 'In Progress') {
+        if (totalOutput > 0 && ['Pending', 'In Progress'].includes(batch.status)) {
           await automationService.onBatchCompleted(trx, {
             batchId: parseInt(id),
             userId: req.user.id,
