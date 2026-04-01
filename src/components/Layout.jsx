@@ -3,7 +3,7 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Ship, Factory, Package, DollarSign, FileText,
   BarChart3, Settings, Search, Bell, ChevronDown, ChevronRight,
-  User, Plus, X, LogOut, AlertTriangle, AlertCircle, Info,
+  User, Users, Plus, X, LogOut, AlertTriangle, AlertCircle, Info,
   ArrowRightLeft, FlaskConical, Menu, ShieldCheck, Shield,
   ChevronsLeft, ChevronsRight, Sun, Moon,
   Zap, Brain, Beaker,
@@ -16,6 +16,7 @@ const sidebarNav = [
   { label: 'Dashboard', icon: LayoutDashboard, to: '/' },
   { label: 'Finance Dashboard', icon: DollarSign, to: '/finance' },
   { section: 'Operations' },
+  { label: 'Buyers', icon: Users, to: '/buyers' },
   {
     label: 'Export Orders',
     icon: Ship,

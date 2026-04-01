@@ -16,6 +16,9 @@ exports.up = async function (knex) {
     t.string('bank_account', 100);
     t.string('bank_swift', 50);
     t.string('bank_iban', 100);
+    t.string('payment_terms', 100).defaultTo('Advance');
+    t.string('currency', 10).defaultTo('USD');
+    t.decimal('credit_limit', 15, 2).defaultTo(0);
     t.boolean('is_active').defaultTo(true);
     t.boolean('archived').defaultTo(false);
     t.timestamps(true, true);

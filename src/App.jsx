@@ -14,6 +14,7 @@ import { LoadingSpinner } from './components/LoadingState';
 // Lazy-loaded page components
 const Login = lazy(() => import('./pages/Login'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Buyers = lazy(() => import('./pages/Buyers'));
 const ExportOrders = lazy(() => import('./pages/ExportOrders'));
 const CreateExportOrder = lazy(() => import('./pages/CreateExportOrder'));
 const ExportOrderDetail = lazy(() => import('./pages/ExportOrderDetail'));
@@ -85,6 +86,7 @@ function App() {
                     <Layout>
                       <Routes>
                         <Route path="/" element={<Dashboard />} />
+                        <Route path="/buyers" element={<Buyers />} />
                         <Route path="/export" element={<ExportOrders />} />
                         <Route path="/export/create" element={<CreateExportOrder />} />
                         <Route path="/export/:id" element={<ExportOrderDetail />} />
