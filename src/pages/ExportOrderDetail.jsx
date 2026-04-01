@@ -207,6 +207,11 @@ export default function ExportOrderDetail() {
 
   const handleConfirmAdvance = async () => {
     const amount = parseFloat(advanceAmount) || 0;
+    if (!amount || amount <= 0) {
+      addToast('Please enter a valid amount', 'error');
+      return;
+    }
+    setShowAdvanceModal(false);
     try {
       const res = await api.post(`/api/export-orders/${order.dbId || order.id}/confirm-advance`, {
         amount,
@@ -216,25 +221,23 @@ export default function ExportOrderDetail() {
         bank_reference: advanceBankRef,
         notes: advanceNotes,
       });
-      // Sync local state from the API response (api client returns parsed JSON directly)
+      // Sync local state immediately from the API response
       const updated = res?.data?.order;
       if (updated) {
         setApiOrder(transformOrder(updated));
+        addToast(`Advance of $${amount.toLocaleString()} confirmed — status: ${updated.status}`);
+      } else {
+        addToast('Advance payment confirmed successfully');
       }
+      // Re-fetch full detail (costs, docs, history) to get the complete picture
       await fetchOrderDetail();
-      addActivityToOrder(order.id, {
-        date: today(),
-        action: `Advance payment confirmed: $${amount.toLocaleString()} via ${advanceMethod}${advanceBankRef ? ` (Ref: ${advanceBankRef})` : ''}${advanceNotes ? ` - ${advanceNotes}` : ''}`,
-        by: 'Export Manager',
-      });
-      addToast('Advance payment confirmed successfully');
-      refreshFromApi('orders'); // Refresh orders + receivables
-      refreshFromApi('finance'); // Refresh finance dashboard
+      refreshFromApi('orders');
+      refreshFromApi('finance');
     } catch (err) {
-      console.warn('API advance confirm failed:', err.message);
-      addToast(err?.data?.message || 'Failed to confirm advance payment', 'error');
+      const msg = err?.message || err?.data?.message || 'Failed to confirm advance payment';
+      console.error('Advance confirm failed:', msg);
+      addToast(msg, 'error');
     }
-    setShowAdvanceModal(false);
   };
 
   const handleRequestBalance = async () => {
