@@ -123,5 +123,11 @@ router.post(
   auditAction('confirm_balance', 'export_order', (req) => req.params.id),
   controller.confirmBalance
 );
+router.post(
+  '/:id/allocate-stock',
+  authorize('export_orders', 'edit'),
+  auditAction('allocate_stock', 'export_order', (req) => req.params.id),
+  controller.allocateStock
+);
 
 module.exports = router;

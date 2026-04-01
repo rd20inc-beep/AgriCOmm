@@ -1204,6 +1204,92 @@ const exportOrderController = {
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
   },
+
+  async allocateStock(req, res) {
+    try {
+      const rawId = req.params.id;
+      const isNumeric = /^\d+$/.test(rawId);
+      const whereClause = isNumeric ? { id: parseInt(rawId) } : { order_no: rawId };
+      const { lot_id, qty_mt, notes } = req.body;
+
+      if (!lot_id) {
+        return res.status(400).json({ success: false, message: 'lot_id is required.' });
+      }
+      const qtyMT = parseFloat(qty_mt);
+      if (!qtyMT || qtyMT <= 0) {
+        return res.status(400).json({ success: false, message: 'A positive qty_mt is required.' });
+      }
+
+      const order = await db('export_orders').where(whereClause).first();
+      if (!order) {
+        return res.status(404).json({ success: false, message: 'Export order not found.' });
+      }
+
+      const lot = await db('inventory_lots').where({ id: lot_id }).first();
+      if (!lot) {
+        return res.status(404).json({ success: false, message: 'Inventory lot not found.' });
+      }
+
+      const available = parseFloat(lot.available_qty) || 0;
+      if (qtyMT > available) {
+        return res.status(400).json({
+          success: false,
+          message: `Requested ${qtyMT} MT but only ${available} MT available in ${lot.lot_no}.`,
+        });
+      }
+
+      await db.transaction(async (trx) => {
+        await inventoryService.reserveStock(trx, {
+          lotId: lot.id,
+          orderId: order.id,
+          qtyMT,
+          userId: req.user?.id,
+        });
+
+        // Mark the lot as reserved against this order
+        await trx('inventory_lots').where({ id: lot.id }).update({
+          reserved_against: order.order_no,
+          entity: 'export',
+          updated_at: trx.fn.now(),
+        });
+
+        // Record allocation transaction
+        await trx('lot_transactions').insert({
+          lot_id: lot.id,
+          transaction_type: 'export_allocation',
+          transaction_no: `ALLOC-${order.order_no}`,
+          quantity_kg: qtyMT * 1000,
+          rate_per_kg: parseFloat(lot.rate_per_kg) || 0,
+          reference_module: 'export_order',
+          reference_id: order.id,
+          transaction_date: trx.fn.now(),
+          notes: notes || `Allocated ${qtyMT} MT to ${order.order_no}`,
+          created_by: req.user?.id,
+        });
+
+        await trx('export_order_status_history').insert({
+          order_id: order.id,
+          from_status: order.status,
+          to_status: order.status,
+          changed_by: req.user?.id,
+          reason: `${qtyMT} MT allocated from ${lot.lot_no}`,
+        });
+      });
+
+      const updated = await db('export_orders').where({ id: order.id }).first();
+
+      return res.json({
+        success: true,
+        data: {
+          order: updated,
+          allocated: { lot_id: lot.id, lot_no: lot.lot_no, qty_mt: qtyMT },
+        },
+      });
+    } catch (err) {
+      console.error('Export order allocateStock error:', err);
+      return res.status(500).json({ success: false, message: err.message || 'Internal server error.' });
+    }
+  },
 };
 
 module.exports = exportOrderController;

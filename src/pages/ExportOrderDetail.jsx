@@ -529,6 +529,7 @@ export default function ExportOrderDetail() {
             onLinkExternalPurchase={() => { addToast('External purchase linked'); addActivityToOrder(order.id, { date: today(), action: 'External purchase linked to order', by: 'Export Manager' }); }}
             canCreateMilling={canCreateMilling}
             canStartDocs={canStartDocs}
+            onStockAllocated={() => { fetchOrderDetail(); addToast('Stock allocated successfully'); refreshFromApi('orders'); }}
           />
         )}
         {activeTab === 'documents' && <DocumentsTab order={order} onUpload={handleDocumentUpload} onApprove={handleDocumentApprove} onPreviewInvoice={() => setShowInvoicePreview(true)} />}
