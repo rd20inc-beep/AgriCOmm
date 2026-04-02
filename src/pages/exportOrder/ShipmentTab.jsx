@@ -2,9 +2,14 @@ import React from 'react';
 import { Check, Circle, Ship, Anchor } from 'lucide-react';
 
 export default function ShipmentTab({ order, onUpdateShipment, canUpdateShipment }) {
+  const shipmentContainers = order.shipmentContainers || [];
+  const containerSummary = shipmentContainers.length
+    ? `${shipmentContainers.length} container${shipmentContainers.length > 1 ? 's' : ''}`
+    : (order.containerNo || '—');
+
   const shipmentEvents = [
     { label: 'Vessel Booked', value: order.bookingNo, completed: !!order.bookingNo },
-    { label: 'Container Loaded', value: order.containerNo, completed: !!order.containerNo },
+    { label: 'Container Loaded', value: containerSummary, completed: shipmentContainers.length > 0 || !!order.containerNo },
     { label: 'ETD', value: order.etd, completed: !!order.etd },
     { label: 'Departed (ATD)', value: order.atd, completed: !!order.atd },
     { label: 'ETA', value: order.eta, completed: !!order.eta },
@@ -49,8 +54,8 @@ export default function ShipmentTab({ order, onUpdateShipment, canUpdateShipment
               <span className="font-medium text-gray-900">{order.bookingNo || '\u2014'}</span>
             </div>
             <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Container No</span>
-              <span className="font-medium text-blue-700">{order.containerNo || '\u2014'}</span>
+              <span className="text-gray-500">Containers</span>
+              <span className="font-medium text-blue-700">{containerSummary}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">BL Number</span>
@@ -77,6 +82,39 @@ export default function ShipmentTab({ order, onUpdateShipment, canUpdateShipment
             </div>
           </div>
         </div>
+      </div>
+
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Container Details</h3>
+        {shipmentContainers.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {shipmentContainers.map((container, index) => (
+              <div key={container.id || `${container.containerNo}-${index}`} className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-semibold text-gray-800">Container {index + 1}</h4>
+                  <span className="text-xs font-medium text-blue-700">{container.containerNo || '—'}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <p className="text-gray-500 text-xs uppercase">Seal No</p>
+                    <p className="font-medium text-gray-900">{container.sealNo || '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500 text-xs uppercase">Gross / Net</p>
+                    <p className="font-medium text-gray-900">
+                      {container.grossWeightKg != null ? `${container.grossWeightKg} kg` : '—'} / {container.netWeightKg != null ? `${container.netWeightKg} kg` : '—'}
+                    </p>
+                  </div>
+                </div>
+                {container.notes ? (
+                  <p className="text-xs text-gray-500">{container.notes}</p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500">No shipment containers recorded yet.</p>
+        )}
       </div>
 
       {/* Shipment Status Timeline */}

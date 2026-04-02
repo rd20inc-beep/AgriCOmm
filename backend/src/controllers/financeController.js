@@ -341,6 +341,11 @@ const financeController = {
               updated_at: trx.fn.now(),
             });
           }
+          if (bank_account_id) {
+            await trx('bank_accounts')
+              .where({ id: bank_account_id })
+              .increment('current_balance', parseFloat(amount));
+          }
         } else if (type === 'payment' && linked_payable_id) {
           const payable = await trx('payables').where({ id: linked_payable_id }).first();
           if (payable) {
@@ -353,6 +358,11 @@ const financeController = {
               status: fullyPaid ? 'paid' : 'partial',
               updated_at: trx.fn.now(),
             });
+          }
+          if (bank_account_id) {
+            await trx('bank_accounts')
+              .where({ id: bank_account_id })
+              .increment('current_balance', parseFloat(amount) * -1);
           }
         }
 
@@ -571,6 +581,32 @@ const financeController = {
             description: `Internal transfer (export side) — ${t.product_name || 'rice'}`,
             userId: req.user?.id,
           });
+        }
+
+        if (t.export_order_id) {
+          const propagatedCost = parseFloat(t.usd_equivalent || t.total_value_pkr || 0);
+          if (propagatedCost > 0) {
+            const existingCost = await trx('export_order_costs')
+              .where({ order_id: t.export_order_id, category: 'raw_rice' })
+              .first();
+
+            if (existingCost) {
+              await trx('export_order_costs')
+                .where({ id: existingCost.id })
+                .update({
+                  amount: parseFloat(existingCost.amount || 0) + propagatedCost,
+                  notes: `Updated from transfer ${t.transfer_no}`,
+                  updated_at: trx.fn.now(),
+                });
+            } else {
+              await trx('export_order_costs').insert({
+                order_id: t.export_order_id,
+                category: 'raw_rice',
+                amount: propagatedCost,
+                notes: `Updated from transfer ${t.transfer_no}`,
+              });
+            }
+          }
         }
 
         return t;

@@ -33,6 +33,39 @@ const INBOUND_TYPES = new Set([
   MOVEMENT_TYPES.RETURN,
 ]);
 
+const LOT_TRANSACTION_TYPE_MAP = {
+  [MOVEMENT_TYPES.PURCHASE_RECEIPT]: 'purchase_in',
+  [MOVEMENT_TYPES.INTERNAL_RECEIPT]: 'warehouse_transfer_in',
+  [MOVEMENT_TYPES.PRODUCTION_ISSUE]: 'milling_issue',
+  [MOVEMENT_TYPES.PRODUCTION_OUTPUT]: 'milling_receipt',
+  [MOVEMENT_TYPES.BYPRODUCT_OUTPUT]: 'milling_receipt',
+  [MOVEMENT_TYPES.TRANSFER_OUT]: 'warehouse_transfer_out',
+  [MOVEMENT_TYPES.TRANSFER_IN]: 'warehouse_transfer_in',
+  [MOVEMENT_TYPES.EXPORT_DISPATCH]: 'dispatch_out',
+  [MOVEMENT_TYPES.ADJUSTMENT_PLUS]: 'stock_adjustment_plus',
+  [MOVEMENT_TYPES.ADJUSTMENT_MINUS]: 'stock_adjustment_minus',
+  [MOVEMENT_TYPES.RETURN]: 'return_in',
+};
+
+function getMovementDirection(movementType) {
+  if (INBOUND_TYPES.has(movementType)) return 1;
+  if (OUTBOUND_TYPES.has(movementType)) return -1;
+  return 0;
+}
+
+async function generateLotTxnNo(trx) {
+  const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const count = await trx('lot_transactions').count('id as c').first();
+  return `TXN-${today}-${String((count?.c || 0) + 1).padStart(4, '0')}`;
+}
+
+function resolveReferenceModule({ orderId, batchId, transferId, sourceEntity }) {
+  if (orderId) return 'export_order';
+  if (batchId) return 'milling_batch';
+  if (transferId) return 'internal_transfer';
+  return sourceEntity || null;
+}
+
 const inventoryService = {
   MOVEMENT_TYPES,
 
@@ -94,6 +127,8 @@ const inventoryService = {
     const parsedQty = parseFloat(qty);
     const parsedCost = parseFloat(costPerUnit) || 0;
     const totalCost = parsedCost * parsedQty;
+    const movementQtyKg = parsedQty * 1000;
+    const direction = getMovementDirection(movementType);
 
     // 1. Validate lot exists
     const lot = await trx('inventory_lots').where('id', lotId).first();
@@ -148,6 +183,9 @@ const inventoryService = {
 
     // 5. available_qty = qty - reserved_qty
     const newAvailable = newQty - currentReserved;
+    const currentNetWeightKg = parseFloat(lot.net_weight_kg) || currentQty * 1000;
+    const newNetWeightKg = currentNetWeightKg + (direction * movementQtyKg);
+    const newGrossWeightKg = newNetWeightKg;
 
     // 6. Recalculate total_value
     const newCostPerUnit = parsedCost > 0 ? parsedCost : parseFloat(lot.cost_per_unit) || 0;
@@ -158,7 +196,35 @@ const inventoryService = {
       available_qty: newAvailable,
       cost_per_unit: newCostPerUnit,
       total_value: newTotalValue,
+      net_weight_kg: newNetWeightKg,
+      gross_weight_kg: newGrossWeightKg,
       updated_at: trx.fn.now(),
+    });
+
+    const txnNo = await generateLotTxnNo(trx);
+    await trx('lot_transactions').insert({
+      transaction_no: txnNo,
+      transaction_date: new Date().toISOString().slice(0, 10),
+      lot_id: lotId,
+      transaction_type: LOT_TRANSACTION_TYPE_MAP[movementType] || movementType,
+      reference_module: resolveReferenceModule({ orderId, batchId, transferId, sourceEntity }),
+      reference_id: orderId || batchId || transferId || null,
+      reference_no: linkedRef || null,
+      warehouse_from_id: fromWarehouseId || null,
+      warehouse_to_id: toWarehouseId || null,
+      input_unit: 'MT',
+      input_qty: parsedQty,
+      quantity_kg: direction * movementQtyKg,
+      quantity_bags: direction * Math.round(movementQtyKg / (parseFloat(lot.bag_weight_kg) || 50)),
+      rate_input_unit: 'MT',
+      rate_input_value: parsedCost || null,
+      rate_per_kg: parsedCost > 0 ? parsedCost / 1000 : null,
+      cost_impact: totalCost,
+      currency: currency || 'PKR',
+      balance_kg: newNetWeightKg,
+      balance_bags: Math.round(newNetWeightKg / (parseFloat(lot.bag_weight_kg) || 50)),
+      remarks: notes || null,
+      created_by: userId || null,
     });
 
     // 7. Return the movement record
@@ -186,7 +252,6 @@ const inventoryService = {
     const lotNo = await inventoryService.generateLotNo(trx);
     const parsedQty = parseFloat(qty) || 0;
     const parsedCost = parseFloat(costPerUnit) || 0;
-    const totalValue = parsedCost * parsedQty;
 
     const [lot] = await trx('inventory_lots')
       .insert({
@@ -195,15 +260,17 @@ const inventoryService = {
         type: type || 'raw',
         entity: entity || 'mill',
         warehouse_id: warehouseId || null,
-        qty: parsedQty,
+        qty: 0,
         unit: unit || 'MT',
         product_id: productId || null,
         batch_ref: batchRef || null,
-        cost_per_unit: parsedCost,
+        cost_per_unit: 0,
         cost_currency: costCurrency || 'PKR',
-        total_value: totalValue,
+        total_value: 0,
         reserved_qty: 0,
-        available_qty: parsedQty,
+        available_qty: 0,
+        net_weight_kg: 0,
+        gross_weight_kg: 0,
         status: 'Available',
         created_by: userId || null,
       })
@@ -228,7 +295,8 @@ const inventoryService = {
       userId,
     });
 
-    return { lot, movement };
+    const updatedLot = await trx('inventory_lots').where('id', lot.id).first();
+    return { lot: updatedLot, movement };
   },
 
   // =========================================================================
@@ -295,24 +363,24 @@ const inventoryService = {
           type: 'raw',
           entity: 'mill',
           warehouse_id: warehouse.id,
-          qty: parsedWeight,
+          qty: 0,
           unit: 'MT',
           batch_ref: `batch-${batchId}`,
-          cost_per_unit: parsedCost,
+          cost_per_unit: 0,
           cost_currency: currency || 'PKR',
-          total_value: parsedCost * parsedWeight,
+          total_value: 0,
           reserved_qty: 0,
-          available_qty: parsedWeight,
+          available_qty: 0,
+          net_weight_kg: 0,
+          gross_weight_kg: 0,
           status: 'Available',
           created_by: userId || null,
           // Enrichment
           supplier_id: supplierId || null,
-          net_weight_kg: parsedWeight * 1000,
-          gross_weight_kg: parsedWeight * 1000,
-          rate_per_kg: parsedCost > 0 ? parsedCost / 1000 : 0,
-          purchase_amount: parsedCost * parsedWeight,
-          landed_cost_total: parsedCost * parsedWeight,
-          landed_cost_per_kg: parsedCost > 0 ? parsedCost / 1000 : 0,
+          rate_per_kg: 0,
+          purchase_amount: 0,
+          landed_cost_total: 0,
+          landed_cost_per_kg: 0,
         })
         .returning('*');
 
@@ -329,6 +397,8 @@ const inventoryService = {
         batchId,
         userId,
       });
+
+      lot = await trx('inventory_lots').where('id', lot.id).first();
     }
 
     return { lot, movement };
@@ -422,14 +492,14 @@ const inventoryService = {
           type: 'finished',
           entity: 'mill',
           warehouse_id: fgWarehouse.id,
-          qty: finishedQty,
+          qty: 0,
           unit: 'MT',
           batch_ref: `batch-${batchId}`,
-          cost_per_unit: parsedCost,
+          cost_per_unit: 0,
           cost_currency: 'PKR',
-          total_value: parsedCost * finishedQty,
+          total_value: 0,
           reserved_qty: 0,
-          available_qty: finishedQty,
+          available_qty: 0,
           status: 'Available',
           created_by: userId || null,
           // Enrichment from batch/quality data
@@ -438,12 +508,12 @@ const inventoryService = {
           grade: qualityInfo?.grade || null,
           moisture_pct: qualityInfo?.moisture || null,
           broken_pct: qualityInfo?.broken || null,
-          net_weight_kg: finishedQty * 1000,
-          gross_weight_kg: finishedQty * 1000,
-          rate_per_kg: parsedCost > 0 ? parsedCost / 1000 : 0,
-          purchase_amount: parsedCost * finishedQty,
-          landed_cost_total: parsedCost * finishedQty,
-          landed_cost_per_kg: parsedCost > 0 ? parsedCost / 1000 : 0,
+          net_weight_kg: 0,
+          gross_weight_kg: 0,
+          rate_per_kg: 0,
+          purchase_amount: 0,
+          landed_cost_total: 0,
+          landed_cost_per_kg: 0,
         })
         .returning('*');
 
@@ -461,7 +531,8 @@ const inventoryService = {
         userId,
       });
 
-      results.lots.push(lot);
+      const updatedLot = await trx('inventory_lots').where('id', lot.id).first();
+      results.lots.push(updatedLot);
       results.movements.push(movement);
     }
 
@@ -483,14 +554,16 @@ const inventoryService = {
           type: 'byproduct',
           entity: 'mill',
           warehouse_id: bpWarehouse.id,
-          qty: bp.qty,
+          qty: 0,
           unit: 'MT',
           batch_ref: `batch-${batchId}`,
           cost_per_unit: 0,
           cost_currency: 'PKR',
           total_value: 0,
           reserved_qty: 0,
-          available_qty: bp.qty,
+          available_qty: 0,
+          net_weight_kg: 0,
+          gross_weight_kg: 0,
           status: 'Available',
           created_by: userId || null,
         })
@@ -510,7 +583,8 @@ const inventoryService = {
         userId,
       });
 
-      results.lots.push(lot);
+      const updatedLot = await trx('inventory_lots').where('id', lot.id).first();
+      results.lots.push(updatedLot);
       results.movements.push(movement);
     }
 
@@ -567,14 +641,14 @@ const inventoryService = {
         type: 'finished',
         entity: 'export',
         warehouse_id: exportWarehouse.id,
-        qty: parsedQty,
+        qty: 0,
         unit: sourceLot.unit || 'MT',
         batch_ref: sourceLot.batch_ref || null,
-        cost_per_unit: costPerUnit,
+        cost_per_unit: 0,
         cost_currency: sourceLot.cost_currency || 'PKR',
-        total_value: costPerUnit * parsedQty,
+        total_value: 0,
         reserved_qty: 0,
-        available_qty: parsedQty,
+        available_qty: 0,
         status: 'Available',
         created_by: userId || null,
       })
@@ -597,7 +671,8 @@ const inventoryService = {
       userId,
     });
 
-    return { outMovement, inMovement, exportLot };
+    const updatedExportLot = await trx('inventory_lots').where('id', exportLot.id).first();
+    return { outMovement, inMovement, exportLot: updatedExportLot };
   },
 
   // =========================================================================

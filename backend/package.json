@@ -9,6 +9,7 @@
     "migrate": "knex migrate:latest",
     "migrate:rollback": "knex migrate:rollback",
     "seed": "knex seed:run",
+    "backfill:shipment-containers": "node scripts/backfillShipmentContainers.js",
     "test": "jest --passWithNoTests"
   },
   "keywords": [],

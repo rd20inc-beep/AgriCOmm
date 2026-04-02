@@ -283,6 +283,7 @@ const accountingService = {
       if (currency && currency !== 'PKR') {
         const rate = await accountingService.getFxRate(currency, 'PKR', new Date().toISOString().slice(0, 10));
         if (rate) fxRate = rate;
+        else console.warn(`No FX rate found for ${currency}/PKR on ${new Date().toISOString().slice(0, 10)}. Posting journal without conversion rate.`);
       }
 
       const journal = await accountingService.createJournal(knex, {

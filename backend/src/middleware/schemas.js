@@ -65,6 +65,13 @@ const updateExportShipment = Joi.object({
   vessel_name: Joi.string().allow('', null),
   booking_no: Joi.string().allow('', null),
   container_no: Joi.string().allow('', null),
+  containers: Joi.array().items(Joi.object({
+    container_no: Joi.string().trim().min(1).required(),
+    seal_no: Joi.string().allow('', null),
+    gross_weight_kg: Joi.number().min(0).allow(null),
+    net_weight_kg: Joi.number().min(0).allow(null),
+    notes: Joi.string().allow('', null),
+  })).allow(null),
   bl_number: Joi.string().allow('', null),
   shipping_line: Joi.string().allow('', null),
   etd: Joi.date().iso().allow(null, ''),
@@ -84,6 +91,127 @@ const exportOrderDocumentAction = Joi.object({
   file_path: Joi.string().allow('', null),
   version: Joi.number().integer().min(1).allow(null),
   notes: Joi.string().allow('', null),
+});
+
+const confirmAdvance = Joi.object({
+  amount: Joi.number().positive().required(),
+  payment_date: Joi.date().iso().allow(null, ''),
+  payment_method: Joi.string().max(50).allow(null, ''),
+  bank_account_id: Joi.number().integer().positive().allow(null),
+  bank_reference: Joi.string().max(255).allow(null, ''),
+  reference: Joi.string().max(255).allow(null, ''),
+  notes: Joi.string().max(1000).allow(null, ''),
+});
+
+const confirmBalance = Joi.object({
+  amount: Joi.number().positive().required(),
+  payment_date: Joi.date().iso().allow(null, ''),
+  payment_method: Joi.string().max(50).allow(null, ''),
+  bank_account_id: Joi.number().integer().positive().allow(null),
+  bank_reference: Joi.string().max(255).allow(null, ''),
+  reference: Joi.string().max(255).allow(null, ''),
+  notes: Joi.string().max(1000).allow(null, ''),
+});
+
+const allocateExportStock = Joi.object({
+  lot_id: Joi.number().integer().positive().required(),
+  qty_mt: Joi.number().positive().required(),
+  notes: Joi.string().allow('', null),
+});
+
+const createPurchaseLot = Joi.object({
+  item_name: Joi.string().max(255).required(),
+  type: Joi.string().valid('raw', 'finished', 'byproduct').default('raw'),
+  entity: Joi.string().valid('mill', 'export').default('mill'),
+  warehouse_id: Joi.number().integer().positive().allow(null),
+  product_id: Joi.number().integer().positive().allow(null),
+  supplier_id: Joi.number().integer().positive().allow(null),
+  broker_id: Joi.number().integer().positive().allow(null),
+  purchase_date: Joi.date().iso().allow(null, ''),
+  crop_year: Joi.string().max(20).allow(null, ''),
+  variety: Joi.string().allow(null, ''),
+  grade: Joi.string().allow(null, ''),
+  moisture_pct: Joi.number().min(0).max(100).allow(null),
+  broken_pct: Joi.number().min(0).max(100).allow(null),
+  sortex_status: Joi.string().allow(null, ''),
+  whiteness: Joi.string().allow(null, ''),
+  quality_notes: Joi.string().allow(null, ''),
+  bag_type: Joi.string().allow(null, ''),
+  bag_quality: Joi.string().allow(null, ''),
+  bag_size_kg: Joi.number().positive().allow(null),
+  bag_weight_gm: Joi.number().positive().allow(null),
+  bag_color: Joi.string().allow(null, ''),
+  bag_cost_per_bag: Joi.number().min(0).allow(null),
+  bag_cost_included: Joi.boolean().default(false),
+  quantity_input: Joi.number().positive().required(),
+  quantity_unit: Joi.string().valid('katta', 'bag', 'kg', 'maund', 'ton', 'mt').default('katta'),
+  bag_weight_kg: Joi.number().positive().default(50),
+  rate_input: Joi.number().positive().required(),
+  rate_unit: Joi.string().valid('katta', 'bag', 'kg', 'maund', 'ton', 'mt').default('katta'),
+  transport_cost: Joi.number().min(0).default(0),
+  labor_cost: Joi.number().min(0).default(0),
+  unloading_cost: Joi.number().min(0).default(0),
+  packing_cost: Joi.number().min(0).default(0),
+  other_cost: Joi.number().min(0).default(0),
+  total_bags: Joi.number().integer().min(0).allow(null),
+  notes: Joi.string().allow(null, ''),
+  payment_status: Joi.string().valid('Unpaid', 'Partial', 'Paid').default('Unpaid'),
+  paid_amount: Joi.number().min(0).allow(null),
+});
+
+const recordLotTransaction = Joi.object({
+  transaction_type: Joi.string().required(),
+  transaction_date: Joi.date().iso().allow(null, ''),
+  quantity_input: Joi.number().positive().required(),
+  quantity_unit: Joi.string().valid('kg', 'katta', 'bag', 'maund', 'ton', 'mt').default('kg'),
+  bag_weight_kg: Joi.number().positive().default(50),
+  warehouse_from_id: Joi.number().integer().positive().allow(null),
+  warehouse_to_id: Joi.number().integer().positive().allow(null),
+  reference_module: Joi.string().allow(null, ''),
+  reference_id: Joi.number().integer().allow(null),
+  reference_no: Joi.string().allow(null, ''),
+  rate_input: Joi.number().min(0).allow(null),
+  rate_unit: Joi.string().valid('kg', 'katta', 'bag', 'maund', 'ton', 'mt').allow(null, ''),
+  remarks: Joi.string().allow(null, ''),
+});
+
+const updateLotCosts = Joi.object({
+  transport_cost: Joi.number().min(0).allow(null),
+  labor_cost: Joi.number().min(0).allow(null),
+  unloading_cost: Joi.number().min(0).allow(null),
+  packing_cost: Joi.number().min(0).allow(null),
+  other_cost: Joi.number().min(0).allow(null),
+  bag_cost_per_bag: Joi.number().min(0).allow(null),
+});
+
+const createAdvance = Joi.object({
+  customer_id: Joi.number().integer().positive().required(),
+  amount: Joi.number().positive().required(),
+  currency: Joi.string().valid('USD', 'PKR', 'EUR').allow(null, ''),
+  bank_account_id: Joi.number().integer().positive().allow(null),
+  payment_method: Joi.string().max(50).allow(null, ''),
+  bank_reference: Joi.string().max(255).allow(null, ''),
+  payment_date: Joi.date().iso().allow(null, ''),
+  notes: Joi.string().allow(null, ''),
+});
+
+const allocateAdvance = Joi.object({
+  order_id: Joi.number().integer().positive().required(),
+  amount: Joi.number().positive().required(),
+  notes: Joi.string().allow(null, ''),
+});
+
+const createInternalTransfer = Joi.object({
+  batch_id: Joi.number().integer().positive().required(),
+  export_order_id: Joi.number().integer().positive().required(),
+  product_name: Joi.string().allow('', null),
+  qty_mt: Joi.number().positive().required(),
+  transfer_price_pkr: Joi.number().min(0).allow(null),
+  total_value_pkr: Joi.number().min(0).allow(null),
+  usd_equivalent: Joi.number().min(0).allow(null),
+  pkr_rate: Joi.number().min(0).allow(null),
+  dispatch_date: Joi.date().iso().allow(null, ''),
+  status: Joi.string().allow(null, ''),
 });
 
 // ===================== PAYMENTS =====================
@@ -194,6 +322,15 @@ module.exports = {
   updateExportShipment,
   exportOrderAction,
   exportOrderDocumentAction,
+  confirmAdvance,
+  confirmBalance,
+  allocateExportStock,
+  createPurchaseLot,
+  recordLotTransaction,
+  updateLotCosts,
+  createAdvance,
+  allocateAdvance,
+  createInternalTransfer,
   recordPayment,
   createJournal,
   stockAdjustment,

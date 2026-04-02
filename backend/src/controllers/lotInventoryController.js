@@ -6,11 +6,33 @@
 
 const db = require('../config/database');
 const uc = require('../services/unitConversion');
+const accountingService = require('../services/accountingService');
+const accountingService = require('../services/accountingService');
 
 async function generateTxnNo(trx) {
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const count = await trx('lot_transactions').count('id as c').first();
   return `TXN-${today}-${String((count?.c || 0) + 1).padStart(4, '0')}`;
+}
+
+async function generatePayNo(trx) {
+  const last = await trx('payables')
+    .select('pay_no')
+    .orderBy('id', 'desc')
+    .first();
+
+  if (!last || !last.pay_no) {
+    return 'PAY-001';
+  }
+
+  const num = parseInt(last.pay_no.replace('PAY-', ''), 10) || 0;
+  return `PAY-${String(num + 1).padStart(3, '0')}`;
+}
+
+function addDays(dateValue, days) {
+  const base = new Date(dateValue || new Date().toISOString().slice(0, 10));
+  base.setDate(base.getDate() + days);
+  return base.toISOString().slice(0, 10);
 }
 
 /** Compute derived unit fields from KG-based lot */
@@ -172,6 +194,18 @@ module.exports = {
       const totalBagCost = (bag_cost_included ? 0 : (parseFloat(bag_cost_per_bag) || 0) * totalBags);
       const landedCostTotal = uc.round2(purchaseAmount + directCosts + totalBagCost);
       const landedCostPerKg = netWeightKg > 0 ? uc.round4(landedCostTotal / netWeightKg) : 0;
+      const normalizedPaymentStatus = String(payment_status || 'Unpaid').toLowerCase();
+      const landedPayableAmount = landedCostTotal;
+      const paidAmount = normalizedPaymentStatus === 'paid'
+        ? landedPayableAmount
+        : normalizedPaymentStatus === 'partial'
+          ? Math.max(0, Math.min(landedPayableAmount, parseFloat(req.body.paid_amount) || 0))
+          : Math.max(0, parseFloat(req.body.paid_amount) || 0);
+      const payableStatus = paidAmount >= landedPayableAmount - 0.01
+        ? 'paid'
+        : paidAmount > 0
+          ? 'partial'
+          : 'pending';
 
       const result = await db.transaction(async (trx) => {
         // Generate lot number
@@ -238,9 +272,9 @@ module.exports = {
           cost_per_unit: landedCostPerKg * 1000, // per MT for legacy
           total_value: landedCostTotal,
           // Payment
-          payment_status,
-          paid_amount: 0,
-          due_amount: landedCostTotal,
+          payment_status: payableStatus,
+          paid_amount: paidAmount,
+          due_amount: Math.max(0, landedPayableAmount - paidAmount),
           notes: notes || null,
           created_by: req.user?.id || null,
         }).returning('*');
@@ -282,6 +316,36 @@ module.exports = {
           currency: 'PKR',
           created_by: req.user?.id || null,
         });
+
+        if (landedPayableAmount > 0 && supplier_id) {
+          const payNo = await generatePayNo(trx);
+
+          await trx('payables').insert({
+            pay_no: payNo,
+            entity: 'mill',
+            category: 'Raw Material',
+            supplier_id: supplier_id || null,
+            linked_ref: lotNo,
+            original_amount: landedPayableAmount,
+            paid_amount: paidAmount,
+            outstanding: Math.max(0, landedPayableAmount - paidAmount),
+            due_date: addDays(purchase_date, 30),
+            status: payableStatus,
+            currency: 'PKR',
+            notes: `Auto-created from purchase lot ${lotNo}`,
+          });
+
+          await accountingService.autoPost(trx, {
+            triggerEvent: 'purchase_invoice',
+            entity: 'mill',
+            amount: landedPayableAmount,
+            currency: 'PKR',
+            refType: 'Purchase Lot',
+            refNo: lotNo,
+            description: `Purchase lot ${lotNo} for ${item_name}`,
+            userId: req.user?.id || null,
+          });
+        }
 
         return lot;
       });

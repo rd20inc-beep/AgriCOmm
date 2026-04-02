@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
+const authorize = require('../middleware/rbac');
 
 // GET /api/suppliers
-router.get('/', async (req, res) => {
+router.get('/', authorize('milling', 'view'), async (req, res) => {
   try {
     const { page = 1, limit = 50, search } = req.query;
     const offset = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
@@ -39,7 +40,7 @@ router.get('/', async (req, res) => {
 });
 
 // GET /api/suppliers/:id
-router.get('/:id', async (req, res) => {
+router.get('/:id', authorize('milling', 'view'), async (req, res) => {
   try {
     const supplier = await db('suppliers').where({ id: req.params.id }).first();
     if (!supplier) {

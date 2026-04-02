@@ -5,7 +5,7 @@ const authorize = require('../middleware/rbac');
 const auditAction = require('../middleware/audit');
 
 // GET /api/customers — list with search, country filter, pagination
-router.get('/', async (req, res) => {
+router.get('/', authorize('export_orders', 'view'), async (req, res) => {
   try {
     const { page = 1, limit = 50, search, country, active } = req.query;
     const offset = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
@@ -47,7 +47,7 @@ router.get('/', async (req, res) => {
 });
 
 // GET /api/customers/:id — single customer
-router.get('/:id', async (req, res) => {
+router.get('/:id', authorize('export_orders', 'view'), async (req, res) => {
   try {
     const customer = await db('customers').where({ id: req.params.id }).first();
     if (!customer) {

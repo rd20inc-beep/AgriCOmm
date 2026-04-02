@@ -3,6 +3,7 @@ const inventoryService = require('../services/inventoryService');
 const accountingService = require('../services/accountingService');
 const automationService = require('../services/automationService');
 const workflowService = require('../services/exportOrderWorkflowService');
+const { publishExportOrderUpdate } = require('../services/exportOrderEventBus');
 
 /** Resolve batch param to numeric ID (supports both "9" and "M-226") */
 async function resolveBatchId(idParam) {
@@ -212,6 +213,15 @@ const millingController = {
 
         return { batch, order: updatedOrder };
       });
+
+      if (result.order) {
+        publishExportOrderUpdate(result.order.id, {
+          eventType: 'milling_started',
+          batchId: result.batch.id,
+          batchNo: result.batch.batch_no,
+          status: result.order.status,
+        });
+      }
 
       return res.status(201).json({
         success: true,
@@ -479,6 +489,29 @@ const millingController = {
             description: `Milling completed for batch ${batch.batch_no} — ${finished} MT finished`,
             userId: req.user?.id,
           });
+        }
+
+        if (batch.linked_export_order_id && batchCostTotal > 0) {
+          const existingCost = await trx('export_order_costs')
+            .where({ order_id: batch.linked_export_order_id, category: 'milling' })
+            .first();
+
+          if (existingCost) {
+            await trx('export_order_costs')
+              .where({ id: existingCost.id })
+              .update({
+                amount: parseFloat(existingCost.amount || 0) + batchCostTotal,
+                notes: `Updated from milling batch ${batch.batch_no}`,
+                updated_at: trx.fn.now(),
+              });
+          } else {
+            await trx('export_order_costs').insert({
+              order_id: batch.linked_export_order_id,
+              category: 'milling',
+              amount: batchCostTotal,
+              notes: `Updated from milling batch ${batch.batch_no}`,
+            });
+          }
         }
 
         // Trigger automation if batch completed

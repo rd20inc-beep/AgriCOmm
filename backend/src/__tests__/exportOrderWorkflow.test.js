@@ -14,6 +14,7 @@ function resetState() {
     export_order_documents: [],
     document_checklists: [],
     order_packing_lines: [],
+    shipment_containers: [],
     inventory_lots: [],
   };
   mockState.seq = {
@@ -26,6 +27,7 @@ function resetState() {
     export_order_documents: 1,
     document_checklists: 1,
     order_packing_lines: 1,
+    shipment_containers: 1,
     inventory_lots: 1,
   };
 }
@@ -198,6 +200,17 @@ class Query {
     return new MutationQuery(rows);
   }
 
+  delete() {
+    const rows = this._rows();
+    const table = mockState.tables[this.tableName] || [];
+    mockState.tables[this.tableName] = table.filter((row) => !rows.includes(row));
+    return Promise.resolve(rows.length);
+  }
+
+  del() {
+    return this.delete();
+  }
+
   increment(field, amount) {
     const rows = this._rows();
     rows.forEach((row) => {
@@ -281,6 +294,7 @@ jest.mock('../services/emailService', () => ({
 }));
 
 const controller = require('../controllers/exportOrderController');
+const workflowService = require('../services/exportOrderWorkflowService');
 const millingController = require('../controllers/millingController');
 
 function makeReq(overrides = {}) {
@@ -423,6 +437,10 @@ describe('Export order workflow', () => {
       body: {
         vessel_name: 'MV Test',
         booking_no: 'BK-001',
+        containers: [
+          { container_no: 'MSCU1234567', seal_no: 'SEAL-1', gross_weight_kg: 25100, net_weight_kg: 24350, notes: 'Front container' },
+          { container_no: 'MSCU7654321', seal_no: 'SEAL-2', gross_weight_kg: 24800, net_weight_kg: 24090, notes: 'Rear container' },
+        ],
         atd: '2026-04-07',
         eta: '2026-04-20',
         destination_port: 'Jebel Ali',
@@ -433,6 +451,15 @@ describe('Export order workflow', () => {
     await controller.updateShipment(req, res);
     expect(res.statusCode).toBe(200);
     expect(res.body.data.order.status).toBe('Shipped');
+    expect(res.body.data.shipmentContainers).toHaveLength(2);
+    expect(mockState.tables.shipment_containers).toHaveLength(2);
+    expect(mockState.tables.shipment_containers[0]).toEqual(
+      expect.objectContaining({
+        order_id: order.id,
+        sequence_no: 1,
+        container_no: 'MSCU1234567',
+      })
+    );
 
     req = makeReq({
       params: { id: String(order.id) },
@@ -520,6 +547,27 @@ describe('Export order workflow', () => {
     expect(res.body.data.order.status).toBe('Advance Received');
     expect(res.body.data.order.current_step).toBe(3);
     expect(mockState.tables.receivables.find((row) => row.type === 'Advance').status).toBe('Received');
+  });
+
+  it('derives allowed actions from the backend workflow state', () => {
+    const actions = workflowService.getAllowedActions({
+      status: 'Awaiting Balance',
+      advance_received: 25000,
+      advance_expected: 25000,
+      balance_received: 0,
+      balance_expected: 40000,
+      milling_order_id: 7,
+    });
+
+    expect(actions).toEqual(expect.objectContaining({
+      canConfirmAdvance: false,
+      canStartDocs: false,
+      canRequestBalance: true,
+      canCreateMilling: false,
+      canUpdateShipment: false,
+      canPutOnHold: true,
+      canCloseOrder: false,
+    }));
   });
 
   it('creates a linked milling batch and moves the export order to in milling atomically', async () => {

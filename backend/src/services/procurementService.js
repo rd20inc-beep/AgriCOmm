@@ -432,6 +432,18 @@ const procurementService = {
           }
         }
       }
+
+      if (grn.batch_id && parseFloat(grn.accepted_qty_mt) > 0) {
+        await inventoryService.receiveRawPaddy(trx, {
+          batchId: grn.batch_id,
+          weightMT: parseFloat(grn.accepted_qty_mt),
+          costPerMT: parseFloat(grn.price_per_mt) || 0,
+          currency: grn.currency || 'PKR',
+          supplierId: grn.supplier_id,
+          vehicleNo: grn.vehicle_no || null,
+          userId: inspectedBy,
+        });
+      }
     }
 
     const [updated] = await trx('goods_receipt_notes')

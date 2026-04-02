@@ -14,49 +14,110 @@ import { useAuth } from '../context/AuthContext';
 const sidebarNav = [
   { section: 'Main' },
   { label: 'Dashboard', icon: LayoutDashboard, to: '/' },
-  { label: 'Finance Dashboard', icon: DollarSign, to: '/finance' },
+  { label: 'Finance Dashboard', icon: DollarSign, to: '/finance', permission: { module: 'finance', action: 'view' } },
   { section: 'Operations' },
-  { label: 'Buyers', icon: Users, to: '/buyers' },
-  { label: 'Advance Payments', icon: CreditCard, to: '/advances' },
+  { label: 'Buyers', icon: Users, to: '/buyers', permission: { module: 'export_orders', action: 'view' } },
+  { label: 'Advance Payments', icon: CreditCard, to: '/advances', permission: { module: 'finance', action: 'view' } },
   {
     label: 'Export Orders',
     icon: Ship,
     children: [
-      { label: 'All Orders', to: '/export' },
-      { label: 'Create Order', to: '/export/create', icon: Plus },
+      { label: 'All Orders', to: '/export', permission: { module: 'export_orders', action: 'view' } },
+      { label: 'Create Order', to: '/export/create', icon: Plus, permission: { module: 'export_orders', action: 'create' } },
     ],
   },
   {
     label: 'Milling',
     icon: Factory,
     children: [
-      { label: 'Dashboard', to: '/milling' },
-      { label: 'Quality', to: '/quality', icon: FlaskConical },
-      { label: 'Transfers', to: '/transfer', icon: ArrowRightLeft },
+      { label: 'Dashboard', to: '/milling', permission: { module: 'milling', action: 'view' } },
+      { label: 'Quality', to: '/quality', icon: FlaskConical, permission: { module: 'milling', action: 'view' } },
+      { label: 'Transfers', to: '/transfer', icon: ArrowRightLeft, permission: { module: 'finance', action: 'view' } },
     ],
   },
   {
     label: 'Inventory',
     icon: Package,
     children: [
-      { label: 'Overview', to: '/inventory' },
-      { label: 'Lot Inventory', to: '/lot-inventory' },
-      { label: 'Local Sales', to: '/local-sales' },
+      { label: 'Overview', to: '/inventory', permission: { module: 'inventory', action: 'view' } },
+      { label: 'Lot Inventory', to: '/lot-inventory', permission: { module: 'inventory', action: 'view' } },
+      { label: 'Local Sales', to: '/local-sales', permission: { module: 'inventory', action: 'view' } },
     ],
   },
   { section: 'Reports' },
-  { label: 'Reports', icon: BarChart3, to: '/reports' },
+  { label: 'Reports', icon: BarChart3, to: '/reports', permission: { module: 'reports', action: 'view' } },
   { section: 'Intelligence' },
-  { label: 'Exceptions', icon: Zap, to: '/exceptions' },
+  { label: 'Exceptions', icon: Zap, to: '/exceptions', permission: { module: 'admin', action: 'view' } },
   { label: 'Analytics', icon: Brain, to: '/intelligence' },
   { label: 'Simulator', icon: Beaker, to: '/simulator' },
   { section: 'Governance' },
-  { label: 'Approvals', icon: ShieldCheck, to: '/approvals' },
-  { label: 'Audit Trail', icon: Shield, to: '/audit' },
-  { label: 'Documents', icon: FileText, to: '/documents' },
+  { label: 'Approvals', icon: ShieldCheck, to: '/approvals', permission: { module: 'admin', action: 'view' } },
+  { label: 'Audit Trail', icon: Shield, to: '/audit', permission: { module: 'admin', action: 'view' } },
+  { label: 'Documents', icon: FileText, to: '/documents', permission: { module: 'documents', action: 'view' } },
   { section: 'System' },
-  { label: 'Admin', icon: Settings, to: '/admin' },
+  { label: 'Admin', icon: Settings, to: '/admin', permission: { module: 'admin', action: 'view' } },
 ];
+
+function canAccessNavItem(item, hasPermission) {
+  if (!item || item.section) return true;
+
+  if (item.permission && !hasPermission(item.permission.module, item.permission.action)) {
+    return false;
+  }
+
+  if (Array.isArray(item.anyOf) && item.anyOf.length > 0) {
+    return item.anyOf.some((perm) => hasPermission(perm.module, perm.action));
+  }
+
+  if (item.children) {
+    return item.children.some((child) => canAccessNavItem(child, hasPermission));
+  }
+
+  return true;
+}
+
+function pruneNavItem(item, hasPermission) {
+  if (!canAccessNavItem(item, hasPermission)) return null;
+
+  if (!item.children) return item;
+
+  const children = item.children
+    .filter((child) => canAccessNavItem(child, hasPermission))
+    .map((child) => ({ ...child }));
+
+  if (children.length === 0) return null;
+
+  return { ...item, children };
+}
+
+function buildSidebarNav(items, hasPermission) {
+  const output = [];
+  let currentSection = null;
+  let currentItems = [];
+
+  const flush = () => {
+    if (currentSection && currentItems.length > 0) {
+      output.push(currentSection);
+      output.push(...currentItems);
+    }
+    currentSection = null;
+    currentItems = [];
+  };
+
+  items.forEach((item) => {
+    if (item.section) {
+      flush();
+      currentSection = item;
+      return;
+    }
+
+    const visible = pruneNavItem(item, hasPermission);
+    if (visible) currentItems.push(visible);
+  });
+
+  flush();
+  return output;
+}
 
 function SidebarLink({ to, icon: Icon, label, nested, collapsed, onNavigate }) {
   return (
@@ -209,12 +270,7 @@ export default function Layout({ children }) {
   const userEmail = user?.email || '';
   const userInitials = userFullName.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
 
-  const filteredSidebarNav = sidebarNav.filter((item) => {
-    if (item.section) return true;
-    if (item.label === 'Admin' && !hasPermission('admin', 'view')) return false;
-    if (item.label === 'Finance' && !hasPermission('finance', 'view')) return false;
-    return true;
-  });
+  const filteredSidebarNav = buildSidebarNav(sidebarNav, hasPermission);
 
   const handleSidebarNavigate = () => setSidebarOpen(false);
 

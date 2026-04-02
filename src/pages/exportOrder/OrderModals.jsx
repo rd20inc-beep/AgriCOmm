@@ -201,7 +201,6 @@ export function ShipmentModal({
   isOpen, onClose,
   shipVessel, setShipVessel,
   shipBooking, setShipBooking,
-  shipContainer, setShipContainer,
   shipBL, setShipBL,
   shipLine, setShipLine,
   shipETD, setShipETD,
@@ -209,8 +208,43 @@ export function ShipmentModal({
   shipETA, setShipETA,
   shipATA, setShipATA,
   shipDestPort, setShipDestPort,
+  shipmentContainers, setShipmentContainers,
   onConfirm,
 }) {
+  const rows = Array.isArray(shipmentContainers) ? shipmentContainers : [];
+
+  const updateRow = (index, field, value) => {
+    setShipmentContainers((prev) => prev.map((row, rowIndex) => (rowIndex === index ? { ...row, [field]: value } : row)));
+  };
+
+  const addRow = () => {
+    setShipmentContainers((prev) => ([
+      ...prev,
+      {
+        sequenceNo: prev.length + 1,
+        containerNo: '',
+        sealNo: '',
+        grossWeightKg: '',
+        netWeightKg: '',
+        notes: '',
+      },
+    ]));
+  };
+
+  const removeRow = (index) => {
+    setShipmentContainers((prev) => {
+      const next = prev.filter((_, rowIndex) => rowIndex !== index);
+      return next.length > 0 ? next.map((row, rowIndex) => ({ ...row, sequenceNo: rowIndex + 1 })) : [{
+        sequenceNo: 1,
+        containerNo: '',
+        sealNo: '',
+        grossWeightKg: '',
+        netWeightKg: '',
+        notes: '',
+      }];
+    });
+  };
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Update Shipment Details" size="lg">
       <div className="space-y-4">
@@ -230,13 +264,94 @@ export function ShipmentModal({
             <input type="text" value={shipBooking} onChange={e => setShipBooking(e.target.value)} placeholder="e.g. BK-2025-001" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Container No</label>
-            <input type="text" value={shipContainer} onChange={e => setShipContainer(e.target.value)} placeholder="e.g. MSCU1234567" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
-          </div>
-          <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">BL Number</label>
             <input type="text" value={shipBL} onChange={e => setShipBL(e.target.value)} placeholder="e.g. MAEUSK12345" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
           </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Destination Port</label>
+            <input type="text" value={shipDestPort} onChange={e => setShipDestPort(e.target.value)} placeholder="e.g. Conakry Port" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          </div>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h4 className="text-sm font-semibold text-gray-700">Shipment Containers</h4>
+            <p className="text-xs text-gray-500">Add one row per physical container on the shipment.</p>
+          </div>
+          <button
+            type="button"
+            onClick={addRow}
+            className="px-3 py-2 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors"
+          >
+            + Add Container
+          </button>
+        </div>
+        <div className="space-y-3">
+          {rows.map((container, index) => (
+            <div key={container.id || index} className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h5 className="text-sm font-semibold text-gray-800">Container {index + 1}</h5>
+                <button
+                  type="button"
+                  onClick={() => removeRow(index)}
+                  className="text-xs font-medium text-red-600 hover:text-red-700 disabled:text-gray-400"
+                  disabled={rows.length === 1}
+                >
+                  Remove
+                </button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Container No *</label>
+                  <input
+                    type="text"
+                    value={container.containerNo || ''}
+                    onChange={e => updateRow(index, 'containerNo', e.target.value)}
+                    placeholder="e.g. MSCU1234567"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Seal No</label>
+                  <input
+                    type="text"
+                    value={container.sealNo || ''}
+                    onChange={e => updateRow(index, 'sealNo', e.target.value)}
+                    placeholder="e.g. SEAL-7781"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Gross Weight (kg)</label>
+                  <input
+                    type="number"
+                    value={container.grossWeightKg ?? ''}
+                    onChange={e => updateRow(index, 'grossWeightKg', e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Net Weight (kg)</label>
+                  <input
+                    type="number"
+                    value={container.netWeightKg ?? ''}
+                    onChange={e => updateRow(index, 'netWeightKg', e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                  <input
+                    type="text"
+                    value={container.notes || ''}
+                    onChange={e => updateRow(index, 'notes', e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
@@ -257,10 +372,6 @@ export function ShipmentModal({
             <label className="block text-sm font-medium text-gray-700 mb-1">ATA (Actual Arrival)</label>
             <input type="date" value={shipATA} onChange={e => setShipATA(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
           </div>
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Destination Port</label>
-          <input type="text" value={shipDestPort} onChange={e => setShipDestPort(e.target.value)} placeholder="e.g. Conakry Port" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
         </div>
         <div className="flex items-center justify-end gap-3 pt-2">
           <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>

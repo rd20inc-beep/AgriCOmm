@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const accountingService = require('../services/accountingService');
 
 async function generateAdvanceNo(trx) {
   const last = await trx('advance_payments')
@@ -8,6 +9,10 @@ async function generateAdvanceNo(trx) {
     .first();
   const num = last ? (parseInt(last.advance_no.replace('ADV-', ''), 10) || 0) + 1 : 1;
   return `ADV-${String(num).padStart(3, '0')}`;
+}
+
+function lockRow(query) {
+  return typeof query?.forUpdate === 'function' ? query.forUpdate() : query;
 }
 
 const advanceController = {
@@ -104,6 +109,21 @@ const advanceController = {
         return advance;
       });
 
+      try {
+        await accountingService.autoPost(db, {
+          triggerEvent: 'advance_receipt',
+          entity: 'export',
+          amount: parseFloat(amount),
+          currency: currency || 'USD',
+          refType: 'Advance Payment',
+          refNo: result.advance_no,
+          description: `Unallocated advance from customer #${customer_id}`,
+          userId: req.user.id,
+        });
+      } catch (e) {
+        console.warn('Advance journal failed:', e.message);
+      }
+
       return res.status(201).json({ success: true, data: { advance: result } });
     } catch (err) {
       console.error('Create advance error:', err);
@@ -120,23 +140,30 @@ const advanceController = {
       if (!order_id) return res.status(400).json({ success: false, message: 'Order is required.' });
       if (!amount || parseFloat(amount) <= 0) return res.status(400).json({ success: false, message: 'A positive amount is required.' });
 
-      const advance = await db('advance_payments').where({ id }).first();
-      if (!advance) return res.status(404).json({ success: false, message: 'Advance not found.' });
-
       const allocAmt = parseFloat(amount);
-      const unallocated = parseFloat(advance.unallocated_amount) || 0;
-
-      if (allocAmt > unallocated + 0.01) {
-        return res.status(400).json({
-          success: false,
-          message: `Cannot allocate ${allocAmt}. Only ${unallocated.toFixed(2)} available.`,
-        });
-      }
-
-      const order = await db('export_orders').where({ id: order_id }).first();
-      if (!order) return res.status(404).json({ success: false, message: 'Export order not found.' });
-
       await db.transaction(async (trx) => {
+        const advance = await lockRow(trx('advance_payments').where({ id })).first();
+        if (!advance) {
+          const err = new Error('Advance not found.');
+          err.statusCode = 404;
+          throw err;
+        }
+
+        const order = await lockRow(trx('export_orders').where({ id: order_id })).first();
+        if (!order) {
+          const err = new Error('Export order not found.');
+          err.statusCode = 404;
+          throw err;
+        }
+
+        const unallocated = parseFloat(advance.unallocated_amount) || 0;
+
+        if (allocAmt > unallocated + 0.01) {
+          const err = new Error(`Cannot allocate ${allocAmt}. Only ${unallocated.toFixed(2)} available.`);
+          err.statusCode = 400;
+          throw err;
+        }
+
         // Create allocation record
         await trx('advance_allocations').insert({
           advance_id: advance.id,
@@ -199,6 +226,9 @@ const advanceController = {
 
       return res.json({ success: true, data: { advance: updated } });
     } catch (err) {
+      if (err.statusCode) {
+        return res.status(err.statusCode).json({ success: false, message: err.message });
+      }
       console.error('Allocate advance error:', err);
       return res.status(500).json({ success: false, message: err.message || 'Internal server error.' });
     }

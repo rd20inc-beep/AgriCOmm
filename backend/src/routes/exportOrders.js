@@ -114,18 +114,21 @@ router.post(
 router.post(
   '/:id/confirm-advance',
   authorizeAny(['export_orders', 'confirm_advance'], ['finance', 'confirm_payment']),
+  validate(schemas.confirmAdvance),
   auditAction('confirm_advance', 'export_order', (req) => req.params.id),
   controller.confirmAdvance
 );
 router.post(
   '/:id/confirm-balance',
   authorizeAny(['export_orders', 'confirm_balance'], ['finance', 'confirm_payment']),
+  validate(schemas.confirmBalance),
   auditAction('confirm_balance', 'export_order', (req) => req.params.id),
   controller.confirmBalance
 );
 router.post(
   '/:id/allocate-stock',
   authorize('export_orders', 'edit'),
+  validate(schemas.allocateExportStock),
   auditAction('allocate_stock', 'export_order', (req) => req.params.id),
   controller.allocateStock
 );

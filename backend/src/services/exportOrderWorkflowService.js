@@ -49,6 +49,24 @@ function canTransition(fromStatus, toStatus) {
   return getAllowedTransitions(fromStatus).includes(toStatus);
 }
 
+function getAllowedActions(order) {
+  const advanceReceived = settledAmount(order.advance_received || 0);
+  const advanceExpected = settledAmount(order.advance_expected || 0);
+  const balanceReceived = settledAmount(order.balance_received || 0);
+  const balanceExpected = settledAmount(order.balance_expected || 0);
+  const isTerminal = ['Closed', 'Cancelled'].includes(order.status);
+
+  return {
+    canConfirmAdvance: ['Draft', 'Awaiting Advance'].includes(order.status) && advanceReceived < advanceExpected,
+    canStartDocs: order.status === 'In Milling',
+    canRequestBalance: order.status === 'Awaiting Balance' && balanceReceived < balanceExpected,
+    canCreateMilling: advanceReceived >= advanceExpected && !order.milling_order_id && !isTerminal,
+    canUpdateShipment: ['Ready to Ship', 'Shipped'].includes(order.status),
+    canPutOnHold: !isTerminal,
+    canCloseOrder: order.status === 'Arrived' || (order.status === 'Shipped' && balanceReceived >= balanceExpected),
+  };
+}
+
 function buildTransitionError(fromStatus, toStatus) {
   const err = new Error(
     `Cannot transition from '${fromStatus}' to '${toStatus}'. Allowed: ${getAllowedTransitions(fromStatus).join(', ') || 'none'}.`
@@ -191,6 +209,7 @@ module.exports = {
   MONEY_EPSILON,
   settledAmount,
   getAllowedTransitions,
+  getAllowedActions,
   getStepForStatus,
   canTransition,
   transitionOrder,

@@ -87,28 +87,28 @@ function App() {
                     <Layout>
                       <Routes>
                         <Route path="/" element={<Dashboard />} />
-                        <Route path="/buyers" element={<Buyers />} />
-                        <Route path="/advances" element={<AdvancePayments />} />
-                        <Route path="/export" element={<ExportOrders />} />
-                        <Route path="/export/create" element={<CreateExportOrder />} />
-                        <Route path="/export/:id" element={<ExportOrderDetail />} />
-                        <Route path="/finance/*" element={<FinanceRoutes />} />
-                        <Route path="/milling" element={<MillingDashboard />} />
-                        <Route path="/milling/:id" element={<MillingBatchDetail />} />
-                        <Route path="/quality" element={<QualityComparison />} />
-                        <Route path="/transfer" element={<InternalTransfer />} />
-                        <Route path="/inventory" element={<Inventory />} />
-                        <Route path="/lot-inventory" element={<LotInventory />} />
-                        <Route path="/local-sales" element={<LocalSales />} />
-                        <Route path="/lot-inventory/:id" element={<LotDetail />} />
-                        <Route path="/documents" element={<Documents />} />
-                        <Route path="/reports" element={<Reports />} />
-                        <Route path="/exceptions" element={<ExceptionDashboard />} />
-                        <Route path="/intelligence" element={<Intelligence />} />
-                        <Route path="/simulator" element={<ScenarioSimulator />} />
-                        <Route path="/approvals" element={<Approvals />} />
-                        <Route path="/audit" element={<AuditLog />} />
-                        <Route path="/admin" element={<Admin />} />
+                        <Route path="/buyers" element={<ProtectedRoute module="export_orders" action="view"><Buyers /></ProtectedRoute>} />
+                        <Route path="/advances" element={<ProtectedRoute module="finance" action="view"><AdvancePayments /></ProtectedRoute>} />
+                        <Route path="/export" element={<ProtectedRoute module="export_orders" action="view"><ExportOrders /></ProtectedRoute>} />
+                        <Route path="/export/create" element={<ProtectedRoute module="export_orders" action="create"><CreateExportOrder /></ProtectedRoute>} />
+                        <Route path="/export/:id" element={<ProtectedRoute module="export_orders" action="view"><ExportOrderDetail /></ProtectedRoute>} />
+                        <Route path="/finance/*" element={<ProtectedRoute module="finance" action="view"><FinanceRoutes /></ProtectedRoute>} />
+                        <Route path="/milling" element={<ProtectedRoute module="milling" action="view"><MillingDashboard /></ProtectedRoute>} />
+                        <Route path="/milling/:id" element={<ProtectedRoute module="milling" action="view"><MillingBatchDetail /></ProtectedRoute>} />
+                        <Route path="/quality" element={<ProtectedRoute module="milling" action="view"><QualityComparison /></ProtectedRoute>} />
+                        <Route path="/transfer" element={<ProtectedRoute module="finance" action="view"><InternalTransfer /></ProtectedRoute>} />
+                        <Route path="/inventory" element={<ProtectedRoute module="inventory" action="view"><Inventory /></ProtectedRoute>} />
+                        <Route path="/lot-inventory" element={<ProtectedRoute module="inventory" action="view"><LotInventory /></ProtectedRoute>} />
+                        <Route path="/local-sales" element={<ProtectedRoute module="inventory" action="view"><LocalSales /></ProtectedRoute>} />
+                        <Route path="/lot-inventory/:id" element={<ProtectedRoute module="inventory" action="view"><LotDetail /></ProtectedRoute>} />
+                        <Route path="/documents" element={<ProtectedRoute module="documents" action="view"><Documents /></ProtectedRoute>} />
+                        <Route path="/reports" element={<ProtectedRoute module="reports" action="view"><Reports /></ProtectedRoute>} />
+                        <Route path="/exceptions" element={<ProtectedRoute module="admin" action="view"><ExceptionDashboard /></ProtectedRoute>} />
+                        <Route path="/intelligence" element={<ProtectedRoute anyOf={[{ module: 'finance', action: 'view' }, { module: 'admin', action: 'view' }]}><Intelligence /></ProtectedRoute>} />
+                        <Route path="/simulator" element={<ProtectedRoute anyOf={[{ module: 'finance', action: 'view' }, { module: 'admin', action: 'view' }]}><ScenarioSimulator /></ProtectedRoute>} />
+                        <Route path="/approvals" element={<ProtectedRoute module="admin" action="view"><Approvals /></ProtectedRoute>} />
+                        <Route path="/audit" element={<ProtectedRoute module="admin" action="view"><AuditLog /></ProtectedRoute>} />
+                        <Route path="/admin" element={<ProtectedRoute module="admin" action="view"><Admin /></ProtectedRoute>} />
                         <Route path="*" element={<Navigate to="/" replace />} />
                       </Routes>
                     </Layout>

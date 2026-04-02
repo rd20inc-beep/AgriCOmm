@@ -5,6 +5,7 @@ const router = express.Router();
 
 // Public routes
 router.use('/auth', require('./auth'));
+router.use('/streams', require('./streams'));
 
 // Protected routes — all require authentication
 router.use('/users', authenticate, require('./users'));

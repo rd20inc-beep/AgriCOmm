@@ -38,12 +38,15 @@ function AccessDenied() {
   );
 }
 
-export default function ProtectedRoute({ children, module, action }) {
+export default function ProtectedRoute({ children, module, action, anyOf = [] }) {
   const { isAuthenticated, isLoading, hasPermission } = useAuth();
 
   if (isLoading) return <LoadingSpinner />;
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   if (module && action && !hasPermission(module, action)) return <AccessDenied />;
+  if (anyOf.length > 0 && !anyOf.some((perm) => hasPermission(perm.module, perm.action))) {
+    return <AccessDenied />;
+  }
 
   return children;
 }
