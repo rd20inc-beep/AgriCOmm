@@ -151,7 +151,9 @@ async function maybePromoteAfterDocuments(trx, { order, userId, reason }) {
     return { changed: false, order };
   }
 
-  const docsComplete = await documentService.isDocumentationComplete('export_order', order.id);
+  // Must use trx (not db) to see uncommitted checklist updates within the same transaction
+  const missing = await documentService.checkMissingDocsWithConn(trx, 'export_order', order.id);
+  const docsComplete = missing.length === 0;
   if (!docsComplete) {
     return { changed: false, order };
   }
