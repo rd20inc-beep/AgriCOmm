@@ -7,7 +7,6 @@
 const db = require('../config/database');
 const uc = require('../services/unitConversion');
 const accountingService = require('../services/accountingService');
-const accountingService = require('../services/accountingService');
 
 async function generateTxnNo(trx) {
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
