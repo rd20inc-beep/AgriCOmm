@@ -99,9 +99,20 @@ export function AdvancePaymentModal({
   );
 }
 
-export function BalancePaymentModal({ isOpen, onClose, order, formatCurrency, onConfirm }) {
+export function BalancePaymentModal({
+  isOpen, onClose, order, formatCurrency,
+  balanceAmount, setBalanceAmount,
+  balanceDate, setBalanceDate,
+  balanceMethod, setBalanceMethod,
+  balanceBankAccountId, setBalanceBankAccountId,
+  balanceBankRef, setBalanceBankRef,
+  balanceNotes, setBalanceNotes,
+  bankAccountsList,
+  onConfirm,
+}) {
+  const outstanding = Math.max(0, (order.balanceExpected || 0) - (order.balanceReceived || 0));
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Request Balance Payment" size="md">
+    <Modal isOpen={isOpen} onClose={onClose} title="Confirm Balance Payment" size="md">
       <div className="space-y-4">
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
           <h4 className="text-sm font-semibold text-blue-800 mb-2">Balance Details</h4>
@@ -114,28 +125,53 @@ export function BalancePaymentModal({ isOpen, onClose, order, formatCurrency, on
               <span className="text-blue-700">Advance Received</span>
               <span className="font-medium text-blue-900">{formatCurrency(order.advanceReceived)}</span>
             </div>
+            <div className="flex justify-between">
+              <span className="text-blue-700">Balance Already Received</span>
+              <span className="font-medium text-blue-900">{formatCurrency(order.balanceReceived)}</span>
+            </div>
             <div className="flex justify-between border-t border-blue-200 pt-1.5">
-              <span className="text-blue-700 font-semibold">Balance Due</span>
-              <span className="font-bold text-blue-900">{formatCurrency(order.balanceExpected)}</span>
+              <span className="text-blue-700 font-semibold">Outstanding Balance</span>
+              <span className="font-bold text-emerald-700">{formatCurrency(outstanding)}</span>
             </div>
           </div>
         </div>
-        <p className="text-sm text-gray-600">
-          This will send a balance payment request to <span className="font-medium">{order.customerName}</span> for the outstanding amount.
-        </p>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Amount Received ($)</label>
+          <input type="number" value={balanceAmount} onChange={e => setBalanceAmount(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+          <input type="date" value={balanceDate} onChange={e => setBalanceDate(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>
+          <select value={balanceMethod} onChange={e => setBalanceMethod(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+            <option value="Bank Transfer">Bank Transfer</option>
+            <option value="Wire">Wire</option>
+            <option value="LC">LC</option>
+            <option value="Cash">Cash</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Receiving Bank Account</label>
+          <select value={balanceBankAccountId || ''} onChange={e => setBalanceBankAccountId(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white">
+            <option value="">Select account...</option>
+            {(bankAccountsList || []).map(a => (
+              <option key={a.id} value={a.id}>{a.name} ({a.currency}) — {a.bankName}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Bank Reference</label>
+          <input type="text" value={balanceBankRef} onChange={e => setBalanceBankRef(e.target.value)} placeholder="TT/Wire reference" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+          <textarea value={balanceNotes} onChange={e => setBalanceNotes(e.target.value)} rows={2} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none" />
+        </div>
         <div className="flex items-center justify-end gap-3 pt-2">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            Send Request
-          </button>
+          <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
+          <button onClick={onConfirm} className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors">Confirm Balance Payment</button>
         </div>
       </div>
     </Modal>

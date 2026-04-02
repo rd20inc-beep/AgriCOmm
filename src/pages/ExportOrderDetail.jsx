@@ -73,6 +73,14 @@ export default function ExportOrderDetail() {
   const [advanceBankRef, setAdvanceBankRef] = useState('');
   const [advanceNotes, setAdvanceNotes] = useState('');
 
+  // Balance Payment form state
+  const [balanceAmount, setBalanceAmount] = useState('');
+  const [balanceDate, setBalanceDate] = useState('');
+  const [balanceMethod, setBalanceMethod] = useState('Bank Transfer');
+  const [balanceBankAccountId, setBalanceBankAccountId] = useState('');
+  const [balanceBankRef, setBalanceBankRef] = useState('');
+  const [balanceNotes, setBalanceNotes] = useState('');
+
   // Milling Demand form state
   const [millingRawQty, setMillingRawQty] = useState('');
   const [millingSupplier, setMillingSupplier] = useState('');
@@ -204,6 +212,12 @@ export default function ExportOrderDetail() {
   };
 
   const openBalanceModal = () => {
+    setBalanceAmount(Math.max(0, (order.balanceExpected || 0) - (order.balanceReceived || 0)));
+    setBalanceDate(today());
+    setBalanceMethod('Bank Transfer');
+    setBalanceBankAccountId('');
+    setBalanceBankRef('');
+    setBalanceNotes('');
     setShowBalanceModal(true);
   };
 
@@ -282,23 +296,35 @@ export default function ExportOrderDetail() {
     }
   };
 
-  const handleRequestBalance = async () => {
-    if (order.status !== 'Awaiting Balance') {
-      addToast('Balance can only be requested after all required documents are approved.', 'error');
-      setShowBalanceModal(false);
+  const handleConfirmBalance = async () => {
+    const amount = parseFloat(balanceAmount) || 0;
+    if (!amount || amount <= 0) {
+      addToast('Please enter a valid amount', 'error');
       return;
     }
+    setShowBalanceModal(false);
     try {
-      await api.post(`/api/export-orders/${order.dbId || order.id}/request-balance`, {
-        notes: 'Balance payment requested from order detail',
+      const res = await api.post(`/api/export-orders/${order.dbId || order.id}/confirm-balance`, {
+        amount,
+        payment_date: balanceDate,
+        payment_method: balanceMethod,
+        bank_account_id: balanceBankAccountId || null,
+        bank_reference: balanceBankRef,
+        notes: balanceNotes,
       });
-      addToast('Balance payment request sent');
+      const updated = res?.data?.order;
+      if (updated) {
+        setApiOrder(transformOrder(updated));
+        addToast(`Balance of $${amount.toLocaleString()} confirmed — status: ${updated.status}`);
+      } else {
+        addToast('Balance payment confirmed');
+      }
       await fetchOrderDetail();
       refreshFromApi('orders');
+      refreshFromApi('finance');
     } catch (err) {
-      addToast(`Failed to request balance: ${err.message || 'Server error'}`, 'error');
+      addToast(err.message || 'Failed to confirm balance', 'error');
     }
-    setShowBalanceModal(false);
   };
 
   const handleStartDocsPreparation = async () => {
@@ -642,7 +668,20 @@ export default function ExportOrderDetail() {
         onClose={() => setShowBalanceModal(false)}
         order={order}
         formatCurrency={formatCurrency}
-        onConfirm={handleRequestBalance}
+        balanceAmount={balanceAmount}
+        setBalanceAmount={setBalanceAmount}
+        balanceDate={balanceDate}
+        setBalanceDate={setBalanceDate}
+        balanceMethod={balanceMethod}
+        setBalanceMethod={setBalanceMethod}
+        balanceBankAccountId={balanceBankAccountId}
+        setBalanceBankAccountId={setBalanceBankAccountId}
+        balanceBankRef={balanceBankRef}
+        setBalanceBankRef={setBalanceBankRef}
+        balanceNotes={balanceNotes}
+        setBalanceNotes={setBalanceNotes}
+        bankAccountsList={bankAccountsList}
+        onConfirm={handleConfirmBalance}
       />
 
       <MillingDemandModal
