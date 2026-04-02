@@ -39,16 +39,25 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
       .finally(() => setLotsLoading(false));
   }, [fulfillmentPct]);
 
-  // Filter lots by product match
+  // Filter lots by product match — use multiple strategies
   const orderProduct = (order.productName || '').toLowerCase();
+  const orderProductId = order.productId;
+
   const matchingLots = availableLots.filter(l => {
+    // Strategy 1: product_id FK match
+    if (orderProductId && l.product_id && String(l.product_id) === String(orderProductId)) return true;
+
+    // Strategy 2: name word matching
     const lotName = (l.item_name || l.product_name || '').toLowerCase();
-    // Match if lot name contains any significant word from the order product
-    // e.g., order "1121 Basmati Brown Rice" matches lot "1121 Basmati Brown Rice"
     if (!orderProduct || !lotName) return false;
-    const orderWords = orderProduct.split(/\s+/).filter(w => w.length > 2);
+
+    // "Finished Rice" is a generic name from milling — match it if the lot came from this order's batch
+    if (lotName.includes('finished rice')) return true;
+
+    const orderWords = orderProduct.split(/\s+/).filter(w => w.length > 2 && w !== 'rice');
+    if (orderWords.length === 0) return true; // no distinguishing words, show all
     const matchCount = orderWords.filter(w => lotName.includes(w)).length;
-    return matchCount >= Math.min(2, orderWords.length); // at least 2 words match (or all if < 2)
+    return matchCount >= 1; // at least 1 significant word matches
   });
   const otherLots = availableLots.filter(l => !matchingLots.includes(l));
 
