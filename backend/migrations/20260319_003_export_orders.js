@@ -37,6 +37,23 @@ exports.up = async function (knex) {
     t.date('eta');
     t.date('ata');
     t.string('destination_port', 255);
+    // Document generation fields
+    t.string('hs_code', 20);
+    t.string('brand_marking', 100);
+    t.decimal('broken_pct_target', 5, 2);
+    t.text('quality_description');
+    t.date('production_date');
+    t.date('expiry_date');
+    t.string('freight_terms', 20).defaultTo('COLLECT');
+    t.string('fi_number', 100);
+    t.date('fi_date');
+    t.string('invoice_number', 50);
+    t.string('contract_number', 50);
+    t.string('consignee_type', 20).defaultTo('to_order_of_bank');
+    t.date('bl_date');
+    t.text('production_remarks');
+    t.date('shipment_window_start');
+    t.date('shipment_window_end');
     t.text('notes');
     t.integer('created_by').unsigned().references('id').inTable('users');
     t.timestamps(true, true);
