@@ -182,6 +182,11 @@ const ALLOWED_UPDATE_FIELDS = [
   'bag_printing', 'bag_color', 'bag_brand', 'bag_notes',
   'receiving_mode', 'quantity_unit', 'packing_notes',
   'packing_lines',
+  // Document generation fields
+  'hs_code', 'brand_marking', 'broken_pct_target', 'quality_description',
+  'production_date', 'expiry_date', 'freight_terms', 'fi_number', 'fi_date',
+  'invoice_number', 'contract_number', 'consignee_type', 'bl_date',
+  'production_remarks', 'shipment_window_start', 'shipment_window_end',
 ];
 
 const exportOrderController = {

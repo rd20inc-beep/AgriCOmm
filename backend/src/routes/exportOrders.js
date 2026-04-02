@@ -133,4 +133,9 @@ router.post(
   controller.allocateStock
 );
 
+// Document generation
+const docController = require('../controllers/exportDocumentController');
+router.get('/:id/documents/available', authorize('export_orders', 'view'), docController.available);
+router.get('/:id/documents/generate/:docType', authorize('export_orders', 'view'), docController.generate);
+
 module.exports = router;
