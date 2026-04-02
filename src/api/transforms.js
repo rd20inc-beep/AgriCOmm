@@ -40,12 +40,16 @@ const docTypeKeyMap = {
   'phyto': 'phyto',
   'BL Draft': 'blDraft',
   'bl_draft': 'blDraft',
+  'blDraft': 'blDraft',
   'BL Final': 'blFinal',
   'bl_final': 'blFinal',
+  'blFinal': 'blFinal',
   'Commercial Invoice': 'invoice',
   'commercial_invoice': 'invoice',
+  'invoice': 'invoice',
   'Packing List': 'packingList',
   'packing_list': 'packingList',
+  'packingList': 'packingList',
   'Certificate of Origin': 'coo',
   'coo': 'coo',
   'Fumigation Certificate': 'fumigation',
@@ -92,6 +96,17 @@ function transformDocuments(docs) {
 // === Export Order transform ===
 export function transformOrder(dbOrder) {
   if (!dbOrder) return null;
+  const shipmentContainers = (dbOrder.shipmentContainers || dbOrder.shipment_containers || []).map((container, index) => ({
+    id: container.id,
+    sequenceNo: container.sequence_no || index + 1,
+    containerNo: container.container_no || '',
+    sealNo: container.seal_no || '',
+    grossWeightKg: container.gross_weight_kg != null ? parseFloat(container.gross_weight_kg) : null,
+    netWeightKg: container.net_weight_kg != null ? parseFloat(container.net_weight_kg) : null,
+    notes: container.notes || '',
+    createdAt: container.created_at,
+    updatedAt: container.updated_at,
+  }));
   return {
     id: dbOrder.order_no || dbOrder.id,
     dbId: dbOrder.id,
@@ -116,10 +131,11 @@ export function transformOrder(dbOrder) {
     currentStep: dbOrder.current_step || 1,
     shipmentETA: dbOrder.shipment_eta,
     millingOrderId: dbOrder.milling_order_id,
+    allowedActions: dbOrder.allowed_actions || dbOrder.allowedActions || null,
     source: dbOrder.source || 'Internal Mill',
     vesselName: dbOrder.vessel_name,
     bookingNo: dbOrder.booking_no,
-    containerNo: dbOrder.container_no || '',
+    containerNo: shipmentContainers[0]?.containerNo || '',
     blNumber: dbOrder.bl_number || '',
     shippingLine: dbOrder.shipping_line || '',
     etd: dbOrder.etd,
@@ -127,6 +143,7 @@ export function transformOrder(dbOrder) {
     eta: dbOrder.eta,
     ata: dbOrder.ata,
     destinationPort: dbOrder.destination_port || '',
+    shipmentContainers,
     createdAt: dbOrder.created_at,
     notes: dbOrder.notes,
     // Bag specification

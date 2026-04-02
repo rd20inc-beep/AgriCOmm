@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
+import { API_BASE } from '../api/client';
 import { transformOrder, transformBankAccount } from '../api/transforms';
 import {
   OrderHeader,
@@ -28,6 +30,7 @@ import {
 export default function ExportOrderDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { token } = useAuth();
   const { exportOrders, millingBatches, updateExportOrder, addActivityToOrder, addToast, addMillingBatch, exportCostCategories, companyProfileData, bankAccountsList: contextBankAccounts, customersList, suppliersList, refreshFromApi } = useApp();
 
   // Fetch bank accounts and suppliers directly via API — bypasses TanStack Query caching issues
@@ -77,7 +80,7 @@ export default function ExportOrderDetail() {
   // Shipment form state
   const [shipVessel, setShipVessel] = useState('');
   const [shipBooking, setShipBooking] = useState('');
-  const [shipContainer, setShipContainer] = useState('');
+  const [shipContainers, setShipContainers] = useState([]);
   const [shipBL, setShipBL] = useState('');
   const [shipLine, setShipLine] = useState('');
   const [shipETD, setShipETD] = useState('');
@@ -121,6 +124,23 @@ export default function ExportOrderDetail() {
   }, [id]);
 
   React.useEffect(() => {
+    if (!id || !token || token === 'mock-prototype-token') {
+      return undefined;
+    }
+
+    const source = new EventSource(`${API_BASE}/api/streams/export-orders/${id}?token=${encodeURIComponent(token)}`);
+    source.onmessage = () => {
+      fetchOrderDetail();
+      refreshFromApi('orders');
+    };
+    source.onerror = () => {};
+
+    return () => {
+      source.close();
+    };
+  }, [id, token]);
+
+  React.useEffect(() => {
     // no-op
   }, [id, listOrder, apiOrder, apiLoading]);
 
@@ -161,8 +181,17 @@ export default function ExportOrderDetail() {
   const grossProfit = (parseFloat(order.contractValue) || 0) - totalCosts;
   const marginPct = order.contractValue > 0 ? ((grossProfit / (parseFloat(order.contractValue) || 1)) * 100).toFixed(1) : '0.0';
   const formatCurrency = (value) => '$' + (parseFloat(value) || 0).toLocaleString();
+  const backendActions = order.allowedActions || {};
 
   // --- Modal openers (reset form state then show) ---
+  const buildShipmentContainerRow = (container = {}, sequenceNo = 1) => ({
+    sequenceNo,
+    containerNo: container.containerNo || '',
+    sealNo: container.sealNo || '',
+    grossWeightKg: container.grossWeightKg ?? '',
+    netWeightKg: container.netWeightKg ?? '',
+    notes: container.notes || '',
+  });
 
   const openAdvanceModal = () => {
     setAdvanceAmount(Math.max(0, (order.advanceExpected || 0) - (order.advanceReceived || 0)));
@@ -187,7 +216,14 @@ export default function ExportOrderDetail() {
   const openShipmentModal = () => {
     setShipVessel(order.vesselName || '');
     setShipBooking(order.bookingNo || '');
-    setShipContainer(order.containerNo || '');
+    const containers = Array.isArray(order.shipmentContainers) && order.shipmentContainers.length > 0
+      ? order.shipmentContainers
+      : (order.containerNo ? [{ containerNo: order.containerNo }] : []);
+    setShipContainers(
+      containers.length > 0
+        ? containers.map((container, index) => buildShipmentContainerRow(container, index + 1))
+        : [buildShipmentContainerRow({}, 1)]
+    );
     setShipBL(order.blNumber || '');
     setShipLine(order.shippingLine || '');
     setShipETD(order.etd || '');
@@ -324,10 +360,26 @@ export default function ExportOrderDetail() {
 
   const handleUpdateShipment = async () => {
     try {
+      const containers = shipContainers
+        .map((container, index) => ({
+          sequence_no: index + 1,
+          container_no: String(container.containerNo || '').trim(),
+          seal_no: container.sealNo || null,
+          gross_weight_kg: container.grossWeightKg === '' || container.grossWeightKg == null
+            ? null
+            : parseFloat(container.grossWeightKg),
+          net_weight_kg: container.netWeightKg === '' || container.netWeightKg == null
+            ? null
+            : parseFloat(container.netWeightKg),
+          notes: container.notes || null,
+        }))
+        .filter((container) => container.container_no);
+
       const res = await api.put(`/api/export-orders/${order.dbId || order.id}/shipment`, {
         vessel_name: shipVessel || null,
         booking_no: shipBooking || null,
-        container_no: shipContainer || null,
+        container_no: containers[0]?.container_no || null,
+        containers,
         bl_number: shipBL || null,
         shipping_line: shipLine || null,
         etd: shipETD || null,
@@ -370,38 +422,54 @@ export default function ExportOrderDetail() {
     setShowHoldModal(false);
   };
 
-  const handleAddExpense = () => {
+  const handleAddExpense = async () => {
     const amount = parseFloat(expenseAmount) || 0;
     if (amount <= 0) {
-      addToast('Please enter a valid amount');
+      addToast('Please enter a valid amount', 'error');
       return;
     }
-    const updatedCosts = {
-      ...order.costs,
-      [expenseCategory]: (order.costs[expenseCategory] || 0) + amount,
-    };
-    updateExportOrder(order.id, { costs: updatedCosts });
-    addActivityToOrder(order.id, {
-      date: today(),
-      action: `Expense added: $${amount.toLocaleString()} to ${expenseCategory}${expenseNotes ? ` (${expenseNotes})` : ''}`,
-      by: 'Export Manager',
-    });
-    addToast(`$${amount.toLocaleString()} added to ${expenseCategory}`);
+    try {
+      await api.post(`/api/export-orders/${order.dbId || order.id}/costs`, {
+        category: expenseCategory,
+        amount,
+        notes: expenseNotes,
+      });
+      addToast(`$${amount.toLocaleString()} added to ${expenseCategory}`);
+      await fetchOrderDetail();
+      refreshFromApi('orders');
+    } catch (err) {
+      addToast(err.message || 'Failed to add expense', 'error');
+    }
     setShowExpenseModal(false);
   };
 
-  const handleDocumentUpload = async (docKey) => {
+  const handleDocumentUpload = async (docKey, file) => {
     try {
+      if (file) {
+        // Upload the actual file first
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('doc_type', docKey);
+        formData.append('linked_type', 'export_order');
+        formData.append('linked_id', order.dbId || order.id);
+        try {
+          await api.upload('/api/documents/upload', formData);
+        } catch (uploadErr) {
+          console.warn('File upload to document store failed:', uploadErr.message);
+          // Continue with status update even if file store fails
+        }
+      }
+      // Mark the document as uploaded in the order
       await api.post(`/api/export-orders/${order.dbId || order.id}/documents/upload`, {
         doc_type: docKey,
-        uploaded_by: 'Export Manager',
+        file_path: file ? file.name : null,
       });
       await fetchOrderDetail();
       refreshFromApi('orders');
-      addToast(`${documentLabels[docKey]} uploaded`);
+      addToast(`${documentLabels[docKey] || docKey} uploaded${file ? ` (${file.name})` : ''}`);
     } catch (err) {
       console.warn('API doc upload failed:', err.message);
-      addToast(`Failed to upload ${documentLabels[docKey]}`, 'error');
+      addToast(`Failed to upload ${documentLabels[docKey] || docKey}`, 'error');
     }
   };
 
@@ -436,13 +504,13 @@ export default function ExportOrderDetail() {
     : null;
 
   // Workflow gating - determine which actions are allowed
-  const canConfirmAdvance = order.advanceReceived < order.advanceExpected && ['Awaiting Advance', 'Draft'].includes(order.status);
-  const canStartDocs = order.status === 'In Milling';
-  const canRequestBalance = order.status === 'Awaiting Balance' && order.balanceReceived < order.balanceExpected;
-  const canCreateMilling = order.advanceReceived >= order.advanceExpected && !order.millingOrderId && !['Draft', 'Closed', 'Cancelled'].includes(order.status);
-  const canUpdateShipment = ['Ready to Ship', 'Shipped'].includes(order.status);
-  const canPutOnHold = !['Closed', 'Cancelled'].includes(order.status);
-  const canCloseOrder = order.status === 'Arrived' || (order.balanceReceived >= order.balanceExpected && order.status === 'Shipped');
+  const canConfirmAdvance = backendActions.canConfirmAdvance ?? (order.advanceReceived < order.advanceExpected && ['Awaiting Advance', 'Draft'].includes(order.status));
+  const canStartDocs = backendActions.canStartDocs ?? (order.status === 'In Milling');
+  const canRequestBalance = backendActions.canRequestBalance ?? (order.status === 'Awaiting Balance' && order.balanceReceived < order.balanceExpected);
+  const canCreateMilling = backendActions.canCreateMilling ?? (order.advanceReceived >= order.advanceExpected && !order.millingOrderId && !['Draft', 'Closed', 'Cancelled'].includes(order.status));
+  const canUpdateShipment = backendActions.canUpdateShipment ?? ['Ready to Ship', 'Shipped'].includes(order.status);
+  const canPutOnHold = backendActions.canPutOnHold ?? !['Closed', 'Cancelled'].includes(order.status);
+  const canCloseOrder = backendActions.canCloseOrder ?? (order.status === 'Arrived' || (order.balanceReceived >= order.balanceExpected && order.status === 'Shipped'));
 
   const handleCloseOrder = async () => {
     try {
@@ -596,8 +664,6 @@ export default function ExportOrderDetail() {
         setShipVessel={setShipVessel}
         shipBooking={shipBooking}
         setShipBooking={setShipBooking}
-        shipContainer={shipContainer}
-        setShipContainer={setShipContainer}
         shipBL={shipBL}
         setShipBL={setShipBL}
         shipLine={shipLine}
@@ -612,6 +678,8 @@ export default function ExportOrderDetail() {
         setShipATA={setShipATA}
         shipDestPort={shipDestPort}
         setShipDestPort={setShipDestPort}
+        shipmentContainers={shipContainers}
+        setShipmentContainers={setShipContainers}
         onConfirm={handleUpdateShipment}
       />
 
