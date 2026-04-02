@@ -177,14 +177,16 @@ export default function ExportOrderDetail() {
   }
 
   // Compute visible tabs based on workflow status
-  const visibleTabs = getVisibleTabs(order.status);
+  const orderStatus = order.status;
+  const visibleTabs = React.useMemo(() => getVisibleTabs(orderStatus), [orderStatus]);
 
   // Reset activeTab if it's no longer visible after a status change
   React.useEffect(() => {
-    if (order && !visibleTabs.find(t => t.key === activeTab)) {
-      setActiveTab(visibleTabs[0]?.key || 'overview');
+    const tabKeys = visibleTabs.map(t => t.key);
+    if (!tabKeys.includes(activeTab)) {
+      setActiveTab(tabKeys[0] || 'overview');
     }
-  }, [order?.status]);
+  }, [orderStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const totalCosts = Object.values(order.costs || {}).reduce((sum, c) => sum + (parseFloat(c) || 0), 0);
   const grossProfit = (parseFloat(order.contractValue) || 0) - totalCosts;
