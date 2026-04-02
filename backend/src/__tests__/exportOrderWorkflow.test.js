@@ -287,6 +287,10 @@ jest.mock('../services/documentService', () => ({
       .filter((row) => row.linked_type === linkedType && row.linked_id === linkedId && row.is_required)
       .every((row) => row.is_fulfilled);
   }),
+  checkMissingDocsWithConn: jest.fn(async (conn, linkedType, linkedId) => {
+    return mockState.tables.document_checklists
+      .filter((row) => row.linked_type === linkedType && row.linked_id === linkedId && row.is_required && !row.is_fulfilled);
+  }),
 }));
 
 jest.mock('../services/emailService', () => ({
