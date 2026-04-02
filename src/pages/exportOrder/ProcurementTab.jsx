@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import StatusBadge from '../../components/StatusBadge';
-import Modal from '../../components/Modal';
 import api from '../../api/client';
-import { Package, Plus, ExternalLink, Warehouse, Scale, FileText, ArrowRightLeft } from 'lucide-react';
+import { Package, Plus, ExternalLink, Warehouse, Scale, FileText } from 'lucide-react';
 
 export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], onCreateMilling, onStartDocsPreparation, onLinkExternalPurchase, canCreateMilling, canStartDocs, onStockAllocated }) {
   const estimatedRawQty = Math.round(order.qtyMT / 0.75);
@@ -19,52 +18,57 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
   }, 0);
   const fulfillmentPct = order.qtyMT > 0 ? Math.min(100, (totalAllocatedMT / order.qtyMT) * 100) : 0;
 
-  // Allocate stock modal
-  const [showAllocateModal, setShowAllocateModal] = useState(false);
+  // Available lots for allocation
   const [availableLots, setAvailableLots] = useState([]);
-  const [selectedLotId, setSelectedLotId] = useState('');
-  const [allocateQty, setAllocateQty] = useState('');
-  const [allocateNotes, setAllocateNotes] = useState('');
-  const [allocating, setAllocating] = useState(false);
+  const [lotsLoading, setLotsLoading] = useState(false);
+  const [allocatingLotId, setAllocatingLotId] = useState(null);
+  const [showAllLots, setShowAllLots] = useState(false);
 
-  // Fetch available finished lots when modal opens
-  useEffect(() => {
-    if (!showAllocateModal) return;
-    api.get('/api/inventory', { type: 'finished', status: 'Available', limit: 100 })
-      .then(res => {
-        const lots = res?.data?.lots || res?.data?.inventory || res?.lots || [];
-        // Only show lots with available quantity
-        setAvailableLots(lots.filter(l => parseFloat(l.available_qty) > 0));
-      })
-      .catch(() => setAvailableLots([]));
-  }, [showAllocateModal]);
-
-  const selectedLot = availableLots.find(l => String(l.id) === String(selectedLotId));
   const remainingNeeded = Math.max(0, order.qtyMT - totalAllocatedMT);
 
-  function openAllocateModal() {
-    setSelectedLotId('');
-    setAllocateQty(remainingNeeded > 0 ? remainingNeeded.toFixed(2) : '');
-    setAllocateNotes('');
-    setShowAllocateModal(true);
-  }
+  // Fetch available finished lots when fulfillment < 100%
+  useEffect(() => {
+    if (fulfillmentPct >= 100) return;
+    setLotsLoading(true);
+    api.get('/api/inventory', { type: 'finished', status: 'Available', limit: 200 })
+      .then(res => {
+        const lots = res?.data?.lots || res?.data?.inventory || res?.lots || [];
+        setAvailableLots(lots.filter(l => parseFloat(l.available_qty) > 0));
+      })
+      .catch(() => setAvailableLots([]))
+      .finally(() => setLotsLoading(false));
+  }, [fulfillmentPct]);
 
-  async function handleAllocate() {
-    const qty = parseFloat(allocateQty);
-    if (!selectedLotId || !qty || qty <= 0) return;
-    setAllocating(true);
+  // Filter lots by product match
+  const orderProduct = (order.productName || '').toLowerCase();
+  const matchingLots = availableLots.filter(l => {
+    const lotName = (l.item_name || l.product_name || '').toLowerCase();
+    // Match if lot name contains any significant word from the order product
+    // e.g., order "1121 Basmati Brown Rice" matches lot "1121 Basmati Brown Rice"
+    if (!orderProduct || !lotName) return false;
+    const orderWords = orderProduct.split(/\s+/).filter(w => w.length > 2);
+    const matchCount = orderWords.filter(w => lotName.includes(w)).length;
+    return matchCount >= Math.min(2, orderWords.length); // at least 2 words match (or all if < 2)
+  });
+  const otherLots = availableLots.filter(l => !matchingLots.includes(l));
+
+  async function handleQuickAllocate(lot) {
+    const availMT = parseFloat(lot.available_qty) || 0;
+    const qtyToAllocate = Math.min(availMT, remainingNeeded);
+    if (qtyToAllocate <= 0) return;
+
+    setAllocatingLotId(lot.id);
     try {
       await api.post(`/api/export-orders/${order.dbId || order.id}/allocate-stock`, {
-        lot_id: parseInt(selectedLotId),
-        qty_mt: qty,
-        notes: allocateNotes,
+        lot_id: lot.id,
+        qty_mt: qtyToAllocate,
+        notes: `Quick allocation: ${qtyToAllocate.toFixed(2)} MT from ${lot.lot_no}`,
       });
-      setShowAllocateModal(false);
       if (onStockAllocated) onStockAllocated();
     } catch (err) {
       alert(err.message || 'Allocation failed');
     } finally {
-      setAllocating(false);
+      setAllocatingLotId(null);
     }
   }
 
@@ -225,26 +229,102 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
         )}
       </div>
 
-      {/* Purchase Lots + Allocate Action */}
+      {/* Available Stock for Allocation — click to allocate */}
+      {fulfillmentPct < 100 && !lotsLoading && (matchingLots.length > 0 || otherLots.length > 0) && (
+        <div className="bg-white rounded-xl shadow-sm border border-emerald-200 p-6">
+          <h3 className="text-sm font-semibold text-emerald-700 uppercase tracking-wide mb-1">Available Stock — Click to Allocate</h3>
+          <p className="text-xs text-gray-400 mb-4">
+            Need <span className="font-semibold text-emerald-700">{remainingNeeded.toFixed(2)} MT</span> more.
+            {matchingLots.length > 0 ? ` Showing lots matching "${order.productName}".` : ' No exact product match found.'}
+          </p>
+
+          {matchingLots.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+              {matchingLots.map(lot => {
+                const availMT = parseFloat(lot.available_qty) || 0;
+                const willAllocate = Math.min(availMT, remainingNeeded);
+                const isAllocating = allocatingLotId === lot.id;
+                return (
+                  <button
+                    key={lot.id}
+                    onClick={() => handleQuickAllocate(lot)}
+                    disabled={isAllocating || remainingNeeded <= 0}
+                    className="text-left rounded-lg border-2 border-emerald-200 bg-emerald-50/50 p-4 hover:border-emerald-400 hover:bg-emerald-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <div>
+                        <p className="text-sm font-bold text-gray-900">{lot.lot_no}</p>
+                        <p className="text-xs text-gray-600">{lot.item_name || lot.product_name || 'Finished Rice'}</p>
+                      </div>
+                      <span className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-600 text-white rounded-lg text-xs font-medium">
+                        {isAllocating ? 'Allocating...' : `+ ${willAllocate.toFixed(1)} MT`}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-xs">
+                      <div><span className="text-gray-400">Available</span><br/><span className="font-semibold text-gray-900">{availMT.toFixed(2)} MT</span></div>
+                      <div><span className="text-gray-400">Entity</span><br/><span className="font-semibold text-gray-900">{lot.entity || '—'}</span></div>
+                      <div><span className="text-gray-400">Supplier</span><br/><span className="font-semibold text-gray-900">{lot.supplier_name || '—'}</span></div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {otherLots.length > 0 && (
+            <>
+              <button
+                onClick={() => setShowAllLots(!showAllLots)}
+                className="text-xs text-blue-600 hover:text-blue-800 font-medium mb-3"
+              >
+                {showAllLots ? 'Hide' : 'Show'} {otherLots.length} other available lot{otherLots.length !== 1 ? 's' : ''} (different product)
+              </button>
+              {showAllLots && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {otherLots.map(lot => {
+                    const availMT = parseFloat(lot.available_qty) || 0;
+                    const willAllocate = Math.min(availMT, remainingNeeded);
+                    const isAllocating = allocatingLotId === lot.id;
+                    return (
+                      <button
+                        key={lot.id}
+                        onClick={() => handleQuickAllocate(lot)}
+                        disabled={isAllocating || remainingNeeded <= 0}
+                        className="text-left rounded-lg border border-gray-200 bg-white p-4 hover:border-blue-300 hover:bg-blue-50/30 transition-all disabled:opacity-50"
+                      >
+                        <div className="flex items-start justify-between mb-2">
+                          <div>
+                            <p className="text-sm font-bold text-gray-900">{lot.lot_no}</p>
+                            <p className="text-xs text-gray-600">{lot.item_name || 'Finished Rice'}</p>
+                          </div>
+                          <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-600 text-white rounded-lg text-xs font-medium">
+                            {isAllocating ? 'Allocating...' : `+ ${willAllocate.toFixed(1)} MT`}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-xs">
+                          <div><span className="text-gray-400">Available</span><br/><span className="font-semibold">{availMT.toFixed(2)} MT</span></div>
+                          <div><span className="text-gray-400">Entity</span><br/><span className="font-semibold">{lot.entity || '—'}</span></div>
+                          <div><span className="text-gray-400">Supplier</span><br/><span className="font-semibold">{lot.supplier_name || '—'}</span></div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Allocated Stock */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Allocated Stock</h3>
-          <div className="flex items-center gap-2">
-            {finishedLots.length > 0 && (
-              <span className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded-full">
-                {finishedLots.length} lot{finishedLots.length !== 1 ? 's' : ''}
-              </span>
-            )}
-            {fulfillmentPct < 100 && (
-              <button
-                onClick={openAllocateModal}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-medium hover:bg-emerald-700 transition-colors"
-              >
-                <ArrowRightLeft className="w-3.5 h-3.5" />
-                Allocate Stock
-              </button>
-            )}
-          </div>
+          {finishedLots.length > 0 && (
+            <span className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded-full">
+              {finishedLots.length} lot{finishedLots.length !== 1 ? 's' : ''}
+            </span>
+          )}
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -356,86 +436,6 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
         </div>
       )}
 
-      {/* Allocate Stock Modal */}
-      <Modal isOpen={showAllocateModal} onClose={() => setShowAllocateModal(false)} title="Allocate Stock to Export Order" size="md">
-        <div className="space-y-4">
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm">
-            <span className="text-blue-700">Order {order.id} needs </span>
-            <span className="font-bold text-blue-900">{remainingNeeded.toFixed(2)} MT</span>
-            <span className="text-blue-700"> more to fulfill {order.qtyMT} MT target</span>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Select Lot</label>
-            <select
-              value={selectedLotId}
-              onChange={e => {
-                setSelectedLotId(e.target.value);
-                const lot = availableLots.find(l => String(l.id) === e.target.value);
-                if (lot) {
-                  const avail = parseFloat(lot.available_qty) || 0;
-                  setAllocateQty(Math.min(avail, remainingNeeded).toFixed(2));
-                }
-              }}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
-            >
-              <option value="">Select a lot...</option>
-              {availableLots.map(l => (
-                <option key={l.id} value={l.id}>
-                  {l.lot_no} — {l.item_name || 'Finished Rice'} — {parseFloat(l.available_qty).toFixed(2)} MT available
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {selectedLot && (
-            <div className="bg-gray-50 rounded-lg p-3 text-sm space-y-1">
-              <div className="flex justify-between"><span className="text-gray-500">Lot</span><span className="font-medium">{selectedLot.lot_no}</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">Product</span><span className="font-medium">{selectedLot.item_name}</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">Available</span><span className="font-medium">{parseFloat(selectedLot.available_qty).toFixed(2)} MT</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">Total in Lot</span><span className="font-medium">{parseFloat(selectedLot.qty).toFixed(2)} MT</span></div>
-            </div>
-          )}
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Quantity to Allocate (MT)</label>
-            <input
-              type="number"
-              step="0.01"
-              value={allocateQty}
-              onChange={e => setAllocateQty(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-            />
-            {selectedLot && parseFloat(allocateQty) < parseFloat(selectedLot.available_qty) && (
-              <p className="text-xs text-gray-500 mt-1">
-                Remaining {(parseFloat(selectedLot.available_qty) - parseFloat(allocateQty || 0)).toFixed(2)} MT will stay in inventory
-              </p>
-            )}
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-            <input
-              type="text"
-              value={allocateNotes}
-              onChange={e => setAllocateNotes(e.target.value)}
-              placeholder="Optional notes"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-            />
-          </div>
-
-          <div className="flex items-center justify-end gap-3 pt-2">
-            <button onClick={() => setShowAllocateModal(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
-            <button
-              onClick={handleAllocate}
-              disabled={!selectedLotId || !parseFloat(allocateQty) || allocating}
-              className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {allocating ? 'Allocating...' : `Allocate ${parseFloat(allocateQty || 0).toFixed(2)} MT`}
-            </button>
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 }
