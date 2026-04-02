@@ -12,6 +12,7 @@ import {
   FinancialsTab,
   ProcurementTab,
   DocumentsTab,
+  DocumentCenter,
   ShipmentTab,
   TimelineTab,
   AdvancePaymentModal,
@@ -635,7 +636,12 @@ export default function ExportOrderDetail() {
             onStockAllocated={() => { fetchOrderDetail(); addToast('Stock allocated successfully'); refreshFromApi('orders'); }}
           />
         )}
-        {activeTab === 'documents' && <DocumentsTab order={order} onUpload={handleDocumentUpload} onApprove={handleDocumentApprove} onPreviewInvoice={() => setShowInvoicePreview(true)} />}
+        {activeTab === 'documents' && (
+          <>
+            <DocumentsTab order={order} onUpload={handleDocumentUpload} onApprove={handleDocumentApprove} onPreviewInvoice={() => setShowInvoicePreview(true)} />
+            <DocumentCenter order={order} />
+          </>
+        )}
         {activeTab === 'shipment' && <ShipmentTab order={order} onUpdateShipment={openShipmentModal} canUpdateShipment={canUpdateShipment} />}
         {activeTab === 'timeline' && <TimelineTab order={order} />}
       </div>
