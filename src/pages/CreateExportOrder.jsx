@@ -19,7 +19,7 @@ const RECEIVING_MODES = [
 const EMPTY_PACKING_LINE = { bagType: '', bagQuality: '', fillWeightKg: '25', bagCount: '', bagPrinting: '', notes: '' };
 
 export default function CreateExportOrder() {
-  const { exportOrders, addExportOrder, addToast, customersList: customers, productsList: products, exportCostCategories, refreshFromApi, bagTypesList } = useApp();
+  const { addToast, customersList: customers, productsList: products, exportCostCategories, refreshFromApi, bagTypesList } = useApp();
   const navigate = useNavigate();
 
   const [form, setForm] = useState({

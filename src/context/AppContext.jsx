@@ -109,32 +109,6 @@ export function AppProvider({ children }) {
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000);
   }, []);
 
-  // === Legacy mutation helpers (optimistic local + invalidate query cache) ===
-  // These are kept for backward compatibility with pages not yet migrated to useMutation
-
-  const updateExportOrder = useCallback((orderId, updates) => {
-    // Invalidate cache so next render gets fresh data
-    qc.invalidateQueries({ queryKey: queryKeys.orders.all });
-  }, [qc]);
-
-  const addExportOrder = useCallback((order) => {
-    qc.invalidateQueries({ queryKey: queryKeys.orders.all });
-    qc.invalidateQueries({ queryKey: queryKeys.dashboard });
-  }, [qc]);
-
-  const addActivityToOrder = useCallback((orderId, activity) => {
-    qc.invalidateQueries({ queryKey: queryKeys.orders.detail(orderId) });
-  }, [qc]);
-
-  const updateMillingBatch = useCallback((batchId, updates) => {
-    qc.invalidateQueries({ queryKey: queryKeys.batches.all });
-  }, [qc]);
-
-  const addMillingBatch = useCallback((batch) => {
-    qc.invalidateQueries({ queryKey: queryKeys.batches.all });
-    qc.invalidateQueries({ queryKey: queryKeys.dashboard });
-  }, [qc]);
-
   const dismissAlert = useCallback((alertId) => {
     setAlerts(prev => prev.filter(a => a.id !== alertId));
   }, []);
@@ -169,11 +143,6 @@ export function AppProvider({ children }) {
 
   const addBagType = useCallback((bagType) => {
     qc.invalidateQueries({ queryKey: ['bag-types'] });
-  }, [qc]);
-
-  const updateDocumentStatus = useCallback((orderId, docKey, newStatus) => {
-    qc.invalidateQueries({ queryKey: queryKeys.orders.detail(orderId) });
-    qc.invalidateQueries({ queryKey: queryKeys.documents.all });
   }, [qc]);
 
   const getOrdersByStatus = useCallback((status) => {
@@ -225,9 +194,9 @@ export function AppProvider({ children }) {
 
   return (
     <AppContext.Provider value={{
-      exportOrders, updateExportOrder, addExportOrder, addActivityToOrder,
+      exportOrders,
       apiConnected: true, dataLoading, refreshFromApi,
-      millingBatches, updateMillingBatch, addMillingBatch,
+      millingBatches,
       inventory: inventoryData,
       alerts, setAlerts, dismissAlert, addAlert,
       toasts, addToast,
@@ -242,7 +211,6 @@ export function AppProvider({ children }) {
       companyProfileData,
       exportCostCategories, addExportCostCategory,
       millingCostCategories, addMillingCostCategory,
-      updateDocumentStatus,
       getOrdersByStatus, getOrderPipelineCounts,
       emailSettings, updateEmailSettings,
     }}>
