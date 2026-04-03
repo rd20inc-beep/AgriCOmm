@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
   Package,
@@ -19,8 +20,11 @@ import {
   Truck,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import api from '../api/client';
-import { transformBatch } from '../api/transforms';
+import { queryKeys } from '../api/queryClient';
+import {
+  useMillingBatch, useSaveQuality, useRecordYield,
+  useAddBatchCost, useAddVehicle, useUpdateMillingBatch,
+} from '../api/queries';
 import Modal from '../components/Modal';
 import StatusBadge from '../components/StatusBadge';
 import MillingCostSheet from '../components/MillingCostSheet';
@@ -50,7 +54,25 @@ function formatPKR(value) {
 
 export default function MillingBatchDetail() {
   const { id } = useParams();
-  const { millingBatches, updateMillingBatch, addToast, millingCostCategories, companyProfileData, refreshFromApi } = useApp();
+  const qc = useQueryClient();
+  const { addToast, millingCostCategories, companyProfileData } = useApp();
+
+  // Fetch batch detail via TanStack Query
+  const { data: batch, isLoading: batchLoading } = useMillingBatch(id);
+
+  // Mutations
+  const saveQualityMut = useSaveQuality();
+  const recordYieldMut = useRecordYield();
+  const addCostMut = useAddBatchCost();
+  const addVehicleMut = useAddVehicle();
+  const updateBatchMut = useUpdateMillingBatch();
+
+  const invalidateBatch = () => {
+    qc.invalidateQueries({ queryKey: queryKeys.batches.detail(id) });
+    qc.invalidateQueries({ queryKey: queryKeys.batches.all });
+    qc.invalidateQueries({ queryKey: queryKeys.inventory.all });
+  };
+
   const [activeTab, setActiveTab] = useState('overview');
   const [showAnalysisModal, setShowAnalysisModal] = useState(false);
   const [analysisModalType, setAnalysisModalType] = useState('arrival');
@@ -70,55 +92,14 @@ export default function MillingBatchDetail() {
     vehicleNo: '', driverName: '', driverPhone: '', weightMT: '', arrivalDate: new Date().toISOString().split('T')[0], notes: '',
   });
 
-  // Try list first, then fetch detail from API for full data (vehicles, costs, quality)
-  const listBatch = millingBatches.find((b) => b.id === id || String(b.dbId) === id);
-  const [apiBatch, setApiBatch] = useState(null);
-  const [batchLoading, setBatchLoading] = useState(false);
-
-  function fetchBatchDetail() {
-    setBatchLoading(true);
-    api.get(`/api/milling/batches/${id}`)
-      .then(res => {
-        const raw = res?.data?.batch || res?.data;
-        if (raw) {
-          // Merge sub-data into batch object
-          raw.vehicleArrivals = (res?.data?.vehicles || []).map(v => ({
-            id: v.id,
-            vehicleNo: v.vehicle_no,
-            driverName: v.driver_name,
-            driverPhone: v.driver_phone,
-            weightMT: parseFloat(v.weight_mt) || 0,
-            arrivalDate: v.arrival_date,
-            notes: v.notes,
-          }));
-          // Convert costs array to keyed object: [{category, amount}] -> {category: amount}
-          const costsArr = res?.data?.costs || [];
-          if (Array.isArray(costsArr) && costsArr.length > 0) {
-            const costsObj = {};
-            costsArr.forEach(c => { costsObj[c.category] = parseFloat(c.amount) || 0; });
-            raw.costs = costsObj;
-          }
-          // Map quality samples to sampleAnalysis/arrivalAnalysis
-          const quality = res?.data?.quality || {};
-          const pf = (v) => v != null ? parseFloat(v) || null : null; // parse to number
-          if (quality.sample && quality.sample.length > 0) {
-            const s = quality.sample[0];
-            raw.sampleAnalysis = { moisture: pf(s.moisture), broken: pf(s.broken), chalky: pf(s.chalky), foreignMatter: pf(s.foreign_matter), discoloration: pf(s.discoloration), purity: pf(s.purity), grainSize: pf(s.grain_size), pricePerKg: pf(s.price_per_kg), pricePerMT: pf(s.price_per_mt) };
-          }
-          if (quality.arrival && quality.arrival.length > 0) {
-            const a = quality.arrival[0];
-            raw.arrivalAnalysis = { moisture: pf(a.moisture), broken: pf(a.broken), chalky: pf(a.chalky), foreignMatter: pf(a.foreign_matter), discoloration: pf(a.discoloration), purity: pf(a.purity), grainSize: pf(a.grain_size), pricePerKg: pf(a.price_per_kg), pricePerMT: pf(a.price_per_mt) };
-          }
-          setApiBatch(transformBatch(raw));
-        }
-      })
-      .catch(err => { console.error('[MillingDetail] fetchBatchDetail failed:', err.message); })
-      .finally(() => setBatchLoading(false));
+  if (batchLoading && !batch) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20">
+        <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-4" />
+        <p className="text-gray-500 text-sm">Loading batch...</p>
+      </div>
+    );
   }
-
-  useEffect(() => { fetchBatchDetail(); }, [id]);
-
-  const batch = apiBatch || listBatch;
 
   if (!batch) {
     return (
@@ -204,6 +185,8 @@ export default function MillingBatchDetail() {
     setShowAnalysisModal(true);
   }
 
+  const batchId = batch?.dbId || batch?.id;
+
   async function handleAnalysisSubmit(e) {
     e.preventDefault();
     const formValues = {};
@@ -211,88 +194,51 @@ export default function MillingBatchDetail() {
       const v = parseFloat(analysisForm[p.key]);
       if (!isNaN(v)) formValues[p.key] = v;
     });
-    // Add price fields
     const pkgPrice = parseFloat(analysisForm.pricePerKg);
     const pmtPrice = parseFloat(analysisForm.pricePerMT);
     if (!isNaN(pkgPrice)) formValues.pricePerKg = pkgPrice;
     if (!isNaN(pmtPrice)) formValues.pricePerMT = pmtPrice;
 
-    if (analysisModalType === 'sample') {
-      // Saving sample analysis
-      const updates = { sampleAnalysis: formValues };
-      // Recalculate variance if arrival analysis already exists
-      if (safeArrival) {
-        const diffs = qualityParams
-          .filter(p => formValues[p.key] != null && safeArrival?.[p.key] != null)
-          .map(p => Math.abs(safeArrival?.[p.key] - formValues[p.key]));
-        const variance = diffs.length > 0 ? parseFloat(Math.max(...diffs).toFixed(2)) : 0;
-        updates.variancePct = variance;
-        updates.varianceStatus = variance > 1.0 ? 'Pending' : 'Approved';
-      }
-      updateMillingBatch(batch.id, updates);
-      addToast(`Sample analysis saved for ${batch.id}`);
-      try {
-        await api.post(`/api/milling/batches/${batch.dbId || batch.id}/quality`, {
-          analysis_type: analysisModalType,
-          moisture: formValues.moisture,
-          broken: formValues.broken,
-          chalky: formValues.chalky,
-          foreign_matter: formValues.foreignMatter,
-          discoloration: formValues.discoloration,
-          purity: formValues.purity,
-          grain_size: formValues.grainSize,
-          price_per_kg: formValues.pricePerKg,
-          price_per_mt: formValues.pricePerMT,
-        });
-        fetchBatchDetail(); refreshFromApi('batches'); refreshFromApi('inventory');
-      } catch (err) { console.warn('API quality save failed:', err.message); }
-      setShowAnalysisModal(false);
-      return;
-    }
-
-    // Saving arrival analysis
-    let calculatedVariance = 0;
-    if (safeSample) {
-      const diffs = qualityParams
-        .filter(p => formValues[p.key] != null && safeSample?.[p.key] != null)
-        .map(p => Math.abs((parseFloat(formValues[p.key]) || 0) - (parseFloat(safeSample?.[p.key]) || 0)));
-      calculatedVariance = diffs.length > 0 ? parseFloat(Math.max(...diffs).toFixed(2)) : 0;
-    }
-
-    const batchUpdates = {
-      arrivalAnalysis: formValues,
-      variancePct: calculatedVariance,
-      varianceStatus: calculatedVariance > 1.0 ? 'Pending' : 'Approved',
+    const qualityPayload = {
+      analysis_type: analysisModalType,
+      moisture: formValues.moisture,
+      broken: formValues.broken,
+      chalky: formValues.chalky,
+      foreign_matter: formValues.foreignMatter,
+      discoloration: formValues.discoloration,
+      purity: formValues.purity,
+      grain_size: formValues.grainSize,
+      price_per_kg: formValues.pricePerKg,
+      price_per_mt: formValues.pricePerMT,
     };
 
-    // Auto-populate raw rice cost from agreed price × raw qty
-    if (formValues.pricePerMT && batch.rawQtyMT > 0) {
-      const rawRiceCost = Math.round(formValues.pricePerMT * batch.rawQtyMT);
-      batchUpdates.costs = { ...(batch.costs || {}), rawRice: rawRiceCost };
-      addToast(`Raw rice cost auto-updated: Rs ${rawRiceCost.toLocaleString()} (${batch.rawQtyMT} MT × Rs ${Math.round(formValues.pricePerMT).toLocaleString()}/MT)`, 'info');
-    }
-
-    updateMillingBatch(batch.id, batchUpdates);
-
-    addToast(`Arrival analysis saved for ${batch.id}`);
-    if (calculatedVariance > 1.0) {
-      addToast('Variance exceeds threshold - manager approval required', 'warning');
-    }
     try {
-      await api.post(`/api/milling/batches/${batch.dbId || batch.id}/quality`, {
-        analysis_type: analysisModalType,
-        moisture: formValues.moisture,
-        broken: formValues.broken,
-        chalky: formValues.chalky,
-        foreign_matter: formValues.foreignMatter,
-        discoloration: formValues.discoloration,
-        purity: formValues.purity,
-        grain_size: formValues.grainSize,
-        price_per_kg: formValues.pricePerKg,
-        price_per_mt: formValues.pricePerMT,
-      });
-      fetchBatchDetail(); refreshFromApi('batches'); refreshFromApi('inventory');
-    } catch (err) { console.warn('API quality save failed:', err.message); }
+      await saveQualityMut.mutateAsync({ id: batchId, data: qualityPayload });
+
+      if (analysisModalType === 'sample') {
+        addToast(`Sample analysis saved for ${batch.id}`);
+      } else {
+        addToast(`Arrival analysis saved for ${batch.id}`);
+        // Check variance
+        if (safeSample) {
+          const diffs = qualityParams
+            .filter(p => formValues[p.key] != null && safeSample?.[p.key] != null)
+            .map(p => Math.abs((parseFloat(formValues[p.key]) || 0) - (parseFloat(safeSample?.[p.key]) || 0)));
+          const calculatedVariance = diffs.length > 0 ? parseFloat(Math.max(...diffs).toFixed(2)) : 0;
+          if (calculatedVariance > 1.0) {
+            addToast('Variance exceeds threshold - manager approval required', 'warning');
+          }
+        }
+        // Auto-populate raw rice cost from agreed price
+        if (formValues.pricePerMT && batch.rawQtyMT > 0) {
+          const rawRiceCost = Math.round(formValues.pricePerMT * batch.rawQtyMT);
+          addToast(`Raw rice cost auto-updated: Rs ${rawRiceCost.toLocaleString()} (${batch.rawQtyMT} MT × Rs ${Math.round(formValues.pricePerMT).toLocaleString()}/MT)`, 'info');
+        }
+      }
+      invalidateBatch();
+    } catch (err) {
+      addToast(`Failed to save ${analysisModalType} analysis: ${err.message}`, 'error');
+    }
     setShowAnalysisModal(false);
   }
 
@@ -317,36 +263,24 @@ export default function MillingBatchDetail() {
     const totalOutput = finished + broken + bran + husk + wastage;
     const yieldPct = batch.rawQtyMT > 0 ? parseFloat(((finished / batch.rawQtyMT) * 100).toFixed(1)) : 0;
 
-    const updates = {
-      actualFinishedMT: finished,
-      brokenMT: broken,
-      branMT: bran,
-      huskMT: husk,
-      wastageMT: wastage,
-      yieldPct,
-    };
-
-    // If all output recorded and total is close to raw input, mark as completed
-    if (totalOutput > 0 && batch.status === 'In Progress') {
-      updates.status = 'Completed';
-      updates.completedAt = new Date().toISOString().split('T')[0];
-    }
-
-    updateMillingBatch(batch.id, updates);
-    addToast(`Yield output recorded for ${batch.id} — Yield: ${yieldPct}%`);
-    if (totalOutput > 0 && batch.status === 'In Progress') {
-      addToast(`Batch ${batch.id} marked as Completed`, 'info');
-    }
     try {
-      await api.post(`/api/milling/batches/${batch.dbId || batch.id}/yield`, {
-        actual_finished_mt: finished,
-        broken_mt: broken,
-        bran_mt: bran,
-        husk_mt: husk,
-        wastage_mt: wastage,
+      await recordYieldMut.mutateAsync({
+        id: batchId,
+        data: {
+          actual_finished_mt: finished,
+          broken_mt: broken,
+          bran_mt: bran,
+          husk_mt: husk,
+          wastage_mt: wastage,
+        },
       });
-      fetchBatchDetail(); refreshFromApi('batches'); refreshFromApi('inventory');
-    } catch (err) { console.warn('API yield save failed:', err.message); }
+      addToast(`Yield output recorded for ${batch.id} — Yield: ${yieldPct}%`);
+      if (totalOutput > 0 && batch.status === 'In Progress') {
+        addToast(`Batch ${batch.id} marked as Completed`, 'info');
+      }
+    } catch (err) {
+      addToast(`Failed to record yield: ${err.message}`, 'error');
+    }
     setShowYieldModal(false);
   }
 
@@ -357,30 +291,18 @@ export default function MillingBatchDetail() {
       return;
     }
     try {
-      const res = await api.post(`/api/milling/batches/${batch.dbId || batch.id}/vehicles`, {
-        vehicle_no: vehicleForm.vehicleNo.trim(),
-        driver_name: vehicleForm.driverName.trim(),
-        driver_phone: vehicleForm.driverPhone.trim(),
-        weight_mt: parseFloat(vehicleForm.weightMT) || 0,
-        arrival_date: vehicleForm.arrivalDate,
-        notes: vehicleForm.notes.trim(),
+      await addVehicleMut.mutateAsync({
+        id: batchId,
+        data: {
+          vehicle_no: vehicleForm.vehicleNo.trim(),
+          driver_name: vehicleForm.driverName.trim(),
+          driver_phone: vehicleForm.driverPhone.trim(),
+          weight_mt: parseFloat(vehicleForm.weightMT) || 0,
+          arrival_date: vehicleForm.arrivalDate,
+          notes: vehicleForm.notes.trim(),
+        },
       });
       addToast(`Vehicle ${vehicleForm.vehicleNo} added`);
-
-      // Immediately add to local state so it shows without waiting for refetch
-      const newVehicle = {
-        id: res?.data?.vehicle?.id || Date.now(),
-        vehicleNo: vehicleForm.vehicleNo.trim(),
-        driverName: vehicleForm.driverName.trim(),
-        driverPhone: vehicleForm.driverPhone.trim(),
-        weightMT: parseFloat(vehicleForm.weightMT) || 0,
-        arrivalDate: vehicleForm.arrivalDate,
-        notes: vehicleForm.notes.trim(),
-      };
-      setApiBatch(prev => {
-        if (!prev) return prev;
-        return { ...prev, vehicleArrivals: [...(prev.vehicleArrivals || []), newVehicle] };
-      });
     } catch (err) {
       addToast(err.message || 'Failed to add vehicle', 'error');
     }
@@ -403,41 +325,57 @@ export default function MillingBatchDetail() {
     millingCostCategories.forEach(cat => {
       costs[cat.key] = parseFloat(costForm[cat.key]) || 0;
     });
-    updateMillingBatch(batch.id, { costs });
-    const total = Object.values(costs).reduce((s, v) => s + v, 0);
-    addToast(`Costs updated for ${batch.id} — Total: Rs ${Math.round(total).toLocaleString()}`);
     try {
       for (const cat of millingCostCategories) {
         if (costs[cat.key] > 0) {
-          await api.post(`/api/milling/batches/${batch.dbId || batch.id}/costs`, {
-            category: cat.key,
-            amount: costs[cat.key],
+          await addCostMut.mutateAsync({
+            id: batchId,
+            data: { category: cat.key, amount: costs[cat.key] },
           });
         }
       }
-      fetchBatchDetail(); refreshFromApi('batches'); refreshFromApi('inventory');
-    } catch (err) { console.warn('API cost save failed:', err.message); }
+      const total = Object.values(costs).reduce((s, v) => s + v, 0);
+      addToast(`Costs updated for ${batch.id} — Total: Rs ${Math.round(total).toLocaleString()}`);
+    } catch (err) {
+      addToast(`Failed to save costs: ${err.message}`, 'error');
+    }
     setShowCostModal(false);
   }
 
-  function handleApproveAnyway() {
-    updateMillingBatch(batch.id, { varianceStatus: 'Approved' });
-    addToast(`Quality variance approved for ${batch.id}`);
+  async function handleApproveAnyway() {
+    try {
+      await updateBatchMut.mutateAsync({ id: batchId, data: { variance_status: 'Approved' } });
+      addToast(`Quality variance approved for ${batch.id}`);
+    } catch (err) {
+      addToast(`Failed to approve variance: ${err.message}`, 'error');
+    }
   }
 
-  function handleHoldLot() {
-    updateMillingBatch(batch.id, { varianceStatus: 'On Hold', status: 'On Hold' });
-    addToast(`Batch ${batch.id} placed on hold`, 'warning');
+  async function handleHoldLot() {
+    try {
+      await updateBatchMut.mutateAsync({ id: batchId, data: { variance_status: 'On Hold', status: 'On Hold' } });
+      addToast(`Batch ${batch.id} placed on hold`, 'warning');
+    } catch (err) {
+      addToast(`Failed to hold batch: ${err.message}`, 'error');
+    }
   }
 
-  function handleRenegotiation() {
-    updateMillingBatch(batch.id, { varianceStatus: 'Renegotiation' });
-    addToast(`Renegotiation initiated for ${batch.id}`, 'warning');
+  async function handleRenegotiation() {
+    try {
+      await updateBatchMut.mutateAsync({ id: batchId, data: { variance_status: 'Renegotiation' } });
+      addToast(`Renegotiation initiated for ${batch.id}`, 'warning');
+    } catch (err) {
+      addToast(`Failed to initiate renegotiation: ${err.message}`, 'error');
+    }
   }
 
-  function handleReject() {
-    updateMillingBatch(batch.id, { varianceStatus: 'Rejected', status: 'Cancelled' });
-    addToast(`Batch ${batch.id} rejected`, 'error');
+  async function handleReject() {
+    try {
+      await updateBatchMut.mutateAsync({ id: batchId, data: { variance_status: 'Rejected', status: 'Cancelled' } });
+      addToast(`Batch ${batch.id} rejected`, 'error');
+    } catch (err) {
+      addToast(`Failed to reject batch: ${err.message}`, 'error');
+    }
   }
 
   return (

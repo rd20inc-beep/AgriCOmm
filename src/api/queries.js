@@ -211,8 +211,32 @@ export function useMillingBatch(id) {
     queryKey: queryKeys.batches.detail(id),
     queryFn: async () => {
       const res = await millingApi.getBatch(id);
-      const batch = unwrap(res, 'batch') || res?.data;
-      return transformBatch(batch);
+      const raw = unwrap(res, 'batch') || res?.data;
+      if (raw) {
+        // Merge sub-data (vehicles, costs, quality) into batch object
+        raw.vehicleArrivals = (res?.data?.vehicles || []).map(v => ({
+          id: v.id, vehicleNo: v.vehicle_no, driverName: v.driver_name,
+          driverPhone: v.driver_phone, weightMT: parseFloat(v.weight_mt) || 0,
+          arrivalDate: v.arrival_date, notes: v.notes,
+        }));
+        const costsArr = res?.data?.costs || [];
+        if (Array.isArray(costsArr) && costsArr.length > 0) {
+          const costsObj = {};
+          costsArr.forEach(c => { costsObj[c.category] = parseFloat(c.amount) || 0; });
+          raw.costs = costsObj;
+        }
+        const quality = res?.data?.quality || {};
+        const pf = (v) => v != null ? parseFloat(v) || null : null;
+        if (quality.sample?.length > 0) {
+          const s = quality.sample[0];
+          raw.sampleAnalysis = { moisture: pf(s.moisture), broken: pf(s.broken), chalky: pf(s.chalky), foreignMatter: pf(s.foreign_matter), discoloration: pf(s.discoloration), purity: pf(s.purity), grainSize: pf(s.grain_size), pricePerKg: pf(s.price_per_kg), pricePerMT: pf(s.price_per_mt) };
+        }
+        if (quality.arrival?.length > 0) {
+          const a = quality.arrival[0];
+          raw.arrivalAnalysis = { moisture: pf(a.moisture), broken: pf(a.broken), chalky: pf(a.chalky), foreignMatter: pf(a.foreign_matter), discoloration: pf(a.discoloration), purity: pf(a.purity), grainSize: pf(a.grain_size), pricePerKg: pf(a.price_per_kg), pricePerMT: pf(a.price_per_mt) };
+        }
+      }
+      return transformBatch(raw);
     },
     enabled: !!id,
   });
