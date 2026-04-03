@@ -1,10 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
-import api from '../api/client';
 import { API_BASE } from '../api/client';
-import { transformOrder, transformBankAccount } from '../api/transforms';
+import api from '../api/client';
+import { queryKeys } from '../api/queryClient';
+import {
+  useExportOrder, useConfirmAdvance, useConfirmBalance,
+  useUpdateOrderStatus, useAddOrderCost, useUpdateShipment,
+  useStartDocs, useUploadDocument, useApproveDocument,
+} from '../api/queries';
+import { useCreateMillingBatch } from '../api/queries';
 import {
   OrderHeader,
   WorkflowTimeline,
@@ -31,31 +38,27 @@ import {
 export default function ExportOrderDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const { token } = useAuth();
-  const { exportOrders, millingBatches, updateExportOrder, addActivityToOrder, addToast, addMillingBatch, exportCostCategories, companyProfileData, bankAccountsList: contextBankAccounts, customersList, suppliersList, refreshFromApi } = useApp();
+  const { millingBatches, addToast, exportCostCategories, companyProfileData, bankAccountsList, customersList, suppliersList } = useApp();
 
-  // Fetch bank accounts and suppliers directly via API — bypasses TanStack Query caching issues
-  const [bankAccountsList, setBankAccountsList] = useState([]);
-  const [localSuppliers, setLocalSuppliers] = useState([]);
-  useEffect(() => {
-    api.get('/api/finance/bank-accounts')
-      .then(res => {
-        const raw = res?.data?.accounts || res?.data?.bank_accounts || [];
-        setBankAccountsList(raw.map(transformBankAccount));
-      })
-      .catch(() => { if (contextBankAccounts?.length > 0) setBankAccountsList(contextBankAccounts); });
-    api.get('/api/suppliers?limit=500')
-      .then(res => {
-        const raw = res?.data?.suppliers || [];
-        setLocalSuppliers(raw.map(s => ({ id: s.id, name: s.name })));
-      })
-      .catch(() => { if (suppliersList?.length > 0) setLocalSuppliers(suppliersList); });
-  }, []);
+  // Fetch order detail via TanStack Query
+  const { data: order, isLoading: orderLoading } = useExportOrder(id);
+
+  // Mutations
+  const confirmAdvanceMut = useConfirmAdvance();
+  const confirmBalanceMut = useConfirmBalance();
+  const updateStatusMut = useUpdateOrderStatus();
+  const addCostMut = useAddOrderCost();
+  const updateShipmentMut = useUpdateShipment();
+  const startDocsMut = useStartDocs();
+  const uploadDocMut = useUploadDocument();
+  const approveDocMut = useApproveDocument();
+  const createMillingMut = useCreateMillingBatch();
+
   const [activeTab, setActiveTab] = useState('overview');
   const [showActions, setShowActions] = useState(false);
   const [showInvoicePreview, setShowInvoicePreview] = useState(false);
-  const [apiOrder, setApiOrder] = useState(null);
-  const [apiLoading, setApiLoading] = useState(false);
 
   // Modal visibility states
   const [showAdvanceModal, setShowAdvanceModal] = useState(false);
@@ -103,60 +106,27 @@ export default function ExportOrderDetail() {
   const [expenseAmount, setExpenseAmount] = useState('');
   const [expenseNotes, setExpenseNotes] = useState('');
 
-  // Try to find in pre-loaded list first, fallback to API fetch
-  const listOrder = exportOrders.find(o => o.id === id || String(o.dbId) === id);
+  // Helper to invalidate order + related caches after mutations
+  const invalidateOrder = () => {
+    qc.invalidateQueries({ queryKey: queryKeys.orders.detail(id) });
+    qc.invalidateQueries({ queryKey: queryKeys.orders.all });
+  };
+  const invalidateFinance = () => {
+    qc.invalidateQueries({ queryKey: queryKeys.receivables.all });
+    qc.invalidateQueries({ queryKey: queryKeys.financeOverview });
+  };
 
-  // Fetch full order detail from API (costs, documents, status history)
-  async function fetchOrderDetail() {
-    setApiLoading(true);
-    try {
-      const res = await api.get(`/api/export-orders/${id}`);
-      const raw = res?.data?.order;
-      if (raw) {
-        raw.costs = res.data.costs || raw.costs;
-        raw.documents = res.data.documents || raw.documents;
-        raw.status_history = res.data.statusHistory || raw.status_history;
-        raw.packingLines = res.data.packingLines || [];
-        raw.purchaseLots = res.data.purchaseLots || [];
-        setApiOrder(transformOrder(raw));
-      }
-    } catch (_) {
-      // Leave the existing order visible if the refetch fails.
-    } finally {
-      setApiLoading(false);
-    }
-  }
-
-  // Fetch on mount and when ID changes
-  React.useEffect(() => {
-    if (id) fetchOrderDetail();
-  }, [id]);
-
-  React.useEffect(() => {
-    if (!id || !token || token === 'mock-prototype-token') {
-      return undefined;
-    }
+  // SSE real-time updates — invalidate query cache on server push
+  useEffect(() => {
+    if (!id || !token || token === 'mock-prototype-token') return undefined;
 
     const source = new EventSource(`${API_BASE}/api/streams/export-orders/${id}?token=${encodeURIComponent(token)}`);
-    source.onmessage = () => {
-      fetchOrderDetail();
-      refreshFromApi('orders');
-    };
+    source.onmessage = () => invalidateOrder();
     source.onerror = () => {};
+    return () => source.close();
+  }, [id, token]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    return () => {
-      source.close();
-    };
-  }, [id, token]);
-
-  React.useEffect(() => {
-    // no-op
-  }, [id, listOrder, apiOrder, apiLoading]);
-
-  // Prefer apiOrder (fresh from detail endpoint) over listOrder (from cached list)
-  const order = apiOrder || listOrder;
-
-  if (apiLoading && !order) {
+  if (orderLoading && !order) {
     return (
       <div className="flex flex-col items-center justify-center py-20">
         <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-4" />
@@ -264,6 +234,8 @@ export default function ExportOrderDetail() {
 
   // --- Handlers ---
 
+  const orderId = order?.dbId || order?.id;
+
   const handleConfirmAdvance = async () => {
     const amount = parseFloat(advanceAmount) || 0;
     if (!amount || amount <= 0) {
@@ -272,30 +244,24 @@ export default function ExportOrderDetail() {
     }
     setShowAdvanceModal(false);
     try {
-      const res = await api.post(`/api/export-orders/${order.dbId || order.id}/confirm-advance`, {
-        amount,
-        payment_date: advanceDate,
-        payment_method: advanceMethod,
-        bank_account_id: advanceBankAccountId || null,
-        bank_reference: advanceBankRef,
-        notes: advanceNotes,
+      const res = await confirmAdvanceMut.mutateAsync({
+        id: orderId,
+        data: {
+          amount,
+          payment_date: advanceDate,
+          payment_method: advanceMethod,
+          bank_account_id: advanceBankAccountId || null,
+          bank_reference: advanceBankRef,
+          notes: advanceNotes,
+        },
       });
-      // Sync local state immediately from the API response
       const updated = res?.data?.order;
-      if (updated) {
-        setApiOrder(transformOrder(updated));
-        addToast(`Advance of $${amount.toLocaleString()} confirmed — status: ${updated.status}`);
-      } else {
-        addToast('Advance payment confirmed successfully');
-      }
-      // Re-fetch full detail (costs, docs, history) to get the complete picture
-      await fetchOrderDetail();
-      refreshFromApi('orders');
-      refreshFromApi('finance');
+      addToast(updated
+        ? `Advance of $${amount.toLocaleString()} confirmed — status: ${updated.status}`
+        : 'Advance payment confirmed successfully');
+      invalidateFinance();
     } catch (err) {
-      const msg = err?.message || err?.data?.message || 'Failed to confirm advance payment';
-      console.error('Advance confirm failed:', msg);
-      addToast(msg, 'error');
+      addToast(err?.message || 'Failed to confirm advance payment', 'error');
     }
   };
 
@@ -307,24 +273,22 @@ export default function ExportOrderDetail() {
     }
     setShowBalanceModal(false);
     try {
-      const res = await api.post(`/api/export-orders/${order.dbId || order.id}/confirm-balance`, {
-        amount,
-        payment_date: balanceDate,
-        payment_method: balanceMethod,
-        bank_account_id: balanceBankAccountId || null,
-        bank_reference: balanceBankRef,
-        notes: balanceNotes,
+      const res = await confirmBalanceMut.mutateAsync({
+        id: orderId,
+        data: {
+          amount,
+          payment_date: balanceDate,
+          payment_method: balanceMethod,
+          bank_account_id: balanceBankAccountId || null,
+          bank_reference: balanceBankRef,
+          notes: balanceNotes,
+        },
       });
       const updated = res?.data?.order;
-      if (updated) {
-        setApiOrder(transformOrder(updated));
-        addToast(`Balance of $${amount.toLocaleString()} confirmed — status: ${updated.status}`);
-      } else {
-        addToast('Balance payment confirmed');
-      }
-      await fetchOrderDetail();
-      refreshFromApi('orders');
-      refreshFromApi('finance');
+      addToast(updated
+        ? `Balance of $${amount.toLocaleString()} confirmed — status: ${updated.status}`
+        : 'Balance payment confirmed');
+      invalidateFinance();
     } catch (err) {
       addToast(err.message || 'Failed to confirm balance', 'error');
     }
@@ -332,15 +296,10 @@ export default function ExportOrderDetail() {
 
   const handleStartDocsPreparation = async () => {
     try {
-      const res = await api.post(`/api/export-orders/${order.dbId || order.id}/start-docs`, {
-        notes: 'Document preparation started from order detail',
+      await startDocsMut.mutateAsync({
+        id: orderId,
+        data: { notes: 'Document preparation started from order detail' },
       });
-      const updatedOrder = res?.data?.order;
-      if (updatedOrder) {
-        setApiOrder(transformOrder(updatedOrder));
-      }
-      await fetchOrderDetail();
-      refreshFromApi('orders');
       addToast('Document preparation started');
     } catch (err) {
       addToast(`Failed to start document preparation: ${err.message || 'Server error'}`, 'error');
@@ -360,25 +319,15 @@ export default function ExportOrderDetail() {
     }
 
     try {
-      const res = await api.post('/api/milling/batches', {
+      const res = await createMillingMut.mutateAsync({
         supplier_id: supplierId,
-        linked_export_order_id: order.dbId || parseInt(order.id) || null,
+        linked_export_order_id: orderId || null,
         raw_qty_mt: rawQty,
         planned_finished_mt: order.qtyMT,
       });
-
       const batchNo = res?.data?.batch?.batch_no || res?.data?.batch?.id || 'New';
-      const updatedOrder = res?.data?.order;
-      if (updatedOrder) {
-        setApiOrder(transformOrder(updatedOrder));
-      }
-
-      // Refresh UI immediately
-      await fetchOrderDetail();
-      addMillingBatch({});
-      refreshFromApi('orders');
-
       addToast(`Milling batch ${batchNo} created successfully`);
+      invalidateOrder();
       setShowMillingModal(false);
       setMillingRawQty('');
       setMillingSupplier('');
@@ -404,31 +353,27 @@ export default function ExportOrderDetail() {
         }))
         .filter((container) => container.container_no);
 
-      const res = await api.put(`/api/export-orders/${order.dbId || order.id}/shipment`, {
-        vessel_name: shipVessel || null,
-        booking_no: shipBooking || null,
-        container_no: containers[0]?.container_no || null,
-        containers,
-        bl_number: shipBL || null,
-        shipping_line: shipLine || null,
-        etd: shipETD || null,
-        atd: shipATD || null,
-        eta: shipETA || null,
-        ata: shipATA || null,
-        destination_port: shipDestPort || null,
-        notes: shipATA
-          ? `Shipment arrived on ${shipATA}`
-          : shipATD
-          ? `Shipment departed on ${shipATD}`
-          : null,
+      const res = await updateShipmentMut.mutateAsync({
+        id: orderId,
+        data: {
+          vessel_name: shipVessel || null,
+          booking_no: shipBooking || null,
+          container_no: containers[0]?.container_no || null,
+          containers,
+          bl_number: shipBL || null,
+          shipping_line: shipLine || null,
+          etd: shipETD || null,
+          atd: shipATD || null,
+          eta: shipETA || null,
+          ata: shipATA || null,
+          destination_port: shipDestPort || null,
+          notes: shipATA
+            ? `Shipment arrived on ${shipATA}`
+            : shipATD
+            ? `Shipment departed on ${shipATD}`
+            : null,
+        },
       });
-
-      const updatedOrder = res?.data?.order;
-      if (updatedOrder) {
-        setApiOrder(transformOrder(updatedOrder));
-      }
-      await fetchOrderDetail();
-      refreshFromApi('orders');
       addToast(res?.data?.transitioned_to ? `Shipment updated: ${res.data.transitioned_to}` : 'Shipment details updated');
     } catch (err) {
       addToast(`Failed to update shipment: ${err.message || 'Server error'}`, 'error');
@@ -438,13 +383,11 @@ export default function ExportOrderDetail() {
 
   const handlePutOnHold = async () => {
     try {
-      await api.put(`/api/export-orders/${order.dbId || order.id}/status`, {
-        status: 'Cancelled',
-        notes: 'Order cancelled / put on hold',
+      await updateStatusMut.mutateAsync({
+        id: orderId,
+        data: { status: 'Cancelled', notes: 'Order cancelled / put on hold' },
       });
       addToast('Order has been cancelled');
-      fetchOrderDetail();
-      refreshFromApi('orders');
     } catch (err) {
       addToast(`Failed to cancel order: ${err.message || 'Server error'}`, 'error');
     }
@@ -458,14 +401,11 @@ export default function ExportOrderDetail() {
       return;
     }
     try {
-      await api.post(`/api/export-orders/${order.dbId || order.id}/costs`, {
-        category: expenseCategory,
-        amount,
-        notes: expenseNotes,
+      await addCostMut.mutateAsync({
+        id: orderId,
+        data: { category: expenseCategory, amount, notes: expenseNotes },
       });
       addToast(`$${amount.toLocaleString()} added to ${expenseCategory}`);
-      await fetchOrderDetail();
-      refreshFromApi('orders');
     } catch (err) {
       addToast(err.message || 'Failed to add expense', 'error');
     }
@@ -473,57 +413,42 @@ export default function ExportOrderDetail() {
   };
 
   const handleDocumentUpload = async (docKey, file) => {
-    try {
-      if (file) {
-        // Upload the actual file first
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('doc_type', docKey);
-        formData.append('linked_type', 'export_order');
-        formData.append('linked_id', order.dbId || order.id);
-        try {
-          await api.upload('/api/documents/upload', formData);
-        } catch (uploadErr) {
-          console.warn('File upload to document store failed:', uploadErr.message);
-          // Continue with status update even if file store fails
-        }
+    if (file) {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('doc_type', docKey);
+      formData.append('linked_type', 'export_order');
+      formData.append('linked_id', orderId);
+      try {
+        await api.upload('/api/documents/upload', formData);
+      } catch (uploadErr) {
+        addToast(`File upload failed: ${uploadErr.message}. Marking document status anyway.`, 'warning');
       }
-      // Mark the document as uploaded in the order
-      await api.post(`/api/export-orders/${order.dbId || order.id}/documents/upload`, {
-        doc_type: docKey,
-        file_path: file ? file.name : null,
+    }
+    try {
+      await uploadDocMut.mutateAsync({
+        id: orderId,
+        data: { doc_type: docKey, file_path: file ? file.name : null },
       });
-      await fetchOrderDetail();
-      refreshFromApi('orders');
       addToast(`${documentLabels[docKey] || docKey} uploaded${file ? ` (${file.name})` : ''}`);
     } catch (err) {
-      console.warn('API doc upload failed:', err.message);
-      addToast(`Failed to upload ${documentLabels[docKey] || docKey}`, 'error');
+      addToast(`Failed to upload ${documentLabels[docKey] || docKey}: ${err.message}`, 'error');
     }
   };
 
   const handleDocumentApprove = async (docKey) => {
     try {
-      await api.post(`/api/export-orders/${order.dbId || order.id}/documents/approve`, {
-        doc_type: docKey,
-        uploaded_by: 'Export Manager',
+      await approveDocMut.mutateAsync({
+        id: orderId,
+        data: { doc_type: docKey, uploaded_by: 'Export Manager' },
       });
-      await fetchOrderDetail();
-      refreshFromApi('orders');
       addToast(`${documentLabels[docKey]} approved`);
     } catch (err) {
-      console.warn('API doc approve failed:', err.message);
-      addToast(`Failed to approve ${documentLabels[docKey]}`, 'error');
+      addToast(`Failed to approve ${documentLabels[docKey]}: ${err.message}`, 'error');
       return;
     }
-    // GAP 26: BL Draft approved → balance collection reminder
     if (docKey === 'blDraft' && order.balanceReceived < order.balanceExpected) {
       addToast('Balance collection reminder sent to customer', 'info');
-      addActivityToOrder(order.id, {
-        date: today(),
-        action: 'BL Draft approved — balance collection reminder triggered',
-        by: 'System',
-      });
     }
   };
 
@@ -543,21 +468,16 @@ export default function ExportOrderDetail() {
 
   const handleCloseOrder = async () => {
     try {
-      await api.put(`/api/export-orders/${order.dbId || order.id}/status`, {
-        status: 'Closed',
-        notes: 'Order closed with full settlement',
+      await updateStatusMut.mutateAsync({
+        id: orderId,
+        data: { status: 'Closed', notes: 'Order closed with full settlement' },
       });
       addToast(`Order ${order.id} has been closed`);
-      fetchOrderDetail();
-      refreshFromApi('orders');
     } catch (err) {
       addToast(`Failed to close order: ${err.message || 'Server error'}`, 'error');
     }
     setShowActions(false);
   };
-
-  // Resolve suppliers list for milling modal
-  const resolvedSuppliers = localSuppliers.length > 0 ? localSuppliers : suppliersList || [];
 
   return (
     <div className="space-y-6">
@@ -619,7 +539,7 @@ export default function ExportOrderDetail() {
             onConfirmAdvance={openAdvanceModal}
             onRequestBalance={openBalanceModal}
             onAddExpense={openExpenseModal}
-            onAddReceivable={() => { addToast('Receivable recorded'); addActivityToOrder(order.id, { date: today(), action: 'Receivable added to financials', by: 'Export Manager' }); }}
+            onAddReceivable={() => addToast('Receivable recorded')}
             canConfirmAdvance={canConfirmAdvance}
             canRequestBalance={canRequestBalance}
             exportCostCategories={exportCostCategories}
@@ -632,10 +552,10 @@ export default function ExportOrderDetail() {
             purchaseLots={order.purchaseLots || []}
             onCreateMilling={openMillingModal}
             onStartDocsPreparation={handleStartDocsPreparation}
-            onLinkExternalPurchase={() => { addToast('External purchase linked'); addActivityToOrder(order.id, { date: today(), action: 'External purchase linked to order', by: 'Export Manager' }); }}
+            onLinkExternalPurchase={() => addToast('External purchase linked')}
             canCreateMilling={canCreateMilling}
             canStartDocs={canStartDocs}
-            onStockAllocated={() => { fetchOrderDetail(); addToast('Stock allocated successfully'); refreshFromApi('orders'); }}
+            onStockAllocated={() => { invalidateOrder(); addToast('Stock allocated successfully'); }}
           />
         )}
         {activeTab === 'documents' && (
@@ -700,7 +620,7 @@ export default function ExportOrderDetail() {
         setMillingRawQty={setMillingRawQty}
         millingSupplier={millingSupplier}
         setMillingSupplier={setMillingSupplier}
-        suppliersList={resolvedSuppliers}
+        suppliersList={suppliersList || []}
         onConfirm={handleCreateMilling}
       />
 

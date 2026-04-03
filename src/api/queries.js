@@ -51,8 +51,15 @@ export function useExportOrder(id) {
     queryKey: queryKeys.orders.detail(id),
     queryFn: async () => {
       const res = await exportOrdersApi.get(id);
-      const order = unwrap(res, 'order') || res?.data;
-      return transformOrder(order);
+      const raw = unwrap(res, 'order') || res?.data;
+      if (raw) {
+        raw.costs = res?.data?.costs || raw.costs;
+        raw.documents = res?.data?.documents || raw.documents;
+        raw.status_history = res?.data?.statusHistory || raw.status_history;
+        raw.packingLines = res?.data?.packingLines || [];
+        raw.purchaseLots = res?.data?.purchaseLots || [];
+      }
+      return transformOrder(raw);
     },
     enabled: !!id,
   });
@@ -123,6 +130,64 @@ export function useUpdateOrderStatus() {
       qc.invalidateQueries({ queryKey: queryKeys.orders.all });
       qc.invalidateQueries({ queryKey: queryKeys.orders.detail(id) });
       qc.invalidateQueries({ queryKey: queryKeys.dashboard });
+    },
+  });
+}
+
+export function useUpdateShipment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => exportOrdersApi.updateShipment(id, data),
+    onSuccess: (_, { id }) => {
+      qc.invalidateQueries({ queryKey: queryKeys.orders.all });
+      qc.invalidateQueries({ queryKey: queryKeys.orders.detail(id) });
+    },
+  });
+}
+
+export function useStartDocs() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => exportOrdersApi.startDocs(id, data),
+    onSuccess: (_, { id }) => {
+      qc.invalidateQueries({ queryKey: queryKeys.orders.all });
+      qc.invalidateQueries({ queryKey: queryKeys.orders.detail(id) });
+      qc.invalidateQueries({ queryKey: queryKeys.dashboard });
+    },
+  });
+}
+
+export function useUploadDocument() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => exportOrdersApi.uploadDocument(id, data),
+    onSuccess: (_, { id }) => {
+      qc.invalidateQueries({ queryKey: queryKeys.orders.detail(id) });
+      qc.invalidateQueries({ queryKey: queryKeys.documents.all });
+    },
+  });
+}
+
+export function useApproveDocument() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => exportOrdersApi.approveDocument(id, data),
+    onSuccess: (_, { id }) => {
+      qc.invalidateQueries({ queryKey: queryKeys.orders.all });
+      qc.invalidateQueries({ queryKey: queryKeys.orders.detail(id) });
+      qc.invalidateQueries({ queryKey: queryKeys.documents.all });
+    },
+  });
+}
+
+export function useAllocateStock() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => exportOrdersApi.allocateStock(id, data),
+    onSuccess: (_, { id }) => {
+      qc.invalidateQueries({ queryKey: queryKeys.orders.detail(id) });
+      qc.invalidateQueries({ queryKey: queryKeys.inventory.all });
+      qc.invalidateQueries({ queryKey: ['lot-inventory'] });
     },
   });
 }

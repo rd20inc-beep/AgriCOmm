@@ -74,7 +74,7 @@ export default function Profitability() {
   useEffect(() => {
     api.get('/api/local-sales', { limit: 500 })
       .then(res => setLocalSalesData(res?.data?.sales || []))
-      .catch(() => {});
+      .catch(() => { /* local sales data is supplementary — page still works without it */ });
   }, []);
 
   // Compute profitability trend from real data

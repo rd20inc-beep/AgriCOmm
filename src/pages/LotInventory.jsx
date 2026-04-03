@@ -230,7 +230,7 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
       import('../api/client').then(({ default: api }) => {
         api.get('/api/lot-inventory/sources')
           .then(res => setSources(res?.data?.sources || []))
-          .catch(() => {})
+          .catch(() => { /* non-critical — sources dropdown will be empty */ })
           .finally(() => setSourcesLoading(false));
       });
     }

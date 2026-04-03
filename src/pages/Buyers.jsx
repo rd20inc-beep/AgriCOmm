@@ -29,7 +29,7 @@ export default function Buyers() {
   function loadBuyers() {
     api.get('/api/customers', { limit: 500 })
       .then(res => setBuyers(res?.data?.customers || []))
-      .catch(() => {})
+      .catch(err => addToast(`Failed to load buyers: ${err.message}`, 'error'))
       .finally(() => setLoading(false));
   }
 

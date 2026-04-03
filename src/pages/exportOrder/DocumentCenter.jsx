@@ -394,7 +394,7 @@ export default function DocumentCenter({ order }) {
     const oid = order.dbId || order.id;
     api.get(`/api/export-orders/${oid}/documents/available`)
       .then(res => setAvailableDocs(res?.data?.documents || []))
-      .catch(() => {})
+      .catch(() => { /* document list unavailable — will show empty state */ })
       .finally(() => setLoading(false));
   }, [order?.dbId, order?.id, order?.status]);
 

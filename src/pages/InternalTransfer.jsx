@@ -17,14 +17,14 @@ export default function InternalTransfer() {
       .then(res => {
         setTransfers(res?.data?.transfers || []);
       })
-      .catch(() => {})
+      .catch(err => addToast(`Failed to load transfers: ${err.message}`, 'error'))
       .finally(() => setLoading(false));
   }, []);
 
   function reload() {
     api.get('/api/finance/internal-transfers', { limit: 100 })
       .then(res => setTransfers(res?.data?.transfers || []))
-      .catch(() => {});
+      .catch(err => addToast(`Failed to reload transfers: ${err.message}`, 'error'));
   }
 
   const completedBatches = millingBatches.filter(b => b.status === 'Completed');

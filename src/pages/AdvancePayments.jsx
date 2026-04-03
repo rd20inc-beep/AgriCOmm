@@ -31,7 +31,7 @@ export default function AdvancePayments() {
   function loadAdvances() {
     api.get('/api/advances', { limit: 200 })
       .then(res => setAdvances(res?.data?.advances || []))
-      .catch(() => {})
+      .catch(err => addToast(`Failed to load advances: ${err.message}`, 'error'))
       .finally(() => setLoading(false));
   }
 
@@ -42,7 +42,7 @@ export default function AdvancePayments() {
         const raw = res?.data?.accounts || res?.data?.bank_accounts || [];
         setBankAccounts(raw.map(transformBankAccount));
       })
-      .catch(() => {});
+      .catch(err => addToast(`Failed to load bank accounts: ${err.message}`, 'error'));
   }, []);
 
   const filtered = useMemo(() => {

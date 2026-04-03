@@ -87,7 +87,7 @@ export default function LotDetail() {
           arrivalAnalysis: arrival ? { moisture: pf(arrival.moisture), broken: pf(arrival.broken), pricePerMT: pf(arrival.price_per_mt) } : null,
         });
       })
-      .catch(() => {});
+      .catch(() => { /* batch detail is supplementary context */ });
   }, [lot.batchRef, lot.id]);
 
   const txnMutation = useRecordLotTransaction();
