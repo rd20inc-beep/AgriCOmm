@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   Landmark,
   Wallet,
@@ -13,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useBankTransactions, useCashForecast } from '../../api/queries';
+import { accountingApi } from '../../api/services';
 
 function formatPKR(value) {
   if (value === 0) return 'Rs 0';
@@ -30,6 +32,7 @@ function formatAmount(value, currency) {
 }
 
 export default function CashBank() {
+  const qc = useQueryClient();
   const { bankAccountsList: rawBankAccounts, addToast } = useApp();
   const bankAccounts = Array.isArray(rawBankAccounts) ? rawBankAccounts : [];
   const { data: rawBankTransactions = [] } = useBankTransactions();
@@ -77,8 +80,25 @@ export default function CashBank() {
     { label: 'Pending Payments', value: formatUSD(kpis.pendingPayments), icon: CreditCard, color: 'text-purple-600', bg: 'bg-purple-50' },
   ];
 
-  function handleMatch(txn) {
-    addToast(`Transaction matched: ${txn.bankRef} - ${txn.counterparty}`);
+  async function handleMatch(txn) {
+    try {
+      // Create a reconciliation and match the transaction
+      const reconRes = await accountingApi.createReconciliation({
+        bank_account_id: txn.bankAccountId || txn.bank_account_id,
+        period_start: txn.date || txn.transactionDate,
+        period_end: txn.date || txn.transactionDate,
+      });
+      const reconId = reconRes?.data?.reconciliation?.id || reconRes?.data?.id;
+      if (reconId) {
+        await accountingApi.matchReconciliation(reconId, {
+          transaction_ids: [txn.id],
+        });
+      }
+      qc.invalidateQueries({ queryKey: ['bank-transactions'] });
+      addToast(`Transaction matched: ${txn.bankRef || txn.bank_ref} - ${txn.counterparty}`);
+    } catch (err) {
+      addToast(`Failed to match transaction: ${err.message}`, 'error');
+    }
   }
 
   return (

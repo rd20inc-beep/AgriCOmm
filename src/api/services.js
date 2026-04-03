@@ -75,6 +75,8 @@ export const accountingApi = {
   balanceSheet: (params) => api.get('/api/accounting/statements/balance-sheet', params),
   fxRates: () => api.get('/api/accounting/fx-rates'),
   setFxRate: (data) => api.post('/api/accounting/fx-rates', data),
+  createReconciliation: (data) => api.post('/api/accounting/reconciliations', data),
+  matchReconciliation: (id, data) => api.put(`/api/accounting/reconciliations/${id}/match`, data),
 };
 
 // ========== PROCUREMENT ==========
