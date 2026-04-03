@@ -1,6 +1,9 @@
 import { useState, useMemo } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { FileText, Search, Filter, Eye, CheckCircle, RotateCcw, FileCheck } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { queryKeys } from '../api/queryClient';
+import { exportOrdersApi } from '../api/services';
 import StatusBadge from '../components/StatusBadge';
 import Modal from '../components/Modal';
 import ProformaInvoice from '../components/ProformaInvoice';
@@ -20,7 +23,8 @@ const docTypeKeys = Object.keys(docTypeLabels);
 const allStatuses = ['All', 'Pending', 'Draft Uploaded', 'Approved', 'Under Review', 'Rejected'];
 
 export default function Documents() {
-  const { exportOrders, addToast, updateDocumentStatus, addActivityToOrder, companyProfileData } = useApp();
+  const qc = useQueryClient();
+  const { exportOrders, addToast, companyProfileData } = useApp();
 
   const getOrderForDoc = (orderId) => exportOrders.find(o => o.id === orderId);
 
@@ -64,24 +68,38 @@ export default function Documents() {
     return ['All', ...Array.from(new Set(exportOrders.map(o => o.id)))];
   }, [exportOrders]);
 
-  const handleMarkApproved = (doc) => {
-    updateDocumentStatus(doc.orderId, doc.docKey, 'Approved');
-    addActivityToOrder(doc.orderId, {
-      date: new Date().toISOString().split('T')[0],
-      action: `${doc.docType} marked as Approved`,
-      by: 'Admin',
-    });
-    addToast(`${doc.docType} for ${doc.orderId} marked as Approved`, 'success');
+  const handleMarkApproved = async (doc) => {
+    const order = getOrderForDoc(doc.orderId);
+    const oid = order?.dbId || doc.orderId;
+    try {
+      await exportOrdersApi.approveDocument(oid, {
+        doc_type: doc.docKey,
+        uploaded_by: 'Admin',
+      });
+      qc.invalidateQueries({ queryKey: queryKeys.orders.all });
+      qc.invalidateQueries({ queryKey: queryKeys.orders.detail(oid) });
+      qc.invalidateQueries({ queryKey: queryKeys.documents.all });
+      addToast(`${doc.docType} for ${doc.orderId} marked as Approved`, 'success');
+    } catch (err) {
+      addToast(`Failed to approve ${doc.docType}: ${err.message}`, 'error');
+    }
   };
 
-  const handleRequestRevision = (doc) => {
-    updateDocumentStatus(doc.orderId, doc.docKey, 'Under Review');
-    addActivityToOrder(doc.orderId, {
-      date: new Date().toISOString().split('T')[0],
-      action: `Revision requested for ${doc.docType}`,
-      by: 'Admin',
-    });
-    addToast(`Revision requested for ${doc.docType} on ${doc.orderId}`, 'info');
+  const handleRequestRevision = async (doc) => {
+    const order = getOrderForDoc(doc.orderId);
+    const oid = order?.dbId || doc.orderId;
+    try {
+      await exportOrdersApi.uploadDocument(oid, {
+        doc_type: doc.docKey,
+        status: 'Under Review',
+      });
+      qc.invalidateQueries({ queryKey: queryKeys.orders.all });
+      qc.invalidateQueries({ queryKey: queryKeys.orders.detail(oid) });
+      qc.invalidateQueries({ queryKey: queryKeys.documents.all });
+      addToast(`Revision requested for ${doc.docType} on ${doc.orderId}`, 'info');
+    } catch (err) {
+      addToast(`Failed to request revision: ${err.message}`, 'error');
+    }
   };
 
   const totalDocs = allDocuments.length;

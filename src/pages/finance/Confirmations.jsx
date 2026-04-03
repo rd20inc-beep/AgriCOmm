@@ -42,7 +42,10 @@ export default function FinanceConfirmations() {
         const raw = res?.data?.accounts || res?.data?.bank_accounts || [];
         setBankAccountsList(raw.map(transformBankAccount));
       })
-      .catch(() => { if (contextBankAccounts?.length > 0) setBankAccountsList(contextBankAccounts); });
+      .catch(() => {
+        // Fall back to cached context bank accounts if API fails
+        if (contextBankAccounts?.length > 0) setBankAccountsList(contextBankAccounts);
+      });
   }, []);
 
   const [modalOpen, setModalOpen] = useState(false);
