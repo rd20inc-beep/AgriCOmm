@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { FileText, Download, Printer, Eye, CheckCircle, Clock, Loader2 } from 'lucide-react';
 import api from '../../api/client';
+import { useApp } from '../../context/AppContext';
 import Modal from '../../components/Modal';
 
 // ─── Document Templates ───
@@ -382,6 +383,7 @@ function renderDocument(doc) {
 // ─── Document Center Component ───
 
 export default function DocumentCenter({ order }) {
+  const { addToast } = useApp();
   const [availableDocs, setAvailableDocs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [previewDoc, setPreviewDoc] = useState(null);
@@ -410,7 +412,7 @@ export default function DocumentCenter({ order }) {
         setPreviewHtml(renderDocument(doc));
       }
     } catch (err) {
-      console.error('Doc generation failed:', err);
+      addToast(`Failed to generate document: ${err.message}`, 'error');
     } finally {
       setGenerating(null);
     }
