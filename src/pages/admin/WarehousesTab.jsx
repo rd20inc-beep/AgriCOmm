@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { Warehouse, Plus } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { useCreateWarehouse } from '../../api/queries';
 import Modal from '../../components/Modal';
 
 export default function WarehousesTab() {
-  const { warehousesList, addWarehouse, addToast } = useApp();
+  const { warehousesList, addToast } = useApp();
+  const createWarehouseMut = useCreateWarehouse();
 
   const [warehouseModal, setWarehouseModal] = useState(false);
 
@@ -19,19 +21,23 @@ export default function WarehousesTab() {
     setWhType('raw');
   };
 
-  const handleSaveWarehouse = () => {
+  const handleSaveWarehouse = async () => {
     if (!whName.trim()) {
       addToast('Warehouse name is required', 'error');
       return;
     }
-    addWarehouse({
-      name: whName.trim(),
-      entity: whEntity,
-      type: whType,
-    });
-    addToast(`Warehouse "${whName.trim()}" added successfully`, 'success');
-    resetWarehouseForm();
-    setWarehouseModal(false);
+    try {
+      await createWarehouseMut.mutateAsync({
+        name: whName.trim(),
+        entity: whEntity,
+        type: whType,
+      });
+      addToast(`Warehouse "${whName.trim()}" added successfully`, 'success');
+      resetWarehouseForm();
+      setWarehouseModal(false);
+    } catch (err) {
+      addToast(`Failed to create warehouse: ${err.message}`, 'error');
+    }
   };
 
   return (

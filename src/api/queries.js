@@ -559,6 +559,56 @@ export function useBagTypes(opts = {}) {
   });
 }
 
+// ===================== MASTER DATA MUTATIONS =====================
+
+export function useCreateCustomer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => adminApi.createCustomer(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.customers.all }),
+  });
+}
+
+export function useCreateSupplier() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => adminApi.createSupplier(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.suppliers.all }),
+  });
+}
+
+export function useCreateProduct() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => adminApi.createProduct(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.products.all }),
+  });
+}
+
+export function useCreateWarehouse() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => adminApi.createWarehouse(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.warehouses.all }),
+  });
+}
+
+export function useCreateBagType() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => adminApi.createBagType(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['bag-types'] }),
+  });
+}
+
+export function useCreateBankAccount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => adminApi.createBankAccount(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.bankAccounts.all }),
+  });
+}
+
 // ===================== DASHBOARD =====================
 
 export function useDashboard() {

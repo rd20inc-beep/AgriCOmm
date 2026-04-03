@@ -125,26 +125,6 @@ export function AppProvider({ children }) {
     setEmailSettings(prev => ({ ...prev, ...newEmailSettings }));
   }, []);
 
-  const addCustomer = useCallback((customer) => {
-    qc.invalidateQueries({ queryKey: queryKeys.customers.all });
-  }, [qc]);
-
-  const addSupplier = useCallback((supplier) => {
-    qc.invalidateQueries({ queryKey: queryKeys.suppliers.all });
-  }, [qc]);
-
-  const addProduct = useCallback((product) => {
-    qc.invalidateQueries({ queryKey: queryKeys.products.all });
-  }, [qc]);
-
-  const addWarehouse = useCallback((warehouse) => {
-    qc.invalidateQueries({ queryKey: queryKeys.warehouses.all });
-  }, [qc]);
-
-  const addBagType = useCallback((bagType) => {
-    qc.invalidateQueries({ queryKey: ['bag-types'] });
-  }, [qc]);
-
   const getOrdersByStatus = useCallback((status) => {
     return exportOrders.filter(o => o.status === status);
   }, [exportOrders]);
@@ -202,11 +182,11 @@ export function AppProvider({ children }) {
       toasts, addToast,
       entityFilter, setEntityFilter,
       settings, updateSettings,
-      customersList, addCustomer,
-      suppliersList, addSupplier,
-      productsList, addProduct,
-      warehousesList, addWarehouse,
-      bagTypesList, addBagType,
+      customersList,
+      suppliersList,
+      productsList,
+      warehousesList,
+      bagTypesList,
       bankAccountsList,
       companyProfileData,
       exportCostCategories, addExportCostCategory,

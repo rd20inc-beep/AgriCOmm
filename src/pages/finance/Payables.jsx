@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { usePayables } from '../../api/queries';
+import { useQueryClient } from '@tanstack/react-query';
+import { usePayables, useRecordPayment } from '../../api/queries';
+import { queryKeys } from '../../api/queryClient';
 import { useApp } from '../../context/AppContext';
 import StatusBadge from '../../components/StatusBadge';
 import {
@@ -90,7 +92,9 @@ function matchesTab(p, tab) {
 
 export default function Payables() {
   const { addToast } = useApp();
+  const qc = useQueryClient();
   const { data: payables = [], isLoading } = usePayables();
+  const recordPaymentMut = useRecordPayment();
   const [activeTab, setActiveTab] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
   const [entityFilter, setEntityFilter] = useState('All');
@@ -139,18 +143,46 @@ export default function Payables() {
     setSelectedPay(null);
   }
 
-  function handleRecordPayment() {
-    addToast(`Payment recorded for ${selectedPay.id} - ${selectedPay.supplierName || selectedPay.supplier || '—'}`, 'success');
+  async function handleRecordPayment() {
+    try {
+      await recordPaymentMut.mutateAsync({
+        type: 'payment',
+        amount: parseFloat(selectedPay.outstanding) || 0,
+        currency: selectedPay.currency || 'PKR',
+        payment_method: 'bank_transfer',
+        payment_date: new Date().toISOString().split('T')[0],
+        linked_payable_id: selectedPay.dbId || selectedPay.id,
+        notes: `Full payment for ${selectedPay.category} - ${selectedPay.supplierName || selectedPay.supplier || ''}`,
+      });
+      addToast(`Payment recorded for ${selectedPay.id} - ${selectedPay.supplierName || selectedPay.supplier || '—'}`, 'success');
+    } catch (err) {
+      addToast(`Failed to record payment: ${err.message}`, 'error');
+    }
     closeDrawer();
   }
 
-  function handleMarkPartial() {
-    addToast(`${selectedPay.id} marked as partial payment`, 'info');
+  async function handleMarkPartial() {
+    const partialAmount = Math.round((parseFloat(selectedPay.outstanding) || 0) / 2);
+    try {
+      await recordPaymentMut.mutateAsync({
+        type: 'payment',
+        amount: partialAmount,
+        currency: selectedPay.currency || 'PKR',
+        payment_method: 'bank_transfer',
+        payment_date: new Date().toISOString().split('T')[0],
+        linked_payable_id: selectedPay.dbId || selectedPay.id,
+        notes: `Partial payment for ${selectedPay.category}`,
+      });
+      addToast(`Partial payment of ${partialAmount} recorded for ${selectedPay.id}`, 'info');
+    } catch (err) {
+      addToast(`Failed to record partial payment: ${err.message}`, 'error');
+    }
     closeDrawer();
   }
 
   function handleFlagDispute() {
-    addToast(`Dispute flagged for ${selectedPay.id}`, 'warning');
+    // No dedicated dispute endpoint yet — toast only
+    addToast(`Dispute flagged for ${selectedPay.id} (will be tracked in next release)`, 'warning');
     closeDrawer();
   }
 

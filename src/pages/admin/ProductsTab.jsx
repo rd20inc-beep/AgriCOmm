@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { Package, Plus } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { useCreateProduct } from '../../api/queries';
 import Modal from '../../components/Modal';
 
 export default function ProductsTab() {
-  const { productsList, addProduct, addToast } = useApp();
+  const { productsList, addToast } = useApp();
+  const createProductMut = useCreateProduct();
 
   const [productModal, setProductModal] = useState(false);
 
@@ -21,20 +23,24 @@ export default function ProductsTab() {
     setProdGrade('Premium');
   };
 
-  const handleSaveProduct = () => {
+  const handleSaveProduct = async () => {
     if (!prodName.trim()) {
       addToast('Product name is required', 'error');
       return;
     }
-    addProduct({
-      name: prodName.trim(),
-      code: prodCode.trim(),
-      brokenPct: prodBrokenPct,
-      grade: prodGrade,
-    });
-    addToast(`Product "${prodName.trim()}" added successfully`, 'success');
-    resetProductForm();
-    setProductModal(false);
+    try {
+      await createProductMut.mutateAsync({
+        name: prodName.trim(),
+        code: prodCode.trim(),
+        broken_pct: prodBrokenPct,
+        grade: prodGrade,
+      });
+      addToast(`Product "${prodName.trim()}" added successfully`, 'success');
+      resetProductForm();
+      setProductModal(false);
+    } catch (err) {
+      addToast(`Failed to create product: ${err.message}`, 'error');
+    }
   };
 
   return (

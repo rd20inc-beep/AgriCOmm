@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { Users, Plus, Globe, Mail, Phone } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { useCreateCustomer } from '../../api/queries';
 import Modal from '../../components/Modal';
 
 export default function CustomersTab() {
-  const { customersList, addCustomer, addToast } = useApp();
+  const { customersList, addToast } = useApp();
+  const createCustomerMut = useCreateCustomer();
 
   const [customerModal, setCustomerModal] = useState(false);
 
@@ -23,21 +25,25 @@ export default function CustomersTab() {
     setCustPhone('');
   };
 
-  const handleSaveCustomer = () => {
+  const handleSaveCustomer = async () => {
     if (!custName.trim()) {
       addToast('Customer name is required', 'error');
       return;
     }
-    addCustomer({
-      name: custName.trim(),
-      country: custCountry.trim(),
-      contact: custContact.trim(),
-      email: custEmail.trim(),
-      phone: custPhone.trim(),
-    });
-    addToast(`Customer "${custName.trim()}" added successfully`, 'success');
-    resetCustomerForm();
-    setCustomerModal(false);
+    try {
+      await createCustomerMut.mutateAsync({
+        name: custName.trim(),
+        country: custCountry.trim(),
+        contact_person: custContact.trim(),
+        email: custEmail.trim(),
+        phone: custPhone.trim(),
+      });
+      addToast(`Customer "${custName.trim()}" added successfully`, 'success');
+      resetCustomerForm();
+      setCustomerModal(false);
+    } catch (err) {
+      addToast(`Failed to create customer: ${err.message}`, 'error');
+    }
   };
 
   return (

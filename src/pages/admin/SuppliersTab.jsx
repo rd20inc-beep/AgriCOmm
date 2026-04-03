@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { Truck, Plus, MapPin } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { useCreateSupplier } from '../../api/queries';
 import Modal from '../../components/Modal';
 
 export default function SuppliersTab() {
-  const { suppliersList, addSupplier, addToast } = useApp();
+  const { suppliersList, addToast } = useApp();
+  const createSupplierMut = useCreateSupplier();
 
   const [supplierModal, setSupplierModal] = useState(false);
 
@@ -21,20 +23,24 @@ export default function SuppliersTab() {
     setSuppContact('');
   };
 
-  const handleSaveSupplier = () => {
+  const handleSaveSupplier = async () => {
     if (!suppName.trim()) {
       addToast('Supplier name is required', 'error');
       return;
     }
-    addSupplier({
-      name: suppName.trim(),
-      type: suppType,
-      location: suppLocation.trim(),
-      contact: suppContact.trim(),
-    });
-    addToast(`Supplier "${suppName.trim()}" added successfully`, 'success');
-    resetSupplierForm();
-    setSupplierModal(false);
+    try {
+      await createSupplierMut.mutateAsync({
+        name: suppName.trim(),
+        type: suppType,
+        location: suppLocation.trim(),
+        contact_person: suppContact.trim(),
+      });
+      addToast(`Supplier "${suppName.trim()}" added successfully`, 'success');
+      resetSupplierForm();
+      setSupplierModal(false);
+    } catch (err) {
+      addToast(`Failed to create supplier: ${err.message}`, 'error');
+    }
   };
 
   return (
