@@ -1413,7 +1413,7 @@ const exportOrderController = {
           reference_module: 'export_order',
           reference_id: order.id,
           transaction_date: trx.fn.now(),
-          notes: notes || `Allocated ${qtyMT} MT to ${order.order_no}`,
+          remarks: notes || `Allocated ${qtyMT} MT to ${order.order_no}`,
           created_by: req.user?.id,
         });
 
