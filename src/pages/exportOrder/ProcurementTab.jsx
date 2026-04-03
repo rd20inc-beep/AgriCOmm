@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import StatusBadge from '../../components/StatusBadge';
 import api from '../../api/client';
+import { exportOrdersApi } from '../../api/services';
 import { Package, Plus, ExternalLink, Warehouse, Scale, FileText } from 'lucide-react';
 
 export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], onCreateMilling, onStartDocsPreparation, onLinkExternalPurchase, canCreateMilling, canStartDocs, onStockAllocated }) {
@@ -68,7 +69,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
 
     setAllocatingLotId(lot.id);
     try {
-      await api.post(`/api/export-orders/${order.dbId || order.id}/allocate-stock`, {
+      await exportOrdersApi.allocateStock(order.dbId || order.id, {
         lot_id: lot.id,
         qty_mt: qtyToAllocate,
         notes: `Quick allocation: ${qtyToAllocate.toFixed(2)} MT from ${lot.lot_no}`,

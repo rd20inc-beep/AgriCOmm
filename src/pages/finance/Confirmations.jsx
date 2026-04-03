@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   DollarSign,
@@ -15,8 +15,7 @@ import {
   Mail,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import api from '../../api/client';
-import { transformBankAccount } from '../../api/transforms';
+import { useConfirmAdvance, useConfirmBalance, useUpdateOrderStatus } from '../../api/queries';
 import Modal from '../../components/Modal';
 import StatusBadge from '../../components/StatusBadge';
 import EmailComposer from '../../components/EmailComposer';
@@ -32,21 +31,11 @@ function daysSince(dateStr) {
 }
 
 export default function FinanceConfirmations() {
-  const { exportOrders, addToast, settings, bankAccountsList: contextBankAccounts, refreshFromApi } = useApp();
+  const { exportOrders, addToast, settings, bankAccountsList } = useApp();
 
-  // Fetch bank accounts directly — bypasses TanStack Query caching issues
-  const [bankAccountsList, setBankAccountsList] = useState([]);
-  useEffect(() => {
-    api.get('/api/finance/bank-accounts')
-      .then(res => {
-        const raw = res?.data?.accounts || res?.data?.bank_accounts || [];
-        setBankAccountsList(raw.map(transformBankAccount));
-      })
-      .catch(() => {
-        // Fall back to cached context bank accounts if API fails
-        if (contextBankAccounts?.length > 0) setBankAccountsList(contextBankAccounts);
-      });
-  }, []);
+  const confirmAdvanceMut = useConfirmAdvance();
+  const confirmBalanceMut = useConfirmBalance();
+  const updateStatusMut = useUpdateOrderStatus();
 
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
@@ -159,23 +148,22 @@ export default function FinanceConfirmations() {
       return;
     }
 
-    // Backend-first: call API, then update UI only on success
-    try {
-      const endpoint = milestoneType === 'advance' ? 'confirm-advance' : 'confirm-balance';
-      await api.post(`/api/export-orders/${selectedOrder.dbId || selectedOrder.id}/${endpoint}`, {
-        amount,
-        payment_date: formData.date,
-        payment_method: formData.paymentMethod,
-        bank_account_id: formData.bankAccountId || null,
-        bank_reference: formData.bankReference,
-        notes: formData.notes,
-      });
+    const orderId = selectedOrder.dbId || selectedOrder.id;
+    const payload = {
+      amount,
+      payment_date: formData.date,
+      payment_method: formData.paymentMethod,
+      bank_account_id: formData.bankAccountId || null,
+      bank_reference: formData.bankReference,
+      notes: formData.notes,
+    };
 
+    try {
+      const mut = milestoneType === 'advance' ? confirmAdvanceMut : confirmBalanceMut;
+      await mut.mutateAsync({ id: orderId, data: payload });
       const label = milestoneType === 'advance' ? 'Advance' : 'Balance';
       addToast(`${label} payment of ${formatCurrency(amount)} confirmed for ${selectedOrder.id}`);
       recordPayment(selectedOrder.id, milestoneType, amount, formData.paymentMethod, formData.bankReference, formData.bankAccount);
-      refreshFromApi('orders');
-      refreshFromApi('finance');
     } catch (err) {
       addToast(`Payment confirmation failed: ${err.message || 'Server error'}`, 'error');
     }
@@ -190,23 +178,22 @@ export default function FinanceConfirmations() {
       return;
     }
 
-    // Backend-first: same endpoint handles partial payments (doesn't auto-transition if not full)
-    try {
-      const endpoint = milestoneType === 'advance' ? 'confirm-advance' : 'confirm-balance';
-      await api.post(`/api/export-orders/${selectedOrder.dbId || selectedOrder.id}/${endpoint}`, {
-        amount,
-        payment_date: formData.date,
-        payment_method: formData.paymentMethod,
-        bank_account_id: formData.bankAccountId || null,
-        bank_reference: formData.bankReference,
-        notes: formData.notes,
-      });
+    const orderId = selectedOrder.dbId || selectedOrder.id;
+    const payload = {
+      amount,
+      payment_date: formData.date,
+      payment_method: formData.paymentMethod,
+      bank_account_id: formData.bankAccountId || null,
+      bank_reference: formData.bankReference,
+      notes: formData.notes,
+    };
 
+    try {
+      const mut = milestoneType === 'advance' ? confirmAdvanceMut : confirmBalanceMut;
+      await mut.mutateAsync({ id: orderId, data: payload });
       const label = milestoneType === 'advance' ? 'advance' : 'balance';
       addToast(`Partial ${label} of ${formatCurrency(amount)} recorded for ${selectedOrder.id}`, 'warning');
       recordPayment(selectedOrder.id, milestoneType + ' (partial)', amount, formData.paymentMethod, formData.bankReference, formData.bankAccount);
-      refreshFromApi('orders');
-      refreshFromApi('finance');
     } catch (err) {
       addToast(`Partial payment failed: ${err.message || 'Server error'}`, 'error');
     }
@@ -216,12 +203,11 @@ export default function FinanceConfirmations() {
   async function handlePutOnHold() {
     if (!selectedOrder) return;
     try {
-      await api.put(`/api/export-orders/${selectedOrder.dbId || selectedOrder.id}/status`, {
-        status: 'Cancelled',
-        notes: `Put on hold by Finance. Reason: ${formData.notes || 'Payment issue'}`,
+      await updateStatusMut.mutateAsync({
+        id: selectedOrder.dbId || selectedOrder.id,
+        data: { status: 'Cancelled', notes: `Put on hold by Finance. Reason: ${formData.notes || 'Payment issue'}` },
       });
       addToast(`${selectedOrder.id} cancelled due to payment hold`, 'warning');
-      refreshFromApi('orders');
     } catch (err) {
       addToast(`Failed to update order: ${err.message || 'Server error'}`, 'error');
     }

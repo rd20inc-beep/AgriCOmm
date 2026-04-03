@@ -1,7 +1,7 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { Users, Plus, Search, Globe, Mail, Phone, Edit2, Trash2, DollarSign, CreditCard, Building2 } from 'lucide-react';
-import api from '../api/client';
 import { useApp } from '../context/AppContext';
+import { useBuyers, useSaveBuyer, useDeleteBuyer } from '../api/queries';
 import Modal from '../components/Modal';
 import StatusBadge from '../components/StatusBadge';
 
@@ -15,9 +15,11 @@ const emptyForm = {
 };
 
 export default function Buyers() {
-  const { addToast, refreshFromApi } = useApp();
-  const [buyers, setBuyers] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { addToast } = useApp();
+  const { data: buyers = [], isLoading: loading } = useBuyers();
+  const saveBuyerMut = useSaveBuyer();
+  const deleteBuyerMut = useDeleteBuyer();
+
   const [search, setSearch] = useState('');
   const [countryFilter, setCountryFilter] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
@@ -25,15 +27,6 @@ export default function Buyers() {
   const [form, setForm] = useState({ ...emptyForm });
   const [saving, setSaving] = useState(false);
   const [showBankFields, setShowBankFields] = useState(false);
-
-  function loadBuyers() {
-    api.get('/api/customers', { limit: 500 })
-      .then(res => setBuyers(res?.data?.customers || []))
-      .catch(err => addToast(`Failed to load buyers: ${err.message}`, 'error'))
-      .finally(() => setLoading(false));
-  }
-
-  useEffect(() => { loadBuyers(); }, []);
 
   const countries = useMemo(() => {
     const set = new Set(buyers.map(b => b.country).filter(Boolean));
@@ -87,16 +80,9 @@ export default function Buyers() {
     }
     setSaving(true);
     try {
-      if (editId) {
-        await api.put(`/api/customers/${editId}`, form);
-        addToast(`Buyer "${form.name}" updated`);
-      } else {
-        await api.post('/api/customers', form);
-        addToast(`Buyer "${form.name}" created`, 'success');
-      }
+      await saveBuyerMut.mutateAsync({ id: editId, data: form });
+      addToast(editId ? `Buyer "${form.name}" updated` : `Buyer "${form.name}" created`, 'success');
       setModalOpen(false);
-      loadBuyers();
-      refreshFromApi('orders');
     } catch (err) {
       addToast(err.message || 'Failed to save buyer', 'error');
     } finally {
@@ -107,10 +93,8 @@ export default function Buyers() {
   async function handleDelete(buyer) {
     if (!confirm(`Delete buyer "${buyer.name}"? This cannot be undone if they have no orders.`)) return;
     try {
-      await api.delete(`/api/customers/${buyer.id}`);
+      await deleteBuyerMut.mutateAsync(buyer.id);
       addToast(`Buyer "${buyer.name}" removed`);
-      loadBuyers();
-      refreshFromApi('orders');
     } catch (err) {
       addToast(err.message || 'Failed to delete buyer', 'error');
     }

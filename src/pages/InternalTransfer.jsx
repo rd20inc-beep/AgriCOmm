@@ -1,31 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { ArrowRightLeft, Package, DollarSign, Calendar, Warehouse, CheckCircle, Building2 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import api from '../api/client';
+import { useInternalTransfers, useCreateTransfer } from '../api/queries';
 import StatusBadge from '../components/StatusBadge';
 
 const PKR_RATE = 280; // PKR per USD
 
 export default function InternalTransfer() {
-  const { millingBatches, exportOrders, addToast, refreshFromApi } = useApp();
-  const [transfers, setTransfers] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  // Load transfers from backend
-  useEffect(() => {
-    api.get('/api/finance/internal-transfers', { limit: 100 })
-      .then(res => {
-        setTransfers(res?.data?.transfers || []);
-      })
-      .catch(err => addToast(`Failed to load transfers: ${err.message}`, 'error'))
-      .finally(() => setLoading(false));
-  }, []);
-
-  function reload() {
-    api.get('/api/finance/internal-transfers', { limit: 100 })
-      .then(res => setTransfers(res?.data?.transfers || []))
-      .catch(err => addToast(`Failed to reload transfers: ${err.message}`, 'error'));
-  }
+  const { millingBatches, exportOrders, addToast } = useApp();
+  const { data: transfers = [], isLoading: loading } = useInternalTransfers();
+  const createTransferMut = useCreateTransfer();
 
   const completedBatches = millingBatches.filter(b => b.status === 'Completed');
   const activeExportOrders = exportOrders.filter(o =>
@@ -72,7 +56,7 @@ export default function InternalTransfer() {
 
     setSubmitting(true);
     try {
-      const res = await api.post('/api/finance/internal-transfers', {
+      const res = await createTransferMut.mutateAsync({
         batch_id: batchId,
         export_order_id: orderId,
         product_name: productName || 'Finished Rice',
@@ -88,9 +72,6 @@ export default function InternalTransfer() {
       const t = res?.data?.transfer;
       addToast(`Transfer ${t?.transfer_no || ''} created: ${qty} MT dispatched`, 'success');
       setForm({ batchNo: '', exportOrder: '', qtyMT: '', transferPrice: '', dispatchDate: '' });
-      reload();
-      refreshFromApi('orders');
-      refreshFromApi('finance');
     } catch (err) {
       addToast(err.message || 'Failed to create transfer', 'error');
     } finally {

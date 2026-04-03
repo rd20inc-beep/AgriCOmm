@@ -9,7 +9,7 @@ import {
   exportOrdersApi, millingApi, inventoryApi, financeApi, accountingApi,
   documentsApi, adminApi, communicationApi, reportingApi, procurementApi,
   auditApi, approvalsApi, intelligenceApi, controlApi, smartApi, lotInventoryApi,
-  localSalesApi, usersApi,
+  localSalesApi, usersApi, advancesApi, customersApi,
 } from './services';
 import {
   transformOrders, transformOrder, transformBatches, transformBatch,
@@ -606,6 +606,79 @@ export function useCreateBankAccount() {
   return useMutation({
     mutationFn: (data) => adminApi.createBankAccount(data),
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.bankAccounts.all }),
+  });
+}
+
+// ===================== BUYERS (main customer routes) =====================
+
+export function useBuyers(params = {}) {
+  return useQuery({
+    queryKey: ['buyers', 'list', params],
+    queryFn: async () => {
+      const res = await customersApi.list({ limit: 500, ...params });
+      return unwrap(res, 'customers') || [];
+    },
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useSaveBuyer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => id ? customersApi.update(id, data) : customersApi.create(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['buyers'] });
+      qc.invalidateQueries({ queryKey: queryKeys.customers.all });
+      qc.invalidateQueries({ queryKey: queryKeys.orders.all });
+    },
+  });
+}
+
+export function useDeleteBuyer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => customersApi.delete(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['buyers'] });
+      qc.invalidateQueries({ queryKey: queryKeys.customers.all });
+    },
+  });
+}
+
+// ===================== ADVANCES =====================
+
+export function useAdvances(params = {}) {
+  return useQuery({
+    queryKey: ['advances', 'list', params],
+    queryFn: async () => {
+      const res = await advancesApi.list({ limit: 200, ...params });
+      return unwrap(res, 'advances') || [];
+    },
+    staleTime: 10 * 1000,
+    refetchOnMount: 'always',
+  });
+}
+
+export function useCreateAdvance() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => advancesApi.create(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['advances'] });
+      qc.invalidateQueries({ queryKey: queryKeys.financeOverview });
+    },
+  });
+}
+
+export function useAllocateAdvance() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => advancesApi.allocate(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['advances'] });
+      qc.invalidateQueries({ queryKey: queryKeys.orders.all });
+      qc.invalidateQueries({ queryKey: queryKeys.financeOverview });
+    },
   });
 }
 

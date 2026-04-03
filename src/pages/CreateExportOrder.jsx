@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import api from '../api/client';
+import { useCreateExportOrder } from '../api/queries';
 import {
   Save, Send, DollarSign, Calculator, ArrowLeft, Package, Truck,
   User, ShoppingBag, ChevronRight, Plus, Trash2, Info,
@@ -19,7 +19,8 @@ const RECEIVING_MODES = [
 const EMPTY_PACKING_LINE = { bagType: '', bagQuality: '', fillWeightKg: '25', bagCount: '', bagPrinting: '', notes: '' };
 
 export default function CreateExportOrder() {
-  const { addToast, customersList: customers, productsList: products, exportCostCategories, refreshFromApi, bagTypesList } = useApp();
+  const { addToast, customersList: customers, productsList: products, exportCostCategories, bagTypesList } = useApp();
+  const createOrderMut = useCreateExportOrder();
   const navigate = useNavigate();
 
   const [form, setForm] = useState({
@@ -174,9 +175,8 @@ export default function CreateExportOrder() {
   async function handleSubmit(status) {
     if (!validate(status === 'Draft')) return;
     try {
-      const res = await api.post('/api/export-orders', buildPayload(status));
+      const res = await createOrderMut.mutateAsync(buildPayload(status));
       addToast(`Order ${res.data?.order?.order_no || ''} ${status === 'Draft' ? 'saved as draft' : 'created'}`, 'success');
-      await refreshFromApi('orders');
       navigate(`/export/${res.data?.order?.order_no || res.data?.order?.id || ''}`);
     } catch (err) {
       addToast(err.message || 'Failed to create order', 'error');

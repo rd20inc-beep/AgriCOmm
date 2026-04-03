@@ -1,20 +1,20 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { DollarSign, Plus, Search, ArrowRight, CheckCircle, Clock, AlertCircle, CreditCard, Building2 } from 'lucide-react';
-import api from '../api/client';
 import { useApp } from '../context/AppContext';
-import { transformBankAccount } from '../api/transforms';
+import { useAdvances, useCreateAdvance, useAllocateAdvance } from '../api/queries';
 import Modal from '../components/Modal';
 import StatusBadge from '../components/StatusBadge';
 
 function fmtCur(v, c = 'USD') { return (c === 'PKR' ? 'Rs ' : '$') + (parseFloat(v) || 0).toLocaleString(); }
 
 export default function AdvancePayments() {
-  const { customersList, exportOrders, addToast, refreshFromApi } = useApp();
-  const [advances, setAdvances] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { customersList, exportOrders, addToast, bankAccountsList } = useApp();
+  const { data: advances = [], isLoading: loading } = useAdvances();
+  const createAdvanceMut = useCreateAdvance();
+  const allocateAdvanceMut = useAllocateAdvance();
+
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [bankAccounts, setBankAccounts] = useState([]);
 
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
@@ -27,23 +27,6 @@ export default function AdvancePayments() {
   // Allocate form
   const [allocForm, setAllocForm] = useState({ order_id: '', amount: '', notes: '' });
   const [saving, setSaving] = useState(false);
-
-  function loadAdvances() {
-    api.get('/api/advances', { limit: 200 })
-      .then(res => setAdvances(res?.data?.advances || []))
-      .catch(err => addToast(`Failed to load advances: ${err.message}`, 'error'))
-      .finally(() => setLoading(false));
-  }
-
-  useEffect(() => {
-    loadAdvances();
-    api.get('/api/finance/bank-accounts')
-      .then(res => {
-        const raw = res?.data?.accounts || res?.data?.bank_accounts || [];
-        setBankAccounts(raw.map(transformBankAccount));
-      })
-      .catch(err => addToast(`Failed to load bank accounts: ${err.message}`, 'error'));
-  }, []);
 
   const filtered = useMemo(() => {
     return advances.filter(a => {
@@ -79,12 +62,10 @@ export default function AdvancePayments() {
     if (!form.customer_id || !form.amount) { addToast('Buyer and amount are required', 'error'); return; }
     setSaving(true);
     try {
-      await api.post('/api/advances', form);
+      await createAdvanceMut.mutateAsync(form);
       addToast('Advance payment recorded', 'success');
       setShowAddModal(false);
       setForm({ customer_id: '', amount: '', currency: 'USD', bank_account_id: '', payment_method: 'Bank Transfer', bank_reference: '', payment_date: new Date().toISOString().split('T')[0], notes: '' });
-      loadAdvances();
-      refreshFromApi('finance');
     } catch (err) { addToast(err.message || 'Failed to record advance', 'error'); }
     finally { setSaving(false); }
   }
@@ -105,12 +86,9 @@ export default function AdvancePayments() {
     if (!allocForm.order_id || !allocForm.amount) { addToast('Order and amount are required', 'error'); return; }
     setSaving(true);
     try {
-      await api.put(`/api/advances/${selectedAdvance.id}/allocate`, allocForm);
+      await allocateAdvanceMut.mutateAsync({ id: selectedAdvance.id, data: allocForm });
       addToast('Advance allocated to order', 'success');
       setShowAllocateModal(false);
-      loadAdvances();
-      refreshFromApi('orders');
-      refreshFromApi('finance');
     } catch (err) { addToast(err.message || 'Allocation failed', 'error'); }
     finally { setSaving(false); }
   }
@@ -250,7 +228,7 @@ export default function AdvancePayments() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Bank Account</label>
             <select value={form.bank_account_id} onChange={e => set('bank_account_id', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none bg-white">
               <option value="">Select account...</option>
-              {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name} ({a.currency}) — {a.bankName}</option>)}
+              {(bankAccountsList || []).map(a => <option key={a.id} value={a.id}>{a.name || a.accountName} ({a.currency}) — {a.bankName}</option>)}
             </select>
           </div>
           <div className="grid grid-cols-2 gap-4">

@@ -13,6 +13,7 @@ import Modal from '../components/Modal';
 import { fromKg, allEquivalents, allRateEquivalents, toKg, UNITS } from '../utils/unitConversion';
 import LotCostSheet from '../components/LotCostSheet';
 import api from '../api/client';
+import { lotInventoryApi } from '../api/services';
 
 function fmtPKR(v) { return 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString(); }
 function fmtDate(d) { return d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'; }
@@ -761,7 +762,7 @@ function CostEditModal({ isOpen, onClose, lot, addToast, refetch }) {
   async function handleSave() {
     setSaving(true);
     try {
-      await api.put(`/api/lot-inventory/lots/${lot.id}/costs`, costs);
+      await lotInventoryApi.updateLotCosts(lot.id, costs);
       addToast('Costs updated', 'success'); refetch(); onClose();
     } catch (err) { addToast(err.message || 'Failed', 'error'); } finally { setSaving(false); }
   }

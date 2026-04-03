@@ -172,6 +172,21 @@ export const adminApi = {
   auditLogs: (params) => api.get('/api/admin/audit-logs', params),
 };
 
+// ========== CUSTOMERS (main routes, not admin) ==========
+export const customersApi = {
+  list: (params) => api.get('/api/customers', params),
+  create: (data) => api.post('/api/customers', data),
+  update: (id, data) => api.put(`/api/customers/${id}`, data),
+  delete: (id) => api.delete(`/api/customers/${id}`),
+};
+
+// ========== ADVANCES ==========
+export const advancesApi = {
+  list: (params) => api.get('/api/advances', params),
+  create: (data) => api.post('/api/advances', data),
+  allocate: (id, data) => api.put(`/api/advances/${id}/allocate`, data),
+};
+
 // ========== USERS ==========
 export const usersApi = {
   list: (params) => api.get('/api/users', params),
