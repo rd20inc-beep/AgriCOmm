@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 // Cost allocations computed from real export orders and milling batches
 import { useApp } from '../../context/AppContext';
+import { financeApi } from '../../api/services';
 import StatusBadge from '../../components/StatusBadge';
 
 const PKR_RATE = 280;
@@ -178,7 +179,7 @@ export default function CostAllocation() {
     return millingBatches.map(b => ({ id: b.id, label: `${b.id} - ${b.supplierName} (${b.plannedFinishedMT} MT)` }));
   }
 
-  function handleAllocate(costId) {
+  async function handleAllocate(costId) {
     const amount = parseFloat(allocForm.amount);
     if (!allocForm.targetId || isNaN(amount) || amount <= 0) {
       addToast('Please select a target and enter a valid amount', 'error');
@@ -197,6 +198,22 @@ export default function CostAllocation() {
     }
 
     const pct = parseFloat(((amount / cost.grossAmount) * 100).toFixed(1));
+
+    // Persist to backend if this cost has a DB id
+    if (cost.dbId) {
+      try {
+        await financeApi.addAllocationLine(cost.dbId, {
+          target_type: allocForm.targetType === 'Export Order' ? 'export_order' : 'milling_batch',
+          target_id: allocForm.targetId,
+          amount,
+          pct,
+        });
+      } catch (err) {
+        addToast(`Failed to save allocation: ${err.message}`, 'error');
+        return;
+      }
+    }
+
     const newAllocation = {
       targetType: allocForm.targetType,
       targetId: allocForm.targetId,
@@ -225,7 +242,20 @@ export default function CostAllocation() {
     setAllocForm({ targetType: 'Export Order', targetId: '', amount: '' });
   }
 
-  function handleRemoveAllocation(costId, allocIndex) {
+  async function handleRemoveAllocation(costId, allocIndex) {
+    const cost = costs.find(c => c.id === costId);
+    const alloc = cost?.allocations?.[allocIndex];
+
+    // Persist to backend if both IDs are available
+    if (cost?.dbId && alloc?.dbLineId) {
+      try {
+        await financeApi.removeAllocationLine(cost.dbId, alloc.dbLineId);
+      } catch (err) {
+        addToast(`Failed to remove allocation: ${err.message}`, 'error');
+        return;
+      }
+    }
+
     setCosts(prev =>
       prev.map(c => {
         if (c.id !== costId) return c;

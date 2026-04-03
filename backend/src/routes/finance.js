@@ -29,4 +29,25 @@ router.post(
   controller.createInternalTransfer
 );
 
+// Cost Allocations
+router.get('/cost-allocations', authorize('finance', 'view'), controller.listCostAllocations);
+router.post(
+  '/cost-allocations',
+  authorize('finance', 'confirm_payment'),
+  auditAction('create_cost_allocation', 'cost_allocation'),
+  controller.createCostAllocation
+);
+router.post(
+  '/cost-allocations/:id/lines',
+  authorize('finance', 'confirm_payment'),
+  auditAction('add_allocation_line', 'cost_allocation', (req) => req.params.id),
+  controller.addAllocationLine
+);
+router.delete(
+  '/cost-allocations/:allocationId/lines/:lineId',
+  authorize('finance', 'confirm_payment'),
+  auditAction('remove_allocation_line', 'cost_allocation', (req) => req.params.allocationId),
+  controller.removeAllocationLine
+);
+
 module.exports = router;

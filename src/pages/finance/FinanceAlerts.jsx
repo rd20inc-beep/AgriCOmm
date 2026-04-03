@@ -57,8 +57,33 @@ export default function FinanceAlerts() {
   const [entityFilter, setEntityFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('Open');
 
-  // Sync from API when data arrives
-  useEffect(() => { if (apiAlerts.length > 0) setAlerts(apiAlerts); }, [apiAlerts]);
+  // Persist snooze/resolve state in localStorage (alerts are computed on-the-fly, no DB table)
+  const STORAGE_KEY = 'riceflow_alert_actions';
+  function getStoredActions() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch { return {}; }
+  }
+  function storeAction(alertId, status) {
+    const actions = getStoredActions();
+    actions[alertId] = { status, timestamp: Date.now() };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(actions));
+  }
+
+  // Sync from API when data arrives, applying stored actions
+  useEffect(() => {
+    if (apiAlerts.length > 0) {
+      const stored = getStoredActions();
+      // Expire stored actions older than 7 days
+      const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      const merged = apiAlerts.map(a => {
+        const action = stored[a.id];
+        if (action && action.timestamp > weekAgo) {
+          return { ...a, status: action.status };
+        }
+        return a;
+      });
+      setAlerts(merged);
+    }
+  }, [apiAlerts]);
 
   const entities = ['All', ...new Set((apiAlerts.length > 0 ? apiAlerts : alerts).map((a) => a.entity).filter(Boolean))];
 
@@ -87,13 +112,15 @@ export default function FinanceAlerts() {
   }
 
   function handleSnooze(alertId) {
+    storeAction(alertId, 'Snoozed');
     setAlerts((prev) =>
       prev.map((a) => (a.id === alertId ? { ...a, status: 'Snoozed' } : a))
     );
-    addToast('Alert snoozed', 'success');
+    addToast('Alert snoozed for 7 days', 'success');
   }
 
   function handleResolve(alertId) {
+    storeAction(alertId, 'Resolved');
     setAlerts((prev) =>
       prev.map((a) => (a.id === alertId ? { ...a, status: 'Resolved' } : a))
     );
@@ -101,7 +128,11 @@ export default function FinanceAlerts() {
   }
 
   function handleEscalate(alert) {
-    addToast(`Escalated: ${alert.title} - sent to senior management`);
+    storeAction(alert.id, 'Escalated');
+    setAlerts((prev) =>
+      prev.map((a) => (a.id === alert.id ? { ...a, status: 'Escalated' } : a))
+    );
+    addToast(`Escalated: ${alert.title} — flagged for senior management`);
   }
 
   return (

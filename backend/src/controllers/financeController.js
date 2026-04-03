@@ -623,4 +623,120 @@ const financeController = {
   },
 };
 
+// ===================== COST ALLOCATIONS =====================
+
+async function generateCostNo(trx) {
+  const last = await (trx || db)('cost_allocations')
+    .select('cost_no')
+    .orderBy('id', 'desc')
+    .first();
+  if (!last || !last.cost_no) return 'COST-001';
+  const num = parseInt(last.cost_no.replace('COST-', '')) + 1;
+  return 'COST-' + String(num).padStart(3, '0');
+}
+
+financeController.listCostAllocations = async function (req, res) {
+  try {
+    const { limit = 200 } = req.query;
+    const allocations = await db('cost_allocations')
+      .orderBy('created_at', 'desc')
+      .limit(parseInt(limit));
+
+    const allocationIds = allocations.map(a => a.id);
+    const lines = allocationIds.length > 0
+      ? await db('cost_allocation_lines').whereIn('allocation_id', allocationIds)
+      : [];
+
+    const result = allocations.map(a => ({
+      ...a,
+      lines: lines.filter(l => l.allocation_id === a.id),
+    }));
+
+    return res.json({ success: true, data: { allocations: result } });
+  } catch (err) {
+    console.error('List cost allocations error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+};
+
+financeController.createCostAllocation = async function (req, res) {
+  try {
+    const { entity, category, vendor, gross_amount, currency, date } = req.body;
+    if (!category || !gross_amount) {
+      return res.status(400).json({ success: false, message: 'Category and gross_amount are required.' });
+    }
+    const costNo = await generateCostNo();
+    const [id] = await db('cost_allocations').insert({
+      cost_no: costNo,
+      entity: entity || 'export',
+      category,
+      vendor: vendor || null,
+      gross_amount: parseFloat(gross_amount),
+      currency: currency || 'USD',
+      date: date || new Date().toISOString().split('T')[0],
+      status: 'Unallocated',
+      created_at: new Date(),
+      updated_at: new Date(),
+    }).returning('id');
+
+    const allocation = await db('cost_allocations').where({ id: id.id || id }).first();
+    return res.json({ success: true, data: { allocation } });
+  } catch (err) {
+    console.error('Create cost allocation error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+};
+
+financeController.addAllocationLine = async function (req, res) {
+  try {
+    const { id } = req.params;
+    const { target_type, target_id, amount, pct } = req.body;
+
+    const allocation = await db('cost_allocations').where({ id }).first();
+    if (!allocation) {
+      return res.status(404).json({ success: false, message: 'Cost allocation not found.' });
+    }
+
+    await db('cost_allocation_lines').insert({
+      allocation_id: parseInt(id),
+      target_type: target_type || 'export_order',
+      target_id: target_id || '',
+      amount: parseFloat(amount) || 0,
+      pct: parseFloat(pct) || 0,
+    });
+
+    // Recalculate status
+    const lines = await db('cost_allocation_lines').where({ allocation_id: id });
+    const totalAllocated = lines.reduce((s, l) => s + parseFloat(l.amount), 0);
+    const newStatus = totalAllocated >= parseFloat(allocation.gross_amount) ? 'Allocated' : totalAllocated > 0 ? 'Partial' : 'Unallocated';
+    await db('cost_allocations').where({ id }).update({ status: newStatus, updated_at: new Date() });
+
+    const updated = await db('cost_allocations').where({ id }).first();
+    updated.lines = lines;
+    return res.json({ success: true, data: { allocation: updated } });
+  } catch (err) {
+    console.error('Add allocation line error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+};
+
+financeController.removeAllocationLine = async function (req, res) {
+  try {
+    const { allocationId, lineId } = req.params;
+
+    await db('cost_allocation_lines').where({ id: lineId, allocation_id: allocationId }).del();
+
+    const lines = await db('cost_allocation_lines').where({ allocation_id: allocationId });
+    const allocation = await db('cost_allocations').where({ id: allocationId }).first();
+    const totalAllocated = lines.reduce((s, l) => s + parseFloat(l.amount), 0);
+    const newStatus = totalAllocated >= parseFloat(allocation.gross_amount) ? 'Allocated' : totalAllocated > 0 ? 'Partial' : 'Unallocated';
+    await db('cost_allocations').where({ id: allocationId }).update({ status: newStatus, updated_at: new Date() });
+
+    return res.json({ success: true, data: { message: 'Allocation line removed.' } });
+  } catch (err) {
+    console.error('Remove allocation line error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+};
+
 module.exports = financeController;

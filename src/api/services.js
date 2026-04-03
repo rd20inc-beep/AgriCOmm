@@ -32,6 +32,10 @@ export const millingApi = {
   recordYield: (id, data) => api.post(`/api/milling/batches/${id}/yield`, data),
   addCost: (id, data) => api.post(`/api/milling/batches/${id}/costs`, data),
   addVehicle: (id, data) => api.post(`/api/milling/batches/${id}/vehicles`, data),
+  // Mills
+  listMills: (params) => api.get('/api/milling/mills', params),
+  createMill: (data) => api.post('/api/milling/mills', data),
+  updateMill: (id, data) => api.put(`/api/milling/mills/${id}`, data),
   // Advanced
   listPlans: (params) => api.get('/api/milling/plans', params),
   createPlan: (data) => api.post('/api/milling/plans', data),
@@ -63,6 +67,10 @@ export const financeApi = {
   alerts: (params) => api.get('/api/finance/alerts', params),
   internalTransfers: (params) => api.get('/api/finance/internal-transfers', params),
   createTransfer: (data) => api.post('/api/finance/internal-transfers', data),
+  costAllocations: (params) => api.get('/api/finance/cost-allocations', params),
+  createCostAllocation: (data) => api.post('/api/finance/cost-allocations', data),
+  addAllocationLine: (id, data) => api.post(`/api/finance/cost-allocations/${id}/lines`, data),
+  removeAllocationLine: (allocationId, lineId) => api.delete(`/api/finance/cost-allocations/${allocationId}/lines/${lineId}`),
 };
 
 // ========== ACCOUNTING ==========
@@ -162,6 +170,17 @@ export const adminApi = {
   settings: () => api.get('/api/admin/settings'),
   updateSettings: (data) => api.put('/api/admin/settings', data),
   auditLogs: (params) => api.get('/api/admin/audit-logs', params),
+};
+
+// ========== USERS ==========
+export const usersApi = {
+  list: (params) => api.get('/api/users', params),
+  get: (id) => api.get(`/api/users/${id}`),
+  create: (data) => api.post('/api/users', data),
+  update: (id, data) => api.put(`/api/users/${id}`, data),
+  changeRole: (id, data) => api.put(`/api/users/${id}/role`, data),
+  deactivate: (id) => api.put(`/api/users/${id}/deactivate`),
+  activate: (id) => api.put(`/api/users/${id}/activate`),
 };
 
 // ========== WHATSAPP ==========

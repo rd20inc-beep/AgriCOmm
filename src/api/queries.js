@@ -9,7 +9,7 @@ import {
   exportOrdersApi, millingApi, inventoryApi, financeApi, accountingApi,
   documentsApi, adminApi, communicationApi, reportingApi, procurementApi,
   auditApi, approvalsApi, intelligenceApi, controlApi, smartApi, lotInventoryApi,
-  localSalesApi,
+  localSalesApi, usersApi,
 } from './services';
 import {
   transformOrders, transformOrder, transformBatches, transformBatch,
@@ -606,6 +606,80 @@ export function useCreateBankAccount() {
   return useMutation({
     mutationFn: (data) => adminApi.createBankAccount(data),
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.bankAccounts.all }),
+  });
+}
+
+// ===================== USERS =====================
+
+export function useUsers(params = {}) {
+  return useQuery({
+    queryKey: ['users', 'list', params],
+    queryFn: async () => {
+      const res = await usersApi.list({ limit: 100, ...params });
+      return transformKeys(unwrap(res, 'users') || []);
+    },
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useCreateUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => usersApi.create(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+  });
+}
+
+export function useDeactivateUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => usersApi.deactivate(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+  });
+}
+
+export function useActivateUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => usersApi.activate(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+  });
+}
+
+export function useChangeUserRole() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => usersApi.changeRole(id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+  });
+}
+
+// ===================== MILLS =====================
+
+export function useMills() {
+  return useQuery({
+    queryKey: ['mills'],
+    queryFn: async () => {
+      const res = await millingApi.listMills();
+      return transformKeys(unwrap(res, 'mills') || []);
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useCreateMill() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => millingApi.createMill(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['mills'] }),
+  });
+}
+
+export function useUpdateMill() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => millingApi.updateMill(id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['mills'] }),
   });
 }
 
