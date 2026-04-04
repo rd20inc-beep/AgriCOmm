@@ -427,6 +427,7 @@ export default function ExportOrderDetail() {
       formData.append('doc_type', docKey);
       formData.append('linked_type', 'export_order');
       formData.append('linked_id', orderId);
+      formData.append('title', `${documentLabels[docKey] || docKey} - ${order.id}`);
       try {
         await api.upload('/api/documents/upload', formData);
       } catch (uploadErr) {
