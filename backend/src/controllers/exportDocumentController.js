@@ -364,32 +364,24 @@ const exportDocumentController = {
       const containerCount = parseInt(hasContainers?.c) || 0;
       const hasBL = !!order.bl_number;
 
-      // All 12 documents always visible. Ready = has the data needed to generate.
-      // Contract/PI/Production/Banking/Undertaking/Invoice just need basic order data.
-      // Shipping docs need vessel + containers. Origin docs need BL number.
+      // All 15 documents always ready — generate with whatever data is available,
+      // missing fields show as blanks. User fills in shipment details as they become known.
       const docs = [
-        // Contract & Proforma — need basic order data
-        { key: 'sales-contract', label: 'Sales Contract', availableFrom: 2, ready: hasBasicData },
-        { key: 'proforma-invoice', label: 'Proforma Invoice', availableFrom: 2, ready: hasBasicData },
-        // Production — need basic data
-        { key: 'production-plan', label: 'Production Plan', availableFrom: 5, ready: hasBasicData },
-        // Banking & Compliance — need basic data
-        { key: 'bank-fi-request', label: 'Bank FI Request (E-Form)', availableFrom: 6, ready: hasBasicData },
-        { key: 'export-undertaking', label: 'Export Undertaking', availableFrom: 6, ready: hasBasicData },
-        // Invoice — need basic data
-        { key: 'invoice', label: 'Invoice', availableFrom: 7, ready: hasBasicData },
-        // Shipping docs — need vessel and container data
-        { key: 'commercial-invoice', label: 'Commercial Invoice', availableFrom: 8, ready: hasBasicData && hasVessel },
-        { key: 'bill-of-lading', label: 'Bill of Lading (Draft)', availableFrom: 8, ready: hasBasicData && hasVessel && containerCount > 0 },
-        { key: 'packing-certificate', label: 'Packing Certificate', availableFrom: 8, ready: hasBasicData && hasVessel && containerCount > 0 },
-        { key: 'packing-list', label: 'Packing List', availableFrom: 8, ready: hasBasicData && hasVessel && containerCount > 0 },
-        // Origin — need BL number
-        { key: 'statement-of-origin', label: 'Statement of Origin', availableFrom: 9, ready: hasBasicData && hasBL },
-        { key: 'certificate-of-origin', label: 'Certificate of Origin', availableFrom: 9, ready: hasBasicData && hasBL },
-        // Covering letters & lab requests
-        { key: 'bank-covering-letter', label: 'Bank Covering Letter', availableFrom: 9, ready: hasBasicData && hasBL },
-        { key: 'buyer-covering-letter', label: 'Buyer Covering Letter', availableFrom: 9, ready: hasBasicData && hasBL },
-        { key: 'lab-test-request', label: 'PCSIR / Lab Test Request', availableFrom: 5, ready: hasBasicData },
+        { key: 'sales-contract', label: 'Sales Contract', availableFrom: 2, ready: true },
+        { key: 'proforma-invoice', label: 'Proforma Invoice', availableFrom: 2, ready: true },
+        { key: 'production-plan', label: 'Production Plan', availableFrom: 5, ready: true },
+        { key: 'bank-fi-request', label: 'Bank FI Request (E-Form)', availableFrom: 6, ready: true },
+        { key: 'export-undertaking', label: 'Export Undertaking', availableFrom: 6, ready: true },
+        { key: 'invoice', label: 'Invoice', availableFrom: 7, ready: true },
+        { key: 'commercial-invoice', label: 'Commercial Invoice', availableFrom: 8, ready: true },
+        { key: 'bill-of-lading', label: 'Bill of Lading (Draft)', availableFrom: 8, ready: true },
+        { key: 'packing-certificate', label: 'Packing Certificate', availableFrom: 8, ready: true },
+        { key: 'packing-list', label: 'Packing List', availableFrom: 8, ready: true },
+        { key: 'statement-of-origin', label: 'Statement of Origin', availableFrom: 9, ready: true },
+        { key: 'certificate-of-origin', label: 'Certificate of Origin', availableFrom: 9, ready: true },
+        { key: 'bank-covering-letter', label: 'Bank Covering Letter', availableFrom: 9, ready: true },
+        { key: 'buyer-covering-letter', label: 'Buyer Covering Letter', availableFrom: 9, ready: true },
+        { key: 'lab-test-request', label: 'PCSIR / Lab Test Request', availableFrom: 5, ready: true },
       ];
 
       return res.json({
