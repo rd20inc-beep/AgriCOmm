@@ -137,6 +137,18 @@ export default function MillingDashboard() {
       .reduce((sum, i) => sum + i.qtyMT, 0);
   }, [inventory]);
 
+  const finishedAvailable = useMemo(() => {
+    return inventory
+      .filter((i) => i.type === 'finished' && i.entity === 'mill')
+      .reduce((sum, i) => sum + (parseFloat(i.availableQty) || 0), 0);
+  }, [inventory]);
+
+  const finishedReserved = useMemo(() => {
+    return inventory
+      .filter((i) => i.type === 'finished' && i.entity === 'mill')
+      .reduce((sum, i) => sum + (parseFloat(i.reservedQty) || 0), 0);
+  }, [inventory]);
+
   const byproductStock = useMemo(() => {
     return inventory
       .filter((i) => i.type === 'byproduct')
@@ -248,7 +260,7 @@ export default function MillingDashboard() {
           icon={Package}
           title="Finished Rice Stock"
           value={`${finishedRiceStock} MT`}
-          subtitle="Mill finished goods"
+          subtitle={`${finishedAvailable.toFixed(1)} available · ${finishedReserved.toFixed(1)} reserved`}
           color="green"
         />
         <KPICard

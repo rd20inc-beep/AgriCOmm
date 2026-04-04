@@ -590,21 +590,71 @@ export default function LotDetail() {
             </div>
           </div>
 
-          {/* Linked Reservations */}
-          {reservations.length > 0 && (
-            <div className="bg-white rounded-xl border border-gray-100 p-5">
-              <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">Linked Orders / Reservations</h3>
-              <div className="space-y-2">
-                {reservations.map(r => (
-                  <div key={r.id} className="flex items-center justify-between bg-gray-50 rounded-lg p-3">
-                    <Link to={`/export/${r.orderNo || r.orderId}`} className="text-sm font-medium text-blue-600 hover:text-blue-800">{r.orderNo || `Order #${r.orderId}`}</Link>
-                    <span className="text-sm text-gray-600">{dv((parseFloat(r.reservedQty) || 0) * 1000).toLocaleString()} {ul()}</span>
-                    <StatusBadge status={r.status} />
-                  </div>
-                ))}
+          {/* Stock Allocation Breakdown */}
+          <div className="bg-white rounded-xl border border-gray-100 p-5">
+            <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">Stock Allocation</h3>
+
+            {/* Visual bar */}
+            <div className="mb-4">
+              <div className="flex items-center gap-1 h-4 rounded-full overflow-hidden bg-gray-100">
+                {reservedKg > 0 && (
+                  <div className="h-full bg-amber-500 rounded-l-full" style={{ width: `${Math.round((reservedKg / netKg) * 100)}%` }} title={`Reserved: ${dv(reservedKg)} ${ul()}`} />
+                )}
+                {soldKg > 0 && (
+                  <div className="h-full bg-blue-500" style={{ width: `${Math.round((soldKg / netKg) * 100)}%` }} title={`Sold: ${dv(soldKg)} ${ul()}`} />
+                )}
+                {availKg > 0 && (
+                  <div className="h-full bg-emerald-500 rounded-r-full" style={{ width: `${Math.max(5, Math.round((availKg / netKg) * 100))}%` }} title={`Available: ${dv(availKg)} ${ul()}`} />
+                )}
+              </div>
+              <div className="flex items-center gap-4 mt-2 text-xs">
+                {reservedKg > 0 && <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-amber-500" />Reserved: {dv(reservedKg).toLocaleString()} {ul()}</span>}
+                {soldKg > 0 && <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-blue-500" />Sold: {dv(soldKg).toLocaleString()} {ul()}</span>}
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />Available: {dv(availKg).toLocaleString()} {ul()}</span>
               </div>
             </div>
-          )}
+
+            {/* Order-by-order breakdown */}
+            {reservations.length > 0 ? (
+              <div className="space-y-2">
+                {reservations.map(r => {
+                  const rKg = (parseFloat(r.reservedQty) || 0) * 1000;
+                  const pct = netKg > 0 ? Math.round((rKg / netKg) * 100) : 0;
+                  return (
+                    <div key={r.id} className="flex items-center gap-3 bg-amber-50 border border-amber-100 rounded-lg p-3">
+                      <div className="flex-1 min-w-0">
+                        <Link to={`/export/${r.orderNo || r.orderId}`} className="text-sm font-semibold text-blue-600 hover:text-blue-800">
+                          {r.orderNo || `Order #${r.orderId}`}
+                        </Link>
+                        <p className="text-xs text-gray-500 mt-0.5">Reserved for export</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-bold text-amber-700">{dv(rKg).toLocaleString()} {ul()}</p>
+                        <p className="text-xs text-amber-500">{pct}% of lot</p>
+                      </div>
+                      <StatusBadge status={r.status} />
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-400">No reservations — entire lot is available for allocation or local sale.</p>
+            )}
+
+            {/* Available surplus callout */}
+            {availKg > 0 && reservations.length > 0 && (
+              <div className="mt-3 bg-emerald-50 border border-emerald-200 rounded-lg p-3 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-emerald-800">Surplus Available</p>
+                  <p className="text-xs text-emerald-600">{dv(availKg).toLocaleString()} {ul()} not allocated to any order</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Link to="/export" className="text-xs font-medium text-emerald-700 bg-emerald-100 px-3 py-1.5 rounded-lg hover:bg-emerald-200">Allocate to Order</Link>
+                  <Link to="/local-sales" className="text-xs font-medium text-blue-700 bg-blue-100 px-3 py-1.5 rounded-lg hover:bg-blue-200">Sell Locally</Link>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
