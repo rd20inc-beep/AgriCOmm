@@ -151,9 +151,14 @@ async function maybePromoteAfterDocuments(trx, { order, userId, reason }) {
     return { changed: false, order };
   }
 
-  // Must use trx (not db) to see uncommitted checklist updates within the same transaction
-  const missing = await documentService.checkMissingDocsWithConn(trx, 'export_order', order.id);
-  const docsComplete = missing.length === 0;
+  // Check export_order_documents — all 7 must be Approved or Final
+  const REQUIRED_DOCS = ['phyto', 'blDraft', 'blFinal', 'invoice', 'packingList', 'coo', 'fumigation',
+    'Phytosanitary Certificate', 'BL Draft', 'BL Final', 'Commercial Invoice', 'Packing List', 'Certificate of Origin', 'Fumigation Certificate'];
+  const orderDocs = await trx('export_order_documents').where({ order_id: order.id });
+  const approvedStatuses = new Set(['Approved', 'Final', 'Draft Uploaded']);
+  const approvedCount = orderDocs.filter(d => approvedStatuses.has(d.status)).length;
+  // Need at least 7 docs confirmed (the 7 required export docs)
+  const docsComplete = approvedCount >= 7;
   if (!docsComplete) {
     return { changed: false, order };
   }
