@@ -983,70 +983,71 @@ export default function DocumentCenter({ order }) {
     return <div className="text-center py-12 text-gray-400">Loading documents...</div>;
   }
 
-  // Group by availability phase
-  const phases = [
-    { label: 'Contract & Proforma', from: 2, docs: availableDocs.filter(d => d.availableFrom === 2) },
-    { label: 'Production', from: 5, docs: availableDocs.filter(d => d.availableFrom === 5) },
-    { label: 'Banking & Compliance', from: 6, docs: availableDocs.filter(d => d.availableFrom === 6) },
-    { label: 'Invoice', from: 7, docs: availableDocs.filter(d => d.availableFrom === 7) },
-    { label: 'Shipping Documents', from: 8, docs: availableDocs.filter(d => d.availableFrom === 8) },
-    { label: 'Origin & Final', from: 9, docs: availableDocs.filter(d => d.availableFrom === 9) },
-  ];
+  const readyCount = availableDocs.filter(d => d.ready).length;
+  const lockedCount = availableDocs.filter(d => !d.ready).length;
 
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-        <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-1">Export Document Center</h3>
-        <p className="text-xs text-gray-400 mb-4">Generate, preview, and print all required export documents. Documents become available as the order progresses through the workflow.</p>
-
-        {phases.map(phase => (
-          <div key={phase.label} className="mb-6">
-            <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 text-[10px] flex items-center justify-center font-bold">{phase.from}</span>
-              {phase.label}
-            </h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {phase.docs.length > 0 ? phase.docs.map(doc => (
-                <div
-                  key={doc.key}
-                  className={`rounded-lg border p-4 flex items-start justify-between gap-3 ${doc.ready ? 'border-gray-200 bg-white hover:border-blue-200 hover:shadow-sm transition-all' : 'border-gray-100 bg-gray-50/50'}`}
-                >
-                  <div className="flex items-start gap-3">
-                    {doc.ready
-                      ? <CheckCircle className="w-5 h-5 mt-0.5 flex-shrink-0 text-green-500" />
-                      : <Clock className="w-5 h-5 mt-0.5 flex-shrink-0 text-gray-300" />
-                    }
-                    <div>
-                      <p className={`text-sm font-medium ${doc.ready ? 'text-gray-900' : 'text-gray-400'}`}>{doc.label}</p>
-                      <p className="text-xs text-gray-400 mt-0.5">
-                        {doc.ready ? 'Ready to generate' : doc.availableFrom >= 8 ? 'Needs shipment data (vessel, containers)' : 'Needs order data'}
-                      </p>
-                    </div>
-                  </div>
-                  {doc.ready ? (
-                    <button
-                      onClick={() => handleGenerate(doc.key)}
-                      disabled={generating === doc.key}
-                      className="flex-shrink-0 inline-flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-100 transition-colors disabled:opacity-50"
-                    >
-                      {generating === doc.key ? (
-                        <><Loader2 className="w-3 h-3 animate-spin" /> Generating...</>
-                      ) : (
-                        <><Eye className="w-3 h-3" /> Preview</>
-                      )}
-                    </button>
-                  ) : (
-                    <span className="flex-shrink-0 inline-flex items-center px-2 py-1 bg-gray-100 text-gray-400 rounded text-[10px] font-medium">
-                      Locked
-                    </span>
-                  )}
-                </div>
-              )) : (
-                <p className="text-xs text-gray-400 col-span-3">No documents in this phase yet.</p>
-              )}
-            </div>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900">Export Document Center</h3>
+            <p className="text-xs text-gray-400 mt-0.5">{readyCount} ready to generate{lockedCount > 0 ? ` · ${lockedCount} need more data` : ''}</p>
           </div>
-        ))}
+          <div className="flex items-center gap-2 text-xs">
+            <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-50 text-green-700 rounded-full font-medium">
+              <CheckCircle className="w-3 h-3" /> {readyCount} Ready
+            </span>
+            {lockedCount > 0 && (
+              <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-500 rounded-full font-medium">
+                <Clock className="w-3 h-3" /> {lockedCount} Pending
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          {availableDocs.map((doc, idx) => (
+            <div
+              key={doc.key}
+              className={`rounded-xl border p-4 flex flex-col gap-3 transition-all ${
+                doc.ready
+                  ? 'border-gray-200 bg-white hover:border-blue-300 hover:shadow-md cursor-pointer'
+                  : 'border-gray-100 bg-gray-50/60'
+              }`}
+              onClick={() => doc.ready && handleGenerate(doc.key)}
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex items-start gap-3">
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold ${
+                    doc.ready ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-400'
+                  }`}>
+                    {idx + 1}
+                  </div>
+                  <div>
+                    <p className={`text-sm font-semibold ${doc.ready ? 'text-gray-900' : 'text-gray-400'}`}>{doc.label}</p>
+                    <p className="text-[11px] text-gray-400 mt-0.5">
+                      {doc.ready
+                        ? 'Click to preview & print'
+                        : doc.availableFrom >= 9 ? 'Needs BL number'
+                        : doc.availableFrom >= 8 ? 'Needs vessel & containers'
+                        : 'Needs order data'}
+                    </p>
+                  </div>
+                </div>
+                {doc.ready ? (
+                  generating === doc.key ? (
+                    <Loader2 className="w-4 h-4 text-blue-500 animate-spin flex-shrink-0 mt-1" />
+                  ) : (
+                    <Eye className="w-4 h-4 text-blue-500 flex-shrink-0 mt-1" />
+                  )
+                ) : (
+                  <Clock className="w-4 h-4 text-gray-300 flex-shrink-0 mt-1" />
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Preview Modal */}
