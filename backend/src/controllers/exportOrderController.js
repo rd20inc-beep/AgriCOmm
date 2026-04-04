@@ -1423,7 +1423,6 @@ const exportOrderController = {
         // Mark the lot as reserved against this order
         await trx('inventory_lots').where({ id: lot.id }).update({
           reserved_against: order.order_no,
-          entity: 'export',
           updated_at: trx.fn.now(),
         });
 

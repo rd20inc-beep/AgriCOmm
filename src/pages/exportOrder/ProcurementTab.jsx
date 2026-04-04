@@ -34,10 +34,10 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
   // Fetch available finished lots
   useEffect(() => {
     setLotsLoading(true);
-    api.get('/api/inventory', { type: 'finished', status: 'Available', limit: 200 })
+    api.get('/api/inventory', { type: 'finished', status: 'Available', entity: 'mill', limit: 200 })
       .then(res => {
         const lots = res?.data?.lots || res?.data?.inventory || res?.lots || [];
-        setAvailableLots(lots.filter(l => parseFloat(l.available_qty) > 0));
+        setAvailableLots(lots.filter(l => parseFloat(l.available_qty) > 0 && !l.reserved_against));
       })
       .catch(() => setAvailableLots([]))
       .finally(() => setLotsLoading(false));
