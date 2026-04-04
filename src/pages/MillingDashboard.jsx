@@ -128,13 +128,13 @@ export default function MillingDashboard() {
   const rawRiceStock = useMemo(() => {
     return inventory
       .filter((i) => i.type === 'raw')
-      .reduce((sum, i) => sum + i.qtyMT, 0);
+      .reduce((sum, i) => sum + parseFloat(i.qty), 0);
   }, [inventory]);
 
   // All finished rice — mill owns it regardless of where it sits
   const finishedAll = useMemo(() => inventory.filter(i => i.type === 'finished'), [inventory]);
 
-  const finishedRiceStock = useMemo(() => finishedAll.reduce((s, i) => s + i.qtyMT, 0), [finishedAll]);
+  const finishedRiceStock = useMemo(() => finishedAll.reduce((s, i) => s + parseFloat(i.qty), 0), [finishedAll]);
 
   const finishedInMill = useMemo(() =>
     finishedAll.filter(i => i.entity === 'mill' && !i.reservedAgainst)
@@ -146,12 +146,12 @@ export default function MillingDashboard() {
 
   const finishedAtExport = useMemo(() =>
     finishedAll.filter(i => i.entity === 'export')
-      .reduce((s, i) => s + i.qtyMT, 0), [finishedAll]);
+      .reduce((s, i) => s + parseFloat(i.qty), 0), [finishedAll]);
 
   const byproductStock = useMemo(() => {
     return inventory
       .filter((i) => i.type === 'byproduct')
-      .reduce((sum, i) => sum + i.qtyMT, 0);
+      .reduce((sum, i) => sum + parseFloat(i.qty), 0);
   }, [inventory]);
 
   const pendingBatches = useMemo(() => {
@@ -338,7 +338,7 @@ export default function MillingDashboard() {
                       </td>
                       <td className="py-2 px-3 text-gray-700">{lot.itemName || lot.productName || '—'}</td>
                       <td className="py-2 px-3 text-gray-600">{lot.supplierName || '—'}</td>
-                      <td className="py-2 px-3 text-right font-medium">{lot.qtyMT?.toFixed(2)} MT</td>
+                      <td className="py-2 px-3 text-right font-medium">{parseFloat(lot.qty)?.toFixed(2)} MT</td>
                       <td className="py-2 px-3 text-right">
                         {!isAtExport ? <span className="text-emerald-700 font-medium">{avail.toFixed(2)} MT</span> : <span className="text-gray-400">—</span>}
                       </td>

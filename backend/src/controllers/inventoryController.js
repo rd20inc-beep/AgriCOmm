@@ -22,10 +22,12 @@ const inventoryController = {
       let query = db('inventory_lots as il')
         .leftJoin('warehouses as w', 'il.warehouse_id', 'w.id')
         .leftJoin('products as p', 'il.product_id', 'p.id')
+        .leftJoin('suppliers as s', 'il.supplier_id', 's.id')
         .select(
           'il.*',
           'w.name as warehouse_name',
-          'p.name as product_name'
+          'p.name as product_name',
+          's.name as supplier_name'
         );
 
       if (type) query = query.where('il.type', type);
