@@ -14,17 +14,18 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
     return doc && ['Approved', 'Final', 'Draft Uploaded'].includes(doc.status);
   }).length;
 
-  function handleToggle(key) {
+  async function handleToggle(key) {
     const doc = order.documents?.[key];
     const isChecked = doc && ['Approved', 'Final', 'Draft Uploaded'].includes(doc.status);
 
-    if (isChecked) {
-      // Already checked — no un-check for now
-      return;
+    if (isChecked) return;
+
+    // Single call to approve — this creates the doc record if missing and sets Approved
+    try {
+      await onApprove(key);
+    } catch (err) {
+      // Handler already shows toast
     }
-    // Mark as confirmed (Draft Uploaded → then approve)
-    onUpload(key, null); // marks as Draft Uploaded
-    setTimeout(() => onApprove(key), 500); // then approve
   }
 
   return (
