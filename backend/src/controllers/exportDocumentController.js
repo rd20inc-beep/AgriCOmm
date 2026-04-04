@@ -137,9 +137,18 @@ const exportDocumentController = {
           qualityDescription: order.quality_description || `Pakistani ${order.product_name || 'Rice'} - ${order.broken_pct_target || 2}% Broken - Double (silky) polished & color sorted, Latest Crop - PACKED IN ${parseFloat(order.bag_size_kg) || 50} KGS ${order.bag_type || 'PP'} BAG - HS CODE: ${order.hs_code || settings.default_hs_code || '1006.3098'} - GMO FREE, FIT FOR HUMAN CONSUMPTION AT ANY STAGE, FREE FROM ALIVE AND DEAD WEEVILS/INSECTS`,
         },
 
+        // Notify Party
+        notifyParty: {
+          name: order.notify_party_name || '',
+          address: order.notify_party_address || '',
+          phone: order.notify_party_phone || '',
+          email: order.notify_party_email || '',
+        },
+
         // Shipment
         shipment: {
           vesselName: order.vessel_name || '',
+          voyageNumber: order.voyage_number || '',
           bookingNo: order.booking_no || '',
           blNumber: order.bl_number || '',
           blDate: formatDate(order.bl_date),
@@ -149,11 +158,16 @@ const exportDocumentController = {
           eta: formatDate(order.eta),
           ata: formatDate(order.ata),
           fiNumber: order.fi_number || '',
+          fiNumber2: order.fi_number_2 || '',
+          fiNumber3: order.fi_number_3 || '',
           fiDate: formatDate(order.fi_date),
+          gdNumber: order.gd_number || '',
+          gdDate: formatDate(order.gd_date),
           freightTerms: order.freight_terms || 'COLLECT',
           consigneeType: order.consignee_type || 'to_order_of_bank',
           containerCount: containers.length || 1,
           containerType: containers[0]?.container_type || '20ft',
+          shipmentRemarks: order.shipment_remarks || '',
         },
 
         // Containers
@@ -304,6 +318,18 @@ const exportDocumentController = {
           };
           break;
 
+        case 'bank-covering-letter':
+          document = { type: 'Bank Covering Letter', ...common };
+          break;
+
+        case 'buyer-covering-letter':
+          document = { type: 'Buyer Covering Letter', ...common };
+          break;
+
+        case 'lab-test-request':
+          document = { type: 'PCSIR / Lab Test Request', ...common };
+          break;
+
         default:
           return res.status(400).json({ success: false, message: `Unknown document type: ${docType}` });
       }
@@ -360,6 +386,10 @@ const exportDocumentController = {
         // Origin — need BL number
         { key: 'statement-of-origin', label: 'Statement of Origin', availableFrom: 9, ready: hasBasicData && hasBL },
         { key: 'certificate-of-origin', label: 'Certificate of Origin', availableFrom: 9, ready: hasBasicData && hasBL },
+        // Covering letters & lab requests
+        { key: 'bank-covering-letter', label: 'Bank Covering Letter', availableFrom: 9, ready: hasBasicData && hasBL },
+        { key: 'buyer-covering-letter', label: 'Buyer Covering Letter', availableFrom: 9, ready: hasBasicData && hasBL },
+        { key: 'lab-test-request', label: 'PCSIR / Lab Test Request', availableFrom: 5, ready: hasBasicData },
       ];
 
       return res.json({

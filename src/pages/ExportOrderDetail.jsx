@@ -100,6 +100,18 @@ export default function ExportOrderDetail() {
   const [shipETA, setShipETA] = useState('');
   const [shipATA, setShipATA] = useState('');
   const [shipDestPort, setShipDestPort] = useState('');
+  const [shipVoyage, setShipVoyage] = useState('');
+  const [shipGD, setShipGD] = useState('');
+  const [shipGDDate, setShipGDDate] = useState('');
+  const [shipFI, setShipFI] = useState('');
+  const [shipFI2, setShipFI2] = useState('');
+  const [shipFI3, setShipFI3] = useState('');
+  const [shipFIDate, setShipFIDate] = useState('');
+  const [shipNotifyName, setShipNotifyName] = useState('');
+  const [shipNotifyAddress, setShipNotifyAddress] = useState('');
+  const [shipNotifyPhone, setShipNotifyPhone] = useState('');
+  const [shipNotifyEmail, setShipNotifyEmail] = useState('');
+  const [shipRemarks, setShipRemarks] = useState('');
 
   // Expense form state
   const [expenseCategory, setExpenseCategory] = useState('rice');
@@ -226,6 +238,18 @@ export default function ExportOrderDetail() {
     setShipETA(order.eta || '');
     setShipATA(order.ata || '');
     setShipDestPort(order.destinationPort || '');
+    setShipVoyage(order.voyageNumber || '');
+    setShipGD(order.gdNumber || '');
+    setShipGDDate(order.gdDate || '');
+    setShipFI(order.fiNumber || '');
+    setShipFI2(order.fiNumber2 || '');
+    setShipFI3(order.fiNumber3 || '');
+    setShipFIDate(order.fiDate || '');
+    setShipNotifyName(order.notifyPartyName || '');
+    setShipNotifyAddress(order.notifyPartyAddress || '');
+    setShipNotifyPhone(order.notifyPartyPhone || '');
+    setShipNotifyEmail(order.notifyPartyEmail || '');
+    setShipRemarks(order.shipmentRemarks || '');
     setShowShipmentModal(true);
   };
 
@@ -375,6 +399,18 @@ export default function ExportOrderDetail() {
           eta: shipETA || null,
           ata: shipATA || null,
           destination_port: shipDestPort || null,
+          voyage_number: shipVoyage || null,
+          gd_number: shipGD || null,
+          gd_date: shipGDDate || null,
+          fi_number: shipFI || null,
+          fi_number_2: shipFI2 || null,
+          fi_number_3: shipFI3 || null,
+          fi_date: shipFIDate || null,
+          notify_party_name: shipNotifyName || null,
+          notify_party_address: shipNotifyAddress || null,
+          notify_party_phone: shipNotifyPhone || null,
+          notify_party_email: shipNotifyEmail || null,
+          shipment_remarks: shipRemarks || null,
           notes: shipATA
             ? `Shipment arrived on ${shipATA}`
             : shipATD
@@ -654,6 +690,18 @@ export default function ExportOrderDetail() {
         setShipATA={setShipATA}
         shipDestPort={shipDestPort}
         setShipDestPort={setShipDestPort}
+        shipVoyage={shipVoyage} setShipVoyage={setShipVoyage}
+        shipGD={shipGD} setShipGD={setShipGD}
+        shipGDDate={shipGDDate} setShipGDDate={setShipGDDate}
+        shipFI={shipFI} setShipFI={setShipFI}
+        shipFI2={shipFI2} setShipFI2={setShipFI2}
+        shipFI3={shipFI3} setShipFI3={setShipFI3}
+        shipFIDate={shipFIDate} setShipFIDate={setShipFIDate}
+        shipNotifyName={shipNotifyName} setShipNotifyName={setShipNotifyName}
+        shipNotifyAddress={shipNotifyAddress} setShipNotifyAddress={setShipNotifyAddress}
+        shipNotifyPhone={shipNotifyPhone} setShipNotifyPhone={setShipNotifyPhone}
+        shipNotifyEmail={shipNotifyEmail} setShipNotifyEmail={setShipNotifyEmail}
+        shipRemarks={shipRemarks} setShipRemarks={setShipRemarks}
         shipmentContainers={shipContainers}
         setShipmentContainers={setShipContainers}
         onConfirm={handleUpdateShipment}

@@ -155,7 +155,7 @@ function renderCommercialInvoice(doc) {
           <td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">Shipment Ports</td>
           <td style="border:1px solid #333; padding:4px 8px;">${order.portOfLoading} to ${order.destinationPort}, ${buyer.country}</td>
           <td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">F.I. #</td>
-          <td style="border:1px solid #333; padding:4px 8px;">${shipment.fiNumber || '—'}</td>
+          <td style="border:1px solid #333; padding:4px 8px;">${[shipment.fiNumber, shipment.fiNumber2, shipment.fiNumber3].filter(Boolean).join('<br/>') || '—'}</td>
         </tr>
         <tr>
           <td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">No. of Containers</td>
@@ -714,14 +714,12 @@ function renderBillOfLading(doc) {
         <tr>
           <td style="border:2px solid #333; padding:10px; vertical-align:top;">
             <strong style="text-decoration:underline;">NOTIFY PARTY:</strong><br/>
-            ${buyer.name}<br/>${buyer.address}<br/>${buyer.country}
-            ${buyer.vatNumber ? `<br/>VAT #: ${buyer.vatNumber}` : ''}
-            ${buyer.phone ? `<br/>TEL: ${buyer.phone}` : ''} ${buyer.email ? `EMAIL: ${buyer.email}` : ''}
+            ${(doc.notifyParty?.name) ? `${doc.notifyParty.name}<br/>${doc.notifyParty.address || ''}${doc.notifyParty.phone ? `<br/>TEL: ${doc.notifyParty.phone}` : ''}${doc.notifyParty.email ? ` EMAIL: ${doc.notifyParty.email}` : ''}` : `${buyer.name}<br/>${buyer.address}<br/>${buyer.country}${buyer.vatNumber ? `<br/>VAT #: ${buyer.vatNumber}` : ''}${buyer.phone ? `<br/>TEL: ${buyer.phone}` : ''} ${buyer.email ? `EMAIL: ${buyer.email}` : ''}`}
           </td>
         </tr>
         <tr>
           <td style="border:2px solid #333; padding:10px;">
-            <strong>VESSEL AND VOYAGE NO:</strong><br/>${shipment.vesselName || '—'}
+            <strong>VESSEL AND VOYAGE NO:</strong><br/>${shipment.vesselName || '—'}${shipment.voyageNumber ? ' V.' + shipment.voyageNumber : ''}
           </td>
           <td style="border:2px solid #333; padding:10px;">
             <strong>PLACE OF DELIVERY</strong><br/>${order.destinationPort}, ${buyer.country}
@@ -907,6 +905,126 @@ function renderCertificateOfOrigin(doc) {
     </div>`;
 }
 
+// ─── Bank Covering Letter ───
+function renderBankCoveringLetter(doc) {
+  const { company, buyer, order, shipment, containers, notifyParty } = doc;
+  const fiNumbers = [shipment.fiNumber, shipment.fiNumber2, shipment.fiNumber3].filter(Boolean);
+  return `
+    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:800px; margin:0 auto; padding:20px;">
+      ${renderHeader(company)}
+      <p>Date: ${order.date}</p>
+      <p style="margin-top:15px;">${company.bank.name}<br/>${company.bank.branch}<br/>Karachi</p>
+      <p style="float:right; margin-top:-40px; font-weight:bold; color:red;">ONLY FOR LODGEMENT</p>
+      <div style="clear:both;"></div>
+      <h3 style="text-decoration:underline; margin:20px 0;">EXPORT DOCUMENTS AGAINST FI # ${fiNumbers.join(' & ')}</h3>
+      <p>Dear Sir,</p>
+      <p>Pleased to send you following documents of our consignment against FI # ${fiNumbers.join(' & ')} against ${order.paymentTerms} Basis.</p>
+
+      <table style="width:100%; border-collapse:collapse; margin:20px 0; font-size:11px;">
+        <thead><tr style="background:#f5f5f5;">
+          <th style="border:1px solid #333; padding:6px;">S.No.</th>
+          <th style="border:1px solid #333; padding:6px;">Documents</th>
+          <th style="border:1px solid #333; padding:6px;">Document Type</th>
+          <th style="border:1px solid #333; padding:6px;">Marks & Nos.</th>
+        </tr></thead>
+        <tbody>
+          <tr><td style="border:1px solid #333; padding:6px;">1</td><td style="border:1px solid #333; padding:6px;">BILL OF LADING</td><td style="border:1px solid #333; padding:6px;">3 Original + NN COPY</td><td style="border:1px solid #333; padding:6px;">${shipment.blNumber} - ${shipment.blDate}</td></tr>
+          <tr><td style="border:1px solid #333; padding:6px;">2</td><td style="border:1px solid #333; padding:6px;">COMMERCIAL INVOICE</td><td style="border:1px solid #333; padding:6px;">Original</td><td style="border:1px solid #333; padding:6px;">${order.invoiceNumber}</td></tr>
+          <tr><td style="border:1px solid #333; padding:6px;">3</td><td style="border:1px solid #333; padding:6px;">PACKING LIST</td><td style="border:1px solid #333; padding:6px;">Original</td><td style="border:1px solid #333; padding:6px;">${order.invoiceNumber} (${containers.length} X 20 Containers)</td></tr>
+          <tr><td style="border:1px solid #333; padding:6px;">4</td><td style="border:1px solid #333; padding:6px;">STATEMENT OF ORIGIN</td><td style="border:1px solid #333; padding:6px;">Original</td><td style="border:1px solid #333; padding:6px;">${order.invoiceNumber}</td></tr>
+          <tr><td style="border:1px solid #333; padding:6px;">5</td><td style="border:1px solid #333; padding:6px;">FI</td><td style="border:1px solid #333; padding:6px;">Original</td><td style="border:1px solid #333; padding:6px;">${fiNumbers.join(' & ')}</td></tr>
+          ${shipment.gdNumber ? `<tr><td style="border:1px solid #333; padding:6px;">6</td><td style="border:1px solid #333; padding:6px;">GD</td><td style="border:1px solid #333; padding:6px;">Original</td><td style="border:1px solid #333; padding:6px;">${shipment.gdNumber} - ${shipment.gdDate}</td></tr>` : ''}
+        </tbody>
+      </table>
+
+      ${(notifyParty?.name) ? `<p>Therefore, you are requested to please endorse the Original Bill of Lading in the name of Notify party: <strong>${notifyParty.name}, ${notifyParty.address || buyer.country}</strong></p>` : ''}
+
+      <div style="margin-top:40px;"><p>Best Regards,</p><p style="font-weight:bold;">${company.name}<br/>Proprietor</p></div>
+      ${renderCompanyFooter(company)}
+    </div>`;
+}
+
+// ─── Buyer Covering Letter ───
+function renderBuyerCoveringLetter(doc) {
+  const { company, buyer, order, shipment, containers, notifyParty } = doc;
+  return `
+    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:800px; margin:0 auto; padding:20px;">
+      ${renderHeader(company)}
+      <p>Date: ${order.date}</p>
+      <p style="margin-top:15px;">${buyer.name}<br/>${buyer.address}<br/>${buyer.country}${buyer.vatNumber ? `<br/>VAT NO: ${buyer.vatNumber}` : ''}</p>
+
+      <h3 style="text-decoration:underline; margin:20px 0;">EXPORT DOCUMENTS AGAINST SALES CONTRACT # ${order.contractNumber} DATED: ${order.date}</h3>
+      <p>Dear Sir,</p>
+      <p>Pleased to send you following documents of our consignment against Sales Contract # ${order.contractNumber}</p>
+
+      <table style="width:100%; border-collapse:collapse; margin:20px 0; font-size:11px;">
+        <thead><tr style="background:#f5f5f5;">
+          <th style="border:1px solid #333; padding:6px;">S.No.</th>
+          <th style="border:1px solid #333; padding:6px;">Documents</th>
+          <th style="border:1px solid #333; padding:6px;">Document Type</th>
+          <th style="border:1px solid #333; padding:6px;">Marks & Nos.</th>
+          <th style="border:1px solid #333; padding:6px;">Copies</th>
+        </tr></thead>
+        <tbody>
+          <tr><td style="border:1px solid #333; padding:6px;">1</td><td style="border:1px solid #333; padding:6px;">BILL OF LADING ENDORSED</td><td style="border:1px solid #333; padding:6px;">3 Original + NN COPY</td><td style="border:1px solid #333; padding:6px;">${shipment.blNumber}</td><td style="border:1px solid #333; padding:6px;">01</td></tr>
+          <tr><td style="border:1px solid #333; padding:6px;">2</td><td style="border:1px solid #333; padding:6px;">COMMERCIAL INVOICE</td><td style="border:1px solid #333; padding:6px;">Original</td><td style="border:1px solid #333; padding:6px;">${order.invoiceNumber}</td><td style="border:1px solid #333; padding:6px;">5</td></tr>
+          <tr><td style="border:1px solid #333; padding:6px;">3</td><td style="border:1px solid #333; padding:6px;">PACKING LIST & CERTIFICATE</td><td style="border:1px solid #333; padding:6px;">Original</td><td style="border:1px solid #333; padding:6px;">${containers.length} x 20</td><td style="border:1px solid #333; padding:6px;">5</td></tr>
+          <tr><td style="border:1px solid #333; padding:6px;">4</td><td style="border:1px solid #333; padding:6px;">STATEMENT OF ORIGIN</td><td style="border:1px solid #333; padding:6px;">Original</td><td style="border:1px solid #333; padding:6px;">${order.invoiceNumber}</td><td style="border:1px solid #333; padding:6px;">3</td></tr>
+          <tr><td style="border:1px solid #333; padding:6px;">5</td><td style="border:1px solid #333; padding:6px;">CERTIFICATE OF ORIGIN</td><td style="border:1px solid #333; padding:6px;">Original</td><td style="border:1px solid #333; padding:6px;">—</td><td style="border:1px solid #333; padding:6px;">01</td></tr>
+          <tr><td style="border:1px solid #333; padding:6px;">6</td><td style="border:1px solid #333; padding:6px;">PHYTOSANITARY CERTIFICATE</td><td style="border:1px solid #333; padding:6px;">Original + Duplicate</td><td style="border:1px solid #333; padding:6px;">—</td><td style="border:1px solid #333; padding:6px;">1</td></tr>
+          <tr><td style="border:1px solid #333; padding:6px;">7</td><td style="border:1px solid #333; padding:6px;">FUMIGATION CERTIFICATE</td><td style="border:1px solid #333; padding:6px;">Original + Duplicate</td><td style="border:1px solid #333; padding:6px;">${containers.length} x 20</td><td style="border:1px solid #333; padding:6px;">1</td></tr>
+          <tr><td style="border:1px solid #333; padding:6px;">8</td><td style="border:1px solid #333; padding:6px;">PCSIR AFLATOXIN REPORT</td><td style="border:1px solid #333; padding:6px;">Original</td><td style="border:1px solid #333; padding:6px;">—</td><td style="border:1px solid #333; padding:6px;">1</td></tr>
+          <tr><td style="border:1px solid #333; padding:6px;">9</td><td style="border:1px solid #333; padding:6px;">PCSIR NON GMO REPORT</td><td style="border:1px solid #333; padding:6px;">Original</td><td style="border:1px solid #333; padding:6px;">—</td><td style="border:1px solid #333; padding:6px;">1</td></tr>
+          <tr><td style="border:1px solid #333; padding:6px;">10</td><td style="border:1px solid #333; padding:6px;">SGS INSPECTION REPORTS</td><td style="border:1px solid #333; padding:6px;">Original</td><td style="border:1px solid #333; padding:6px;">—</td><td style="border:1px solid #333; padding:6px;">1</td></tr>
+        </tbody>
+      </table>
+
+      <p>THANK YOU AND WAITING FOR YOUR NEXT CONSIGNMENT.</p>
+      <div style="margin-top:40px;"><p>Best Regards,</p><p style="font-weight:bold;">${company.name}<br/>Proprietor</p></div>
+      ${renderCompanyFooter(company)}
+    </div>`;
+}
+
+// ─── PCSIR / Lab Test Request ───
+function renderLabTestRequest(doc) {
+  const { company, order } = doc;
+  return `
+    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:800px; margin:0 auto; padding:20px;">
+      ${renderHeader(company)}
+      <p style="text-align:right;">Date: ${order.date}</p>
+      <p>INVOICE NO: ${order.invoiceNumber}</p>
+
+      <p style="margin-top:15px;">To,<br/>P.C.S.I.R,<br/>Karachi.</p>
+      <p>Dear Sir,</p>
+
+      <p><strong>Sub: ${order.product} SAMPLE FOR NON GMO REPORT</strong></p>
+
+      <p>Enclosed herewith the Pay order # __________ dated: __________ amount Rs. 10,000/- drawn on ${company.bank.name}, ${company.bank.branch}, Karachi Fee for NON GMO Testing of Rice for Export to EU Country.</p>
+
+      <p style="margin-top:20px;">Kindly issue the NON GMO Certificate as soon as possible.</p>
+
+      <p style="margin-top:15px;">Thanking you,<br/>Yours truly,</p>
+      <p style="margin-top:20px;">For: ${company.name},<br/>Proprietor</p>
+
+      <hr style="margin:30px 0; border:none; border-top:2px dashed #ccc;" />
+
+      <p style="text-align:right;">Date: ${order.date}</p>
+      <p>Shipper Invoice # ${order.invoiceNumber}</p>
+
+      <p style="margin-top:15px;">To,<br/>Eurofins Dr. Specht Express Testing & Inspection GMBH<br/>Am Neulander Gewerbepark 2<br/>DE - 21079 Hamburg, Germany</p>
+
+      <p><strong>Sub: 01 kg ${order.product} sample for Pesticides Test - INV # ${order.invoiceNumber}</strong></p>
+
+      <p>Dear Sir,</p>
+      <p>We are pleased to send one sample of 1 kg rice sample sealed by SGS Pakistan Pvt Ltd for Pesticides test.</p>
+      <p>Please share the results to an email "${company.email}".</p>
+
+      <p style="margin-top:15px;">Thanking you,<br/>Yours truly,</p>
+      <p style="margin-top:20px;">For: ${company.name},<br/>Proprietor</p>
+      ${renderCompanyFooter(company)}
+    </div>`;
+}
+
 const RENDERERS = {
   'proforma-invoice': renderProformaInvoice,
   'commercial-invoice': renderCommercialInvoice,
@@ -920,6 +1038,9 @@ const RENDERERS = {
   'packing-certificate': renderPackingCertificate,
   'statement-of-origin': renderStatementOfOrigin,
   'certificate-of-origin': renderCertificateOfOrigin,
+  'bank-covering-letter': renderBankCoveringLetter,
+  'buyer-covering-letter': renderBuyerCoveringLetter,
+  'lab-test-request': renderLabTestRequest,
 };
 
 function renderDocument(doc) {

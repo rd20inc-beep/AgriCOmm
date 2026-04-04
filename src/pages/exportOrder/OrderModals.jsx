@@ -244,6 +244,18 @@ export function ShipmentModal({
   shipETA, setShipETA,
   shipATA, setShipATA,
   shipDestPort, setShipDestPort,
+  shipVoyage, setShipVoyage,
+  shipGD, setShipGD,
+  shipGDDate, setShipGDDate,
+  shipFI, setShipFI,
+  shipFI2, setShipFI2,
+  shipFI3, setShipFI3,
+  shipFIDate, setShipFIDate,
+  shipNotifyName, setShipNotifyName,
+  shipNotifyAddress, setShipNotifyAddress,
+  shipNotifyPhone, setShipNotifyPhone,
+  shipNotifyEmail, setShipNotifyEmail,
+  shipRemarks, setShipRemarks,
   shipmentContainers, setShipmentContainers,
   onConfirm,
 }) {
@@ -409,7 +421,69 @@ export function ShipmentModal({
             <input type="date" value={shipATA} onChange={e => setShipATA(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
           </div>
         </div>
-        <div className="flex items-center justify-end gap-3 pt-2">
+
+        {/* Voyage & GD */}
+        <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider pt-2 border-t border-gray-200">Voyage & Customs</h4>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Voyage Number</label>
+            <input type="text" value={shipVoyage || ''} onChange={e => setShipVoyage(e.target.value)} placeholder="e.g. XA604A" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">GD Number</label>
+            <input type="text" value={shipGD || ''} onChange={e => setShipGD(e.target.value)} placeholder="e.g. KPPE-SB-189325" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">GD Date</label>
+            <input type="date" value={shipGDDate || ''} onChange={e => setShipGDDate(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          </div>
+        </div>
+
+        {/* FI Numbers */}
+        <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider pt-2 border-t border-gray-200">Financial Instrument (FI)</h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">FI Number</label>
+            <input type="text" value={shipFI || ''} onChange={e => setShipFI(e.target.value)} placeholder="e.g. AHB-EXP-021606-02022026" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">FI Date</label>
+            <input type="date" value={shipFIDate || ''} onChange={e => setShipFIDate(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">FI Number 2</label>
+            <input type="text" value={shipFI2 || ''} onChange={e => setShipFI2(e.target.value)} placeholder="Optional second FI" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">FI Number 3</label>
+            <input type="text" value={shipFI3 || ''} onChange={e => setShipFI3(e.target.value)} placeholder="Optional third FI" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          </div>
+        </div>
+
+        {/* Notify Party */}
+        <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider pt-2 border-t border-gray-200">Notify Party</h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Notify Party Name</label>
+            <input type="text" value={shipNotifyName || ''} onChange={e => setShipNotifyName(e.target.value)} placeholder="If different from buyer" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Notify Phone</label>
+            <input type="text" value={shipNotifyPhone || ''} onChange={e => setShipNotifyPhone(e.target.value)} placeholder="Phone" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          </div>
+          <div className="md:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Notify Address</label>
+            <input type="text" value={shipNotifyAddress || ''} onChange={e => setShipNotifyAddress(e.target.value)} placeholder="Full address" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          </div>
+        </div>
+
+        {/* Remarks */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Shipment Remarks</label>
+          <textarea value={shipRemarks || ''} onChange={e => setShipRemarks(e.target.value)} rows={2} placeholder="e.g. Partial shipment allowed, SGS inspection required" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none" />
+        </div>
+
+        <div className="flex items-center justify-end gap-3 pt-2 border-t border-gray-200">
           <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
           <button onClick={onConfirm} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">Save Shipment</button>
         </div>

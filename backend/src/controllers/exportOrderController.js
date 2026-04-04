@@ -201,6 +201,9 @@ const ALLOWED_UPDATE_FIELDS = [
   'production_date', 'expiry_date', 'freight_terms', 'fi_number', 'fi_date',
   'invoice_number', 'contract_number', 'consignee_type', 'bl_date',
   'production_remarks', 'shipment_window_start', 'shipment_window_end',
+  'voyage_number', 'gd_number', 'gd_date', 'fi_number_2', 'fi_number_3',
+  'notify_party_name', 'notify_party_address', 'notify_party_phone', 'notify_party_email',
+  'shipment_remarks',
 ];
 
 const exportOrderController = {
@@ -746,18 +749,13 @@ const exportOrderController = {
     try {
       const { id } = req.params;
       const {
-        vessel_name,
-        booking_no,
-        container_no,
-        containers,
-        bl_number,
-        shipping_line,
-        etd,
-        atd,
-        eta,
-        ata,
-        destination_port,
-        notes,
+        vessel_name, booking_no, container_no, containers,
+        bl_number, shipping_line, etd, atd, eta, ata,
+        destination_port, notes,
+        voyage_number, gd_number, gd_date,
+        fi_number, fi_number_2, fi_number_3, fi_date,
+        notify_party_name, notify_party_address, notify_party_phone, notify_party_email,
+        shipment_remarks,
       } = req.body;
 
       const order = await db('export_orders').where({ id }).first();
@@ -802,6 +800,18 @@ const exportOrderController = {
           eta: eta || null,
           ata: ata || null,
           destination_port: destination_port || null,
+          voyage_number: voyage_number || null,
+          gd_number: gd_number || null,
+          gd_date: gd_date || null,
+          fi_number: fi_number || order.fi_number || null,
+          fi_number_2: fi_number_2 || null,
+          fi_number_3: fi_number_3 || null,
+          fi_date: fi_date || order.fi_date || null,
+          notify_party_name: notify_party_name || null,
+          notify_party_address: notify_party_address || null,
+          notify_party_phone: notify_party_phone || null,
+          notify_party_email: notify_party_email || null,
+          shipment_remarks: shipment_remarks || null,
           updated_at: trx.fn.now(),
         });
 
