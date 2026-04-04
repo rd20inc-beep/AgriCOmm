@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { DollarSign, Users, Zap, Shield, TrendingUp, TrendingDown, AlertTriangle, Plus, UserPlus } from 'lucide-react';
+import { DollarSign, Users, Zap, Shield, TrendingUp, TrendingDown, AlertTriangle, Plus, UserPlus, Package } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useMillExpenses, useCreateMillExpense, useMillWorkers, useCreateMillWorker, usePayrollSummary, useRecordAttendance } from '../api/queries';
 import KPICard from '../components/KPICard';
@@ -23,7 +23,9 @@ const tabs = [
 ];
 
 export default function MillFinanceDashboard() {
-  const { millingBatches, addToast } = useApp();
+  const { millingBatches, inventory: rawInventory, addToast } = useApp();
+  const inventory = Array.isArray(rawInventory) ? rawInventory : [];
+  const pf = (v) => parseFloat(v) || 0;
   const { data: expData } = useMillExpenses();
   const createExpMut = useCreateMillExpense();
   const { data: workers = [] } = useMillWorkers();
@@ -142,6 +144,21 @@ export default function MillFinanceDashboard() {
             <KPICard icon={TrendingUp} title="Net Profit" value={PKR(kpis.netProfit)} subtitle={`Margin: ${margin}%`} color={kpis.netProfit >= 0 ? 'green' : 'red'} />
             <KPICard icon={DollarSign} title="Cost per KG" value={`Rs ${kpis.costPerKg.toFixed(2)}`} subtitle="All-in cost of finished rice" color="gray" />
           </div>
+          {/* Inventory Value */}
+          {(() => {
+            const rawVal = inventory.filter(i => i.type === 'raw').reduce((s, i) => s + (pf(i.landedCostPerKg) || pf(i.ratePerKg)) * pf(i.netWeightKg), 0);
+            const finVal = inventory.filter(i => i.type === 'finished').reduce((s, i) => s + (pf(i.landedCostPerKg) || pf(i.ratePerKg) || pf(i.rawCostComponent)) * pf(i.availableQty) * 1000, 0);
+            const bpVal = inventory.filter(i => i.type === 'byproduct').reduce((s, i) => s + pf(i.ratePerKg) * pf(i.availableQty) * 1000, 0);
+            const total = rawVal + finVal + bpVal;
+            return total > 0 ? (
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <KPICard icon={Package} title="Raw Inventory" value={PKR(rawVal)} subtitle={`${inventory.filter(i => i.type === 'raw').reduce((s, i) => s + pf(i.qty), 0).toFixed(1)} MT`} color="amber" />
+                <KPICard icon={Package} title="Finished Inventory" value={PKR(finVal)} subtitle={`${inventory.filter(i => i.type === 'finished').reduce((s, i) => s + pf(i.availableQty), 0).toFixed(1)} MT available`} color="green" />
+                <KPICard icon={Package} title="Byproduct Inventory" value={PKR(bpVal)} subtitle={`${inventory.filter(i => i.type === 'byproduct').reduce((s, i) => s + pf(i.availableQty), 0).toFixed(1)} MT`} color="purple" />
+                <KPICard icon={DollarSign} title="Total Working Capital" value={PKR(total)} subtitle="Capital locked in inventory" color="blue" />
+              </div>
+            ) : null;
+          })()}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="bg-white rounded-xl border border-gray-200 p-5">
               <h3 className="text-sm font-semibold text-gray-700 mb-3">Expense Breakdown</h3>

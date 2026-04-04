@@ -166,6 +166,23 @@ export default function MillingDashboard() {
   const byproductStock = useMemo(() =>
     inventory.filter(i => i.type === 'byproduct').reduce((s, i) => s + pf(i.qty), 0), [inventory]);
 
+  // Inventory VALUES (PKR) — money locked in stock
+  const rawInventoryValue = useMemo(() =>
+    inventory.filter(i => i.type === 'raw')
+      .reduce((s, i) => s + (pf(i.landedCostPerKg) || pf(i.ratePerKg) || 0) * pf(i.netWeightKg || 0), 0), [inventory]);
+
+  const finishedInventoryValue = useMemo(() =>
+    finishedAll.reduce((s, i) => {
+      const costKg = pf(i.landedCostPerKg) || pf(i.ratePerKg) || pf(i.rawCostComponent) || 0;
+      return s + costKg * (pf(i.availableQty) || 0) * 1000;
+    }, 0), [finishedAll]);
+
+  const byproductInventoryValue = useMemo(() =>
+    inventory.filter(i => i.type === 'byproduct')
+      .reduce((s, i) => s + pf(i.availableQty || 0) * 1000 * (pf(i.ratePerKg) || 0), 0), [inventory]);
+
+  const totalInventoryValue = rawInventoryValue + finishedInventoryValue + byproductInventoryValue;
+
   const pendingBatches = useMemo(() => {
     return millingBatches.filter(
       (b) => b.status === 'In Progress' || b.status === 'Queued' || b.status === 'Pending Approval'
@@ -286,6 +303,35 @@ export default function MillingDashboard() {
           <KPICard icon={TrendingUp} title="Mill Net Profit" value={formatPKR(Math.round(millNetProfit))} subtitle="Current period estimate" color="green" />
         </Link>
       </div>
+
+      {/* Inventory Value */}
+      {totalInventoryValue > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">Inventory Value (Working Capital)</h2>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-amber-50 rounded-lg p-4">
+              <p className="text-xs font-medium text-amber-600 uppercase">Raw Paddy</p>
+              <p className="text-lg font-bold text-amber-900">{formatPKR(rawInventoryValue)}</p>
+              <p className="text-xs text-amber-500">{rawRiceStock.toFixed(1)} MT in stock</p>
+            </div>
+            <div className="bg-green-50 rounded-lg p-4">
+              <p className="text-xs font-medium text-green-600 uppercase">Finished Rice</p>
+              <p className="text-lg font-bold text-green-900">{formatPKR(finishedInventoryValue)}</p>
+              <p className="text-xs text-green-500">{finishedRiceStock.toFixed(1)} MT in stock</p>
+            </div>
+            <div className="bg-purple-50 rounded-lg p-4">
+              <p className="text-xs font-medium text-purple-600 uppercase">Byproducts</p>
+              <p className="text-lg font-bold text-purple-900">{formatPKR(byproductInventoryValue)}</p>
+              <p className="text-xs text-purple-500">{byproductStock.toFixed(1)} MT in stock</p>
+            </div>
+            <div className="bg-blue-50 rounded-lg p-4">
+              <p className="text-xs font-medium text-blue-600 uppercase">Total Inventory</p>
+              <p className="text-lg font-bold text-blue-900">{formatPKR(totalInventoryValue)}</p>
+              <p className="text-xs text-blue-500">Capital locked in stock</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Mill P&L Summary */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
