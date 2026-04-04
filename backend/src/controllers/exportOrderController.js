@@ -1407,7 +1407,7 @@ const exportOrderController = {
         await trx('lot_transactions').insert({
           lot_id: lot.id,
           transaction_type: 'export_allocation',
-          transaction_no: `ALLOC-${order.order_no}`,
+          transaction_no: `ALLOC-${order.order_no}-${lot.lot_no}-${Date.now()}`,
           quantity_kg: qtyMT * 1000,
           rate_per_kg: parseFloat(lot.rate_per_kg) || 0,
           reference_module: 'export_order',
