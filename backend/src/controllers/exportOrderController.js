@@ -108,6 +108,17 @@ const DOC_TYPE_TO_CHECKLIST = {
   'fumigation': 'fumigation',
 };
 
+// Map short frontend keys to all possible DB doc_type values
+const DOC_TYPE_ALIASES = {
+  'phyto': ['phyto', 'Phytosanitary Certificate'],
+  'blDraft': ['blDraft', 'bl_draft', 'BL Draft'],
+  'blFinal': ['blFinal', 'bl_final', 'BL Final'],
+  'invoice': ['invoice', 'commercial_invoice', 'Commercial Invoice'],
+  'packingList': ['packingList', 'packing_list', 'Packing List'],
+  'coo': ['coo', 'Certificate of Origin'],
+  'fumigation': ['fumigation', 'Fumigation Certificate'],
+};
+
 async function applyDocumentAction({ orderRef, userId, docType, targetStatus, filePath, version, notes }) {
   const isNumeric = /^\d+$/.test(String(orderRef));
   const whereClause = isNumeric ? { id: parseInt(orderRef) } : { order_no: orderRef };
@@ -118,8 +129,11 @@ async function applyDocumentAction({ orderRef, userId, docType, targetStatus, fi
     throw err;
   }
 
+  // Find existing doc by any alias of this doc_type
+  const aliases = DOC_TYPE_ALIASES[docType] || [docType];
   const existing = await db('export_order_documents')
-    .where({ order_id: order.id, doc_type: docType })
+    .where('order_id', order.id)
+    .whereIn('doc_type', aliases)
     .first();
 
   let doc;
