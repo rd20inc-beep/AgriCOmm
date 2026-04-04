@@ -133,6 +133,19 @@ export default function ExportOrderDetail() {
     };
   }, [id, token, invalidateOrder]);
 
+  // Hooks must be called before any early returns (React Rules of Hooks)
+  const orderStatus = order?.status;
+  const visibleTabs = React.useMemo(() => getVisibleTabs(orderStatus), [orderStatus]);
+
+  React.useEffect(() => {
+    if (!orderStatus) return;
+    const tabKeys = visibleTabs.map(t => t.key);
+    if (!tabKeys.includes(activeTab)) {
+      setActiveTab(tabKeys[0] || 'overview');
+    }
+  }, [orderStatus]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Early returns AFTER all hooks
   if (orderLoading && !order) {
     return (
       <div className="flex flex-col items-center justify-center py-20">
@@ -152,18 +165,6 @@ export default function ExportOrderDetail() {
       </div>
     );
   }
-
-  // Compute visible tabs based on workflow status
-  const orderStatus = order.status;
-  const visibleTabs = React.useMemo(() => getVisibleTabs(orderStatus), [orderStatus]);
-
-  // Reset activeTab if it's no longer visible after a status change
-  React.useEffect(() => {
-    const tabKeys = visibleTabs.map(t => t.key);
-    if (!tabKeys.includes(activeTab)) {
-      setActiveTab(tabKeys[0] || 'overview');
-    }
-  }, [orderStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const totalCosts = Object.values(order.costs || {}).reduce((sum, c) => sum + (parseFloat(c) || 0), 0);
   const grossProfit = (parseFloat(order.contractValue) || 0) - totalCosts;
