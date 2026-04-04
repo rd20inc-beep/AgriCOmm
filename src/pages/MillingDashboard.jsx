@@ -131,23 +131,22 @@ export default function MillingDashboard() {
       .reduce((sum, i) => sum + i.qtyMT, 0);
   }, [inventory]);
 
-  const finishedRiceStock = useMemo(() => {
-    return inventory
-      .filter((i) => i.type === 'finished' && i.entity === 'mill')
-      .reduce((sum, i) => sum + i.qtyMT, 0);
-  }, [inventory]);
+  // All finished rice — mill owns it regardless of where it sits
+  const finishedAll = useMemo(() => inventory.filter(i => i.type === 'finished'), [inventory]);
 
-  const finishedAvailable = useMemo(() => {
-    return inventory
-      .filter((i) => i.type === 'finished' && i.entity === 'mill')
-      .reduce((sum, i) => sum + (parseFloat(i.availableQty) || 0), 0);
-  }, [inventory]);
+  const finishedRiceStock = useMemo(() => finishedAll.reduce((s, i) => s + i.qtyMT, 0), [finishedAll]);
 
-  const finishedReserved = useMemo(() => {
-    return inventory
-      .filter((i) => i.type === 'finished' && i.entity === 'mill')
-      .reduce((sum, i) => sum + (parseFloat(i.reservedQty) || 0), 0);
-  }, [inventory]);
+  const finishedInMill = useMemo(() =>
+    finishedAll.filter(i => i.entity === 'mill' && !i.reservedAgainst)
+      .reduce((s, i) => s + (parseFloat(i.availableQty) || 0), 0), [finishedAll]);
+
+  const finishedReserved = useMemo(() =>
+    finishedAll.filter(i => i.entity === 'mill')
+      .reduce((s, i) => s + (parseFloat(i.reservedQty) || 0), 0), [finishedAll]);
+
+  const finishedAtExport = useMemo(() =>
+    finishedAll.filter(i => i.entity === 'export')
+      .reduce((s, i) => s + i.qtyMT, 0), [finishedAll]);
 
   const byproductStock = useMemo(() => {
     return inventory
@@ -258,9 +257,9 @@ export default function MillingDashboard() {
         />
         <KPICard
           icon={Package}
-          title="Finished Rice Stock"
-          value={`${finishedRiceStock} MT`}
-          subtitle={`${finishedAvailable.toFixed(1)} available · ${finishedReserved.toFixed(1)} reserved`}
+          title="Finished Rice"
+          value={`${finishedRiceStock.toFixed(1)} MT`}
+          subtitle={`${finishedInMill.toFixed(1)} in mill · ${finishedReserved.toFixed(1)} reserved · ${finishedAtExport.toFixed(1)} at export`}
           color="green"
         />
         <KPICard
@@ -306,6 +305,66 @@ export default function MillingDashboard() {
           color="green"
         />
       </div>
+
+      {/* Stock Location Breakdown */}
+      {finishedAll.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4">Finished Rice — Stock Location</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200">
+                  <th className="text-left py-2 px-3 font-semibold text-gray-600">Lot</th>
+                  <th className="text-left py-2 px-3 font-semibold text-gray-600">Product</th>
+                  <th className="text-left py-2 px-3 font-semibold text-gray-600">Supplier</th>
+                  <th className="text-right py-2 px-3 font-semibold text-gray-600">Total</th>
+                  <th className="text-right py-2 px-3 font-semibold text-gray-600">In Mill</th>
+                  <th className="text-right py-2 px-3 font-semibold text-gray-600">Reserved</th>
+                  <th className="text-left py-2 px-3 font-semibold text-gray-600">Reserved For</th>
+                  <th className="text-left py-2 px-3 font-semibold text-gray-600">Location</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {finishedAll.map(lot => {
+                  const avail = parseFloat(lot.availableQty) || 0;
+                  const reserved = parseFloat(lot.reservedQty) || 0;
+                  const isAtExport = lot.entity === 'export';
+                  return (
+                    <tr key={lot.id || lot.lotNo} className="hover:bg-gray-50">
+                      <td className="py-2 px-3">
+                        <Link to={`/lot-inventory/${lot.lotNo || lot.id}`} className="font-medium text-blue-600 hover:underline">
+                          {lot.lotNo}
+                        </Link>
+                      </td>
+                      <td className="py-2 px-3 text-gray-700">{lot.itemName || lot.productName || '—'}</td>
+                      <td className="py-2 px-3 text-gray-600">{lot.supplierName || '—'}</td>
+                      <td className="py-2 px-3 text-right font-medium">{lot.qtyMT?.toFixed(2)} MT</td>
+                      <td className="py-2 px-3 text-right">
+                        {!isAtExport ? <span className="text-emerald-700 font-medium">{avail.toFixed(2)} MT</span> : <span className="text-gray-400">—</span>}
+                      </td>
+                      <td className="py-2 px-3 text-right">
+                        {reserved > 0 ? <span className="text-amber-700 font-medium">{reserved.toFixed(2)} MT</span> : <span className="text-gray-400">—</span>}
+                      </td>
+                      <td className="py-2 px-3">
+                        {lot.reservedAgainst ? (
+                          <Link to={`/export/${lot.reservedAgainst}`} className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded">{lot.reservedAgainst}</Link>
+                        ) : <span className="text-gray-400">—</span>}
+                      </td>
+                      <td className="py-2 px-3">
+                        <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
+                          isAtExport ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'
+                        }`}>
+                          {isAtExport ? 'Export Warehouse' : 'Mill'}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Orders Queue */}
       <div className="bg-white rounded-xl shadow-sm p-5">
