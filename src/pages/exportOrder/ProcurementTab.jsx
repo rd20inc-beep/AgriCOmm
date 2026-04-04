@@ -491,12 +491,17 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
 // ─── Receive from Mill sub-component ───
 function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
   const [transferring, setTransferring] = useState(false);
-  const [transferPrice, setTransferPrice] = useState('');
   const [expanded, setExpanded] = useState(true);
 
   const finishedMT = parseFloat(linkedBatch.actualFinishedMT) || 0;
   const batchId = linkedBatch.dbId || linkedBatch.id;
   const orderId = order.dbId || order.id;
+
+  // Auto-calculate transfer price from batch cost: (raw cost + milling cost) per KG × 1000 = per MT
+  const autoPrice = linkedBatch.totalCostPerKgFinished
+    ? Math.round(linkedBatch.totalCostPerKgFinished * 1000)
+    : '';
+  const [transferPrice, setTransferPrice] = useState(autoPrice || '');
 
   async function handleTransfer() {
     const price = parseFloat(transferPrice);
@@ -551,7 +556,7 @@ function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
           </p>
 
           <div className="bg-white/70 rounded-lg border border-amber-200 p-4 mb-4">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm mb-3">
               <div>
                 <span className="text-xs text-gray-500">Batch</span>
                 <p className="font-bold text-gray-900">{linkedBatch.id}</p>
@@ -569,6 +574,23 @@ function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
                 <p className="font-bold text-gray-900">{linkedBatch.supplierName || '—'}</p>
               </div>
             </div>
+            {linkedBatch.totalCostPerKgFinished > 0 && (
+              <div className="border-t border-amber-200 pt-3 grid grid-cols-3 gap-3 text-xs">
+                <div>
+                  <span className="text-gray-500">Raw Cost</span>
+                  <p className="font-bold text-gray-900">PKR {(linkedBatch.rawCostPerKgFinished || 0).toFixed(2)}/KG</p>
+                </div>
+                <div>
+                  <span className="text-gray-500">Milling Cost</span>
+                  <p className="font-bold text-gray-900">PKR {(linkedBatch.millingCostPerKgFinished || 0).toFixed(2)}/KG</p>
+                </div>
+                <div>
+                  <span className="text-gray-500">Total Finished Cost</span>
+                  <p className="font-bold text-emerald-700">PKR {(linkedBatch.totalCostPerKgFinished || 0).toFixed(2)}/KG</p>
+                  <p className="text-gray-400">= PKR {Math.round((linkedBatch.totalCostPerKgFinished || 0) * 1000).toLocaleString()}/MT</p>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="flex flex-col sm:flex-row items-end gap-3">

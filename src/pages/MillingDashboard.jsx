@@ -63,6 +63,7 @@ export default function MillingDashboard() {
   const setBF = (k, v) => setBatchForm(p => ({ ...p, [k]: v }));
   const resetBatchForm = () => setBatchForm({
     millingType: 'own_stock', supplierId: '', rawQtyMT: '', plannedFinishedMT: '',
+    millingFeePerKg: '5',
     millId: '', shift: 'Day', notes: '', clientName: '', clientContact: '', millingFeePerMT: '',
   });
 
@@ -83,6 +84,7 @@ export default function MillingDashboard() {
         supplier_id: parseInt(batchForm.supplierId),
         raw_qty_mt: rawQty,
         planned_finished_mt: planned,
+        milling_fee_per_kg: parseFloat(batchForm.millingFeePerKg) || 5,
         mill_id: batchForm.millId ? parseInt(batchForm.millId) : null,
         shift: batchForm.shift,
         notes: batchForm.millingType === 'service_milling'
@@ -264,6 +266,61 @@ export default function MillingDashboard() {
           <KPICard icon={TrendingUp} title="Mill Net Profit" value={formatPKR(Math.round(millNetProfit))} subtitle="Current period estimate" color="green" />
         </Link>
       </div>
+
+      {/* Mill P&L Summary */}
+      {millingBatches.filter(b => b.status === 'Completed').length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4">Mill Profit & Loss</h2>
+          {(() => {
+            const completed = millingBatches.filter(b => b.status === 'Completed');
+            const totalRawCost = completed.reduce((s, b) => s + (b.rawCostTotal || Object.values(b.costs || {}).reduce((cs, c) => cs + c, 0)), 0);
+            const totalMillingFees = completed.reduce((s, b) => {
+              const fee = b.millingFeePerKg || 5;
+              return s + (fee * (b.rawQtyMT || 0) * 1000);
+            }, 0);
+            const finishedRevenue = completed.reduce((s, b) => s + (b.actualFinishedMT * MILL_PRICES_PKR.finishedRicePerMT), 0);
+            const byproductRevenue = completed.reduce((s, b) =>
+              s + (b.brokenMT * MILL_PRICES_PKR.brokenPerMT) + (b.branMT * MILL_PRICES_PKR.branPerMT) + (b.huskMT * MILL_PRICES_PKR.huskPerMT), 0);
+            const totalRevenue = finishedRevenue + byproductRevenue;
+            const totalCost = totalRawCost + totalMillingFees;
+            const grossProfit = totalRevenue - totalCost;
+            const margin = totalRevenue > 0 ? (grossProfit / totalRevenue * 100).toFixed(1) : 0;
+
+            return (
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-blue-50 rounded-lg p-4">
+                  <p className="text-xs font-medium text-blue-600 uppercase">Revenue</p>
+                  <p className="text-lg font-bold text-blue-900 mt-1">{formatPKR(finishedRevenue)}</p>
+                  <p className="text-xs text-blue-500">Finished rice (internal transfers)</p>
+                  <p className="text-sm font-semibold text-blue-700 mt-2">{formatPKR(byproductRevenue)}</p>
+                  <p className="text-xs text-blue-500">Byproducts (broken, bran, husk)</p>
+                </div>
+                <div className="bg-red-50 rounded-lg p-4">
+                  <p className="text-xs font-medium text-red-600 uppercase">Costs</p>
+                  <p className="text-lg font-bold text-red-900 mt-1">{formatPKR(totalRawCost)}</p>
+                  <p className="text-xs text-red-500">Raw material purchase</p>
+                  <p className="text-sm font-semibold text-red-700 mt-2">{formatPKR(totalMillingFees)}</p>
+                  <p className="text-xs text-red-500">Milling operations</p>
+                </div>
+                <div className={`${grossProfit >= 0 ? 'bg-emerald-50' : 'bg-red-50'} rounded-lg p-4`}>
+                  <p className={`text-xs font-medium ${grossProfit >= 0 ? 'text-emerald-600' : 'text-red-600'} uppercase`}>Gross Profit</p>
+                  <p className={`text-lg font-bold ${grossProfit >= 0 ? 'text-emerald-900' : 'text-red-900'} mt-1`}>{formatPKR(grossProfit)}</p>
+                  <p className={`text-xs ${grossProfit >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>Margin: {margin}%</p>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <p className="text-xs font-medium text-gray-600 uppercase">Summary</p>
+                  <div className="mt-1 space-y-1 text-xs">
+                    <div className="flex justify-between"><span className="text-gray-500">Batches completed</span><span className="font-bold">{completed.length}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">Raw processed</span><span className="font-bold">{completed.reduce((s, b) => s + b.rawQtyMT, 0).toFixed(1)} MT</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">Finished produced</span><span className="font-bold">{completed.reduce((s, b) => s + b.actualFinishedMT, 0).toFixed(1)} MT</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">Avg yield</span><span className="font-bold">{avgYield}%</span></div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      )}
 
       {/* Stock Location Breakdown */}
       {finishedAll.length > 0 && (
@@ -727,6 +784,13 @@ export default function MillingDashboard() {
                 <option value="Full">Full Day</option>
               </select>
             </div>
+          </div>
+
+          {/* Milling Fee */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Milling Fee (PKR/KG)</label>
+            <input type="number" value={batchForm.millingFeePerKg} onChange={e => setBF('millingFeePerKg', e.target.value)} placeholder="5" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
+            <p className="text-xs text-gray-400 mt-1">Cost charged per KG of raw paddy processed. Default: PKR 5/KG</p>
           </div>
 
           {/* Notes */}

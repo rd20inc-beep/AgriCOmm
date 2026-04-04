@@ -133,6 +133,7 @@ const millingController = {
         linked_export_order_id,
         raw_qty_mt,
         planned_finished_mt,
+        milling_fee_per_kg,
         notes,
       } = req.body;
 
@@ -178,6 +179,7 @@ const millingController = {
             linked_export_order_id: linked_export_order_id || null,
             raw_qty_mt: parseFloat(raw_qty_mt),
             planned_finished_mt: planned_finished_mt ? parseFloat(planned_finished_mt) : null,
+            milling_fee_per_kg: milling_fee_per_kg ? parseFloat(milling_fee_per_kg) : 5,
             status: 'Pending',
             created_by: req.user.id,
           })
@@ -451,6 +453,37 @@ const millingController = {
         // Net cost per MT of finished rice = total batch cost / finished MT
         const effectiveCostPerMT = finished > 0 ? batchCostTotal / finished : 0;
 
+        // === Cost decomposition: raw cost vs milling cost ===
+        const rawQty = parseFloat(batch.raw_qty_mt) || 0;
+        const millingFee = parseFloat(batch.milling_fee_per_kg) || 5; // default 5 PKR/kg
+
+        // Get raw material cost from milling_costs (category='rawRice' or 'raw_rice')
+        const rawCostRow = await trx('milling_costs')
+          .where({ batch_id: batch.id })
+          .where(function () { this.where('category', 'rawRice').orWhere('category', 'raw_rice'); })
+          .sum('amount as total').first();
+        const rawCostTotal = parseFloat(rawCostRow?.total) || 0;
+
+        // Raw cost per KG of finished = total raw cost / finished KG
+        const finishedKg = finished * 1000;
+        const rawCostPerKg = finishedKg > 0 ? rawCostTotal / finishedKg : 0;
+        // Milling cost per KG of finished = (milling fee × raw KG) / finished KG
+        const millingCostPerKg = finishedKg > 0 ? (millingFee * rawQty * 1000) / finishedKg : 0;
+        const totalCostPerKg = rawCostPerKg + millingCostPerKg;
+
+        // Update batch with cost decomposition
+        await trx('milling_batches').where({ id }).update({
+          raw_cost_total: rawCostTotal,
+          raw_cost_per_kg_finished: rawCostPerKg,
+          milling_cost_per_kg_finished: millingCostPerKg,
+          total_cost_per_kg_finished: totalCostPerKg,
+        });
+
+        // Mark raw lots as consumed
+        await trx('inventory_lots')
+          .where({ batch_ref: `batch-${batch.id}`, type: 'raw' })
+          .update({ milling_status: 'Consumed' });
+
         // Record finished goods + byproducts with enrichment
         await inventoryService.recordMillingOutput(trx, {
           batchId: batch.id,
@@ -460,6 +493,8 @@ const millingController = {
           huskMT: parseFloat(husk),
           productName: linkedOrder?.product_name || 'Finished Rice',
           costPerMT: effectiveCostPerMT,
+          rawCostComponent: rawCostPerKg,
+          millingCostComponent: millingCostPerKg,
           userId: req.user?.id,
           supplierInfo: { supplierId: batch.supplier_id },
           qualityInfo: arrivalQuality ? {

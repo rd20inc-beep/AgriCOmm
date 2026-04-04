@@ -450,6 +450,8 @@ const inventoryService = {
     huskMT,
     productName,
     costPerMT,
+    rawCostComponent,
+    millingCostComponent,
     userId,
     // Optional enrichment from batch/quality
     supplierInfo,
@@ -510,10 +512,12 @@ const inventoryService = {
           broken_pct: qualityInfo?.broken || null,
           net_weight_kg: 0,
           gross_weight_kg: 0,
-          rate_per_kg: 0,
+          rate_per_kg: rawCostComponent ? (rawCostComponent + (millingCostComponent || 0)) : 0,
           purchase_amount: 0,
           landed_cost_total: 0,
-          landed_cost_per_kg: 0,
+          landed_cost_per_kg: rawCostComponent ? (rawCostComponent + (millingCostComponent || 0)) : 0,
+          raw_cost_component: rawCostComponent || null,
+          milling_cost_component: millingCostComponent || null,
         })
         .returning('*');
 
