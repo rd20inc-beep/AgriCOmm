@@ -61,10 +61,23 @@ const millingController = {
 
       const total = parseInt(countResult.total);
 
+      // Attach costs to each batch (from milling_costs table)
+      const batchIds = batches.map(b => b.id);
+      const allCosts = batchIds.length > 0
+        ? await db('milling_costs').whereIn('batch_id', batchIds)
+        : [];
+
+      const batchesWithCosts = batches.map(b => {
+        const batchCosts = allCosts.filter(c => c.batch_id === b.id);
+        const costs = {};
+        batchCosts.forEach(c => { costs[c.category] = parseFloat(c.amount) || 0; });
+        return { ...b, costs };
+      });
+
       return res.json({
         success: true,
         data: {
-          batches,
+          batches: batchesWithCosts,
           pagination: {
             page: parseInt(page),
             limit: parseInt(limit),
