@@ -345,7 +345,6 @@ export default function ExportOrderDetail() {
     }
     const rawQty = parseFloat(millingRawQty) || Math.ceil(order.qtyMT / 0.75);
     const supplierId = parseInt(millingSupplier) || null;
-    }
 
     try {
       const res = await createMillingMut.mutateAsync({
