@@ -16,7 +16,6 @@ const sidebarNav = [
   { label: 'Dashboard', icon: LayoutDashboard, to: '/' },
   { label: 'Finance Dashboard', icon: DollarSign, to: '/finance', permission: { module: 'finance', action: 'view' } },
   { section: 'Operations' },
-  { label: 'Buyers', icon: Users, to: '/buyers', permission: { module: 'export_orders', action: 'view' } },
   { label: 'Advance Payments', icon: CreditCard, to: '/advances', permission: { module: 'finance', action: 'view' } },
   {
     label: 'Export Orders',
