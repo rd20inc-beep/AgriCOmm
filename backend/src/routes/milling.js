@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const db = require('../config/database');
 const controller = require('../controllers/millingController');
 const advancedController = require('../controllers/millingAdvancedController');
 const authorize = require('../middleware/rbac');
@@ -199,5 +200,50 @@ router.get('/analytics/supplier-comparison', authorize('milling', 'view'), advan
 router.get('/analytics/operator-productivity', authorize('milling', 'view'), advancedController.analyticsOperatorProductivity);
 router.get('/analytics/moisture-analysis', authorize('milling', 'view'), advancedController.analyticsMoistureAnalysis);
 router.get('/analytics/batch-profitability/:id', authorize('milling', 'view'), advancedController.analyticsBatchProfitability);
+
+// =============================================================================
+// Mill Expenses (Overheads: salaries, rent, utilities, etc.)
+// =============================================================================
+
+router.get('/expenses', authorize('milling', 'view'), async (req, res) => {
+  try {
+    const { limit = 100, period } = req.query;
+    let query = db('mill_expenses').orderBy('expense_date', 'desc').limit(parseInt(limit));
+    if (period) query = query.where('period', period);
+    const expenses = await query;
+    const summary = await db('mill_expenses').select('category')
+      .sum('amount as total').groupBy('category').orderBy('total', 'desc');
+    return res.json({ success: true, data: { expenses, summary } });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.post('/expenses', authorize('milling', 'create'),
+  auditAction('create', 'mill_expense', (req, data) => data.data?.expense?.id),
+  async (req, res) => {
+    try {
+      const { category, description, amount, expense_date, period, payment_method, reference, notes, mill_id } = req.body;
+      if (!category || !amount || !expense_date) {
+        return res.status(400).json({ success: false, message: 'category, amount, and expense_date are required.' });
+      }
+      const [expense] = await db('mill_expenses').insert({
+        mill_id: mill_id || null,
+        category,
+        description: description || null,
+        amount: parseFloat(amount),
+        expense_date,
+        period: period || expense_date.substring(0, 7),
+        payment_method: payment_method || null,
+        reference: reference || null,
+        notes: notes || null,
+        created_by: req.user?.id,
+      }).returning('*');
+      return res.json({ success: true, data: { expense } });
+    } catch (err) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  }
+);
 
 module.exports = router;

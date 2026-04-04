@@ -26,7 +26,7 @@ import {
   Legend,
 } from 'recharts';
 import { useApp } from '../context/AppContext';
-import { useCreateMillingBatch, useMills } from '../api/queries';
+import { useCreateMillingBatch, useMills, useMillExpenses, useCreateMillExpense } from '../api/queries';
 import KPICard from '../components/KPICard';
 import StatusBadge from '../components/StatusBadge';
 import Modal from '../components/Modal';
@@ -50,6 +50,26 @@ export default function MillingDashboard() {
   const inventory = Array.isArray(rawInventory) ? rawInventory : [];
   const createBatchMut = useCreateMillingBatch();
   const { data: mills = [] } = useMills();
+  const { data: expenseData } = useMillExpenses();
+  const createExpenseMut = useCreateMillExpense();
+  const millExpenses = expenseData?.expenses || [];
+  const expenseSummary = expenseData?.summary || [];
+  const totalOverhead = expenseSummary.reduce((s, e) => s + (parseFloat(e.total) || 0), 0);
+
+  // Expense modal
+  const [showExpenseModal, setShowExpenseModal] = useState(false);
+  const [expForm, setExpForm] = useState({ category: 'salaries', description: '', amount: '', expense_date: new Date().toISOString().split('T')[0], notes: '' });
+  const setEF = (k, v) => setExpForm(p => ({ ...p, [k]: v }));
+
+  async function handleAddExpense() {
+    if (!expForm.amount) { addToast('Amount is required', 'error'); return; }
+    try {
+      await createExpenseMut.mutateAsync(expForm);
+      addToast('Expense recorded', 'success');
+      setShowExpenseModal(false);
+      setExpForm({ category: 'salaries', description: '', amount: '', expense_date: new Date().toISOString().split('T')[0], notes: '' });
+    } catch (err) { addToast(err.message || 'Failed', 'error'); }
+  }
 
   // New batch modal
   const [showNewBatch, setShowNewBatch] = useState(false);
@@ -268,59 +288,135 @@ export default function MillingDashboard() {
       </div>
 
       {/* Mill P&L Summary */}
-      {millingBatches.filter(b => b.status === 'Completed').length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
-          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4">Mill Profit & Loss</h2>
-          {(() => {
-            const completed = millingBatches.filter(b => b.status === 'Completed');
-            const totalRawCost = completed.reduce((s, b) => s + (b.rawCostTotal || Object.values(b.costs || {}).reduce((cs, c) => cs + c, 0)), 0);
-            const totalMillingFees = completed.reduce((s, b) => {
-              const fee = b.millingFeePerKg || 5;
-              return s + (fee * (b.rawQtyMT || 0) * 1000);
-            }, 0);
-            const finishedRevenue = completed.reduce((s, b) => s + (b.actualFinishedMT * MILL_PRICES_PKR.finishedRicePerMT), 0);
-            const byproductRevenue = completed.reduce((s, b) =>
-              s + (b.brokenMT * MILL_PRICES_PKR.brokenPerMT) + (b.branMT * MILL_PRICES_PKR.branPerMT) + (b.huskMT * MILL_PRICES_PKR.huskPerMT), 0);
-            const totalRevenue = finishedRevenue + byproductRevenue;
-            const totalCost = totalRawCost + totalMillingFees;
-            const grossProfit = totalRevenue - totalCost;
-            const margin = totalRevenue > 0 ? (grossProfit / totalRevenue * 100).toFixed(1) : 0;
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">Mill Profit & Loss</h2>
+          <button onClick={() => setShowExpenseModal(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-700 rounded-lg text-xs font-medium hover:bg-red-100">
+            <Plus className="w-3 h-3" /> Add Expense
+          </button>
+        </div>
+        {(() => {
+          const completed = millingBatches.filter(b => b.status === 'Completed');
+          const totalRawCost = completed.reduce((s, b) => s + (b.rawCostTotal || Object.values(b.costs || {}).reduce((cs, c) => cs + c, 0)), 0);
+          const totalMillingOps = completed.reduce((s, b) => s + ((b.millingFeePerKg || 5) * (b.rawQtyMT || 0) * 1000), 0);
+          const finishedRevenue = completed.reduce((s, b) => s + (b.actualFinishedMT * MILL_PRICES_PKR.finishedRicePerMT), 0);
+          const byproductRevenue = completed.reduce((s, b) =>
+            s + (b.brokenMT * MILL_PRICES_PKR.brokenPerMT) + (b.branMT * MILL_PRICES_PKR.branPerMT) + (b.huskMT * MILL_PRICES_PKR.huskPerMT), 0);
+          const totalRevenue = finishedRevenue + byproductRevenue;
+          const totalCost = totalRawCost + totalMillingOps + totalOverhead;
+          const netProfit = totalRevenue - totalCost;
+          const margin = totalRevenue > 0 ? (netProfit / totalRevenue * 100).toFixed(1) : 0;
 
-            return (
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          return (
+            <>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
                 <div className="bg-blue-50 rounded-lg p-4">
                   <p className="text-xs font-medium text-blue-600 uppercase">Revenue</p>
-                  <p className="text-lg font-bold text-blue-900 mt-1">{formatPKR(finishedRevenue)}</p>
-                  <p className="text-xs text-blue-500">Finished rice (internal transfers)</p>
-                  <p className="text-sm font-semibold text-blue-700 mt-2">{formatPKR(byproductRevenue)}</p>
-                  <p className="text-xs text-blue-500">Byproducts (broken, bran, husk)</p>
+                  <p className="text-lg font-bold text-blue-900 mt-1">{formatPKR(totalRevenue)}</p>
+                  <div className="mt-2 space-y-1 text-xs">
+                    <div className="flex justify-between"><span className="text-blue-500">Finished rice</span><span className="font-medium">{formatPKR(finishedRevenue)}</span></div>
+                    <div className="flex justify-between"><span className="text-blue-500">Byproducts</span><span className="font-medium">{formatPKR(byproductRevenue)}</span></div>
+                  </div>
                 </div>
                 <div className="bg-red-50 rounded-lg p-4">
-                  <p className="text-xs font-medium text-red-600 uppercase">Costs</p>
-                  <p className="text-lg font-bold text-red-900 mt-1">{formatPKR(totalRawCost)}</p>
-                  <p className="text-xs text-red-500">Raw material purchase</p>
-                  <p className="text-sm font-semibold text-red-700 mt-2">{formatPKR(totalMillingFees)}</p>
-                  <p className="text-xs text-red-500">Milling operations</p>
+                  <p className="text-xs font-medium text-red-600 uppercase">Direct Costs</p>
+                  <p className="text-lg font-bold text-red-900 mt-1">{formatPKR(totalRawCost + totalMillingOps)}</p>
+                  <div className="mt-2 space-y-1 text-xs">
+                    <div className="flex justify-between"><span className="text-red-500">Raw material</span><span className="font-medium">{formatPKR(totalRawCost)}</span></div>
+                    <div className="flex justify-between"><span className="text-red-500">Milling ops</span><span className="font-medium">{formatPKR(totalMillingOps)}</span></div>
+                  </div>
                 </div>
-                <div className={`${grossProfit >= 0 ? 'bg-emerald-50' : 'bg-red-50'} rounded-lg p-4`}>
-                  <p className={`text-xs font-medium ${grossProfit >= 0 ? 'text-emerald-600' : 'text-red-600'} uppercase`}>Gross Profit</p>
-                  <p className={`text-lg font-bold ${grossProfit >= 0 ? 'text-emerald-900' : 'text-red-900'} mt-1`}>{formatPKR(grossProfit)}</p>
-                  <p className={`text-xs ${grossProfit >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>Margin: {margin}%</p>
+                <div className="bg-orange-50 rounded-lg p-4">
+                  <p className="text-xs font-medium text-orange-600 uppercase">Overheads</p>
+                  <p className="text-lg font-bold text-orange-900 mt-1">{formatPKR(totalOverhead)}</p>
+                  <div className="mt-2 space-y-1 text-xs">
+                    {expenseSummary.slice(0, 3).map(e => (
+                      <div key={e.category} className="flex justify-between"><span className="text-orange-500 capitalize">{e.category}</span><span className="font-medium">{formatPKR(parseFloat(e.total))}</span></div>
+                    ))}
+                    {expenseSummary.length === 0 && <p className="text-orange-400">No expenses recorded</p>}
+                  </div>
                 </div>
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <p className="text-xs font-medium text-gray-600 uppercase">Summary</p>
-                  <div className="mt-1 space-y-1 text-xs">
-                    <div className="flex justify-between"><span className="text-gray-500">Batches completed</span><span className="font-bold">{completed.length}</span></div>
-                    <div className="flex justify-between"><span className="text-gray-500">Raw processed</span><span className="font-bold">{completed.reduce((s, b) => s + b.rawQtyMT, 0).toFixed(1)} MT</span></div>
-                    <div className="flex justify-between"><span className="text-gray-500">Finished produced</span><span className="font-bold">{completed.reduce((s, b) => s + b.actualFinishedMT, 0).toFixed(1)} MT</span></div>
-                    <div className="flex justify-between"><span className="text-gray-500">Avg yield</span><span className="font-bold">{avgYield}%</span></div>
+                <div className={`${netProfit >= 0 ? 'bg-emerald-50' : 'bg-red-50'} rounded-lg p-4`}>
+                  <p className={`text-xs font-medium ${netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'} uppercase`}>Net Profit</p>
+                  <p className={`text-lg font-bold ${netProfit >= 0 ? 'text-emerald-900' : 'text-red-900'} mt-1`}>{formatPKR(netProfit)}</p>
+                  <p className={`text-xs ${netProfit >= 0 ? 'text-emerald-500' : 'text-red-500'} mt-1`}>Margin: {margin}%</p>
+                  <div className="mt-2 space-y-1 text-xs">
+                    <div className="flex justify-between"><span className="text-gray-500">Batches</span><span className="font-bold">{completed.length}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">Processed</span><span className="font-bold">{completed.reduce((s, b) => s + b.rawQtyMT, 0).toFixed(1)} MT</span></div>
                   </div>
                 </div>
               </div>
-            );
-          })()}
-        </div>
-      )}
+
+              {/* Batch-by-batch breakdown — clickable */}
+              {completed.length > 0 && (
+                <details className="mt-2">
+                  <summary className="text-xs font-medium text-blue-600 cursor-pointer hover:text-blue-800">View batch-by-batch breakdown ({completed.length} batches)</summary>
+                  <div className="mt-3 overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead><tr className="border-b border-gray-200">
+                        <th className="text-left py-2 px-2 font-semibold text-gray-600">Batch</th>
+                        <th className="text-right py-2 px-2 font-semibold text-gray-600">Raw MT</th>
+                        <th className="text-right py-2 px-2 font-semibold text-gray-600">Finished MT</th>
+                        <th className="text-right py-2 px-2 font-semibold text-gray-600">Yield %</th>
+                        <th className="text-right py-2 px-2 font-semibold text-gray-600">Raw Cost</th>
+                        <th className="text-right py-2 px-2 font-semibold text-gray-600">Cost/KG</th>
+                        <th className="text-right py-2 px-2 font-semibold text-gray-600">Revenue</th>
+                        <th className="text-right py-2 px-2 font-semibold text-gray-600">Profit</th>
+                      </tr></thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {completed.map(b => {
+                          const bRevenue = (b.actualFinishedMT * MILL_PRICES_PKR.finishedRicePerMT) + (b.brokenMT * MILL_PRICES_PKR.brokenPerMT) + (b.branMT * MILL_PRICES_PKR.branPerMT) + (b.huskMT * MILL_PRICES_PKR.huskPerMT);
+                          const bCost = b.rawCostTotal || Object.values(b.costs || {}).reduce((s, c) => s + c, 0);
+                          const bProfit = bRevenue - bCost;
+                          return (
+                            <tr key={b.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => navigate(`/milling/${b.id}`)}>
+                              <td className="py-2 px-2 font-medium text-blue-600">{b.id}</td>
+                              <td className="py-2 px-2 text-right">{b.rawQtyMT}</td>
+                              <td className="py-2 px-2 text-right">{b.actualFinishedMT}</td>
+                              <td className="py-2 px-2 text-right">{b.yieldPct}%</td>
+                              <td className="py-2 px-2 text-right">{formatPKR(bCost)}</td>
+                              <td className="py-2 px-2 text-right">{b.totalCostPerKgFinished ? `Rs ${b.totalCostPerKgFinished.toFixed(2)}` : '—'}</td>
+                              <td className="py-2 px-2 text-right">{formatPKR(bRevenue)}</td>
+                              <td className={`py-2 px-2 text-right font-medium ${bProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{formatPKR(bProfit)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
+              )}
+
+              {/* Recent Expenses */}
+              {millExpenses.length > 0 && (
+                <details className="mt-3">
+                  <summary className="text-xs font-medium text-orange-600 cursor-pointer hover:text-orange-800">View overhead expenses ({millExpenses.length} entries)</summary>
+                  <div className="mt-3 overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead><tr className="border-b border-gray-200">
+                        <th className="text-left py-2 px-2 font-semibold text-gray-600">Date</th>
+                        <th className="text-left py-2 px-2 font-semibold text-gray-600">Category</th>
+                        <th className="text-left py-2 px-2 font-semibold text-gray-600">Description</th>
+                        <th className="text-right py-2 px-2 font-semibold text-gray-600">Amount</th>
+                      </tr></thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {millExpenses.slice(0, 20).map(e => (
+                          <tr key={e.id} className="hover:bg-gray-50">
+                            <td className="py-2 px-2">{e.expenseDate}</td>
+                            <td className="py-2 px-2 capitalize">{e.category}</td>
+                            <td className="py-2 px-2 text-gray-600">{e.description || '—'}</td>
+                            <td className="py-2 px-2 text-right font-medium">{formatPKR(parseFloat(e.amount))}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
+              )}
+            </>
+          );
+        })()}
+      </div>
 
       {/* Stock Location Breakdown */}
       {finishedAll.length > 0 && (
@@ -677,6 +773,54 @@ export default function MillingDashboard() {
           </div>
         </div>
       )}
+
+      {/* Add Expense Modal */}
+      <Modal isOpen={showExpenseModal} onClose={() => setShowExpenseModal(false)} title="Add Mill Expense" size="md">
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
+              <select value={expForm.category} onChange={e => setEF('category', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none bg-white">
+                <option value="salaries">Salaries & Wages</option>
+                <option value="utilities">Utilities (Electricity/Gas/Water)</option>
+                <option value="rent">Rent / Facility</option>
+                <option value="maintenance">Maintenance & Repairs</option>
+                <option value="insurance">Insurance</option>
+                <option value="transport">Transport</option>
+                <option value="fuel">Fuel & Diesel</option>
+                <option value="packaging">Packaging Material</option>
+                <option value="misc">Miscellaneous</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Amount (PKR) *</label>
+              <input type="number" value={expForm.amount} onChange={e => setEF('amount', e.target.value)} placeholder="0" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+            <input type="text" value={expForm.description} onChange={e => setEF('description', e.target.value)} placeholder="e.g. March electricity bill" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Date *</label>
+              <input type="date" value={expForm.expense_date} onChange={e => setEF('expense_date', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Reference</label>
+              <input type="text" value={expForm.reference || ''} onChange={e => setEF('reference', e.target.value)} placeholder="Receipt/invoice #" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+            <textarea value={expForm.notes} onChange={e => setEF('notes', e.target.value)} rows={2} placeholder="Optional" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none resize-none" />
+          </div>
+          <div className="flex justify-end gap-2 pt-2 border-t border-gray-200">
+            <button onClick={() => setShowExpenseModal(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+            <button onClick={handleAddExpense} className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700">Record Expense</button>
+          </div>
+        </div>
+      </Modal>
 
       {/* New Batch Modal */}
       <Modal isOpen={showNewBatch} onClose={() => setShowNewBatch(false)} title="Create Milling Batch" size="md">

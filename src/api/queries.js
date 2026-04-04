@@ -733,6 +733,28 @@ export function useChangeUserRole() {
 
 // ===================== MILLS =====================
 
+export function useMillExpenses(params = {}) {
+  return useQuery({
+    queryKey: ['mill-expenses', params],
+    queryFn: async () => {
+      const res = await millingApi.listExpenses(params);
+      return {
+        expenses: transformKeys(unwrap(res, 'expenses') || []),
+        summary: transformKeys(unwrap(res, 'summary') || []),
+      };
+    },
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useCreateMillExpense() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => millingApi.createExpense(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['mill-expenses'] }),
+  });
+}
+
 export function useMills() {
   return useQuery({
     queryKey: ['mills'],
