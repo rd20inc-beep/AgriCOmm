@@ -45,10 +45,19 @@ export default function MillFinanceDashboard() {
   const completed = useMemo(() => millingBatches.filter(b => b.status === 'Completed'), [millingBatches]);
 
   // Financial KPIs
+  const RAW_KEYS = new Set(['rawRice', 'raw_rice', 'rawrice']);
+  const getRawCost = (costs) => {
+    if (!costs) return 0;
+    for (const [k, v] of Object.entries(costs)) {
+      if (RAW_KEYS.has(k)) return parseFloat(v) || 0;
+    }
+    return 0;
+  };
+
   const kpis = useMemo(() => {
-    const totalRaw = completed.reduce((s, b) => s + (parseFloat(b.costs?.rawRice) || 0), 0);
+    const totalRaw = completed.reduce((s, b) => s + getRawCost(b.costs), 0);
     const totalOtherCosts = completed.reduce((s, b) => {
-      return s + Object.entries(b.costs || {}).reduce((cs, [k, v]) => k === 'rawRice' ? cs : cs + (parseFloat(v) || 0), 0);
+      return s + Object.entries(b.costs || {}).reduce((cs, [k, v]) => RAW_KEYS.has(k) ? cs : cs + (parseFloat(v) || 0), 0);
     }, 0);
     const finishedRev = completed.reduce((s, b) => s + b.actualFinishedMT * MILL_PRICES.finished, 0);
     const byproductRev = completed.reduce((s, b) =>

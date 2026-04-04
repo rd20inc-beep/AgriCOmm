@@ -128,7 +128,7 @@ export default function MillingDashboard() {
     const completed = millingBatches.filter(b => b.status === 'Completed');
     if (completed.length === 0) return months.map(month => ({ month, rawRice: 0, transport: 0, electricity: 0, labor: 0, rent: 0 }));
     const avgCosts = completed.reduce((acc, b) => {
-      acc.rawRice += (b.costs?.rawRice || 0);
+      acc.rawRice += (parseFloat(b.costs?.rawRice) || parseFloat(b.costs?.raw_rice) || 0);
       acc.transport += (b.costs?.transport || 0);
       acc.electricity += (b.costs?.electricity || 0);
       acc.labor += (b.costs?.labor || 0);
