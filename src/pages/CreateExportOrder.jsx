@@ -1,13 +1,66 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { useCreateExportOrder } from '../api/queries';
 import {
   Save, Send, DollarSign, Calculator, ArrowLeft, Package, Truck,
-  User, ShoppingBag, ChevronRight, Plus, Trash2, Info,
+  User, ShoppingBag, ChevronRight, Plus, Trash2, Info, Search,
 } from 'lucide-react';
 import { validateForm, required, positiveNonZero } from '../utils/validation';
 import { toKg, fromKg, allEquivalents, UNITS } from '../utils/unitConversion';
+
+function SearchSelect({ value, onChange, options, placeholder }) {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  const selected = options.find(o => String(o.value) === String(value));
+
+  useEffect(() => {
+    function handleClick(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  const filtered = query
+    ? options.filter(o => o.label.toLowerCase().includes(query.toLowerCase()) || (o.sub || '').toLowerCase().includes(query.toLowerCase()))
+    : options;
+
+  return (
+    <div ref={ref} className="relative">
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+        <input
+          type="text"
+          value={open ? query : (selected ? `${selected.label}${selected.sub ? ` (${selected.sub})` : ''}` : '')}
+          onChange={e => { setQuery(e.target.value); if (!open) setOpen(true); }}
+          onFocus={() => { setOpen(true); setQuery(''); }}
+          placeholder={placeholder}
+          className="form-input pl-9"
+        />
+      </div>
+      {open && (
+        <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+          {filtered.length === 0 ? (
+            <div className="px-4 py-3 text-sm text-gray-400">No results found</div>
+          ) : (
+            filtered.map(o => (
+              <button
+                key={o.value}
+                type="button"
+                onClick={() => { onChange(String(o.value)); setOpen(false); setQuery(''); }}
+                className={`w-full text-left px-4 py-2.5 text-sm hover:bg-blue-50 transition-colors ${String(o.value) === String(value) ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-900'}`}
+              >
+                {o.label}
+                {o.sub && <span className="ml-2 text-xs text-gray-400">{o.sub}</span>}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const RECEIVING_MODES = [
   { value: 'bags', label: 'In Bags', desc: 'Standard packed bags', icon: ShoppingBag },
@@ -206,10 +259,12 @@ export default function CreateExportOrder() {
         <div className="form-grid">
           <div className="form-group">
             <label className="form-label">Customer *</label>
-            <select value={form.customerId} onChange={e => set('customerId', e.target.value)} className="form-input">
-              <option value="">Select customer...</option>
-              {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            <SearchSelect
+              value={form.customerId}
+              onChange={val => set('customerId', val)}
+              options={customers.map(c => ({ value: c.id, label: c.name, sub: c.country }))}
+              placeholder="Type to search buyer..."
+            />
           </div>
           <div className="form-group">
             <label className="form-label">Destination Country</label>
@@ -217,10 +272,12 @@ export default function CreateExportOrder() {
           </div>
           <div className="form-group">
             <label className="form-label">Product *</label>
-            <select value={form.productId} onChange={e => set('productId', e.target.value)} className="form-input">
-              <option value="">Select product...</option>
-              {products.filter(p => !p.isByproduct).map(p => <option key={p.id} value={p.id}>{p.name}{p.grade ? ` (${p.grade})` : ''}</option>)}
-            </select>
+            <SearchSelect
+              value={form.productId}
+              onChange={val => set('productId', val)}
+              options={products.filter(p => !p.isByproduct).map(p => ({ value: p.id, label: p.name, sub: p.grade || '' }))}
+              placeholder="Type to search product..."
+            />
           </div>
         </div>
       </div>
