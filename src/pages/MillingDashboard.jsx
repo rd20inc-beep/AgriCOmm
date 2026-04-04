@@ -125,34 +125,24 @@ export default function MillingDashboard() {
   }, [millingBatches]);
 
   // KPI Calculations
-  const rawRiceStock = useMemo(() => {
-    return inventory
-      .filter((i) => i.type === 'raw')
-      .reduce((sum, i) => sum + parseFloat(i.qty), 0);
-  }, [inventory]);
+  const pf = (v) => parseFloat(v) || 0;
+
+  const rawRiceStock = useMemo(() =>
+    inventory.filter(i => i.type === 'raw').reduce((s, i) => s + pf(i.qty), 0), [inventory]);
 
   // All finished rice — mill owns it regardless of where it sits
   const finishedAll = useMemo(() => inventory.filter(i => i.type === 'finished'), [inventory]);
-
-  const finishedRiceStock = useMemo(() => finishedAll.reduce((s, i) => s + parseFloat(i.qty), 0), [finishedAll]);
-
+  const finishedRiceStock = useMemo(() => finishedAll.reduce((s, i) => s + pf(i.qty), 0), [finishedAll]);
   const finishedInMill = useMemo(() =>
     finishedAll.filter(i => i.entity === 'mill' && !i.reservedAgainst)
-      .reduce((s, i) => s + (parseFloat(i.availableQty) || 0), 0), [finishedAll]);
-
+      .reduce((s, i) => s + pf(i.availableQty), 0), [finishedAll]);
   const finishedReserved = useMemo(() =>
-    finishedAll.filter(i => i.entity === 'mill')
-      .reduce((s, i) => s + (parseFloat(i.reservedQty) || 0), 0), [finishedAll]);
-
+    finishedAll.filter(i => i.entity === 'mill').reduce((s, i) => s + pf(i.reservedQty), 0), [finishedAll]);
   const finishedAtExport = useMemo(() =>
-    finishedAll.filter(i => i.entity === 'export')
-      .reduce((s, i) => s + parseFloat(i.qty), 0), [finishedAll]);
+    finishedAll.filter(i => i.entity === 'export').reduce((s, i) => s + pf(i.qty), 0), [finishedAll]);
 
-  const byproductStock = useMemo(() => {
-    return inventory
-      .filter((i) => i.type === 'byproduct')
-      .reduce((sum, i) => sum + parseFloat(i.qty), 0);
-  }, [inventory]);
+  const byproductStock = useMemo(() =>
+    inventory.filter(i => i.type === 'byproduct').reduce((s, i) => s + pf(i.qty), 0), [inventory]);
 
   const pendingBatches = useMemo(() => {
     return millingBatches.filter(
@@ -246,64 +236,33 @@ export default function MillingDashboard() {
         </button>
       </div>
 
-      {/* KPI Row */}
+      {/* KPI Row — clickable cards */}
       <div className="kpi-grid">
-        <KPICard
-          icon={Wheat}
-          title="Raw Rice Stock"
-          value={`${rawRiceStock} MT`}
-          subtitle="Paddy in mill warehouse"
-          color="amber"
-        />
-        <KPICard
-          icon={Package}
-          title="Finished Rice"
-          value={`${finishedRiceStock.toFixed(1)} MT`}
-          subtitle={`${finishedInMill.toFixed(1)} in mill · ${finishedReserved.toFixed(1)} reserved · ${finishedAtExport.toFixed(1)} at export`}
-          color="green"
-        />
-        <KPICard
-          icon={Recycle}
-          title="By-product Stock"
-          value={`${byproductStock.toFixed(1)} MT`}
-          subtitle="Broken, bran, husk"
-          color="purple"
-        />
-        <KPICard
-          icon={Clock}
-          title="Pending Batches"
-          value={pendingBatches}
-          subtitle="In Progress / Queued / Pending"
-          color="indigo"
-        />
-        <KPICard
-          icon={AlertTriangle}
-          title="Variance Alerts"
-          value={varianceAlerts}
-          subtitle="Exceeding 1% threshold"
-          color="red"
-        />
-        <KPICard
-          icon={BarChart3}
-          title="Avg Yield %"
-          value={`${avgYield}%`}
-          subtitle="Completed batches average"
-          color="blue"
-        />
-        <KPICard
-          icon={DollarSign}
-          title="Local Sales"
-          value={formatPKR(Math.round(localSalesValue))}
-          subtitle="By-products & local rice"
-          color="cyan"
-        />
-        <KPICard
-          icon={TrendingUp}
-          title="Mill Net Profit"
-          value={formatPKR(Math.round(millNetProfit))}
-          subtitle="Current period estimate"
-          color="green"
-        />
+        <Link to="/lot-inventory?type=raw">
+          <KPICard icon={Wheat} title="Raw Rice Stock" value={`${rawRiceStock.toFixed(1)} MT`} subtitle="Paddy in mill warehouse" color="amber" />
+        </Link>
+        <Link to="/lot-inventory?type=finished">
+          <KPICard icon={Package} title="Finished Rice" value={`${finishedRiceStock.toFixed(1)} MT`}
+            subtitle={`${finishedInMill.toFixed(1)} in mill · ${finishedReserved.toFixed(1)} reserved · ${finishedAtExport.toFixed(1)} at export`} color="green" />
+        </Link>
+        <Link to="/lot-inventory?type=byproduct">
+          <KPICard icon={Recycle} title="By-product Stock" value={`${byproductStock.toFixed(1)} MT`} subtitle="Broken, bran, husk" color="purple" />
+        </Link>
+        <div className="cursor-pointer" onClick={() => document.getElementById('batches-section')?.scrollIntoView({ behavior: 'smooth' })}>
+          <KPICard icon={Clock} title="Pending Batches" value={pendingBatches} subtitle="In Progress / Queued / Pending" color="indigo" />
+        </div>
+        <Link to="/quality">
+          <KPICard icon={AlertTriangle} title="Variance Alerts" value={varianceAlerts} subtitle="Exceeding 1% threshold" color="red" />
+        </Link>
+        <div className="cursor-pointer" onClick={() => document.getElementById('yield-section')?.scrollIntoView({ behavior: 'smooth' })}>
+          <KPICard icon={BarChart3} title="Avg Yield %" value={`${avgYield}%`} subtitle="Completed batches average" color="blue" />
+        </div>
+        <Link to="/local-sales">
+          <KPICard icon={DollarSign} title="Local Sales" value={formatPKR(Math.round(localSalesValue))} subtitle="By-products & local rice" color="cyan" />
+        </Link>
+        <Link to="/reports">
+          <KPICard icon={TrendingUp} title="Mill Net Profit" value={formatPKR(Math.round(millNetProfit))} subtitle="Current period estimate" color="green" />
+        </Link>
       </div>
 
       {/* Stock Location Breakdown */}
@@ -330,7 +289,7 @@ export default function MillingDashboard() {
                   const reserved = parseFloat(lot.reservedQty) || 0;
                   const isAtExport = lot.entity === 'export';
                   return (
-                    <tr key={lot.id || lot.lotNo} className="hover:bg-gray-50">
+                    <tr key={lot.id || lot.lotNo} className="hover:bg-gray-50 cursor-pointer" onClick={() => navigate(`/lot-inventory/${lot.lotNo || lot.id}`)}>
                       <td className="py-2 px-3">
                         <Link to={`/lot-inventory/${lot.lotNo || lot.id}`} className="font-medium text-blue-600 hover:underline">
                           {lot.lotNo}
@@ -367,7 +326,7 @@ export default function MillingDashboard() {
       )}
 
       {/* Orders Queue */}
-      <div className="bg-white rounded-xl shadow-sm p-5">
+      <div id="batches-section" className="bg-white rounded-xl shadow-sm p-5">
         <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4">
           Orders Queue
         </h2>
@@ -522,6 +481,7 @@ export default function MillingDashboard() {
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Yield Trend */}
+        <div id="yield-section"></div>
         <div className="bg-white rounded-xl shadow-sm p-5">
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4">
             Yield Trend
