@@ -297,13 +297,25 @@ export default function MillingDashboard() {
         </div>
         {(() => {
           const completed = millingBatches.filter(b => b.status === 'Completed');
-          const totalRawCost = completed.reduce((s, b) => s + (b.rawCostTotal || Object.values(b.costs || {}).reduce((cs, c) => cs + c, 0)), 0);
-          const totalMillingOps = completed.reduce((s, b) => s + ((b.millingFeePerKg || 5) * (b.rawQtyMT || 0) * 1000), 0);
+          // Raw cost = rawRice category from batch costs
+          const totalRawCost = completed.reduce((s, b) => {
+            if (b.rawCostTotal) return s + b.rawCostTotal;
+            const costs = b.costs || {};
+            return s + (parseFloat(costs.rawRice) || parseFloat(costs.raw_rice) || 0);
+          }, 0);
+          // Other batch costs (transport, electricity, labor, etc.) — everything except rawRice
+          const totalOtherBatchCosts = completed.reduce((s, b) => {
+            const costs = b.costs || {};
+            return s + Object.entries(costs).reduce((cs, [k, v]) => {
+              if (k === 'rawRice' || k === 'raw_rice') return cs;
+              return cs + (parseFloat(v) || 0);
+            }, 0);
+          }, 0);
           const finishedRevenue = completed.reduce((s, b) => s + (b.actualFinishedMT * MILL_PRICES_PKR.finishedRicePerMT), 0);
           const byproductRevenue = completed.reduce((s, b) =>
             s + (b.brokenMT * MILL_PRICES_PKR.brokenPerMT) + (b.branMT * MILL_PRICES_PKR.branPerMT) + (b.huskMT * MILL_PRICES_PKR.huskPerMT), 0);
           const totalRevenue = finishedRevenue + byproductRevenue;
-          const totalCost = totalRawCost + totalMillingOps + totalOverhead;
+          const totalCost = totalRawCost + totalOtherBatchCosts + totalOverhead;
           const netProfit = totalRevenue - totalCost;
           const margin = totalRevenue > 0 ? (netProfit / totalRevenue * 100).toFixed(1) : 0;
 
@@ -320,10 +332,10 @@ export default function MillingDashboard() {
                 </div>
                 <div className="bg-red-50 rounded-lg p-4">
                   <p className="text-xs font-medium text-red-600 uppercase">Direct Costs</p>
-                  <p className="text-lg font-bold text-red-900 mt-1">{formatPKR(totalRawCost + totalMillingOps)}</p>
+                  <p className="text-lg font-bold text-red-900 mt-1">{formatPKR(totalRawCost + totalOtherBatchCosts)}</p>
                   <div className="mt-2 space-y-1 text-xs">
-                    <div className="flex justify-between"><span className="text-red-500">Raw material</span><span className="font-medium">{formatPKR(totalRawCost)}</span></div>
-                    <div className="flex justify-between"><span className="text-red-500">Milling ops</span><span className="font-medium">{formatPKR(totalMillingOps)}</span></div>
+                    <div className="flex justify-between"><span className="text-red-500">Raw paddy purchase</span><span className="font-medium">{formatPKR(totalRawCost)}</span></div>
+                    <div className="flex justify-between"><span className="text-red-500">Processing costs</span><span className="font-medium">{formatPKR(totalOtherBatchCosts)}</span></div>
                   </div>
                 </div>
                 <div className="bg-orange-50 rounded-lg p-4">
@@ -366,7 +378,7 @@ export default function MillingDashboard() {
                       <tbody className="divide-y divide-gray-100">
                         {completed.map(b => {
                           const bRevenue = (b.actualFinishedMT * MILL_PRICES_PKR.finishedRicePerMT) + (b.brokenMT * MILL_PRICES_PKR.brokenPerMT) + (b.branMT * MILL_PRICES_PKR.branPerMT) + (b.huskMT * MILL_PRICES_PKR.huskPerMT);
-                          const bCost = b.rawCostTotal || Object.values(b.costs || {}).reduce((s, c) => s + c, 0);
+                          const bCost = Object.values(b.costs || {}).reduce((s, c) => s + (parseFloat(c) || 0), 0);
                           const bProfit = bRevenue - bCost;
                           return (
                             <tr key={b.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => navigate(`/milling/${b.id}`)}>
