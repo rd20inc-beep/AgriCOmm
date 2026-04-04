@@ -344,10 +344,7 @@ export default function ExportOrderDetail() {
       return;
     }
     const rawQty = parseFloat(millingRawQty) || Math.ceil(order.qtyMT / 0.75);
-    const supplierId = parseInt(millingSupplier);
-    if (!supplierId) {
-      addToast('Please select a supplier', 'error');
-      return;
+    const supplierId = parseInt(millingSupplier) || null;
     }
 
     try {

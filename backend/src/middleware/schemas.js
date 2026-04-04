@@ -297,7 +297,7 @@ const rejectApproval = Joi.object({
 // ===================== MILLING =====================
 
 const createBatch = Joi.object({
-  supplier_id: Joi.number().integer().positive().required(),
+  supplier_id: Joi.number().integer().positive().allow(null),
   raw_qty_mt: Joi.number().positive().required().messages({
     'number.positive': 'Raw quantity must be greater than zero',
   }),

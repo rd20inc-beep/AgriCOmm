@@ -2,6 +2,7 @@ import React from 'react';
 import Modal from '../../components/Modal';
 import ProformaInvoice from '../../components/ProformaInvoice';
 import EmailComposer from '../../components/EmailComposer';
+import SearchSelect from '../../components/SearchSelect';
 import { AlertTriangle } from 'lucide-react';
 
 export function AdvancePaymentModal({
@@ -202,17 +203,14 @@ export function MillingDemandModal({
           <p className="text-xs text-gray-400 mt-1">Estimated at 75% milling yield</p>
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Supplier *</label>
-          <select
+          <label className="block text-sm font-medium text-gray-700 mb-1">Supplier</label>
+          <SearchSelect
             value={millingSupplier}
-            onChange={e => setMillingSupplier(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
-          >
-            <option value="">Select supplier...</option>
-            {(suppliersList || []).map(s => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
+            onChange={setMillingSupplier}
+            options={(suppliersList || []).map(s => ({ value: s.id, label: s.name, sub: s.location || s.type || '' }))}
+            placeholder="Type to search supplier or leave for mill to decide..."
+          />
+          <p className="text-xs text-gray-400 mt-1">Optional — mill can assign the supplier later</p>
         </div>
         <div className="flex items-center justify-end gap-3 pt-2">
           <button
