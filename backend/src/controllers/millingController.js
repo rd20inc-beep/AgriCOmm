@@ -136,10 +136,10 @@ const millingController = {
         notes,
       } = req.body;
 
-      if (!supplier_id || !raw_qty_mt) {
+      if (!raw_qty_mt) {
         return res.status(400).json({
           success: false,
-          message: 'supplier_id and raw_qty_mt are required.',
+          message: 'raw_qty_mt is required.',
         });
       }
 
