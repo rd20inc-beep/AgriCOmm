@@ -1,38 +1,41 @@
-import React, { useRef } from 'react';
-import StatusBadge from '../../components/StatusBadge';
-import { FileText, Upload, CheckCircle, Eye, Paperclip } from 'lucide-react';
+import React from 'react';
+import { FileText, CheckCircle, Circle, Eye } from 'lucide-react';
 import { documentLabels } from './constants';
 
 export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvoice }) {
   const docKeys = ['phyto', 'blDraft', 'blFinal', 'invoice', 'packingList', 'coo', 'fumigation'];
-  const fileInputRefs = useRef({});
 
-  const handleFileSelect = (docKey) => {
-    // Create a hidden file input and trigger it
-    if (!fileInputRefs.current[docKey]) {
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = '.pdf,.doc,.docx,.jpg,.jpeg,.png';
-      input.style.display = 'none';
-      input.addEventListener('change', (e) => {
-        const file = e.target.files?.[0];
-        if (file) {
-          onUpload(docKey, file);
-        }
-        input.value = ''; // reset for re-upload
-      });
-      document.body.appendChild(input);
-      fileInputRefs.current[docKey] = input;
+  const allChecked = docKeys.every(key => {
+    const doc = order.documents?.[key];
+    return doc && ['Approved', 'Final', 'Draft Uploaded'].includes(doc.status);
+  });
+  const checkedCount = docKeys.filter(key => {
+    const doc = order.documents?.[key];
+    return doc && ['Approved', 'Final', 'Draft Uploaded'].includes(doc.status);
+  }).length;
+
+  function handleToggle(key) {
+    const doc = order.documents?.[key];
+    const isChecked = doc && ['Approved', 'Final', 'Draft Uploaded'].includes(doc.status);
+
+    if (isChecked) {
+      // Already checked — no un-check for now
+      return;
     }
-    fileInputRefs.current[docKey].click();
-  };
+    // Mark as confirmed (Draft Uploaded → then approve)
+    onUpload(key, null); // marks as Draft Uploaded
+    setTimeout(() => onApprove(key), 500); // then approve
+  }
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm text-gray-500">
-            Upload and approve all required export documents. Order advances to Awaiting Balance when all are approved.
+            Confirm each document is ready. Order advances to Awaiting Balance when all are checked.
+          </p>
+          <p className="text-xs text-gray-400 mt-1">
+            {checkedCount} of {docKeys.length} confirmed
           </p>
         </div>
         <button
@@ -43,79 +46,65 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
           Preview Proforma Invoice
         </button>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      {docKeys.map(key => {
-        const doc = order.documents?.[key] || { status: 'Pending', uploadedBy: null, date: null };
-        const isApproved = ['Approved', 'Final'].includes(doc.status);
-        const isUploaded = ['Draft Uploaded', 'Under Review'].includes(doc.status);
-        const isPending = !isApproved && !isUploaded;
 
-        return (
-          <div key={key} className={`bg-white rounded-xl shadow-sm border p-5 ${isApproved ? 'border-green-200 bg-green-50/30' : 'border-gray-200'}`}>
-            <div className="flex items-start justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <FileText className={`w-4 h-4 ${isApproved ? 'text-green-500' : 'text-gray-400'}`} />
-                <h4 className="text-sm font-semibold text-gray-900">{documentLabels[key]}</h4>
+      {/* Progress bar */}
+      <div>
+        <div className="flex justify-between text-xs text-gray-500 mb-1">
+          <span>Document Checklist</span>
+          <span>{checkedCount}/{docKeys.length} {allChecked ? '— All confirmed!' : ''}</span>
+        </div>
+        <div className="w-full bg-gray-200 rounded-full h-2">
+          <div
+            className={`h-2 rounded-full transition-all ${allChecked ? 'bg-green-500' : 'bg-blue-500'}`}
+            style={{ width: `${(checkedCount / docKeys.length) * 100}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Document checklist */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 divide-y divide-gray-100">
+        {docKeys.map(key => {
+          const doc = order.documents?.[key] || {};
+          const isChecked = ['Approved', 'Final', 'Draft Uploaded'].includes(doc.status);
+
+          return (
+            <div
+              key={key}
+              onClick={() => handleToggle(key)}
+              className={`flex items-center gap-4 px-5 py-4 cursor-pointer transition-colors ${
+                isChecked ? 'bg-green-50/50' : 'hover:bg-gray-50'
+              }`}
+            >
+              {isChecked ? (
+                <CheckCircle className="w-6 h-6 text-green-500 flex-shrink-0" />
+              ) : (
+                <Circle className="w-6 h-6 text-gray-300 flex-shrink-0" />
+              )}
+              <div className="flex-1 min-w-0">
+                <p className={`text-sm font-medium ${isChecked ? 'text-green-800' : 'text-gray-900'}`}>
+                  {documentLabels[key]}
+                </p>
+                {isChecked && doc.date && (
+                  <p className="text-xs text-green-600 mt-0.5">Confirmed {doc.date}</p>
+                )}
               </div>
-              <StatusBadge status={doc.status} />
-            </div>
-            <div className="space-y-1.5 mb-4">
-              <div className="flex justify-between text-xs">
-                <span className="text-gray-500">Status</span>
-                <span className="text-gray-700">{doc.status || 'Pending'}</span>
-              </div>
-              {doc.filePath && (
-                <div className="flex justify-between text-xs">
-                  <span className="text-gray-500">File</span>
-                  <span className="text-blue-600 flex items-center gap-1"><Paperclip className="w-3 h-3" /> Attached</span>
-                </div>
-              )}
-              {doc.date && (
-                <div className="flex justify-between text-xs">
-                  <span className="text-gray-500">Date</span>
-                  <span className="text-gray-700">{doc.date}</span>
-                </div>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              {isPending && (
-                <button
-                  onClick={() => handleFileSelect(key)}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-medium hover:bg-blue-100 transition-colors"
-                >
-                  <Upload className="w-3 h-3" />
-                  Upload Document
-                </button>
-              )}
-              {isUploaded && (
-                <>
-                  <button
-                    onClick={() => handleFileSelect(key)}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-gray-50 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-100 transition-colors"
-                  >
-                    <Upload className="w-3 h-3" />
-                    Re-upload
-                  </button>
-                  <button
-                    onClick={() => onApprove(key)}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-green-50 text-green-600 rounded-lg text-xs font-medium hover:bg-green-100 transition-colors"
-                  >
-                    <CheckCircle className="w-3 h-3" />
-                    Approve
-                  </button>
-                </>
-              )}
-              {isApproved && (
-                <span className="inline-flex items-center gap-1 text-xs text-green-600 font-medium">
-                  <CheckCircle className="w-3 h-3" />
-                  Approved
+              {isChecked && (
+                <span className="text-xs font-medium text-green-600 bg-green-100 px-2 py-1 rounded-full flex-shrink-0">
+                  Ready
                 </span>
               )}
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
       </div>
+
+      {allChecked && (
+        <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-center">
+          <CheckCircle className="w-8 h-8 text-green-500 mx-auto mb-2" />
+          <p className="text-sm font-semibold text-green-800">All documents confirmed</p>
+          <p className="text-xs text-green-600 mt-1">Order is ready to advance to the next stage.</p>
+        </div>
+      )}
     </div>
   );
 }
