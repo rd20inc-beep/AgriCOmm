@@ -2,10 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import StatusBadge from '../../components/StatusBadge';
 import api from '../../api/client';
-import { exportOrdersApi } from '../../api/services';
-import { Package, Plus, ExternalLink, Warehouse, Scale, FileText } from 'lucide-react';
+import { exportOrdersApi, financeApi } from '../../api/services';
+import { useApp } from '../../context/AppContext';
+import { Package, Plus, ExternalLink, Warehouse, Scale, FileText, Truck, ArrowRight } from 'lucide-react';
 
 export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], onCreateMilling, onStartDocsPreparation, onLinkExternalPurchase, canCreateMilling, canStartDocs, onStockAllocated }) {
+  const { addToast } = useApp();
   const estimatedRawQty = Math.round(order.qtyMT / 0.75);
 
   // Split lots into finished (main product) and byproducts
@@ -239,6 +241,16 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
         )}
       </div>
 
+      {/* Receive from Mill — shows when batch completed but stock not yet transferred */}
+      {linkedBatch && linkedBatch.status === 'Completed' && linkedBatch.actualFinishedMT > 0 && fulfillmentPct < 100 && (
+        <ReceiveFromMill
+          order={order}
+          linkedBatch={linkedBatch}
+          addToast={addToast}
+          onTransferComplete={() => { if (onStockAllocated) onStockAllocated(); }}
+        />
+      )}
+
       {/* Available Stock for Allocation — click to allocate */}
       {fulfillmentPct < 100 && !lotsLoading && (matchingLots.length > 0 || otherLots.length > 0) && (
         <div className="bg-white rounded-xl shadow-sm border border-emerald-200 p-6">
@@ -446,6 +458,129 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
         </div>
       )}
 
+    </div>
+  );
+}
+
+// ─── Receive from Mill sub-component ───
+function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
+  const [transferring, setTransferring] = useState(false);
+  const [transferPrice, setTransferPrice] = useState('');
+  const [expanded, setExpanded] = useState(true);
+
+  const finishedMT = parseFloat(linkedBatch.actualFinishedMT) || 0;
+  const batchId = linkedBatch.dbId || linkedBatch.id;
+  const orderId = order.dbId || order.id;
+
+  async function handleTransfer() {
+    const price = parseFloat(transferPrice);
+    if (!price || price <= 0) {
+      addToast('Please enter the transfer price (PKR/MT)', 'error');
+      return;
+    }
+
+    setTransferring(true);
+    try {
+      const totalPKR = Math.round(price * finishedMT);
+      const pkrRate = 280;
+      await financeApi.createTransfer({
+        batch_id: batchId,
+        export_order_id: orderId,
+        product_name: linkedBatch.productName || order.productName || 'Finished Rice',
+        qty_mt: finishedMT,
+        transfer_price_pkr: price,
+        total_value_pkr: totalPKR,
+        usd_equivalent: Math.round(totalPKR / pkrRate),
+        pkr_rate: pkrRate,
+        dispatch_date: new Date().toISOString().split('T')[0],
+        status: 'In Transit',
+      });
+      addToast(`${finishedMT} MT transferred from mill to export — ${linkedBatch.id}`, 'success');
+      if (onTransferComplete) onTransferComplete();
+    } catch (err) {
+      addToast(`Transfer failed: ${err.message}`, 'error');
+    } finally {
+      setTransferring(false);
+    }
+  }
+
+  return (
+    <div className="bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl shadow-sm border-2 border-amber-300 p-6">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-amber-800 uppercase tracking-wide flex items-center gap-2">
+          <Truck className="w-4 h-4" />
+          Receive from Mill
+        </h3>
+        <button onClick={() => setExpanded(!expanded)} className="text-xs text-amber-600 hover:text-amber-800">
+          {expanded ? 'Collapse' : 'Expand'}
+        </button>
+      </div>
+
+      {expanded && (
+        <>
+          <p className="text-sm text-amber-700 mb-4">
+            Milling batch <span className="font-bold">{linkedBatch.id}</span> has completed with{' '}
+            <span className="font-bold">{finishedMT} MT</span> finished rice.
+            Transfer this stock from the mill to your export warehouse to make it available for allocation.
+          </p>
+
+          <div className="bg-white/70 rounded-lg border border-amber-200 p-4 mb-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+              <div>
+                <span className="text-xs text-gray-500">Batch</span>
+                <p className="font-bold text-gray-900">{linkedBatch.id}</p>
+              </div>
+              <div>
+                <span className="text-xs text-gray-500">Finished Output</span>
+                <p className="font-bold text-gray-900">{finishedMT} MT</p>
+              </div>
+              <div>
+                <span className="text-xs text-gray-500">Yield</span>
+                <p className="font-bold text-gray-900">{linkedBatch.yieldPct || '—'}%</p>
+              </div>
+              <div>
+                <span className="text-xs text-gray-500">Supplier</span>
+                <p className="font-bold text-gray-900">{linkedBatch.supplierName || '—'}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-end gap-3">
+            <div className="flex-1">
+              <label className="block text-xs font-medium text-amber-800 mb-1">Transfer Price (PKR/MT) *</label>
+              <input
+                type="number"
+                value={transferPrice}
+                onChange={e => setTransferPrice(e.target.value)}
+                placeholder="e.g. 72800"
+                className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none bg-white"
+              />
+              {transferPrice && finishedMT > 0 && (
+                <p className="text-xs text-amber-600 mt-1">
+                  Total: PKR {Math.round(parseFloat(transferPrice) * finishedMT).toLocaleString()} (~${Math.round((parseFloat(transferPrice) * finishedMT) / 280).toLocaleString()})
+                </p>
+              )}
+            </div>
+            <button
+              onClick={handleTransfer}
+              disabled={transferring}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-600 text-white rounded-lg text-sm font-semibold hover:bg-amber-700 transition-colors disabled:opacity-50 whitespace-nowrap"
+            >
+              {transferring ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  Transferring...
+                </>
+              ) : (
+                <>
+                  <ArrowRight className="w-4 h-4" />
+                  Receive {finishedMT} MT from Mill
+                </>
+              )}
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
