@@ -11,12 +11,16 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
   const estimatedRawQty = Math.round(order.qtyMT / 0.75);
 
   // Split lots into finished (main product) and byproducts
-  const finishedLots = purchaseLots.filter(l => l.type === 'finished' || l.source === 'reservation' || l.source === 'allocation');
+  const finishedLots = purchaseLots.filter(l =>
+    (l.type === 'finished' || l.source === 'reservation' || l.source === 'allocation' || l.source === 'both')
+    && (parseFloat(l.allocated_qty_kg) > 0 || l.source === 'reservation')
+  );
   const byproductLots = purchaseLots.filter(l => l.type === 'byproduct' && l.source === 'milling_output');
 
-  // Calculate totals from finished lots only
+  // Calculate totals — only count explicitly allocated/reserved quantities
   const totalAllocatedMT = finishedLots.reduce((sum, lot) => {
-    const kg = parseFloat(lot.allocated_qty_kg) || parseFloat(lot.net_weight_kg) || (parseFloat(lot.qty) || 0) * 1000;
+    // Use allocated_qty_kg from transaction, or reserved_qty for reservation-only lots
+    const kg = parseFloat(lot.allocated_qty_kg) || (lot.source === 'reservation' ? (parseFloat(lot.reserved_qty) || 0) * 1000 : 0);
     return sum + kg / 1000;
   }, 0);
   const fulfillmentPct = order.qtyMT > 0 ? Math.min(100, (totalAllocatedMT / order.qtyMT) * 100) : 0;

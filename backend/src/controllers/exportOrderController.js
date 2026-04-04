@@ -346,7 +346,7 @@ const exportOrderController = {
           .select(...lotSelectFields)
           .where('l.reserved_against', order.order_no),
 
-        // Path 2 & 3: Lots with export_allocation transactions
+        // Path 2: Lots with allocation transactions for THIS order only
         db('lot_transactions as lt')
           .leftJoin('inventory_lots as l', 'lt.lot_id', 'l.id')
           .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
@@ -360,19 +360,10 @@ const exportOrderController = {
             'lt.transaction_no',
             'lt.transaction_date'
           )
+          .where('lt.reference_module', 'export_order')
           .where(function () {
-            // Match by explicit reference to this order
-            this.where(function () {
-              this.where('lt.reference_module', 'export_order')
-                .where(function () {
-                  this.where('lt.reference_id', orderId)
-                    .orWhere('lt.reference_no', order.order_no);
-                });
-            })
-            // OR match export_allocation transactions (even without reference_id)
-            .orWhere(function () {
-              this.whereIn('lt.transaction_type', ['export_allocation', 'dispatch_out']);
-            });
+            this.where('lt.reference_id', orderId)
+              .orWhere('lt.reference_no', order.order_no);
           }),
 
         // Path 4: Finished/byproduct lots from milling batch linked to this order
@@ -415,9 +406,12 @@ const exportOrderController = {
       }
       for (const lot of millingOutputLots) {
         if (!lotMap.has(lot.id)) {
+          // Only include milling output lots if they're reserved for this order
+          // or show as informational (source: milling_output) without allocated qty
+          const isReservedForUs = lot.reserved_against === order.order_no;
           lotMap.set(lot.id, {
             ...lot,
-            allocated_qty_kg: (parseFloat(lot.net_weight_kg) || (parseFloat(lot.qty) || 0) * 1000),
+            allocated_qty_kg: isReservedForUs ? (parseFloat(lot.net_weight_kg) || (parseFloat(lot.qty) || 0) * 1000) : 0,
             source: 'milling_output',
           });
         }
