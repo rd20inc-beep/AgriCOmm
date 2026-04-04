@@ -991,7 +991,7 @@ export default function DocumentCenter({ order }) {
     { label: 'Invoice', from: 7, docs: availableDocs.filter(d => d.availableFrom === 7) },
     { label: 'Shipping Documents', from: 8, docs: availableDocs.filter(d => d.availableFrom === 8) },
     { label: 'Origin & Final', from: 9, docs: availableDocs.filter(d => d.availableFrom === 9) },
-  ].filter(p => p.docs.length > 0);
+  ];
 
   return (
     <div className="space-y-6">
@@ -1006,21 +1006,24 @@ export default function DocumentCenter({ order }) {
               {phase.label}
             </h4>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {phase.docs.map(doc => (
+              {phase.docs.length > 0 ? phase.docs.map(doc => (
                 <div
                   key={doc.key}
-                  className={`rounded-lg border p-4 flex items-start justify-between gap-3 ${doc.ready ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50 opacity-60'}`}
+                  className={`rounded-lg border p-4 flex items-start justify-between gap-3 ${doc.ready ? 'border-gray-200 bg-white hover:border-blue-200 hover:shadow-sm transition-all' : 'border-gray-100 bg-gray-50/50'}`}
                 >
                   <div className="flex items-start gap-3">
-                    <FileText className={`w-5 h-5 mt-0.5 flex-shrink-0 ${doc.ready ? 'text-blue-600' : 'text-gray-300'}`} />
+                    {doc.ready
+                      ? <CheckCircle className="w-5 h-5 mt-0.5 flex-shrink-0 text-green-500" />
+                      : <Clock className="w-5 h-5 mt-0.5 flex-shrink-0 text-gray-300" />
+                    }
                     <div>
-                      <p className="text-sm font-medium text-gray-900">{doc.label}</p>
+                      <p className={`text-sm font-medium ${doc.ready ? 'text-gray-900' : 'text-gray-400'}`}>{doc.label}</p>
                       <p className="text-xs text-gray-400 mt-0.5">
-                        {doc.ready ? 'Ready to generate' : 'Missing shipment data'}
+                        {doc.ready ? 'Ready to generate' : `Available from step ${doc.availableFrom}`}
                       </p>
                     </div>
                   </div>
-                  {doc.ready && (
+                  {doc.ready ? (
                     <button
                       onClick={() => handleGenerate(doc.key)}
                       disabled={generating === doc.key}
@@ -1032,9 +1035,15 @@ export default function DocumentCenter({ order }) {
                         <><Eye className="w-3 h-3" /> Preview</>
                       )}
                     </button>
+                  ) : (
+                    <span className="flex-shrink-0 inline-flex items-center px-2 py-1 bg-gray-100 text-gray-400 rounded text-[10px] font-medium">
+                      Locked
+                    </span>
                   )}
                 </div>
-              ))}
+              )) : (
+                <p className="text-xs text-gray-400 col-span-3">No documents in this phase yet.</p>
+              )}
             </div>
           </div>
         ))}

@@ -332,59 +332,32 @@ const exportDocumentController = {
       }
 
       const step = order.current_step || 1;
-      const docs = [];
+      const hasVessel = !!order.vessel_name;
+      const hasContainers = await db('shipment_containers').where({ order_id: order.id }).count('id as c').first();
+      const containerCount = parseInt(hasContainers?.c) || 0;
+      const hasBL = !!order.bl_number;
 
-      // Step 2+: Sales Contract, Proforma Invoice
-      if (step >= 2) {
-        docs.push(
-          { key: 'sales-contract', label: 'Sales Contract', availableFrom: 2, ready: true },
-          { key: 'proforma-invoice', label: 'Proforma Invoice', availableFrom: 2, ready: true },
-        );
-      }
-
-      // Step 5+: Production Plan
-      if (step >= 5) {
-        docs.push(
-          { key: 'production-plan', label: 'Production Plan', availableFrom: 5, ready: true },
-        );
-      }
-
-      // Step 6+: Bank FI Request, Export Undertaking
-      if (step >= 6) {
-        docs.push(
-          { key: 'bank-fi-request', label: 'Bank FI Request (E-Form)', availableFrom: 6, ready: true },
-          { key: 'export-undertaking', label: 'Export Undertaking', availableFrom: 6, ready: true },
-        );
-      }
-
-      // Step 7+: Invoice
-      if (step >= 7) {
-        docs.push(
-          { key: 'invoice', label: 'Invoice', availableFrom: 7, ready: true },
-        );
-      }
-
-      // Step 8+: Commercial Invoice, BL, Packing docs (need shipment details)
-      if (step >= 8) {
-        const hasVessel = !!order.vessel_name;
-        const hasContainers = await db('shipment_containers').where({ order_id: order.id }).count('id as c').first();
-        const hasBL = !!order.bl_number;
-
-        docs.push(
-          { key: 'commercial-invoice', label: 'Commercial Invoice', availableFrom: 8, ready: hasVessel },
-          { key: 'bill-of-lading', label: 'Bill of Lading (Draft)', availableFrom: 8, ready: hasVessel && parseInt(hasContainers.c) > 0 },
-          { key: 'packing-certificate', label: 'Packing Certificate', availableFrom: 8, ready: hasVessel && parseInt(hasContainers.c) > 0 },
-          { key: 'packing-list', label: 'Packing List', availableFrom: 8, ready: hasVessel && parseInt(hasContainers.c) > 0 },
-        );
-      }
-
-      // Step 9+: Final docs
-      if (step >= 9) {
-        docs.push(
-          { key: 'statement-of-origin', label: 'Statement of Origin', availableFrom: 9, ready: !!order.bl_number },
-          { key: 'certificate-of-origin', label: 'Certificate of Origin', availableFrom: 9, ready: !!order.bl_number },
-        );
-      }
+      // Always return ALL document types — mark readiness based on step and data
+      const docs = [
+        // Step 2+: Contract & Proforma
+        { key: 'sales-contract', label: 'Sales Contract', availableFrom: 2, ready: step >= 2 },
+        { key: 'proforma-invoice', label: 'Proforma Invoice', availableFrom: 2, ready: step >= 2 },
+        // Step 5+: Production
+        { key: 'production-plan', label: 'Production Plan', availableFrom: 5, ready: step >= 5 },
+        // Step 6+: Banking & Compliance
+        { key: 'bank-fi-request', label: 'Bank FI Request (E-Form)', availableFrom: 6, ready: step >= 6 },
+        { key: 'export-undertaking', label: 'Export Undertaking', availableFrom: 6, ready: step >= 6 },
+        // Step 7+: Invoice
+        { key: 'invoice', label: 'Invoice', availableFrom: 7, ready: step >= 7 },
+        // Step 8+: Shipping docs (need shipment details)
+        { key: 'commercial-invoice', label: 'Commercial Invoice', availableFrom: 8, ready: step >= 8 && hasVessel },
+        { key: 'bill-of-lading', label: 'Bill of Lading (Draft)', availableFrom: 8, ready: step >= 8 && hasVessel && containerCount > 0 },
+        { key: 'packing-certificate', label: 'Packing Certificate', availableFrom: 8, ready: step >= 8 && hasVessel && containerCount > 0 },
+        { key: 'packing-list', label: 'Packing List', availableFrom: 8, ready: step >= 8 && hasVessel && containerCount > 0 },
+        // Step 9+: Final docs
+        { key: 'statement-of-origin', label: 'Statement of Origin', availableFrom: 9, ready: step >= 9 && hasBL },
+        { key: 'certificate-of-origin', label: 'Certificate of Origin', availableFrom: 9, ready: step >= 9 && hasBL },
+      ];
 
       return res.json({
         success: true,
