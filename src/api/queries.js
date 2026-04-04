@@ -755,6 +755,36 @@ export function useCreateMillExpense() {
   });
 }
 
+export function useMillWorkers() {
+  return useQuery({
+    queryKey: ['mill-workers'],
+    queryFn: async () => { const res = await millingApi.listWorkers(); return transformKeys(unwrap(res, 'workers') || []); },
+  });
+}
+
+export function useCreateMillWorker() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => millingApi.createWorker(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['mill-workers'] }),
+  });
+}
+
+export function usePayrollSummary(params = {}) {
+  return useQuery({
+    queryKey: ['payroll-summary', params],
+    queryFn: async () => { const res = await millingApi.payrollSummary(params); return transformKeys(unwrap(res) || {}); },
+  });
+}
+
+export function useRecordAttendance() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => millingApi.recordAttendance(data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['payroll-summary'] }); },
+  });
+}
+
 export function useMills() {
   return useQuery({
     queryKey: ['mills'],

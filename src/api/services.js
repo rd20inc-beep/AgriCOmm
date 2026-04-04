@@ -35,6 +35,15 @@ export const millingApi = {
   // Mill Expenses
   listExpenses: (params) => api.get('/api/milling/expenses', params),
   createExpense: (data) => api.post('/api/milling/expenses', data),
+  // Mill Workers & Payroll
+  listWorkers: () => api.get('/api/milling/workers'),
+  createWorker: (data) => api.post('/api/milling/workers', data),
+  listAttendance: (params) => api.get('/api/milling/attendance', params),
+  recordAttendance: (data) => api.post('/api/milling/attendance', data),
+  payrollSummary: (params) => api.get('/api/milling/payroll/summary', params),
+  // Utilities
+  listUtilities: (params) => api.get('/api/milling/utilities', params),
+  recordUtility: (data) => api.post('/api/milling/utilities', data),
   // Mills
   listMills: (params) => api.get('/api/milling/mills', params),
   createMill: (data) => api.post('/api/milling/mills', data),

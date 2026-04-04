@@ -246,4 +246,86 @@ router.post('/expenses', authorize('milling', 'create'),
   }
 );
 
+// =============================================================================
+// Mill Workers & Payroll
+// =============================================================================
+
+router.get('/workers', authorize('milling', 'view'), async (req, res) => {
+  try {
+    const workers = await db('mill_workers').orderBy('name');
+    return res.json({ success: true, data: { workers } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.post('/workers', authorize('milling', 'create'), async (req, res) => {
+  try {
+    const { name, role, daily_wage, phone, cnic, joined_date, mill_id, notes } = req.body;
+    if (!name || !daily_wage) return res.status(400).json({ success: false, message: 'name and daily_wage required.' });
+    const [worker] = await db('mill_workers').insert({
+      name, role: role || 'laborer', daily_wage: parseFloat(daily_wage),
+      phone: phone || null, cnic: cnic || null,
+      joined_date: joined_date || new Date().toISOString().split('T')[0],
+      mill_id: mill_id || null, notes: notes || null,
+    }).returning('*');
+    return res.json({ success: true, data: { worker } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.get('/attendance', authorize('milling', 'view'), async (req, res) => {
+  try {
+    const { month, worker_id } = req.query;
+    let query = db('mill_attendance as a')
+      .leftJoin('mill_workers as w', 'a.worker_id', 'w.id')
+      .select('a.*', 'w.name as worker_name', 'w.daily_wage')
+      .orderBy('a.date', 'desc');
+    if (month) query = query.where('a.date', '>=', `${month}-01`).where('a.date', '<', `${month}-32`);
+    if (worker_id) query = query.where('a.worker_id', worker_id);
+    const records = await query.limit(500);
+    return res.json({ success: true, data: { attendance: records } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.post('/attendance', authorize('milling', 'create'), async (req, res) => {
+  try {
+    const { worker_id, date, status, hours_worked, overtime_hours, notes } = req.body;
+    if (!worker_id || !date) return res.status(400).json({ success: false, message: 'worker_id and date required.' });
+    const [record] = await db('mill_attendance').insert({
+      worker_id, date, status: status || 'present',
+      hours_worked: hours_worked || 8, overtime_hours: overtime_hours || 0,
+      notes: notes || null,
+    }).returning('*').onConflict(['worker_id', 'date']).merge();
+    return res.json({ success: true, data: { attendance: record } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.get('/payroll/summary', authorize('milling', 'view'), async (req, res) => {
+  try {
+    const { month } = req.query;
+    const startDate = month ? `${month}-01` : new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+    const endDate = month ? `${month}-31` : new Date().toISOString().split('T')[0];
+
+    const workers = await db('mill_workers').where('is_active', true).orderBy('name');
+    const attendance = await db('mill_attendance')
+      .where('date', '>=', startDate).where('date', '<=', endDate);
+
+    const summary = workers.map(w => {
+      const records = attendance.filter(a => a.worker_id === w.id);
+      const daysPresent = records.filter(a => a.status === 'present').length;
+      const halfDays = records.filter(a => a.status === 'half_day').length;
+      const totalOT = records.reduce((s, a) => s + (parseFloat(a.overtime_hours) || 0), 0);
+      const effectiveDays = daysPresent + (halfDays * 0.5);
+      const basicPay = effectiveDays * parseFloat(w.daily_wage);
+      const otPay = totalOT * (parseFloat(w.daily_wage) / 8 * 1.5);
+      return {
+        ...w, daysPresent, halfDays, effectiveDays, totalOT,
+        basicPay: Math.round(basicPay), otPay: Math.round(otPay),
+        totalPay: Math.round(basicPay + otPay),
+      };
+    });
+
+    const grandTotal = summary.reduce((s, w) => s + w.totalPay, 0);
+    return res.json({ success: true, data: { summary, grandTotal, period: { startDate, endDate } } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
 module.exports = router;

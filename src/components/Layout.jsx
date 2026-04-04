@@ -30,6 +30,7 @@ const sidebarNav = [
     icon: Factory,
     children: [
       { label: 'Dashboard', to: '/milling', permission: { module: 'milling', action: 'view' } },
+      { label: 'Mill Finance', to: '/milling/finance', icon: DollarSign, permission: { module: 'milling', action: 'view' } },
       { label: 'Quality', to: '/quality', icon: FlaskConical, permission: { module: 'milling', action: 'view' } },
       { label: 'Transfers', to: '/transfer', icon: ArrowRightLeft, permission: { module: 'finance', action: 'view' } },
     ],
