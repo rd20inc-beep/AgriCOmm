@@ -202,6 +202,64 @@ router.get('/analytics/moisture-analysis', authorize('milling', 'view'), advance
 router.get('/analytics/batch-profitability/:id', authorize('milling', 'view'), advancedController.analyticsBatchProfitability);
 
 // =============================================================================
+// Product Pricing — confirm byproduct prices per batch
+// =============================================================================
+
+router.get('/last-prices', authorize('milling', 'view'), async (req, res) => {
+  try {
+    // Get the most recent batch with confirmed prices
+    const last = await db('milling_batches')
+      .whereNotNull('finished_price_per_mt')
+      .where('prices_confirmed', true)
+      .orderBy('completed_at', 'desc')
+      .select('finished_price_per_mt', 'broken_price_per_mt', 'bran_price_per_mt', 'husk_price_per_mt', 'batch_no', 'completed_at')
+      .first();
+
+    return res.json({
+      success: true,
+      data: {
+        lastPrices: last ? {
+          finished: parseFloat(last.finished_price_per_mt) || 72800,
+          broken: parseFloat(last.broken_price_per_mt) || 38000,
+          bran: parseFloat(last.bran_price_per_mt) || 28000,
+          husk: parseFloat(last.husk_price_per_mt) || 8400,
+          fromBatch: last.batch_no,
+          date: last.completed_at,
+        } : {
+          finished: 72800, broken: 38000, bran: 28000, husk: 8400,
+          fromBatch: null, date: null,
+        },
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.put('/batches/:id/prices', authorize('milling', 'edit'),
+  auditAction('confirm_prices', 'milling_batch', (req) => req.params.id),
+  async (req, res) => {
+    try {
+      const id = await controller.resolveBatchId ? await controller.resolveBatchId(req.params.id) : parseInt(req.params.id);
+      const { finished_price_per_mt, broken_price_per_mt, bran_price_per_mt, husk_price_per_mt } = req.body;
+
+      const [updated] = await db('milling_batches').where({ id }).update({
+        finished_price_per_mt: parseFloat(finished_price_per_mt) || null,
+        broken_price_per_mt: parseFloat(broken_price_per_mt) || null,
+        bran_price_per_mt: parseFloat(bran_price_per_mt) || null,
+        husk_price_per_mt: parseFloat(husk_price_per_mt) || null,
+        prices_confirmed: true,
+        updated_at: db.fn.now(),
+      }).returning('*');
+
+      return res.json({ success: true, data: { batch: updated } });
+    } catch (err) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  }
+);
+
+// =============================================================================
 // Mill Expenses (Overheads: salaries, rent, utilities, etc.)
 // =============================================================================
 

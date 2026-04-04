@@ -7,7 +7,9 @@ import KPICard from '../components/KPICard';
 import Modal from '../components/Modal';
 
 const PKR = (v) => 'Rs ' + Math.round(v || 0).toLocaleString('en-PK');
-const MILL_PRICES = { finished: 72800, broken: 38000, bran: 28000, husk: 8400 };
+// Default prices — overridden by batch-specific confirmed prices
+const DEFAULT_PRICES = { finished: 72800, broken: 38000, bran: 28000, husk: 8400 };
+const batchPrice = (b, product) => b[`${product}PricePerMT`] || DEFAULT_PRICES[product];
 const EXPENSE_CATS = ['salaries', 'utilities', 'rent', 'maintenance', 'insurance', 'transport', 'fuel', 'packaging', 'misc'];
 const WORKER_ROLES = ['operator', 'laborer', 'supervisor', 'driver', 'guard', 'cleaner'];
 
@@ -59,9 +61,9 @@ export default function MillFinanceDashboard() {
     const totalOtherCosts = completed.reduce((s, b) => {
       return s + Object.entries(b.costs || {}).reduce((cs, [k, v]) => RAW_KEYS.has(k) ? cs : cs + (parseFloat(v) || 0), 0);
     }, 0);
-    const finishedRev = completed.reduce((s, b) => s + b.actualFinishedMT * MILL_PRICES.finished, 0);
+    const finishedRev = completed.reduce((s, b) => s + b.actualFinishedMT * batchPrice(b, 'finished'), 0);
     const byproductRev = completed.reduce((s, b) =>
-      s + b.brokenMT * MILL_PRICES.broken + b.branMT * MILL_PRICES.bran + b.huskMT * MILL_PRICES.husk, 0);
+      s + b.brokenMT * batchPrice(b, 'broken') + b.branMT * batchPrice(b, 'bran') + b.huskMT * batchPrice(b, 'husk'), 0);
     const totalRev = finishedRev + byproductRev;
     const totalCost = totalRaw + totalOtherCosts + totalOverhead;
     const totalFinishedKg = completed.reduce((s, b) => s + b.actualFinishedMT * 1000, 0);
