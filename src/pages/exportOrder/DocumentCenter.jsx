@@ -1019,7 +1019,7 @@ export default function DocumentCenter({ order }) {
                     <div>
                       <p className={`text-sm font-medium ${doc.ready ? 'text-gray-900' : 'text-gray-400'}`}>{doc.label}</p>
                       <p className="text-xs text-gray-400 mt-0.5">
-                        {doc.ready ? 'Ready to generate' : `Available from step ${doc.availableFrom}`}
+                        {doc.ready ? 'Ready to generate' : doc.availableFrom >= 8 ? 'Needs shipment data (vessel, containers)' : 'Needs order data'}
                       </p>
                     </div>
                   </div>

@@ -332,31 +332,34 @@ const exportDocumentController = {
       }
 
       const step = order.current_step || 1;
+      const hasBasicData = !!(order.customer_id && order.qty_mt > 0);
       const hasVessel = !!order.vessel_name;
       const hasContainers = await db('shipment_containers').where({ order_id: order.id }).count('id as c').first();
       const containerCount = parseInt(hasContainers?.c) || 0;
       const hasBL = !!order.bl_number;
 
-      // Always return ALL document types — mark readiness based on step and data
+      // All 12 documents always visible. Ready = has the data needed to generate.
+      // Contract/PI/Production/Banking/Undertaking/Invoice just need basic order data.
+      // Shipping docs need vessel + containers. Origin docs need BL number.
       const docs = [
-        // Step 2+: Contract & Proforma
-        { key: 'sales-contract', label: 'Sales Contract', availableFrom: 2, ready: step >= 2 },
-        { key: 'proforma-invoice', label: 'Proforma Invoice', availableFrom: 2, ready: step >= 2 },
-        // Step 5+: Production
-        { key: 'production-plan', label: 'Production Plan', availableFrom: 5, ready: step >= 5 },
-        // Step 6+: Banking & Compliance
-        { key: 'bank-fi-request', label: 'Bank FI Request (E-Form)', availableFrom: 6, ready: step >= 6 },
-        { key: 'export-undertaking', label: 'Export Undertaking', availableFrom: 6, ready: step >= 6 },
-        // Step 7+: Invoice
-        { key: 'invoice', label: 'Invoice', availableFrom: 7, ready: step >= 7 },
-        // Step 8+: Shipping docs (need shipment details)
-        { key: 'commercial-invoice', label: 'Commercial Invoice', availableFrom: 8, ready: step >= 8 && hasVessel },
-        { key: 'bill-of-lading', label: 'Bill of Lading (Draft)', availableFrom: 8, ready: step >= 8 && hasVessel && containerCount > 0 },
-        { key: 'packing-certificate', label: 'Packing Certificate', availableFrom: 8, ready: step >= 8 && hasVessel && containerCount > 0 },
-        { key: 'packing-list', label: 'Packing List', availableFrom: 8, ready: step >= 8 && hasVessel && containerCount > 0 },
-        // Step 9+: Final docs
-        { key: 'statement-of-origin', label: 'Statement of Origin', availableFrom: 9, ready: step >= 9 && hasBL },
-        { key: 'certificate-of-origin', label: 'Certificate of Origin', availableFrom: 9, ready: step >= 9 && hasBL },
+        // Contract & Proforma — need basic order data
+        { key: 'sales-contract', label: 'Sales Contract', availableFrom: 2, ready: hasBasicData },
+        { key: 'proforma-invoice', label: 'Proforma Invoice', availableFrom: 2, ready: hasBasicData },
+        // Production — need basic data
+        { key: 'production-plan', label: 'Production Plan', availableFrom: 5, ready: hasBasicData },
+        // Banking & Compliance — need basic data
+        { key: 'bank-fi-request', label: 'Bank FI Request (E-Form)', availableFrom: 6, ready: hasBasicData },
+        { key: 'export-undertaking', label: 'Export Undertaking', availableFrom: 6, ready: hasBasicData },
+        // Invoice — need basic data
+        { key: 'invoice', label: 'Invoice', availableFrom: 7, ready: hasBasicData },
+        // Shipping docs — need vessel and container data
+        { key: 'commercial-invoice', label: 'Commercial Invoice', availableFrom: 8, ready: hasBasicData && hasVessel },
+        { key: 'bill-of-lading', label: 'Bill of Lading (Draft)', availableFrom: 8, ready: hasBasicData && hasVessel && containerCount > 0 },
+        { key: 'packing-certificate', label: 'Packing Certificate', availableFrom: 8, ready: hasBasicData && hasVessel && containerCount > 0 },
+        { key: 'packing-list', label: 'Packing List', availableFrom: 8, ready: hasBasicData && hasVessel && containerCount > 0 },
+        // Origin — need BL number
+        { key: 'statement-of-origin', label: 'Statement of Origin', availableFrom: 9, ready: hasBasicData && hasBL },
+        { key: 'certificate-of-origin', label: 'Certificate of Origin', availableFrom: 9, ready: hasBasicData && hasBL },
       ];
 
       return res.json({
