@@ -51,17 +51,21 @@ export function useExportOrder(id) {
     queryKey: queryKeys.orders.detail(id),
     queryFn: async () => {
       const res = await exportOrdersApi.get(id);
-      const raw = unwrap(res, 'order') || res?.data;
-      if (raw) {
-        raw.costs = res?.data?.costs || raw.costs;
-        raw.documents = res?.data?.documents || raw.documents;
-        raw.status_history = res?.data?.statusHistory || raw.status_history;
-        raw.packingLines = res?.data?.packingLines || [];
-        raw.purchaseLots = res?.data?.purchaseLots || [];
-      }
+      const order = unwrap(res, 'order') || res?.data;
+      if (!order) return null;
+      // Merge sub-data without mutating the original response object
+      const raw = {
+        ...order,
+        costs: res?.data?.costs || order.costs,
+        documents: res?.data?.documents || order.documents,
+        status_history: res?.data?.statusHistory || order.status_history,
+        packingLines: res?.data?.packingLines || [],
+        purchaseLots: res?.data?.purchaseLots || [],
+      };
       return transformOrder(raw);
     },
     enabled: !!id,
+    staleTime: 10 * 1000,
   });
 }
 
