@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { FileText, Download, Printer, Eye, CheckCircle, Clock, Loader2 } from 'lucide-react';
+import { FileText, Download, Printer, Eye, CheckCircle, Clock, Loader2, Edit2 } from 'lucide-react';
 import api from '../../api/client';
 import { useApp } from '../../context/AppContext';
 import Modal from '../../components/Modal';
@@ -1087,12 +1087,14 @@ export default function DocumentCenter({ order }) {
   }
 
   function handlePrint() {
+    // Use the edited DOM content (user may have edited text inline)
+    const editedHtml = printRef.current ? printRef.current.innerHTML : previewHtml;
     const printWindow = window.open('', '_blank');
     printWindow.document.write(`
       <html>
         <head><title>${previewDoc?.type || 'Document'} — ${order.id}</title></head>
         <body style="margin:0; padding:0;">
-          ${previewHtml}
+          ${editedHtml}
           <script>window.onload = function() { window.print(); }</script>
         </body>
       </html>
@@ -1174,18 +1176,31 @@ export default function DocumentCenter({ order }) {
       {/* Preview Modal */}
       {previewDoc && (
         <Modal isOpen={!!previewDoc} onClose={() => setPreviewDoc(null)} title={`${previewDoc.type} — ${order.id}`} size="xl">
-          <div className="space-y-4">
-            <div className="flex items-center justify-end gap-2">
-              <button
-                onClick={handlePrint}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
-              >
-                <Printer className="w-4 h-4" /> Print / Save PDF
-              </button>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-gray-400 flex items-center gap-1">
+                <Edit2 className="w-3 h-3" /> Click any text to edit before printing
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => { setPreviewHtml(renderDocument(previewDoc)); addToast('Document reset to original', 'info'); }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50"
+                >
+                  Reset
+                </button>
+                <button
+                  onClick={handlePrint}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
+                >
+                  <Printer className="w-4 h-4" /> Print / Save PDF
+                </button>
+              </div>
             </div>
             <div
               ref={printRef}
-              className="bg-white border border-gray-200 rounded-lg overflow-auto max-h-[70vh] p-2"
+              contentEditable
+              suppressContentEditableWarning
+              className="bg-white border border-gray-200 rounded-lg overflow-auto max-h-[70vh] p-2 focus:outline-none focus:ring-2 focus:ring-blue-200"
               dangerouslySetInnerHTML={{ __html: previewHtml }}
             />
           </div>
