@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useApp } from '../context/AppContext';
@@ -107,24 +107,31 @@ export default function ExportOrderDetail() {
   const [expenseNotes, setExpenseNotes] = useState('');
 
   // Helper to invalidate order + related caches after mutations
-  const invalidateOrder = () => {
+  const invalidateOrder = useCallback(() => {
     qc.invalidateQueries({ queryKey: queryKeys.orders.detail(id) });
     qc.invalidateQueries({ queryKey: queryKeys.orders.all });
-  };
-  const invalidateFinance = () => {
+  }, [qc, id]);
+  const invalidateFinance = useCallback(() => {
     qc.invalidateQueries({ queryKey: queryKeys.receivables.all });
     qc.invalidateQueries({ queryKey: queryKeys.financeOverview });
-  };
+  }, [qc]);
 
-  // SSE real-time updates — invalidate query cache on server push
+  // SSE real-time updates — debounced to prevent re-render loops
+  const sseTimer = useRef(null);
   useEffect(() => {
     if (!id || !token || token === 'mock-prototype-token') return undefined;
 
     const source = new EventSource(`${API_BASE}/api/streams/export-orders/${id}?token=${encodeURIComponent(token)}`);
-    source.onmessage = () => invalidateOrder();
+    source.onmessage = () => {
+      if (sseTimer.current) clearTimeout(sseTimer.current);
+      sseTimer.current = setTimeout(() => invalidateOrder(), 500);
+    };
     source.onerror = () => {};
-    return () => source.close();
-  }, [id, token]); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => {
+      source.close();
+      if (sseTimer.current) clearTimeout(sseTimer.current);
+    };
+  }, [id, token, invalidateOrder]);
 
   if (orderLoading && !order) {
     return (
