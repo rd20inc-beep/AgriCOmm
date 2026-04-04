@@ -31,8 +31,9 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
 
   const remainingNeeded = Math.max(0, order.qtyMT - totalAllocatedMT);
 
-  // Fetch available finished lots
+  // Fetch available finished lots only when order needs more stock
   useEffect(() => {
+    if (remainingNeeded <= 0) { setAvailableLots([]); return; }
     setLotsLoading(true);
     api.get('/api/inventory', { type: 'finished', status: 'Available', entity: 'mill', limit: 200 })
       .then(res => {
@@ -41,7 +42,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
       })
       .catch(() => setAvailableLots([]))
       .finally(() => setLotsLoading(false));
-  }, [fetchTrigger]);
+  }, [fetchTrigger, remainingNeeded]);
 
   // Filter lots by product match — use multiple strategies
   const orderProduct = (order.productName || '').toLowerCase();
@@ -256,8 +257,8 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
         />
       )}
 
-      {/* Available Stock for Allocation */}
-      {!lotsLoading && availableLots.length > 0 && (
+      {/* Available Stock for Allocation — only when order needs more */}
+      {remainingNeeded > 0 && !lotsLoading && availableLots.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm border border-emerald-200 p-6">
           <div className="flex items-center justify-between mb-1">
             <h3 className="text-sm font-semibold text-emerald-700 uppercase tracking-wide">Available Finished Stock</h3>
