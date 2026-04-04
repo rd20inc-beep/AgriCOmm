@@ -554,6 +554,26 @@ export default function ExportOrderDetail() {
       {/* Workflow Timeline */}
       <WorkflowTimeline order={order} />
 
+      {/* Action Banner — prominent CTA for current workflow step */}
+      {canConfirmAdvance && order.status === 'Awaiting Advance' && (
+        <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-amber-800">Advance Payment Required</p>
+            <p className="text-xs text-amber-600">Expected: {formatCurrency(order.advanceExpected)} | Received: {formatCurrency(order.advanceReceived)}</p>
+          </div>
+          <button onClick={openAdvanceModal} className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700">Confirm Advance Received</button>
+        </div>
+      )}
+      {canRequestBalance && order.status === 'Awaiting Balance' && (
+        <div className="bg-blue-50 border border-blue-300 rounded-xl p-4 flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-blue-800">Balance Payment Required</p>
+            <p className="text-xs text-blue-600">Expected: {formatCurrency(order.balanceExpected)} | Received: {formatCurrency(order.balanceReceived)} | Outstanding: {formatCurrency(order.balanceExpected - order.balanceReceived)}</p>
+          </div>
+          <button onClick={openBalanceModal} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">Confirm Balance Received</button>
+        </div>
+      )}
+
       {/* Tabs — only show tabs relevant to the current workflow stage */}
       <div className="flex items-center gap-1 border-b border-gray-200 overflow-x-auto">
         {visibleTabs.map(tab => (
