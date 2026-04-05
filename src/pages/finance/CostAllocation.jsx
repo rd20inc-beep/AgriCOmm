@@ -18,7 +18,8 @@ import { useApp } from '../../context/AppContext';
 import { financeApi } from '../../api/services';
 import StatusBadge from '../../components/StatusBadge';
 
-const PKR_RATE = 280;
+// PKR rate should come from settings — this is used only as page-level fallback
+const PKR_RATE_DEFAULT_DEFAULT = 280;
 
 function formatPKR(value) {
   return 'Rs ' + Math.round(value).toLocaleString('en-PK');
@@ -137,11 +138,11 @@ export default function CostAllocation() {
     let countUnallocated = 0;
 
     costs.forEach(c => {
-      const grossUSD = c.currency === 'PKR' ? c.grossAmount / PKR_RATE : c.grossAmount;
+      const grossUSD = c.currency === 'PKR' ? c.grossAmount / PKR_RATE_DEFAULT : c.grossAmount;
       const allocatedAmt = c.allocations.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
-      const allocatedUSD = c.currency === 'PKR' ? allocatedAmt / PKR_RATE : allocatedAmt;
+      const allocatedUSD = c.currency === 'PKR' ? allocatedAmt / PKR_RATE_DEFAULT : allocatedAmt;
       const unallocatedAmt = c.grossAmount - allocatedAmt;
-      const unallocatedUSD = c.currency === 'PKR' ? unallocatedAmt / PKR_RATE : unallocatedAmt;
+      const unallocatedUSD = c.currency === 'PKR' ? unallocatedAmt / PKR_RATE_DEFAULT : unallocatedAmt;
 
       totalGross += grossUSD;
       totalAllocated += allocatedUSD;

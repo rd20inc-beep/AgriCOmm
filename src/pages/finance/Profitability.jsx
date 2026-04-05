@@ -80,13 +80,20 @@ export default function Profitability() {
   // Compute profitability trend from real data
   const profitabilityTrend = useMemo(() => {
     const months = ['Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
+    const pkrRate = settings?.pkrRate || 280;
     const totalExportProfit = exportOrders.reduce((sum, o) => {
-      const costs = Object.values(o.costs || {}).reduce((s, c) => s + c, 0);
-      return costs > 0 ? sum + (o.contractValue - costs) : sum;
+      const opCosts = Object.values(o.costs || {}).reduce((s, c) => s + (parseFloat(c) || 0), 0);
+      const cogsUSD = (parseFloat(o.inventoryCogsTotalPkr) || 0) / pkrRate;
+      const totalCost = opCosts + cogsUSD;
+      return totalCost > 0 ? sum + (o.contractValue - totalCost) : sum;
     }, 0);
     const totalMillProfit = millingBatches.filter(b => b.status === 'Completed').reduce((sum, b) => {
-      const rev = (b.actualFinishedMT * 72800) + (b.brokenMT * 42000) + (b.branMT * 22400) + (b.huskMT * 8400);
-      const costs = Object.values(b.costs || {}).reduce((s, c) => s + c, 0);
+      const fp = parseFloat(b.finishedPricePerMT) || 0;
+      const bp = parseFloat(b.brokenPricePerMT) || 0;
+      const np = parseFloat(b.branPricePerMT) || 0;
+      const hp = parseFloat(b.huskPricePerMT) || 0;
+      const rev = (b.actualFinishedMT * fp) + (b.brokenMT * bp) + (b.branMT * np) + (b.huskMT * hp);
+      const costs = Object.values(b.costs || {}).reduce((s, c) => s + (parseFloat(c) || 0), 0);
       return sum + (rev - costs);
     }, 0);
     const avg = totalExportProfit / Math.max(months.length, 1);
@@ -119,14 +126,19 @@ export default function Profitability() {
   // EXPORT rows
   // ================================================================
   const exportRows = useMemo(() => {
+    const pRate = settings?.pkrRate || 280;
     return exportOrders.map(order => {
-      const totalCosts = Object.values(order.costs || {}).reduce((s, c) => s + c, 0);
+      const operationalCosts = Object.values(order.costs || {}).reduce((s, c) => s + (parseFloat(c) || 0), 0);
+      const inventoryCOGS = (parseFloat(order.inventoryCogsTotalPkr) || 0) / pRate;
+      const totalCosts = operationalCosts + inventoryCOGS;
       const grossProfit = order.contractValue - totalCosts;
       const marginPct = pct(grossProfit, order.contractValue);
       const costPerMT = order.qtyMT > 0 ? totalCosts / order.qtyMT : 0;
+      const hasCOGS = inventoryCOGS > 0;
 
       // Risk flags
       const flags = [];
+      if (!hasCOGS && order.status === 'Shipped') flags.push({ label: 'No Inventory COGS', color: 'bg-amber-100 text-amber-700' });
       if (grossProfit < 0) flags.push({ label: 'Negative Margin', color: 'bg-red-100 text-red-700' });
       else if (marginPct < 5 && totalCosts > 0) flags.push({ label: 'Low Margin', color: 'bg-amber-100 text-amber-700' });
       if (totalCosts > 0 && totalCosts > order.contractValue * 0.8) flags.push({ label: 'High Cost', color: 'bg-purple-100 text-purple-700' });
@@ -159,16 +171,23 @@ export default function Profitability() {
   // ================================================================
   const millRows = useMemo(() => {
     return millingBatches.map(batch => {
-      const totalCosts = Object.values(batch.costs || {}).reduce((s, c) => s + c, 0);
-      const finishedRevenue = (batch.actualFinishedMT || 0) * 72800;
-      const brokenRevenue = (batch.brokenMT || 0) * 42000;
-      const branRevenue = (batch.branMT || 0) * 22400;
-      const huskRevenue = (batch.huskMT || 0) * 8400;
+      const totalCosts = Object.values(batch.costs || {}).reduce((s, c) => s + (parseFloat(c) || 0), 0);
+      // Use batch-confirmed prices — NOT hardcoded constants
+      const fp = parseFloat(batch.finishedPricePerMT) || 0;
+      const bp = parseFloat(batch.brokenPricePerMT) || 0;
+      const np = parseFloat(batch.branPricePerMT) || 0;
+      const hp = parseFloat(batch.huskPricePerMT) || 0;
+      const finishedRevenue = (batch.actualFinishedMT || 0) * fp;
+      const brokenRevenue = (batch.brokenMT || 0) * bp;
+      const branRevenue = (batch.branMT || 0) * np;
+      const huskRevenue = (batch.huskMT || 0) * hp;
       const totalRevenue = finishedRevenue + brokenRevenue + branRevenue + huskRevenue;
       const grossProfit = totalRevenue - totalCosts;
       const marginPct = pct(grossProfit, totalRevenue);
+      const pricesConfirmed = !!batch.pricesConfirmed;
 
       const flags = [];
+      if (!pricesConfirmed && batch.status === 'Completed') flags.push({ label: 'Prices Not Confirmed', color: 'bg-amber-100 text-amber-700' });
       if (grossProfit < 0) flags.push({ label: 'Negative Margin', color: 'bg-red-100 text-red-700' });
       else if (marginPct < 5 && totalCosts > 0) flags.push({ label: 'Low Margin', color: 'bg-amber-100 text-amber-700' });
       if (totalCosts > 0 && totalCosts > totalRevenue * 0.8) flags.push({ label: 'High Cost', color: 'bg-purple-100 text-purple-700' });
@@ -1648,25 +1667,25 @@ export default function Profitability() {
                           <tr className="hover:bg-gray-50">
                             <td className="px-4 py-2 text-gray-900">Finished Rice</td>
                             <td className="px-4 py-2 text-right text-gray-700">{drilldownData.batch.actualFinishedMT}</td>
-                            <td className="px-4 py-2 text-right text-gray-600">{formatPKR(72800)}</td>
+                            <td className="px-4 py-2 text-right text-gray-600">{formatPKR(parseFloat(drilldownData.batch.finishedPricePerMT) || 0)}</td>
                             <td className="px-4 py-2 text-right font-medium text-gray-900">{formatPKR(drilldownData.row.revenueBreakdown.finishedRevenue)}</td>
                           </tr>
                           <tr className="hover:bg-gray-50">
                             <td className="px-4 py-2 text-gray-900">Broken Rice</td>
                             <td className="px-4 py-2 text-right text-gray-700">{drilldownData.batch.brokenMT}</td>
-                            <td className="px-4 py-2 text-right text-gray-600">{formatPKR(42000)}</td>
+                            <td className="px-4 py-2 text-right text-gray-600">{formatPKR(parseFloat(drilldownData.batch.brokenPricePerMT) || 0)}</td>
                             <td className="px-4 py-2 text-right font-medium text-gray-900">{formatPKR(drilldownData.row.revenueBreakdown.brokenRevenue)}</td>
                           </tr>
                           <tr className="hover:bg-gray-50">
                             <td className="px-4 py-2 text-gray-900">Bran</td>
                             <td className="px-4 py-2 text-right text-gray-700">{drilldownData.batch.branMT}</td>
-                            <td className="px-4 py-2 text-right text-gray-600">{formatPKR(22400)}</td>
+                            <td className="px-4 py-2 text-right text-gray-600">{formatPKR(parseFloat(drilldownData.batch.branPricePerMT) || 0)}</td>
                             <td className="px-4 py-2 text-right font-medium text-gray-900">{formatPKR(drilldownData.row.revenueBreakdown.branRevenue)}</td>
                           </tr>
                           <tr className="hover:bg-gray-50">
                             <td className="px-4 py-2 text-gray-900">Husk</td>
                             <td className="px-4 py-2 text-right text-gray-700">{drilldownData.batch.huskMT}</td>
-                            <td className="px-4 py-2 text-right text-gray-600">{formatPKR(8400)}</td>
+                            <td className="px-4 py-2 text-right text-gray-600">{formatPKR(parseFloat(drilldownData.batch.huskPricePerMT) || 0)}</td>
                             <td className="px-4 py-2 text-right font-medium text-gray-900">{formatPKR(drilldownData.row.revenueBreakdown.huskRevenue)}</td>
                           </tr>
                           <tr className="bg-gray-50 font-semibold">

@@ -93,22 +93,31 @@ export default function FinanceOverview() {
 
     // Export gross profit
     const exportGP = exportOrders.reduce((sum, o) => {
-      const totalCost = Object.values(o.costs || {}).reduce((a, b) => a + (parseFloat(b) || 0), 0);
+      const operationalCosts = Object.values(o.costs || {}).reduce((a, b) => a + (parseFloat(b) || 0), 0);
+      const inventoryCOGS = parseFloat(o.inventoryCogsTotalPkr) || 0;
+      const cogsPKR = inventoryCOGS > 0 ? inventoryCOGS / pkrRate : 0; // convert to USD
+      const totalCost = operationalCosts + cogsPKR;
       return sum + ((parseFloat(o.contractValue) || 0) - totalCost);
     }, 0);
+    const ordersWithoutCOGS = exportOrders.filter(o => o.status === 'Shipped' && !parseFloat(o.inventoryCogsTotalPkr)).length;
 
-    // Mill gross profit (PKR) — use actual local sales profit data
+    // Mill gross profit (PKR) — use batch-confirmed prices, not hardcoded constants
     const pkrRate = settings?.pkrRate || 280;
-    const localSalesProfit = parseFloat(localSalesSummary?.profit?.grossProfit) || 0;
-    const millBatchCosts = millingBatches.reduce((sum, b) => {
-      return sum + Object.values(b.costs || {}).reduce((a, b2) => a + (parseFloat(b2) || 0), 0);
-    }, 0);
-    // Use actual local sales profit if available, otherwise estimate from batches
-    const millGP = localSalesProfit > 0 ? localSalesProfit : millingBatches.reduce((sum, b) => {
+    const completedBatches = millingBatches.filter(b => b.status === 'Completed');
+    const millGP = completedBatches.reduce((sum, b) => {
       const totalCost = Object.values(b.costs || {}).reduce((a, b2) => a + (parseFloat(b2) || 0), 0);
-      const revenue = (b.actualFinishedMT || 0) * 95000;
+      // Use batch-confirmed prices; fall back to 0 (not hardcoded constant)
+      const finPrice = parseFloat(b.finishedPricePerMT) || 0;
+      const brokenPrice = parseFloat(b.brokenPricePerMT) || 0;
+      const branPrice = parseFloat(b.branPricePerMT) || 0;
+      const huskPrice = parseFloat(b.huskPricePerMT) || 0;
+      const revenue = (b.actualFinishedMT || 0) * finPrice
+        + (b.brokenMT || 0) * brokenPrice
+        + (b.branMT || 0) * branPrice
+        + (b.huskMT || 0) * huskPrice;
       return sum + (revenue - totalCost);
     }, 0);
+    const millHasUnconfirmedPrices = completedBatches.some(b => !b.pricesConfirmed);
 
     // Working capital locked (advances received minus costs spent for active orders)
     const activeStatuses = [

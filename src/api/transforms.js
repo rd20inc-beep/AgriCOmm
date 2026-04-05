@@ -153,6 +153,12 @@ export function transformOrder(dbOrder) {
     notifyPartyPhone: dbOrder.notify_party_phone || '',
     notifyPartyEmail: dbOrder.notify_party_email || '',
     shipmentRemarks: dbOrder.shipment_remarks || '',
+    // Phase 5 COGS
+    inventoryCogsTotalPkr: parseFloat(dbOrder.inventory_cogs_total_pkr) || 0,
+    inventoryCogsPerMtPkr: parseFloat(dbOrder.inventory_cogs_per_mt_pkr) || 0,
+    grossProfitPkr: parseFloat(dbOrder.gross_profit_pkr) || 0,
+    grossProfitUsd: parseFloat(dbOrder.gross_profit_usd) || 0,
+    costLockedAtDispatch: !!dbOrder.cost_locked_at_dispatch,
     shipmentContainers,
     createdAt: dbOrder.created_at,
     notes: dbOrder.notes,
