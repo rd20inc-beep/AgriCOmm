@@ -1229,6 +1229,151 @@ const inventoryService = {
   /**
    * Lock COGS on a local sale
    */
+  // =========================================================================
+  // PHASE 6: STOCK ADJUSTMENTS
+  // =========================================================================
+
+  /**
+   * Create a stock adjustment request (draft → pending_approval)
+   */
+  async createStockAdjustment(trx, { lotId, adjustmentType, quantityKg, reason, referenceNote, userId }) {
+    const conn = trx || db;
+    const lot = await conn('inventory_lots').where('id', lotId).first();
+    if (!lot) throw new Error(`Lot ${lotId} not found`);
+
+    const validTypes = ['excess_found', 'shortage_found', 'damaged', 'spoiled', 'moisture_loss', 'bag_loss', 'manual_correction'];
+    if (!validTypes.includes(adjustmentType)) throw new Error(`Invalid adjustment type: ${adjustmentType}`);
+
+    const unitCost = parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.rate_per_kg) || 0;
+    const totalCostImpact = unitCost * Math.abs(parseFloat(quantityKg));
+
+    const [adj] = await conn('stock_adjustments').insert({
+      lot_id: lotId,
+      adjustment_type: adjustmentType,
+      quantity_kg: parseFloat(quantityKg),
+      reason: reason || null,
+      unit_cost: unitCost,
+      total_cost_impact: totalCostImpact,
+      approval_status: 'pending_approval',
+      requested_by: userId || null,
+      reference_note: referenceNote || null,
+    }).returning('*');
+
+    return adj;
+  },
+
+  /**
+   * Approve a stock adjustment — posts to ledger
+   */
+  async approveStockAdjustment(trx, { adjustmentId, approverId }) {
+    if (!trx) throw new Error('approveStockAdjustment requires a transaction');
+
+    const adj = await trx('stock_adjustments').where('id', adjustmentId).first();
+    if (!adj) throw new Error('Adjustment not found');
+    if (adj.approval_status !== 'pending_approval') throw new Error(`Cannot approve adjustment in status: ${adj.approval_status}`);
+
+    const lot = await trx('inventory_lots').where('id', adj.lot_id).first();
+    if (!lot) throw new Error('Lot not found');
+
+    const qtyKg = parseFloat(adj.quantity_kg);
+    const isIncrease = ['excess_found', 'manual_correction'].includes(adj.adjustment_type) && qtyKg > 0;
+    const movementType = isIncrease ? MOVEMENT_TYPES.ADJUSTMENT_PLUS
+      : ['damaged', 'spoiled'].includes(adj.adjustment_type) ? MOVEMENT_TYPES.DAMAGE_WRITEOFF
+      : ['shortage_found', 'bag_loss'].includes(adj.adjustment_type) ? MOVEMENT_TYPES.SHORTAGE_WRITEOFF
+      : MOVEMENT_TYPES.ADJUSTMENT_MINUS;
+
+    const qtyMT = Math.abs(qtyKg) / 1000;
+
+    // Post movement through ledger
+    await inventoryService.postMovement(trx, {
+      movementType,
+      lotId: adj.lot_id,
+      qty: qtyMT,
+      sourceEntity: lot.entity,
+      linkedRef: `adjustment-${adjustmentId}`,
+      notes: `${adj.adjustment_type}: ${adj.reason || 'No reason'}`,
+      costPerUnit: parseFloat(adj.unit_cost) * 1000 || 0, // per MT
+      currency: 'PKR',
+      userId: approverId,
+    });
+
+    // Update damaged_weight_kg if applicable
+    if (['damaged', 'spoiled'].includes(adj.adjustment_type)) {
+      await trx('inventory_lots').where('id', adj.lot_id).update({
+        damaged_weight_kg: (parseFloat(lot.damaged_weight_kg) || 0) + Math.abs(qtyKg),
+      });
+    }
+
+    // Mark adjustment as approved
+    await trx('stock_adjustments').where('id', adjustmentId).update({
+      approval_status: 'approved',
+      approved_by: approverId,
+      approved_at: trx.fn.now(),
+    });
+
+    return trx('stock_adjustments').where('id', adjustmentId).first();
+  },
+
+  /**
+   * Reject a stock adjustment
+   */
+  async rejectStockAdjustment(trx, { adjustmentId, approverId, reason }) {
+    const conn = trx || db;
+    await conn('stock_adjustments').where('id', adjustmentId).update({
+      approval_status: 'rejected',
+      approved_by: approverId,
+      approved_at: conn.fn ? conn.fn.now() : new Date(),
+      reason: reason || undefined,
+    });
+    return conn('stock_adjustments').where('id', adjustmentId).first();
+  },
+
+  /**
+   * Reconcile lot balance — compare physical count vs system
+   */
+  async reconcileLotBalance(lotId) {
+    const lot = await db('inventory_lots').where('id', lotId).first();
+    if (!lot) throw new Error('Lot not found');
+
+    // Sum all transactions to compute expected balance
+    const txnSum = await db('lot_transactions')
+      .where('lot_id', lotId)
+      .sum('quantity_kg as total_kg')
+      .first();
+
+    const ledgerBalanceKg = parseFloat(txnSum?.total_kg) || 0;
+    const systemBalanceKg = (parseFloat(lot.qty) || 0) * 1000;
+    const discrepancyKg = systemBalanceKg - ledgerBalanceKg;
+
+    return {
+      lotId,
+      lotNo: lot.lot_no,
+      systemQtyMT: parseFloat(lot.qty),
+      systemQtyKg: systemBalanceKg,
+      ledgerQtyKg: ledgerBalanceKg,
+      discrepancyKg,
+      discrepancyMT: discrepancyKg / 1000,
+      isReconciled: Math.abs(discrepancyKg) < 1, // within 1 KG tolerance
+    };
+  },
+
+  /**
+   * Reconcile all lots — returns discrepancy report
+   */
+  async reconcileAllLots() {
+    const lots = await db('inventory_lots').where('qty', '>', 0).select('id');
+    const results = [];
+    for (const lot of lots) {
+      const r = await inventoryService.reconcileLotBalance(lot.id);
+      results.push(r);
+    }
+    return {
+      total: results.length,
+      reconciled: results.filter(r => r.isReconciled).length,
+      discrepancies: results.filter(r => !r.isReconciled),
+    };
+  },
+
   async lockSaleCOGS(trx, saleId) {
     const cogs = await inventoryService.calculateSaleCOGS(trx, saleId);
 
