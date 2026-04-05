@@ -228,6 +228,8 @@ export function transformBatch(dbBatch) {
     millId: dbBatch.mill_id,
     machineLine: dbBatch.machine_line,
     shift: dbBatch.shift,
+    notes: dbBatch.notes || '',
+    isServiceMilling: (dbBatch.notes || '').includes('[SERVICE MILLING]'),
   };
 }
 

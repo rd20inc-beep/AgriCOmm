@@ -259,6 +259,21 @@ export default function MillingBatchDetail() {
 
   async function handleYieldSubmit(e) {
     e.preventDefault();
+
+    // Validation: require vehicle arrivals and arrival price (unless service milling)
+    if (!batch.isServiceMilling) {
+      const vehicles = Array.isArray(batch.vehicleArrivals) ? batch.vehicleArrivals : [];
+      if (vehicles.length === 0) {
+        addToast('Please add at least one vehicle arrival before recording yield. Go to the Overview tab to add vehicle details.', 'error');
+        return;
+      }
+      const hasArrivalPrice = batch.arrivalAnalysis?.pricePerMT || batch.arrivalAnalysis?.pricePerKg;
+      if (!hasArrivalPrice) {
+        addToast('Please record the arrival analysis with the agreed price per MT/KG before recording yield. This sets the raw material cost.', 'error');
+        return;
+      }
+    }
+
     const finished = parseFloat(yieldForm.actualFinishedMT) || 0;
     const broken = parseFloat(yieldForm.brokenMT) || 0;
     const bran = parseFloat(yieldForm.branMT) || 0;
@@ -821,6 +836,29 @@ export default function MillingBatchDetail() {
         {/* YIELD TAB */}
         {activeTab === 'yield' && (
           <div className="space-y-4">
+            {/* Warnings for missing data */}
+            {!batch.isServiceMilling && batch.status !== 'Completed' && (
+              <>
+                {(!batch.vehicleArrivals || batch.vehicleArrivals.length === 0) && (
+                  <div className="bg-red-50 border border-red-300 rounded-xl p-4 flex items-start gap-3">
+                    <AlertTriangle className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-sm font-semibold text-red-800">Vehicle Arrivals Required</p>
+                      <p className="text-xs text-red-600 mt-0.5">Add vehicle/truck details in the Overview tab before recording yield.</p>
+                    </div>
+                  </div>
+                )}
+                {!batch.arrivalAnalysis?.pricePerMT && !batch.arrivalAnalysis?.pricePerKg && (
+                  <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex items-start gap-3">
+                    <AlertTriangle className="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-sm font-semibold text-amber-800">Arrival Price Required</p>
+                      <p className="text-xs text-amber-600 mt-0.5">Record the arrival quality analysis with the agreed price per MT in the Quality tab. This sets the raw material cost for the costing sheet.</p>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
             <div className="bg-white rounded-xl shadow-sm p-5">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
@@ -907,6 +945,7 @@ export default function MillingBatchDetail() {
         {activeTab === 'costs' && (() => {
           // Auto-populate raw material cost from quality sheet
           const inputPriceMT = parseFloat(safeArrival?.pricePerMT || safeSample?.pricePerMT) || 0;
+          const missingPrice = !inputPriceMT && !batch.isServiceMilling;
           const rawMaterialCostFromQuality = batch.rawQtyMT * inputPriceMT;
           const manualRawCost = parseFloat(safeCosts.rawRice) || 0;
           const effectiveRawCost = manualRawCost > 0 ? manualRawCost : rawMaterialCostFromQuality;
@@ -920,6 +959,16 @@ export default function MillingBatchDetail() {
 
           return (
           <div className="space-y-6">
+            {missingPrice && (
+              <div className="bg-red-50 border border-red-300 rounded-xl p-4 flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-semibold text-red-800">Raw Material Cost Missing</p>
+                  <p className="text-xs text-red-600 mt-0.5">Go to the Quality tab and record the arrival analysis with the agreed price per MT. Without this, the costing sheet cannot calculate raw material cost.</p>
+                  <button onClick={() => setActiveTab('quality')} className="mt-2 px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-medium hover:bg-red-700">Go to Quality Tab</button>
+                </div>
+              </div>
+            )}
             {/* Summary KPIs */}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
               <div className="bg-white rounded-xl border border-gray-100 p-4">
