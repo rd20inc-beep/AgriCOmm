@@ -146,9 +146,25 @@ export default function MillFinanceDashboard() {
           </div>
           {/* Inventory Value */}
           {(() => {
-            const rawVal = inventory.filter(i => i.type === 'raw').reduce((s, i) => s + (pf(i.landedCostPerKg) || pf(i.ratePerKg)) * pf(i.netWeightKg), 0);
-            const finVal = inventory.filter(i => i.type === 'finished').reduce((s, i) => s + (pf(i.landedCostPerKg) || pf(i.ratePerKg) || pf(i.rawCostComponent)) * pf(i.availableQty) * 1000, 0);
-            const bpVal = inventory.filter(i => i.type === 'byproduct').reduce((s, i) => s + pf(i.ratePerKg) * pf(i.availableQty) * 1000, 0);
+            const rawVal = inventory.filter(i => i.type === 'raw').reduce((s, i) => s + (pf(i.landedCostPerKg) || pf(i.ratePerKg) || 0) * pf(i.netWeightKg), 0);
+            // Calculate finished value from batch costs
+            const finVal = inventory.filter(i => i.type === 'finished').reduce((s, i) => {
+              let costKg = pf(i.landedCostPerKg) || pf(i.ratePerKg);
+              if (!costKg && i.batchRef) {
+                const bId = String(i.batchRef).replace('batch-', '');
+                const b = completed.find(b => String(b.dbId) === bId || b.id === i.batchRef);
+                if (b) { const tc = Object.values(b.costs || {}).reduce((cs, c) => cs + pf(c), 0); costKg = b.actualFinishedMT > 0 ? tc / (b.actualFinishedMT * 1000) : 0; }
+              }
+              return s + costKg * pf(i.availableQty) * 1000;
+            }, 0);
+            // Byproducts at market rates
+            const lastConfirmed = completed.filter(b => b.pricesConfirmed).sort((a, b) => (b.completedAt || '').localeCompare(a.completedAt || ''))[0];
+            const bpRates = { broken: pf(lastConfirmed?.brokenPricePerMT) || 38000, bran: pf(lastConfirmed?.branPricePerMT) || 28000, husk: pf(lastConfirmed?.huskPricePerMT) || 8400 };
+            const bpVal = inventory.filter(i => i.type === 'byproduct').reduce((s, i) => {
+              const n = (i.itemName || '').toLowerCase();
+              const r = n.includes('broken') ? bpRates.broken : n.includes('bran') ? bpRates.bran : bpRates.husk;
+              return s + pf(i.availableQty) * r;
+            }, 0);
             const total = rawVal + finVal + bpVal;
             return total > 0 ? (
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

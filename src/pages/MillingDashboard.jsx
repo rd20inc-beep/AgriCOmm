@@ -167,19 +167,48 @@ export default function MillingDashboard() {
     inventory.filter(i => i.type === 'byproduct').reduce((s, i) => s + pf(i.qty), 0), [inventory]);
 
   // Inventory VALUES (PKR) — money locked in stock
+  // Calculate from batch costs since lot cost fields may be empty
+  const RAW_KEYS = new Set(['rawRice', 'raw_rice']);
+  const getRawCost = (costs) => { for (const [k, v] of Object.entries(costs || {})) { if (RAW_KEYS.has(k)) return pf(v); } return 0; };
+
   const rawInventoryValue = useMemo(() =>
-    inventory.filter(i => i.type === 'raw')
-      .reduce((s, i) => s + (pf(i.landedCostPerKg) || pf(i.ratePerKg) || 0) * pf(i.netWeightKg || 0), 0), [inventory]);
+    inventory.filter(i => i.type === 'raw').reduce((s, i) => {
+      const costKg = pf(i.landedCostPerKg) || pf(i.ratePerKg) || 0;
+      return s + costKg * pf(i.netWeightKg);
+    }, 0), [inventory]);
 
-  const finishedInventoryValue = useMemo(() =>
-    finishedAll.reduce((s, i) => {
-      const costKg = pf(i.landedCostPerKg) || pf(i.ratePerKg) || pf(i.rawCostComponent) || 0;
-      return s + costKg * (pf(i.availableQty) || 0) * 1000;
-    }, 0), [finishedAll]);
+  const finishedInventoryValue = useMemo(() => {
+    // Map batch costs to finished lots via batch_ref
+    return finishedAll.reduce((s, i) => {
+      // Try lot-level cost first
+      let costKg = pf(i.landedCostPerKg) || pf(i.ratePerKg);
+      if (!costKg && i.batchRef) {
+        // Fall back to batch cost data
+        const batchId = String(i.batchRef).replace('batch-', '');
+        const batch = millingBatches.find(b => String(b.dbId) === batchId || b.id === i.batchRef || b.id === `M-${batchId}`);
+        if (batch) {
+          const totalBatchCost = Object.values(batch.costs || {}).reduce((cs, c) => cs + pf(c), 0);
+          const finishedKg = pf(batch.actualFinishedMT) * 1000;
+          costKg = finishedKg > 0 ? totalBatchCost / finishedKg : 0;
+        }
+      }
+      return s + costKg * pf(i.availableQty) * 1000;
+    }, 0);
+  }, [finishedAll, millingBatches]);
 
-  const byproductInventoryValue = useMemo(() =>
-    inventory.filter(i => i.type === 'byproduct')
-      .reduce((s, i) => s + pf(i.availableQty || 0) * 1000 * (pf(i.ratePerKg) || 0), 0), [inventory]);
+  const byproductInventoryValue = useMemo(() => {
+    // Use last confirmed prices or defaults for byproduct valuation
+    const lastCompleted = millingBatches.filter(b => b.status === 'Completed' && b.pricesConfirmed).sort((a, b) => (b.completedAt || '').localeCompare(a.completedAt || ''))[0];
+    const brokenRate = pf(lastCompleted?.brokenPricePerMT) || 38000;
+    const branRate = pf(lastCompleted?.branPricePerMT) || 28000;
+    const huskRate = pf(lastCompleted?.huskPricePerMT) || 8400;
+
+    return inventory.filter(i => i.type === 'byproduct').reduce((s, i) => {
+      const name = (i.itemName || '').toLowerCase();
+      const rate = name.includes('broken') ? brokenRate : name.includes('bran') ? branRate : huskRate;
+      return s + pf(i.availableQty) * rate; // availableQty is in MT, rate is per MT
+    }, 0);
+  }, [inventory, millingBatches]);
 
   const totalInventoryValue = rawInventoryValue + finishedInventoryValue + byproductInventoryValue;
 
