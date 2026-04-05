@@ -12,6 +12,8 @@ import Modal from '../components/Modal';
 import { fromKg, rateFromPerKg, allEquivalents, allRateEquivalents, toKg, rateToPerKg, UNITS, formatQty, formatRate } from '../utils/unitConversion';
 
 const STATUS_TABS = ['All', 'Available', 'Reserved', 'Closed'];
+const TYPE_TABS = ['All', 'raw', 'finished', 'byproduct'];
+const ENTITY_TABS = ['All', 'mill', 'export'];
 
 function fmtPKR(v) { return 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString(); }
 
@@ -19,6 +21,8 @@ export default function LotInventory() {
   const { addToast, suppliersList, warehousesList, productsList } = useApp();
   const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState('Available');
+  const [typeFilter, setTypeFilter] = useState('All');
+  const [entityFilter, setEntityFilter] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
   const [displayUnit, setDisplayUnit] = useState('katta');
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
@@ -28,15 +32,22 @@ export default function LotInventory() {
   });
 
   const filtered = useMemo(() => {
-    if (!searchTerm) return lots;
-    const t = searchTerm.toLowerCase();
-    return lots.filter(l =>
-      (l.lotNo || '').toLowerCase().includes(t) ||
-      (l.itemName || '').toLowerCase().includes(t) ||
-      (l.variety || '').toLowerCase().includes(t) ||
-      (l.supplierName || '').toLowerCase().includes(t)
-    );
-  }, [lots, searchTerm]);
+    return lots.filter(l => {
+      if (typeFilter !== 'All' && l.type !== typeFilter) return false;
+      if (entityFilter !== 'All' && l.entity !== entityFilter) return false;
+      if (searchTerm) {
+        const t = searchTerm.toLowerCase();
+        if (!(
+          (l.lotNo || '').toLowerCase().includes(t) ||
+          (l.itemName || '').toLowerCase().includes(t) ||
+          (l.variety || '').toLowerCase().includes(t) ||
+          (l.supplierName || '').toLowerCase().includes(t) ||
+          (l.warehouseName || '').toLowerCase().includes(t)
+        )) return false;
+      }
+      return true;
+    });
+  }, [lots, searchTerm, typeFilter, entityFilter]);
 
   // Summary KPIs
   const kpis = useMemo(() => {
@@ -104,28 +115,52 @@ export default function LotInventory() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex bg-gray-100 rounded-lg p-0.5">
-          {STATUS_TABS.map(tab => (
-            <button key={tab} onClick={() => setStatusFilter(tab)}
-              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${statusFilter === tab ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-800'}`}>
-              {tab}
-            </button>
-          ))}
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Status */}
+          <div className="flex bg-gray-100 rounded-lg p-0.5">
+            {STATUS_TABS.map(tab => (
+              <button key={tab} onClick={() => setStatusFilter(tab)}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${statusFilter === tab ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-800'}`}>
+                {tab}
+              </button>
+            ))}
+          </div>
+          {/* Type */}
+          <div className="flex bg-gray-100 rounded-lg p-0.5">
+            {TYPE_TABS.map(tab => (
+              <button key={tab} onClick={() => setTypeFilter(tab)}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors capitalize ${typeFilter === tab ? 'bg-white text-emerald-600 shadow-sm' : 'text-gray-600 hover:text-gray-800'}`}>
+                {tab === 'All' ? 'All Types' : tab === 'raw' ? 'Raw Paddy' : tab === 'finished' ? 'Finished Rice' : 'Byproducts'}
+              </button>
+            ))}
+          </div>
+          {/* Entity/Location */}
+          <div className="flex bg-gray-100 rounded-lg p-0.5">
+            {ENTITY_TABS.map(tab => (
+              <button key={tab} onClick={() => setEntityFilter(tab)}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors capitalize ${entityFilter === tab ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-600 hover:text-gray-800'}`}>
+                {tab === 'All' ? 'All Locations' : tab === 'mill' ? 'Mill' : 'Export Warehouse'}
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="relative flex-1 max-w-xs">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
-            placeholder="Search lots, supplier, variety..." className="form-input pl-9 py-1.5 text-sm" />
-        </div>
-        {/* Unit toggle */}
-        <div className="flex bg-gray-100 rounded-lg p-0.5 ml-auto">
-          {UNITS.map(u => (
-            <button key={u} onClick={() => setDisplayUnit(u)}
-              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${displayUnit === u ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}>
-              {u === 'katta' ? 'Katta' : u === 'maund' ? 'Maund' : u === 'ton' ? 'Ton' : 'KG'}
-            </button>
-          ))}
+        <div className="flex items-center gap-3">
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+              placeholder="Search lots, supplier, variety, warehouse..." className="form-input pl-9 py-1.5 text-sm w-full" />
+          </div>
+          <span className="text-xs text-gray-400">{filtered.length} of {lots.length} lots</span>
+          {/* Unit toggle */}
+          <div className="flex bg-gray-100 rounded-lg p-0.5 ml-auto">
+            {UNITS.map(u => (
+              <button key={u} onClick={() => setDisplayUnit(u)}
+                className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${displayUnit === u ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}>
+                {u === 'katta' ? 'Katta' : u === 'maund' ? 'Maund' : u === 'ton' ? 'Ton' : 'KG'}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
