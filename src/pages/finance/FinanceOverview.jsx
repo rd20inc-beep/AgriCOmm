@@ -88,10 +88,10 @@ export default function FinanceOverview() {
 
     const pendingConfirmations = receivables.filter((r) => r.status === 'Pending' || r.status === 'pending').length;
 
-    // Payables: show PKR and USD separately when derived
+    // Payables: show PKR and USD separately
     const payablesPKR = pay.totalOutstandingPKR || 0;
     const payablesUSD = pay.totalOutstandingUSD || 0;
-    const hasBreakdown = !!pay.breakdown;
+    const hasCurrencySplit = payablesPKR > 0 || payablesUSD > 0;
 
     return {
       totalReceivables: recv.totalOutstanding || 0,
@@ -99,7 +99,7 @@ export default function FinanceOverview() {
       totalPayablesPKR: payablesPKR,
       totalPayablesUSD: payablesUSD,
       totalPayables: pay.totalOutstanding || 0,
-      hasPayablesBreakdown: hasBreakdown,
+      hasCurrencySplit: hasBreakdown,
       overduePayables: pay.overdueAmount || 0,
       exportGP: exp.grossProfit || 0,
       millGP: mill.grossProfit || 0,
@@ -249,8 +249,8 @@ export default function FinanceOverview() {
           <KPICard
             icon={ArrowUpRight}
             title="Mill Payables"
-            value={kpis.hasPayablesBreakdown ? fmt(kpis.totalPayablesPKR, 'PKR') : fmt(kpis.totalPayables)}
-            subtitle={kpis.hasPayablesBreakdown ? 'Paddy + Milling costs' : 'Outstanding'}
+            value={kpis.hasCurrencySplit ? fmt(kpis.totalPayablesPKR, 'PKR') : fmt(kpis.totalPayables)}
+            subtitle={kpis.hasCurrencySplit ? 'Paddy + Milling costs' : 'Outstanding'}
             color="amber"
           />
         </Link>
@@ -258,8 +258,8 @@ export default function FinanceOverview() {
           <KPICard
             icon={ArrowUpRight}
             title="Export Payables"
-            value={kpis.hasPayablesBreakdown ? fmt(kpis.totalPayablesUSD) : fmt(kpis.overduePayables)}
-            subtitle={kpis.hasPayablesBreakdown ? 'Freight + Clearing + Bags' : 'Overdue'}
+            value={kpis.hasCurrencySplit ? fmt(kpis.totalPayablesUSD) : fmt(kpis.overduePayables)}
+            subtitle={kpis.hasCurrencySplit ? 'Freight + Clearing + Bags' : 'Overdue'}
             color="orange"
           />
         </Link>
