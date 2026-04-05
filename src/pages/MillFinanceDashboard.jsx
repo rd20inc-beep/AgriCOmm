@@ -137,12 +137,24 @@ export default function MillFinanceDashboard() {
       {/* === OVERVIEW === */}
       {activeTab === 'overview' && (
         <div className="space-y-6">
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
             <KPICard icon={TrendingUp} title="Total Revenue" value={PKR(kpis.totalRev)} subtitle={`Finished: ${PKR(kpis.finishedRev)}`} color="blue" />
             <KPICard icon={TrendingDown} title="Raw Material" value={PKR(kpis.totalRaw)} subtitle="Paddy purchase cost" color="red" />
             <KPICard icon={DollarSign} title="Operating Costs" value={PKR(kpis.totalOtherCosts + totalOverhead)} subtitle={`Batch: ${PKR(kpis.totalOtherCosts)} + OH: ${PKR(totalOverhead)}`} color="orange" />
             <KPICard icon={TrendingUp} title="Net Profit" value={PKR(kpis.netProfit)} subtitle={`Margin: ${margin}%`} color={kpis.netProfit >= 0 ? 'green' : 'red'} />
             <KPICard icon={DollarSign} title="Cost per KG" value={`Rs ${kpis.costPerKg.toFixed(2)}`} subtitle="All-in cost of finished rice" color="gray" />
+            <KPICard icon={Package} title="Inventory Value" value={PKR((() => {
+              const rawV = inventory.filter(i => i.type === 'raw').reduce((s, i) => s + (pf(i.landedCostPerKg) || pf(i.ratePerKg) || 0) * pf(i.netWeightKg), 0);
+              const finV = inventory.filter(i => i.type === 'finished').reduce((s, i) => {
+                let c = pf(i.landedCostPerKg) || pf(i.ratePerKg);
+                if (!c && i.batchRef) { const bId = String(i.batchRef).replace('batch-',''); const b = completed.find(x => String(x.dbId) === bId); if (b) { const tc = Object.values(b.costs||{}).reduce((cs,cv) => cs+pf(cv),0); c = b.actualFinishedMT > 0 ? tc/(b.actualFinishedMT*1000) : 0; } }
+                return s + c * pf(i.availableQty) * 1000;
+              }, 0);
+              const lc = completed.filter(b => b.pricesConfirmed).sort((a,b) => (b.completedAt||'').localeCompare(a.completedAt||''))[0];
+              const bpR = { broken: pf(lc?.brokenPricePerMT)||38000, bran: pf(lc?.branPricePerMT)||28000, husk: pf(lc?.huskPricePerMT)||8400 };
+              const bpV = inventory.filter(i => i.type === 'byproduct').reduce((s,i) => { const n=(i.itemName||'').toLowerCase(); return s + pf(i.availableQty) * (n.includes('broken')?bpR.broken:n.includes('bran')?bpR.bran:bpR.husk); },0);
+              return rawV + finV + bpV;
+            })())} subtitle="Capital locked in stock" color="purple" />
           </div>
           {/* Inventory Value */}
           {(() => {
