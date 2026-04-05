@@ -45,13 +45,14 @@ export default function Profit() {
   const exportColumns = [
     { key: 'orderNo', label: 'Order', sortable: true },
     { key: 'status', label: 'Status', sortable: true },
-    { key: 'contractValue', label: 'Revenue', sortable: true, align: 'right', render: (v) => fmt(v) },
-    { key: 'operationalCosts', label: 'Op. Costs', sortable: true, align: 'right', render: (v) => fmt(v) },
-    { key: 'inventoryCOGS', label: 'COGS', sortable: true, align: 'right', render: (v) => v > 0 ? fmt(v) : <span className="text-gray-400">—</span> },
+    { key: 'contractValue', label: 'Revenue (USD)', sortable: true, align: 'right', render: (v) => fmt(v) },
+    { key: 'operationalCosts', label: 'Op. Costs (USD)', sortable: true, align: 'right', render: (v) => v > 0 ? fmt(v) : <span className="text-gray-400">—</span> },
+    { key: 'cogs', label: 'COGS (USD)', sortable: true, align: 'right', render: (v) => v > 0 ? fmt(v) : <span className="text-gray-400">—</span> },
     { key: 'grossProfit', label: 'Profit', sortable: true, align: 'right', render: (v) => (
       <span className={v >= 0 ? 'text-emerald-600 font-medium' : 'text-red-600 font-medium'}>{fmt(v)}</span>
     )},
     { key: 'marginPct', label: 'Margin', sortable: true, align: 'right', render: (v) => `${v}%` },
+    { key: 'bookedFxRate', label: 'FX Rate', align: 'right', render: (v) => v ? <span className="text-xs text-gray-500">{v}</span> : <span className="text-gray-300">—</span> },
     { key: 'calculationStatus', label: 'Accuracy', render: (v) => <AccuracyBadge status={v} /> },
   ];
 

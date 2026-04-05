@@ -40,11 +40,14 @@ export default function FinanceOverview() {
   const pay = summary.payables || {};
   const cash = summary.cashPosition || {};
 
-  // Derived KPIs
-  const totalMoneyIn = (recv.totalOutstanding || 0) + (parseFloat(exp.revenue) || 0);
+  // Derived KPIs — all converted to USD for consistent display
+  const receivablesUSD = recv.totalOutstanding || 0; // already USD
   const totalPayablesPKR = pay.totalOutstandingPKR || 0;
-  const cashBalance = cash.bankBalance || 0;
-  const netPosition = cashBalance + totalMoneyIn - (totalPayablesPKR / pkrRate);
+  const totalPayablesUSD = totalPayablesPKR / pkrRate;
+  const cashBalancePKR = cash.bankBalance || 0;
+  const cashBalanceUSD = cashBalancePKR / pkrRate;
+  // Net position: everything in USD for apples-to-apples comparison
+  const netPosition = cashBalanceUSD + receivablesUSD - totalPayablesUSD;
 
   const collectionRate = summary.collectionRate || 0;
   const overduePayPKR = pay.overdueAmount || 0;
@@ -110,23 +113,23 @@ export default function FinanceOverview() {
       {/* PRIMARY KPIs — the 5-second clarity row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <FinanceKPI
-          icon={Landmark} title="Cash Position" value={fmt(cashBalance, 'PKR')}
-          subtitle="All bank accounts" status={cashBalance > 0 ? 'good' : 'danger'}
+          icon={Landmark} title="Cash Position" value={fmt(cashBalancePKR, 'PKR')}
+          subtitle="All bank accounts" status={cashBalancePKR > 0 ? 'good' : 'danger'}
           onClick={() => navigate('/finance/cash')} loading={isLoading}
         />
         <FinanceKPI
-          icon={ArrowDownLeft} title="Money In" value={fmt(recv.totalOutstanding || 0)}
-          subtitle={`${recv.count || 0} receivables`} status="info"
+          icon={ArrowDownLeft} title="Money In" value={fmt(receivablesUSD)}
+          subtitle={`${recv.count || 0} receivables (USD)`} status="info"
           onClick={() => navigate('/finance/money-in')} loading={isLoading}
         />
         <FinanceKPI
           icon={ArrowUpRight} title="Money Out" value={fmt(totalPayablesPKR, 'PKR')}
-          subtitle={`${pay.count || 0} payables`} status="neutral"
+          subtitle={`${pay.count || 0} payables (PKR)`} status="neutral"
           onClick={() => navigate('/finance/money-out')} loading={isLoading}
         />
         <FinanceKPI
           icon={Activity} title="Net Position" value={fmt(netPosition)}
-          subtitle="Cash + receivables - payables"
+          subtitle="All converted to USD"
           status={netPosition > 0 ? 'good' : 'danger'} loading={isLoading}
         />
       </div>

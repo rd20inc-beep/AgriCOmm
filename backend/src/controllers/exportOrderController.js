@@ -530,6 +530,10 @@ const exportOrderController = {
             total_bags: input_total_bags ? parseInt(input_total_bags) : null,
             total_loose_weight_kg: total_loose_weight_kg ? parseFloat(total_loose_weight_kg) : null,
             packing_notes: packing_notes || null,
+            // FX rate locking — lock USD/PKR rate at order creation
+            booked_fx_rate: parseFloat(req.body.booked_fx_rate) || parseFloat((await trx('system_settings').where('key', 'pkr_rate').first())?.value) || 280,
+            fx_rate_source: req.body.booked_fx_rate ? 'manual' : 'system',
+            fx_rate_locked_at: new Date(),
           })
           .returning('*');
 
@@ -599,6 +603,8 @@ const exportOrderController = {
             currency: order.currency || 'USD',
             aging: 0,
             notes: `Advance ${order.advance_pct}% for order ${orderNo}`,
+            fx_rate: order.booked_fx_rate,
+            base_amount_pkr: order.advance_expected * (order.booked_fx_rate || 280),
           });
         }
         if (order.balance_expected > 0) {
@@ -618,6 +624,8 @@ const exportOrderController = {
             currency: order.currency || 'USD',
             aging: 0,
             notes: `Balance payment for order ${orderNo} (against BL)`,
+            fx_rate: order.booked_fx_rate,
+            base_amount_pkr: order.balance_expected * (order.booked_fx_rate || 280),
           });
         }
 
