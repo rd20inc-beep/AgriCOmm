@@ -1,17 +1,33 @@
 const db = require('../config/database');
 
+// =============================================================================
+// CANONICAL MOVEMENT TAXONOMY — Single source of truth for all stock movements
+// =============================================================================
+
 const MOVEMENT_TYPES = {
+  // Purchase & receipts
   PURCHASE_RECEIPT: 'purchase_receipt',
   INTERNAL_RECEIPT: 'internal_receipt',
+  RETURN: 'return',
+  OPENING_BALANCE: 'opening_balance',
+  // Milling
   PRODUCTION_ISSUE: 'production_issue',
   PRODUCTION_OUTPUT: 'production_output',
   BYPRODUCT_OUTPUT: 'byproduct_output',
+  // Transfers
   TRANSFER_OUT: 'transfer_out',
   TRANSFER_IN: 'transfer_in',
+  // Sales & dispatch
   EXPORT_DISPATCH: 'export_dispatch',
+  LOCAL_SALE: 'local_sale',
+  // Reservations (no qty change, reservation_effect only)
+  RESERVATION_HOLD: 'reservation_hold',
+  RESERVATION_RELEASE: 'reservation_release',
+  // Adjustments
   ADJUSTMENT_PLUS: 'adjustment_plus',
   ADJUSTMENT_MINUS: 'adjustment_minus',
-  RETURN: 'return',
+  DAMAGE_WRITEOFF: 'damage_writeoff',
+  SHORTAGE_WRITEOFF: 'shortage_writeoff',
 };
 
 // Movement types that reduce stock
@@ -19,7 +35,10 @@ const OUTBOUND_TYPES = new Set([
   MOVEMENT_TYPES.PRODUCTION_ISSUE,
   MOVEMENT_TYPES.TRANSFER_OUT,
   MOVEMENT_TYPES.EXPORT_DISPATCH,
+  MOVEMENT_TYPES.LOCAL_SALE,
   MOVEMENT_TYPES.ADJUSTMENT_MINUS,
+  MOVEMENT_TYPES.DAMAGE_WRITEOFF,
+  MOVEMENT_TYPES.SHORTAGE_WRITEOFF,
 ]);
 
 // Movement types that increase stock
@@ -31,20 +50,34 @@ const INBOUND_TYPES = new Set([
   MOVEMENT_TYPES.TRANSFER_IN,
   MOVEMENT_TYPES.ADJUSTMENT_PLUS,
   MOVEMENT_TYPES.RETURN,
+  MOVEMENT_TYPES.OPENING_BALANCE,
 ]);
 
+// Reservation types — no qty change, only reservation_effect
+const RESERVATION_TYPES = new Set([
+  MOVEMENT_TYPES.RESERVATION_HOLD,
+  MOVEMENT_TYPES.RESERVATION_RELEASE,
+]);
+
+// Canonical mapping: internal movement code → stored lot_transactions.transaction_type
 const LOT_TRANSACTION_TYPE_MAP = {
   [MOVEMENT_TYPES.PURCHASE_RECEIPT]: 'purchase_in',
   [MOVEMENT_TYPES.INTERNAL_RECEIPT]: 'warehouse_transfer_in',
   [MOVEMENT_TYPES.PRODUCTION_ISSUE]: 'milling_issue',
   [MOVEMENT_TYPES.PRODUCTION_OUTPUT]: 'milling_receipt',
-  [MOVEMENT_TYPES.BYPRODUCT_OUTPUT]: 'milling_receipt',
+  [MOVEMENT_TYPES.BYPRODUCT_OUTPUT]: 'byproduct_receipt',
   [MOVEMENT_TYPES.TRANSFER_OUT]: 'warehouse_transfer_out',
   [MOVEMENT_TYPES.TRANSFER_IN]: 'warehouse_transfer_in',
-  [MOVEMENT_TYPES.EXPORT_DISPATCH]: 'dispatch_out',
+  [MOVEMENT_TYPES.EXPORT_DISPATCH]: 'export_dispatch_out',
+  [MOVEMENT_TYPES.LOCAL_SALE]: 'local_sale_out',
+  [MOVEMENT_TYPES.RESERVATION_HOLD]: 'export_allocation',
+  [MOVEMENT_TYPES.RESERVATION_RELEASE]: 'export_release',
   [MOVEMENT_TYPES.ADJUSTMENT_PLUS]: 'stock_adjustment_plus',
   [MOVEMENT_TYPES.ADJUSTMENT_MINUS]: 'stock_adjustment_minus',
+  [MOVEMENT_TYPES.DAMAGE_WRITEOFF]: 'damage_out',
+  [MOVEMENT_TYPES.SHORTAGE_WRITEOFF]: 'shortage_out',
   [MOVEMENT_TYPES.RETURN]: 'return_in',
+  [MOVEMENT_TYPES.OPENING_BALANCE]: 'opening_balance',
 };
 
 function getMovementDirection(movementType) {
@@ -177,8 +210,15 @@ const inventoryService = {
       newQty = currentQty + parsedQty;
     } else if (OUTBOUND_TYPES.has(movementType)) {
       newQty = currentQty - parsedQty;
+    } else if (RESERVATION_TYPES.has(movementType)) {
+      newQty = currentQty; // no qty change for reservations
     } else {
       throw new Error(`Unknown movement type: ${movementType}`);
+    }
+
+    // HARD ENFORCEMENT: no negative stock
+    if (newQty < -0.001) {
+      throw new Error(`Movement would result in negative stock on lot ${lot.lot_no}: current ${currentQty}, change ${-parsedQty}`);
     }
 
     // 5. available_qty = qty - reserved_qty
@@ -200,6 +240,11 @@ const inventoryService = {
       gross_weight_kg: newGrossWeightKg,
       updated_at: trx.fn.now(),
     });
+
+    // Flag zero-cost lots on inbound movements
+    if (INBOUND_TYPES.has(movementType) && parsedCost === 0) {
+      await trx('inventory_lots').where('id', lotId).update({ cost_incomplete: true });
+    }
 
     const txnNo = await generateLotTxnNo(trx);
     await trx('lot_transactions').insert({
@@ -225,6 +270,14 @@ const inventoryService = {
       balance_bags: Math.round(newNetWeightKg / (parseFloat(lot.bag_weight_kg) || 50)),
       remarks: notes || null,
       created_by: userId || null,
+      // Phase 1 new columns
+      unit_cost: parsedCost > 0 ? parsedCost / 1000 : null,
+      total_cost: totalCost || null,
+      entity_from: sourceEntity || lot.entity || null,
+      entity_to: destEntity || lot.entity || null,
+      performed_by: userId || null,
+      performed_at: new Date(),
+      reservation_effect: null,
     });
 
     // 7. Return the movement record
@@ -736,14 +789,34 @@ const inventoryService = {
       })
       .returning('*');
 
-    // Update lot: increase reserved_qty, decrease available_qty
+    // HARD ENFORCEMENT: no over-reservation
     const newReserved = parseFloat(lot.reserved_qty) + parsedQty;
+    if (newReserved > parseFloat(lot.qty)) {
+      throw new Error(`Cannot reserve ${parsedQty} MT — would exceed total qty ${lot.qty} on lot ${lot.lot_no}`);
+    }
     const newAvailable = parseFloat(lot.qty) - newReserved;
 
     await trx('inventory_lots').where('id', lotId).update({
       reserved_qty: newReserved,
       available_qty: newAvailable,
+      reserved_against: `order-${orderId}`,
       updated_at: trx.fn.now(),
+    });
+
+    // Write reservation ledger entry
+    const txnNo = await generateLotTxnNo(trx);
+    await trx('lot_transactions').insert({
+      transaction_no: txnNo,
+      transaction_date: new Date().toISOString().slice(0, 10),
+      lot_id: lotId,
+      transaction_type: LOT_TRANSACTION_TYPE_MAP[MOVEMENT_TYPES.RESERVATION_HOLD],
+      reference_module: 'export_order',
+      reference_id: orderId,
+      quantity_kg: 0, // no physical movement
+      reservation_effect: parsedQty * 1000,
+      remarks: `Reserved ${parsedQty} MT for order ${orderId}`,
+      performed_by: userId || null,
+      performed_at: new Date(),
     });
 
     return reservation;

@@ -1414,25 +1414,8 @@ const exportOrderController = {
           userId: req.user?.id,
         });
 
-        // Mark the lot as reserved against this order
-        await trx('inventory_lots').where({ id: lot.id }).update({
-          reserved_against: order.order_no,
-          updated_at: trx.fn.now(),
-        });
-
-        // Record allocation transaction
-        await trx('lot_transactions').insert({
-          lot_id: lot.id,
-          transaction_type: 'export_allocation',
-          transaction_no: `ALLOC-${order.order_no}-${lot.lot_no}-${Date.now()}`,
-          quantity_kg: qtyMT * 1000,
-          rate_per_kg: parseFloat(lot.rate_per_kg) || 0,
-          reference_module: 'export_order',
-          reference_id: order.id,
-          transaction_date: trx.fn.now(),
-          remarks: notes || `Allocated ${qtyMT} MT to ${order.order_no}`,
-          created_by: req.user?.id,
-        });
+        // reserveStock now handles: lot update, reservation record, AND ledger entry
+        // No direct inventory_lots or lot_transactions writes needed here
 
         await trx('export_order_status_history').insert({
           order_id: order.id,
