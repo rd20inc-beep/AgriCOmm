@@ -502,7 +502,7 @@ export default function Layout({ children }) {
         )}
 
         {/* Main content */}
-        <main className="flex-1 overflow-y-auto w-full page-content">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden w-full page-content">
           {children}
         </main>
       </div>

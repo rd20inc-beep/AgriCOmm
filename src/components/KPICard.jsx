@@ -24,7 +24,7 @@ export default function KPICard({ icon: Icon, title, value, subtitle, trend, col
         )}
         <div className="flex-1 min-w-0">
           <p className="text-xs font-medium text-gray-500 uppercase tracking-wide truncate">{title}</p>
-          <p className="mt-1 text-xl sm:text-2xl font-bold text-gray-900 tabular-nums">{value}</p>
+          <p className="mt-1 text-lg sm:text-xl font-bold text-gray-900 tabular-nums truncate">{value}</p>
           {subtitle && (
             <p className="mt-1 text-xs text-gray-400 truncate">{typeof trend === 'string' && trend !== 'up' && trend !== 'down' ? trend : subtitle}</p>
           )}
