@@ -658,6 +658,22 @@ export default function LotDetail() {
         </div>
       )}
 
+      {/* Lot Lineage & Traceability */}
+      {activeTab === 'overview' && (
+        <LotLineage lotId={lot.id} lotNo={lot.lotNo} />
+      )}
+
+      {/* Cost Warnings */}
+      {lot.costIncomplete && (
+        <div className="bg-red-50 border-2 border-red-300 rounded-xl p-4 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="text-sm font-semibold text-red-800">Cost Data Incomplete</p>
+            <p className="text-xs text-red-600 mt-1">This lot has missing or zero cost data. Financial reports will not include this lot until cost is repaired.</p>
+          </div>
+        </div>
+      )}
+
       {/* ═══ TRANSACTIONS LEDGER TAB ═══ */}
       {activeTab === 'transactions' && (
         <div className="space-y-4">
@@ -830,5 +846,81 @@ function CostEditModal({ isOpen, onClose, lot, addToast, refetch }) {
         </div>
       </div>
     </Modal>
+  );
+}
+
+
+// ─── Lot Lineage Component ───
+function LotLineage({ lotId, lotNo }) {
+  const [ancestry, setAncestry] = useState([]);
+  const [descendants, setDescendants] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!lotId) return;
+    Promise.all([
+      lotInventoryApi.getLotAncestry(lotId).catch(() => ({ data: { ancestry: [] } })),
+      lotInventoryApi.getLotDescendants(lotId).catch(() => ({ data: { descendants: [] } })),
+    ]).then(([aRes, dRes]) => {
+      setAncestry(aRes?.data?.ancestry || []);
+      setDescendants(dRes?.data?.descendants || []);
+    }).finally(() => setLoading(false));
+  }, [lotId]);
+
+  if (loading) return null;
+  if (ancestry.length === 0 && descendants.length === 0) return null;
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-100 p-5">
+      <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3 flex items-center gap-2">
+        <Activity className="w-4 h-4" /> Lot Lineage & Traceability
+      </h3>
+
+      {ancestry.length > 0 && (
+        <div className="mb-4">
+          <p className="text-xs font-medium text-gray-500 mb-2">Source (Parent Lots / Batches)</p>
+          <div className="space-y-2">
+            {ancestry.map((a, i) => (
+              <div key={i} className="flex items-center justify-between bg-amber-50 border border-amber-100 rounded-lg p-3 text-sm">
+                <div>
+                  {a.parent_lot_no ? (
+                    <Link to={`/lot-inventory/${a.parent_lot_no}`} className="font-medium text-blue-600 hover:underline">{a.parent_lot_no}</Link>
+                  ) : (
+                    <span className="text-gray-400">No raw lot (seeded)</span>
+                  )}
+                  {a.batch_no && (
+                    <Link to={`/milling/${a.batch_no}`} className="ml-2 text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded hover:bg-gray-200">Batch {a.batch_no}</Link>
+                  )}
+                </div>
+                <div className="text-right text-xs">
+                  <span className="text-gray-500">{(parseFloat(a.quantity_kg) / 1000).toFixed(2)} MT</span>
+                  {a.cost_share_amount > 0 && <span className="ml-2 text-gray-500">Cost: {fmtPKR(a.cost_share_amount)}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {descendants.length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-gray-500 mb-2">Derived (Child Lots)</p>
+          <div className="space-y-2">
+            {descendants.map((d, i) => (
+              <div key={i} className="flex items-center justify-between bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm">
+                <div>
+                  <Link to={`/lot-inventory/${d.child_lot_no}`} className="font-medium text-blue-600 hover:underline">{d.child_lot_no}</Link>
+                  <span className={`ml-2 text-xs px-1.5 py-0.5 rounded ${d.child_type === 'finished' ? 'bg-green-100 text-green-700' : 'bg-purple-100 text-purple-700'}`}>{d.child_type}</span>
+                </div>
+                <div className="text-right text-xs">
+                  <span className="text-gray-500">{parseFloat(d.qty).toFixed(2)} MT</span>
+                  <span className={`ml-2 px-1.5 py-0.5 rounded text-xs ${d.entity === 'mill' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>{d.entity}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

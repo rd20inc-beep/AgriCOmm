@@ -23,6 +23,7 @@ const MillingDashboard = lazy(() => import('./pages/MillingDashboard'));
 const MillingBatchDetail = lazy(() => import('./pages/MillingBatchDetail'));
 const MillFinanceDashboard = lazy(() => import('./pages/MillFinanceDashboard'));
 const QualityComparison = lazy(() => import('./pages/QualityComparison'));
+const StockAdjustments = lazy(() => import('./pages/StockAdjustments'));
 const InternalTransfer = lazy(() => import('./pages/InternalTransfer'));
 const Inventory = lazy(() => import('./pages/Inventory'));
 const Documents = lazy(() => import('./pages/Documents'));
@@ -96,6 +97,7 @@ function App() {
                         <Route path="/finance/*" element={<ProtectedRoute module="finance" action="view"><FinanceRoutes /></ProtectedRoute>} />
                         <Route path="/milling" element={<ProtectedRoute module="milling" action="view"><MillingDashboard /></ProtectedRoute>} />
                         <Route path="/milling/finance" element={<ProtectedRoute module="milling" action="view"><MillFinanceDashboard /></ProtectedRoute>} />
+                        <Route path="/stock-adjustments" element={<ProtectedRoute module="inventory" action="view"><StockAdjustments /></ProtectedRoute>} />
                         <Route path="/milling/:id" element={<ProtectedRoute module="milling" action="view"><MillingBatchDetail /></ProtectedRoute>} />
                         <Route path="/quality" element={<ProtectedRoute module="milling" action="view"><QualityComparison /></ProtectedRoute>} />
                         <Route path="/transfer" element={<ProtectedRoute module="finance" action="view"><InternalTransfer /></ProtectedRoute>} />

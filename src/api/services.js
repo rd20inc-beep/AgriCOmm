@@ -305,6 +305,25 @@ export const lotInventoryApi = {
   recordTransaction: (lotId, data) => api.post(`/api/lot-inventory/lots/${lotId}/transactions`, data),
   updateLotCosts: (id, data) => api.put(`/api/lot-inventory/lots/${id}/costs`, data),
   stockReport: (params) => api.get('/api/lot-inventory/reports/stock', params),
+  // Phase 4: Traceability
+  getLotAncestry: (id) => api.get(`/api/lot-inventory/lots/${id}/ancestry`),
+  getLotDescendants: (id) => api.get(`/api/lot-inventory/lots/${id}/descendants`),
+  getBatchTrace: (batchId) => api.get(`/api/lot-inventory/batch-trace/${batchId}`),
+  getOrderTrace: (orderId) => api.get(`/api/lot-inventory/order-trace/${orderId}`),
+  getOrderCOGS: (orderId) => api.get(`/api/lot-inventory/order-cogs/${orderId}`),
+  // Phase 6: Adjustments
+  listAdjustments: (params) => api.get('/api/lot-inventory/adjustments', params),
+  createAdjustment: (data) => api.post('/api/lot-inventory/adjustments', data),
+  approveAdjustment: (id) => api.put(`/api/lot-inventory/adjustments/${id}/approve`),
+  rejectAdjustment: (id, data) => api.put(`/api/lot-inventory/adjustments/${id}/reject`, data),
+  getReconciliation: () => api.get('/api/lot-inventory/reconciliation'),
+  getLotReconciliation: (id) => api.get(`/api/lot-inventory/reconciliation/${id}`),
+  // Phase 7: Valuation & Repair
+  takeValuationSnapshot: () => api.post('/api/lot-inventory/valuation-snapshot'),
+  getValuationHistory: () => api.get('/api/lot-inventory/valuation-history'),
+  getDataProblems: () => api.get('/api/lot-inventory/data-problems'),
+  repairLotCost: (id, data) => api.post(`/api/lot-inventory/repair-lot-cost/${id}`, data),
+  getRepairLog: () => api.get('/api/lot-inventory/repair-log'),
 };
 
 // ========== AUDIT ==========
