@@ -38,9 +38,16 @@ const Intelligence = lazy(() => import('./pages/Intelligence'));
 const ScenarioSimulator = lazy(() => import('./pages/ScenarioSimulator'));
 const Admin = lazy(() => import('./pages/Admin'));
 
-// Finance sub-pages (lazy)
+// Finance sub-pages (lazy) — money-flow structure
 const FinanceLayout = lazy(() => import('./pages/finance/FinanceLayout'));
 const FinanceOverview = lazy(() => import('./pages/finance/FinanceOverview'));
+const MoneyIn = lazy(() => import('./pages/finance/MoneyIn'));
+const MoneyOut = lazy(() => import('./pages/finance/MoneyOut'));
+const Cash = lazy(() => import('./pages/finance/Cash'));
+const Profit = lazy(() => import('./pages/finance/Profit'));
+const Accounting = lazy(() => import('./pages/finance/Accounting'));
+const FinanceAlerts = lazy(() => import('./pages/finance/Alerts'));
+// Legacy routes (still accessible via direct URL)
 const Receivables = lazy(() => import('./pages/finance/Receivables'));
 const Payables = lazy(() => import('./pages/finance/Payables'));
 const FinanceConfirmations = lazy(() => import('./pages/finance/Confirmations'));
@@ -49,23 +56,28 @@ const FinanceTransfers = lazy(() => import('./pages/finance/InternalTransfers'))
 const Profitability = lazy(() => import('./pages/finance/Profitability'));
 const CashBank = lazy(() => import('./pages/finance/CashBank'));
 const Ledger = lazy(() => import('./pages/finance/Ledger'));
-const FinanceAlerts = lazy(() => import('./pages/finance/FinanceAlerts'));
 const Reconciliation = lazy(() => import('./pages/finance/Reconciliation'));
 
 function FinanceRoutes() {
   return (
     <FinanceLayout>
       <Routes>
+        {/* Primary money-flow tabs */}
         <Route index element={<FinanceOverview />} />
-        <Route path="receivables" element={<Receivables />} />
-        <Route path="payables" element={<Payables />} />
+        <Route path="money-in" element={<MoneyIn />} />
+        <Route path="money-out" element={<MoneyOut />} />
+        <Route path="cash" element={<Cash />} />
+        <Route path="profit" element={<Profit />} />
+        <Route path="accounting" element={<Accounting />} />
+        <Route path="alerts" element={<FinanceAlerts />} />
+        {/* Legacy routes — redirect-compatible */}
+        <Route path="receivables" element={<MoneyIn />} />
+        <Route path="payables" element={<MoneyOut />} />
         <Route path="confirmations" element={<FinanceConfirmations />} />
         <Route path="costs" element={<CostAllocation />} />
         <Route path="transfers" element={<FinanceTransfers />} />
-        <Route path="profitability" element={<Profitability />} />
-        <Route path="cash" element={<CashBank />} />
-        <Route path="ledger" element={<Ledger />} />
-        <Route path="alerts" element={<FinanceAlerts />} />
+        <Route path="profitability" element={<Profit />} />
+        <Route path="ledger" element={<Accounting />} />
         <Route path="reconciliation" element={<Reconciliation />} />
       </Routes>
     </FinanceLayout>
