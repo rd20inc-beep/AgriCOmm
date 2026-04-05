@@ -163,4 +163,50 @@ router.get('/order-cogs/:orderId', authorize('finance', 'view'), async (req, res
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
+// Phase 7: Valuation snapshots & repair tools
+
+router.post('/valuation-snapshot', authorize('inventory', 'view'), async (req, res) => {
+  try {
+    const result = await inventoryService.takeValuationSnapshot();
+    return res.json({ success: true, data: result });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.get('/valuation-history', authorize('inventory', 'view'), async (req, res) => {
+  try {
+    const snapshots = await db('inventory_valuation_snapshots').orderBy('snapshot_date', 'desc').limit(100);
+    return res.json({ success: true, data: { snapshots } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.get('/data-problems', authorize('inventory', 'view'), async (req, res) => {
+  try {
+    const problems = await inventoryService.findProblematicLots();
+    return res.json({ success: true, data: problems });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.post('/repair-lot-cost/:lotId', authorize('inventory', 'edit'),
+  auditAction('repair_lot_cost', 'inventory_lot', (req) => req.params.lotId),
+  async (req, res) => {
+    try {
+      const result = await db.transaction(async (trx) => {
+        return inventoryService.repairLotCost(trx, {
+          lotId: parseInt(req.params.lotId),
+          userId: req.user?.id,
+          reason: req.body.reason || 'admin_repair',
+        });
+      });
+      return res.json({ success: true, data: result });
+    } catch (err) { return res.status(400).json({ success: false, message: err.message }); }
+  }
+);
+
+router.get('/repair-log', authorize('inventory', 'view'), async (req, res) => {
+  try {
+    const log = await db('historical_cost_repair_log').orderBy('repaired_at', 'desc').limit(100);
+    return res.json({ success: true, data: { log } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
 module.exports = router;

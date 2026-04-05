@@ -1374,6 +1374,131 @@ const inventoryService = {
     };
   },
 
+  // =========================================================================
+  // PHASE 7: VALUATION SNAPSHOTS & REPAIR TOOLS
+  // =========================================================================
+
+  /**
+   * Take a valuation snapshot — captures current inventory value by entity/type
+   */
+  async takeValuationSnapshot() {
+    const lots = await db('inventory_lots').where('available_qty', '>', 0).select('type', 'entity', 'available_qty', 'rate_per_kg', 'landed_cost_per_kg', 'net_weight_kg');
+
+    const groups = {};
+    for (const lot of lots) {
+      const key = `${lot.entity || 'unknown'}|${lot.type || 'unknown'}`;
+      if (!groups[key]) groups[key] = { entity: lot.entity, type: lot.type, totalKg: 0, totalValue: 0 };
+      const costKg = parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.rate_per_kg) || 0;
+      const qtyKg = parseFloat(lot.available_qty) * 1000;
+      groups[key].totalKg += qtyKg;
+      groups[key].totalValue += costKg * qtyKg;
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+    const rows = Object.values(groups).map(g => ({
+      snapshot_date: today,
+      entity: g.entity,
+      lot_type: g.type,
+      total_qty_kg: g.totalKg,
+      total_value: g.totalValue,
+      avg_value_per_kg: g.totalKg > 0 ? g.totalValue / g.totalKg : 0,
+      generated_at: new Date(),
+    }));
+
+    if (rows.length > 0) {
+      await db('inventory_valuation_snapshots').insert(rows);
+    }
+
+    return { date: today, groups: Object.values(groups), totalValue: Object.values(groups).reduce((s, g) => s + g.totalValue, 0) };
+  },
+
+  /**
+   * Find lots with data problems
+   */
+  async findProblematicLots() {
+    const zeroCost = await db('inventory_lots').where(function () { this.where('rate_per_kg', 0).orWhereNull('rate_per_kg'); }).where('qty', '>', 0).select('id', 'lot_no', 'type', 'qty');
+    const incomplete = await db('inventory_lots').where('cost_incomplete', true).select('id', 'lot_no', 'type', 'qty');
+    const noLineage = await db.raw("SELECT l.id, l.lot_no, l.type, l.qty FROM inventory_lots l WHERE l.type IN ('finished','byproduct') AND l.id NOT IN (SELECT child_lot_id FROM lot_source_mapping) AND l.qty > 0");
+    const missingCOGSOrders = await db('export_orders').where('status', 'Shipped').where(function () { this.whereNull('inventory_cogs_total_pkr').orWhere('inventory_cogs_total_pkr', 0); }).select('id', 'order_no', 'contract_value');
+
+    return {
+      zeroCostLots: zeroCost,
+      incompleteLots: incomplete,
+      noLineageLots: noLineage.rows,
+      missingCOGSOrders: missingCOGSOrders,
+      summary: {
+        zeroCost: zeroCost.length,
+        incomplete: incomplete.length,
+        noLineage: noLineage.rows.length,
+        missingCOGS: missingCOGSOrders.length,
+      },
+    };
+  },
+
+  /**
+   * Repair a lot's cost from its batch data
+   */
+  async repairLotCost(trx, { lotId, userId, reason }) {
+    const conn = trx || db;
+    const lot = await conn('inventory_lots').where('id', lotId).first();
+    if (!lot) throw new Error('Lot not found');
+
+    const oldValues = { rate_per_kg: lot.rate_per_kg, landed_cost_per_kg: lot.landed_cost_per_kg, cost_incomplete: lot.cost_incomplete };
+
+    let newCostPerKg = 0;
+
+    if (lot.batch_ref) {
+      const batchId = lot.batch_ref.replace('batch-', '');
+      const batch = await conn('milling_batches').where('id', parseInt(batchId)).first();
+      if (batch) {
+        const costs = await conn('milling_costs').where('batch_id', batch.id);
+        const totalCost = costs.reduce((s, c) => s + (parseFloat(c.amount) || 0), 0);
+        const finishedKg = (parseFloat(batch.actual_finished_mt) || 0) * 1000;
+
+        if (lot.type === 'finished' && finishedKg > 0) {
+          newCostPerKg = totalCost / finishedKg;
+        } else if (lot.type === 'byproduct') {
+          const prices = await conn('milling_output_market_prices').where('batch_id', batch.id).first();
+          const fp = parseFloat(prices?.finished_price_per_mt || batch.finished_price_per_mt) || 72800;
+          const bp = parseFloat(prices?.broken_price_per_mt || batch.broken_price_per_mt) || 38000;
+          const np = parseFloat(prices?.bran_price_per_mt || batch.bran_price_per_mt) || 28000;
+          const hp = parseFloat(prices?.husk_price_per_mt || batch.husk_price_per_mt) || 8400;
+          const name = (lot.item_name || '').toLowerCase();
+          const myPrice = name.includes('broken') ? bp : name.includes('bran') ? np : hp;
+          const myQty = parseFloat(lot.qty) || 0;
+          const totalMV = (parseFloat(batch.actual_finished_mt) || 0) * fp + (parseFloat(batch.broken_mt) || 0) * bp + (parseFloat(batch.bran_mt) || 0) * np + (parseFloat(batch.husk_mt) || 0) * hp;
+          if (totalMV > 0 && myQty > 0) {
+            newCostPerKg = totalCost * (myQty * myPrice / totalMV) / (myQty * 1000);
+          }
+        }
+      }
+    }
+
+    if (newCostPerKg > 0) {
+      const qtyKg = (parseFloat(lot.qty) || 0) * 1000;
+      await conn('inventory_lots').where('id', lotId).update({
+        rate_per_kg: newCostPerKg,
+        landed_cost_per_kg: newCostPerKg,
+        landed_cost_total: newCostPerKg * qtyKg,
+        cost_per_unit: newCostPerKg * 1000,
+        total_value: newCostPerKg * qtyKg,
+        cost_incomplete: false,
+      });
+
+      await conn('historical_cost_repair_log').insert({
+        lot_id: lotId,
+        batch_id: lot.batch_ref ? parseInt(lot.batch_ref.replace('batch-', '')) : null,
+        issue_type: reason || 'manual_cost_repair',
+        old_value_json: JSON.stringify(oldValues),
+        new_value_json: JSON.stringify({ rate_per_kg: newCostPerKg }),
+        repaired_by: userId || null,
+        repaired_at: new Date(),
+      });
+    }
+
+    return { lotId, oldCost: parseFloat(oldValues.rate_per_kg), newCost: newCostPerKg, repaired: newCostPerKg > 0 };
+  },
+
   async lockSaleCOGS(trx, saleId) {
     const cogs = await inventoryService.calculateSaleCOGS(trx, saleId);
 
