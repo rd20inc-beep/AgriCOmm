@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { DollarSign, Users, Zap, Shield, TrendingUp, TrendingDown, AlertTriangle, Plus, UserPlus, Package } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { useMillExpenses, useCreateMillExpense, useMillWorkers, useCreateMillWorker, usePayrollSummary, useRecordAttendance } from '../api/queries';
+import { useMillExpenses, useCreateMillExpense, useMillWorkers, useCreateMillWorker, usePayrollSummary, useRecordAttendance, useInventory } from '../api/queries';
 import KPICard from '../components/KPICard';
 import Modal from '../components/Modal';
 
@@ -23,8 +23,10 @@ const tabs = [
 ];
 
 export default function MillFinanceDashboard() {
-  const { millingBatches, inventory: rawInventory, addToast } = useApp();
-  const inventory = Array.isArray(rawInventory) ? rawInventory : [];
+  const { millingBatches, addToast } = useApp();
+  // Fetch inventory directly — AppContext inventory may be empty due to timing
+  const { data: directInventory = [] } = useInventory({});
+  const inventory = Array.isArray(directInventory) ? directInventory : [];
   const pf = (v) => parseFloat(v) || 0;
 
   // Inventory value — simple calculation with defaults

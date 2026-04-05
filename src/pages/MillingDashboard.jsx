@@ -26,7 +26,7 @@ import {
   Legend,
 } from 'recharts';
 import { useApp } from '../context/AppContext';
-import { useCreateMillingBatch, useMills, useMillExpenses, useCreateMillExpense } from '../api/queries';
+import { useCreateMillingBatch, useMills, useMillExpenses, useCreateMillExpense, useInventory } from '../api/queries';
 import KPICard from '../components/KPICard';
 import StatusBadge from '../components/StatusBadge';
 import Modal from '../components/Modal';
@@ -46,8 +46,9 @@ const MILL_PRICES_PKR = {
 
 export default function MillingDashboard() {
   const navigate = useNavigate();
-  const { millingBatches, inventory: rawInventory, suppliersList, addToast } = useApp();
-  const inventory = Array.isArray(rawInventory) ? rawInventory : [];
+  const { millingBatches, suppliersList, addToast } = useApp();
+  const { data: directInv = [] } = useInventory({});
+  const inventory = Array.isArray(directInv) ? directInv : [];
   const createBatchMut = useCreateMillingBatch();
   const { data: mills = [] } = useMills();
   const { data: expenseData } = useMillExpenses();
