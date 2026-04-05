@@ -26,6 +26,27 @@ export default function MillFinanceDashboard() {
   const { millingBatches, inventory: rawInventory, addToast } = useApp();
   const inventory = Array.isArray(rawInventory) ? rawInventory : [];
   const pf = (v) => parseFloat(v) || 0;
+
+  // Inventory value — simple calculation with defaults
+  const inventoryValue = useMemo(() => {
+    let raw = 0, fin = 0, bp = 0;
+    for (const lot of inventory) {
+      const qty = pf(lot.availableQty || lot.qty);
+      const netKg = pf(lot.netWeightKg) || qty * 1000;
+      const costKg = pf(lot.landedCostPerKg) || pf(lot.ratePerKg);
+
+      if (lot.type === 'raw') {
+        raw += (costKg || 150) * netKg;
+      } else if (lot.type === 'finished') {
+        fin += (costKg || 190) * qty * 1000;
+      } else if (lot.type === 'byproduct') {
+        const name = (lot.itemName || '').toLowerCase();
+        const rate = name.includes('broken') ? 38 : name.includes('bran') ? 28 : 8.4;
+        bp += (costKg || rate) * qty * 1000;
+      }
+    }
+    return { raw, fin, bp, total: raw + fin + bp };
+  }, [inventory]);
   const { data: expData } = useMillExpenses();
   const createExpMut = useCreateMillExpense();
   const { data: workers = [] } = useMillWorkers();
@@ -143,66 +164,15 @@ export default function MillFinanceDashboard() {
             <KPICard icon={DollarSign} title="Operating Costs" value={PKR(kpis.totalOtherCosts + totalOverhead)} subtitle={`Batch: ${PKR(kpis.totalOtherCosts)} + OH: ${PKR(totalOverhead)}`} color="orange" />
             <KPICard icon={TrendingUp} title="Net Profit" value={PKR(kpis.netProfit)} subtitle={`Margin: ${margin}%`} color={kpis.netProfit >= 0 ? 'green' : 'red'} />
             <KPICard icon={DollarSign} title="Cost per KG" value={`Rs ${kpis.costPerKg.toFixed(2)}`} subtitle="All-in cost of finished rice" color="gray" />
-            <KPICard icon={Package} title="Inventory Value" value={PKR((() => {
-              // Raw: use landed cost, or estimate at Rs 150/KG default
-              const rawV = inventory.filter(i => i.type === 'raw').reduce((s, i) => {
-                const c = pf(i.landedCostPerKg) || pf(i.ratePerKg) || 150;
-                return s + c * pf(i.netWeightKg || i.qty * 1000);
-              }, 0);
-              // Finished: use batch cost, or estimate at Rs 190/KG (typical finished cost)
-              const allBatches = millingBatches;
-              const finV = inventory.filter(i => i.type === 'finished').reduce((s, i) => {
-                let c = pf(i.landedCostPerKg) || pf(i.ratePerKg);
-                if (!c && i.batchRef) {
-                  const bId = String(i.batchRef).replace('batch-','');
-                  const b = allBatches.find(x => String(x.dbId) === bId);
-                  if (b) { const tc = Object.values(b.costs||{}).reduce((cs,cv) => cs+pf(cv),0); c = b.actualFinishedMT > 0 ? tc/(b.actualFinishedMT*1000) : 0; }
-                }
-                if (!c) c = 190; // default finished rice cost per KG
-                return s + c * pf(i.availableQty) * 1000;
-              }, 0);
-              // Byproducts at market rates
-              const lc = allBatches.filter(b => b.pricesConfirmed).sort((a,b) => (b.completedAt||'').localeCompare(a.completedAt||''))[0];
-              const bpR = { broken: pf(lc?.brokenPricePerMT)||38, bran: pf(lc?.branPricePerMT)||28, husk: pf(lc?.huskPricePerMT)||8.4 }; // per KG
-              const bpV = inventory.filter(i => i.type === 'byproduct').reduce((s,i) => {
-                const n = (i.itemName||'').toLowerCase();
-                const r = n.includes('broken') ? bpR.broken : n.includes('bran') ? bpR.bran : bpR.husk;
-                return s + pf(i.availableQty) * 1000 * r;
-              }, 0);
-              return rawV + finV + bpV;
-            })())} subtitle="Capital locked in stock" color="purple" />
+            <KPICard icon={Package} title="Inventory Value" value={PKR(inventoryValue.total)} subtitle={`Raw: ${PKR(inventoryValue.raw)} | Fin: ${PKR(inventoryValue.fin)}`} color="purple" />
           </div>
-          {/* Inventory Value */}
-          {(() => {
-            const rawVal = inventory.filter(i => i.type === 'raw').reduce((s, i) => s + (pf(i.landedCostPerKg) || pf(i.ratePerKg) || 0) * pf(i.netWeightKg), 0);
-            // Calculate finished value from batch costs
-            const finVal = inventory.filter(i => i.type === 'finished').reduce((s, i) => {
-              let costKg = pf(i.landedCostPerKg) || pf(i.ratePerKg);
-              if (!costKg && i.batchRef) {
-                const bId = String(i.batchRef).replace('batch-', '');
-                const b = completed.find(b => String(b.dbId) === bId || b.id === i.batchRef);
-                if (b) { const tc = Object.values(b.costs || {}).reduce((cs, c) => cs + pf(c), 0); costKg = b.actualFinishedMT > 0 ? tc / (b.actualFinishedMT * 1000) : 0; }
-              }
-              return s + costKg * pf(i.availableQty) * 1000;
-            }, 0);
-            // Byproducts at market rates
-            const lastConfirmed = completed.filter(b => b.pricesConfirmed).sort((a, b) => (b.completedAt || '').localeCompare(a.completedAt || ''))[0];
-            const bpRates = { broken: pf(lastConfirmed?.brokenPricePerMT) || 38000, bran: pf(lastConfirmed?.branPricePerMT) || 28000, husk: pf(lastConfirmed?.huskPricePerMT) || 8400 };
-            const bpVal = inventory.filter(i => i.type === 'byproduct').reduce((s, i) => {
-              const n = (i.itemName || '').toLowerCase();
-              const r = n.includes('broken') ? bpRates.broken : n.includes('bran') ? bpRates.bran : bpRates.husk;
-              return s + pf(i.availableQty) * r;
-            }, 0);
-            const total = rawVal + finVal + bpVal;
-            return total > 0 ? (
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                <KPICard icon={Package} title="Raw Inventory" value={PKR(rawVal)} subtitle={`${inventory.filter(i => i.type === 'raw').reduce((s, i) => s + pf(i.qty), 0).toFixed(1)} MT`} color="amber" />
-                <KPICard icon={Package} title="Finished Inventory" value={PKR(finVal)} subtitle={`${inventory.filter(i => i.type === 'finished').reduce((s, i) => s + pf(i.availableQty), 0).toFixed(1)} MT available`} color="green" />
-                <KPICard icon={Package} title="Byproduct Inventory" value={PKR(bpVal)} subtitle={`${inventory.filter(i => i.type === 'byproduct').reduce((s, i) => s + pf(i.availableQty), 0).toFixed(1)} MT`} color="purple" />
-                <KPICard icon={DollarSign} title="Total Working Capital" value={PKR(total)} subtitle="Capital locked in inventory" color="blue" />
-              </div>
-            ) : null;
-          })()}
+          {/* Inventory Value Breakdown */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <KPICard icon={Package} title="Raw Paddy" value={PKR(inventoryValue.raw)} subtitle={`${inventory.filter(i => i.type === 'raw').reduce((s, i) => s + pf(i.qty), 0).toFixed(1)} MT in stock`} color="amber" />
+            <KPICard icon={Package} title="Finished Rice" value={PKR(inventoryValue.fin)} subtitle={`${inventory.filter(i => i.type === 'finished').reduce((s, i) => s + pf(i.availableQty), 0).toFixed(1)} MT available`} color="green" />
+            <KPICard icon={Package} title="Byproducts" value={PKR(inventoryValue.bp)} subtitle={`${inventory.filter(i => i.type === 'byproduct').reduce((s, i) => s + pf(i.availableQty), 0).toFixed(1)} MT in stock`} color="purple" />
+            <KPICard icon={DollarSign} title="Total Working Capital" value={PKR(inventoryValue.total)} subtitle="Capital locked in inventory" color="blue" />
+          </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="bg-white rounded-xl border border-gray-200 p-5">
               <h3 className="text-sm font-semibold text-gray-700 mb-3">Expense Breakdown</h3>
