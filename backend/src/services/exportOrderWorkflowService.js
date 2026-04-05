@@ -106,6 +106,13 @@ async function runTransitionSideEffects(trx, order, toStatus, userId) {
     });
   }
 
+  // Phase 5: Lock COGS at dispatch
+  try {
+    await inventoryService.lockOrderCOGS(trx, order.id, 280);
+  } catch (e) {
+    console.warn('COGS lock failed (non-blocking):', e.message);
+  }
+
   await automationService.onShipmentDeparted(trx, {
     orderId: order.id,
     userId,

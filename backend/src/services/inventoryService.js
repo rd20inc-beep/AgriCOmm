@@ -1040,6 +1040,207 @@ const inventoryService = {
     }
     return lot;
   },
+
+  // =========================================================================
+  // PHASE 4: LOT LINEAGE & TRACEABILITY QUERIES
+  // =========================================================================
+
+  /**
+   * Get full ancestry of a lot (parent lots, source batches)
+   */
+  async getLotAncestry(lotId) {
+    const mappings = await db('lot_source_mapping as lsm')
+      .leftJoin('inventory_lots as parent', 'lsm.parent_lot_id', 'parent.id')
+      .leftJoin('milling_batches as mb', 'lsm.source_batch_id', 'mb.id')
+      .select(
+        'lsm.*',
+        'parent.lot_no as parent_lot_no', 'parent.item_name as parent_item',
+        'parent.type as parent_type', 'parent.rate_per_kg as parent_rate',
+        'mb.batch_no', 'mb.raw_qty_mt', 'mb.actual_finished_mt', 'mb.yield_pct'
+      )
+      .where('lsm.child_lot_id', lotId)
+      .orderBy('lsm.created_at');
+    return mappings;
+  },
+
+  /**
+   * Get all descendants of a lot (output lots from milling, transfer children)
+   */
+  async getLotDescendants(lotId) {
+    const mappings = await db('lot_source_mapping as lsm')
+      .leftJoin('inventory_lots as child', 'lsm.child_lot_id', 'child.id')
+      .select(
+        'lsm.*',
+        'child.lot_no as child_lot_no', 'child.item_name as child_item',
+        'child.type as child_type', 'child.qty', 'child.rate_per_kg as child_rate',
+        'child.entity', 'child.status'
+      )
+      .where('lsm.parent_lot_id', lotId)
+      .orderBy('lsm.created_at');
+    return mappings;
+  },
+
+  /**
+   * Trace all source lots for a milling batch
+   */
+  async getBatchSourceTrace(batchId) {
+    const rawLots = await db('inventory_lots')
+      .where({ batch_ref: `batch-${batchId}`, type: 'raw' })
+      .select('*');
+    const outputLots = await db('inventory_lots')
+      .where({ batch_ref: `batch-${batchId}` })
+      .whereIn('type', ['finished', 'byproduct'])
+      .select('*');
+    const lineage = await db('lot_source_mapping')
+      .where({ source_batch_id: batchId })
+      .select('*');
+    const prices = await db('milling_output_market_prices')
+      .where({ batch_id: batchId })
+      .first();
+    return { rawLots, outputLots, lineage, marketPrices: prices };
+  },
+
+  /**
+   * Trace all lots involved in an export order (reserved, transferred, dispatched)
+   */
+  async getOrderLotTrace(orderId) {
+    const reservations = await db('inventory_reservations as ir')
+      .leftJoin('inventory_lots as l', 'ir.lot_id', 'l.id')
+      .select('ir.*', 'l.lot_no', 'l.item_name', 'l.type', 'l.rate_per_kg', 'l.landed_cost_per_kg', 'l.entity')
+      .where('ir.order_id', orderId);
+
+    const transactions = await db('lot_transactions as lt')
+      .leftJoin('inventory_lots as l', 'lt.lot_id', 'l.id')
+      .select('lt.*', 'l.lot_no', 'l.item_name', 'l.type', 'l.rate_per_kg')
+      .where('lt.reference_module', 'export_order')
+      .where(function () { this.where('lt.reference_id', orderId); });
+
+    const transfers = await db('internal_transfers')
+      .where('export_order_id', orderId)
+      .select('*');
+
+    return { reservations, transactions, transfers };
+  },
+
+  /**
+   * Trace source lots for a local sale
+   */
+  async getSaleLotTrace(saleId) {
+    const sale = await db('local_sales').where('id', saleId).first();
+    if (!sale || !sale.lot_id) return { sale, lot: null, ancestry: [] };
+
+    const lot = await db('inventory_lots').where('id', sale.lot_id).first();
+    const ancestry = lot ? await inventoryService.getLotAncestry(lot.id) : [];
+    return { sale, lot, ancestry };
+  },
+
+  // =========================================================================
+  // PHASE 5: COGS CALCULATION
+  // =========================================================================
+
+  /**
+   * Calculate COGS for an export order from dispatched/allocated lots
+   */
+  async calculateOrderCOGS(trx, orderId) {
+    const conn = trx || db;
+
+    // Get all lots allocated/reserved for this order
+    const reservations = await conn('inventory_reservations')
+      .where({ order_id: orderId, status: 'Active' })
+      .select('lot_id', 'reserved_qty');
+
+    let totalCOGS = 0;
+    let totalQtyKg = 0;
+
+    for (const r of reservations) {
+      const lot = await conn('inventory_lots').where('id', r.lot_id).first();
+      if (!lot) continue;
+
+      const costPerKg = parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.rate_per_kg) || 0;
+      const qtyKg = parseFloat(r.reserved_qty) * 1000;
+      totalCOGS += costPerKg * qtyKg;
+      totalQtyKg += qtyKg;
+    }
+
+    // Also check internal transfers for this order
+    const transfers = await conn('internal_transfers')
+      .where('export_order_id', orderId)
+      .select('qty_mt', 'transfer_price_pkr');
+
+    for (const t of transfers) {
+      const tQtyKg = parseFloat(t.qty_mt) * 1000;
+      const tCostTotal = parseFloat(t.transfer_price_pkr) * parseFloat(t.qty_mt);
+      // Only add if not already counted via reservation
+      if (totalQtyKg === 0) {
+        totalCOGS += tCostTotal;
+        totalQtyKg += tQtyKg;
+      }
+    }
+
+    const cogsPerKg = totalQtyKg > 0 ? totalCOGS / totalQtyKg : 0;
+    const cogsPerMT = cogsPerKg * 1000;
+
+    return { totalCOGS, totalQtyKg, cogsPerKg, cogsPerMT };
+  },
+
+  /**
+   * Calculate COGS for a local sale from the source lot
+   */
+  async calculateSaleCOGS(trx, saleId) {
+    const conn = trx || db;
+    const sale = await conn('local_sales').where('id', saleId).first();
+    if (!sale || !sale.lot_id) return { totalCOGS: 0, cogsPerKg: 0 };
+
+    const lot = await conn('inventory_lots').where('id', sale.lot_id).first();
+    if (!lot) return { totalCOGS: 0, cogsPerKg: 0 };
+
+    const costPerKg = parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.rate_per_kg) || 0;
+    const saleQtyKg = parseFloat(sale.quantity_kg) || 0;
+    const totalCOGS = costPerKg * saleQtyKg;
+    const revenue = parseFloat(sale.total_amount) || 0;
+    const grossProfit = revenue - totalCOGS;
+
+    return { totalCOGS, cogsPerKg: costPerKg, grossProfit };
+  },
+
+  /**
+   * Lock COGS on an export order (called at dispatch)
+   */
+  async lockOrderCOGS(trx, orderId, pkrRate) {
+    const cogs = await inventoryService.calculateOrderCOGS(trx, orderId);
+    const order = await trx('export_orders').where('id', orderId).first();
+    if (!order) return;
+
+    const contractValuePKR = parseFloat(order.contract_value) * (pkrRate || 280);
+    const grossProfitPKR = contractValuePKR - cogs.totalCOGS;
+    const grossProfitUSD = grossProfitPKR / (pkrRate || 280);
+
+    await trx('export_orders').where('id', orderId).update({
+      inventory_cogs_total_pkr: cogs.totalCOGS,
+      inventory_cogs_per_mt_pkr: cogs.cogsPerMT,
+      gross_profit_pkr: grossProfitPKR,
+      gross_profit_usd: grossProfitUSD,
+      cost_locked_at_dispatch: true,
+    });
+
+    return { ...cogs, grossProfitPKR, grossProfitUSD };
+  },
+
+  /**
+   * Lock COGS on a local sale
+   */
+  async lockSaleCOGS(trx, saleId) {
+    const cogs = await inventoryService.calculateSaleCOGS(trx, saleId);
+
+    await trx('local_sales').where('id', saleId).update({
+      cogs_total_pkr: cogs.totalCOGS,
+      cogs_per_kg: cogs.cogsPerKg,
+      gross_profit_pkr: cogs.grossProfit,
+      cost_locked_at_dispatch: true,
+    });
+
+    return cogs;
+  },
 };
 
 module.exports = inventoryService;

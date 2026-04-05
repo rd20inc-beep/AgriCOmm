@@ -236,6 +236,11 @@ module.exports = {
           });
         }
 
+        // Phase 5: Lock COGS on sale
+        if (sale.id && lot_id) {
+          await inventoryService.lockSaleCOGS(trx, sale.id);
+        }
+
         return sale;
       });
 

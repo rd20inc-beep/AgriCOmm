@@ -44,4 +44,50 @@ router.put(
 // Reports
 router.get('/reports/stock', authorize('inventory', 'view'), controller.getStockReport);
 
+// Phase 4: Lot lineage & traceability
+const inventoryService = require('../services/inventoryService');
+
+router.get('/lots/:id/ancestry', authorize('inventory', 'view'), async (req, res) => {
+  try {
+    const ancestry = await inventoryService.getLotAncestry(parseInt(req.params.id));
+    return res.json({ success: true, data: { ancestry } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.get('/lots/:id/descendants', authorize('inventory', 'view'), async (req, res) => {
+  try {
+    const descendants = await inventoryService.getLotDescendants(parseInt(req.params.id));
+    return res.json({ success: true, data: { descendants } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.get('/batch-trace/:batchId', authorize('inventory', 'view'), async (req, res) => {
+  try {
+    const trace = await inventoryService.getBatchSourceTrace(parseInt(req.params.batchId));
+    return res.json({ success: true, data: trace });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.get('/order-trace/:orderId', authorize('inventory', 'view'), async (req, res) => {
+  try {
+    const trace = await inventoryService.getOrderLotTrace(parseInt(req.params.orderId));
+    return res.json({ success: true, data: trace });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.get('/sale-trace/:saleId', authorize('inventory', 'view'), async (req, res) => {
+  try {
+    const trace = await inventoryService.getSaleLotTrace(parseInt(req.params.saleId));
+    return res.json({ success: true, data: trace });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Phase 5: COGS calculation
+router.get('/order-cogs/:orderId', authorize('finance', 'view'), async (req, res) => {
+  try {
+    const cogs = await inventoryService.calculateOrderCOGS(null, parseInt(req.params.orderId));
+    return res.json({ success: true, data: cogs });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
 module.exports = router;
