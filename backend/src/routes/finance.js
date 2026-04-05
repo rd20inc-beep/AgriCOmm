@@ -29,6 +29,31 @@ router.post(
   controller.createInternalTransfer
 );
 
+// Phase 2: Centralized finance summary endpoints
+const financeService = require('../services/financeService');
+
+router.get('/overview-summary', authorize('finance', 'view'), async (req, res) => {
+  try {
+    const { start_date, end_date, entity } = req.query;
+    const summary = await financeService.getOverviewSummary({ startDate: start_date, endDate: end_date, entity });
+    return res.json({ success: true, data: summary });
+  } catch (err) {
+    console.error('Finance overview-summary error:', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.get('/profitability-summary', authorize('finance', 'view'), async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+    const summary = await financeService.getProfitabilitySummary({ startDate: start_date, endDate: end_date });
+    return res.json({ success: true, data: summary });
+  } catch (err) {
+    console.error('Finance profitability-summary error:', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // Cost Allocations
 router.get('/cost-allocations', authorize('finance', 'view'), controller.listCostAllocations);
 router.post(

@@ -33,7 +33,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import {
   useReceivables, usePayables, useFinanceAlerts, useJournalEntries,
-  useFinanceOverview as useFinanceOverviewData, useLocalSalesSummary,
+  useFinanceOverviewSummary,
 } from '../../api/queries';
 import KPICard from '../../components/KPICard';
 
@@ -53,82 +53,30 @@ function fmt(n, currency = 'USD') {
 }
 
 export default function FinanceOverview() {
-  const { exportOrders, millingBatches, bankAccountsList, settings } = useApp();
+  const { exportOrders } = useApp();
   const [entityFilter, setEntityFilter] = useState('All');
 
-  // Fetch finance data from API via TanStack Query
+  // Phase 2: Backend-computed finance summary (single source of truth)
+  const { data: summary = {}, isLoading: summaryLoading } = useFinanceOverviewSummary({ entity: entityFilter !== 'All' ? entityFilter.toLowerCase() : undefined });
+
+  // Supplementary data for alerts, journals, overdue list
   const { data: receivables = [] } = useReceivables();
   const { data: payablesData = [] } = usePayables();
   const { data: alertsData = [] } = useFinanceAlerts();
   const { data: journalData = [] } = useJournalEntries();
-  const { data: localSalesSummary = {} } = useLocalSalesSummary();
 
-  // ── KPI computations ──
+  // ── KPIs from backend summary ──
   const kpis = useMemo(() => {
-    // Receivables from receivables table
-    const tableReceivables = receivables.reduce((s, r) => s + (parseFloat(r.outstanding) || 0), 0);
-    const overdueReceivables = receivables
-      .filter((r) => r.status === 'Overdue')
-      .reduce((s, r) => s + (parseFloat(r.outstanding) || 0), 0);
+    const exp = summary.export || {};
+    const mill = summary.mill || {};
+    const recv = summary.receivables || {};
+    const pay = summary.payables || {};
+    const cash = summary.cashPosition || {};
 
-    // Also compute from export orders directly (for orders without receivable records)
-    const orderReceivables = exportOrders.reduce((s, o) => {
-      const outstanding = (parseFloat(o.contractValue) || 0) - (parseFloat(o.advanceReceived) || 0) - (parseFloat(o.balanceReceived) || 0);
-      return outstanding > 0 ? s + outstanding : s;
-    }, 0);
-
-    // Use whichever is higher (avoids double-counting but ensures completeness)
-    const totalReceivables = Math.max(tableReceivables, orderReceivables);
-
-    // Payables from table
-    const tablePayables = payablesData.reduce((s, p) => s + (parseFloat(p.outstanding) || 0), 0);
-    const overduePayables = payablesData
-      .filter((p) => p.status === 'Overdue')
-      .reduce((s, p) => s + (parseFloat(p.outstanding) || 0), 0);
-
-    const orderCostsTotal = exportOrders.reduce((s, o) => {
-      return s + Object.values(o.costs || {}).reduce((a, b) => a + (parseFloat(b) || 0), 0);
-    }, 0);
-    const totalPayables = Math.max(tablePayables, orderCostsTotal);
-
-    // Export gross profit
-    const exportGP = exportOrders.reduce((sum, o) => {
-      const operationalCosts = Object.values(o.costs || {}).reduce((a, b) => a + (parseFloat(b) || 0), 0);
-      const inventoryCOGS = parseFloat(o.inventoryCogsTotalPkr) || 0;
-      const cogsPKR = inventoryCOGS > 0 ? inventoryCOGS / pkrRate : 0; // convert to USD
-      const totalCost = operationalCosts + cogsPKR;
-      return sum + ((parseFloat(o.contractValue) || 0) - totalCost);
-    }, 0);
-    const ordersWithoutCOGS = exportOrders.filter(o => o.status === 'Shipped' && !parseFloat(o.inventoryCogsTotalPkr)).length;
-
-    // Mill gross profit (PKR) — use batch-confirmed prices, not hardcoded constants
-    const pkrRate = settings?.pkrRate || 280;
-    const completedBatches = millingBatches.filter(b => b.status === 'Completed');
-    const millGP = completedBatches.reduce((sum, b) => {
-      const totalCost = Object.values(b.costs || {}).reduce((a, b2) => a + (parseFloat(b2) || 0), 0);
-      // Use batch-confirmed prices; fall back to 0 (not hardcoded constant)
-      const finPrice = parseFloat(b.finishedPricePerMT) || 0;
-      const brokenPrice = parseFloat(b.brokenPricePerMT) || 0;
-      const branPrice = parseFloat(b.branPricePerMT) || 0;
-      const huskPrice = parseFloat(b.huskPricePerMT) || 0;
-      const revenue = (b.actualFinishedMT || 0) * finPrice
-        + (b.brokenMT || 0) * brokenPrice
-        + (b.branMT || 0) * branPrice
-        + (b.huskMT || 0) * huskPrice;
-      return sum + (revenue - totalCost);
-    }, 0);
-    const millHasUnconfirmedPrices = completedBatches.some(b => !b.pricesConfirmed);
-
-    // Working capital locked (advances received minus costs spent for active orders)
+    // Working capital: computed from export orders (still client-side since backend doesn't have this)
     const activeStatuses = [
-      'Awaiting Advance',
-      'Advance Received',
-      'Procurement Pending',
-      'In Milling',
-      'Docs In Preparation',
-      'Awaiting Balance',
-      'Ready to Ship',
-      'Shipped',
+      'Awaiting Advance', 'Advance Received', 'Procurement Pending',
+      'In Milling', 'Docs In Preparation', 'Awaiting Balance', 'Ready to Ship', 'Shipped',
     ];
     const workingCapital = exportOrders
       .filter((o) => activeStatuses.includes(o.status))
@@ -138,56 +86,45 @@ export default function FinanceOverview() {
         return sum + (received - spent);
       }, 0);
 
-    // Cash position
-    const cashPosition = (bankAccountsList || []).reduce(
-      (s, a) => s + (a.currentBalance || 0),
-      0
-    );
-
-    // Pending confirmations
     const pendingConfirmations = receivables.filter((r) => r.status === 'Pending' || r.status === 'pending').length;
 
-    // Collection rate
-    const totalExpected = receivables.reduce((s, r) => s + (parseFloat(r.expectedAmount || r.expected || r.amount) || 0), 0);
-    const totalCollected = receivables.reduce((s, r) => s + (parseFloat(r.receivedAmount || r.received) || 0), 0);
-    const collectionRate = totalExpected > 0 ? ((totalCollected / totalExpected) * 100).toFixed(1) : '0.0';
-
     return {
-      totalReceivables,
-      overdueReceivables,
-      totalPayables,
-      overduePayables,
-      exportGP,
-      millGP,
+      totalReceivables: recv.totalOutstanding || 0,
+      overdueReceivables: recv.overdueAmount || 0,
+      totalPayables: pay.totalOutstanding || 0,
+      overduePayables: pay.overdueAmount || 0,
+      exportGP: exp.grossProfit || 0,
+      millGP: mill.grossProfit || 0,
       workingCapital,
-      cashPosition,
+      cashPosition: cash.bankBalance || 0,
       pendingConfirmations,
-      collectionRate,
+      collectionRate: summary.collectionRate || 0,
     };
-  }, [exportOrders, millingBatches, bankAccountsList, settings, receivables, payablesData, localSalesSummary]);
+  }, [summary, exportOrders, receivables]);
 
   // ── Chart data ──
+  const pkrRate = summary.pkrRate || 280;
+
   const profitSplit = useMemo(() => {
     return [
       { name: 'Export', value: Math.max(0, kpis.exportGP) },
-      { name: 'Mill', value: Math.max(0, kpis.millGP / (settings?.pkrRate || 280)) },
+      { name: 'Mill', value: Math.max(0, kpis.millGP / pkrRate) },
     ];
-  }, [kpis, settings]);
+  }, [kpis, pkrRate]);
 
-  // Compute receivables vs payables chart from real data
+  // Receivables vs payables chart
   const receivablesPayables = useMemo(() => {
     const months = ['Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
-    const totalRec = receivables.reduce((s, r) => s + (parseFloat(r.outstanding) || 0), 0);
-    const totalPay = payablesData.reduce((s, p) => s + (parseFloat(p.outstanding) || 0), 0);
+    const totalRec = kpis.totalReceivables;
+    const totalPay = kpis.totalPayables;
     return months.map((month, i) => ({
       month,
       receivables: Math.max(0, Math.round((totalRec / 6) * (1 + (i - 3) * 0.1))),
       payables: Math.max(0, Math.round((totalPay / 6) * (1 + (i - 2) * 0.08))),
     }));
-  }, [receivables, payablesData]);
+  }, [kpis]);
 
   const cashFlowData = useMemo(() => {
-    // Compute from receivables/payables data
     const months = ['Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
     const totalInflow = receivables.reduce((s, r) => s + (parseFloat(r.receivedAmount || r.received) || 0), 0);
     const totalOutflow = payablesData.reduce((s, p) => s + (parseFloat(p.paidAmount || p.paid) || 0), 0);
@@ -199,7 +136,6 @@ export default function FinanceOverview() {
   }, [receivables, payablesData]);
 
   const costBreakdownData = useMemo(() => {
-    // Aggregate from export orders
     const cats = {};
     exportOrders.forEach((o) => {
       Object.entries(o.costs || {}).forEach(([k, v]) => {
@@ -263,6 +199,22 @@ export default function FinanceOverview() {
           ))}
         </div>
       </div>
+
+      {/* Backend warnings */}
+      {(summary.warnings || []).length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+          {summary.warnings.map((w, i) => (
+            <div key={i} className="flex items-center gap-2 text-sm text-amber-800">
+              <AlertTriangle size={14} className="flex-shrink-0" />
+              <span>{w}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {summaryLoading && (
+        <div className="text-center text-sm text-gray-400 py-2">Loading finance summary...</div>
+      )}
 
       {/* KPI Cards — 5 columns, 2 rows */}
       <div className="kpi-grid">

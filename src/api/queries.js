@@ -335,6 +335,30 @@ export function useInventorySummary() {
 
 // ===================== FINANCE =====================
 
+// Phase 2: Centralized finance summary hooks
+export function useFinanceOverviewSummary(params = {}) {
+  return useQuery({
+    queryKey: ['finance-overview-summary', params],
+    queryFn: async () => {
+      const res = await financeApi.overviewSummary(params);
+      return unwrap(res) || {};
+    },
+    staleTime: 15 * 1000,
+    refetchOnMount: 'always',
+  });
+}
+
+export function useProfitabilitySummary(params = {}) {
+  return useQuery({
+    queryKey: ['finance-profitability-summary', params],
+    queryFn: async () => {
+      const res = await financeApi.profitabilitySummary(params);
+      return unwrap(res) || {};
+    },
+    staleTime: 15 * 1000,
+  });
+}
+
 export function useFinanceOverview() {
   return useQuery({
     queryKey: queryKeys.financeOverview,
