@@ -88,10 +88,18 @@ export default function FinanceOverview() {
 
     const pendingConfirmations = receivables.filter((r) => r.status === 'Pending' || r.status === 'pending').length;
 
+    // Payables: show PKR and USD separately when derived
+    const payablesPKR = pay.totalOutstandingPKR || 0;
+    const payablesUSD = pay.totalOutstandingUSD || 0;
+    const hasBreakdown = !!pay.breakdown;
+
     return {
       totalReceivables: recv.totalOutstanding || 0,
       overdueReceivables: recv.overdueAmount || 0,
+      totalPayablesPKR: payablesPKR,
+      totalPayablesUSD: payablesUSD,
       totalPayables: pay.totalOutstanding || 0,
+      hasPayablesBreakdown: hasBreakdown,
       overduePayables: pay.overdueAmount || 0,
       exportGP: exp.grossProfit || 0,
       millGP: mill.grossProfit || 0,
@@ -101,9 +109,6 @@ export default function FinanceOverview() {
       collectionRate: summary.collectionRate || 0,
     };
   }, [summary, exportOrders, receivables]);
-
-  // Payables breakdown (when derived from cost tables)
-  const payablesBreakdown = summary.payables?.breakdown || null;
 
   // ── Chart data ──
   const pkrRate = summary.pkrRate || 280;
@@ -243,19 +248,18 @@ export default function FinanceOverview() {
         <Link to="/finance/payables">
           <KPICard
             icon={ArrowUpRight}
-            title="Total Payables"
-            value={fmt(kpis.totalPayables)}
-            subtitle={payablesBreakdown ? 'Paddy + Milling + Export costs' : 'Outstanding'}
+            title="Mill Payables"
+            value={kpis.hasPayablesBreakdown ? fmt(kpis.totalPayablesPKR, 'PKR') : fmt(kpis.totalPayables)}
+            subtitle={kpis.hasPayablesBreakdown ? 'Paddy + Milling costs' : 'Outstanding'}
             color="amber"
           />
         </Link>
         <Link to="/finance/payables">
           <KPICard
-            icon={AlertTriangle}
-            title="Overdue Payables"
-            value={fmt(kpis.overduePayables)}
-            subtitle="Past due"
-            trend="down"
+            icon={ArrowUpRight}
+            title="Export Payables"
+            value={kpis.hasPayablesBreakdown ? fmt(kpis.totalPayablesUSD) : fmt(kpis.overduePayables)}
+            subtitle={kpis.hasPayablesBreakdown ? 'Freight + Clearing + Bags' : 'Overdue'}
             color="orange"
           />
         </Link>

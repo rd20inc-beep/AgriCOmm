@@ -127,6 +127,8 @@ const financeService = {
       derivedPayables = {
         count: parseInt(costLineCount?.n || 0) + parseInt(exportCostLineCount?.n || 0),
         totalOutstanding: totalPayablesUsd,
+        totalOutstandingPKR: totalMillPayablesPkr,
+        totalOutstandingUSD: exportOpTotal,
         overdueCount: 0,
         overdueAmount: 0,
         breakdown: {

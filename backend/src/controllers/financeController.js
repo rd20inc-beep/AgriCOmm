@@ -82,45 +82,147 @@ const financeController = {
 
   async getPayables(req, res) {
     try {
-      const { page = 1, limit = 20, status, supplier_id, overdue } = req.query;
+      const { page = 1, limit = 200, status, supplier_id, overdue } = req.query;
       const offset = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
 
-      let query = db('payables as p')
-        .leftJoin('suppliers as s', 'p.supplier_id', 's.id')
+      // Check if the payables table has data
+      const payableCount = await db('payables').count('* as n').first();
+      const hasPayablesTable = parseInt(payableCount?.n || 0) > 0;
+
+      if (hasPayablesTable) {
+        let query = db('payables as p')
+          .leftJoin('suppliers as s', 'p.supplier_id', 's.id')
+          .select('p.*', 's.name as supplier_name');
+
+        if (status) query = query.where('p.status', status);
+        if (supplier_id) query = query.where('p.supplier_id', supplier_id);
+        if (overdue === 'true') query = query.where('p.due_date', '<', db.fn.now()).where('p.status', '!=', 'paid');
+
+        const countQuery = query.clone().clearSelect().clearOrder().count('p.id as total').first();
+        const [payables, countResult] = await Promise.all([
+          query.orderBy('p.due_date', 'asc').limit(parseInt(limit)).offset(offset),
+          countQuery,
+        ]);
+
+        return res.json({
+          success: true,
+          data: {
+            payables,
+            pagination: { page: parseInt(page), limit: parseInt(limit), total: parseInt(countResult.total), totalPages: Math.ceil(parseInt(countResult.total) / parseInt(limit)) },
+          },
+        });
+      }
+
+      // Derive payables from cost tables
+      const millingCosts = await db('milling_costs as mc')
+        .join('milling_batches as mb', 'mc.batch_id', 'mb.id')
         .select(
-          'p.*',
-          's.name as supplier_name'
-        );
+          'mc.id', 'mc.batch_id', 'mc.category', 'mc.amount', 'mc.currency',
+          'mc.created_at', 'mb.batch_no', 'mb.supplier_name',
+        )
+        .where('mc.amount', '>', 0)
+        .orderBy('mc.created_at', 'desc');
 
-      if (status) {
-        query = query.where('p.status', status);
-      }
-      if (supplier_id) {
-        query = query.where('p.supplier_id', supplier_id);
-      }
-      if (overdue === 'true') {
-        query = query.where('p.due_date', '<', db.fn.now()).where('p.status', '!=', 'paid');
-      }
+      const exportCosts = await db('export_order_costs as eoc')
+        .join('export_orders as eo', 'eoc.order_id', 'eo.id')
+        .leftJoin('customers as c', 'eo.customer_id', 'c.id')
+        .select(
+          'eoc.id', 'eoc.order_id', 'eoc.category', 'eoc.amount',
+          'eoc.created_at', 'eo.order_no', 'c.name as customer_name',
+        )
+        .where('eoc.amount', '>', 0)
+        .orderBy('eoc.created_at', 'desc');
 
-      const countQuery = query.clone().clearSelect().clearOrder().count('p.id as total').first();
+      const millExpenses = await db('mill_expenses')
+        .where('amount', '>', 0)
+        .select('*')
+        .orderBy('expense_date', 'desc');
 
-      const [payables, countResult] = await Promise.all([
-        query.orderBy('p.due_date', 'asc').limit(parseInt(limit)).offset(offset),
-        countQuery,
-      ]);
+      // Map to payable-shaped rows
+      const derived = [];
 
-      const total = parseInt(countResult.total);
+      const categoryLabel = (cat) => {
+        const map = { raw_rice: 'Raw Rice', transport: 'Transport', electricity: 'Electricity', rent: 'Rent', labor: 'Labor', maintenance: 'Maintenance' };
+        return map[cat] || cat.charAt(0).toUpperCase() + cat.slice(1);
+      };
+
+      millingCosts.forEach(mc => {
+        derived.push({
+          id: `MC-${mc.id}`,
+          pay_no: `MC-${mc.id}`,
+          entity: 'mill',
+          category: categoryLabel(mc.category),
+          supplier_name: mc.supplier_name || null,
+          linked_ref: mc.batch_no,
+          original_amount: parseFloat(mc.amount),
+          paid_amount: 0,
+          outstanding: parseFloat(mc.amount),
+          due_date: mc.created_at,
+          status: 'Pending',
+          currency: mc.currency || 'PKR',
+          aging: 0,
+          notes: `${categoryLabel(mc.category)} cost for batch ${mc.batch_no}`,
+          created_at: mc.created_at,
+          source: 'milling_costs',
+        });
+      });
+
+      exportCosts.forEach(ec => {
+        derived.push({
+          id: `EC-${ec.id}`,
+          pay_no: `EC-${ec.id}`,
+          entity: 'export',
+          category: categoryLabel(ec.category),
+          supplier_name: ec.customer_name || null,
+          linked_ref: ec.order_no,
+          original_amount: parseFloat(ec.amount),
+          paid_amount: 0,
+          outstanding: parseFloat(ec.amount),
+          due_date: ec.created_at,
+          status: 'Pending',
+          currency: 'USD',
+          aging: 0,
+          notes: `${categoryLabel(ec.category)} cost for order ${ec.order_no}`,
+          created_at: ec.created_at,
+          source: 'export_order_costs',
+        });
+      });
+
+      millExpenses.forEach(me => {
+        derived.push({
+          id: `ME-${me.id}`,
+          pay_no: `ME-${me.id}`,
+          entity: 'mill',
+          category: categoryLabel(me.category || 'overhead'),
+          supplier_name: null,
+          linked_ref: null,
+          original_amount: parseFloat(me.amount),
+          paid_amount: 0,
+          outstanding: parseFloat(me.amount),
+          due_date: me.expense_date || me.created_at,
+          status: 'Pending',
+          currency: 'PKR',
+          aging: 0,
+          notes: me.description || `Mill expense: ${me.category}`,
+          created_at: me.created_at,
+          source: 'mill_expenses',
+        });
+      });
+
+      // Apply filters
+      let filtered = derived;
+      if (status) filtered = filtered.filter(p => p.status === status);
+      if (overdue === 'true') filtered = filtered.filter(p => new Date(p.due_date) < new Date());
+
+      const total = filtered.length;
+      const paged = filtered.slice(offset, offset + parseInt(limit));
 
       return res.json({
         success: true,
         data: {
-          payables,
-          pagination: {
-            page: parseInt(page),
-            limit: parseInt(limit),
-            total,
-            totalPages: Math.ceil(total / parseInt(limit)),
-          },
+          payables: paged,
+          pagination: { page: parseInt(page), limit: parseInt(limit), total, totalPages: Math.ceil(total / parseInt(limit)) },
+          source: 'derived_from_costs',
         },
       });
     } catch (err) {
