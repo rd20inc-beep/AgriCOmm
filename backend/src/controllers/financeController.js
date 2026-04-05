@@ -92,7 +92,11 @@ const financeController = {
       if (hasPayablesTable) {
         let query = db('payables as p')
           .leftJoin('suppliers as s', 'p.supplier_id', 's.id')
-          .select('p.*', 's.name as supplier_name');
+          .select('p.*', 's.name as supplier_name')
+          .where(function() {
+            // Only show real vendor payables, not internal cost allocations
+            this.where('p.payable_type', 'vendor').orWhereNull('p.payable_type');
+          });
 
         if (status) query = query.where('p.status', status);
         if (supplier_id) query = query.where('p.supplier_id', supplier_id);

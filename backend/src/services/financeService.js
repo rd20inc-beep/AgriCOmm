@@ -86,22 +86,28 @@ const financeService = {
       db.raw("COALESCE(SUM(CASE WHEN due_date < CURRENT_DATE THEN outstanding END), 0) as overdue_amount"),
     ).first();
 
-    // Payables — with PKR/USD currency split
-    const payStats = await db('payables').whereNot('status', 'Paid').select(
-      db.raw("COUNT(*) as count"),
-      db.raw("COALESCE(SUM(outstanding), 0) as total_outstanding"),
-      db.raw("COUNT(CASE WHEN due_date < CURRENT_DATE THEN 1 END) as overdue_count"),
-      db.raw("COALESCE(SUM(CASE WHEN due_date < CURRENT_DATE THEN outstanding END), 0) as overdue_amount"),
-    ).first();
+    // Payables — broken down by entity (mill vs export ops)
+    const payStats = await db('payables').whereNot('status', 'Paid')
+      .where('payable_type', 'vendor') // only real vendor payables
+      .select(
+        db.raw("COUNT(*) as count"),
+        db.raw("COALESCE(SUM(outstanding), 0) as total_outstanding"),
+        db.raw("COUNT(CASE WHEN due_date < CURRENT_DATE THEN 1 END) as overdue_count"),
+        db.raw("COALESCE(SUM(CASE WHEN due_date < CURRENT_DATE THEN outstanding END), 0) as overdue_amount"),
+      ).first();
 
-    const payPKR = await db('payables').whereNot('status', 'Paid').where('currency', 'PKR')
+    // Mill payables (raw rice, transport, labor, etc.) — all PKR
+    const millPay = await db('payables').whereNot('status', 'Paid')
+      .where('entity', 'mill')
       .sum('outstanding as total').first();
-    const payUSD = await db('payables').whereNot('status', 'Paid').where('currency', 'USD')
+    // Export ops payables (bags, loading, clearing, freight) — also PKR (local vendors)
+    const exportOpsPay = await db('payables').whereNot('status', 'Paid')
+      .where('entity', 'export')
       .sum('outstanding as total').first();
 
-    const totalPayPKR = parseFloat(payPKR?.total) || 0;
-    const totalPayUSD = parseFloat(payUSD?.total) || 0;
-    const combinedPayUSD = totalPayUSD + (totalPayPKR / pkrRate);
+    const totalMillPayPKR = parseFloat(millPay?.total) || 0;
+    const totalExportOpsPayPKR = parseFloat(exportOpsPay?.total) || 0;
+    const totalPayPKR = totalMillPayPKR + totalExportOpsPayPKR;
 
     // Bank position
     const bankTotal = await db('bank_accounts').sum('current_balance as total').first();
@@ -153,9 +159,10 @@ const financeService = {
       },
       payables: {
         count: parseInt(payStats.count),
-        totalOutstanding: combinedPayUSD,
         totalOutstandingPKR: totalPayPKR,
-        totalOutstandingUSD: totalPayUSD,
+        millPayablesPKR: totalMillPayPKR,
+        exportOpsPayablesPKR: totalExportOpsPayPKR,
+        totalOutstandingUSD: totalPayPKR / pkrRate, // converted for dashboard display
         overdueCount: parseInt(payStats.overdue_count),
         overdueAmount: parseFloat(payStats.overdue_amount),
       },

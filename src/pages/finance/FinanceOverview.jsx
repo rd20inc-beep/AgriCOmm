@@ -88,18 +88,17 @@ export default function FinanceOverview() {
 
     const pendingConfirmations = receivables.filter((r) => r.status === 'Pending' || r.status === 'pending').length;
 
-    // Payables: show PKR and USD separately
-    const payablesPKR = pay.totalOutstandingPKR || 0;
-    const payablesUSD = pay.totalOutstandingUSD || 0;
-    const hasCurrencySplit = payablesPKR > 0 || payablesUSD > 0;
+    // Payables: all in PKR (mill + export ops are local vendors)
+    const totalPayablesPKR = pay.totalOutstandingPKR || 0;
+    const millPayablesPKR = pay.millPayablesPKR || 0;
+    const exportOpsPayablesPKR = pay.exportOpsPayablesPKR || 0;
 
     return {
       totalReceivables: recv.totalOutstanding || 0,
       overdueReceivables: recv.overdueAmount || 0,
-      totalPayablesPKR: payablesPKR,
-      totalPayablesUSD: payablesUSD,
-      totalPayables: pay.totalOutstanding || 0,
-      hasCurrencySplit: hasBreakdown,
+      totalPayablesPKR,
+      millPayablesPKR,
+      exportOpsPayablesPKR,
       overduePayables: pay.overdueAmount || 0,
       exportGP: exp.grossProfit || 0,
       millGP: mill.grossProfit || 0,
@@ -120,11 +119,11 @@ export default function FinanceOverview() {
     ];
   }, [kpis, pkrRate]);
 
-  // Receivables vs payables chart
+  // Receivables vs payables chart (convert payables PKR→USD for comparison)
   const receivablesPayables = useMemo(() => {
     const months = ['Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
     const totalRec = kpis.totalReceivables;
-    const totalPay = kpis.totalPayables;
+    const totalPay = kpis.totalPayablesPKR / pkrRate;
     return months.map((month, i) => ({
       month,
       receivables: Math.max(0, Math.round((totalRec / 6) * (1 + (i - 3) * 0.1))),
@@ -248,18 +247,19 @@ export default function FinanceOverview() {
         <Link to="/finance/payables">
           <KPICard
             icon={ArrowUpRight}
-            title="Mill Payables"
-            value={kpis.hasCurrencySplit ? fmt(kpis.totalPayablesPKR, 'PKR') : fmt(kpis.totalPayables)}
-            subtitle={kpis.hasCurrencySplit ? 'Paddy + Milling costs' : 'Outstanding'}
+            title="Supplier Payables"
+            value={fmt(kpis.totalPayablesPKR, 'PKR')}
+            subtitle="Paddy + Milling + Export ops"
             color="amber"
           />
         </Link>
         <Link to="/finance/payables">
           <KPICard
-            icon={ArrowUpRight}
-            title="Export Payables"
-            value={kpis.hasCurrencySplit ? fmt(kpis.totalPayablesUSD) : fmt(kpis.overduePayables)}
-            subtitle={kpis.hasCurrencySplit ? 'Freight + Clearing + Bags' : 'Overdue'}
+            icon={AlertTriangle}
+            title="Overdue Payables"
+            value={fmt(kpis.overduePayables, 'PKR')}
+            subtitle="Past due"
+            trend="down"
             color="orange"
           />
         </Link>
