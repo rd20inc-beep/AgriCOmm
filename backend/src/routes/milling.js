@@ -14,6 +14,34 @@ const schemas = require('../middleware/schemas');
 
 router.get('/batches', authorize('milling', 'view'), controller.list);
 router.get('/batches/:id', authorize('milling', 'view'), controller.getById);
+router.put('/batches/:id', authorize('milling', 'edit'),
+  auditAction('update_batch', 'milling_batch', (req) => req.params.id),
+  async (req, res) => {
+    try {
+      const id = /^\d+$/.test(req.params.id) ? parseInt(req.params.id)
+        : (await db('milling_batches').where('batch_no', req.params.id).select('id').first())?.id;
+      if (!id) return res.status(404).json({ success: false, message: 'Batch not found' });
+
+      const allowed = ['supplier_id', 'raw_qty_mt', 'planned_finished_mt', 'milling_fee_per_kg',
+        'mill_id', 'machine_line', 'shift', 'notes', 'variance_status', 'status'];
+      const updates = {};
+      for (const key of allowed) {
+        if (req.body[key] !== undefined) updates[key] = req.body[key];
+      }
+      // Also update supplier_name if supplier_id is set
+      if (updates.supplier_id) {
+        const supplier = await db('suppliers').where('id', updates.supplier_id).first();
+        if (supplier) updates.supplier_name = supplier.name;
+      }
+      updates.updated_at = db.fn.now();
+
+      const [batch] = await db('milling_batches').where({ id }).update(updates).returning('*');
+      return res.json({ success: true, data: { batch } });
+    } catch (err) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  }
+);
 router.post(
   '/batches',
   authorize('milling', 'create'),

@@ -26,6 +26,7 @@ import {
   useAddBatchCost, useAddVehicle, useUpdateMillingBatch,
 } from '../api/queries';
 import { millingApi } from '../api/services';
+import SearchSelect from '../components/SearchSelect';
 import Modal from '../components/Modal';
 import StatusBadge from '../components/StatusBadge';
 import MillingCostSheet from '../components/MillingCostSheet';
@@ -56,7 +57,7 @@ function formatPKR(value) {
 export default function MillingBatchDetail() {
   const { id } = useParams();
   const qc = useQueryClient();
-  const { addToast, millingCostCategories, companyProfileData } = useApp();
+  const { addToast, millingCostCategories, companyProfileData, suppliersList } = useApp();
 
   // Fetch batch detail via TanStack Query
   const { data: batch, isLoading: batchLoading } = useMillingBatch(id);
@@ -90,6 +91,8 @@ export default function MillingBatchDetail() {
   const [showCostSheet, setShowCostSheet] = useState(false);
   const [showVehicleModal, setShowVehicleModal] = useState(false);
   const [showPriceModal, setShowPriceModal] = useState(false);
+  const [showSupplierModal, setShowSupplierModal] = useState(false);
+  const [selectedSupplier, setSelectedSupplier] = useState('');
   const [priceForm, setPriceForm] = useState({ finished: '', broken: '', bran: '', husk: '' });
   const [priceLoading, setPriceLoading] = useState(false);
   const [vehicleForm, setVehicleForm] = useState({
@@ -435,11 +438,24 @@ export default function MillingBatchDetail() {
                   </Link>
                 </span>
               )}
-              <span>Supplier: {batch.supplierName}</span>
+              {batch.supplierName ? (
+                <span>Supplier: {batch.supplierName}</span>
+              ) : (
+                <span className="text-amber-600 font-medium">No supplier assigned</span>
+              )}
               <span>Created: {batch.createdAt}</span>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-4">
+            {!batch.supplierName && batch.status !== 'Completed' && batch.status !== 'Cancelled' && (
+              <button
+                onClick={() => setShowSupplierModal(true)}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 transition-colors"
+              >
+                <Edit3 size={16} />
+                Assign Supplier
+              </button>
+            )}
             <button
               onClick={() => setShowCostSheet(true)}
               className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#1e3a5f] text-white rounded-lg text-sm font-medium hover:bg-[#2d5a87] transition-colors"
@@ -1568,6 +1584,45 @@ export default function MillingBatchDetail() {
             setPriceLoading(false);
             setShowPriceModal(true);
           }} className="mt-2 px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-medium hover:bg-amber-700">Confirm Prices Now</button>
+        </div>
+      )}
+
+      {/* Assign Supplier Modal */}
+      <Modal isOpen={showSupplierModal} onClose={() => setShowSupplierModal(false)} title="Assign Supplier to Batch" size="md">
+        <div className="space-y-4">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
+            This batch was created without a supplier. Select the paddy supplier for this milling batch.
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Supplier *</label>
+            <SearchSelect
+              value={selectedSupplier}
+              onChange={setSelectedSupplier}
+              options={(suppliersList || []).map(s => ({ value: s.id, label: s.name, sub: s.location || s.type || '' }))}
+              placeholder="Type to search supplier..."
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-2 border-t">
+            <button onClick={() => setShowSupplierModal(false)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+            <button onClick={async () => {
+              if (!selectedSupplier) { addToast('Please select a supplier', 'error'); return; }
+              try {
+                await updateBatchMut.mutateAsync({ id: batchId, data: { supplier_id: parseInt(selectedSupplier) } });
+                addToast('Supplier assigned to batch');
+                setShowSupplierModal(false);
+                setSelectedSupplier('');
+              } catch (err) { addToast(err.message || 'Failed', 'error'); }
+            }} className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700">Assign Supplier</button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* No Supplier Banner */}
+      {batch && !batch.supplierName && !batch.isServiceMilling && batch.status !== 'Completed' && batch.status !== 'Cancelled' && (
+        <div className="fixed bottom-4 left-4 z-50 bg-amber-50 border-2 border-amber-400 rounded-xl p-4 shadow-lg max-w-sm">
+          <p className="text-sm font-semibold text-amber-800">No Supplier Assigned</p>
+          <p className="text-xs text-amber-600 mt-1">Assign a paddy supplier before recording quality and yield.</p>
+          <button onClick={() => setShowSupplierModal(true)} className="mt-2 px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-medium hover:bg-amber-700">Assign Supplier</button>
         </div>
       )}
     </div>
