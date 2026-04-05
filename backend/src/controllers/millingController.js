@@ -466,38 +466,93 @@ const millingController = {
         // Net cost per MT of finished rice = total batch cost / finished MT
         const effectiveCostPerMT = finished > 0 ? batchCostTotal / finished : 0;
 
-        // === Cost decomposition: raw cost vs milling cost ===
+        // =================================================================
+        // PHASE 3: Market-Value-Based Joint Cost Allocation
+        // =================================================================
+
         const rawQty = parseFloat(batch.raw_qty_mt) || 0;
-        const millingFee = parseFloat(batch.milling_fee_per_kg) || 5; // default 5 PKR/kg
+        const millingFee = parseFloat(batch.milling_fee_per_kg) || 0;
 
-        // Get raw material cost from milling_costs (category='rawRice' or 'raw_rice')
-        const rawCostRow = await trx('milling_costs')
-          .where({ batch_id: batch.id })
-          .where(function () { this.where('category', 'rawRice').orWhere('category', 'raw_rice'); })
-          .sum('amount as total').first();
-        const rawCostTotal = parseFloat(rawCostRow?.total) || 0;
+        // 1. Compute TOTAL BATCH COST POOL (all costs tied to this batch)
+        const rawCostTotal = parseFloat(
+          (await trx('milling_costs').where({ batch_id: batch.id })
+            .where('category', 'raw_rice').sum('amount as total').first())?.total
+        ) || 0;
 
-        // Raw cost per KG of finished = total raw cost / finished KG
-        const finishedKg = finished * 1000;
-        const rawCostPerKg = finishedKg > 0 ? rawCostTotal / finishedKg : 0;
-        // Milling cost per KG of finished = (milling fee × raw KG) / finished KG
-        const millingCostPerKg = finishedKg > 0 ? (millingFee * rawQty * 1000) / finishedKg : 0;
-        const totalCostPerKg = rawCostPerKg + millingCostPerKg;
+        const processingCosts = parseFloat(
+          (await trx('milling_costs').where({ batch_id: batch.id })
+            .whereNot('category', 'raw_rice').sum('amount as total').first())?.total
+        ) || 0;
 
-        // Update batch with cost decomposition
+        const millingFeeTotal = millingFee * rawQty * 1000; // fee per KG × raw KG
+        const totalBatchCostPool = rawCostTotal + processingCosts + millingFeeTotal;
+
+        // 2. Get market prices (from batch if confirmed, otherwise block or use last known)
+        const finishedPrice = parseFloat(batch.finished_price_per_mt) || 0;
+        const brokenPrice = parseFloat(batch.broken_price_per_mt) || 0;
+        const branPrice = parseFloat(batch.bran_price_per_mt) || 0;
+        const huskPrice = parseFloat(batch.husk_price_per_mt) || 0;
+
+        // 3. Compute market values for each saleable output
+        const outputValues = {
+          finished: { qty: finished, price: finishedPrice, marketValue: finished * finishedPrice },
+          broken:   { qty: broken,  price: brokenPrice,  marketValue: broken * brokenPrice },
+          bran:     { qty: bran,    price: branPrice,    marketValue: bran * branPrice },
+          husk:     { qty: husk,    price: huskPrice,    marketValue: husk * huskPrice },
+        };
+        const totalOutputMarketValue = Object.values(outputValues).reduce((s, o) => s + o.marketValue, 0);
+
+        // 4. Allocate costs proportionally by market value
+        const allocations = {};
+        for (const [name, o] of Object.entries(outputValues)) {
+          if (o.qty > 0 && totalOutputMarketValue > 0) {
+            const share = o.marketValue / totalOutputMarketValue;
+            const allocatedCost = totalBatchCostPool * share;
+            const costPerKg = allocatedCost / (o.qty * 1000);
+            allocations[name] = {
+              qty: o.qty,
+              marketValue: o.marketValue,
+              share: share,
+              allocatedCost: allocatedCost,
+              costPerKg: costPerKg,
+              costPerMT: costPerKg * 1000,
+            };
+          } else {
+            allocations[name] = { qty: o.qty, marketValue: 0, share: 0, allocatedCost: 0, costPerKg: 0, costPerMT: 0 };
+          }
+        }
+
+        // 5. Update batch with full cost decomposition
+        const finAlloc = allocations.finished;
         await trx('milling_batches').where({ id }).update({
           raw_cost_total: rawCostTotal,
-          raw_cost_per_kg_finished: rawCostPerKg,
-          milling_cost_per_kg_finished: millingCostPerKg,
-          total_cost_per_kg_finished: totalCostPerKg,
+          raw_cost_per_kg_finished: finAlloc.qty > 0 ? rawCostTotal / (finAlloc.qty * 1000) : 0,
+          milling_cost_per_kg_finished: finAlloc.qty > 0 ? (processingCosts + millingFeeTotal) / (finAlloc.qty * 1000) : 0,
+          total_cost_per_kg_finished: finAlloc.costPerKg,
         });
 
-        // Mark raw lots as consumed
+        // 6. Store market price allocation snapshot
+        await trx('milling_output_market_prices').insert({
+          batch_id: batch.id,
+          finished_price_per_mt: finishedPrice,
+          broken_price_per_mt: brokenPrice,
+          bran_price_per_mt: branPrice,
+          husk_price_per_mt: huskPrice,
+          confirmed_by: req.user?.id || null,
+          confirmed_at: trx.fn.now(),
+          notes: JSON.stringify({
+            totalBatchCost: totalBatchCostPool,
+            totalMarketValue: totalOutputMarketValue,
+            allocations,
+          }),
+        });
+
+        // 7. Mark raw lots as consumed
         await trx('inventory_lots')
           .where({ batch_ref: `batch-${batch.id}`, type: 'raw' })
           .update({ milling_status: 'Consumed' });
 
-        // Record finished goods + byproducts with enrichment
+        // 8. Record finished goods + byproducts with ALLOCATED costs
         await inventoryService.recordMillingOutput(trx, {
           batchId: batch.id,
           finishedMT: parseFloat(finished),
@@ -505,9 +560,15 @@ const millingController = {
           branMT: parseFloat(bran),
           huskMT: parseFloat(husk),
           productName: linkedOrder?.product_name || 'Finished Rice',
-          costPerMT: effectiveCostPerMT,
-          rawCostComponent: rawCostPerKg,
-          millingCostComponent: millingCostPerKg,
+          costPerMT: finAlloc.costPerMT,
+          rawCostComponent: finAlloc.qty > 0 ? rawCostTotal / (finAlloc.qty * 1000) : 0,
+          millingCostComponent: finAlloc.qty > 0 ? (processingCosts + millingFeeTotal) / (finAlloc.qty * 1000) : 0,
+          // Pass per-output allocated costs for byproducts
+          byproductCosts: {
+            broken: allocations.broken.costPerKg,
+            bran: allocations.bran.costPerKg,
+            husk: allocations.husk.costPerKg,
+          },
           userId: req.user?.id,
           supplierInfo: { supplierId: batch.supplier_id },
           qualityInfo: arrivalQuality ? {
@@ -524,7 +585,7 @@ const millingController = {
           .where({ batch_id: batch.id })
           .sum('amount as total')
           .first();
-        const millingValue = parseFloat(millingCosts?.total || 0) || (parseFloat(batch.raw_qty_mt) * 100);
+        const millingValue = parseFloat(millingCosts?.total || 0);
 
         if (millingValue > 0) {
           await accountingService.autoPost(trx, {

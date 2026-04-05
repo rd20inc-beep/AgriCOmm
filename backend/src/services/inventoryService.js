@@ -505,6 +505,7 @@ const inventoryService = {
     costPerMT,
     rawCostComponent,
     millingCostComponent,
+    byproductCosts, // { broken: costPerKg, bran: costPerKg, husk: costPerKg }
     userId,
     // Optional enrichment from batch/quality
     supplierInfo,
@@ -593,15 +594,19 @@ const inventoryService = {
       results.movements.push(movement);
     }
 
-    // --- By-products: broken, bran, husk ---
+    // --- By-products: broken, bran, husk — with ALLOCATED costs ---
+    const bpCosts = byproductCosts || {};
     const byproducts = [
-      { name: 'Broken Rice', qty: parseFloat(brokenMT) || 0 },
-      { name: 'Rice Bran', qty: parseFloat(branMT) || 0 },
-      { name: 'Rice Husk', qty: parseFloat(huskMT) || 0 },
+      { name: 'Broken Rice', key: 'broken', qty: parseFloat(brokenMT) || 0 },
+      { name: 'Rice Bran', key: 'bran', qty: parseFloat(branMT) || 0 },
+      { name: 'Rice Husk', key: 'husk', qty: parseFloat(huskMT) || 0 },
     ];
 
     for (const bp of byproducts) {
       if (bp.qty <= 0) continue;
+
+      const bpCostPerKg = parseFloat(bpCosts[bp.key]) || 0;
+      const bpCostPerMT = bpCostPerKg * 1000;
 
       const lotNo = await inventoryService.generateLotNo(trx);
       const [lot] = await trx('inventory_lots')
@@ -614,13 +619,17 @@ const inventoryService = {
           qty: 0,
           unit: 'MT',
           batch_ref: `batch-${batchId}`,
-          cost_per_unit: 0,
+          cost_per_unit: bpCostPerMT,
           cost_currency: 'PKR',
           total_value: 0,
           reserved_qty: 0,
           available_qty: 0,
           net_weight_kg: 0,
           gross_weight_kg: 0,
+          rate_per_kg: bpCostPerKg,
+          landed_cost_per_kg: bpCostPerKg,
+          raw_cost_component: bpCostPerKg,
+          cost_incomplete: bpCostPerKg === 0,
           status: 'Available',
           created_by: userId || null,
         })
@@ -634,7 +643,7 @@ const inventoryService = {
         destEntity: 'mill',
         linkedRef: `batch-${batchId}`,
         notes: `${bp.name} from milling batch ${batchId}`,
-        costPerUnit: 0,
+        costPerUnit: bpCostPerMT,
         currency: 'PKR',
         batchId,
         userId,
@@ -643,6 +652,27 @@ const inventoryService = {
       const updatedLot = await trx('inventory_lots').where('id', lot.id).first();
       results.lots.push(updatedLot);
       results.movements.push(movement);
+    }
+
+    // 9. Create lot lineage: raw lots → output lots
+    const rawLots = await trx('inventory_lots')
+      .where({ batch_ref: `batch-${batchId}`, type: 'raw' });
+
+    for (const rawLot of rawLots) {
+      for (const outputLot of results.lots) {
+        const outputQtyKg = (parseFloat(outputLot.qty) || 0) * 1000;
+        const rawQtyKg = (parseFloat(rawLot.qty) || 0) * 1000;
+        const costShare = outputQtyKg > 0 ? (parseFloat(outputLot.rate_per_kg) || 0) * outputQtyKg : 0;
+
+        await trx('lot_source_mapping').insert({
+          parent_lot_id: rawLot.id,
+          child_lot_id: outputLot.id,
+          source_batch_id: batchId,
+          quantity_kg: outputQtyKg,
+          cost_share_amount: costShare,
+          mapping_type: 'milling_input_to_output',
+        });
+      }
     }
 
     return results;
