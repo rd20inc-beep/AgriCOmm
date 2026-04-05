@@ -71,6 +71,13 @@ const financeService = {
     const overheads = await ohQuery.sum('amount as total').first();
     const overheadTotal = parseFloat(overheads?.total) || 0;
 
+    // Settings (needed for payables derivation below)
+    const pkrRateSetting = await db('system_settings').where('key', 'pkr_rate').first();
+    const pkrRate = parseFloat(pkrRateSetting?.value) || 280;
+
+    // Export operational costs total (needed for payables derivation)
+    const exportOpCosts = parseFloat(exportCosts?.total) || 0;
+
     // Receivables & Payables
     const recvStats = await db('receivables').whereNot('status', 'Paid').select(
       db.raw("COUNT(*) as count"),
@@ -79,6 +86,7 @@ const financeService = {
       db.raw("COALESCE(SUM(CASE WHEN due_date < CURRENT_DATE THEN outstanding END), 0) as overdue_amount"),
     ).first();
 
+    // Payables: use payables table if populated, otherwise derive from cost tables
     const payStats = await db('payables').whereNot('status', 'Paid').select(
       db.raw("COUNT(*) as count"),
       db.raw("COALESCE(SUM(outstanding), 0) as total_outstanding"),
@@ -86,16 +94,58 @@ const financeService = {
       db.raw("COALESCE(SUM(CASE WHEN due_date < CURRENT_DATE THEN outstanding END), 0) as overdue_amount"),
     ).first();
 
+    // If payables table is empty, derive from actual cost tables
+    const payablesTableEmpty = parseInt(payStats.count) === 0;
+    let derivedPayables = null;
+    if (payablesTableEmpty) {
+      // Raw paddy purchases from milling_costs (category = 'raw_rice')
+      const rawPaddyCosts = await db('milling_costs')
+        .where('category', 'raw_rice')
+        .sum('amount as total').first();
+      const rawPaddyTotal = parseFloat(rawPaddyCosts?.total) || 0;
+
+      // Milling operational costs (transport, labor, electricity, etc. — everything except raw_rice)
+      const millingOpCosts = await db('milling_costs')
+        .whereNot('category', 'raw_rice')
+        .sum('amount as total').first();
+      const millingOpTotal = parseFloat(millingOpCosts?.total) || 0;
+
+      // Export operational costs (freight, clearing, bags, etc.)
+      const exportOpTotal = exportOpCosts; // already computed above
+
+      // Mill overheads
+      const millOverheadTotal = overheadTotal; // already computed above
+
+      // Total derived payables (all in PKR except export costs in USD)
+      const totalMillPayablesPkr = rawPaddyTotal + millingOpTotal + millOverheadTotal;
+      const totalPayablesUsd = exportOpTotal + (totalMillPayablesPkr / pkrRate);
+
+      const costLineCount = await db('milling_costs').count('* as n').first();
+      const exportCostLineCount = await db('export_order_costs')
+        .where('amount', '>', 0).count('* as n').first();
+
+      derivedPayables = {
+        count: parseInt(costLineCount?.n || 0) + parseInt(exportCostLineCount?.n || 0),
+        totalOutstanding: totalPayablesUsd,
+        overdueCount: 0,
+        overdueAmount: 0,
+        breakdown: {
+          rawPaddyPurchases: rawPaddyTotal,
+          millingOperations: millingOpTotal,
+          millOverheads: millOverheadTotal,
+          exportOperations: exportOpTotal,
+          totalMillPKR: totalMillPayablesPkr,
+          totalExportUSD: exportOpTotal,
+        },
+        source: 'derived_from_costs',
+      };
+    }
+
     // Bank position
     const bankTotal = await db('bank_accounts').sum('current_balance as total').first();
 
-    // Settings
-    const pkrRateSetting = await db('system_settings').where('key', 'pkr_rate').first();
-    const pkrRate = parseFloat(pkrRateSetting?.value) || 280;
-
     // Compute
     const exportRevenue = parseFloat(exportStats.closed_revenue) || 0;
-    const exportOpCosts = parseFloat(exportCosts?.total) || 0;
     const exportCOGSPkr = parseFloat(exportStats.total_cogs_pkr) || 0;
     const exportCOGSUsd = exportCOGSPkr / pkrRate;
     const exportGrossProfit = exportRevenue - exportOpCosts - exportCOGSUsd;
@@ -139,7 +189,7 @@ const financeService = {
         overdueCount: parseInt(recvStats.overdue_count),
         overdueAmount: parseFloat(recvStats.overdue_amount),
       },
-      payables: {
+      payables: derivedPayables || {
         count: parseInt(payStats.count),
         totalOutstanding: parseFloat(payStats.total_outstanding),
         overdueCount: parseInt(payStats.overdue_count),

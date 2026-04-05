@@ -102,6 +102,9 @@ export default function FinanceOverview() {
     };
   }, [summary, exportOrders, receivables]);
 
+  // Payables breakdown (when derived from cost tables)
+  const payablesBreakdown = summary.payables?.breakdown || null;
+
   // ── Chart data ──
   const pkrRate = summary.pkrRate || 280;
 
@@ -242,7 +245,7 @@ export default function FinanceOverview() {
             icon={ArrowUpRight}
             title="Total Payables"
             value={fmt(kpis.totalPayables)}
-            subtitle="Outstanding"
+            subtitle={payablesBreakdown ? 'Paddy + Milling + Export costs' : 'Outstanding'}
             color="amber"
           />
         </Link>
