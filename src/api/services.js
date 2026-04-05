@@ -88,6 +88,12 @@ export const financeApi = {
   createCostAllocation: (data) => api.post('/api/finance/cost-allocations', data),
   addAllocationLine: (id, data) => api.post(`/api/finance/cost-allocations/${id}/lines`, data),
   removeAllocationLine: (allocationId, lineId) => api.delete(`/api/finance/cost-allocations/${allocationId}/lines/${lineId}`),
+  // FX & Commodity Rates
+  fxRates: (params) => api.get('/api/finance/fx-rates', params),
+  addFxRate: (data) => api.post('/api/finance/fx-rates', data),
+  refreshFxValues: () => api.post('/api/finance/fx-rates/refresh'),
+  commodityRates: (params) => api.get('/api/finance/commodity-rates', params),
+  addCommodityRate: (data) => api.post('/api/finance/commodity-rates', data),
 };
 
 // ========== ACCOUNTING ==========

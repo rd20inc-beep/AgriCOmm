@@ -359,6 +359,28 @@ export function useProfitabilitySummary(params = {}) {
   });
 }
 
+export function useFxRates(params = {}) {
+  return useQuery({
+    queryKey: ['finance-fx-rates', params],
+    queryFn: async () => {
+      const res = await financeApi.fxRates(params);
+      return unwrap(res) || {};
+    },
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useCommodityRates(params = {}) {
+  return useQuery({
+    queryKey: ['finance-commodity-rates', params],
+    queryFn: async () => {
+      const res = await financeApi.commodityRates(params);
+      return (Array.isArray(unwrap(res)) ? unwrap(res) : []);
+    },
+    staleTime: 30 * 1000,
+  });
+}
+
 export function useFinanceOverview() {
   return useQuery({
     queryKey: queryKeys.financeOverview,

@@ -46,6 +46,7 @@ const MoneyOut = lazy(() => import('./pages/finance/MoneyOut'));
 const Cash = lazy(() => import('./pages/finance/Cash'));
 const Profit = lazy(() => import('./pages/finance/Profit'));
 const Accounting = lazy(() => import('./pages/finance/Accounting'));
+const RatesCenter = lazy(() => import('./pages/finance/RatesCenter'));
 const FinanceAlerts = lazy(() => import('./pages/finance/Alerts'));
 // Legacy routes (still accessible via direct URL)
 const Receivables = lazy(() => import('./pages/finance/Receivables'));
@@ -68,6 +69,7 @@ function FinanceRoutes() {
         <Route path="money-out" element={<MoneyOut />} />
         <Route path="cash" element={<Cash />} />
         <Route path="profit" element={<Profit />} />
+        <Route path="rates" element={<RatesCenter />} />
         <Route path="accounting" element={<Accounting />} />
         <Route path="alerts" element={<FinanceAlerts />} />
         {/* Legacy routes — redirect-compatible */}

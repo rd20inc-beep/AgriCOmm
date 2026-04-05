@@ -75,4 +75,72 @@ router.delete(
   controller.removeAllocationLine
 );
 
+// ── FX Rates ──
+const fxRateService = require('../services/fxRateService');
+const commodityRateService = require('../services/commodityRateService');
+
+router.get('/fx-rates', authorize('finance', 'view'), async (req, res) => {
+  try {
+    const { currency = 'USD' } = req.query;
+    const rates = await fxRateService.listRates(currency);
+    const latest = await fxRateService.getLatestRate(currency);
+    return res.json({ success: true, data: { rates, latest } });
+  } catch (err) {
+    console.error('FX rates error:', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.post('/fx-rates', authorize('finance', 'confirm_payment'), async (req, res) => {
+  try {
+    const { currency_code, rate, effective_date, source_type, notes } = req.body;
+    if (!currency_code || !rate || !effective_date) {
+      return res.status(400).json({ success: false, message: 'currency_code, rate, and effective_date are required' });
+    }
+    const row = await fxRateService.addRate({
+      currencyCode: currency_code, rate: parseFloat(rate),
+      effectiveDate: effective_date, sourceType: source_type || 'manual',
+      notes, createdBy: req.user?.id,
+    });
+    return res.json({ success: true, data: row });
+  } catch (err) {
+    console.error('Add FX rate error:', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.post('/fx-rates/refresh', authorize('finance', 'confirm_payment'), async (req, res) => {
+  try {
+    const result = await fxRateService.refreshCurrentFxValues();
+    return res.json({ success: true, data: result });
+  } catch (err) {
+    console.error('FX refresh error:', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ── Commodity / Product Rates ──
+router.get('/commodity-rates', authorize('finance', 'view'), async (req, res) => {
+  try {
+    const { rate_type } = req.query;
+    const rates = rate_type ? await commodityRateService.listRates(rate_type) : await commodityRateService.getCurrentRates();
+    return res.json({ success: true, data: rates });
+  } catch (err) {
+    console.error('Commodity rates error:', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.post('/commodity-rates', authorize('finance', 'confirm_payment'), async (req, res) => {
+  try {
+    const row = await commodityRateService.upsertRate({
+      ...req.body, createdBy: req.user?.id,
+    });
+    return res.json({ success: true, data: row });
+  } catch (err) {
+    console.error('Add commodity rate error:', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 module.exports = router;

@@ -486,6 +486,11 @@ const exportOrderController = {
       const advanceExpected = contractValue * (advancePct / 100);
       const balanceExpected = contractValue - advanceExpected;
 
+      // Get locked FX rate via service (unless manually provided)
+      const fxRateService = require('../services/fxRateService');
+      const fxResult = await fxRateService.lockRateForOrder(currency || 'USD', new Date().toISOString().split('T')[0], parseFloat(req.body.booked_fx_rate) || null);
+      const _lockedFxRate = fxResult.rate;
+
       const result = await db.transaction(async (trx) => {
         const orderNo = await generateOrderNo(trx);
 
@@ -530,10 +535,14 @@ const exportOrderController = {
             total_bags: input_total_bags ? parseInt(input_total_bags) : null,
             total_loose_weight_kg: total_loose_weight_kg ? parseFloat(total_loose_weight_kg) : null,
             packing_notes: packing_notes || null,
-            // FX rate locking — lock USD/PKR rate at order creation
-            booked_fx_rate: parseFloat(req.body.booked_fx_rate) || parseFloat((await trx('system_settings').where('key', 'pkr_rate').first())?.value) || 280,
-            fx_rate_source: req.body.booked_fx_rate ? 'manual' : 'system',
+            // FX rate locking — lock rate at order creation via fxRateService
+            booked_fx_rate: (() => {
+              const manual = parseFloat(req.body.booked_fx_rate);
+              return manual > 0 ? manual : _lockedFxRate;
+            })(),
+            fx_rate_source: parseFloat(req.body.booked_fx_rate) > 0 ? 'manual' : 'system',
             fx_rate_locked_at: new Date(),
+            contract_value_pkr_locked: contractValue * (parseFloat(req.body.booked_fx_rate) > 0 ? parseFloat(req.body.booked_fx_rate) : _lockedFxRate),
           })
           .returning('*');
 

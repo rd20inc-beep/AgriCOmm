@@ -1,7 +1,7 @@
 import { NavLink, useSearchParams } from 'react-router-dom';
 import {
   LayoutDashboard, ArrowDownLeft, ArrowUpRight,
-  TrendingUp, Landmark, BookOpen, Bell, Clock,
+  TrendingUp, Landmark, BookOpen, Bell, Clock, Settings,
 } from 'lucide-react';
 
 const tabs = [
@@ -10,6 +10,7 @@ const tabs = [
   { label: 'Money Out',   path: '/finance/money-out',    icon: ArrowUpRight },
   { label: 'Cash',        path: '/finance/cash',         icon: Landmark },
   { label: 'Profit',      path: '/finance/profit',       icon: TrendingUp },
+  { label: 'Rates',       path: '/finance/rates',        icon: Settings },
   { label: 'Accounting',  path: '/finance/accounting',   icon: BookOpen },
   { label: 'Alerts',      path: '/finance/alerts',       icon: Bell },
 ];
