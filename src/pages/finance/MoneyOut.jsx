@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { ArrowUpRight, AlertTriangle, CheckCircle, Clock, Eye, X, DollarSign } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceFilterBar } from '../../components/finance';
 import { usePayables, useRecordPayment } from '../../api/queries';
@@ -66,7 +67,12 @@ export default function MoneyOut() {
     )},
     { key: 'category', label: 'Category', sortable: true },
     { key: 'supplierName', label: 'Supplier', sortable: true, render: (v) => v || '—' },
-    { key: 'linkedRef', label: 'Linked To', sortable: true, render: (v) => v ? <span className="text-blue-600 font-medium">{v}</span> : '—' },
+    { key: 'linkedRef', label: 'Linked To', sortable: true, render: (v) => {
+      if (!v) return '—';
+      const href = v.startsWith('EX-') ? `/export/${v}` : v.startsWith('M-') ? `/milling/${v}` : null;
+      if (href) return <Link to={href} className="text-blue-600 hover:text-blue-800 font-medium hover:underline" onClick={e => e.stopPropagation()}>{v}</Link>;
+      return <span className="text-gray-700 font-medium">{v}</span>;
+    }},
     { key: 'originalAmount', label: 'Amount', sortable: true, align: 'right', render: (v, row) => fmtAmount(v, row.currency) },
     { key: 'outstanding', label: 'Outstanding', sortable: true, align: 'right', render: (v, row) => (
       <span className={parseFloat(v) > 0 ? 'text-red-600 font-medium' : 'text-gray-400'}>{parseFloat(v) > 0 ? fmtAmount(v, row.currency) : '—'}</span>
@@ -180,7 +186,10 @@ export default function MoneyOut() {
               </div>
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div><p className="text-xs text-gray-500">Supplier</p><p>{drawer.supplierName || '—'}</p></div>
-                <div><p className="text-xs text-gray-500">Linked To</p><p>{drawer.linkedRef || '—'}</p></div>
+                <div><p className="text-xs text-gray-500">Linked To</p>{drawer.linkedRef ? (
+                  <Link to={drawer.linkedRef.startsWith('EX-') ? `/export/${drawer.linkedRef}` : drawer.linkedRef.startsWith('M-') ? `/milling/${drawer.linkedRef}` : '#'}
+                    className="text-blue-600 hover:underline font-medium">{drawer.linkedRef} →</Link>
+                ) : <p>—</p>}</div>
                 <div><p className="text-xs text-gray-500">Currency</p><p>{drawer.currency || 'PKR'}</p></div>
                 <div><p className="text-xs text-gray-500">Status</p><StatusBadge status={drawer.status} /></div>
               </div>

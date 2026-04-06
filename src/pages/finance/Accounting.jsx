@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { BookOpen, FileText, BarChart3, Scale } from 'lucide-react';
 import { FinanceTable } from '../../components/finance';
 import { useJournalEntries } from '../../api/queries';
@@ -18,6 +19,13 @@ export default function Accounting() {
   const [subTab, setSubTab] = useState('ledger');
   const { data: journalData = [], isLoading } = useJournalEntries();
 
+  function RefLink({ refNo, refType }) {
+    if (!refNo) return <span className="text-gray-400">—</span>;
+    const href = refNo.startsWith('EX-') ? `/export/${refNo}` : refNo.startsWith('M-') ? `/milling/${refNo}` : null;
+    if (href) return <Link to={href} className="text-blue-600 hover:underline text-xs font-medium">{refNo}</Link>;
+    return <span className="text-xs text-gray-600">{refNo}</span>;
+  }
+
   const journalColumns = [
     { key: 'journalNo', label: 'Journal #', sortable: true },
     { key: 'date', label: 'Date', sortable: true, render: (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—' },
@@ -26,7 +34,8 @@ export default function Accounting() {
         {v || 'General'}
       </span>
     )},
-    { key: 'description', label: 'Description', render: (v) => <span className="truncate max-w-[250px] block">{v || '—'}</span> },
+    { key: 'refNo', label: 'Reference', sortable: true, render: (v, row) => <RefLink refNo={v} refType={row.refType} /> },
+    { key: 'description', label: 'Description', render: (v) => <span className="truncate max-w-[200px] block">{v || '—'}</span> },
     { key: 'totalDebit', label: 'Debit', sortable: true, align: 'right', render: (v) => fmtAmount(v) },
     { key: 'totalCredit', label: 'Credit', sortable: true, align: 'right', render: (v) => fmtAmount(v) },
     { key: 'status', label: 'Status', sortable: true },

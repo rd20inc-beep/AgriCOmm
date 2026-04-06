@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import {
   Landmark, ArrowDownLeft, ArrowUpRight, Activity,
   DollarSign, TrendingUp, Percent, AlertTriangle,
@@ -216,13 +216,14 @@ export default function FinanceOverview() {
           <div className="space-y-2">
             {overdueRecv.length === 0 && <p className="text-sm text-gray-400 text-center py-4">No overdue receivables</p>}
             {overdueRecv.map((r, i) => (
-              <div key={r.id || i} className="flex items-center justify-between p-2.5 rounded-lg bg-red-50 border border-red-100">
+              <Link key={r.id || i} to={r.orderId ? `/export/${r.orderId}` : '/finance/money-in'}
+                className="flex items-center justify-between p-2.5 rounded-lg bg-red-50 border border-red-100 hover:bg-red-100 transition-colors">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-gray-900 truncate">{r.customerName || r.party || `#${r.id}`}</p>
-                  <p className="text-xs text-gray-500">{r.orderId || ''}</p>
+                  <p className="text-xs text-blue-600">{r.recvNo || r.orderId || ''}</p>
                 </div>
                 <span className="text-sm font-bold text-red-600 flex-shrink-0 ml-2">{fmtUSD(parseFloat(r.outstanding) || 0)}</span>
-              </div>
+              </Link>
             ))}
           </div>
         </div>

@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowDownLeft, DollarSign, AlertTriangle, CheckCircle, Clock, Eye, X } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart, FinanceFilterBar } from '../../components/finance';
@@ -53,7 +54,10 @@ export default function MoneyIn() {
   }, [receivables]);
 
   const columns = [
-    { key: 'recvNo', label: 'Ref', sortable: true, width: '100px' },
+    { key: 'recvNo', label: 'Ref', sortable: true, width: '120px', render: (v, row) => {
+      if (row.orderId) return <Link to={`/export/${row.orderId}`} className="text-blue-600 hover:text-blue-800 font-medium hover:underline" onClick={e => e.stopPropagation()}>{v}</Link>;
+      return v || '—';
+    }},
     { key: 'customerName', label: 'Customer', sortable: true, render: (v) => v || '—' },
     { key: 'type', label: 'Type', sortable: true, render: (v) => (
       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${v === 'Advance' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>{v}</span>
@@ -159,7 +163,7 @@ export default function MoneyIn() {
                 <div><p className="text-xs text-gray-500">Type</p><p>{drawer.type}</p></div>
                 <div><p className="text-xs text-gray-500">Due Date</p><p>{drawer.dueDate ? new Date(drawer.dueDate).toLocaleDateString() : '—'}</p></div>
                 <div><p className="text-xs text-gray-500">Currency</p><p>{drawer.currency || 'USD'}</p></div>
-                <div><p className="text-xs text-gray-500">Order</p><p>{drawer.orderId || '—'}</p></div>
+                <div><p className="text-xs text-gray-500">Order</p>{drawer.orderId ? <Link to={`/export/${drawer.orderId}`} className="text-blue-600 hover:underline font-medium">View Order →</Link> : <p>—</p>}</div>
               </div>
             </div>
             {drawer.status !== 'Paid' && parseFloat(drawer.outstanding) > 0 && (

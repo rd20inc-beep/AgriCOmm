@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { TrendingUp, DollarSign, Package, Factory, AlertTriangle, CheckCircle, RefreshCw } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart } from '../../components/finance';
 import { useProfitabilitySummary } from '../../api/queries';
@@ -44,7 +45,9 @@ export default function Profit() {
   const consolidatedPkr = exportBookedProfitPkr + millProfitPkr;
 
   const exportColumns = [
-    { key: 'orderNo', label: 'Order', sortable: true },
+    { key: 'orderNo', label: 'Order', sortable: true, render: (v, row) => (
+      <Link to={`/export/${row.id}`} className="text-blue-600 hover:text-blue-800 font-medium hover:underline" onClick={e => e.stopPropagation()}>{v}</Link>
+    )},
     { key: 'status', label: 'Status', sortable: true },
     { key: 'currency', label: 'Cur.', render: (v) => <span className="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{v}</span> },
     { key: 'contractValueForeign', label: 'Contract (Foreign)', sortable: true, align: 'right', render: (v, row) => fmtUSD(v) },
@@ -62,7 +65,9 @@ export default function Profit() {
   ];
 
   const millColumns = [
-    { key: 'batchNo', label: 'Batch', sortable: true },
+    { key: 'batchNo', label: 'Batch', sortable: true, render: (v, row) => (
+      <Link to={`/milling/${row.id}`} className="text-blue-600 hover:text-blue-800 font-medium hover:underline" onClick={e => e.stopPropagation()}>{v}</Link>
+    )},
     { key: 'status', label: 'Status', sortable: true },
     { key: 'rawQtyMT', label: 'Raw (MT)', sortable: true, align: 'right' },
     { key: 'finishedMT', label: 'Finished (MT)', sortable: true, align: 'right' },
