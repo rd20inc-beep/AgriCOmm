@@ -27,6 +27,7 @@ export const tabList = [
   { key: 'overview', label: 'Overview' },
   { key: 'financials', label: 'Financials' },
   { key: 'procurement', label: 'Procurement' },
+  { key: 'packing', label: 'Packing' },
   { key: 'documents', label: 'Documents' },
   { key: 'shipment', label: 'Shipment' },
   { key: 'timeline', label: 'Timeline' },
@@ -38,8 +39,8 @@ export const tabList = [
  * workflow reaches the stage where they become actionable.
  */
 export function getVisibleTabs(status) {
-  // Always-visible
-  const visible = ['overview', 'timeline'];
+  // Always-visible (packing specs are set at creation, always relevant)
+  const visible = ['overview', 'packing', 'timeline'];
 
   // Financials: visible from Awaiting Advance onwards (payment related)
   const financialsFrom = ['Awaiting Advance', 'Advance Received', 'Procurement Pending',

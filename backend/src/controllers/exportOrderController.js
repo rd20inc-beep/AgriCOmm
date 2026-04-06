@@ -695,21 +695,52 @@ const exportOrderController = {
         safeUpdates.balance_expected = contractValue - safeUpdates.advance_expected;
       }
 
+      // Extract packing_lines before DB update (it's a separate table, not a column)
+      const packingLines = safeUpdates.packing_lines;
+      delete safeUpdates.packing_lines;
+
       safeUpdates.updated_at = db.fn.now();
 
-      const [order] = await db('export_orders')
-        .where({ id })
-        .update(safeUpdates)
-        .returning('*');
+      const result = await db.transaction(async (trx) => {
+        const [order] = await trx('export_orders')
+          .where({ id })
+          .update(safeUpdates)
+          .returning('*');
 
-      if (!order) {
+        if (!order) return null;
+
+        // Handle packing_lines update: delete old, insert new
+        if (Array.isArray(packingLines)) {
+          await trx('order_packing_lines').where({ order_id: id }).del();
+          if (packingLines.length > 0) {
+            const lineRows = packingLines.map((line, idx) => ({
+              order_id: parseInt(id),
+              line_no: idx + 1,
+              bag_type: line.bag_type || null,
+              bag_quality: line.bag_quality || null,
+              fill_weight_kg: parseFloat(line.fill_weight_kg) || 0,
+              bag_count: parseInt(line.bag_count) || 0,
+              total_weight_kg: (parseFloat(line.fill_weight_kg) || 0) * (parseInt(line.bag_count) || 0),
+              bag_printing: line.bag_printing || null,
+              bag_color: line.bag_color || null,
+              bag_brand: line.bag_brand || null,
+              notes: line.notes || null,
+            }));
+            await trx('order_packing_lines').insert(lineRows);
+          }
+        }
+
+        return order;
+      });
+
+      if (!result) {
         return res.status(404).json({ success: false, message: 'Export order not found.' });
       }
 
-      emitExportOrderUpdate(order.id, 'updated');
+      emitExportOrderUpdate(result.id, 'updated');
       return res.json({
         success: true,
-        data: { order },
+        data: { order: result },
       });
     } catch (err) {
       console.error('Export order update error:', err);

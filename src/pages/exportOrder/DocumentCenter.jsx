@@ -265,7 +265,68 @@ function renderPackingList(doc) {
         </tr>
       </table>
 
+      ${/* Bag Specification */ ''}
+      ${order.bagType || order.bagSizeKg ? `
+        <table style="width:100%; border-collapse:collapse; margin-bottom:10px; font-size:11px;">
+          <tr style="background:#f9f9f9;">
+            <td style="border:1px solid #333; padding:4px; font-weight:bold;">Bag Type</td>
+            <td style="border:1px solid #333; padding:4px;">${order.bagType || '—'}</td>
+            <td style="border:1px solid #333; padding:4px; font-weight:bold;">Quality</td>
+            <td style="border:1px solid #333; padding:4px;">${order.bagQuality || '—'}</td>
+            <td style="border:1px solid #333; padding:4px; font-weight:bold;">Size</td>
+            <td style="border:1px solid #333; padding:4px;">${order.bagSizeKg || '—'} KG</td>
+          </tr>
+          <tr>
+            <td style="border:1px solid #333; padding:4px; font-weight:bold;">Printing</td>
+            <td style="border:1px solid #333; padding:4px;">${order.bagPrinting || '—'}</td>
+            <td style="border:1px solid #333; padding:4px; font-weight:bold;">Color</td>
+            <td style="border:1px solid #333; padding:4px;">${order.bagColor || '—'}</td>
+            <td style="border:1px solid #333; padding:4px; font-weight:bold;">Brand</td>
+            <td style="border:1px solid #333; padding:4px;">${order.bagBrand || order.brandMarking || '—'}</td>
+          </tr>
+        </table>
+      ` : ''}
+
+      ${/* Packing Lines (mixed mode) */ ''}
+      ${order.packingLines && order.packingLines.length > 0 ? `
+        <h3 style="font-size:12px; margin:10px 0 5px;">PACKING BREAKDOWN</h3>
+        <table style="width:100%; border-collapse:collapse; font-size:11px; margin-bottom:15px;">
+          <thead>
+            <tr style="background:#f5f5f5;">
+              <th style="border:1px solid #333; padding:5px;">#</th>
+              <th style="border:1px solid #333; padding:5px;">BAG TYPE</th>
+              <th style="border:1px solid #333; padding:5px;">QUALITY</th>
+              <th style="border:1px solid #333; padding:5px;">FILL WT (KG)</th>
+              <th style="border:1px solid #333; padding:5px;">NO. OF BAGS</th>
+              <th style="border:1px solid #333; padding:5px;">TOTAL WT (KG)</th>
+              <th style="border:1px solid #333; padding:5px;">PRINTING</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${order.packingLines.map((l, i) => `
+              <tr>
+                <td style="border:1px solid #333; padding:5px; text-align:center;">${i + 1}</td>
+                <td style="border:1px solid #333; padding:5px;">${l.bagType || l.bag_type || '—'}</td>
+                <td style="border:1px solid #333; padding:5px;">${l.bagQuality || l.bag_quality || '—'}</td>
+                <td style="border:1px solid #333; padding:5px; text-align:right;">${l.fillWeightKg || l.fill_weight_kg || '—'}</td>
+                <td style="border:1px solid #333; padding:5px; text-align:right;">${(l.bagCount || l.bag_count || 0).toLocaleString()}</td>
+                <td style="border:1px solid #333; padding:5px; text-align:right;">${((parseFloat(l.fillWeightKg || l.fill_weight_kg || 0)) * parseInt(l.bagCount || l.bag_count || 0)).toLocaleString()}</td>
+                <td style="border:1px solid #333; padding:5px;">${l.bagPrinting || l.bag_printing || '—'}</td>
+              </tr>
+            `).join('')}
+            <tr style="font-weight:bold;">
+              <td colspan="4" style="border:1px solid #333; padding:5px; text-align:right;">Total</td>
+              <td style="border:1px solid #333; padding:5px; text-align:right;">${order.packingLines.reduce((s, l) => s + (parseInt(l.bagCount || l.bag_count || 0)), 0).toLocaleString()}</td>
+              <td style="border:1px solid #333; padding:5px; text-align:right;">${order.packingLines.reduce((s, l) => s + ((parseFloat(l.fillWeightKg || l.fill_weight_kg || 0)) * parseInt(l.bagCount || l.bag_count || 0)), 0).toLocaleString()}</td>
+              <td style="border:1px solid #333; padding:5px;"></td>
+            </tr>
+          </tbody>
+        </table>
+      ` : ''}
+
+      ${/* Container-level packing (shipment) */ ''}
       ${containers.length > 0 ? `
+        <h3 style="font-size:12px; margin:10px 0 5px;">CONTAINER DETAILS</h3>
         <table style="width:100%; border-collapse:collapse;">
           <thead>
             <tr style="background:#f5f5f5;">
@@ -283,7 +344,7 @@ function renderPackingList(doc) {
                 <td style="border:1px solid #333; padding:6px; font-size:10px;">${c.lotNumber || '—'}</td>
                 <td style="border:1px solid #333; padding:6px;">${c.containerNo}</td>
                 <td style="border:1px solid #333; padding:6px; font-size:10px;">${order.brandMarking ? `<strong>${order.brandMarking}</strong><br/>` : ''}${order.product}</td>
-                <td style="border:1px solid #333; padding:6px; font-size:10px;">PACKED IN ${order.bagSizeKg} KGS PP BAG</td>
+                <td style="border:1px solid #333; padding:6px; font-size:10px;">PACKED IN ${order.bagSizeKg || 25} KGS ${order.bagType || 'PP'} BAG</td>
                 <td style="border:1px solid #333; padding:6px; text-align:center;">${c.bagsCount || '—'} Bags</td>
                 <td style="border:1px solid #333; padding:6px; text-align:right;">${c.grossWeightKg ? c.grossWeightKg.toLocaleString('en-US', {minimumFractionDigits:2}) : '—'}</td>
                 <td style="border:1px solid #333; padding:6px; text-align:right;">${c.netWeightKg ? c.netWeightKg.toLocaleString('en-US', {minimumFractionDigits:2}) : '—'}</td>

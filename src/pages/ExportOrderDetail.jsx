@@ -21,6 +21,7 @@ import {
   DocumentsTab,
   DocumentCenter,
   ShipmentTab,
+  PackingTab,
   TimelineTab,
   AdvancePaymentModal,
   BalancePaymentModal,
@@ -619,6 +620,7 @@ export default function ExportOrderDetail() {
             onStockAllocated={() => { invalidateOrder(); addToast('Stock allocated successfully'); }}
           />
         )}
+        {activeTab === 'packing' && <PackingTab order={order} onUpdated={invalidateOrder} />}
         {activeTab === 'documents' && (
           <>
             <DocumentsTab order={order} onUpload={handleDocumentUpload} onApprove={handleDocumentApprove} onPreviewInvoice={() => setShowInvoicePreview(true)} />
