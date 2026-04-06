@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowDownLeft, DollarSign, AlertTriangle, CheckCircle, Clock, Eye, X } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart, FinanceFilterBar } from '../../components/finance';
-import { useReceivables, useRecordPayment } from '../../api/queries';
+import { useReceivables, useRecordPayment, useBankAccounts } from '../../api/queries';
 import { useApp } from '../../context/AppContext';
 import StatusBadge from '../../components/StatusBadge';
 
@@ -71,16 +71,36 @@ export default function MoneyIn() {
     { key: 'status', label: 'Status', sortable: true },
   ];
 
-  async function handleRecordPayment(recv) {
+  const { data: bankAccounts = [] } = useBankAccounts();
+  const [recvForm, setRecvForm] = useState({ amount: '', bankAccountId: '', paymentMethod: 'bank_transfer', paymentDate: new Date().toISOString().split('T')[0], notes: '' });
+
+  function openDrawer(row) {
+    setDrawer(row);
+    setRecvForm({
+      amount: String(parseFloat(row.outstanding) || 0),
+      bankAccountId: '',
+      paymentMethod: 'bank_transfer',
+      paymentDate: new Date().toISOString().split('T')[0],
+      notes: '',
+    });
+  }
+
+  async function handleRecordPayment(e) {
+    e.preventDefault();
+    const recv = drawer;
+    const amount = parseFloat(recvForm.amount);
+    if (!amount || amount <= 0) { addToast('Enter a valid amount', 'error'); return; }
     try {
       await recordPaymentMut.mutateAsync({
-        type: 'receipt', amount: parseFloat(recv.outstanding) || 0,
-        currency: recv.currency || 'USD', payment_method: 'bank_transfer',
-        payment_date: new Date().toISOString().split('T')[0],
+        type: 'receipt', amount,
+        currency: recv.currency || 'USD',
+        payment_method: recvForm.paymentMethod,
+        payment_date: recvForm.paymentDate,
+        bank_account_id: recvForm.bankAccountId || null,
         linked_receivable_id: recv.dbId || recv.id,
-        notes: `Payment for ${recv.recvNo}`,
+        notes: recvForm.notes || `Payment for ${recv.recvNo}`,
       });
-      addToast(`Payment recorded for ${recv.recvNo}`, 'success');
+      addToast(`Payment of ${fmt(amount)} recorded for ${recv.recvNo}`, 'success');
       setDrawer(null);
     } catch (err) {
       addToast(`Failed: ${err.message}`, 'error');
@@ -121,12 +141,12 @@ export default function MoneyIn() {
         columns={columns}
         data={filtered}
         searchKeys={['customerName', 'recvNo', 'orderId']}
-        onRowClick={setDrawer}
+        onRowClick={openDrawer}
         exportFilename="receivables"
         emptyText="No receivables found"
         loading={isLoading}
         actions={(row) => (
-          <button onClick={() => setDrawer(row)} className="text-blue-600 hover:text-blue-800">
+          <button onClick={() => openDrawer(row)} className="text-blue-600 hover:text-blue-800">
             <Eye size={15} />
           </button>
         )}
@@ -167,12 +187,76 @@ export default function MoneyIn() {
               </div>
             </div>
             {drawer.status !== 'Paid' && parseFloat(drawer.outstanding) > 0 && (
-              <div className="px-6 py-4 border-t bg-gray-50">
-                <button onClick={() => handleRecordPayment(drawer)}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium text-sm">
-                  <CheckCircle size={16} /> Record Full Payment
+              <form onSubmit={handleRecordPayment} className="px-6 py-4 border-t border-gray-200 space-y-3">
+                <h3 className="text-sm font-semibold text-gray-700">Record Receipt</h3>
+
+                {/* Bank Account */}
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Receive Into Account</label>
+                  <select value={recvForm.bankAccountId} onChange={e => setRecvForm({ ...recvForm, bankAccountId: e.target.value })}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">Select bank account...</option>
+                    {bankAccounts.map(a => (
+                      <option key={a.id} value={a.id}>
+                        {a.name} — {a.bankName || ''} ({a.currency || 'PKR'} {Math.round(parseFloat(a.currentBalance) || 0).toLocaleString()})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Amount + Date */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-gray-500 block mb-1">Amount ({drawer.currency || 'USD'})</label>
+                    <input type="number" step="0.01" required value={recvForm.amount}
+                      onChange={e => setRecvForm({ ...recvForm, amount: e.target.value })}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 block mb-1">Date</label>
+                    <input type="date" required value={recvForm.paymentDate}
+                      onChange={e => setRecvForm({ ...recvForm, paymentDate: e.target.value })}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                </div>
+
+                {/* Method */}
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Payment Method</label>
+                  <select value={recvForm.paymentMethod} onChange={e => setRecvForm({ ...recvForm, paymentMethod: e.target.value })}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="bank_transfer">Bank Transfer / TT</option>
+                    <option value="lc">Letter of Credit</option>
+                    <option value="cheque">Cheque</option>
+                    <option value="cash">Cash</option>
+                    <option value="online">Online</option>
+                  </select>
+                </div>
+
+                {/* Notes */}
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Notes</label>
+                  <input type="text" value={recvForm.notes} onChange={e => setRecvForm({ ...recvForm, notes: e.target.value })}
+                    placeholder={`Receipt for ${drawer.recvNo}`}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+
+                {/* Quick amounts */}
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setRecvForm({ ...recvForm, amount: String(parseFloat(drawer.outstanding)) })}
+                    className="text-xs px-3 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">Full Amount</button>
+                  <button type="button" onClick={() => setRecvForm({ ...recvForm, amount: String(Math.round(parseFloat(drawer.outstanding) / 2)) })}
+                    className="text-xs px-3 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">Half</button>
+                  <button type="button" onClick={() => setRecvForm({ ...recvForm, amount: '' })}
+                    className="text-xs px-3 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">Custom</button>
+                </div>
+
+                <button type="submit" disabled={recordPaymentMut.isPending}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium text-sm disabled:opacity-50">
+                  <CheckCircle size={16} />
+                  {recordPaymentMut.isPending ? 'Processing...' : `Record Receipt — ${fmt(parseFloat(recvForm.amount) || 0)}`}
                 </button>
-              </div>
+              </form>
             )}
           </div>
         </div>
