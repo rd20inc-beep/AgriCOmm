@@ -58,14 +58,19 @@ const financeService = {
     const fxGainLossTotal = revenuePkrCurrent - revenuePkrBooked;
 
     // Export operational costs (PKR) — exclude internal allocations
-    // ALWAYS compute from amount * order's booked_fx_rate to avoid double-conversion bugs.
-    // Do NOT trust base_amount_pkr — it's a cached value that may be wrong on production.
+    // Currency-aware: if cost.currency='PKR', use amount as-is. Otherwise multiply by FX rate.
+    // This handles both production data (PKR amounts) and seed data (USD amounts).
+    const hasEocCurrency = await db.schema.hasColumn('export_order_costs', 'currency');
+    const costToPkrExpr = hasEocCurrency
+      ? "CASE WHEN eoc.currency = 'PKR' THEN eoc.amount ELSE eoc.amount * COALESCE(eo.booked_fx_rate, " + pkrRate + ") END"
+      : "eoc.amount * COALESCE(eo.booked_fx_rate, " + pkrRate + ")";
+
     const exportOpResult = await db('export_order_costs as eoc')
       .join('export_orders as eo', 'eoc.order_id', 'eo.id')
       .whereNotIn('eo.status', ['Cancelled'])
       .whereNotIn('eoc.category', INTERNAL_COST_CATS)
       .select(
-        db.raw("COALESCE(SUM(eoc.amount * COALESCE(eo.booked_fx_rate, ?)), 0) as total_pkr", [pkrRate]),
+        db.raw("COALESCE(SUM(" + costToPkrExpr + "), 0) as total_pkr"),
         db.raw("COALESCE(SUM(eoc.amount), 0) as total_raw"),
       ).first();
     const exportOpCostsPkr = parseFloat(exportOpResult?.total_pkr) || 0;
@@ -76,7 +81,7 @@ const financeService = {
       .whereNotIn('eo.status', ['Cancelled'])
       .whereIn('eoc.category', INTERNAL_COST_CATS)
       .select(
-        db.raw("COALESCE(SUM(eoc.amount * COALESCE(eo.booked_fx_rate, ?)), 0) as total_pkr", [pkrRate]),
+        db.raw("COALESCE(SUM(" + costToPkrExpr + "), 0) as total_pkr"),
       ).first();
     const lockedCogsPkr = parseFloat(exportStats.total_cogs_pkr) || 0;
     const allocCogsPkr = parseFloat(cogsResult?.total_pkr) || 0;
@@ -247,16 +252,21 @@ const financeService = {
       const revenuePkrBooked = parseFloat(o.contract_value_pkr_locked) || (revenue * lockedRate);
       const revenuePkrCurrent = revenue * pkrRate;
 
-      // Op costs in PKR — always compute from amount * lockedRate (never trust cached base_amount_pkr)
+      // Op costs in PKR — currency-aware: PKR amounts used as-is, foreign amounts × lockedRate
+      const costToPkr = (c) => {
+        const amt = parseFloat(c.amount) || 0;
+        if (c.currency === 'PKR') return amt; // already PKR
+        return amt * lockedRate; // convert foreign to PKR
+      };
       const opCostsPkr = orderCosts
         .filter(c => !INTERNAL_COST_CATS.includes(c.category))
-        .reduce((s, c) => s + (parseFloat(c.amount) || 0) * lockedRate, 0);
+        .reduce((s, c) => s + costToPkr(c), 0);
 
       // COGS in PKR
       const lockedCogsPkr = parseFloat(o.inventory_cogs_total_pkr) || 0;
       const allocCogsPkr = orderCosts
         .filter(c => INTERNAL_COST_CATS.includes(c.category))
-        .reduce((s, c) => s + (parseFloat(c.amount) || 0) * lockedRate, 0);
+        .reduce((s, c) => s + costToPkr(c), 0);
       const cogsPkr = lockedCogsPkr > 0 ? lockedCogsPkr : allocCogsPkr;
 
       const totalCostPkr = opCostsPkr + cogsPkr;
