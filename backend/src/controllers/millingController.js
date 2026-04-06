@@ -605,20 +605,31 @@ const millingController = {
             .where({ order_id: batch.linked_export_order_id, category: 'milling' })
             .first();
 
+          // batchCostTotal is in PKR — convert to order currency using order's locked FX rate
+          const linkedOrder = await trx('export_orders').where('id', batch.linked_export_order_id).first();
+          const orderFxRate = parseFloat(linkedOrder?.booked_fx_rate) || 280;
+          const costInOrderCurrency = batchCostTotal / orderFxRate;
+
           if (existingCost) {
             await trx('export_order_costs')
               .where({ id: existingCost.id })
               .update({
-                amount: parseFloat(existingCost.amount || 0) + batchCostTotal,
-                notes: `Updated from milling batch ${batch.batch_no}`,
+                amount: parseFloat(existingCost.amount || 0) + costInOrderCurrency,
+                currency: linkedOrder?.currency || 'USD',
+                base_amount_pkr: (parseFloat(existingCost.amount || 0) + costInOrderCurrency) * orderFxRate,
+                fx_rate: orderFxRate,
+                notes: `Updated from milling batch ${batch.batch_no} (PKR ${Math.round(batchCostTotal).toLocaleString()} ÷ ${orderFxRate})`,
                 updated_at: trx.fn.now(),
               });
           } else {
             await trx('export_order_costs').insert({
               order_id: batch.linked_export_order_id,
               category: 'milling',
-              amount: batchCostTotal,
-              notes: `Updated from milling batch ${batch.batch_no}`,
+              amount: costInOrderCurrency,
+              currency: linkedOrder?.currency || 'USD',
+              base_amount_pkr: batchCostTotal,
+              fx_rate: orderFxRate,
+              notes: `From milling batch ${batch.batch_no} (PKR ${Math.round(batchCostTotal).toLocaleString()} ÷ ${orderFxRate})`,
             });
           }
         }

@@ -60,10 +60,14 @@ const financeService = {
     // Export operational costs (PKR) — exclude internal allocations
     // Currency-aware: if cost.currency='PKR', use amount as-is. Otherwise multiply by FX rate.
     // This handles both production data (PKR amounts) and seed data (USD amounts).
+    // Currency-aware cost-to-PKR conversion with sanity check:
+    // - currency='PKR' → use as-is
+    // - currency='USD' but amount > 100000 → likely PKR stored incorrectly, use as-is
+    // - currency='USD' and amount <= 100000 → normal USD, multiply by FX rate
     const hasEocCurrency = await db.schema.hasColumn('export_order_costs', 'currency');
     const costToPkrExpr = hasEocCurrency
-      ? "CASE WHEN eoc.currency = 'PKR' THEN eoc.amount ELSE eoc.amount * COALESCE(eo.booked_fx_rate, " + pkrRate + ") END"
-      : "eoc.amount * COALESCE(eo.booked_fx_rate, " + pkrRate + ")";
+      ? "CASE WHEN eoc.currency = 'PKR' THEN eoc.amount WHEN eoc.amount > 100000 THEN eoc.amount ELSE eoc.amount * COALESCE(eo.booked_fx_rate, " + pkrRate + ") END"
+      : "CASE WHEN eoc.amount > 100000 THEN eoc.amount ELSE eoc.amount * COALESCE(eo.booked_fx_rate, " + pkrRate + ") END";
 
     const exportOpResult = await db('export_order_costs as eoc')
       .join('export_orders as eo', 'eoc.order_id', 'eo.id')
@@ -252,10 +256,13 @@ const financeService = {
       const revenuePkrBooked = parseFloat(o.contract_value_pkr_locked) || (revenue * lockedRate);
       const revenuePkrCurrent = revenue * pkrRate;
 
-      // Op costs in PKR — currency-aware: PKR amounts used as-is, foreign amounts × lockedRate
+      // Op costs in PKR — currency-aware with sanity check
       const costToPkr = (c) => {
         const amt = parseFloat(c.amount) || 0;
+        if (amt === 0) return 0;
         if (c.currency === 'PKR') return amt; // already PKR
+        // Sanity check: if marked USD but amount > 100K, it's likely PKR stored incorrectly
+        if (amt > 100000 && (!c.currency || c.currency === 'USD')) return amt; // treat as PKR
         return amt * lockedRate; // convert foreign to PKR
       };
       const opCostsPkr = orderCosts

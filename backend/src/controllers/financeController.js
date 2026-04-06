@@ -690,8 +690,13 @@ const financeController = {
         }
 
         if (t.export_order_id) {
-          const propagatedCost = parseFloat(t.usd_equivalent || t.total_value_pkr || 0);
-          if (propagatedCost > 0) {
+          // Transfer value is in PKR — convert to order currency using order's locked FX rate
+          const linkedOrder = await trx('export_orders').where('id', t.export_order_id).first();
+          const orderFxRate = parseFloat(linkedOrder?.booked_fx_rate) || parseFloat(t.pkr_rate) || 280;
+          const valuePkr = parseFloat(t.total_value_pkr) || 0;
+          const valueInOrderCurrency = valuePkr / orderFxRate;
+
+          if (valueInOrderCurrency > 0) {
             const existingCost = await trx('export_order_costs')
               .where({ order_id: t.export_order_id, category: 'raw_rice' })
               .first();
@@ -700,16 +705,22 @@ const financeController = {
               await trx('export_order_costs')
                 .where({ id: existingCost.id })
                 .update({
-                  amount: parseFloat(existingCost.amount || 0) + propagatedCost,
-                  notes: `Updated from transfer ${t.transfer_no}`,
+                  amount: parseFloat(existingCost.amount || 0) + valueInOrderCurrency,
+                  currency: linkedOrder?.currency || 'USD',
+                  base_amount_pkr: (parseFloat(existingCost.amount || 0) + valueInOrderCurrency) * orderFxRate,
+                  fx_rate: orderFxRate,
+                  notes: `Updated from transfer ${t.transfer_no} (PKR ${Math.round(valuePkr).toLocaleString()} ÷ ${orderFxRate})`,
                   updated_at: trx.fn.now(),
                 });
             } else {
               await trx('export_order_costs').insert({
                 order_id: t.export_order_id,
                 category: 'raw_rice',
-                amount: propagatedCost,
-                notes: `Updated from transfer ${t.transfer_no}`,
+                amount: valueInOrderCurrency,
+                currency: linkedOrder?.currency || 'USD',
+                base_amount_pkr: valuePkr,
+                fx_rate: orderFxRate,
+                notes: `From transfer ${t.transfer_no} (PKR ${Math.round(valuePkr).toLocaleString()} ÷ ${orderFxRate})`,
               });
             }
           }
