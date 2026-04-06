@@ -9,6 +9,10 @@ const commodityRateService = {
    * Get the latest effective rate for a rate_type + product_type.
    */
   async getRate(rateType, productType = null, asOfDate = null) {
+    // Safe check — table may not exist on pre-migration databases
+    const exists = await db.schema.hasTable('commodity_rate_master');
+    if (!exists) return null;
+
     let query = db('commodity_rate_master')
       .where('rate_type', rateType);
 
@@ -32,6 +36,8 @@ const commodityRateService = {
    * Get all rates of a specific type (e.g., all finished_rice rates).
    */
   async listRates(rateType = null) {
+    const exists = await db.schema.hasTable('commodity_rate_master');
+    if (!exists) return [];
     let query = db('commodity_rate_master').orderBy('effective_date', 'desc');
     if (rateType) query = query.where('rate_type', rateType);
     return query;
@@ -41,6 +47,8 @@ const commodityRateService = {
    * Get all current rates (latest per type+product).
    */
   async getCurrentRates() {
+    const exists = await db.schema.hasTable('commodity_rate_master');
+    if (!exists) return [];
     const all = await db('commodity_rate_master').orderBy('effective_date', 'desc');
     const latest = {};
     for (const r of all) {

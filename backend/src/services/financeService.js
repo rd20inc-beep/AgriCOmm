@@ -35,12 +35,17 @@ const financeService = {
     let orderQuery = db('export_orders').whereNotIn('status', ['Cancelled']);
     if (startDate || endDate) orderQuery = dateFilter(orderQuery, 'created_at');
 
+    // Check if new PKR columns exist (safe for pre-migration DBs)
+    const hasPkrLocked = await db.schema.hasColumn('export_orders', 'contract_value_pkr_locked');
+
     const exportStats = await orderQuery.clone().select(
       db.raw("COUNT(*) as total_orders"),
       db.raw("COUNT(CASE WHEN status NOT IN ('Closed','Cancelled') THEN 1 END) as active_orders"),
       db.raw("COALESCE(SUM(contract_value), 0) as total_revenue_foreign"),
-      db.raw("COALESCE(SUM(contract_value_pkr_locked), 0) as total_revenue_pkr_booked"),
-      db.raw("COALESCE(SUM(contract_value * COALESCE(booked_fx_rate, 280)), 0) as total_revenue_pkr_calc"),
+      db.raw(hasPkrLocked
+        ? "COALESCE(SUM(contract_value_pkr_locked), 0) as total_revenue_pkr_booked"
+        : "0 as total_revenue_pkr_booked"),
+      db.raw("COALESCE(SUM(contract_value * COALESCE(booked_fx_rate, ?)), 0) as total_revenue_pkr_calc", [pkrRate]),
       db.raw("COALESCE(SUM(advance_received), 0) as total_advance_received"),
       db.raw("COALESCE(SUM(balance_received), 0) as total_balance_received"),
       db.raw("COALESCE(SUM(inventory_cogs_total_pkr), 0) as total_cogs_pkr"),
@@ -52,16 +57,20 @@ const financeService = {
     const revenuePkrCurrent = revenueForeign * pkrRate;
     const fxGainLossTotal = revenuePkrCurrent - revenuePkrBooked;
 
+    // Check if export_order_costs has the new currency columns
+    const hasEocBasePkr = await db.schema.hasColumn('export_order_costs', 'base_amount_pkr');
+
     // Export operational costs (PKR) — exclude internal allocations
     const exportOpResult = await db('export_order_costs as eoc')
       .join('export_orders as eo', 'eoc.order_id', 'eo.id')
       .whereNotIn('eo.status', ['Cancelled'])
       .whereNotIn('eoc.category', INTERNAL_COST_CATS)
       .select(
-        db.raw("COALESCE(SUM(CASE WHEN eoc.currency = 'PKR' THEN eoc.amount ELSE eoc.base_amount_pkr END), 0) as total_pkr"),
+        db.raw(hasEocBasePkr
+          ? "COALESCE(SUM(CASE WHEN eoc.currency = 'PKR' THEN eoc.amount ELSE eoc.base_amount_pkr END), 0) as total_pkr"
+          : "COALESCE(SUM(eoc.amount * ?), 0) as total_pkr", hasEocBasePkr ? [] : [pkrRate]),
         db.raw("COALESCE(SUM(eoc.amount), 0) as total_raw"),
       ).first();
-    // If base_amount_pkr is populated use it; otherwise convert foreign costs
     const exportOpCostsPkr = parseFloat(exportOpResult?.total_pkr) || (parseFloat(exportOpResult?.total_raw) || 0) * pkrRate;
 
     // Export COGS (PKR) — from rice allocation or locked COGS
@@ -70,7 +79,9 @@ const financeService = {
       .whereNotIn('eo.status', ['Cancelled'])
       .whereIn('eoc.category', INTERNAL_COST_CATS)
       .select(
-        db.raw("COALESCE(SUM(CASE WHEN eoc.base_amount_pkr > 0 THEN eoc.base_amount_pkr ELSE eoc.amount * COALESCE(eoc.fx_rate, 280) END), 0) as total_pkr"),
+        db.raw(hasEocBasePkr
+          ? "COALESCE(SUM(CASE WHEN eoc.base_amount_pkr > 0 THEN eoc.base_amount_pkr ELSE eoc.amount * COALESCE(eoc.fx_rate, ?) END), 0) as total_pkr"
+          : "COALESCE(SUM(eoc.amount * ?), 0) as total_pkr", [pkrRate]),
       ).first();
     const lockedCogsPkr = parseFloat(exportStats.total_cogs_pkr) || 0;
     const allocCogsPkr = parseFloat(cogsResult?.total_pkr) || 0;
@@ -121,10 +132,13 @@ const financeService = {
     const millMargin = millRevenue > 0 ? (millGrossProfit / millRevenue * 100) : 0;
 
     // ── Receivables ──
+    const hasRecvBasePkr = await db.schema.hasColumn('receivables', 'base_amount_pkr');
     const recvStats = await db('receivables').whereNot('status', 'Paid').select(
       db.raw("COUNT(*) as count"),
       db.raw("COALESCE(SUM(outstanding), 0) as total_outstanding"),
-      db.raw("COALESCE(SUM(base_amount_pkr), 0) as total_outstanding_pkr"),
+      db.raw(hasRecvBasePkr
+        ? "COALESCE(SUM(base_amount_pkr), 0) as total_outstanding_pkr"
+        : "COALESCE(SUM(outstanding * ?), 0) as total_outstanding_pkr", hasRecvBasePkr ? [] : [pkrRate]),
       db.raw("COUNT(CASE WHEN due_date < CURRENT_DATE THEN 1 END) as overdue_count"),
       db.raw("COALESCE(SUM(CASE WHEN due_date < CURRENT_DATE THEN outstanding END), 0) as overdue_amount"),
     ).first();
