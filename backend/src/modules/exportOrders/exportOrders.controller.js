@@ -347,6 +347,8 @@ const exportOrderController = {
           .where('l.reserved_against', order.order_no),
 
         // Path 2: Lots with allocation transactions for THIS order only
+        // Exclude outbound transfers (warehouse_transfer_out) — those are the source side
+        // of a mill→export transfer, not an actual allocation TO this order
         db('lot_transactions as lt')
           .leftJoin('inventory_lots as l', 'lt.lot_id', 'l.id')
           .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
@@ -361,6 +363,7 @@ const exportOrderController = {
             'lt.transaction_date'
           )
           .where('lt.reference_module', 'export_order')
+          .whereNotIn('lt.transaction_type', ['warehouse_transfer_out'])
           .where(function () {
             this.where('lt.reference_id', orderId)
               .orWhere('lt.reference_no', order.order_no);
@@ -404,17 +407,23 @@ const exportOrderController = {
           });
         }
       }
+      // Collect batch_refs already present from export-entity lots (via allocation/transfer)
+      const exportBatchRefs = new Set();
+      for (const [, lot] of lotMap) {
+        if (lot.entity === 'export' && lot.batch_ref) exportBatchRefs.add(lot.batch_ref);
+      }
+
       for (const lot of millingOutputLots) {
-        if (!lotMap.has(lot.id)) {
-          // Only include milling output lots if they're reserved for this order
-          // or show as informational (source: milling_output) without allocated qty
-          const isReservedForUs = lot.reserved_against === order.order_no;
-          lotMap.set(lot.id, {
-            ...lot,
-            allocated_qty_kg: isReservedForUs ? (parseFloat(lot.net_weight_kg) || (parseFloat(lot.qty) || 0) * 1000) : 0,
-            source: 'milling_output',
-          });
-        }
+        if (lotMap.has(lot.id)) continue;
+        // Skip mill-entity finished lots when an export-entity lot from the same batch
+        // already exists (it was transferred — showing both would double-count)
+        if (lot.entity === 'mill' && lot.type === 'finished' && lot.batch_ref && exportBatchRefs.has(lot.batch_ref)) continue;
+        const isReservedForUs = lot.reserved_against === order.order_no;
+        lotMap.set(lot.id, {
+          ...lot,
+          allocated_qty_kg: isReservedForUs ? (parseFloat(lot.net_weight_kg) || (parseFloat(lot.qty) || 0) * 1000) : 0,
+          source: 'milling_output',
+        });
       }
       const purchaseLots = Array.from(lotMap.values());
 
