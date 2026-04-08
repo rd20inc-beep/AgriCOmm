@@ -191,7 +191,7 @@ exports.up = async function (knex) {
     await knex.raw(`
       ALTER TABLE milling_batches
       ADD CONSTRAINT chk_milling_batches_status_valid
-      CHECK (status IN ('Queued','In Progress','Pending Approval','Completed','Cancelled'))
+      CHECK (status IN ('Queued','Pending','In Progress','Pending Approval','Completed','Cancelled'))
     `);
   }
 
@@ -204,7 +204,7 @@ exports.up = async function (knex) {
     await knex.raw(`
       ALTER TABLE receivables
       ADD CONSTRAINT chk_receivables_status_valid
-      CHECK (status IN ('Pending','Partial','Paid','Overdue','Written Off'))
+      CHECK (status IN ('Pending','Partial','Paid','Received','Overdue','Written Off'))
     `);
   }
 
@@ -214,6 +214,8 @@ exports.up = async function (knex) {
     WHERE constraint_name = 'chk_payables_status_valid'
   `);
   if (hasPayCheck.rows.length === 0) {
+    // Normalize lowercase 'paid' to 'Paid' before adding constraint
+    await knex('payables').where('status', 'paid').update({ status: 'Paid' });
     await knex.raw(`
       ALTER TABLE payables
       ADD CONSTRAINT chk_payables_status_valid
