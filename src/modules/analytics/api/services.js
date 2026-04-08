@@ -1,0 +1,63 @@
+import api from '../../../api/client';
+export const reportingApi = {
+  executiveSummary: (params) => api.get('/api/reporting/executive/summary', params),
+  orderPipeline: (params) => api.get('/api/reporting/executive/pipeline', params),
+  orderProfitability: (params) => api.get('/api/reporting/profitability/orders', params),
+  batchProfitability: (params) => api.get('/api/reporting/profitability/batches', params),
+  customerProfitability: (params) => api.get('/api/reporting/profitability/customers', params),
+  countryAnalysis: (params) => api.get('/api/reporting/profitability/countries', params),
+  supplierQualityRanking: (params) => api.get('/api/reporting/quality/supplier-ranking', params),
+  stockAging: () => api.get('/api/reporting/inventory/stock-aging'),
+  cashForecast: (params) => api.get('/api/reporting/financial/cash-forecast', params),
+  kpiBenchmarks: (params) => api.get('/api/reporting/kpi/benchmarks', params),
+  exportReport: (data) => api.post('/api/reporting/export', data),
+};
+export const intelligenceApi = {
+  scanExceptions: () => api.post('/api/intelligence/exceptions/scan'),
+  exceptionStats: () => api.get('/api/intelligence/exceptions/stats'),
+  exceptions: (params) => api.get('/api/intelligence/exceptions', params),
+  acknowledgeException: (id) => api.put(`/api/intelligence/exceptions/${id}/acknowledge`),
+  resolveException: (id, data) => api.put(`/api/intelligence/exceptions/${id}/resolve`, data),
+  escalateException: (id) => api.put(`/api/intelligence/exceptions/${id}/escalate`),
+  riskDashboard: () => api.get('/api/intelligence/risk/dashboard'),
+  riskOrder: (id) => api.post(`/api/intelligence/risk/order/${id}`),
+  topRiskOrders: () => api.get('/api/intelligence/risk/top-orders'),
+  topRiskCustomers: () => api.get('/api/intelligence/risk/top-customers'),
+  rcaMargin: (orderId) => api.post(`/api/intelligence/rca/margin/${orderId}`),
+  rcaCost: (orderId) => api.post(`/api/intelligence/rca/cost/${orderId}`),
+  rcaYield: (batchId) => api.post(`/api/intelligence/rca/yield/${batchId}`),
+  rcaPayment: (orderId) => api.post(`/api/intelligence/rca/payment/${orderId}`),
+  dashboard: (params) => api.get('/api/intelligence/dashboard', params),
+};
+export const controlApi = {
+  orderMargin: (id) => api.get(`/api/control/margin/order/${id}`),
+  marginComparison: (params) => api.get('/api/control/margin/comparison', params),
+  simulatePricing: (data) => api.post('/api/control/margin/simulate', data),
+  supplierScoreboard: () => api.get('/api/control/supplier-scoreboard'),
+  calculateSupplierScore: (id) => api.post(`/api/control/supplier-score/${id}`),
+  customerScoreboard: () => api.get('/api/control/customer-scoreboard'),
+  calculateCustomerScore: (id) => api.post(`/api/control/customer-score/${id}`),
+  customerTrends: (id) => api.get(`/api/control/customer-trends/${id}`),
+  millPerformance: (id) => api.post(`/api/control/mill-performance/${id}`),
+  recoveryAnalysis: () => api.get('/api/control/recovery-analysis'),
+};
+export const smartApi = {
+  costPredict: (productId) => api.get(`/api/smart/cost/predict/${productId}`),
+  optimalSourcing: (data) => api.post('/api/smart/cost/optimal-sourcing', data),
+  scenarioFobVsCif: (data) => api.post('/api/smart/scenario/fob-vs-cif', data),
+  scenarioSupplier: (data) => api.post('/api/smart/scenario/supplier-comparison', data),
+  scenarioYield: (data) => api.post('/api/smart/scenario/yield', data),
+  scenarioFx: (data) => api.post('/api/smart/scenario/fx', data),
+  scenarioFullOrder: (data) => api.post('/api/smart/scenario/full-order', data),
+  savedScenarios: () => api.get('/api/smart/scenarios'),
+  predictiveAlerts: () => api.get('/api/smart/predict/alerts'),
+  runPredictions: () => api.post('/api/smart/predict/run'),
+  acknowledgeAlert: (id) => api.put(`/api/smart/predict/alerts/${id}/acknowledge`),
+};
+export const approvalsApi = {
+  pending: (params) => api.get('/api/control/approvals/pending', params),
+  myRequests: (params) => api.get('/api/control/approvals/requests', params),
+  submit: (data) => api.post('/api/control/approvals/submit', data),
+  approve: (id, data) => api.put(`/api/control/approvals/${id}/approve`, data),
+  reject: (id, data) => api.put(`/api/control/approvals/${id}/reject`, data),
+};

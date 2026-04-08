@@ -254,22 +254,33 @@ mockDb.fn = {
 
 jest.mock('../config/database', () => mockDb);
 
-jest.mock('../services/inventoryService', () => ({
+// Mock services at both old (re-export) and new (module) paths
+// Jest requires mock variable names to be prefixed with "mock"
+const mockInventorySvc = {
   reserveStock: jest.fn().mockResolvedValue(null),
   dispatchForShipment: jest.fn().mockResolvedValue(null),
-}));
+  lockOrderCOGS: jest.fn().mockResolvedValue(null),
+  MOVEMENT_TYPES: {},
+};
+jest.mock('../services/inventoryService', () => mockInventorySvc);
+jest.mock('../modules/inventory/inventory.service', () => mockInventorySvc);
 
-jest.mock('../services/accountingService', () => ({
+const mockAccountingSvc = {
   autoPost: jest.fn().mockResolvedValue(null),
-}));
+  createJournal: jest.fn().mockResolvedValue({ id: 1 }),
+};
+jest.mock('../services/accountingService', () => mockAccountingSvc);
+jest.mock('../modules/accounting/accounting.service', () => mockAccountingSvc);
 
-jest.mock('../services/automationService', () => ({
+const mockAutomationSvc = {
   onAdvanceConfirmed: jest.fn().mockResolvedValue(null),
   onBalanceConfirmed: jest.fn().mockResolvedValue(null),
   onShipmentDeparted: jest.fn().mockResolvedValue(null),
-}));
+};
+jest.mock('../services/automationService', () => mockAutomationSvc);
+jest.mock('../modules/admin/automation.service', () => mockAutomationSvc);
 
-jest.mock('../services/documentService', () => ({
+const mockDocumentSvc = {
   createChecklist: jest.fn(async (trx, { linkedType, linkedId, items }) => {
     const rows = items.map((item) => ({
       linked_type: linkedType,
@@ -291,11 +302,15 @@ jest.mock('../services/documentService', () => ({
     return mockState.tables.document_checklists
       .filter((row) => row.linked_type === linkedType && row.linked_id === linkedId && row.is_required && !row.is_fulfilled);
   }),
-}));
+};
+jest.mock('../services/documentService', () => mockDocumentSvc);
+jest.mock('../modules/documents/documents.service', () => mockDocumentSvc);
 
-jest.mock('../services/emailService', () => ({
+const mockEmailSvc = {
   sendBalanceReminder: jest.fn().mockResolvedValue(null),
-}));
+};
+jest.mock('../services/emailService', () => mockEmailSvc);
+jest.mock('../modules/communications/email.service', () => mockEmailSvc);
 
 const controller = require('../controllers/exportOrderController');
 const workflowService = require('../services/exportOrderWorkflowService');

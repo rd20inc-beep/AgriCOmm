@@ -81,10 +81,6 @@ export default function Dashboard() {
     }, 0);
   }, [exportOrders]);
 
-  const exportReceivablesOrderCount = useMemo(() => {
-    return exportOrders.filter((o) => o.contractValue - o.advanceReceived - o.balanceReceived > 0).length;
-  }, [exportOrders]);
-
   // Separate profit calculations — Export in USD, Mill in PKR
   const exportProfit = useMemo(() => {
     const val = exportOrders.reduce((sum, o) => {
@@ -229,18 +225,15 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* KPI Row */}
+      {/* KPI Row — 4 consolidated cards */}
       <KPICardsRow
-        entityFilter={entityFilter}
         activeOrders={activeOrders}
         advancePending={advancePending}
         balancePending={balancePending}
         shipmentsInTransit={shipmentsInTransit}
         millBatchesRunning={millBatchesRunning}
-        millingBatchesTotal={millingBatches.length}
         varianceAlerts={varianceAlerts}
         exportReceivables={exportReceivables}
-        exportReceivablesOrderCount={exportReceivablesOrderCount}
         exportProfit={exportProfit}
         millProfitPKR={millProfitPKR}
       />
