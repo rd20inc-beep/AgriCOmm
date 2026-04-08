@@ -10,17 +10,29 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
   const { addToast } = useApp();
   const estimatedRawQty = Math.round(order.qtyMT / 0.75);
 
-  // Split lots into finished (main product) and byproducts
-  const finishedLots = purchaseLots.filter(l =>
-    (l.type === 'finished' || l.source === 'reservation' || l.source === 'allocation' || l.source === 'both')
-    && (parseFloat(l.allocated_qty_kg) > 0 || l.source === 'reservation')
+  // Split lots into finished (main product) and byproducts.
+  // Deduplicate: when a lot is transferred from mill→export, both the mill lot and
+  // export lot appear. Prefer the export-entity lot (it's the actual allocation),
+  // and exclude the mill-entity original if an export-entity copy exists for the same batch.
+  const exportEntityLotBatchRefs = new Set(
+    purchaseLots
+      .filter(l => l.entity === 'export' && l.type === 'finished')
+      .map(l => l.batch_ref)
+      .filter(Boolean)
   );
+
+  const finishedLots = purchaseLots.filter(l => {
+    if (l.type === 'byproduct') return false;
+    // If this is a mill-entity lot and an export-entity lot exists from the same batch, skip it
+    if (l.entity === 'mill' && l.batch_ref && exportEntityLotBatchRefs.has(l.batch_ref)) return false;
+    return (l.type === 'finished' || l.source === 'reservation' || l.source === 'allocation' || l.source === 'both')
+      && (parseFloat(l.allocated_qty_kg) > 0 || l.source === 'reservation' || l.source === 'milling_output');
+  });
   const byproductLots = purchaseLots.filter(l => l.type === 'byproduct' && l.source === 'milling_output');
 
   // Calculate totals — only count explicitly allocated/reserved quantities
   const totalAllocatedMT = finishedLots.reduce((sum, lot) => {
-    // Use allocated_qty_kg from transaction, or reserved_qty for reservation-only lots
-    const kg = parseFloat(lot.allocated_qty_kg) || (lot.source === 'reservation' ? (parseFloat(lot.reserved_qty) || 0) * 1000 : 0);
+    const kg = parseFloat(lot.allocated_qty_kg) || parseFloat(lot.net_weight_kg) || (parseFloat(lot.qty) || 0) * 1000;
     return sum + kg / 1000;
   }, 0);
   const fulfillmentPct = order.qtyMT > 0 ? Math.min(100, (totalAllocatedMT / order.qtyMT) * 100) : 0;

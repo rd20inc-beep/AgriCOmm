@@ -18,12 +18,14 @@ import {
   Edit3,
   Plus,
   Truck,
+  Send,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { queryKeys } from '../api/queryClient';
 import {
   useMillingBatch, useSaveQuality, useRecordYield,
   useAddBatchCost, useAddVehicle, useUpdateMillingBatch,
+  useCreateTransfer, useExportOrder,
 } from '../api/queries';
 import { millingApi } from '../api/services';
 import SearchSelect from '../components/SearchSelect';
@@ -62,12 +64,17 @@ export default function MillingBatchDetail() {
   // Fetch batch detail via TanStack Query
   const { data: batch, isLoading: batchLoading } = useMillingBatch(id);
 
+  // Fetch linked export order (if any) to get required qty
+  const linkedOrderId = batch?.linkedExportOrder;
+  const { data: linkedOrder } = useExportOrder(linkedOrderId);
+
   // Mutations
   const saveQualityMut = useSaveQuality();
   const recordYieldMut = useRecordYield();
   const addCostMut = useAddBatchCost();
   const addVehicleMut = useAddVehicle();
   const updateBatchMut = useUpdateMillingBatch();
+  const createTransferMut = useCreateTransfer();
 
   const invalidateBatch = () => {
     qc.invalidateQueries({ queryKey: queryKeys.batches.detail(id) });
@@ -93,6 +100,8 @@ export default function MillingBatchDetail() {
   const [showPriceModal, setShowPriceModal] = useState(false);
   const [showSupplierModal, setShowSupplierModal] = useState(false);
   const [selectedSupplier, setSelectedSupplier] = useState('');
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [transferForm, setTransferForm] = useState({ qtyMT: '', pricePerMT: '', pkrRate: '280' });
   const [priceForm, setPriceForm] = useState({ finished: '', broken: '', bran: '', husk: '' });
   const [priceLoading, setPriceLoading] = useState(false);
   const [vehicleForm, setVehicleForm] = useState({
@@ -463,6 +472,26 @@ export default function MillingBatchDetail() {
               <DollarSign size={16} />
               Costing Sheet
             </button>
+            {batch.status === 'Completed' && batch.linkedExportOrder && (
+              <button
+                onClick={() => {
+                  const exportQty = linkedOrder?.qtyMT || 0;
+                  const finishedQty = batch.actualFinishedMT || 0;
+                  const transferQty = Math.min(exportQty, finishedQty);
+                  const costPerKg = batch.totalCostPerKgFinished || batch.rawCostPerKgFinished || 0;
+                  setTransferForm({
+                    qtyMT: String(transferQty),
+                    pricePerMT: String(Math.round(costPerKg * 1000)),
+                    pkrRate: '280',
+                  });
+                  setShowTransferModal(true);
+                }}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
+              >
+                <Send size={16} />
+                Transfer to Export
+              </button>
+            )}
             <div className="text-right">
               <div className="text-xs text-gray-500">Raw Qty</div>
               <div className="text-lg font-bold text-gray-900">{batch.rawQtyMT} MT</div>
@@ -1615,6 +1644,142 @@ export default function MillingBatchDetail() {
             }} className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700">Assign Supplier</button>
           </div>
         </div>
+      </Modal>
+
+      {/* Transfer to Export Modal */}
+      <Modal isOpen={showTransferModal} onClose={() => setShowTransferModal(false)} title="Transfer to Export Order">
+        {linkedOrder && batch && (
+          <div className="space-y-4">
+            {/* Summary */}
+            <div className="bg-blue-50 rounded-lg p-4 space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Export Order</span>
+                <span className="font-bold text-blue-800">{linkedOrder.orderNo || batch.linkedExportOrder}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Export Demand</span>
+                <span className="font-bold text-gray-900">{linkedOrder.qtyMT} MT</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Finished Rice Available</span>
+                <span className="font-bold text-emerald-700">{batch.actualFinishedMT} MT</span>
+              </div>
+              {batch.actualFinishedMT > linkedOrder.qtyMT && (
+                <div className="flex justify-between text-sm border-t border-blue-200 pt-2">
+                  <span className="text-gray-600">Surplus (stays in inventory)</span>
+                  <span className="font-bold text-amber-700">{(batch.actualFinishedMT - linkedOrder.qtyMT).toFixed(2)} MT</span>
+                </div>
+              )}
+              {batch.brokenMT > 0 && (
+                <div className="flex justify-between text-sm text-gray-500">
+                  <span>Broken Rice (stays in inventory)</span>
+                  <span>{batch.brokenMT} MT</span>
+                </div>
+              )}
+              {batch.branMT > 0 && (
+                <div className="flex justify-between text-sm text-gray-500">
+                  <span>Bran (stays in inventory)</span>
+                  <span>{batch.branMT} MT</span>
+                </div>
+              )}
+              {batch.huskMT > 0 && (
+                <div className="flex justify-between text-sm text-gray-500">
+                  <span>Husk (stays in inventory)</span>
+                  <span>{batch.huskMT} MT</span>
+                </div>
+              )}
+            </div>
+
+            {/* Transfer Form */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Transfer Qty (MT)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={transferForm.qtyMT}
+                  onChange={(e) => setTransferForm(prev => ({ ...prev, qtyMT: e.target.value }))}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  max={batch.actualFinishedMT}
+                />
+                <p className="text-xs text-gray-400 mt-1">Max: {batch.actualFinishedMT} MT</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Transfer Price (PKR/MT)</label>
+                <input
+                  type="number"
+                  step="1"
+                  value={transferForm.pricePerMT}
+                  onChange={(e) => setTransferForm(prev => ({ ...prev, pricePerMT: e.target.value }))}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">PKR/USD Rate</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={transferForm.pkrRate}
+                  onChange={(e) => setTransferForm(prev => ({ ...prev, pkrRate: e.target.value }))}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Total Value</label>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-bold text-gray-900">
+                  Rs {Math.round((parseFloat(transferForm.qtyMT) || 0) * (parseFloat(transferForm.pricePerMT) || 0)).toLocaleString()}
+                </div>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex justify-end gap-3 pt-3 border-t">
+              <button
+                onClick={() => setShowTransferModal(false)}
+                className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={createTransferMut.isPending}
+                onClick={async () => {
+                  const qty = parseFloat(transferForm.qtyMT);
+                  const price = parseFloat(transferForm.pricePerMT);
+                  const rate = parseFloat(transferForm.pkrRate) || 280;
+
+                  if (!qty || qty <= 0) { addToast('Enter a valid quantity', 'error'); return; }
+                  if (qty > batch.actualFinishedMT) { addToast('Cannot transfer more than finished quantity', 'error'); return; }
+
+                  const totalPKR = qty * price;
+                  const usdEquiv = totalPKR / rate;
+
+                  try {
+                    await createTransferMut.mutateAsync({
+                      batch_id: batch.dbId || parseInt(id),
+                      export_order_id: linkedOrder.dbId || linkedOrder.id,
+                      product_name: batch.supplierName ? `${batch.supplierName} - Finished Rice` : 'Finished Rice',
+                      qty_mt: qty,
+                      transfer_price_pkr: price,
+                      total_value_pkr: totalPKR,
+                      usd_equivalent: usdEquiv,
+                      pkr_rate: rate,
+                      dispatch_date: new Date().toISOString().split('T')[0],
+                      status: 'Completed',
+                    });
+                    addToast(`${qty} MT transferred to export order ${linkedOrder.orderNo || batch.linkedExportOrder}`);
+                    setShowTransferModal(false);
+                    invalidateBatch();
+                  } catch (err) {
+                    addToast(err?.message || 'Transfer failed', 'error');
+                  }
+                }}
+                className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {createTransferMut.isPending ? 'Transferring...' : `Transfer ${transferForm.qtyMT || 0} MT`}
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* No Supplier Banner */}
