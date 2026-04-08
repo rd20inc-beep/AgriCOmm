@@ -327,7 +327,7 @@ const exportOrderController = {
       const batchRef = millingBatch ? `batch-${millingBatch.id}` : null;
 
       const lotSelectFields = [
-        'l.id', 'l.lot_no', 'l.item_name', 'l.type', 'l.entity',
+        'l.id', 'l.lot_no', 'l.item_name', 'l.type', 'l.entity', 'l.batch_ref',
         'l.qty', 'l.available_qty', 'l.reserved_qty', 'l.status',
         'l.net_weight_kg', 'l.rate_per_kg', 'l.landed_cost_per_kg',
         'l.variety', 'l.grade', 'l.moisture_pct', 'l.broken_pct',
