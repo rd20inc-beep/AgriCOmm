@@ -398,7 +398,7 @@ const millingController = {
       if (!id) return res.status(404).json({ success: false, message: 'Batch not found.' });
       const {
         actual_finished_mt,
-        broken_mt,
+        broken_mt, b1_mt, b2_mt, b3_mt, csr_mt, short_grain_mt,
         bran_mt,
         husk_mt,
         wastage_mt,
@@ -410,7 +410,13 @@ const millingController = {
       }
 
       const finished = parseFloat(actual_finished_mt) || 0;
-      const broken = parseFloat(broken_mt) || 0;
+      const b1 = parseFloat(b1_mt) || 0;
+      const b2 = parseFloat(b2_mt) || 0;
+      const b3 = parseFloat(b3_mt) || 0;
+      const csr = parseFloat(csr_mt) || 0;
+      const shortGrain = parseFloat(short_grain_mt) || 0;
+      // Total broken = sum of B1+B2+B3+CSR+Short Grain (or legacy broken_mt if new fields not provided)
+      const broken = (b1 + b2 + b3 + csr + shortGrain) || parseFloat(broken_mt) || 0;
       const bran = parseFloat(bran_mt) || 0;
       const husk = parseFloat(husk_mt) || 0;
       const wastage = parseFloat(wastage_mt) || 0;
@@ -452,7 +458,8 @@ const millingController = {
         // Already recorded — update the batch numbers but don't create duplicate lots
         await db('milling_batches').where({ id }).update({
           actual_finished_mt: finished,
-          broken_mt: broken, bran_mt: bran, husk_mt: husk, wastage_mt: wastage,
+          broken_mt: broken, b1_mt: b1, b2_mt: b2, b3_mt: b3, csr_mt: csr, short_grain_mt: shortGrain,
+          bran_mt: bran, husk_mt: husk, wastage_mt: wastage,
           yield_pct: yieldPct, updated_at: db.fn.now(),
         });
         return res.json({
@@ -466,6 +473,11 @@ const millingController = {
       const updateData = {
         actual_finished_mt: finished,
         broken_mt: broken,
+        b1_mt: b1,
+        b2_mt: b2,
+        b3_mt: b3,
+        csr_mt: csr,
+        short_grain_mt: shortGrain,
         bran_mt: bran,
         husk_mt: husk,
         wastage_mt: wastage,
