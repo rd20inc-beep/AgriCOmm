@@ -561,6 +561,33 @@ export default function ExportOrderDetail() {
           <button onClick={openAdvanceModal} className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700">Confirm Advance Received</button>
         </div>
       )}
+      {order.status === 'Docs In Preparation' && (() => {
+        const docs = order.documents || {};
+        const approvedCount = Object.values(docs).filter(d => d && ['Approved', 'Final', 'Draft Uploaded'].includes(typeof d === 'string' ? d : d.status || d)).length;
+        if (approvedCount < 7) return null;
+        return (
+          <div className="bg-emerald-50 border border-emerald-300 rounded-xl p-4 flex items-center justify-between">
+            <div>
+              <p className="text-sm font-semibold text-emerald-800">All Documents Approved</p>
+              <p className="text-xs text-emerald-600">All 7 required export documents are approved. Click to advance to balance payment stage.</p>
+            </div>
+            <button
+              onClick={async () => {
+                try {
+                  await updateStatusMut.mutateAsync({ id: orderId, data: { status: 'Awaiting Balance', reason: 'All documents complete — manual promotion' } });
+                  addToast('Order moved to Awaiting Balance');
+                  invalidateOrder();
+                } catch (err) {
+                  addToast(err?.message || 'Failed to promote', 'error');
+                }
+              }}
+              className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700"
+            >
+              Complete Documents
+            </button>
+          </div>
+        );
+      })()}
       {canRequestBalance && order.status === 'Awaiting Balance' && (
         <div className="bg-blue-50 border border-blue-300 rounded-xl p-4 flex items-center justify-between">
           <div>
