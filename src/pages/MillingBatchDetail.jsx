@@ -1233,10 +1233,25 @@ export default function MillingBatchDetail() {
             <div className="grid grid-cols-2 gap-3">
               {qualityParams.filter(p => p.section === 'core').map((param) => (
                 <div key={param.key}>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{param.label}</label>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    {param.label}
+                    {param.key === 'purity' && <span className="text-blue-500 ml-1 font-normal">(auto-suggested)</span>}
+                  </label>
                   <input type="number" step="0.01" value={analysisForm[param.key]}
-                    onChange={(e) => setAnalysisForm((prev) => ({ ...prev, [param.key]: e.target.value }))}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setAnalysisForm((prev) => {
+                        const next = { ...prev, [param.key]: val };
+                        // Auto-suggest purity when foreignMatter or csrPct changes
+                        if (param.key === 'foreignMatter' || param.key === 'csrPct') {
+                          const fm = parseFloat(param.key === 'foreignMatter' ? val : next.foreignMatter) || 0;
+                          const csr = parseFloat(param.key === 'csrPct' ? val : next.csrPct) || 0;
+                          next.purity = (100 - fm - csr).toFixed(2);
+                        }
+                        return next;
+                      });
+                    }}
+                    className={`w-full rounded-lg border px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${param.key === 'purity' ? 'border-blue-300 bg-blue-50' : 'border-gray-300'}`}
                     placeholder="0.00" />
                 </div>
               ))}
@@ -1247,7 +1262,19 @@ export default function MillingBatchDetail() {
                 <div key={param.key}>
                   <label className="block text-xs font-medium text-gray-600 mb-1">{param.label}</label>
                   <input type="number" step="0.01" value={analysisForm[param.key]}
-                    onChange={(e) => setAnalysisForm((prev) => ({ ...prev, [param.key]: e.target.value }))}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setAnalysisForm((prev) => {
+                        const next = { ...prev, [param.key]: val };
+                        // Auto-suggest purity when CSR changes
+                        if (param.key === 'csrPct') {
+                          const fm = parseFloat(next.foreignMatter) || 0;
+                          const csr = parseFloat(val) || 0;
+                          next.purity = (100 - fm - csr).toFixed(2);
+                        }
+                        return next;
+                      });
+                    }}
                     className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     placeholder="0.00" />
                 </div>
