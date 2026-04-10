@@ -91,12 +91,14 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
   const totalRecoveryPct = rawQtyMT > 0 ? (totalOutputMT / rawQtyMT * 100).toFixed(1) : '0.0';
 
   // ═══ SECTION F: Final Costing ═══
-  const netCostAfterByproducts = totalBatchCost - totalByproductValue;
-  const finalCostPerKG = finishedKG > 0 ? netCostAfterByproducts / finishedKG : 0;
+  // Cost per KG = total batch cost ÷ finished rice KG
+  // By-product value is REVENUE, not a cost deduction — shown separately
+  const finalCostPerKG = finishedKG > 0 ? totalBatchCost / finishedKG : 0;
   const finalCostPerMaund = finalCostPerKG * 40;
   const finalCostPerKatta = finalCostPerKG * 50;
   const finalCostPerTon = finalCostPerKG * 1000;
-  const costPerMT = rawQtyMT > 0 ? totalBatchCost / rawQtyMT : 0;
+  const totalOutputValue = allOutputProducts.reduce((s, p) => s + p.value, 0);
+  const batchProfit = totalOutputValue - totalBatchCost;
 
   const H = '#1e3a5f'; // header color
   const G = '#d4a853'; // gold accent
@@ -287,7 +289,7 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-green-300 bg-green-50">
-                <td className="px-6 py-2 font-bold text-green-900">Total By-Product Recovery (B)</td>
+                <td className="px-6 py-2 font-bold text-green-900">Total By-Product Value</td>
                 <td className="px-6 py-2 text-right font-bold text-green-900">{byProducts.reduce((s, bp) => s + bp.qtyKG, 0).toLocaleString()}</td>
                 <td className="px-6 py-2"></td>
                 <td className="px-6 py-2"></td>
@@ -298,28 +300,43 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
         </div>
 
         {/* ═══ SECTION F: Final Costing Summary ═══ */}
-        <div className="border-x border-t border-gray-200 px-6 py-4" style={{ backgroundColor: netCostAfterByproducts >= 0 ? '#f0fdf4' : '#fef2f2' }}>
-          <p className="text-[10px] font-bold uppercase tracking-widest mb-3" style={{ color: H }}>Section F — Final Milling Cost Summary</p>
+        <div className="border-x border-t border-gray-200 px-6 py-4 bg-gray-50">
+          <p className="text-[10px] font-bold uppercase tracking-widest mb-3" style={{ color: H }}>Section F — Finished Rice Cost</p>
 
-          {/* Net cost formula */}
+          {/* Cost breakdown */}
           <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4">
             <div className="space-y-2 text-sm">
-              <div className="flex justify-between"><span className="text-gray-600">Total Batch Cost (A)</span><span className="font-bold text-gray-900">{fmtPKR(totalBatchCost)}</span></div>
-              <div className="flex justify-between text-green-700"><span>Less: By-Product Recovery (B)</span><span className="font-bold">- {fmtPKR(totalByproductValue)}</span></div>
-              <div className="flex justify-between border-t-2 border-gray-300 pt-2"><span className="font-bold text-gray-900">Net Cost of Finished Rice (A - B)</span><span className="text-lg font-bold text-gray-900">{fmtPKR(netCostAfterByproducts)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-600">Total Batch Cost</span><span className="font-bold text-gray-900">{fmtPKR(totalBatchCost)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-600">Finished Rice Output</span><span className="font-bold text-blue-900">{finishedKG.toLocaleString()} KG ({finishedMT} MT)</span></div>
+              <div className="flex justify-between border-t-2 border-gray-300 pt-2">
+                <span className="font-bold text-gray-900">Cost per KG (Finished Rice)</span>
+                <span className="text-xl font-bold" style={{ color: H }}>{fmtPKR(finalCostPerKG)}</span>
+              </div>
             </div>
           </div>
 
           {/* Per-unit costs */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-3">
-            <div className="bg-white rounded-lg border p-3 text-center"><p className="text-[10px] text-gray-500 uppercase">Finished Rice</p><p className="text-lg font-bold text-blue-900">{finishedMT} MT</p></div>
-            <div className="bg-white rounded-lg border p-3 text-center"><p className="text-[10px] text-gray-500 uppercase">Cost / KG</p><p className="text-lg font-bold text-gray-900">{fmtPKR(finalCostPerKG)}</p></div>
-            <div className="bg-white rounded-lg border p-3 text-center"><p className="text-[10px] text-gray-500 uppercase">Cost / Maund</p><p className="text-lg font-bold text-gray-900">{fmtPKR(finalCostPerMaund)}</p></div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+            <div className="bg-white rounded-lg border p-3 text-center"><p className="text-[10px] text-gray-500 uppercase">Cost / KG</p><p className="text-lg font-bold" style={{ color: H }}>{fmtPKR(finalCostPerKG)}</p></div>
+            <div className="bg-white rounded-lg border p-3 text-center"><p className="text-[10px] text-gray-500 uppercase">Cost / Maund (40kg)</p><p className="text-lg font-bold text-gray-900">{fmtPKR(finalCostPerMaund)}</p></div>
             <div className="bg-white rounded-lg border p-3 text-center"><p className="text-[10px] text-gray-500 uppercase">Cost / Katta (50kg)</p><p className="text-lg font-bold text-gray-900">{fmtPKR(finalCostPerKatta)}</p></div>
-            <div className="bg-white rounded-lg border p-3 text-center"><p className="text-[10px] text-gray-500 uppercase">Cost / Ton</p><p className="text-lg font-bold text-gray-900">{fmtPKR(finalCostPerTon)}</p></div>
+            <div className="bg-white rounded-lg border p-3 text-center"><p className="text-[10px] text-gray-500 uppercase">Cost / MT</p><p className="text-lg font-bold text-gray-900">{fmtPKR(finalCostPerTon)}</p></div>
           </div>
 
-          <p className="text-xs text-gray-600">Net amount in words: PKR {numberToWords(Math.abs(Math.round(netCostAfterByproducts)))} Only</p>
+          {/* Batch P&L summary */}
+          <div className={`rounded-lg border p-4 ${batchProfit >= 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">Batch P&L</p>
+            <div className="space-y-1.5 text-sm">
+              <div className="flex justify-between"><span className="text-gray-600">Total Output Value (all products)</span><span className="font-bold text-gray-900">{fmtPKR(totalOutputValue)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-600">Total Batch Cost</span><span className="font-bold text-gray-900">- {fmtPKR(totalBatchCost)}</span></div>
+              <div className="flex justify-between border-t border-gray-300 pt-1.5">
+                <span className="font-bold">{batchProfit >= 0 ? 'Batch Profit' : 'Batch Loss'}</span>
+                <span className={`text-lg font-bold ${batchProfit >= 0 ? 'text-green-700' : 'text-red-700'}`}>{fmtPKR(batchProfit)}</span>
+              </div>
+            </div>
+          </div>
+
+          <p className="text-xs text-gray-500 mt-3">Total cost in words: PKR {numberToWords(Math.round(totalBatchCost))} Only</p>
         </div>
 
         {/* ═══ SECTION G: Vehicle Arrivals ═══ */}
