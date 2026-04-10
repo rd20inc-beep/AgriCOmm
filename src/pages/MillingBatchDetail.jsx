@@ -1635,15 +1635,17 @@ export default function MillingBatchDetail() {
             onClick={() => {
               const el = document.getElementById('cost-sheet-printable');
               if (!el) return;
+              // Collect all stylesheets from current page (includes Tailwind)
+              const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
+                .map(s => s.outerHTML).join('\n');
               const w = window.open('', '_blank', 'width=900,height=1100');
               w.document.write(`<!DOCTYPE html><html><head><title>Costing Sheet — ${batch.id}</title>
-                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+                ${styles}
                 <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                  body { font-family: 'Inter', system-ui, sans-serif; padding: 0; }
-                  @media print { body { padding: 0; } @page { margin: 10mm; } }
+                  body { padding: 20px; font-family: Inter, system-ui, sans-serif; }
+                  @media print { body { padding: 0; } @page { margin: 8mm; size: A4; } }
                 </style>
-              </head><body>${el.innerHTML}<script>window.onload=function(){window.print()}<\/script></body></html>`);
+              </head><body>${el.innerHTML}<script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script></body></html>`);
               w.document.close();
             }}
             className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
