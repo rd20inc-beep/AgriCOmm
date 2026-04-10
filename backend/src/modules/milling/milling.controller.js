@@ -802,6 +802,19 @@ const millingController = {
             vehicleNo: v.vehicle_no,
             userId: req.user?.id,
           });
+
+          // Update batch raw_qty_mt to reflect total actually received
+          // (arrival weight is truth, not the ordered amount)
+          const totalVehicleWeight = await trx('milling_vehicle_arrivals')
+            .where({ batch_id: batchId })
+            .sum('weight_mt as total').first();
+          const actualReceived = parseFloat(totalVehicleWeight?.total) || 0;
+          if (actualReceived > 0) {
+            await trx('milling_batches').where({ id: batchId }).update({
+              raw_qty_mt: actualReceived,
+              updated_at: trx.fn.now(),
+            });
+          }
         }
 
         return v;
