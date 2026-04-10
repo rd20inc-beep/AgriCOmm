@@ -757,6 +757,72 @@ export default function MillingBatchDetail() {
                     <FlaskConical size={14} />
                     {safeArrival ? 'Edit Arrival' : 'Enter Arrival'}
                   </button>
+                  {(safeSample || safeArrival) && (
+                    <button
+                      onClick={() => {
+                        const w = window.open('', '_blank', 'width=800,height=900');
+                        const rows = qualityParams.map(p => {
+                          const sv = safeSample?.[p.key];
+                          const av = safeArrival?.[p.key];
+                          const hasBoth = sv != null && av != null;
+                          const variance = hasBoth ? Math.abs(av - sv).toFixed(2) : '—';
+                          const status = hasBoth ? (parseFloat(variance) > 1.0 ? '<span style="color:#dc2626;font-weight:bold">FAIL</span>' : '<span style="color:#16a34a">PASS</span>') : '—';
+                          return `<tr>
+                            <td style="padding:8px;border-bottom:1px solid #e5e7eb">${p.label}</td>
+                            <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right">${sv != null ? sv + p.unit : '—'}</td>
+                            <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right">${av != null ? av + p.unit : '—'}</td>
+                            <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right">${variance}${hasBoth ? p.unit : ''}</td>
+                            <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:center">${status}</td>
+                          </tr>`;
+                        }).join('');
+
+                        const samplePrice = safeSample?.pricePerMT ? `Rs ${Math.round(safeSample.pricePerMT).toLocaleString()}/MT (Rs ${((safeSample.pricePerKg) || (safeSample.pricePerMT / 1000)).toFixed(2)}/KG)` : '—';
+                        const arrivalPrice = safeArrival?.pricePerMT ? `Rs ${Math.round(safeArrival.pricePerMT).toLocaleString()}/MT (Rs ${((safeArrival.pricePerKg) || (safeArrival.pricePerMT / 1000)).toFixed(2)}/KG)` : '—';
+
+                        w.document.write(`<!DOCTYPE html><html><head><title>Quality Report — ${batch.id}</title>
+                          <style>body{font-family:Arial,sans-serif;padding:40px;color:#333}
+                          h1{font-size:20px;margin-bottom:4px} h2{font-size:14px;color:#666;margin-top:24px;margin-bottom:8px;text-transform:uppercase;letter-spacing:1px}
+                          table{width:100%;border-collapse:collapse;margin-top:8px}
+                          th{padding:8px;text-align:left;border-bottom:2px solid #333;font-size:12px;text-transform:uppercase;color:#666}
+                          .header-info{display:flex;justify-content:space-between;margin:16px 0 24px;padding:12px;background:#f8f9fa;border-radius:8px;font-size:13px}
+                          .price-box{display:inline-block;padding:12px 20px;border-radius:8px;margin-right:16px;margin-top:8px}
+                          @media print{body{padding:20px}}</style></head><body>
+                          <h1>Quality Analysis Report</h1>
+                          <p style="color:#666;font-size:13px">AGRI COMMODITIES — Agri Rice Mill</p>
+                          <div class="header-info">
+                            <div><strong>Batch:</strong> ${batch.id}</div>
+                            <div><strong>Supplier:</strong> ${batch.supplierName || '—'}</div>
+                            <div><strong>Raw Qty:</strong> ${batch.rawQtyMT} MT</div>
+                            <div><strong>Date:</strong> ${new Date().toLocaleDateString()}</div>
+                          </div>
+                          <h2>Quality Parameters — Sample vs Arrival</h2>
+                          <table>
+                            <thead><tr>
+                              <th>Parameter</th><th style="text-align:right">Sample</th><th style="text-align:right">Arrival</th>
+                              <th style="text-align:right">Variance</th><th style="text-align:center">Status</th>
+                            </tr></thead>
+                            <tbody>${rows}</tbody>
+                          </table>
+                          <h2>Pricing</h2>
+                          <div>
+                            <div class="price-box" style="background:#fef3c7"><strong>Sample / Offered:</strong> ${samplePrice}</div>
+                            <div class="price-box" style="background:#dbeafe"><strong>Arrival / Agreed:</strong> ${arrivalPrice}</div>
+                          </div>
+                          ${rawQty > 0 && safeArrival?.pricePerMT ? `<p style="margin-top:12px;font-size:13px"><strong>Total Purchase Value:</strong> Rs ${Math.round(safeArrival.pricePerMT * rawQty).toLocaleString()}</p>` : ''}
+                          <div style="margin-top:48px;display:flex;justify-content:space-between;font-size:12px;color:#999">
+                            <div>Generated: ${new Date().toLocaleString()}</div>
+                            <div>AgriCOmm ERP — agricommodities.online</div>
+                          </div>
+                          <script>window.onload=function(){window.print()}</script>
+                        </body></html>`);
+                        w.document.close();
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-700 text-xs font-medium rounded-lg hover:bg-gray-200 transition-colors"
+                    >
+                      <Package size={14} />
+                      Export PDF
+                    </button>
+                  )}
                 </div>
               </div>
               {safeSample && safeArrival ? (
