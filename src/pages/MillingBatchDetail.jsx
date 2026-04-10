@@ -295,7 +295,7 @@ export default function MillingBatchDetail() {
     const yieldPct = batch.rawQtyMT > 0 ? parseFloat(((finished / batch.rawQtyMT) * 100).toFixed(1)) : 0;
 
     try {
-      await recordYieldMut.mutateAsync({
+      const yieldRes = await recordYieldMut.mutateAsync({
         id: batchId,
         data: {
           actual_finished_mt: finished,
@@ -305,6 +305,10 @@ export default function MillingBatchDetail() {
           wastage_mt: wastage,
         },
       });
+      // Show yield warning if output differs from input by >0.5%
+      if (yieldRes?.warning) {
+        addToast(yieldRes.warning, 'error');
+      }
       addToast(`Yield output recorded for ${batch.id} — Yield: ${yieldPct}%`);
       if (totalOutput > 0 && batch.status === 'In Progress') {
         addToast(`Batch ${batch.id} marked as Completed`, 'info');

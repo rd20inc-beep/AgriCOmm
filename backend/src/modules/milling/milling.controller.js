@@ -415,9 +415,53 @@ const millingController = {
       const husk = parseFloat(husk_mt) || 0;
       const wastage = parseFloat(wastage_mt) || 0;
       const totalOutput = finished + broken + bran + husk + wastage;
-      const yieldPct = parseFloat(batch.raw_qty_mt) > 0
-        ? ((finished / parseFloat(batch.raw_qty_mt)) * 100).toFixed(2)
+
+      // Use actual received weight (from raw lot) if it differs from declared raw_qty_mt
+      const rawLot = await db('inventory_lots')
+        .where({ batch_ref: `batch-${batch.id}`, type: 'raw', entity: 'mill' })
+        .first();
+      // The raw qty for yield calculation = lot qty (what was actually received)
+      // If lot already consumed, use the original qty from transactions
+      let actualRawQty = parseFloat(batch.raw_qty_mt) || 0;
+      if (rawLot) {
+        const totalReceived = await db('lot_transactions')
+          .where({ lot_id: rawLot.id, transaction_type: 'purchase_in' })
+          .sum('input_qty as total').first();
+        const received = parseFloat(totalReceived?.total) || 0;
+        if (received > 0) actualRawQty = received;
+      }
+
+      const yieldPct = actualRawQty > 0
+        ? ((finished / actualRawQty) * 100).toFixed(2)
         : 0;
+
+      // Yield tolerance check — warn if output differs from input by more than 0.5%
+      const outputDiffPct = actualRawQty > 0
+        ? Math.abs((totalOutput - actualRawQty) / actualRawQty * 100)
+        : 0;
+      const yieldWarning = outputDiffPct > 0.5
+        ? `Output differs from input by ${outputDiffPct.toFixed(1)}% (${totalOutput.toFixed(2)} MT output vs ${actualRawQty.toFixed(2)} MT input)`
+        : null;
+
+      // Prevent duplicate yield recording — if batch already has output lots, skip
+      const existingOutputLots = await db('inventory_lots')
+        .where({ batch_ref: `batch-${batch.id}` })
+        .whereIn('type', ['finished', 'byproduct'])
+        .count('id as c').first();
+      if (parseInt(existingOutputLots.c) > 0 && batch.status === 'Completed') {
+        // Already recorded — update the batch numbers but don't create duplicate lots
+        await db('milling_batches').where({ id }).update({
+          actual_finished_mt: finished,
+          broken_mt: broken, bran_mt: bran, husk_mt: husk, wastage_mt: wastage,
+          yield_pct: yieldPct, updated_at: db.fn.now(),
+        });
+        return res.json({
+          success: true,
+          data: { batch: await db('milling_batches').where({ id }).first() },
+          warning: yieldWarning,
+          message: 'Yield updated (output lots already exist)',
+        });
+      }
 
       const updateData = {
         actual_finished_mt: finished,
@@ -428,6 +472,11 @@ const millingController = {
         yield_pct: yieldPct,
         updated_at: db.fn.now(),
       };
+
+      // Update raw_qty_mt to actual received weight if different
+      if (actualRawQty !== parseFloat(batch.raw_qty_mt)) {
+        updateData.raw_qty_mt = actualRawQty;
+      }
 
       // Auto-complete if output recorded (from Pending or In Progress)
       if (totalOutput > 0 && ['Pending', 'In Progress'].includes(batch.status)) {
@@ -648,10 +697,11 @@ const millingController = {
       return res.json({
         success: true,
         data: { batch: updated },
+        warning: yieldWarning,
       });
     } catch (err) {
       console.error('Milling recordYield error:', err);
-      return res.status(500).json({ success: false, message: 'Internal server error.' });
+      return res.status(500).json({ success: false, message: err.message || 'Internal server error.' });
     }
   },
 

@@ -475,12 +475,14 @@ const inventoryService = {
     }
 
     // Consume available qty — may be less than declared raw_qty_mt if
-    // actual received weight (via vehicle arrivals) differs from estimate
+    // actual received weight (via vehicle arrivals) differs from estimate.
+    // If stock is already fully consumed (from a prior yield attempt), skip silently.
     const availableQty = parseFloat(lot.available_qty) || 0;
     const consumeQty = Math.min(parsedQty, availableQty);
 
     if (consumeQty <= 0) {
-      throw new Error(`No stock available in raw lot ${lot.lot_no} for batch ${batchId}`);
+      // Already consumed — idempotent, don't fail
+      return null;
     }
 
     const movement = await inventoryService.postMovement(trx, {
