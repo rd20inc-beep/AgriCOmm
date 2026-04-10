@@ -146,6 +146,8 @@ export function transformOrder(dbOrder) {
     voyageNumber: dbOrder.voyage_number || '',
     gdNumber: dbOrder.gd_number || '',
     gdDate: dbOrder.gd_date || '',
+    fiNumber: dbOrder.fi_number || '',
+    fiDate: dbOrder.fi_date || '',
     fiNumber2: dbOrder.fi_number_2 || '',
     fiNumber3: dbOrder.fi_number_3 || '',
     notifyPartyName: dbOrder.notify_party_name || '',
