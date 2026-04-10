@@ -68,20 +68,26 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
   const finishedKG = finishedMT * 1000;
   const finishedYieldPct = rawQtyMT > 0 ? (finishedMT / rawQtyMT * 100).toFixed(1) : '0.0';
 
-  // ═══ SECTION E: By-Products ═══
-  const byProducts = [
-    { type: 'Broken Rice', key: 'broken', qty: pf(batch.brokenMT), rate: pf(byproductRates.broken) },
-    { type: 'Rice Bran / Polish', key: 'bran', qty: pf(batch.branMT), rate: pf(byproductRates.bran) },
-    { type: 'Rice Husk / Bhusa', key: 'husk', qty: pf(batch.huskMT), rate: pf(byproductRates.husk) },
-  ].map(bp => ({
-    ...bp,
-    qtyKG: bp.qty * 1000,
-    value: bp.qty * bp.rate,
-    yieldPct: rawQtyMT > 0 ? (bp.qty / rawQtyMT * 100).toFixed(1) : '0.0',
+  // ═══ SECTION E: All Output Products (only those with qty > 0) ═══
+  const allOutputProducts = [
+    { type: 'Finished Rice', key: 'finished', qty: finishedMT, ratePerKG: finishedKG > 0 ? totalBatchCost / finishedKG : 0, color: 'bg-blue-500', isMain: true },
+    { type: 'B1 (Large Broken)', key: 'b1', qty: pf(batch.b1MT), ratePerKG: pf(byproductRates.broken) / 1000, color: 'bg-amber-500' },
+    { type: 'B2 (Medium Broken)', key: 'b2', qty: pf(batch.b2MT), ratePerKG: pf(byproductRates.broken) * 0.8 / 1000, color: 'bg-amber-400' },
+    { type: 'B3 (Small Broken)', key: 'b3', qty: pf(batch.b3MT), ratePerKG: pf(byproductRates.broken) * 0.6 / 1000, color: 'bg-amber-300' },
+    { type: 'CSR (Sortex Reject)', key: 'csr', qty: pf(batch.csrMT), ratePerKG: pf(byproductRates.broken) * 0.5 / 1000, color: 'bg-orange-400' },
+    { type: 'Short Grain', key: 'shortGrain', qty: pf(batch.shortGrainMT), ratePerKG: pf(byproductRates.broken) * 0.7 / 1000, color: 'bg-yellow-500' },
+    { type: 'Rice Bran / Polish', key: 'bran', qty: pf(batch.branMT), ratePerKG: pf(byproductRates.bran) / 1000, color: 'bg-green-500' },
+    { type: 'Rice Husk / Bhusa', key: 'husk', qty: pf(batch.huskMT), ratePerKG: pf(byproductRates.husk) / 1000, color: 'bg-purple-500' },
+  ].filter(p => p.qty > 0).map(p => ({
+    ...p,
+    qtyKG: p.qty * 1000,
+    value: p.qty * 1000 * p.ratePerKG,
+    yieldPct: rawQtyMT > 0 ? (p.qty / rawQtyMT * 100).toFixed(1) : '0.0',
   }));
+  const byProducts = allOutputProducts.filter(p => !p.isMain);
   const wastageMT = pf(batch.wastageMT);
   const totalByproductValue = byProducts.reduce((s, bp) => s + bp.value, 0);
-  const totalOutputMT = finishedMT + byProducts.reduce((s, bp) => s + bp.qty, 0) + wastageMT;
+  const totalOutputMT = allOutputProducts.reduce((s, p) => s + p.qty, 0) + wastageMT;
   const totalRecoveryPct = rawQtyMT > 0 ? (totalOutputMT / rawQtyMT * 100).toFixed(1) : '0.0';
 
   // ═══ SECTION F: Final Costing ═══
@@ -174,7 +180,7 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
               <tr style={{ backgroundColor: H }}>
                 <th className="text-left px-6 py-2 text-xs font-bold text-white uppercase">Cost Item</th>
                 <th className="text-right px-6 py-2 text-xs font-bold text-white uppercase">Amount (PKR)</th>
-                <th className="text-right px-6 py-2 text-xs font-bold text-white uppercase">Per MT (Raw)</th>
+                <th className="text-right px-6 py-2 text-xs font-bold text-white uppercase">Per KG (Raw)</th>
                 <th className="text-right px-6 py-2 text-xs font-bold text-white uppercase">% of Total</th>
               </tr>
             </thead>
@@ -183,7 +189,7 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
               <tr className="bg-amber-50 border-b border-amber-100">
                 <td className="px-6 py-2 font-semibold text-amber-900">Raw Rice / Paddy Purchase</td>
                 <td className="px-6 py-2 text-right font-bold text-amber-900">{fmtPKR(effectiveRawRiceCost)}</td>
-                <td className="px-6 py-2 text-right text-amber-700">{rawQtyMT > 0 ? fmtPKR(effectiveRawRiceCost / rawQtyMT) : '—'}</td>
+                <td className="px-6 py-2 text-right text-amber-700">{rawQtyKG > 0 ? fmtPKR(effectiveRawRiceCost / rawQtyKG) : '—'}</td>
                 <td className="px-6 py-2 text-right text-amber-700">{totalBatchCost > 0 ? ((effectiveRawRiceCost / totalBatchCost) * 100).toFixed(1) : '—'}%</td>
               </tr>
               {/* Process costs */}
@@ -193,7 +199,7 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
                   <tr key={cat.key} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                     <td className="px-6 py-1.5 text-gray-900">{cat.label}</td>
                     <td className="px-6 py-1.5 text-right text-gray-700">{v > 0 ? fmtPKR(v) : '—'}</td>
-                    <td className="px-6 py-1.5 text-right text-gray-500">{v > 0 && rawQtyMT > 0 ? fmtPKR(v / rawQtyMT) : '—'}</td>
+                    <td className="px-6 py-1.5 text-right text-gray-500">{v > 0 && rawQtyKG > 0 ? fmtPKR(v / rawQtyKG) : '—'}</td>
                     <td className="px-6 py-1.5 text-right text-gray-500">{v > 0 && totalBatchCost > 0 ? ((v / totalBatchCost) * 100).toFixed(1) + '%' : '—'}</td>
                   </tr>
                 );
@@ -215,7 +221,7 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
               <tr className="border-t-2 border-gray-300 bg-gray-100">
                 <td className="px-6 py-2 font-bold text-gray-900">Total Batch Cost (A)</td>
                 <td className="px-6 py-2 text-right font-bold text-gray-900">{fmtPKR(totalBatchCost)}</td>
-                <td className="px-6 py-2 text-right font-semibold text-gray-700">{fmtPKR(costPerMT)}<span className="text-[10px] font-normal"> /MT</span></td>
+                <td className="px-6 py-2 text-right font-semibold text-gray-700">{rawQtyKG > 0 ? fmtPKR(totalBatchCost / rawQtyKG) : '—'}<span className="text-[10px] font-normal"> /KG</span></td>
                 <td className="px-6 py-2 text-right font-bold text-gray-900">100%</td>
               </tr>
             </tfoot>
@@ -237,49 +243,52 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
 
           {/* Yield breakdown bar */}
           <div className="flex rounded overflow-hidden h-5 mb-2">
-            {finishedMT > 0 && <div className="bg-blue-500 flex items-center justify-center text-white text-[9px] font-bold" style={{ width: `${(finishedMT / rawQtyMT) * 100}%` }}>Rice {finishedYieldPct}%</div>}
-            {byProducts.map(bp => bp.qty > 0 && <div key={bp.key} className={`flex items-center justify-center text-white text-[9px] font-bold ${bp.key === 'broken' ? 'bg-amber-500' : bp.key === 'bran' ? 'bg-green-500' : 'bg-purple-500'}`} style={{ width: `${(bp.qty / rawQtyMT) * 100}%` }}>{bp.yieldPct}%</div>)}
+            {allOutputProducts.map(p => (
+              <div key={p.key} className={`${p.color} flex items-center justify-center text-white text-[9px] font-bold`} style={{ width: `${(p.qty / rawQtyMT) * 100}%` }}>{p.yieldPct}%</div>
+            ))}
             {wastageMT > 0 && <div className="bg-red-400 flex items-center justify-center text-white text-[9px] font-bold" style={{ width: `${(wastageMT / rawQtyMT) * 100}%` }}>W</div>}
           </div>
         </div>
 
-        {/* ═══ SECTION E: By-Product Economics ═══ */}
+        {/* ═══ SECTION E: Output Products & Values ═══ */}
         <div className="border-x border-gray-200">
           <div className="px-6 py-2 bg-gray-50 border-t border-gray-200">
-            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Section E — By-Product Recovery & Value</p>
+            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Section E — Output Products & Market Value</p>
           </div>
           <table className="w-full text-sm">
             <thead>
               <tr style={{ backgroundColor: '#065f46' }}>
-                <th className="text-left px-6 py-2 text-xs font-bold text-white uppercase">By-Product</th>
-                <th className="text-right px-6 py-2 text-xs font-bold text-white uppercase">Qty (MT)</th>
+                <th className="text-left px-6 py-2 text-xs font-bold text-white uppercase">Product</th>
+                <th className="text-right px-6 py-2 text-xs font-bold text-white uppercase">Qty (KG)</th>
                 <th className="text-right px-6 py-2 text-xs font-bold text-white uppercase">Yield %</th>
-                <th className="text-right px-6 py-2 text-xs font-bold text-white uppercase">Rate / MT</th>
-                <th className="text-right px-6 py-2 text-xs font-bold text-white uppercase">Value (PKR)</th>
+                <th className="text-right px-6 py-2 text-xs font-bold text-white uppercase">Rate / KG</th>
+                <th className="text-right px-6 py-2 text-xs font-bold text-white uppercase">Total Value (PKR)</th>
               </tr>
             </thead>
             <tbody>
-              {byProducts.map((bp, idx) => (
-                <tr key={bp.key} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                  <td className="px-6 py-2 font-medium text-gray-900">{bp.type}</td>
-                  <td className="px-6 py-2 text-right text-gray-700">{bp.qty > 0 ? bp.qty.toFixed(1) : '—'}</td>
-                  <td className="px-6 py-2 text-right text-gray-600">{bp.qty > 0 ? bp.yieldPct + '%' : '—'}</td>
-                  <td className="px-6 py-2 text-right text-gray-600">{fmtPKR(bp.rate)}</td>
-                  <td className="px-6 py-2 text-right font-medium text-green-700">{bp.value > 0 ? fmtPKR(bp.value) : '—'}</td>
+              {allOutputProducts.map((p, idx) => (
+                <tr key={p.key} className={p.isMain ? 'bg-blue-50' : idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                  <td className={`px-6 py-2 font-medium ${p.isMain ? 'text-blue-900 font-bold' : 'text-gray-900'}`}>{p.type}</td>
+                  <td className="px-6 py-2 text-right text-gray-700">{p.qtyKG.toLocaleString()}</td>
+                  <td className="px-6 py-2 text-right text-gray-600">{p.yieldPct}%</td>
+                  <td className="px-6 py-2 text-right text-gray-600">{fmtPKR(p.ratePerKG)}</td>
+                  <td className={`px-6 py-2 text-right font-medium ${p.isMain ? 'text-blue-800 font-bold' : 'text-green-700'}`}>{fmtPKR(p.value)}</td>
                 </tr>
               ))}
-              <tr className="bg-gray-50">
-                <td className="px-6 py-1.5 text-gray-500 italic">Wastage / Loss</td>
-                <td className="px-6 py-1.5 text-right text-red-600">{wastageMT > 0 ? wastageMT.toFixed(1) : '—'}</td>
-                <td className="px-6 py-1.5 text-right text-red-500">{rawQtyMT > 0 && wastageMT > 0 ? (wastageMT / rawQtyMT * 100).toFixed(1) + '%' : '—'}</td>
-                <td className="px-6 py-1.5 text-right text-gray-400">—</td>
-                <td className="px-6 py-1.5 text-right text-gray-400">—</td>
-              </tr>
+              {wastageMT > 0 && (
+                <tr className="bg-gray-50">
+                  <td className="px-6 py-1.5 text-gray-500 italic">Wastage / Sweeping</td>
+                  <td className="px-6 py-1.5 text-right text-red-600">{(wastageMT * 1000).toLocaleString()}</td>
+                  <td className="px-6 py-1.5 text-right text-red-500">{rawQtyMT > 0 ? (wastageMT / rawQtyMT * 100).toFixed(1) + '%' : '—'}</td>
+                  <td className="px-6 py-1.5 text-right text-gray-400">—</td>
+                  <td className="px-6 py-1.5 text-right text-gray-400">—</td>
+                </tr>
+              )}
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-green-300 bg-green-50">
-                <td className="px-6 py-2 font-bold text-green-900">Total By-Product Value (B)</td>
-                <td className="px-6 py-2 text-right font-bold text-green-900">{byProducts.reduce((s, bp) => s + bp.qty, 0).toFixed(1)}</td>
+                <td className="px-6 py-2 font-bold text-green-900">Total By-Product Recovery (B)</td>
+                <td className="px-6 py-2 text-right font-bold text-green-900">{byProducts.reduce((s, bp) => s + bp.qtyKG, 0).toLocaleString()}</td>
                 <td className="px-6 py-2"></td>
                 <td className="px-6 py-2"></td>
                 <td className="px-6 py-2 text-right font-bold text-green-900">{fmtPKR(totalByproductValue)}</td>
