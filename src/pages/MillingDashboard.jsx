@@ -92,6 +92,9 @@ export default function MillingDashboard() {
         raw_qty_mt: rawQty,
         planned_finished_mt: planned,
         mill_id: mills.length > 0 ? mills[0].id : null,
+        transport_mode: batchForm.withTransport === 'yes' ? 'with' : 'without',
+        purchase_price_per_kg: pricePerKg || null,
+        product_id: batchForm.productId ? parseInt(batchForm.productId) : null,
         notes: notesParts.join(' | '),
       };
       const res = await createBatchMut.mutateAsync(payload);

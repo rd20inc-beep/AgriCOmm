@@ -147,6 +147,9 @@ const millingController = {
         raw_qty_mt,
         planned_finished_mt,
         milling_fee_per_kg,
+        transport_mode,
+        purchase_price_per_kg,
+        product_id,
         notes,
       } = req.body;
 
@@ -193,6 +196,10 @@ const millingController = {
             raw_qty_mt: parseFloat(raw_qty_mt),
             planned_finished_mt: planned_finished_mt ? parseFloat(planned_finished_mt) : null,
             milling_fee_per_kg: milling_fee_per_kg ? parseFloat(milling_fee_per_kg) : 5,
+            transport_mode: transport_mode || 'with',
+            purchase_price_per_kg: purchase_price_per_kg ? parseFloat(purchase_price_per_kg) : null,
+            product_id: product_id ? parseInt(product_id) : null,
+            notes: notes || null,
             status: 'Pending',
             created_by: req.user.id,
           })

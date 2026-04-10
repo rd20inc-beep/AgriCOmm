@@ -241,6 +241,9 @@ export function transformBatch(dbBatch) {
     millId: dbBatch.mill_id,
     machineLine: dbBatch.machine_line,
     shift: dbBatch.shift,
+    transportMode: dbBatch.transport_mode || 'with',
+    purchasePricePerKg: parseFloat(dbBatch.purchase_price_per_kg) || 0,
+    productId: dbBatch.product_id,
     notes: dbBatch.notes || '',
     isServiceMilling: (dbBatch.notes || '').includes('[SERVICE MILLING]'),
   };

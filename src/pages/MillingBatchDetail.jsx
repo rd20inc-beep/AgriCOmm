@@ -111,7 +111,7 @@ export default function MillingBatchDetail() {
   const [priceForm, setPriceForm] = useState({ finished: '', b1: '', b2: '', b3: '', csr: '', shortGrain: '', bran: '', husk: '' });
   const [priceLoading, setPriceLoading] = useState(false);
   const [vehicleForm, setVehicleForm] = useState({
-    vehicleNo: '', driverName: '', driverPhone: '', weightMT: '', bagSizeKg: '50', arrivalDate: new Date().toISOString().split('T')[0], notes: '',
+    vehicleNo: '', driverName: '', driverPhone: '', weightMT: '', bagSizeKg: '50', transportCost: '', arrivalDate: new Date().toISOString().split('T')[0], notes: '',
   });
 
   if (batchLoading && !batch) {
@@ -198,6 +198,8 @@ export default function MillingBatchDetail() {
       setAnalysisForm({
         moisture: source.moisture ?? '',
         broken: source.broken ?? '',
+        b1Pct: source.b1Pct ?? '', b2Pct: source.b2Pct ?? '', b3Pct: source.b3Pct ?? '',
+        csrPct: source.csrPct ?? '', shortGrainPct: source.shortGrainPct ?? '',
         chalky: source.chalky ?? '',
         foreignMatter: source.foreignMatter ?? '',
         discoloration: source.discoloration ?? '',
@@ -207,7 +209,16 @@ export default function MillingBatchDetail() {
         pricePerMT: source.pricePerMT ?? '',
       });
     } else {
-      setAnalysisForm({ moisture: '', broken: '', chalky: '', foreignMatter: '', discoloration: '', purity: '', grainSize: '', pricePerKg: '', pricePerMT: '' });
+      // Pre-fill price from batch purchase price when entering fresh analysis
+      const batchPriceKg = batch.purchasePricePerKg || 0;
+      const batchPriceMT = batchPriceKg > 0 ? (batchPriceKg * 1000).toFixed(2) : '';
+      setAnalysisForm({
+        moisture: '', broken: '',
+        b1Pct: '', b2Pct: '', b3Pct: '', csrPct: '', shortGrainPct: '',
+        chalky: '', foreignMatter: '', discoloration: '', purity: '', grainSize: '',
+        pricePerKg: batchPriceKg > 0 ? String(batchPriceKg) : '',
+        pricePerMT: batchPriceMT,
+      });
     }
     setShowAnalysisModal(true);
   }
@@ -392,7 +403,7 @@ export default function MillingBatchDetail() {
     } catch (err) {
       addToast(err.message || 'Failed to add vehicle', 'error');
     }
-    setVehicleForm({ vehicleNo: '', driverName: '', driverPhone: '', weightMT: '', bagSizeKg: '50', arrivalDate: new Date().toISOString().split('T')[0], notes: '' });
+    setVehicleForm({ vehicleNo: '', driverName: '', driverPhone: '', weightMT: '', bagSizeKg: '50', transportCost: '', arrivalDate: new Date().toISOString().split('T')[0], notes: '' });
     setShowVehicleModal(false);
   }
 
@@ -1700,11 +1711,26 @@ export default function MillingBatchDetail() {
               />
             </div>
           </div>
-          {/* Auto-calculated bag count */}
-          {parseFloat(vehicleForm.weightMT) > 0 && parseFloat(vehicleForm.bagSizeKg) > 0 && (
-            <div className="bg-blue-50 rounded-lg p-3 text-sm text-blue-800">
-              <span className="font-semibold">Total Bags:</span> {Math.ceil((parseFloat(vehicleForm.weightMT) * 1000) / parseFloat(vehicleForm.bagSizeKg)).toLocaleString()} bags
-              &nbsp;({vehicleForm.weightMT} MT ÷ {vehicleForm.bagSizeKg} KG/bag)
+          {/* Transport cost — only for "without transport" batches */}
+          {batch.transportMode === 'without' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Transport Cost (PKR)</label>
+              <input type="number" step="100" value={vehicleForm.transportCost}
+                onChange={(e) => setVehicleForm(prev => ({ ...prev, transportCost: e.target.value }))}
+                placeholder="e.g. 25000" className="w-full rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500" />
+              <p className="text-xs text-amber-500 mt-1">Supplier delivered — enter transport cost charged</p>
+            </div>
+          )}
+
+          {/* Auto-calculated bag count + purchase info */}
+          {parseFloat(vehicleForm.weightMT) > 0 && (
+            <div className="bg-blue-50 rounded-lg p-3 text-sm text-blue-800 space-y-1">
+              {parseFloat(vehicleForm.bagSizeKg) > 0 && (
+                <div><span className="font-semibold">Total Bags:</span> {Math.ceil((parseFloat(vehicleForm.weightMT) * 1000) / parseFloat(vehicleForm.bagSizeKg)).toLocaleString()} bags ({vehicleForm.bagSizeKg} KG/bag)</div>
+              )}
+              {batch.purchasePricePerKg > 0 && (
+                <div><span className="font-semibold">Purchase Value:</span> Rs {Math.round(batch.purchasePricePerKg * parseFloat(vehicleForm.weightMT) * 1000).toLocaleString()} (Rs {batch.purchasePricePerKg}/KG × {vehicleForm.weightMT} MT)</div>
+              )}
             </div>
           )}
           <div className="flex justify-end gap-3 pt-2">
