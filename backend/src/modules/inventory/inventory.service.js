@@ -474,11 +474,19 @@ const inventoryService = {
       throw new Error(`No raw paddy lot found for batch ${batchId}`);
     }
 
-    // validateSufficientStock is called inside postMovement for outbound types
+    // Consume available qty — may be less than declared raw_qty_mt if
+    // actual received weight (via vehicle arrivals) differs from estimate
+    const availableQty = parseFloat(lot.available_qty) || 0;
+    const consumeQty = Math.min(parsedQty, availableQty);
+
+    if (consumeQty <= 0) {
+      throw new Error(`No stock available in raw lot ${lot.lot_no} for batch ${batchId}`);
+    }
+
     const movement = await inventoryService.postMovement(trx, {
       movementType: MOVEMENT_TYPES.PRODUCTION_ISSUE,
       lotId: lot.id,
-      qty: parsedQty,
+      qty: consumeQty,
       fromWarehouseId: lot.warehouse_id,
       sourceEntity: 'mill',
       linkedRef: `batch-${batchId}`,
