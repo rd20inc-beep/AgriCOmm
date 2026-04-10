@@ -108,7 +108,7 @@ export default function MillingBatchDetail() {
   const [selectedSupplier, setSelectedSupplier] = useState('');
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [transferForm, setTransferForm] = useState({ qtyMT: '', pricePerMT: '', pkrRate: '280' });
-  const [priceForm, setPriceForm] = useState({ finished: '', broken: '', bran: '', husk: '' });
+  const [priceForm, setPriceForm] = useState({ finished: '', b1: '', b2: '', b3: '', csr: '', shortGrain: '', bran: '', husk: '' });
   const [priceLoading, setPriceLoading] = useState(false);
   const [vehicleForm, setVehicleForm] = useState({
     vehicleNo: '', driverName: '', driverPhone: '', weightMT: '', bagSizeKg: '50', arrivalDate: new Date().toISOString().split('T')[0], notes: '',
@@ -343,17 +343,21 @@ export default function MillingBatchDetail() {
       if (totalOutput > 0 && batch.status === 'In Progress') {
         addToast(`Batch ${batch.id} marked as Completed`, 'info');
       }
-      // Show price confirmation modal after yield is recorded
+      // Show price confirmation modal — only for products with output > 0
       if (totalOutput > 0) {
         setPriceLoading(true);
         try {
           const res = await millingApi.getLastPrices();
           const lp = res?.data?.lastPrices || {};
           setPriceForm({
-            finished: String(lp.finished || 72800),
-            broken: String(lp.broken || 38000),
-            bran: String(lp.bran || 28000),
-            husk: String(lp.husk || 8400),
+            finished: finished > 0 ? String(lp.finished || 72800) : '',
+            b1: b1 > 0 ? String(lp.broken || 38000) : '',
+            b2: b2 > 0 ? String(Math.round((lp.broken || 38000) * 0.8)) : '',
+            b3: b3 > 0 ? String(Math.round((lp.broken || 38000) * 0.6)) : '',
+            csr: csrVal > 0 ? String(Math.round((lp.broken || 38000) * 0.5)) : '',
+            shortGrain: shortGrain > 0 ? String(Math.round((lp.broken || 38000) * 0.7)) : '',
+            bran: bran > 0 ? String(lp.bran || 28000) : '',
+            husk: husk > 0 ? String(lp.husk || 8400) : '',
           });
         } catch { /* use defaults */ }
         setPriceLoading(false);
@@ -1722,61 +1726,73 @@ export default function MillingBatchDetail() {
         </form>
       </Modal>
 
-      {/* Confirm Product Prices Modal */}
+      {/* Confirm Product Prices Modal — only shows products with output */}
       <Modal isOpen={showPriceModal} onClose={() => setShowPriceModal(false)} title="Confirm Product Prices" size="md">
-        <div className="space-y-4">
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
-            Confirm today's market prices for the costing sheet. Previous prices are pre-filled.
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Finished Rice (PKR/MT)</label>
-              <input type="number" value={priceForm.finished} onChange={e => setPriceForm(p => ({ ...p, finished: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
+        {batch && (() => {
+          const products = [
+            { key: 'finished', label: 'Finished Rice', qty: batch.actualFinishedMT },
+            { key: 'b1', label: 'B1 (Large Broken)', qty: batch.b1MT },
+            { key: 'b2', label: 'B2 (Medium Broken)', qty: batch.b2MT },
+            { key: 'b3', label: 'B3 (Small Broken)', qty: batch.b3MT },
+            { key: 'csr', label: 'CSR (Sortex Reject)', qty: batch.csrMT },
+            { key: 'shortGrain', label: 'Short Grain', qty: batch.shortGrainMT },
+            { key: 'bran', label: 'Rice Bran', qty: batch.branMT },
+            { key: 'husk', label: 'Rice Husk', qty: batch.huskMT },
+          ].filter(p => parseFloat(p.qty) > 0);
+
+          const totalRevenue = products.reduce((s, p) => s + (parseFloat(p.qty) || 0) * (parseFloat(priceForm[p.key]) || 0), 0);
+
+          return (
+            <div className="space-y-4">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
+                Confirm market prices for the products produced in this batch.
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {products.map(p => (
+                  <div key={p.key}>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">{p.label} — {parseFloat(p.qty).toFixed(2)} MT (PKR/MT)</label>
+                    <input type="number" value={priceForm[p.key]} onChange={e => setPriceForm(prev => ({ ...prev, [p.key]: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" placeholder="0" />
+                  </div>
+                ))}
+              </div>
+              <div className="bg-gray-50 rounded-lg p-3 text-xs space-y-1">
+                {products.map(p => {
+                  const rev = (parseFloat(p.qty) || 0) * (parseFloat(priceForm[p.key]) || 0);
+                  return rev > 0 ? (
+                    <div key={p.key} className="flex justify-between">
+                      <span className="text-gray-500">{p.label}</span>
+                      <span className="font-bold">Rs {Math.round(rev).toLocaleString()}</span>
+                    </div>
+                  ) : null;
+                })}
+                <div className="flex justify-between border-t pt-1 mt-1">
+                  <span className="text-gray-700 font-medium">Total Revenue</span>
+                  <span className="font-bold text-green-700">Rs {Math.round(totalRevenue).toLocaleString()}</span>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <button onClick={() => setShowPriceModal(false)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Skip for Now</button>
+                <button onClick={async () => {
+                  try {
+                    const brokenTotal = (parseFloat(priceForm.b1) || 0) + (parseFloat(priceForm.b2) || 0) + (parseFloat(priceForm.b3) || 0) + (parseFloat(priceForm.csr) || 0) + (parseFloat(priceForm.shortGrain) || 0);
+                    const brokenCount = [priceForm.b1, priceForm.b2, priceForm.b3, priceForm.csr, priceForm.shortGrain].filter(v => parseFloat(v) > 0).length;
+                    const avgBrokenPrice = brokenCount > 0 ? brokenTotal / brokenCount : 0;
+                    await millingApi.confirmPrices(batchId, {
+                      finished_price_per_mt: parseFloat(priceForm.finished) || 0,
+                      broken_price_per_mt: avgBrokenPrice,
+                      bran_price_per_mt: parseFloat(priceForm.bran) || 0,
+                      husk_price_per_mt: parseFloat(priceForm.husk) || 0,
+                    });
+                    addToast('Product prices confirmed for costing sheet');
+                    invalidateBatch();
+                    setShowPriceModal(false);
+                  } catch (err) { addToast(err.message || 'Failed', 'error'); }
+                }} className="px-4 py-2 text-sm text-white bg-green-600 rounded-lg hover:bg-green-700">Confirm Prices</button>
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Broken Rice (PKR/MT)</label>
-              <input type="number" value={priceForm.broken} onChange={e => setPriceForm(p => ({ ...p, broken: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Rice Bran (PKR/MT)</label>
-              <input type="number" value={priceForm.bran} onChange={e => setPriceForm(p => ({ ...p, bran: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Rice Husk (PKR/MT)</label>
-              <input type="number" value={priceForm.husk} onChange={e => setPriceForm(p => ({ ...p, husk: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
-            </div>
-          </div>
-          {batch && (
-            <div className="bg-gray-50 rounded-lg p-3 text-xs space-y-1">
-              <div className="flex justify-between"><span className="text-gray-500">Finished Revenue</span><span className="font-bold">Rs {Math.round(batch.actualFinishedMT * (parseFloat(priceForm.finished) || 0)).toLocaleString()}</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">Broken Revenue</span><span className="font-bold">Rs {Math.round((batch.brokenMT || 0) * (parseFloat(priceForm.broken) || 0)).toLocaleString()}</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">Bran Revenue</span><span className="font-bold">Rs {Math.round((batch.branMT || 0) * (parseFloat(priceForm.bran) || 0)).toLocaleString()}</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">Husk Revenue</span><span className="font-bold">Rs {Math.round((batch.huskMT || 0) * (parseFloat(priceForm.husk) || 0)).toLocaleString()}</span></div>
-              <div className="flex justify-between border-t pt-1 mt-1"><span className="text-gray-700 font-medium">Total Revenue</span><span className="font-bold text-green-700">Rs {Math.round(
-                batch.actualFinishedMT * (parseFloat(priceForm.finished) || 0) +
-                (batch.brokenMT || 0) * (parseFloat(priceForm.broken) || 0) +
-                (batch.branMT || 0) * (parseFloat(priceForm.bran) || 0) +
-                (batch.huskMT || 0) * (parseFloat(priceForm.husk) || 0)
-              ).toLocaleString()}</span></div>
-            </div>
-          )}
-          <div className="flex justify-end gap-2 pt-2 border-t">
-            <button onClick={() => setShowPriceModal(false)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Skip for Now</button>
-            <button onClick={async () => {
-              try {
-                await millingApi.confirmPrices(batchId, {
-                  finished_price_per_mt: parseFloat(priceForm.finished) || 0,
-                  broken_price_per_mt: parseFloat(priceForm.broken) || 0,
-                  bran_price_per_mt: parseFloat(priceForm.bran) || 0,
-                  husk_price_per_mt: parseFloat(priceForm.husk) || 0,
-                });
-                addToast('Product prices confirmed for costing sheet');
-                invalidateBatch();
-                setShowPriceModal(false);
-              } catch (err) { addToast(err.message || 'Failed', 'error'); }
-            }} className="px-4 py-2 text-sm text-white bg-green-600 rounded-lg hover:bg-green-700">Confirm Prices</button>
-          </div>
-        </div>
+          );
+        })()}
       </Modal>
 
       {/* Price Confirmation Banner — show if batch completed but prices not confirmed */}
@@ -1789,7 +1805,16 @@ export default function MillingBatchDetail() {
             try {
               const res = await millingApi.getLastPrices();
               const lp = res?.data?.lastPrices || {};
-              setPriceForm({ finished: String(lp.finished || 72800), broken: String(lp.broken || 38000), bran: String(lp.bran || 28000), husk: String(lp.husk || 8400) });
+              setPriceForm({
+                finished: batch.actualFinishedMT > 0 ? String(lp.finished || 72800) : '',
+                b1: batch.b1MT > 0 ? String(lp.broken || 38000) : '',
+                b2: batch.b2MT > 0 ? String(Math.round((lp.broken || 38000) * 0.8)) : '',
+                b3: batch.b3MT > 0 ? String(Math.round((lp.broken || 38000) * 0.6)) : '',
+                csr: batch.csrMT > 0 ? String(Math.round((lp.broken || 38000) * 0.5)) : '',
+                shortGrain: batch.shortGrainMT > 0 ? String(Math.round((lp.broken || 38000) * 0.7)) : '',
+                bran: batch.branMT > 0 ? String(lp.bran || 28000) : '',
+                husk: batch.huskMT > 0 ? String(lp.husk || 8400) : '',
+              });
             } catch {}
             setPriceLoading(false);
             setShowPriceModal(true);
