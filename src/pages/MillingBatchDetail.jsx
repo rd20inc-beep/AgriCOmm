@@ -111,7 +111,7 @@ export default function MillingBatchDetail() {
   const [priceForm, setPriceForm] = useState({ finished: '', broken: '', bran: '', husk: '' });
   const [priceLoading, setPriceLoading] = useState(false);
   const [vehicleForm, setVehicleForm] = useState({
-    vehicleNo: '', driverName: '', driverPhone: '', weightMT: '', arrivalDate: new Date().toISOString().split('T')[0], notes: '',
+    vehicleNo: '', driverName: '', driverPhone: '', weightMT: '', bagSizeKg: '50', arrivalDate: new Date().toISOString().split('T')[0], notes: '',
   });
 
   if (batchLoading && !batch) {
@@ -379,6 +379,7 @@ export default function MillingBatchDetail() {
           driver_name: vehicleForm.driverName.trim(),
           driver_phone: vehicleForm.driverPhone.trim(),
           weight_mt: parseFloat(vehicleForm.weightMT) || 0,
+          bag_size_kg: parseFloat(vehicleForm.bagSizeKg) || null,
           arrival_date: vehicleForm.arrivalDate,
           notes: vehicleForm.notes.trim(),
         },
@@ -387,7 +388,7 @@ export default function MillingBatchDetail() {
     } catch (err) {
       addToast(err.message || 'Failed to add vehicle', 'error');
     }
-    setVehicleForm({ vehicleNo: '', driverName: '', driverPhone: '', weightMT: '', arrivalDate: new Date().toISOString().split('T')[0], notes: '' });
+    setVehicleForm({ vehicleNo: '', driverName: '', driverPhone: '', weightMT: '', bagSizeKg: '50', arrivalDate: new Date().toISOString().split('T')[0], notes: '' });
     setShowVehicleModal(false);
   }
 
@@ -396,6 +397,10 @@ export default function MillingBatchDetail() {
     millingCostCategories.forEach(cat => {
       form[cat.key] = safeCosts[cat.key] || '';
     });
+    // Auto-populate raw rice cost from arrival analysis price if not already set
+    if (!form.rawRice && safeArrival?.pricePerMT && batch.rawQtyMT > 0) {
+      form.rawRice = Math.round(safeArrival.pricePerMT * batch.rawQtyMT);
+    }
     setCostForm(form);
     setShowCostModal(true);
   }
@@ -1602,6 +1607,19 @@ export default function MillingBatchDetail() {
               />
             </div>
             <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Bag Size (KG)</label>
+              <select
+                value={vehicleForm.bagSizeKg}
+                onChange={(e) => setVehicleForm(prev => ({ ...prev, bagSizeKg: e.target.value }))}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+              >
+                <option value="25">25 KG</option>
+                <option value="40">40 KG</option>
+                <option value="50">50 KG</option>
+                <option value="100">100 KG</option>
+              </select>
+            </div>
+            <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
               <input
                 type="text"
@@ -1612,6 +1630,13 @@ export default function MillingBatchDetail() {
               />
             </div>
           </div>
+          {/* Auto-calculated bag count */}
+          {parseFloat(vehicleForm.weightMT) > 0 && parseFloat(vehicleForm.bagSizeKg) > 0 && (
+            <div className="bg-blue-50 rounded-lg p-3 text-sm text-blue-800">
+              <span className="font-semibold">Total Bags:</span> {Math.ceil((parseFloat(vehicleForm.weightMT) * 1000) / parseFloat(vehicleForm.bagSizeKg)).toLocaleString()} bags
+              &nbsp;({vehicleForm.weightMT} MT ÷ {vehicleForm.bagSizeKg} KG/bag)
+            </div>
+          )}
           <div className="flex justify-end gap-3 pt-2">
             <button
               type="button"

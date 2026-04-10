@@ -782,6 +782,7 @@ const millingController = {
         driver_name,
         driver_phone,
         weight_mt,
+        bag_size_kg,
         arrival_date,
         notes,
       } = req.body;
@@ -792,13 +793,21 @@ const millingController = {
       }
 
       const vehicle = await db.transaction(async (trx) => {
+        const parsedWeight = weight_mt ? parseFloat(weight_mt) : null;
+        const parsedBagSize = bag_size_kg ? parseFloat(bag_size_kg) : null;
+        const totalBags = parsedWeight && parsedBagSize && parsedBagSize > 0
+          ? Math.ceil((parsedWeight * 1000) / parsedBagSize)
+          : null;
+
         const [v] = await trx('milling_vehicle_arrivals')
           .insert({
             batch_id: batchId,
             vehicle_no: vehicle_no || null,
             driver_name: driver_name || null,
             driver_phone: driver_phone || null,
-            weight_mt: weight_mt ? parseFloat(weight_mt) : null,
+            weight_mt: parsedWeight,
+            bag_size_kg: parsedBagSize,
+            total_bags: totalBags,
             arrival_date: arrival_date || trx.fn.now(),
             notes: notes || null,
           })
