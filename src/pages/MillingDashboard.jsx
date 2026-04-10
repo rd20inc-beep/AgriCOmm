@@ -34,7 +34,7 @@ function formatPKR(value) {
 
 export default function MillingDashboard() {
   const navigate = useNavigate();
-  const { millingBatches, suppliersList, addToast } = useApp();
+  const { millingBatches, suppliersList, productsList, addToast } = useApp();
   const { data: directInv = [] } = useInventory({});
   const inventory = Array.isArray(directInv) ? directInv : [];
   const createBatchMut = useCreateMillingBatch();
@@ -47,16 +47,17 @@ export default function MillingDashboard() {
   const [showNewBatch, setShowNewBatch] = useState(false);
   const [batchForm, setBatchForm] = useState({
     millingType: 'own_stock',
-    supplierId: '', rawQtyMT: '', plannedFinishedMT: '',
-    millId: '', shift: 'Day', notes: '',
+    supplierId: '', rawQtyMT: '', productId: '',
+    withTransport: 'yes', pricePerMT: '',
+    notes: '',
     // Service milling fields
     clientName: '', clientContact: '', millingFeePerMT: '',
   });
   const setBF = (k, v) => setBatchForm(p => ({ ...p, [k]: v }));
   const resetBatchForm = () => setBatchForm({
-    millingType: 'own_stock', supplierId: '', rawQtyMT: '', plannedFinishedMT: '',
-    millingFeePerKg: '5',
-    millId: '', shift: 'Day', notes: '', clientName: '', clientContact: '', millingFeePerMT: '',
+    millingType: 'own_stock', supplierId: '', rawQtyMT: '', productId: '',
+    withTransport: 'yes', pricePerMT: '',
+    notes: '', clientName: '', clientContact: '', millingFeePerMT: '',
   });
 
   async function handleCreateBatch() {
@@ -69,19 +70,29 @@ export default function MillingDashboard() {
       return;
     }
     const rawQty = parseFloat(batchForm.rawQtyMT);
-    const planned = parseFloat(batchForm.plannedFinishedMT) || Math.round(rawQty * 0.65);
+    const planned = Math.round(rawQty * 0.65);
+    const pricePerMT = parseFloat(batchForm.pricePerMT) || 0;
+    const transportNote = batchForm.withTransport === 'yes' ? 'With Transport' : 'Without Transport';
+    const selectedProduct = (productsList || []).find(p => String(p.id) === String(batchForm.productId));
 
     try {
+      const notesParts = [];
+      if (batchForm.millingType === 'service_milling') {
+        notesParts.push(`[SERVICE MILLING] Client: ${batchForm.clientName}`);
+        if (batchForm.clientContact) notesParts.push(`Contact: ${batchForm.clientContact}`);
+        if (batchForm.millingFeePerMT) notesParts.push(`Fee: PKR ${batchForm.millingFeePerMT}/MT`);
+      }
+      notesParts.push(transportNote);
+      if (pricePerMT > 0) notesParts.push(`Purchase Price: PKR ${pricePerMT.toLocaleString()}/MT`);
+      if (selectedProduct) notesParts.push(`Rice: ${selectedProduct.name}`);
+      if (batchForm.notes) notesParts.push(batchForm.notes);
+
       const payload = {
         supplier_id: parseInt(batchForm.supplierId),
         raw_qty_mt: rawQty,
         planned_finished_mt: planned,
-        milling_fee_per_kg: parseFloat(batchForm.millingFeePerKg) || 5,
-        mill_id: batchForm.millId ? parseInt(batchForm.millId) : null,
-        shift: batchForm.shift,
-        notes: batchForm.millingType === 'service_milling'
-          ? `[SERVICE MILLING] Client: ${batchForm.clientName}${batchForm.clientContact ? ` | Contact: ${batchForm.clientContact}` : ''}${batchForm.millingFeePerMT ? ` | Fee: PKR ${batchForm.millingFeePerMT}/MT` : ''}${batchForm.notes ? ` | ${batchForm.notes}` : ''}`
-          : batchForm.notes || null,
+        mill_id: mills.length > 0 ? mills[0].id : null,
+        notes: notesParts.join(' | '),
       };
       const res = await createBatchMut.mutateAsync(payload);
       const batchNo = res?.data?.batch?.batch_no || res?.data?.batch?.id;
@@ -556,7 +567,7 @@ export default function MillingDashboard() {
             </div>
           )}
 
-          {/* Supplier (paddy source) */}
+          {/* Supplier */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               {batchForm.millingType === 'service_milling' ? 'Paddy Source (Client / Broker)' : 'Supplier'} *
@@ -567,67 +578,69 @@ export default function MillingDashboard() {
             </select>
           </div>
 
-          {/* Quantities */}
+          {/* Rice Category */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Rice Category *</label>
+            <select value={batchForm.productId} onChange={e => setBF('productId', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none bg-white">
+              <option value="">Select rice type...</option>
+              {(productsList || []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+
+          {/* Raw Qty + Price */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Raw Qty (MT) *</label>
-              <input
-                type="number"
-                value={batchForm.rawQtyMT}
-                onChange={e => {
-                  setBF('rawQtyMT', e.target.value);
-                  if (e.target.value) setBF('plannedFinishedMT', String(Math.round(parseFloat(e.target.value) * 0.65)));
-                }}
-                placeholder="Paddy quantity"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none"
-              />
+              <input type="number" step="0.1" value={batchForm.rawQtyMT} onChange={e => setBF('rawQtyMT', e.target.value)}
+                placeholder="Paddy quantity" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Expected Finished (MT)</label>
-              <input type="number" value={batchForm.plannedFinishedMT} onChange={e => setBF('plannedFinishedMT', e.target.value)} placeholder="Auto: ~65% of raw" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
+              <label className="block text-sm font-medium text-gray-700 mb-1">Purchase Price (PKR/MT)</label>
+              <input type="number" step="100" value={batchForm.pricePerMT} onChange={e => setBF('pricePerMT', e.target.value)}
+                placeholder="e.g. 85000" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
             </div>
           </div>
 
-          {/* Mill & Shift */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Mill</label>
-              <select value={batchForm.millId} onChange={e => setBF('millId', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none bg-white">
-                <option value="">Select mill...</option>
-                {mills.map(m => <option key={m.id} value={m.id}>{m.name} — {m.location || 'N/A'}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Shift</label>
-              <select value={batchForm.shift} onChange={e => setBF('shift', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none bg-white">
-                <option value="Day">Day</option>
-                <option value="Night">Night</option>
-                <option value="Full">Full Day</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Milling Fee */}
+          {/* Transport */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Milling Fee (PKR/KG)</label>
-            <input type="number" value={batchForm.millingFeePerKg} onChange={e => setBF('millingFeePerKg', e.target.value)} placeholder="5" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
-            <p className="text-xs text-gray-400 mt-1">Cost charged per KG of raw paddy processed. Default: PKR 5/KG</p>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Transport</label>
+            <div className="grid grid-cols-2 gap-3">
+              <button type="button" onClick={() => setBF('withTransport', 'yes')}
+                className={`p-2.5 rounded-lg border-2 text-center text-sm transition-all ${batchForm.withTransport === 'yes' ? 'border-blue-500 bg-blue-50 text-blue-700 font-semibold' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                With Transport
+                <p className="text-xs text-gray-400 mt-0.5">Mill arranges pickup</p>
+              </button>
+              <button type="button" onClick={() => setBF('withTransport', 'no')}
+                className={`p-2.5 rounded-lg border-2 text-center text-sm transition-all ${batchForm.withTransport === 'no' ? 'border-amber-500 bg-amber-50 text-amber-700 font-semibold' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                Without Transport
+                <p className="text-xs text-gray-400 mt-0.5">Supplier delivers</p>
+              </button>
+            </div>
           </div>
 
           {/* Notes */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-            <textarea value={batchForm.notes} onChange={e => setBF('notes', e.target.value)} rows={2} placeholder="Special instructions, quality requirements..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none resize-none" />
+            <textarea value={batchForm.notes} onChange={e => setBF('notes', e.target.value)} rows={2} placeholder="Special instructions..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none resize-none" />
           </div>
 
           {/* Summary */}
           {batchForm.rawQtyMT && (
-            <div className="bg-gray-50 rounded-lg border border-gray-200 p-3 text-sm">
+            <div className="bg-gray-50 rounded-lg border border-gray-200 p-3 text-sm space-y-1">
               <div className="flex justify-between"><span className="text-gray-500">Type</span><span className="font-medium">{batchForm.millingType === 'service_milling' ? 'Service Milling' : 'Own Stock'}</span></div>
+              {batchForm.productId && (
+                <div className="flex justify-between"><span className="text-gray-500">Rice</span><span className="font-medium">{(productsList || []).find(p => String(p.id) === String(batchForm.productId))?.name || '—'}</span></div>
+              )}
               <div className="flex justify-between"><span className="text-gray-500">Raw Input</span><span className="font-medium">{batchForm.rawQtyMT} MT</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">Expected Output</span><span className="font-medium">{batchForm.plannedFinishedMT || Math.round(parseFloat(batchForm.rawQtyMT) * 0.65)} MT</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Transport</span><span className="font-medium">{batchForm.withTransport === 'yes' ? 'With Transport' : 'Without Transport'}</span></div>
+              {parseFloat(batchForm.pricePerMT) > 0 && (
+                <div className="flex justify-between border-t border-gray-200 pt-1">
+                  <span className="text-gray-500">Total Purchase Cost</span>
+                  <span className="font-bold text-gray-900">PKR {Math.round(parseFloat(batchForm.pricePerMT) * parseFloat(batchForm.rawQtyMT)).toLocaleString()}</span>
+                </div>
+              )}
               {batchForm.millingType === 'service_milling' && batchForm.millingFeePerMT && (
-                <div className="flex justify-between border-t border-gray-200 mt-1 pt-1">
+                <div className="flex justify-between border-t border-gray-200 pt-1">
                   <span className="text-gray-500">Milling Revenue</span>
                   <span className="font-bold text-green-700">PKR {Math.round(parseFloat(batchForm.millingFeePerMT) * parseFloat(batchForm.rawQtyMT)).toLocaleString()}</span>
                 </div>
