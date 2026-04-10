@@ -360,15 +360,17 @@ export default function MillingBatchDetail() {
         try {
           const res = await millingApi.getLastPrices();
           const lp = res?.data?.lastPrices || {};
+          // Convert last prices (per-MT) to per-KG for display
+          const toKG = (v) => String((v / 1000).toFixed(1));
           setPriceForm({
-            finished: finished > 0 ? String(lp.finished || 72800) : '',
-            b1: b1 > 0 ? String(lp.broken || 38000) : '',
-            b2: b2 > 0 ? String(Math.round((lp.broken || 38000) * 0.8)) : '',
-            b3: b3 > 0 ? String(Math.round((lp.broken || 38000) * 0.6)) : '',
-            csr: csrVal > 0 ? String(Math.round((lp.broken || 38000) * 0.5)) : '',
-            shortGrain: shortGrain > 0 ? String(Math.round((lp.broken || 38000) * 0.7)) : '',
-            bran: bran > 0 ? String(lp.bran || 28000) : '',
-            husk: husk > 0 ? String(lp.husk || 8400) : '',
+            finished: finished > 0 ? toKG(lp.finished || 72800) : '',
+            b1: b1 > 0 ? toKG(lp.broken || 38000) : '',
+            b2: b2 > 0 ? toKG((lp.broken || 38000) * 0.8) : '',
+            b3: b3 > 0 ? toKG((lp.broken || 38000) * 0.6) : '',
+            csr: csrVal > 0 ? toKG((lp.broken || 38000) * 0.5) : '',
+            shortGrain: shortGrain > 0 ? toKG((lp.broken || 38000) * 0.7) : '',
+            bran: bran > 0 ? toKG(lp.bran || 28000) : '',
+            husk: husk > 0 ? toKG(lp.husk || 8400) : '',
           });
         } catch { /* use defaults */ }
         setPriceLoading(false);
@@ -1790,7 +1792,8 @@ export default function MillingBatchDetail() {
             { key: 'husk', label: 'Rice Husk', qty: batch.huskMT },
           ].filter(p => parseFloat(p.qty) > 0);
 
-          const totalRevenue = products.reduce((s, p) => s + (parseFloat(p.qty) || 0) * (parseFloat(priceForm[p.key]) || 0), 0);
+          // priceForm stores per-KG, qty is in MT — so: qty_MT × 1000 × price_per_KG
+          const totalRevenue = products.reduce((s, p) => s + (parseFloat(p.qty) || 0) * 1000 * (parseFloat(priceForm[p.key]) || 0), 0);
 
           return (
             <div className="space-y-4">
@@ -1800,7 +1803,7 @@ export default function MillingBatchDetail() {
               <div className="grid grid-cols-2 gap-3">
                 {products.map(p => (
                   <div key={p.key}>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{p.label} — {parseFloat(p.qty).toFixed(2)} MT (PKR/MT)</label>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">{p.label} — {(parseFloat(p.qty) * 1000).toLocaleString()} KG (PKR/KG)</label>
                     <input type="number" value={priceForm[p.key]} onChange={e => setPriceForm(prev => ({ ...prev, [p.key]: e.target.value }))}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" placeholder="0" />
                   </div>
@@ -1808,7 +1811,7 @@ export default function MillingBatchDetail() {
               </div>
               <div className="bg-gray-50 rounded-lg p-3 text-xs space-y-1">
                 {products.map(p => {
-                  const rev = (parseFloat(p.qty) || 0) * (parseFloat(priceForm[p.key]) || 0);
+                  const rev = (parseFloat(p.qty) || 0) * 1000 * (parseFloat(priceForm[p.key]) || 0);
                   return rev > 0 ? (
                     <div key={p.key} className="flex justify-between">
                       <span className="text-gray-500">{p.label}</span>
@@ -1825,14 +1828,15 @@ export default function MillingBatchDetail() {
                 <button onClick={() => setShowPriceModal(false)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Skip for Now</button>
                 <button onClick={async () => {
                   try {
-                    const brokenTotal = (parseFloat(priceForm.b1) || 0) + (parseFloat(priceForm.b2) || 0) + (parseFloat(priceForm.b3) || 0) + (parseFloat(priceForm.csr) || 0) + (parseFloat(priceForm.shortGrain) || 0);
-                    const brokenCount = [priceForm.b1, priceForm.b2, priceForm.b3, priceForm.csr, priceForm.shortGrain].filter(v => parseFloat(v) > 0).length;
-                    const avgBrokenPrice = brokenCount > 0 ? brokenTotal / brokenCount : 0;
+                    // Convert per-KG to per-MT for backend storage
+                    const toMT = (v) => (parseFloat(v) || 0) * 1000;
+                    const brokenPrices = [priceForm.b1, priceForm.b2, priceForm.b3, priceForm.csr, priceForm.shortGrain].filter(v => parseFloat(v) > 0);
+                    const avgBrokenPricePerMT = brokenPrices.length > 0 ? brokenPrices.reduce((s, v) => s + toMT(v), 0) / brokenPrices.length : 0;
                     await millingApi.confirmPrices(batchId, {
-                      finished_price_per_mt: parseFloat(priceForm.finished) || 0,
-                      broken_price_per_mt: avgBrokenPrice,
-                      bran_price_per_mt: parseFloat(priceForm.bran) || 0,
-                      husk_price_per_mt: parseFloat(priceForm.husk) || 0,
+                      finished_price_per_mt: toMT(priceForm.finished),
+                      broken_price_per_mt: avgBrokenPricePerMT,
+                      bran_price_per_mt: toMT(priceForm.bran),
+                      husk_price_per_mt: toMT(priceForm.husk),
                     });
                     addToast('Product prices confirmed for costing sheet');
                     invalidateBatch();
@@ -1855,15 +1859,16 @@ export default function MillingBatchDetail() {
             try {
               const res = await millingApi.getLastPrices();
               const lp = res?.data?.lastPrices || {};
+              const toKG = (v) => String((v / 1000).toFixed(1));
               setPriceForm({
-                finished: batch.actualFinishedMT > 0 ? String(lp.finished || 72800) : '',
-                b1: batch.b1MT > 0 ? String(lp.broken || 38000) : '',
-                b2: batch.b2MT > 0 ? String(Math.round((lp.broken || 38000) * 0.8)) : '',
-                b3: batch.b3MT > 0 ? String(Math.round((lp.broken || 38000) * 0.6)) : '',
-                csr: batch.csrMT > 0 ? String(Math.round((lp.broken || 38000) * 0.5)) : '',
-                shortGrain: batch.shortGrainMT > 0 ? String(Math.round((lp.broken || 38000) * 0.7)) : '',
-                bran: batch.branMT > 0 ? String(lp.bran || 28000) : '',
-                husk: batch.huskMT > 0 ? String(lp.husk || 8400) : '',
+                finished: batch.actualFinishedMT > 0 ? toKG(lp.finished || 72800) : '',
+                b1: batch.b1MT > 0 ? toKG(lp.broken || 38000) : '',
+                b2: batch.b2MT > 0 ? toKG((lp.broken || 38000) * 0.8) : '',
+                b3: batch.b3MT > 0 ? toKG((lp.broken || 38000) * 0.6) : '',
+                csr: batch.csrMT > 0 ? toKG((lp.broken || 38000) * 0.5) : '',
+                shortGrain: batch.shortGrainMT > 0 ? toKG((lp.broken || 38000) * 0.7) : '',
+                bran: batch.branMT > 0 ? toKG(lp.bran || 28000) : '',
+                husk: batch.huskMT > 0 ? toKG(lp.husk || 8400) : '',
               });
             } catch {}
             setPriceLoading(false);
