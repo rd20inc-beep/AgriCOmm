@@ -233,11 +233,11 @@ export function useMillingBatch(id) {
         const pf = (v) => v != null ? parseFloat(v) || null : null;
         if (quality.sample?.length > 0) {
           const s = quality.sample[0];
-          raw.sampleAnalysis = { moisture: pf(s.moisture), broken: pf(s.broken), chalky: pf(s.chalky), foreignMatter: pf(s.foreign_matter), discoloration: pf(s.discoloration), purity: pf(s.purity), grainSize: pf(s.grain_size), pricePerKg: pf(s.price_per_kg), pricePerMT: pf(s.price_per_mt) };
+          raw.sampleAnalysis = { moisture: pf(s.moisture), broken: pf(s.broken), b1Pct: pf(s.b1_pct), b2Pct: pf(s.b2_pct), b3Pct: pf(s.b3_pct), csrPct: pf(s.csr_pct), shortGrainPct: pf(s.short_grain_pct), chalky: pf(s.chalky), foreignMatter: pf(s.foreign_matter), discoloration: pf(s.discoloration), purity: pf(s.purity), grainSize: pf(s.grain_size), pricePerKg: pf(s.price_per_kg), pricePerMT: pf(s.price_per_mt) };
         }
         if (quality.arrival?.length > 0) {
           const a = quality.arrival[0];
-          raw.arrivalAnalysis = { moisture: pf(a.moisture), broken: pf(a.broken), chalky: pf(a.chalky), foreignMatter: pf(a.foreign_matter), discoloration: pf(a.discoloration), purity: pf(a.purity), grainSize: pf(a.grain_size), pricePerKg: pf(a.price_per_kg), pricePerMT: pf(a.price_per_mt) };
+          raw.arrivalAnalysis = { moisture: pf(a.moisture), broken: pf(a.broken), b1Pct: pf(a.b1_pct), b2Pct: pf(a.b2_pct), b3Pct: pf(a.b3_pct), csrPct: pf(a.csr_pct), shortGrainPct: pf(a.short_grain_pct), chalky: pf(a.chalky), foreignMatter: pf(a.foreign_matter), discoloration: pf(a.discoloration), purity: pf(a.purity), grainSize: pf(a.grain_size), pricePerKg: pf(a.price_per_kg), pricePerMT: pf(a.price_per_mt) };
         }
       }
       return transformBatch(raw);

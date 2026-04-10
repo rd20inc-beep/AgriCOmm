@@ -34,13 +34,18 @@ import StatusBadge from '../components/StatusBadge';
 import MillingCostSheet from '../components/MillingCostSheet';
 
 const qualityParams = [
-  { key: 'moisture', label: 'Moisture %', unit: '%' },
-  { key: 'broken', label: 'Broken %', unit: '%' },
-  { key: 'chalky', label: 'Chalky %', unit: '%' },
-  { key: 'foreignMatter', label: 'Foreign Matter %', unit: '%' },
-  { key: 'discoloration', label: 'Discoloration %', unit: '%' },
-  { key: 'purity', label: 'Purity %', unit: '%' },
-  { key: 'grainSize', label: 'Grain Size (mm)', unit: 'mm' },
+  { key: 'moisture', label: 'Moisture %', unit: '%', section: 'core' },
+  { key: 'broken', label: 'Total Broken %', unit: '%', section: 'core' },
+  { key: 'b1Pct', label: 'B1 (Large Broken) %', unit: '%', section: 'broken' },
+  { key: 'b2Pct', label: 'B2 (Medium Broken) %', unit: '%', section: 'broken' },
+  { key: 'b3Pct', label: 'B3 (Small Broken) %', unit: '%', section: 'broken' },
+  { key: 'csrPct', label: 'CSR (Sortex Reject) %', unit: '%', section: 'broken' },
+  { key: 'shortGrainPct', label: 'Short Grain %', unit: '%', section: 'broken' },
+  { key: 'chalky', label: 'Chalky %', unit: '%', section: 'core' },
+  { key: 'foreignMatter', label: 'Foreign Matter %', unit: '%', section: 'core' },
+  { key: 'discoloration', label: 'Discoloration %', unit: '%', section: 'core' },
+  { key: 'purity', label: 'Purity %', unit: '%', section: 'core' },
+  { key: 'grainSize', label: 'Grain Size (mm)', unit: 'mm', section: 'core' },
 ];
 
 const tabs = [
@@ -86,7 +91,8 @@ export default function MillingBatchDetail() {
   const [showAnalysisModal, setShowAnalysisModal] = useState(false);
   const [analysisModalType, setAnalysisModalType] = useState('arrival');
   const [analysisForm, setAnalysisForm] = useState({
-    moisture: '', broken: '', chalky: '', foreignMatter: '', discoloration: '', purity: '', grainSize: '',
+    moisture: '', broken: '', b1Pct: '', b2Pct: '', b3Pct: '', csrPct: '', shortGrainPct: '',
+    chalky: '', foreignMatter: '', discoloration: '', purity: '', grainSize: '',
     pricePerKg: '', pricePerMT: '',
   });
   const [showYieldModal, setShowYieldModal] = useState(false);
@@ -224,6 +230,11 @@ export default function MillingBatchDetail() {
       analysis_type: analysisModalType,
       moisture: formValues.moisture,
       broken: formValues.broken,
+      b1_pct: formValues.b1Pct,
+      b2_pct: formValues.b2Pct,
+      b3_pct: formValues.b3Pct,
+      csr_pct: formValues.csrPct,
+      short_grain_pct: formValues.shortGrainPct,
       chalky: formValues.chalky,
       foreign_matter: formValues.foreignMatter,
       discoloration: formValues.discoloration,
@@ -1217,20 +1228,31 @@ export default function MillingBatchDetail() {
       {/* Sample / Arrival Analysis Modal */}
       <Modal isOpen={showAnalysisModal} onClose={() => setShowAnalysisModal(false)} title={analysisModalType === 'sample' ? 'Sample Analysis' : 'Arrival Analysis'}>
         <form onSubmit={handleAnalysisSubmit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            {qualityParams.map((param) => (
-              <div key={param.key}>
-                <label className="block text-sm font-medium text-gray-700 mb-1">{param.label}</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={analysisForm[param.key]}
-                  onChange={(e) => setAnalysisForm((prev) => ({ ...prev, [param.key]: e.target.value }))}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder={`Enter ${param.label.toLowerCase()}`}
-                />
-              </div>
-            ))}
+          <div className="space-y-3">
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Core Parameters</div>
+            <div className="grid grid-cols-2 gap-3">
+              {qualityParams.filter(p => p.section === 'core').map((param) => (
+                <div key={param.key}>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{param.label}</label>
+                  <input type="number" step="0.01" value={analysisForm[param.key]}
+                    onChange={(e) => setAnalysisForm((prev) => ({ ...prev, [param.key]: e.target.value }))}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="0.00" />
+                </div>
+              ))}
+            </div>
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider pt-2">Broken Rice Breakdown</div>
+            <div className="grid grid-cols-3 gap-3">
+              {qualityParams.filter(p => p.section === 'broken').map((param) => (
+                <div key={param.key}>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{param.label}</label>
+                  <input type="number" step="0.01" value={analysisForm[param.key]}
+                    onChange={(e) => setAnalysisForm((prev) => ({ ...prev, [param.key]: e.target.value }))}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="0.00" />
+                </div>
+              ))}
+            </div>
           </div>
 
           {/* Rice Price */}
