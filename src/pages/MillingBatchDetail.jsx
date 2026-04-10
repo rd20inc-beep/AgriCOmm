@@ -1628,7 +1628,31 @@ export default function MillingBatchDetail() {
 
       {/* Costing Sheet Modal */}
       <Modal isOpen={showCostSheet} onClose={() => setShowCostSheet(false)} title={`Costing Sheet — ${batch.id}`} size="lg">
-        <MillingCostSheet batch={batch} companyProfile={companyProfileData} millingCostCategories={millingCostCategories} vehicles={safeVehicles} />
+        <div className="flex justify-end mb-3 gap-2">
+          <button
+            onClick={() => {
+              const el = document.getElementById('cost-sheet-printable');
+              if (!el) return;
+              const w = window.open('', '_blank', 'width=900,height=1100');
+              w.document.write(`<!DOCTYPE html><html><head><title>Costing Sheet — ${batch.id}</title>
+                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+                <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body { font-family: 'Inter', system-ui, sans-serif; padding: 0; }
+                  @media print { body { padding: 0; } @page { margin: 10mm; } }
+                </style>
+              </head><body>${el.innerHTML}<script>window.onload=function(){window.print()}<\/script></body></html>`);
+              w.document.close();
+            }}
+            className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <Package size={14} />
+            Download / Print
+          </button>
+        </div>
+        <div id="cost-sheet-printable">
+          <MillingCostSheet batch={batch} companyProfile={companyProfileData} millingCostCategories={millingCostCategories} vehicles={safeVehicles} />
+        </div>
       </Modal>
 
       {/* Add Vehicle Modal */}
