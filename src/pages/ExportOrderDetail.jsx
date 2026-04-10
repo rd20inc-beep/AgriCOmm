@@ -416,6 +416,7 @@ export default function ExportOrderDetail() {
         },
       });
       addToast(res?.data?.transitioned_to ? `Shipment updated: ${res.data.transitioned_to}` : 'Shipment details updated');
+      setActiveTab('shipment');
     } catch (err) {
       addToast(`Failed to update shipment: ${err.message || 'Server error'}`, 'error');
     }
