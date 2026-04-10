@@ -48,7 +48,7 @@ export default function MillingDashboard() {
   const [batchForm, setBatchForm] = useState({
     millingType: 'own_stock',
     supplierId: '', rawQtyMT: '', productId: '',
-    withTransport: 'yes', pricePerMT: '',
+    withTransport: 'yes', pricePerKg: '',
     notes: '',
     // Service milling fields
     clientName: '', clientContact: '', millingFeePerMT: '',
@@ -56,7 +56,7 @@ export default function MillingDashboard() {
   const setBF = (k, v) => setBatchForm(p => ({ ...p, [k]: v }));
   const resetBatchForm = () => setBatchForm({
     millingType: 'own_stock', supplierId: '', rawQtyMT: '', productId: '',
-    withTransport: 'yes', pricePerMT: '',
+    withTransport: 'yes', pricePerKg: '',
     notes: '', clientName: '', clientContact: '', millingFeePerMT: '',
   });
 
@@ -71,7 +71,7 @@ export default function MillingDashboard() {
     }
     const rawQty = parseFloat(batchForm.rawQtyMT);
     const planned = Math.round(rawQty * 0.65);
-    const pricePerMT = parseFloat(batchForm.pricePerMT) || 0;
+    const pricePerKg = parseFloat(batchForm.pricePerKg) || 0;
     const transportNote = batchForm.withTransport === 'yes' ? 'With Transport' : 'Without Transport';
     const selectedProduct = (productsList || []).find(p => String(p.id) === String(batchForm.productId));
 
@@ -83,7 +83,7 @@ export default function MillingDashboard() {
         if (batchForm.millingFeePerMT) notesParts.push(`Fee: PKR ${batchForm.millingFeePerMT}/MT`);
       }
       notesParts.push(transportNote);
-      if (pricePerMT > 0) notesParts.push(`Purchase Price: PKR ${pricePerMT.toLocaleString()}/MT`);
+      if (pricePerKg > 0) notesParts.push(`Purchase Price: PKR ${pricePerKg}/KG (${(pricePerKg * 1000).toLocaleString()}/MT)`);
       if (selectedProduct) notesParts.push(`Rice: ${selectedProduct.name}`);
       if (batchForm.notes) notesParts.push(batchForm.notes);
 
@@ -595,9 +595,9 @@ export default function MillingDashboard() {
                 placeholder="Paddy quantity" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Purchase Price (PKR/MT)</label>
-              <input type="number" step="100" value={batchForm.pricePerMT} onChange={e => setBF('pricePerMT', e.target.value)}
-                placeholder="e.g. 85000" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
+              <label className="block text-sm font-medium text-gray-700 mb-1">Purchase Price (PKR/KG)</label>
+              <input type="number" step="0.5" value={batchForm.pricePerKg} onChange={e => setBF('pricePerKg', e.target.value)}
+                placeholder="e.g. 85" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
             </div>
           </div>
 
@@ -633,10 +633,10 @@ export default function MillingDashboard() {
               )}
               <div className="flex justify-between"><span className="text-gray-500">Raw Input</span><span className="font-medium">{batchForm.rawQtyMT} MT</span></div>
               <div className="flex justify-between"><span className="text-gray-500">Transport</span><span className="font-medium">{batchForm.withTransport === 'yes' ? 'With Transport' : 'Without Transport'}</span></div>
-              {parseFloat(batchForm.pricePerMT) > 0 && (
+              {parseFloat(batchForm.pricePerKg) > 0 && (
                 <div className="flex justify-between border-t border-gray-200 pt-1">
                   <span className="text-gray-500">Total Purchase Cost</span>
-                  <span className="font-bold text-gray-900">PKR {Math.round(parseFloat(batchForm.pricePerMT) * parseFloat(batchForm.rawQtyMT)).toLocaleString()}</span>
+                  <span className="font-bold text-gray-900">PKR {Math.round(parseFloat(batchForm.pricePerKg) * parseFloat(batchForm.rawQtyMT) * 1000).toLocaleString()}</span>
                 </div>
               )}
               {batchForm.millingType === 'service_milling' && batchForm.millingFeePerMT && (
