@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Package, Edit3, Save, X, Plus, Trash2 } from 'lucide-react';
-import api from '../../api/client';
+import api from '../../../api/client';
 
 export default function PackingTab({ order, onUpdated }) {
   const [editing, setEditing] = useState(false);

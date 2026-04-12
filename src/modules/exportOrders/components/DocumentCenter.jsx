@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { FileText, Download, Printer, Eye, CheckCircle, Clock, Loader2, Edit2 } from 'lucide-react';
-import api from '../../api/client';
-import { useApp } from '../../context/AppContext';
-import Modal from '../../components/Modal';
+import api from '../../../api/client';
+import { useApp } from '../../../context/AppContext';
+import Modal from '../../../components/Modal';
 
 // ─── Document Templates ───
 // Each function takes the document JSON and returns printable HTML

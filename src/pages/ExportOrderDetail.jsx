@@ -34,7 +34,7 @@ import {
   getVisibleTabs,
   today,
   documentLabels,
-} from './exportOrder';
+} from '../modules/exportOrders/components';
 
 export default function ExportOrderDetail() {
   const { id } = useParams();

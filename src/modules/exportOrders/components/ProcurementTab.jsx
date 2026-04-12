@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import StatusBadge from '../../components/StatusBadge';
-import api from '../../api/client';
-import { exportOrdersApi, financeApi } from '../../api/services';
-import { useApp } from '../../context/AppContext';
+import StatusBadge from '../../../components/StatusBadge';
+import api from '../../../api/client';
+import { exportOrdersApi, financeApi } from '../../../api/services';
+import { useApp } from '../../../context/AppContext';
 import { Package, Plus, ExternalLink, Warehouse, Scale, FileText, Truck, ArrowRight } from 'lucide-react';
 
 export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], onCreateMilling, onStartDocsPreparation, onLinkExternalPurchase, canCreateMilling, canStartDocs, onStockAllocated }) {

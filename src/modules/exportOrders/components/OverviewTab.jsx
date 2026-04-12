@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ExternalLink, Pencil, Save, X } from 'lucide-react';
 import { useUpdateOrder } from '../../../api/queries';
-import { useApp } from '../../context/AppContext';
+import { useApp } from '../../../context/AppContext';
 
 export default function OverviewTab({ order, formatCurrency, totalCosts, grossProfit, marginPct, exportCostCategories }) {
   const { addToast } = useApp();

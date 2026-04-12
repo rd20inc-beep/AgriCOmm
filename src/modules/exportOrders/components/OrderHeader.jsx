@@ -1,5 +1,5 @@
 import React from 'react';
-import StatusBadge from '../../components/StatusBadge';
+import StatusBadge from '../../../components/StatusBadge';
 import {
   ArrowLeft, ChevronDown, FileText, DollarSign,
   Package, User, Globe, Mail

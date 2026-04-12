@@ -1,8 +1,8 @@
 import React from 'react';
-import Modal from '../../components/Modal';
-import ProformaInvoice from '../../components/ProformaInvoice';
-import EmailComposer from '../../components/EmailComposer';
-import SearchSelect from '../../components/SearchSelect';
+import Modal from '../../../components/Modal';
+import ProformaInvoice from '../../../components/ProformaInvoice';
+import EmailComposer from '../../../components/EmailComposer';
+import SearchSelect from '../../../components/SearchSelect';
 import { AlertTriangle } from 'lucide-react';
 
 export function AdvancePaymentModal({
