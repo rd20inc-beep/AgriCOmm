@@ -108,6 +108,11 @@ export default function ExportOrderDetail() {
   const [shipFI2, setShipFI2] = useState('');
   const [shipFI3, setShipFI3] = useState('');
   const [shipFIDate, setShipFIDate] = useState('');
+  const [shipBLDate, setShipBLDate] = useState('');
+  const [shipFreightTerms, setShipFreightTerms] = useState('COLLECT');
+  const [shipConsigneeType, setShipConsigneeType] = useState('to_order_of_bank');
+  const [shipWindowStart, setShipWindowStart] = useState('');
+  const [shipWindowEnd, setShipWindowEnd] = useState('');
   const [shipNotifyName, setShipNotifyName] = useState('');
   const [shipNotifyAddress, setShipNotifyAddress] = useState('');
   const [shipNotifyPhone, setShipNotifyPhone] = useState('');
@@ -188,10 +193,14 @@ export default function ExportOrderDetail() {
   // --- Modal openers (reset form state then show) ---
   const buildShipmentContainerRow = (container = {}, sequenceNo = 1) => ({
     sequenceNo,
-    containerNo: container.containerNo || '',
-    sealNo: container.sealNo || '',
-    grossWeightKg: container.grossWeightKg ?? '',
-    netWeightKg: container.netWeightKg ?? '',
+    containerNo: container.containerNo || container.container_no || '',
+    sealNo: container.sealNo || container.seal_no || '',
+    lotNumber: container.lotNumber || container.lot_number || '',
+    bagsCount: container.bagsCount ?? container.bags_count ?? '',
+    grossWeightKg: container.grossWeightKg ?? container.gross_weight_kg ?? '',
+    netWeightKg: container.netWeightKg ?? container.net_weight_kg ?? '',
+    tareWeightKg: container.tareWeightKg ?? container.tare_weight_kg ?? '',
+    containerType: container.containerType || container.container_type || '20ft',
     notes: container.notes || '',
   });
 
@@ -246,6 +255,11 @@ export default function ExportOrderDetail() {
     setShipFI2(order.fiNumber2 || '');
     setShipFI3(order.fiNumber3 || '');
     setShipFIDate(order.fiDate || '');
+    setShipBLDate(order.blDate || '');
+    setShipFreightTerms(order.freightTerms || 'COLLECT');
+    setShipConsigneeType(order.consigneeType || 'to_order_of_bank');
+    setShipWindowStart(order.shipmentWindowStart || '');
+    setShipWindowEnd(order.shipmentWindowEnd || '');
     setShipNotifyName(order.notifyPartyName || '');
     setShipNotifyAddress(order.notifyPartyAddress || '');
     setShipNotifyPhone(order.notifyPartyPhone || '');
@@ -372,12 +386,20 @@ export default function ExportOrderDetail() {
           sequence_no: index + 1,
           container_no: String(container.containerNo || '').trim(),
           seal_no: container.sealNo || null,
+          lot_number: container.lotNumber || null,
+          bags_count: container.bagsCount === '' || container.bagsCount == null
+            ? null
+            : parseInt(container.bagsCount),
           gross_weight_kg: container.grossWeightKg === '' || container.grossWeightKg == null
             ? null
             : parseFloat(container.grossWeightKg),
           net_weight_kg: container.netWeightKg === '' || container.netWeightKg == null
             ? null
             : parseFloat(container.netWeightKg),
+          tare_weight_kg: container.tareWeightKg === '' || container.tareWeightKg == null
+            ? null
+            : parseFloat(container.tareWeightKg),
+          container_type: container.containerType || null,
           notes: container.notes || null,
         }))
         .filter((container) => container.container_no);
@@ -403,6 +425,11 @@ export default function ExportOrderDetail() {
           fi_number_2: shipFI2 || null,
           fi_number_3: shipFI3 || null,
           fi_date: shipFIDate || null,
+          bl_date: shipBLDate || null,
+          freight_terms: shipFreightTerms || null,
+          consignee_type: shipConsigneeType || null,
+          shipment_window_start: shipWindowStart || null,
+          shipment_window_end: shipWindowEnd || null,
           notify_party_name: shipNotifyName || null,
           notify_party_address: shipNotifyAddress || null,
           notify_party_phone: shipNotifyPhone || null,
@@ -715,6 +742,11 @@ export default function ExportOrderDetail() {
         shipFI2={shipFI2} setShipFI2={setShipFI2}
         shipFI3={shipFI3} setShipFI3={setShipFI3}
         shipFIDate={shipFIDate} setShipFIDate={setShipFIDate}
+        shipBLDate={shipBLDate} setShipBLDate={setShipBLDate}
+        shipFreightTerms={shipFreightTerms} setShipFreightTerms={setShipFreightTerms}
+        shipConsigneeType={shipConsigneeType} setShipConsigneeType={setShipConsigneeType}
+        shipWindowStart={shipWindowStart} setShipWindowStart={setShipWindowStart}
+        shipWindowEnd={shipWindowEnd} setShipWindowEnd={setShipWindowEnd}
         shipNotifyName={shipNotifyName} setShipNotifyName={setShipNotifyName}
         shipNotifyAddress={shipNotifyAddress} setShipNotifyAddress={setShipNotifyAddress}
         shipNotifyPhone={shipNotifyPhone} setShipNotifyPhone={setShipNotifyPhone}

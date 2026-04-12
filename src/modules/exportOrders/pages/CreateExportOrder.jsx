@@ -37,7 +37,10 @@ export default function CreateExportOrder() {
     receivingMode: '',
     // Section 6: Bag spec (shown only when receiving mode needs it)
     bagType: '', bagQuality: '', bagSizeKg: '25', bagWeightGm: '', bagPrinting: '', bagColor: '', bagBrand: '',
-    // Section 7: Notes
+    // Section 7: Contract & Product Specs (for document generation)
+    hsCode: '', contractNumber: '', consigneeType: 'to_order_of_bank', brokenPctTarget: '',
+    qualityDescription: '', shipmentWindowStart: '', shipmentWindowEnd: '',
+    // Section 8: Notes
     notes: '', packingNotes: '',
   });
 
@@ -130,6 +133,14 @@ export default function CreateExportOrder() {
       source: form.source,
       notes: form.notes || null,
       status,
+      // Contract & product specs
+      hs_code: form.hsCode || null,
+      contract_number: form.contractNumber || null,
+      consignee_type: form.consigneeType || null,
+      broken_pct_target: form.brokenPctTarget ? parseFloat(form.brokenPctTarget) : null,
+      quality_description: form.qualityDescription || null,
+      shipment_window_start: form.shipmentWindowStart || null,
+      shipment_window_end: form.shipmentWindowEnd || null,
       // Receiving mode
       receiving_mode: form.receivingMode || null,
       quantity_unit: form.quantityUnit || null,
@@ -279,6 +290,44 @@ export default function CreateExportOrder() {
             )}
           </div>
         )}
+      </div>
+
+      {/* ═══ Contract & Product Specs ═══ */}
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4 flex items-center gap-2"><Package className="w-4 h-4" /> Contract & Product Specs</h2>
+        <div className="form-grid">
+          <div className="form-group">
+            <label className="form-label">HS Code</label>
+            <input value={form.hsCode} onChange={e => set('hsCode', e.target.value)} className="form-input" placeholder="e.g. 1006.3098" />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Contract Number</label>
+            <input value={form.contractNumber} onChange={e => set('contractNumber', e.target.value)} className="form-input" placeholder="If different from order no." />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Consignee Type</label>
+            <select value={form.consigneeType} onChange={e => set('consigneeType', e.target.value)} className="form-input">
+              <option value="to_order_of_bank">To Order of Bank</option>
+              <option value="direct">Direct to Buyer</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Broken % Target</label>
+            <input type="number" value={form.brokenPctTarget} onChange={e => set('brokenPctTarget', e.target.value)} className="form-input" placeholder="e.g. 2" min="0" max="100" step="0.5" />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Shipment Window Start</label>
+            <input type="date" value={form.shipmentWindowStart} onChange={e => set('shipmentWindowStart', e.target.value)} className="form-input" />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Shipment Window End</label>
+            <input type="date" value={form.shipmentWindowEnd} onChange={e => set('shipmentWindowEnd', e.target.value)} className="form-input" />
+          </div>
+          <div className="form-group sm:col-span-2 lg:col-span-3">
+            <label className="form-label">Quality Description</label>
+            <textarea value={form.qualityDescription} onChange={e => set('qualityDescription', e.target.value)} className="form-input resize-none" rows={2} placeholder="e.g. Pakistani Basmati White Rice - 2% Broken - Double polished & color sorted..." />
+          </div>
+        </div>
       </div>
 
       {/* ═══ Section 3: Buyer Receiving Preference (conditional) ═══ */}

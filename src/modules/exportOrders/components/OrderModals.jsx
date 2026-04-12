@@ -249,6 +249,11 @@ export function ShipmentModal({
   shipFI2, setShipFI2,
   shipFI3, setShipFI3,
   shipFIDate, setShipFIDate,
+  shipBLDate, setShipBLDate,
+  shipFreightTerms, setShipFreightTerms,
+  shipConsigneeType, setShipConsigneeType,
+  shipWindowStart, setShipWindowStart,
+  shipWindowEnd, setShipWindowEnd,
   shipNotifyName, setShipNotifyName,
   shipNotifyAddress, setShipNotifyAddress,
   shipNotifyPhone, setShipNotifyPhone,
@@ -270,8 +275,12 @@ export function ShipmentModal({
         sequenceNo: prev.length + 1,
         containerNo: '',
         sealNo: '',
+        lotNumber: '',
+        bagsCount: '',
         grossWeightKg: '',
         netWeightKg: '',
+        tareWeightKg: '',
+        containerType: '20ft',
         notes: '',
       },
     ]));
@@ -284,8 +293,12 @@ export function ShipmentModal({
         sequenceNo: 1,
         containerNo: '',
         sealNo: '',
+        lotNumber: '',
+        bagsCount: '',
         grossWeightKg: '',
         netWeightKg: '',
+        tareWeightKg: '',
+        containerType: '20ft',
         notes: '',
       }];
     });
@@ -304,18 +317,24 @@ export function ShipmentModal({
             <input type="text" value={shipLine} onChange={e => setShipLine(e.target.value)} placeholder="e.g. Maersk, MSC, CMA CGM" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
           </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Booking No</label>
             <input type="text" value={shipBooking} onChange={e => setShipBooking(e.target.value)} placeholder="e.g. BK-2025-001" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
           </div>
           <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Destination Port</label>
+            <input type="text" value={shipDestPort} onChange={e => setShipDestPort(e.target.value)} placeholder="e.g. Conakry Port" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">BL Number</label>
             <input type="text" value={shipBL} onChange={e => setShipBL(e.target.value)} placeholder="e.g. MAEUSK12345" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Destination Port</label>
-            <input type="text" value={shipDestPort} onChange={e => setShipDestPort(e.target.value)} placeholder="e.g. Conakry Port" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+            <label className="block text-sm font-medium text-gray-700 mb-1">BL Date</label>
+            <input type="date" value={shipBLDate || ''} onChange={e => setShipBLDate(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
           </div>
         </div>
         <div className="flex items-center justify-between gap-3">
@@ -345,7 +364,7 @@ export function ShipmentModal({
                   Remove
                 </button>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Container No *</label>
                   <input
@@ -366,8 +385,42 @@ export function ShipmentModal({
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                   />
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Container Type</label>
+                  <select
+                    value={container.containerType || '20ft'}
+                    onChange={e => updateRow(index, 'containerType', e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  >
+                    <option value="20ft">20ft</option>
+                    <option value="40ft">40ft</option>
+                    <option value="40ft HC">40ft HC</option>
+                  </select>
+                </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Lot / Batch Number</label>
+                  <input
+                    type="text"
+                    value={container.lotNumber || ''}
+                    onChange={e => updateRow(index, 'lotNumber', e.target.value)}
+                    placeholder="e.g. LOT-2026-001"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Bags Count</label>
+                  <input
+                    type="number"
+                    value={container.bagsCount ?? ''}
+                    onChange={e => updateRow(index, 'bagsCount', e.target.value)}
+                    placeholder="Number of bags"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Gross Weight (kg)</label>
                   <input
@@ -383,6 +436,15 @@ export function ShipmentModal({
                     type="number"
                     value={container.netWeightKg ?? ''}
                     onChange={e => updateRow(index, 'netWeightKg', e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Tare Weight (kg)</label>
+                  <input
+                    type="number"
+                    value={container.tareWeightKg ?? ''}
+                    onChange={e => updateRow(index, 'tareWeightKg', e.target.value)}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                   />
                 </div>
@@ -455,6 +517,38 @@ export function ShipmentModal({
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">FI Number 3</label>
             <input type="text" value={shipFI3 || ''} onChange={e => setShipFI3(e.target.value)} placeholder="Optional third FI" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          </div>
+        </div>
+
+        {/* Freight & Consignee */}
+        <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider pt-2 border-t border-gray-200">Freight & Consignee</h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Freight Terms</label>
+            <select value={shipFreightTerms || 'COLLECT'} onChange={e => setShipFreightTerms(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+              <option value="COLLECT">Collect</option>
+              <option value="PREPAID">Prepaid</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Consignee Type</label>
+            <select value={shipConsigneeType || 'to_order_of_bank'} onChange={e => setShipConsigneeType(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+              <option value="to_order_of_bank">To Order of Bank</option>
+              <option value="direct">Direct to Buyer</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Shipment Window */}
+        <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider pt-2 border-t border-gray-200">Shipment Window</h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Window Start</label>
+            <input type="date" value={shipWindowStart || ''} onChange={e => setShipWindowStart(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Window End</label>
+            <input type="date" value={shipWindowEnd || ''} onChange={e => setShipWindowEnd(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
           </div>
         </div>
 

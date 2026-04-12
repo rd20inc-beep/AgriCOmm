@@ -55,12 +55,23 @@ function parseShipmentContainerRows(containers, fallbackContainerNo = null) {
         ? parseFloat(container.net_weight_kg)
         : (container.netWeightKg != null ? parseFloat(container.netWeightKg) : null);
 
+      const tareWeight = container.tare_weight_kg != null
+        ? parseFloat(container.tare_weight_kg)
+        : (container.tareWeightKg != null ? parseFloat(container.tareWeightKg) : null);
+      const bagsCount = container.bags_count != null
+        ? parseInt(container.bags_count)
+        : (container.bagsCount != null ? parseInt(container.bagsCount) : null);
+
       return {
         sequence_no: index + 1,
         container_no: containerNo,
         seal_no: container.seal_no || container.sealNo || null,
+        lot_number: container.lot_number || container.lotNumber || null,
+        bags_count: Number.isFinite(bagsCount) ? bagsCount : null,
         gross_weight_kg: Number.isFinite(grossWeight) ? grossWeight : null,
         net_weight_kg: Number.isFinite(netWeight) ? netWeight : null,
+        tare_weight_kg: Number.isFinite(tareWeight) ? tareWeight : null,
+        container_type: container.container_type || container.containerType || null,
         notes: container.notes || null,
       };
     })
@@ -73,8 +84,12 @@ function parseShipmentContainerRows(containers, fallbackContainerNo = null) {
         sequence_no: 1,
         container_no: containerNo,
         seal_no: null,
+        lot_number: null,
+        bags_count: null,
         gross_weight_kg: null,
         net_weight_kg: null,
+        tare_weight_kg: null,
+        container_type: null,
         notes: null,
       });
     }
@@ -801,10 +816,12 @@ const exportOrderController = {
       const { id } = req.params;
       const {
         vessel_name, booking_no, container_no, containers,
-        bl_number, shipping_line, etd, atd, eta, ata,
+        bl_number, bl_date, shipping_line, etd, atd, eta, ata,
         destination_port, notes,
         voyage_number, gd_number, gd_date,
         fi_number, fi_number_2, fi_number_3, fi_date,
+        freight_terms, consignee_type,
+        shipment_window_start, shipment_window_end,
         notify_party_name, notify_party_address, notify_party_phone, notify_party_email,
         shipment_remarks,
       } = req.body;
@@ -845,6 +862,7 @@ const exportOrderController = {
           vessel_name: vessel_name || null,
           booking_no: booking_no || null,
           bl_number: bl_number || null,
+          bl_date: bl_date || order.bl_date || null,
           shipping_line: shipping_line || null,
           etd: etd || null,
           atd: atd || null,
@@ -858,6 +876,10 @@ const exportOrderController = {
           fi_number_2: fi_number_2 || order.fi_number_2 || null,
           fi_number_3: fi_number_3 || order.fi_number_3 || null,
           fi_date: fi_date || order.fi_date || null,
+          freight_terms: freight_terms || order.freight_terms || null,
+          consignee_type: consignee_type || order.consignee_type || null,
+          shipment_window_start: shipment_window_start || order.shipment_window_start || null,
+          shipment_window_end: shipment_window_end || order.shipment_window_end || null,
           notify_party_name: notify_party_name || order.notify_party_name || null,
           notify_party_address: notify_party_address || order.notify_party_address || null,
           notify_party_phone: notify_party_phone || order.notify_party_phone || null,

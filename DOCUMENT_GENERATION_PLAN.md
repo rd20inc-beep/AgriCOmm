@@ -77,37 +77,38 @@ Each document maps to a workflow step where all required data is available.
 - Already in system: most fields
 - Missing: kcci_membership_number, certificate_number (KCCI assigns), buyer_vat_number
 
-## Data Gaps — What Needs to Be Added
+## Data Gaps — Status: ALL RESOLVED (2026-04-11)
 
-### To `export_orders` table:
-- `hs_code` VARCHAR(20) — HS tariff code (e.g., 1006.3098)
-- `brand_marking` VARCHAR(100) — Brand name on bags (e.g., TIGER)
-- `broken_pct_target` DECIMAL(5,2) — Target broken % for production
-- `quality_description` TEXT — Full quality text for documents
-- `production_date` DATE — Date of production (for bag marking)
-- `expiry_date` DATE — Expiry date (for bag marking)
-- `freight_terms` VARCHAR(20) — COLLECT or PREPAID
-- `fi_number` VARCHAR(100) — Financial Instrument number from bank
-- `fi_date` DATE — FI issue date
-- `invoice_number` VARCHAR(50) — Separate invoice sequence from order_no
-- `contract_number` VARCHAR(50) — Sales contract number (may differ from order_no)
-- `consignee_type` VARCHAR(20) — 'direct' or 'to_order_of_bank'
+All data gaps have been addressed. Summary:
 
-### To `customers` table:
-- `vat_number` VARCHAR(100) — EU VAT registration
+### `export_orders` table: ✅ DONE (in original migration)
+All 12 fields present: `hs_code`, `brand_marking`, `broken_pct_target`, `quality_description`,
+`production_date`, `expiry_date`, `freight_terms`, `fi_number`, `fi_date`,
+`invoice_number`, `contract_number`, `consignee_type`
 
-### To `shipment_containers` table:
-- `lot_number` VARCHAR(100) — Lot/batch number per container
-- `bags_count` INTEGER — Number of bags in this container
-- `tare_weight_kg` DECIMAL(10,2) — Tare weight (bag weight)
+### `customers` table: ✅ DONE (in original migration)
+- `vat_number` VARCHAR(100) — present
 
-### New company settings (system_settings or dedicated table):
-- `rex_number` — REX registration for EU GSP
-- `kcci_membership` — KCCI membership number
-- `port_of_loading` — Default port (Karachi, Pakistan)
+### `shipment_containers` table: ✅ DONE (in migration 028)
+All 3 fields present: `lot_number`, `bags_count`, `tare_weight_kg`
 
-### New table: `credit_notes`
-- For tracking price adjustments between shipments
+### Company settings: ✅ DONE (migration 053)
+Seeded in `system_settings`: `rex_number`, `kcci_membership`, `port_of_loading`
+
+### `credit_notes` table: ✅ DONE (migration 053)
+Full table with: credit_note_no, order_id, customer_id, issue_date, reason,
+original_price_per_mt, adjusted_price_per_mt, qty_mt, adjustment_amount,
+currency, status, reference_invoice, notes
+
+### Frontend forms: ✅ DONE
+- CreateExportOrder: hs_code, contract_number, consignee_type, broken_pct_target, quality_description, shipment_window_start/end
+- ShipmentModal: lot_number, bags_count, tare_weight_kg, container_type, bl_date, freight_terms, consignee_type, shipment_window_start/end
+- OverviewTab: editable Document & Product Specs card (contract_number, invoice_number, hs_code, broken_pct_target, freight_terms, consignee_type, production_date, expiry_date, quality_description, production_remarks)
+
+### Backend: ✅ DONE
+- parseShipmentContainerRows maps all container fields (lot_number, bags_count, tare_weight_kg, container_type)
+- updateShipment handler saves bl_date, freight_terms, consignee_type, shipment_window_start/end
+- ALLOWED_UPDATE_FIELDS includes all document generation fields
 
 ## Workflow Step → Data Collection → Document Generation
 
