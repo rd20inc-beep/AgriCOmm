@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Users, Plus, Globe, Mail, Phone } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
-import { useCreateCustomer } from '../../api/queries';
-import Modal from '../../components/Modal';
+import { useApp } from '../../../../context/AppContext';
+import { useCreateCustomer } from '../../../../api/queries';
+import Modal from '../../../../components/Modal';
 
 export default function CustomersTab() {
   const { customersList, addToast } = useApp();

@@ -5,15 +5,15 @@ import {
   Plus, Save, Edit3, AlertTriangle, Warehouse, ShoppingBag, Scale,
   Activity, ChevronRight, TrendingUp, Clock,
 } from 'lucide-react';
-import { useLotDetail, useRecordLotTransaction, useLocalSalesByLot } from '../api/queries';
-import { useApp } from '../context/AppContext';
-import { LoadingSpinner, ErrorState } from '../components/LoadingState';
-import StatusBadge from '../components/StatusBadge';
-import Modal from '../components/Modal';
-import { fromKg, allEquivalents, allRateEquivalents, toKg, UNITS } from '../utils/unitConversion';
-import LotCostSheet from '../components/LotCostSheet';
-import api from '../api/client';
-import { lotInventoryApi } from '../api/services';
+import { useLotDetail, useRecordLotTransaction, useLocalSalesByLot } from '../../../api/queries';
+import { useApp } from '../../../context/AppContext';
+import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
+import StatusBadge from '../../../components/StatusBadge';
+import Modal from '../../../components/Modal';
+import { fromKg, allEquivalents, allRateEquivalents, toKg, UNITS } from '../../../utils/unitConversion';
+import LotCostSheet from '../../../components/LotCostSheet';
+import api from '../../../api/client';
+import { lotInventoryApi } from '../../../api/services';
 
 function fmtPKR(v) { return 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString(); }
 function fmtDate(d) { return d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'; }

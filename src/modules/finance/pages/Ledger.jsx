@@ -8,8 +8,8 @@ import {
   User,
   Link2,
 } from 'lucide-react';
-import { useJournalEntries } from '../../api/queries';
-import Modal from '../../components/Modal';
+import { useJournalEntries } from '../../../api/queries';
+import Modal from '../../../components/Modal';
 
 function formatNumber(value) {
   if (!value && value !== 0) return '--';

@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { BookOpen, FileText, BarChart3, Scale } from 'lucide-react';
-import { FinanceTable } from '../../components/finance';
-import { useJournalEntries } from '../../api/queries';
-import StatusBadge from '../../components/StatusBadge';
+import { FinanceTable } from '../../../components/finance';
+import { useJournalEntries } from '../../../api/queries';
+import StatusBadge from '../../../components/StatusBadge';
 
 const SUB_TABS = [
   { key: 'ledger', label: 'Ledger', icon: BookOpen },

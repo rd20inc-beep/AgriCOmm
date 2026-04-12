@@ -1,8 +1,8 @@
 import { useState, useMemo } from 'react';
 import { Shield, Search, Filter, Clock, User, FileText, Eye, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
-import { useAuditLogs } from '../api/queries';
-import { LoadingSpinner, ErrorState } from '../components/LoadingState';
-import Modal from '../components/Modal';
+import { useAuditLogs } from '../../../api/queries';
+import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
+import Modal from '../../../components/Modal';
 
 const ACTION_COLORS = {
   create: 'bg-green-100 text-green-700',

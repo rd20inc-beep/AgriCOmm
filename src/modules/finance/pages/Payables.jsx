@@ -1,10 +1,10 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { usePayables, useRecordPayment } from '../../api/queries';
-import { queryKeys } from '../../api/queryClient';
-import { useApp } from '../../context/AppContext';
-import StatusBadge from '../../components/StatusBadge';
+import { usePayables, useRecordPayment } from '../../../api/queries';
+import { queryKeys } from '../../../api/queryClient';
+import { useApp } from '../../../context/AppContext';
+import StatusBadge from '../../../components/StatusBadge';
 import {
   Search,
   Filter,

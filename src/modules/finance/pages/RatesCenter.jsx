@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { DollarSign, Package, Plus, RefreshCw, Check } from 'lucide-react';
-import { FinanceTable, FinanceKPI } from '../../components/finance';
-import { useFxRates, useCommodityRates } from '../../api/queries';
-import { financeApi } from '../../api/services';
-import { useApp } from '../../context/AppContext';
+import { FinanceTable, FinanceKPI } from '../../../components/finance';
+import { useFxRates, useCommodityRates } from '../../../api/queries';
+import { financeApi } from '../../../api/services';
+import { useApp } from '../../../context/AppContext';
 
 const SUB_TABS = [
   { key: 'fx', label: 'FX Rates', icon: DollarSign },

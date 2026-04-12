@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import { AlertTriangle, Plus, CheckCircle, XCircle, Search, Shield } from 'lucide-react';
-import { useApp } from '../context/AppContext';
-import { lotInventoryApi } from '../api/services';
-import { useLotInventory } from '../api/queries';
-import Modal from '../components/Modal';
-import StatusBadge from '../components/StatusBadge';
-import SearchSelect from '../components/SearchSelect';
+import { useApp } from '../../../context/AppContext';
+import { lotInventoryApi } from '../../../api/services';
+import { useLotInventory } from '../../../api/queries';
+import Modal from '../../../components/Modal';
+import StatusBadge from '../../../components/StatusBadge';
+import SearchSelect from '../../../components/SearchSelect';
 
 const ADJ_TYPES = [
   { value: 'shortage_found', label: 'Shortage Found', color: 'red' },

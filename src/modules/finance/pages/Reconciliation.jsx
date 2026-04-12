@@ -1,8 +1,8 @@
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { CheckCircle, AlertTriangle, Clock, DollarSign, ArrowRight, XCircle } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
-import { useReceivables, usePayables } from '../../api/queries';
+import { useApp } from '../../../context/AppContext';
+import { useReceivables, usePayables } from '../../../api/queries';
 
 function formatCurrency(value, currency = 'USD') {
   if (!value || isNaN(value)) return '$0';

@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { Landmark, ArrowDownLeft, ArrowUpRight, Wallet } from 'lucide-react';
-import { FinanceKPI, FinanceTable, FinanceChart } from '../../components/finance';
-import { useBankAccounts, useBankTransactions } from '../../api/queries';
+import { FinanceKPI, FinanceTable, FinanceChart } from '../../../components/finance';
+import { useBankAccounts, useBankTransactions } from '../../../api/queries';
 
 function fmtPKR(n) {
   if (n == null || isNaN(n)) return 'Rs 0';

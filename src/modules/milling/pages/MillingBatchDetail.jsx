@@ -19,17 +19,17 @@ import {
   Plus,
   Truck,
 } from 'lucide-react';
-import { useApp } from '../context/AppContext';
-import { queryKeys } from '../api/queryClient';
+import { useApp } from '../../../context/AppContext';
+import { queryKeys } from '../../../api/queryClient';
 import {
   useMillingBatch, useSaveQuality, useRecordYield,
   useAddBatchCost, useAddVehicle, useUpdateMillingBatch,
-} from '../api/queries';
-import { millingApi } from '../api/services';
-import SearchSelect from '../components/SearchSelect';
-import Modal from '../components/Modal';
-import StatusBadge from '../components/StatusBadge';
-import MillingCostSheet from '../components/MillingCostSheet';
+} from '../../../api/queries';
+import { millingApi } from '../../../api/services';
+import SearchSelect from '../../../components/SearchSelect';
+import Modal from '../../../components/Modal';
+import StatusBadge from '../../../components/StatusBadge';
+import MillingCostSheet from '../../../components/MillingCostSheet';
 
 const qualityParams = [
   { key: 'moisture', label: 'Moisture %', unit: '%' },

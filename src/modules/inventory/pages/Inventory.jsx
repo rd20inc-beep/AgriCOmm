@@ -1,10 +1,10 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { Package, Wheat, FlaskConical, Box, Truck, Search, Filter, Eye, RefreshCw, ArrowRight } from 'lucide-react';
-import { useLotInventory, useStockReport } from '../api/queries';
-import { LoadingSpinner, ErrorState } from '../components/LoadingState';
-import StatusBadge from '../components/StatusBadge';
-import { fromKg, UNITS } from '../utils/unitConversion';
+import { useLotInventory, useStockReport } from '../../../api/queries';
+import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
+import StatusBadge from '../../../components/StatusBadge';
+import { fromKg, UNITS } from '../../../utils/unitConversion';
 
 const tabs = [
   { key: 'all', label: 'All Stock', icon: Package },

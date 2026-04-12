@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
-import { SkeletonDashboard as DashboardSkeleton } from '../components/Skeleton';
-import { useApp } from '../context/AppContext';
+import { SkeletonDashboard as DashboardSkeleton } from '../../../components/Skeleton';
+import { useApp } from '../../../context/AppContext';
 
 import KPICardsRow from './dashboard/KPICardsRow';
 import OrderPipeline from './dashboard/OrderPipeline';

@@ -25,11 +25,11 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
-import { useApp } from '../context/AppContext';
-import { useCreateMillingBatch, useMills, useMillExpenses, useCreateMillExpense, useInventory } from '../api/queries';
-import KPICard from '../components/KPICard';
-import StatusBadge from '../components/StatusBadge';
-import Modal from '../components/Modal';
+import { useApp } from '../../../context/AppContext';
+import { useCreateMillingBatch, useMills, useMillExpenses, useCreateMillExpense, useInventory } from '../../../api/queries';
+import KPICard from '../../../components/KPICard';
+import StatusBadge from '../../../components/StatusBadge';
+import Modal from '../../../components/Modal';
 // Chart data computed from real batch data below (no mock imports)
 
 function formatPKR(value) {

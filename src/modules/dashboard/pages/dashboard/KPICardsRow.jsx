@@ -5,7 +5,7 @@ import {
   TrendingUp,
   AlertCircle,
 } from 'lucide-react';
-import KPICard from '../../components/KPICard';
+import KPICard from '../../../../components/KPICard';
 
 const fmt = (v) => '$' + (parseFloat(v) || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
 const fmtPKR = (v) => 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString('en-PK');

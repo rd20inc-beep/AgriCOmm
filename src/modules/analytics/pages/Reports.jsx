@@ -15,8 +15,8 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
-import { useApp } from '../context/AppContext';
-import StatusBadge from '../components/StatusBadge';
+import { useApp } from '../../../context/AppContext';
+import StatusBadge from '../../../components/StatusBadge';
 // Chart data computed from real order/batch data below (no mock imports)
 
 const entityTabs = ['Export', 'Mill', 'Consolidated'];

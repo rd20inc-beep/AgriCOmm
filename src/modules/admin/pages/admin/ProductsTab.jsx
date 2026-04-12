@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Package, Plus } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
-import { useCreateProduct } from '../../api/queries';
-import Modal from '../../components/Modal';
+import { useApp } from '../../../../context/AppContext';
+import { useCreateProduct } from '../../../../api/queries';
+import Modal from '../../../../components/Modal';
 
 export default function ProductsTab() {
   const { productsList, addToast } = useApp();

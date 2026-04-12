@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { Bell, AlertTriangle, AlertCircle, Info, CheckCircle, Clock } from 'lucide-react';
-import { FinanceKPI } from '../../components/finance';
-import { useFinanceAlerts } from '../../api/queries';
+import { FinanceKPI } from '../../../components/finance';
+import { useFinanceAlerts } from '../../../api/queries';
 
 const SEVERITY_CONFIG = {
   danger:  { bg: 'bg-red-50',   border: 'border-red-200',   dot: 'bg-red-500',   icon: AlertTriangle, iconColor: 'text-red-500' },

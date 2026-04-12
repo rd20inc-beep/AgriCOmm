@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useApp } from '../context/AppContext';
-import StatusBadge from '../components/StatusBadge';
+import { useApp } from '../../../context/AppContext';
+import StatusBadge from '../../../components/StatusBadge';
 import { Plus, Search, Eye, ArrowUpDown, Ship, FileText, DollarSign, Package, Clock, Filter, FileDown, Mail } from 'lucide-react';
-import Modal from '../components/Modal';
-import ProformaInvoice from '../components/ProformaInvoice';
-import EmailComposer from '../components/EmailComposer';
+import Modal from '../../../components/Modal';
+import ProformaInvoice from '../../../components/ProformaInvoice';
+import EmailComposer from '../../../components/EmailComposer';
 
 const tabs = [
   { key: 'All', label: 'All' },

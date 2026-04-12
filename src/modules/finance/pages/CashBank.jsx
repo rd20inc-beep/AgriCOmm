@@ -12,9 +12,9 @@ import {
   Eye,
   Link2,
 } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
-import { useBankTransactions, useCashForecast } from '../../api/queries';
-import { accountingApi } from '../../api/services';
+import { useApp } from '../../../context/AppContext';
+import { useBankTransactions, useCashForecast } from '../../../api/queries';
+import { accountingApi } from '../../../api/services';
 
 function formatPKR(value) {
   if (value === 0) return 'Rs 0';

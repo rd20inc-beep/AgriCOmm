@@ -5,10 +5,10 @@ import {
   RefreshCw, ChevronRight, Zap, Ship, DollarSign, Package,
   FileText, TrendingDown, Eye, XCircle,
 } from 'lucide-react';
-import { useExceptions, useExceptionStats, useScanExceptions, useResolveException, useEscalateException } from '../api/queries';
-import { useApp } from '../context/AppContext';
-import { LoadingSpinner, ErrorState } from '../components/LoadingState';
-import Modal from '../components/Modal';
+import { useExceptions, useExceptionStats, useScanExceptions, useResolveException, useEscalateException } from '../../../api/queries';
+import { useApp } from '../../../context/AppContext';
+import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
+import Modal from '../../../components/Modal';
 
 const SEVERITY_CONFIG = {
   critical: { color: 'bg-red-500', bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', icon: AlertCircle },

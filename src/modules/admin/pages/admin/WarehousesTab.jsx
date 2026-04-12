@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Warehouse, Plus } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
-import { useCreateWarehouse } from '../../api/queries';
-import Modal from '../../components/Modal';
+import { useApp } from '../../../../context/AppContext';
+import { useCreateWarehouse } from '../../../../api/queries';
+import Modal from '../../../../components/Modal';
 
 export default function WarehousesTab() {
   const { warehousesList, addToast } = useApp();

@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { ArrowRightLeft, Package, DollarSign, Calendar, Warehouse, CheckCircle, Building2 } from 'lucide-react';
-import { useApp } from '../context/AppContext';
-import { useInternalTransfers, useCreateTransfer } from '../api/queries';
-import StatusBadge from '../components/StatusBadge';
+import { useApp } from '../../../context/AppContext';
+import { useInternalTransfers, useCreateTransfer } from '../../../api/queries';
+import StatusBadge from '../../../components/StatusBadge';
 
 const PKR_RATE = 280; // PKR per USD
 

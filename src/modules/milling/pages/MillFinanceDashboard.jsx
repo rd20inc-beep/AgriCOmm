@@ -1,10 +1,10 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { DollarSign, Users, Zap, Shield, TrendingUp, TrendingDown, AlertTriangle, Plus, UserPlus, Package } from 'lucide-react';
-import { useApp } from '../context/AppContext';
-import { useMillExpenses, useCreateMillExpense, useMillWorkers, useCreateMillWorker, usePayrollSummary, useRecordAttendance, useInventory } from '../api/queries';
-import KPICard from '../components/KPICard';
-import Modal from '../components/Modal';
+import { useApp } from '../../../context/AppContext';
+import { useMillExpenses, useCreateMillExpense, useMillWorkers, useCreateMillWorker, usePayrollSummary, useRecordAttendance, useInventory } from '../../../api/queries';
+import KPICard from '../../../components/KPICard';
+import Modal from '../../../components/Modal';
 
 const PKR = (v) => 'Rs ' + Math.round(v || 0).toLocaleString('en-PK');
 // Default prices — overridden by batch-specific confirmed prices

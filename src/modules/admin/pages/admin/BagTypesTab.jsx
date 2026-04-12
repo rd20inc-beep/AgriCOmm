@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { ShoppingBag, Plus } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
-import { useCreateBagType } from '../../api/queries';
-import Modal from '../../components/Modal';
+import { useApp } from '../../../../context/AppContext';
+import { useCreateBagType } from '../../../../api/queries';
+import Modal from '../../../../components/Modal';
 
 export default function BagTypesTab() {
   const { bagTypesList, addToast } = useApp();

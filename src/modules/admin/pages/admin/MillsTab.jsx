@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Factory, Plus } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
-import { useMills, useCreateMill } from '../../api/queries';
-import Modal from '../../components/Modal';
+import { useApp } from '../../../../context/AppContext';
+import { useMills, useCreateMill } from '../../../../api/queries';
+import Modal from '../../../../components/Modal';
 
 export default function MillsTab() {
   const { addToast } = useApp();

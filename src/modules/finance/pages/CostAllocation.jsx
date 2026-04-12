@@ -14,9 +14,9 @@ import {
   X,
 } from 'lucide-react';
 // Cost allocations computed from real export orders and milling batches
-import { useApp } from '../../context/AppContext';
-import { financeApi } from '../../api/services';
-import StatusBadge from '../../components/StatusBadge';
+import { useApp } from '../../../context/AppContext';
+import { financeApi } from '../../../api/services';
+import StatusBadge from '../../../components/StatusBadge';
 
 // PKR rate should come from settings — this is used only as page-level fallback
 const PKR_RATE_DEFAULT_DEFAULT = 280;

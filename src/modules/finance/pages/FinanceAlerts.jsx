@@ -11,8 +11,8 @@ import {
   Filter,
   DollarSign,
 } from 'lucide-react';
-import { useFinanceAlerts } from '../../api/queries';
-import { useApp } from '../../context/AppContext';
+import { useFinanceAlerts } from '../../../api/queries';
+import { useApp } from '../../../context/AppContext';
 
 function formatRisk(value) {
   if (!value) return '--';

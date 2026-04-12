@@ -1,17 +1,17 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { useApp } from '../context/AppContext';
-import { useAuth } from '../context/AuthContext';
-import { API_BASE } from '../api/client';
-import api from '../api/client';
-import { queryKeys } from '../api/queryClient';
+import { useApp } from '../../../context/AppContext';
+import { useAuth } from '../../../context/AuthContext';
+import { API_BASE } from '../../../api/client';
+import api from '../../../api/client';
+import { queryKeys } from '../../../api/queryClient';
 import {
   useExportOrder, useConfirmAdvance, useConfirmBalance,
   useUpdateOrderStatus, useAddOrderCost, useUpdateShipment,
   useStartDocs, useUploadDocument, useApproveDocument,
-} from '../api/queries';
-import { useCreateMillingBatch } from '../api/queries';
+} from '../../../api/queries';
+import { useCreateMillingBatch } from '../../../api/queries';
 import {
   OrderHeader,
   WorkflowTimeline,
@@ -34,7 +34,7 @@ import {
   getVisibleTabs,
   today,
   documentLabels,
-} from './exportOrder';
+} from '../components';
 
 export default function ExportOrderDetail() {
   const { id } = useParams();

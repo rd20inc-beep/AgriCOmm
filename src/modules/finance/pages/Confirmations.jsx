@@ -14,11 +14,11 @@ import {
   Receipt,
   Mail,
 } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
-import { useConfirmAdvance, useConfirmBalance, useUpdateOrderStatus } from '../../api/queries';
-import Modal from '../../components/Modal';
-import StatusBadge from '../../components/StatusBadge';
-import EmailComposer from '../../components/EmailComposer';
+import { useApp } from '../../../context/AppContext';
+import { useConfirmAdvance, useConfirmBalance, useUpdateOrderStatus } from '../../../api/queries';
+import Modal from '../../../components/Modal';
+import StatusBadge from '../../../components/StatusBadge';
+import EmailComposer from '../../../components/EmailComposer';
 
 function formatCurrency(value) {
   return '$' + value.toLocaleString('en-US');

@@ -2,10 +2,10 @@ import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowDownLeft, DollarSign, AlertTriangle, CheckCircle, Clock, Eye, X } from 'lucide-react';
-import { FinanceKPI, FinanceTable, FinanceChart, FinanceFilterBar } from '../../components/finance';
-import { useReceivables, useRecordPayment, useBankAccounts } from '../../api/queries';
-import { useApp } from '../../context/AppContext';
-import StatusBadge from '../../components/StatusBadge';
+import { FinanceKPI, FinanceTable, FinanceChart, FinanceFilterBar } from '../../../components/finance';
+import { useReceivables, useRecordPayment, useBankAccounts } from '../../../api/queries';
+import { useApp } from '../../../context/AppContext';
+import StatusBadge from '../../../components/StatusBadge';
 
 function fmt(n) {
   if (n == null || isNaN(n)) return '$0';

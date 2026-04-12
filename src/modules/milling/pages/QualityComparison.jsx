@@ -4,12 +4,12 @@ import {
   AlertTriangle, CheckCircle, PauseCircle, XCircle, MessageSquare,
   Filter, FlaskConical, Search, ExternalLink, RefreshCw,
 } from 'lucide-react';
-import { useApp } from '../context/AppContext';
-import { useUpdateMillingBatch } from '../api/queries';
-import api from '../api/client';
-import Modal from '../components/Modal';
-import StatusBadge from '../components/StatusBadge';
-import { LoadingSpinner } from '../components/LoadingState';
+import { useApp } from '../../../context/AppContext';
+import { useUpdateMillingBatch } from '../../../api/queries';
+import api from '../../../api/client';
+import Modal from '../../../components/Modal';
+import StatusBadge from '../../../components/StatusBadge';
+import { LoadingSpinner } from '../../../components/LoadingState';
 
 const qualityParams = [
   { key: 'moisture', label: 'Moisture %', unit: '%' },

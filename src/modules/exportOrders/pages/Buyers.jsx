@@ -1,9 +1,9 @@
 import { useState, useMemo } from 'react';
 import { Users, Plus, Search, Globe, Mail, Phone, Edit2, Trash2, DollarSign, CreditCard, Building2 } from 'lucide-react';
-import { useApp } from '../context/AppContext';
-import { useBuyers, useSaveBuyer, useDeleteBuyer } from '../api/queries';
-import Modal from '../components/Modal';
-import StatusBadge from '../components/StatusBadge';
+import { useApp } from '../../../context/AppContext';
+import { useBuyers, useSaveBuyer, useDeleteBuyer } from '../../../api/queries';
+import Modal from '../../../components/Modal';
+import StatusBadge from '../../../components/StatusBadge';
 
 const PAYMENT_TERMS = ['Advance', 'Net 15', 'Net 30', 'Net 45', 'Net 60', 'LC at Sight', 'LC 30 Days', 'LC 60 Days', 'CAD', 'Open Account'];
 const CURRENCIES = ['USD', 'PKR', 'EUR', 'GBP', 'AED'];

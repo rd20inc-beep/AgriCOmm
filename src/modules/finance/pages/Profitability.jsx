@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import api from '../../api/client';
+import api from '../../../api/client';
 import {
   TrendingUp,
   AlertTriangle,
@@ -31,9 +31,9 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
-import { useApp } from '../../context/AppContext';
+import { useApp } from '../../../context/AppContext';
 // Profitability trend computed from real data below
-import StatusBadge from '../../components/StatusBadge';
+import StatusBadge from '../../../components/StatusBadge';
 
 // ------------------------------------------------------------------ helpers
 function formatUSD(value) {

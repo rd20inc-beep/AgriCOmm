@@ -4,8 +4,8 @@ import {
   ToggleLeft, ToggleRight, Copy, Check, X, ChevronDown, Search,
   EyeOff, Zap, AlertCircle, RefreshCw,
 } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
-import api from '../../api/client';
+import { useApp } from '../../../../context/AppContext';
+import api from '../../../../api/client';
 
 // ── Constants ──────────────────────────────────────────────────────────
 

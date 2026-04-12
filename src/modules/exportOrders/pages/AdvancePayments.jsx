@@ -1,9 +1,9 @@
 import { useState, useMemo } from 'react';
 import { DollarSign, Plus, Search, ArrowRight, CheckCircle, Clock, AlertCircle, CreditCard, Building2 } from 'lucide-react';
-import { useApp } from '../context/AppContext';
-import { useAdvances, useCreateAdvance, useAllocateAdvance } from '../api/queries';
-import Modal from '../components/Modal';
-import StatusBadge from '../components/StatusBadge';
+import { useApp } from '../../../context/AppContext';
+import { useAdvances, useCreateAdvance, useAllocateAdvance } from '../../../api/queries';
+import Modal from '../../../components/Modal';
+import StatusBadge from '../../../components/StatusBadge';
 
 function fmtCur(v, c = 'USD') { return (c === 'PKR' ? 'Rs ' : '$') + (parseFloat(v) || 0).toLocaleString(); }
 

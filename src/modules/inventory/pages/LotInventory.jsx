@@ -4,12 +4,12 @@ import {
   Package, Search, Plus, Warehouse, Truck, Eye, Filter,
   ArrowUpDown, RefreshCw, BarChart3, DollarSign, AlertTriangle,
 } from 'lucide-react';
-import { useLotInventory, useCreatePurchaseLot } from '../api/queries';
-import { useApp } from '../context/AppContext';
-import { LoadingSpinner, ErrorState, EmptyState } from '../components/LoadingState';
-import StatusBadge from '../components/StatusBadge';
-import Modal from '../components/Modal';
-import { fromKg, rateFromPerKg, allEquivalents, allRateEquivalents, toKg, rateToPerKg, UNITS, formatQty, formatRate } from '../utils/unitConversion';
+import { useLotInventory, useCreatePurchaseLot } from '../../../api/queries';
+import { useApp } from '../../../context/AppContext';
+import { LoadingSpinner, ErrorState, EmptyState } from '../../../components/LoadingState';
+import StatusBadge from '../../../components/StatusBadge';
+import Modal from '../../../components/Modal';
+import { fromKg, rateFromPerKg, allEquivalents, allRateEquivalents, toKg, rateToPerKg, UNITS, formatQty, formatRate } from '../../../utils/unitConversion';
 
 const STATUS_TABS = ['All', 'Available', 'Reserved', 'Closed'];
 const TYPE_TABS = ['All', 'raw', 'finished', 'byproduct'];
@@ -262,7 +262,7 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
   useEffect(() => {
     if (isOpen && sources.length === 0) {
       setSourcesLoading(true);
-      import('../api/client').then(({ default: api }) => {
+      import('../../../api/client').then(({ default: api }) => {
         api.get('/api/lot-inventory/sources')
           .then(res => setSources(res?.data?.sources || []))
           .catch(() => { /* non-critical — sources dropdown will be empty */ })

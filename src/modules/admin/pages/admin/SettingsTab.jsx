@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Settings, Server, Shield, Mail, FileText, Eye, Edit3 } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
+import { useApp } from '../../../../context/AppContext';
 
 export default function SettingsTab() {
   const {

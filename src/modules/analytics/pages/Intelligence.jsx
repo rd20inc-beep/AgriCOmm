@@ -9,12 +9,12 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
   PieChart, Pie, Cell,
 } from 'recharts';
-import { useApp } from '../context/AppContext';
+import { useApp } from '../../../context/AppContext';
 import {
   useMarginComparison, useSupplierScoreboard, useCustomerScoreboard,
   usePredictiveAlerts, useTopRiskOrders, useTopRiskCustomers,
-} from '../api/queries';
-import { LoadingSpinner, ErrorState } from '../components/LoadingState';
+} from '../../../api/queries';
+import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 
 const TABS = ['Profitability', 'Customer Scoring', 'Supplier Scoring', 'Risk Monitor', 'Smart Alerts'];
 

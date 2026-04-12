@@ -5,11 +5,11 @@ import {
   DollarSign, TrendingUp, Percent, AlertTriangle,
   Bell, Clock, RefreshCw,
 } from 'lucide-react';
-import { FinanceKPI, FinanceChart } from '../../components/finance';
+import { FinanceKPI, FinanceChart } from '../../../components/finance';
 import {
   useReceivables, useFinanceAlerts, useJournalEntries,
   useFinanceOverviewSummary,
-} from '../../api/queries';
+} from '../../../api/queries';
 
 function fmtPKR(n) {
   if (n == null || isNaN(n)) return 'Rs 0';

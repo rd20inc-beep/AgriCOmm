@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Tags, Factory, Plus } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
+import { useApp } from '../../../../context/AppContext';
 
 export default function CostCategoriesTab() {
   const {

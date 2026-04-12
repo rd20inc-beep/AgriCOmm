@@ -3,8 +3,8 @@ import {
   FlaskConical, Play, DollarSign, TrendingUp, TrendingDown,
   ArrowRightLeft, Wheat, Globe, Calculator, RefreshCw,
 } from 'lucide-react';
-import { useApp } from '../context/AppContext';
-import { useRunScenario, useCostPredict } from '../api/queries';
+import { useApp } from '../../../context/AppContext';
+import { useRunScenario, useCostPredict } from '../../../api/queries';
 
 function formatCurrency(v, cur = 'USD') {
   if (!v && v !== 0) return '—';

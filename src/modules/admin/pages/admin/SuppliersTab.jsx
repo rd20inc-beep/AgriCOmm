@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Truck, Plus, MapPin } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
-import { useCreateSupplier } from '../../api/queries';
-import Modal from '../../components/Modal';
+import { useApp } from '../../../../context/AppContext';
+import { useCreateSupplier } from '../../../../api/queries';
+import Modal from '../../../../components/Modal';
 
 export default function SuppliersTab() {
   const { suppliersList, addToast } = useApp();

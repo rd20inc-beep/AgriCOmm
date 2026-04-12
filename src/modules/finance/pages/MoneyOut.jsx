@@ -1,10 +1,10 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowUpRight, AlertTriangle, CheckCircle, Clock, Eye, X, DollarSign, Landmark } from 'lucide-react';
-import { FinanceKPI, FinanceTable, FinanceFilterBar } from '../../components/finance';
-import { usePayables, useRecordPayment, useBankAccounts, useReceivables } from '../../api/queries';
-import { useApp } from '../../context/AppContext';
-import StatusBadge from '../../components/StatusBadge';
+import { FinanceKPI, FinanceTable, FinanceFilterBar } from '../../../components/finance';
+import { usePayables, useRecordPayment, useBankAccounts, useReceivables } from '../../../api/queries';
+import { useApp } from '../../../context/AppContext';
+import StatusBadge from '../../../components/StatusBadge';
 
 function fmtPKR(n) {
   if (n == null || isNaN(n)) return 'Rs 0';

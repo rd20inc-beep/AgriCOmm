@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Landmark, Plus } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
-import { useCreateBankAccount } from '../../api/queries';
-import Modal from '../../components/Modal';
+import { useApp } from '../../../../context/AppContext';
+import { useCreateBankAccount } from '../../../../api/queries';
+import Modal from '../../../../components/Modal';
 
 export default function BankAccountsTab() {
   const { bankAccountsList, addToast } = useApp();

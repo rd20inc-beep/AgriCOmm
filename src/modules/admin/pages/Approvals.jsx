@@ -4,10 +4,10 @@ import {
   ChevronDown, ChevronUp, Eye, ThumbsUp, ThumbsDown, User, Calendar,
   DollarSign, FileText, RefreshCw, Send,
 } from 'lucide-react';
-import { usePendingApprovals, useMyApprovalRequests, useApproveRequest, useRejectRequest } from '../api/queries';
-import { useApp } from '../context/AppContext';
-import { LoadingSpinner, ErrorState } from '../components/LoadingState';
-import Modal from '../components/Modal';
+import { usePendingApprovals, useMyApprovalRequests, useApproveRequest, useRejectRequest } from '../../../api/queries';
+import { useApp } from '../../../context/AppContext';
+import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
+import Modal from '../../../components/Modal';
 
 const TYPE_LABELS = {
   payment_confirmation: 'Payment Confirmation',

@@ -13,8 +13,8 @@ import {
   X,
   AlertCircle,
 } from 'lucide-react';
-import { useInternalTransfers } from '../../api/queries';
-import StatusBadge from '../../components/StatusBadge';
+import { useInternalTransfers } from '../../../api/queries';
+import StatusBadge from '../../../components/StatusBadge';
 
 const PKR_RATE = 280;
 
