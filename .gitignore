@@ -32,3 +32,8 @@ backups/
 *.njsproj
 *.sln
 *.sw?
+
+# Accidentally-nested copies of the repo
+AgriCOmm/
+AgriCOmm-main/
+AgriCOmm-main.zip
