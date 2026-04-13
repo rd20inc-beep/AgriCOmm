@@ -99,7 +99,6 @@ function ExportRoutes() {
         <Route path="/export/create" element={<CreateExportOrder />} />
         <Route path="/export/:id" element={<ExportOrderDetail />} />
         <Route path="/buyers" element={<Buyers />} />
-        <Route path="/advances" element={<AdvancePayments />} />
         <Route path="/documents" element={<Documents />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="*" element={<Navigate to="/" replace />} />

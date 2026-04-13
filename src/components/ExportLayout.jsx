@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard, Ship, Users, CreditCard, FileText,
+  LayoutDashboard, Ship, Users, FileText,
   BarChart3, Search, Bell, ChevronDown,
   User, X, LogOut, AlertTriangle, AlertCircle, Info,
   Menu, Plus,
@@ -16,7 +16,6 @@ const exportNav = [
   { section: 'Orders' },
   { label: 'Export Orders', icon: Ship, to: '/export' },
   { label: 'New Order', icon: Plus, to: '/export/create' },
-  { label: 'Advance Payments', icon: CreditCard, to: '/advances' },
   { section: 'Customers' },
   { label: 'Buyers', icon: Users, to: '/buyers' },
   { section: 'Documents' },
