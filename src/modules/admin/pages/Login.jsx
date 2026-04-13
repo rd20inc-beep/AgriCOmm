@@ -1,7 +1,20 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext';
 import { Loader2, Eye, EyeOff, Lock, Mail, ArrowRight, Ship } from 'lucide-react';
+
+const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY || '';
+const TURNSTILE_SCRIPT_SRC = 'https://challenges.cloudflare.com/turnstile/v0/api.js';
+
+function loadTurnstileScript() {
+  if (typeof window === 'undefined') return;
+  if (document.querySelector(`script[src="${TURNSTILE_SCRIPT_SRC}"]`)) return;
+  const s = document.createElement('script');
+  s.src = TURNSTILE_SCRIPT_SRC;
+  s.async = true;
+  s.defer = true;
+  document.head.appendChild(s);
+}
 
 export default function Login() {
   const navigate = useNavigate();
@@ -12,27 +25,79 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [captchaRequired, setCaptchaRequired] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState('');
+  const turnstileContainerRef = useRef(null);
+  const turnstileWidgetIdRef = useRef(null);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Load Turnstile script once captcha becomes required
+  useEffect(() => {
+    if (captchaRequired) loadTurnstileScript();
+  }, [captchaRequired]);
+
+  // Render Turnstile widget when required and script is ready
+  useEffect(() => {
+    if (!captchaRequired || !TURNSTILE_SITE_KEY) return;
+    let cancelled = false;
+
+    const tryRender = () => {
+      if (cancelled) return;
+      if (window.turnstile && turnstileContainerRef.current && turnstileWidgetIdRef.current == null) {
+        turnstileWidgetIdRef.current = window.turnstile.render(turnstileContainerRef.current, {
+          sitekey: TURNSTILE_SITE_KEY,
+          callback: (token) => setCaptchaToken(token),
+          'error-callback': () => setCaptchaToken(''),
+          'expired-callback': () => setCaptchaToken(''),
+        });
+      } else if (!window.turnstile) {
+        setTimeout(tryRender, 200);
+      }
+    };
+    tryRender();
+
+    return () => {
+      cancelled = true;
+      if (window.turnstile && turnstileWidgetIdRef.current != null) {
+        try { window.turnstile.remove(turnstileWidgetIdRef.current); } catch { /* noop */ }
+        turnstileWidgetIdRef.current = null;
+      }
+    };
+  }, [captchaRequired]);
 
   if (isAuthenticated) {
     navigate('/', { replace: true });
     return null;
   }
 
+  const resetCaptcha = () => {
+    setCaptchaToken('');
+    if (window.turnstile && turnstileWidgetIdRef.current != null) {
+      try { window.turnstile.reset(turnstileWidgetIdRef.current); } catch { /* noop */ }
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    setLoading(true);
 
-    const result = await login(email, password);
+    if (captchaRequired && !captchaToken) {
+      setError('Please complete the captcha challenge.');
+      return;
+    }
+
+    setLoading(true);
+    const result = await login(email, password, captchaToken);
 
     if (result.success) {
       navigate('/', { replace: true });
     } else {
       setError(result.error || 'Invalid credentials. Please try again.');
+      if (result.captchaRequired) setCaptchaRequired(true);
+      resetCaptcha();
     }
 
     setLoading(false);
@@ -211,10 +276,22 @@ export default function Login() {
               </button>
             </div>
 
+            {/* Captcha (shown after repeated failures) */}
+            {captchaRequired && (
+              <div className="flex flex-col items-center gap-2 py-1">
+                <div ref={turnstileContainerRef} />
+                {!TURNSTILE_SITE_KEY && (
+                  <p className="text-[11px] text-amber-400">
+                    Captcha key not configured (VITE_TURNSTILE_SITE_KEY).
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Submit */}
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || (captchaRequired && !captchaToken)}
               className="w-full flex items-center justify-center gap-2.5 px-4 py-3 text-sm font-semibold text-white rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed group"
               style={{
                 background: loading ? '#2563eb' : 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',

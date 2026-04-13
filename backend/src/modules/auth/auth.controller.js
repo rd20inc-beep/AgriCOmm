@@ -1,12 +1,17 @@
 const authService = require('./auth.service');
+const captchaGuard = require('../../middleware/captchaGuard');
 
 const authController = {
   async login(req, res, next) {
     try {
       const { email, password } = req.body;
       const result = await authService.login(email, password, req.ip);
+      captchaGuard.clearFailures(req.ip);
       return res.json({ success: true, data: result });
     } catch (err) {
+      captchaGuard.recordFailure(req.ip);
+      const willRequireCaptcha = captchaGuard.getFailureCount(req.ip) >= captchaGuard.FAIL_THRESHOLD;
+      res.set('X-Captcha-Required', willRequireCaptcha ? '1' : '0');
       next(err);
     }
   },

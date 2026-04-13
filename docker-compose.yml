@@ -49,6 +49,7 @@ services:
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_SENDER_NAME: ${SMTP_SENDER_NAME:-AGRI COMMODITIES}
       SMTP_SENDER_EMAIL: ${SMTP_SENDER_EMAIL:-info@agririce.com}
+      TURNSTILE_SECRET: ${TURNSTILE_SECRET:-}
     ports:
       - "3001:3001"
     volumes:
@@ -59,6 +60,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.frontend
+      args:
+        VITE_TURNSTILE_SITE_KEY: ${VITE_TURNSTILE_SITE_KEY:-}
     container_name: riceflow-frontend
     restart: unless-stopped
     depends_on:

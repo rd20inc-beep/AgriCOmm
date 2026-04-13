@@ -11,6 +11,10 @@ RUN npm ci --legacy-peer-deps
 # Copy source code
 COPY . .
 
+# Build-time public env vars (Vite bakes VITE_* into the bundle)
+ARG VITE_TURNSTILE_SITE_KEY=""
+ENV VITE_TURNSTILE_SITE_KEY=$VITE_TURNSTILE_SITE_KEY
+
 # Build
 RUN npx vite build
 

@@ -3,8 +3,9 @@ const router = express.Router();
 const authController = require('./auth.controller');
 const authenticate = require('../../middleware/auth');
 const { authLimiter } = require('../../middleware/rateLimiter');
+const { requireCaptchaIfFlagged } = require('../../middleware/captchaGuard');
 
-router.post('/login', authLimiter, authController.login);
+router.post('/login', authLimiter, requireCaptchaIfFlagged, authController.login);
 router.post('/register', authLimiter, authenticate, authController.register);
 router.get('/me', authenticate, authController.me);
 router.post('/refresh-token', authController.refreshToken);
