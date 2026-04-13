@@ -5,7 +5,9 @@ const authenticate = require('../../middleware/auth');
 const { authLimiter } = require('../../middleware/rateLimiter');
 const { requireCaptchaIfFlagged } = require('../../middleware/captchaGuard');
 
-router.post('/login', authLimiter, requireCaptchaIfFlagged, authController.login);
+// Login: captcha guards after 2 failed attempts; no ip rate limiter to
+// avoid hard-locking legitimate users before the captcha can render.
+router.post('/login', requireCaptchaIfFlagged, authController.login);
 router.post('/register', authLimiter, authenticate, authController.register);
 router.get('/me', authenticate, authController.me);
 router.post('/refresh-token', authController.refreshToken);
