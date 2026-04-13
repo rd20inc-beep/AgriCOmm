@@ -7,6 +7,7 @@ import { AuthProvider } from './context/AuthContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import Layout from './components/Layout';
 import MillLayout from './components/MillLayout';
+import ExportLayout from './components/ExportLayout';
 import ProtectedRoute from './components/ProtectedRoute';
 import { useAuth } from './context/AuthContext';
 import Toast from './components/Toast';
@@ -21,6 +22,7 @@ const AdvancePayments = lazy(() => import('./modules/exportOrders/pages/AdvanceP
 const ExportOrders = lazy(() => import('./modules/exportOrders/pages/ExportOrders'));
 const CreateExportOrder = lazy(() => import('./modules/exportOrders/pages/CreateExportOrder'));
 const ExportOrderDetail = lazy(() => import('./modules/exportOrders/pages/ExportOrderDetail'));
+const ExportHomeDashboard = lazy(() => import('./modules/exportOrders/pages/ExportHomeDashboard'));
 const MillingDashboard = lazy(() => import('./modules/milling/pages/MillingDashboard'));
 const MillingBatchDetail = lazy(() => import('./modules/milling/pages/MillingBatchDetail'));
 const MillFinanceDashboard = lazy(() => import('./modules/milling/pages/MillFinanceDashboard'));
@@ -88,6 +90,24 @@ function FinanceRoutes() {
   );
 }
 
+function ExportRoutes() {
+  return (
+    <ExportLayout>
+      <Routes>
+        <Route path="/" element={<ExportHomeDashboard />} />
+        <Route path="/export" element={<ExportOrders />} />
+        <Route path="/export/create" element={<CreateExportOrder />} />
+        <Route path="/export/:id" element={<ExportOrderDetail />} />
+        <Route path="/buyers" element={<Buyers />} />
+        <Route path="/advances" element={<AdvancePayments />} />
+        <Route path="/documents" element={<Documents />} />
+        <Route path="/reports" element={<Reports />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </ExportLayout>
+  );
+}
+
 function MillRoutes() {
   return (
     <MillLayout>
@@ -146,6 +166,7 @@ function StandardRoutes() {
 function RoleGatedShell() {
   const { user } = useAuth();
   if (user?.role === 'Mill Manager') return <MillRoutes />;
+  if (user?.role === 'Export Manager') return <ExportRoutes />;
   return <StandardRoutes />;
 }
 
