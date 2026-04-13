@@ -18,7 +18,6 @@ import { LoadingSpinner } from './components/LoadingState';
 const Login = lazy(() => import('./modules/admin/pages/Login'));
 const Dashboard = lazy(() => import('./modules/dashboard/pages/Dashboard'));
 const Buyers = lazy(() => import('./modules/exportOrders/pages/Buyers'));
-const AdvancePayments = lazy(() => import('./modules/exportOrders/pages/AdvancePayments'));
 const ExportOrders = lazy(() => import('./modules/exportOrders/pages/ExportOrders'));
 const CreateExportOrder = lazy(() => import('./modules/exportOrders/pages/CreateExportOrder'));
 const ExportOrderDetail = lazy(() => import('./modules/exportOrders/pages/ExportOrderDetail'));
@@ -133,7 +132,6 @@ function StandardRoutes() {
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/buyers" element={<ProtectedRoute module="export_orders" action="view"><Buyers /></ProtectedRoute>} />
-        <Route path="/advances" element={<ProtectedRoute module="finance" action="view"><AdvancePayments /></ProtectedRoute>} />
         <Route path="/export" element={<ProtectedRoute module="export_orders" action="view"><ExportOrders /></ProtectedRoute>} />
         <Route path="/export/create" element={<ProtectedRoute module="export_orders" action="create"><CreateExportOrder /></ProtectedRoute>} />
         <Route path="/export/:id" element={<ProtectedRoute module="export_orders" action="view"><ExportOrderDetail /></ProtectedRoute>} />
