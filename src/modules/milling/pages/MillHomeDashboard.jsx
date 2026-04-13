@@ -109,10 +109,14 @@ function BatchColumn({ title, batches, accent, onBatchClick }) {
 
 export default function MillHomeDashboard() {
   const navigate = useNavigate();
-  const { summary, isLoading, batches } = useMillSummary();
-  const { data: inventory = [] } = useInventory({});
+  const { summary, isLoading, batches: rawBatches } = useMillSummary();
+  const { data: rawInventory } = useInventory({});
 
   const data = useMemo(() => {
+    const batches = Array.isArray(rawBatches) ? rawBatches : [];
+    const inventory = Array.isArray(rawInventory) ? rawInventory : [];
+    const batchBreakdown = Array.isArray(summary?.batchBreakdown) ? summary.batchBreakdown : [];
+
     const now = new Date();
     const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -177,7 +181,7 @@ export default function MillHomeDashboard() {
     };
 
     // ─── Trends (real data only) ───
-    const yieldSeries = summary.batchBreakdown
+    const yieldSeries = batchBreakdown
       .filter(b => b.yieldPct > 0)
       .slice(-20)
       .map(b => ({ batch: String(b.batchNo), yield: Number(b.yieldPct.toFixed(1)) }));
@@ -211,7 +215,7 @@ export default function MillHomeDashboard() {
       yieldSeries,
       varianceBuckets,
     };
-  }, [batches, inventory, summary]);
+  }, [rawBatches, rawInventory, summary]);
 
   if (isLoading) {
     return (
