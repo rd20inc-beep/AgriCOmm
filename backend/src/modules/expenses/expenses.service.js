@@ -120,7 +120,7 @@ const expensesService = {
         outstanding: pay_now ? 0 : amountPkr,
         currency: 'PKR',
         due_date: due_date || expense_date,
-        status: pay_now ? 'Paid' : 'Unpaid',
+        status: pay_now ? 'Paid' : 'Pending',
         source_table: 'business_expenses',
         source_id: expense.id,
         payable_type: 'expense',
