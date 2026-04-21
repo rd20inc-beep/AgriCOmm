@@ -62,7 +62,8 @@ jobs:
           script: |
             cd /opt/riceflow-erp
             git pull origin main
-            cd backend && npx knex migrate:latest --env production || true && cd ..
-            docker compose build --no-cache
-            docker compose up -d
+            rsync -a --delete --exclude='.env' --exclude='node_modules' /opt/riceflow-erp/ /root/riceflow-erp/
+            cd /root/riceflow-erp
+            docker-compose build --no-cache
+            docker-compose up -d
             docker image prune -f
