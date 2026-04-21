@@ -67,6 +67,7 @@ const Profitability = lazy(() => import('./modules/finance/pages/Profitability')
 const CashBank = lazy(() => import('./modules/finance/pages/CashBank'));
 const Ledger = lazy(() => import('./modules/finance/pages/Ledger'));
 const Reconciliation = lazy(() => import('./modules/finance/pages/Reconciliation'));
+const Expenses = lazy(() => import('./modules/finance/pages/Expenses'));
 
 function FinanceRoutes() {
   return (
@@ -74,6 +75,7 @@ function FinanceRoutes() {
       <Routes>
         {/* Primary money-flow tabs */}
         <Route index element={<FinanceOverview />} />
+        <Route path="expenses" element={<Expenses />} />
         <Route path="money-in" element={<MoneyIn />} />
         <Route path="money-out" element={<MoneyOut />} />
         <Route path="cash" element={<Cash />} />

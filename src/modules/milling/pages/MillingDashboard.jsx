@@ -302,37 +302,69 @@ export default function MillingDashboard() {
         </button>
       </div>
 
-      {/* KPI Row — clickable cards */}
-      <div className="kpi-grid">
-        <Link to="/lot-inventory?type=raw">
-          <KPICard icon={Wheat} title="Raw Rice Stock" value={`${rawRiceStock.toFixed(1)} MT`} subtitle="Paddy in mill warehouse" color="amber" />
+      {/* Compact KPI Row */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Link to="/lot-inventory?type=raw" className="bg-white rounded-xl border p-4 hover:shadow-sm transition-shadow">
+          <p className="text-xs text-gray-500 font-medium uppercase">Raw Stock</p>
+          <p className="text-xl font-bold text-gray-900 mt-1">{rawRiceStock.toFixed(1)} MT</p>
         </Link>
-        <Link to="/lot-inventory?type=finished">
-          <KPICard icon={Package} title="Finished Rice" value={`${finishedRiceStock.toFixed(1)} MT`}
-            subtitle={`${finishedInMill.toFixed(1)} in mill · ${finishedReserved.toFixed(1)} reserved · ${finishedAtExport.toFixed(1)} at export`} color="green" />
-        </Link>
-        <Link to="/lot-inventory?type=byproduct">
-          <KPICard icon={Recycle} title="By-product Stock" value={`${byproductStock.toFixed(1)} MT`} subtitle="Broken, bran, husk" color="purple" />
-        </Link>
-        <div className="cursor-pointer" onClick={() => document.getElementById('batches-section')?.scrollIntoView({ behavior: 'smooth' })}>
-          <KPICard icon={Clock} title="Pending Batches" value={pendingBatches} subtitle="In Progress / Queued / Pending" color="indigo" />
+        <div className="bg-white rounded-xl border p-4">
+          <p className="text-xs text-gray-500 font-medium uppercase">Pending Batches</p>
+          <p className="text-xl font-bold text-gray-900 mt-1">{pendingBatches}</p>
         </div>
-        <Link to="/quality">
-          <KPICard icon={AlertTriangle} title="Variance Alerts" value={varianceAlerts} subtitle="Exceeding 1% threshold" color="red" />
+        <Link to="/quality" className="bg-white rounded-xl border p-4 hover:shadow-sm transition-shadow">
+          <p className="text-xs text-gray-500 font-medium uppercase">Variance Alerts</p>
+          <p className="text-xl font-bold text-red-600 mt-1">{varianceAlerts}</p>
         </Link>
-        <div className="cursor-pointer" onClick={() => document.getElementById('yield-section')?.scrollIntoView({ behavior: 'smooth' })}>
-          <KPICard icon={BarChart3} title="Avg Yield %" value={`${avgYield}%`} subtitle="Completed batches average" color="blue" />
+        <div className="bg-white rounded-xl border p-4">
+          <p className="text-xs text-gray-500 font-medium uppercase">Avg Yield</p>
+          <p className="text-xl font-bold text-gray-900 mt-1">{avgYield}%</p>
         </div>
         <Link to="/local-sales">
           <KPICard icon={DollarSign} title="Local Sales" value={formatPKR(Math.round(localSalesValue))} subtitle="By-products & local rice" color="cyan" />
         </Link>
-        <Link to="/reports">
-          <KPICard icon={TrendingUp} title="Mill Net Profit" value={formatPKR(Math.round(millNetProfit))} subtitle="Current period estimate" color="green" />
-        </Link>
       </div>
 
-      {/* Inventory Value */}
-      {totalInventoryValue > 0 && (
+      {/* All Batches Table */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+        <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4">All Batches</h2>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-100">
+                <th className="text-left py-2 px-2 text-xs font-medium text-gray-500 uppercase">Batch</th>
+                <th className="text-left py-2 px-2 text-xs font-medium text-gray-500 uppercase">Supplier</th>
+                <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 uppercase">Raw MT</th>
+                <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 uppercase">Finished</th>
+                <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 uppercase">Yield%</th>
+                <th className="text-left py-2 px-2 text-xs font-medium text-gray-500 uppercase">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {productionBatches.map((batch) => (
+                <tr key={batch.id} className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer">
+                  <td className="py-2.5 px-2">
+                    <Link to={`/milling/${batch.id}`} className="font-medium text-blue-600 hover:text-blue-800">{batch.id}</Link>
+                    {batch.linkedExportOrder && <p className="text-[10px] text-gray-400">→ {batch.linkedExportOrder}</p>}
+                  </td>
+                  <td className="py-2.5 px-2 text-gray-600">{batch.supplierName || '—'}</td>
+                  <td className="py-2.5 px-2 text-right">{batch.rawQtyMT}</td>
+                  <td className="py-2.5 px-2 text-right">{batch.actualFinishedMT || '—'}</td>
+                  <td className={`py-2.5 px-2 text-right font-medium ${batch.yieldPct >= 60 ? 'text-green-600' : batch.yieldPct > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
+                    {batch.yieldPct > 0 ? `${batch.yieldPct}%` : '—'}
+                  </td>
+                  <td className="py-2.5 px-2"><StatusBadge status={batch.status} /></td>
+                </tr>
+              ))}
+              {productionBatches.length === 0 && (
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No batches yet</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {false && totalInventoryValue > 0 && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">Inventory Value (Working Capital)</h2>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
