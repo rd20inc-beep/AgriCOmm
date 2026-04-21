@@ -107,22 +107,25 @@ const expensesService = {
       }
 
       // ─── Create payable row ───
-      try {
-        await trx('payables').insert({
-          entity: expense_type === 'mill' ? 'mill' : expense_type === 'export' ? 'export' : 'general',
-          party: vendor_name || (supplier_id ? (await trx('suppliers').where('id', supplier_id).first())?.name : null) || 'Vendor',
-          category,
-          supplier_id: supplier_id || null,
-          original_amount: amountPkr,
-          paid_amount: pay_now ? amountPkr : 0,
-          outstanding: pay_now ? 0 : amountPkr,
-          currency: 'PKR',
-          due_date: due_date || expense_date,
-          status: pay_now ? 'Paid' : 'Unpaid',
-          source_table: 'business_expenses',
-          source_id: expense.id,
-        });
-      } catch { /* payables table may have different schema — graceful skip */ }
+      // payables schema: entity, category, supplier_id, linked_ref, original_amount,
+      // paid_amount, outstanding, due_date, status, currency, source_table, source_id, payable_type
+      const vendorLabel = vendor_name || (supplier_id ? (await trx('suppliers').where('id', supplier_id).first())?.name : null) || 'Vendor';
+      await trx('payables').insert({
+        entity: expense_type === 'mill' ? 'mill' : expense_type === 'export' ? 'export' : 'general',
+        category: category || 'miscellaneous',
+        supplier_id: supplier_id || null,
+        linked_ref: vendorLabel,
+        original_amount: amountPkr,
+        paid_amount: pay_now ? amountPkr : 0,
+        outstanding: pay_now ? 0 : amountPkr,
+        currency: 'PKR',
+        due_date: due_date || expense_date,
+        status: pay_now ? 'Paid' : 'Unpaid',
+        source_table: 'business_expenses',
+        source_id: expense.id,
+        payable_type: 'expense',
+        notes: description || null,
+      });
 
       // ─── If paid now, update bank balance ───
       if (pay_now && bank_account_id) {
