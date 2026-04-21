@@ -24,6 +24,9 @@ const ExportOrderDetail = lazy(() => import('./modules/exportOrders/pages/Export
 const ExportHomeDashboard = lazy(() => import('./modules/exportOrders/pages/ExportHomeDashboard'));
 const MillingDashboard = lazy(() => import('./modules/milling/pages/MillingDashboard'));
 const MillHomeDashboard = lazy(() => import('./modules/milling/pages/MillHomeDashboard'));
+const StoreOverview = lazy(() => import('./modules/millStore/pages/StoreOverview'));
+const NewPurchase = lazy(() => import('./modules/millStore/pages/NewPurchase'));
+const StoreAlerts = lazy(() => import('./modules/millStore/pages/StoreAlerts'));
 const MillingBatchDetail = lazy(() => import('./modules/milling/pages/MillingBatchDetail'));
 const MillFinanceDashboard = lazy(() => import('./modules/milling/pages/MillFinanceDashboard'));
 const QualityComparison = lazy(() => import('./modules/milling/pages/QualityComparison'));
@@ -116,6 +119,9 @@ function MillRoutes() {
         <Route path="/milling/finance" element={<MillFinanceDashboard />} />
         <Route path="/milling/:id" element={<MillingBatchDetail />} />
         <Route path="/quality" element={<QualityComparison />} />
+        <Route path="/mill-store" element={<StoreOverview />} />
+        <Route path="/mill-store/purchases/new" element={<NewPurchase />} />
+        <Route path="/mill-store/alerts" element={<StoreAlerts />} />
         <Route path="/stock-adjustments" element={<StockAdjustments />} />
         <Route path="/transfer" element={<InternalTransfer />} />
         <Route path="/lot-inventory" element={<LotInventory />} />

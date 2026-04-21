@@ -30,6 +30,7 @@ import SearchSelect from '../../../components/SearchSelect';
 import Modal from '../../../components/Modal';
 import StatusBadge from '../../../components/StatusBadge';
 import MillingCostSheet from '../../../components/MillingCostSheet';
+import ConsumptionPanel from '../../millStore/components/ConsumptionPanel';
 
 const qualityParams = [
   { key: 'moisture', label: 'Moisture %', unit: '%' },
@@ -45,6 +46,7 @@ const tabs = [
   { key: 'overview', label: 'Overview', icon: Package },
   { key: 'quality', label: 'Quality', icon: FlaskConical },
   { key: 'yield', label: 'Yield', icon: BarChart3 },
+  { key: 'consumption', label: 'Consumption', icon: Wheat },
   { key: 'costs', label: 'Costs', icon: DollarSign },
   { key: 'transfers', label: 'Transfers', icon: ArrowRightLeft },
   { key: 'activity', label: 'Activity', icon: Activity },
@@ -954,6 +956,17 @@ export default function MillingBatchDetail() {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* CONSUMPTION TAB (Mill Store) */}
+        {activeTab === 'consumption' && (
+          <div className="bg-white rounded-xl shadow-sm p-5">
+            <ConsumptionPanel
+              batchId={batch.dbId || batch.id}
+              batchStatus={batch.status}
+              addToast={addToast}
+            />
           </div>
         )}
 
