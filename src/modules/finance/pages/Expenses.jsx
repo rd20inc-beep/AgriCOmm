@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Plus, DollarSign, Filter, Search, Check, Loader2, CreditCard,
+  Plus, DollarSign, Search, Check, Loader2, CreditCard, User,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useApp } from '../../../context/AppContext';
@@ -37,7 +37,11 @@ function useCreateExpense() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data) => api.post('/api/expenses', data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['expenses'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['expenses'] });
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['batches'] });
+    },
   });
 }
 
@@ -49,16 +53,68 @@ function usePayExpense() {
   });
 }
 
-const TYPES = ['general', 'mill', 'export'];
+const TYPES = [
+  { value: 'general', label: 'General / Office' },
+  { value: 'mill', label: 'Mill Operations' },
+  { value: 'export', label: 'Export Order' },
+  { value: 'personal', label: 'Personal / Owner' },
+];
+
 const CATEGORIES = {
-  general: ['utility_bill', 'rent', 'insurance', 'license', 'professional_fees', 'office_supplies', 'bank_charges', 'inspection', 'miscellaneous'],
-  mill: ['electricity', 'diesel', 'maintenance', 'labor', 'inspection', 'fumigation', 'salaries', 'transport', 'rent', 'insurance', 'miscellaneous'],
-  export: ['clearing', 'freight', 'inspection', 'insurance', 'commission', 'documentation', 'bags', 'transport', 'miscellaneous'],
+  general: [
+    { value: 'utility_bill', label: 'Utility Bill (Electricity, Gas, Water)' },
+    { value: 'rent', label: 'Office / Warehouse Rent' },
+    { value: 'insurance', label: 'Insurance' },
+    { value: 'license', label: 'License / Permit' },
+    { value: 'professional_fees', label: 'Professional Fees (Audit, Legal, Tax)' },
+    { value: 'office_supplies', label: 'Office Supplies' },
+    { value: 'bank_charges', label: 'Bank Charges' },
+    { value: 'inspection', label: 'Inspection Fee' },
+    { value: 'transport', label: 'Transport / Delivery' },
+    { value: 'miscellaneous', label: 'Other / Miscellaneous' },
+  ],
+  mill: [
+    { value: 'electricity', label: 'Electricity' },
+    { value: 'diesel', label: 'Diesel / Fuel' },
+    { value: 'maintenance', label: 'Maintenance / Repair' },
+    { value: 'labor', label: 'Labor / Daily Wages' },
+    { value: 'salaries', label: 'Salaries' },
+    { value: 'transport', label: 'Transport (Paddy / Rice)' },
+    { value: 'inspection', label: 'Inspection / Testing' },
+    { value: 'fumigation', label: 'Fumigation' },
+    { value: 'bags', label: 'Bags / Packaging' },
+    { value: 'rent', label: 'Mill Rent' },
+    { value: 'insurance', label: 'Mill Insurance' },
+    { value: 'miscellaneous', label: 'Other Mill Expense' },
+  ],
+  export: [
+    { value: 'clearing', label: 'Clearing / Customs' },
+    { value: 'freight', label: 'Freight / Shipping' },
+    { value: 'transport', label: 'Transport (Port / Inland)' },
+    { value: 'inspection', label: 'Inspection (SGS, etc.)' },
+    { value: 'insurance', label: 'Cargo Insurance' },
+    { value: 'commission', label: 'Agent Commission' },
+    { value: 'documentation', label: 'Documentation Fees' },
+    { value: 'bags', label: 'Bags / Special Packing' },
+    { value: 'miscellaneous', label: 'Other Export Cost' },
+  ],
+  personal: [
+    { value: 'personal_expense', label: 'Personal Expense' },
+    { value: 'travel', label: 'Travel' },
+    { value: 'entertainment', label: 'Entertainment / Meals' },
+    { value: 'vehicle', label: 'Vehicle / Fuel' },
+    { value: 'medical', label: 'Medical' },
+    { value: 'miscellaneous', label: 'Other Personal' },
+  ],
 };
-const STATUS_COLORS = { Unpaid: 'bg-red-100 text-red-800', Partial: 'bg-amber-100 text-amber-800', Paid: 'bg-green-100 text-green-800' };
+
+const STATUS_COLORS = {
+  Unpaid: 'bg-red-100 text-red-800',
+  Partial: 'bg-amber-100 text-amber-800',
+  Paid: 'bg-green-100 text-green-800',
+};
 
 export default function Expenses() {
-  const navigate = useNavigate();
   const { addToast, suppliersList, bankAccountsList, millingBatches, exportOrders } = useApp();
   const [typeFilter, setTypeFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -73,6 +129,15 @@ export default function Expenses() {
   const payMut = usePayExpense();
 
   const safeExpenses = Array.isArray(expenses) ? expenses : [];
+  const safeBatches = Array.isArray(millingBatches) ? millingBatches : [];
+  const safeOrders = Array.isArray(exportOrders) ? exportOrders : [];
+
+  // Owner users for personal expenses
+  const ownerUsers = useMemo(() => {
+    // We don't have a users list in AppContext, so we'll use a text field
+    return [];
+  }, []);
+
   const filtered = search
     ? safeExpenses.filter(e =>
         (e.vendor_name || e.supplier_name_joined || '').toLowerCase().includes(search.toLowerCase()) ||
@@ -81,21 +146,34 @@ export default function Expenses() {
       )
     : safeExpenses;
 
-  // ─── Form state ───
+  // ─── Form ───
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({
-    expense_type: 'general', category: 'utility_bill', subcategory: '',
+  const initForm = {
+    expense_type: 'general', category: 'utility_bill',
     amount: '', currency: 'PKR', vendor_name: '', supplier_id: '',
     expense_date: new Date().toISOString().split('T')[0], due_date: '',
-    invoice_reference: '', description: '', notes: '',
-    batch_id: '', order_id: '',
+    invoice_reference: '', description: '',
+    batch_id: '', order_id: '', owner_name: '',
     pay_now: false, bank_account_id: '', payment_method: 'bank',
-  });
+  };
+  const [form, setForm] = useState(initForm);
+
   const setF = (k, v) => setForm(p => {
     const u = { ...p, [k]: v };
-    if (k === 'expense_type') u.category = (CATEGORIES[v] || CATEGORIES.general)[0];
+    // Reset context fields when type changes
+    if (k === 'expense_type') {
+      u.category = (CATEGORIES[v] || CATEGORIES.general)[0].value;
+      u.batch_id = '';
+      u.order_id = '';
+      u.owner_name = '';
+    }
     return u;
   });
+
+  const cats = CATEGORIES[form.expense_type] || CATEGORIES.general;
+  const showBatchPicker = form.expense_type === 'mill';
+  const showOrderPicker = form.expense_type === 'export';
+  const showOwnerField = form.expense_type === 'personal';
 
   // ─── Pay modal ───
   const [payId, setPayId] = useState(null);
@@ -103,19 +181,31 @@ export default function Expenses() {
 
   async function handleCreate(e) {
     e.preventDefault();
-    if (!form.amount || !form.category) { addToast('Amount and category required', 'error'); return; }
+    if (!form.amount) { addToast('Amount is required', 'error'); return; }
+    if (!form.category) { addToast('Category is required', 'error'); return; }
     try {
-      await createMut.mutateAsync({
-        ...form,
+      const payload = {
+        expense_type: form.expense_type === 'personal' ? 'general' : form.expense_type,
+        category: form.category,
+        subcategory: form.expense_type === 'personal' ? 'personal' : null,
         amount: Number(form.amount),
+        currency: form.currency,
         supplier_id: form.supplier_id ? Number(form.supplier_id) : null,
+        vendor_name: form.vendor_name || (showOwnerField ? form.owner_name : null),
+        expense_date: form.expense_date,
+        due_date: form.due_date || null,
+        invoice_reference: form.invoice_reference || null,
+        description: form.description + (showOwnerField && form.owner_name ? ` [Owner: ${form.owner_name}]` : ''),
         batch_id: form.batch_id ? Number(form.batch_id) : null,
         order_id: form.order_id ? Number(form.order_id) : null,
+        pay_now: form.pay_now,
         bank_account_id: form.pay_now && form.bank_account_id ? Number(form.bank_account_id) : null,
-      });
-      addToast('Expense recorded', 'success');
+        payment_method: form.pay_now ? form.payment_method : null,
+      };
+      await createMut.mutateAsync(payload);
+      addToast('Expense recorded successfully', 'success');
       setShowForm(false);
-      setForm(f => ({ ...f, amount: '', description: '', invoice_reference: '', notes: '', vendor_name: '', batch_id: '', order_id: '' }));
+      setForm(initForm);
     } catch (err) { addToast(err?.response?.data?.message || err.message, 'error'); }
   }
 
@@ -142,10 +232,10 @@ export default function Expenses() {
         </button>
       </div>
 
-      {/* Summary row */}
+      {/* Summary */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="bg-white rounded-xl border p-4">
-          <p className="text-xs text-gray-500 uppercase font-medium">Total Recorded</p>
+          <p className="text-xs text-gray-500 uppercase font-medium">Total</p>
           <p className="text-xl font-bold text-gray-900 mt-1">{fmtPKR(summary.total_amount_pkr)}</p>
           <p className="text-xs text-gray-400">{summary.total_expenses || 0} expenses</p>
         </div>
@@ -158,7 +248,6 @@ export default function Expenses() {
           <div key={t.expense_type} className="bg-white rounded-xl border p-4">
             <p className="text-xs text-gray-500 uppercase font-medium capitalize">{t.expense_type}</p>
             <p className="text-xl font-bold text-gray-900 mt-1">{fmtPKR(t.total_pkr)}</p>
-            <p className="text-xs text-gray-400">{t.count} expenses</p>
           </div>
         ))}
       </div>
@@ -168,7 +257,7 @@ export default function Expenses() {
         <div className="relative flex-1 max-w-xs">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input type="text" value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search..." className="form-input pl-9 py-1.5 text-sm w-full" />
+            placeholder="Search..." className="w-full pl-9 pr-4 py-1.5 text-sm border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
         {['', 'general', 'mill', 'export'].map(t => (
           <button key={t || 'all'} onClick={() => setTypeFilter(t)}
@@ -180,112 +269,190 @@ export default function Expenses() {
         {['', 'Unpaid', 'Paid'].map(s => (
           <button key={s || 'any'} onClick={() => setStatusFilter(s)}
             className={`px-3 py-1.5 text-xs font-medium rounded-lg ${statusFilter === s ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-            {s || 'Any Status'}
+            {s || 'Any'}
           </button>
         ))}
       </div>
 
-      {/* Create form */}
+      {/* ═══ CREATE FORM ═══ */}
       {showForm && (
-        <form onSubmit={handleCreate} className="bg-white rounded-xl border p-5 space-y-4">
-          <h3 className="text-sm font-semibold text-gray-700">New Expense</h3>
+        <form onSubmit={handleCreate} className="bg-white rounded-xl border border-blue-200 p-5 space-y-4">
+          <h3 className="text-base font-semibold text-gray-900">Record New Expense</h3>
 
+          {/* Row 1: Type selector (cards) */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 uppercase mb-2">What type of expense?</label>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {TYPES.map(t => (
+                <button key={t.value} type="button" onClick={() => setF('expense_type', t.value)}
+                  className={`p-3 rounded-lg border-2 text-left transition-all ${
+                    form.expense_type === t.value
+                      ? 'border-blue-500 bg-blue-50 text-blue-700'
+                      : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                  }`}>
+                  <span className="text-sm font-semibold">{t.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Row 2: Category + Amount (always visible) */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Type</label>
-              <select value={form.expense_type} onChange={e => setF('expense_type', e.target.value)} className="form-input w-full text-sm">
-                {TYPES.map(t => <option key={t} value={t} className="capitalize">{t}</option>)}
-              </select>
-            </div>
-            <div>
               <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Category *</label>
-              <select value={form.category} onChange={e => setF('category', e.target.value)} className="form-input w-full text-sm">
-                {(CATEGORIES[form.expense_type] || []).map(c => <option key={c} value={c} className="capitalize">{c.replace(/_/g, ' ')}</option>)}
+              <select value={form.category} onChange={e => setF('category', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                {cats.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
               </select>
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Amount *</label>
-              <div className="flex gap-1">
-                <select value={form.currency} onChange={e => setF('currency', e.target.value)} className="form-input w-20 text-sm">
+              <div className="flex">
+                <select value={form.currency} onChange={e => setF('currency', e.target.value)}
+                  className="border border-r-0 border-gray-300 rounded-l-lg px-2 py-2.5 text-sm bg-gray-50 outline-none w-20">
                   <option>PKR</option><option>USD</option>
                 </select>
-                <input type="number" min="0" step="any" value={form.amount} onChange={e => setF('amount', e.target.value)}
-                  className="form-input flex-1 text-sm" placeholder="0" required />
+                <input
+                  type="number" min="0" step="any"
+                  value={form.amount}
+                  onChange={e => setF('amount', e.target.value)}
+                  placeholder="Enter amount"
+                  className="flex-1 border border-gray-300 rounded-r-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
               </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Vendor / Supplier</label>
-              <select value={form.supplier_id} onChange={e => { setF('supplier_id', e.target.value); const s = (suppliersList||[]).find(s => String(s.id) === e.target.value); if (s) setF('vendor_name', s.name); }}
-                className="form-input w-full text-sm">
-                <option value="">Select or type below</option>
-                {(suppliersList || []).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-              {!form.supplier_id && (
-                <input type="text" value={form.vendor_name} onChange={e => setF('vendor_name', e.target.value)}
-                  className="form-input w-full text-sm mt-1" placeholder="Or type vendor name" />
-              )}
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Date *</label>
-              <input type="date" value={form.expense_date} onChange={e => setF('expense_date', e.target.value)} className="form-input w-full text-sm" required />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Invoice Ref</label>
-              <input type="text" value={form.invoice_reference} onChange={e => setF('invoice_reference', e.target.value)} className="form-input w-full text-sm" placeholder="Invoice #" />
+              <input type="date" value={form.expense_date} onChange={e => setF('expense_date', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" required />
             </div>
           </div>
 
-          {/* Link to batch/order */}
-          {form.expense_type === 'mill' && (
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Link to batch (optional)</label>
-              <select value={form.batch_id} onChange={e => setF('batch_id', e.target.value)} className="form-input w-full text-sm max-w-sm">
-                <option value="">None — general mill expense</option>
-                {(Array.isArray(millingBatches) ? millingBatches : []).filter(b => b.status !== 'Closed').map(b =>
-                  <option key={b.id} value={b.dbId || b.id}>{b.id} — {b.supplierName || 'Unknown'} ({b.rawQtyMT} MT)</option>
+          {/* Row 3: Context-specific fields */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Vendor / Supplier (not for personal) */}
+            {!showOwnerField && (
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Vendor / Supplier</label>
+                <select value={form.supplier_id} onChange={e => {
+                  setF('supplier_id', e.target.value);
+                  const s = (suppliersList || []).find(s => String(s.id) === e.target.value);
+                  if (s) setF('vendor_name', s.name);
+                }} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                  <option value="">Select or type below</option>
+                  {(suppliersList || []).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+                {!form.supplier_id && (
+                  <input type="text" value={form.vendor_name} onChange={e => setF('vendor_name', e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none mt-1" placeholder="Or type vendor name" />
                 )}
-              </select>
+              </div>
+            )}
+
+            {/* Owner selector for personal expenses */}
+            {showOwnerField && (
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Owner Name *</label>
+                <select value={form.owner_name} onChange={e => setF('owner_name', e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                  <option value="">Select owner</option>
+                  <option value="Akmal Amin">Akmal Amin</option>
+                  <option value="Anzal Amin">Anzal Amin</option>
+                  <option value="Afnan Amin">Afnan Amin</option>
+                </select>
+              </div>
+            )}
+
+            {/* Invoice / Reference */}
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Invoice / Reference</label>
+              <input type="text" value={form.invoice_reference} onChange={e => setF('invoice_reference', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="Bill / receipt number" />
             </div>
-          )}
-          {form.expense_type === 'export' && (
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Link to order (optional)</label>
-              <select value={form.order_id} onChange={e => setF('order_id', e.target.value)} className="form-input w-full text-sm max-w-sm">
-                <option value="">None — general export expense</option>
-                {(Array.isArray(exportOrders) ? exportOrders : []).filter(o => o.status !== 'Closed').map(o =>
-                  <option key={o.id} value={o.dbId || o.id}>{o.id} — {o.customerName} ({o.qtyMT} MT)</option>
+          </div>
+
+          {/* Row 4: Link to batch or order (dynamic based on type) */}
+          {showBatchPicker && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <label className="block text-xs font-semibold text-blue-800 uppercase mb-1">Link to Milling Batch (cost will show on batch)</label>
+              <select value={form.batch_id} onChange={e => setF('batch_id', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                <option value="">No specific batch — general mill expense</option>
+                {safeBatches.filter(b => !['Closed', 'Cancelled', 'Rejected'].includes(b.status)).map(b =>
+                  <option key={b.id} value={b.dbId || b.id}>
+                    {b.id} — {b.supplierName || 'Unknown'} ({Number(b.rawQtyMT || 0).toFixed(1)} MT) [{b.status}]
+                  </option>
                 )}
               </select>
+              <p className="text-[11px] text-blue-600 mt-1">If linked, this cost will appear on the batch's Costs tab automatically.</p>
             </div>
           )}
 
+          {showOrderPicker && (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <label className="block text-xs font-semibold text-green-800 uppercase mb-1">Link to Export Order (cost will show on order)</label>
+              <select value={form.order_id} onChange={e => setF('order_id', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                <option value="">No specific order — general export expense</option>
+                {safeOrders.filter(o => !['Closed', 'Cancelled'].includes(o.status)).map(o =>
+                  <option key={o.id} value={o.dbId || o.id}>
+                    {o.id} — {o.customerName} ({Number(o.qtyMT || 0).toFixed(1)} MT, {o.country}) [{o.status}]
+                  </option>
+                )}
+              </select>
+              <p className="text-[11px] text-green-600 mt-1">If linked, this cost will appear on the order's Financials tab automatically.</p>
+            </div>
+          )}
+
+          {/* Row 5: Description */}
           <div>
             <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Description</label>
-            <input type="text" value={form.description} onChange={e => setF('description', e.target.value)} className="form-input w-full text-sm" placeholder="What is this expense for?" />
+            <input type="text" value={form.description} onChange={e => setF('description', e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="What is this expense for?" />
           </div>
 
-          {/* Pay now toggle */}
-          <div className="flex items-center gap-4 p-3 bg-gray-50 rounded-lg">
-            <label className="flex items-center gap-2 cursor-pointer">
+          {/* Row 6: Payment */}
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+            <label className="flex items-center gap-2 cursor-pointer mb-2">
               <input type="checkbox" checked={form.pay_now} onChange={e => setF('pay_now', e.target.checked)}
                 className="w-4 h-4 rounded border-gray-300 text-blue-600" />
-              <span className="text-sm font-medium text-gray-700">Pay now</span>
+              <span className="text-sm font-medium text-gray-700">Pay now (debit bank account)</span>
             </label>
             {form.pay_now && (
-              <select value={form.bank_account_id} onChange={e => setF('bank_account_id', e.target.value)} className="form-input text-sm flex-1">
-                <option value="">Select bank account</option>
-                {(bankAccountsList || []).map(b => <option key={b.id} value={b.id}>{b.name} ({b.currency})</option>)}
-              </select>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Bank Account *</label>
+                  <select value={form.bank_account_id} onChange={e => setF('bank_account_id', e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none bg-white">
+                    <option value="">Select bank</option>
+                    {(bankAccountsList || []).map(b => <option key={b.id} value={b.id}>{b.name} ({b.currency})</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Method</label>
+                  <select value={form.payment_method} onChange={e => setF('payment_method', e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none bg-white">
+                    <option value="bank">Bank Transfer</option>
+                    <option value="cash">Cash</option>
+                    <option value="cheque">Cheque</option>
+                    <option value="online">Online</option>
+                  </select>
+                </div>
+              </div>
+            )}
+            {!form.pay_now && (
+              <p className="text-xs text-gray-400">Will be saved as unpaid — you can mark it paid later.</p>
             )}
           </div>
 
-          <div className="flex gap-2 justify-end">
-            <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+          {/* Submit */}
+          <div className="flex gap-2 justify-end pt-2">
+            <button type="button" onClick={() => { setShowForm(false); setForm(initForm); }}
+              className="px-4 py-2.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
             <button type="submit" disabled={createMut.isPending}
-              className="flex items-center gap-2 px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">
               {createMut.isPending ? <Loader2 size={16} className="animate-spin" /> : <DollarSign size={16} />}
               Record Expense
             </button>
@@ -293,7 +460,7 @@ export default function Expenses() {
         </form>
       )}
 
-      {/* Expenses table */}
+      {/* ═══ TABLE ═══ */}
       {isLoading ? (
         <div className="animate-pulse space-y-2">{[0,1,2,3].map(i => <div key={i} className="h-12 bg-gray-100 rounded" />)}</div>
       ) : filtered.length === 0 ? (
@@ -308,34 +475,42 @@ export default function Expenses() {
               <tr className="border-b bg-gray-50">
                 <th className="text-left py-2.5 px-4 font-semibold text-gray-600">Ref</th>
                 <th className="text-left py-2.5 px-4 font-semibold text-gray-600">Date</th>
-                <th className="text-left py-2.5 px-4 font-semibold text-gray-600">Vendor</th>
+                <th className="text-left py-2.5 px-4 font-semibold text-gray-600">Description</th>
                 <th className="text-left py-2.5 px-4 font-semibold text-gray-600">Category</th>
                 <th className="text-right py-2.5 px-4 font-semibold text-gray-600">Amount</th>
-                <th className="text-left py-2.5 px-4 font-semibold text-gray-600">Linked</th>
+                <th className="text-left py-2.5 px-4 font-semibold text-gray-600">Linked To</th>
                 <th className="text-left py-2.5 px-4 font-semibold text-gray-600">Status</th>
-                <th className="text-right py-2.5 px-4 font-semibold text-gray-600">Actions</th>
+                <th className="text-right py-2.5 px-4 font-semibold text-gray-600"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filtered.map(e => (
                 <tr key={e.id} className="hover:bg-gray-50">
                   <td className="py-2.5 px-4">
-                    <p className="font-medium text-gray-900 text-xs font-mono">{e.expense_no}</p>
+                    <p className="font-mono text-xs text-gray-500">{e.expense_no}</p>
                     <p className="text-[10px] text-gray-400 capitalize">{e.expense_type}</p>
                   </td>
                   <td className="py-2.5 px-4 text-gray-600">{e.expense_date ? new Date(e.expense_date).toLocaleDateString('en-GB') : '—'}</td>
-                  <td className="py-2.5 px-4 text-gray-900">{e.vendor_name || e.supplier_name_joined || '—'}</td>
                   <td className="py-2.5 px-4">
-                    <span className="inline-block px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-700 capitalize">{(e.category || '').replace(/_/g, ' ')}</span>
+                    <p className="text-gray-900 truncate max-w-[200px]">{e.description || e.vendor_name || e.supplier_name_joined || '—'}</p>
+                  </td>
+                  <td className="py-2.5 px-4">
+                    <span className="inline-block px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-700 capitalize">
+                      {(e.category || '').replace(/_/g, ' ')}
+                    </span>
                   </td>
                   <td className="py-2.5 px-4 text-right font-bold text-gray-900">
                     {e.currency === 'PKR' ? fmtPKR(e.amount) : `$${Number(e.amount).toLocaleString()}`}
                   </td>
-                  <td className="py-2.5 px-4 text-xs text-gray-500">
-                    {e.batch_no ? <span className="text-blue-600">{e.batch_no}</span> : e.order_no ? <span className="text-blue-600">{e.order_no}</span> : '—'}
+                  <td className="py-2.5 px-4 text-xs">
+                    {e.batch_no ? <span className="text-blue-600 font-medium">{e.batch_no}</span>
+                     : e.order_no ? <span className="text-green-600 font-medium">{e.order_no}</span>
+                     : <span className="text-gray-400">—</span>}
                   </td>
                   <td className="py-2.5 px-4">
-                    <span className={`inline-block px-2 py-0.5 text-xs font-medium rounded-full ${STATUS_COLORS[e.payment_status] || 'bg-gray-100'}`}>{e.payment_status}</span>
+                    <span className={`inline-block px-2 py-0.5 text-xs font-medium rounded-full ${STATUS_COLORS[e.payment_status] || 'bg-gray-100'}`}>
+                      {e.payment_status}
+                    </span>
                   </td>
                   <td className="py-2.5 px-4 text-right">
                     {e.payment_status === 'Unpaid' && (
@@ -360,7 +535,7 @@ export default function Expenses() {
             <div>
               <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Bank Account *</label>
               <select value={payForm.bank_account_id} onChange={e => setPayForm(p => ({ ...p, bank_account_id: e.target.value }))}
-                className="form-input w-full text-sm">
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none bg-white">
                 <option value="">Select</option>
                 {(bankAccountsList || []).map(b => <option key={b.id} value={b.id}>{b.name} ({b.currency})</option>)}
               </select>
