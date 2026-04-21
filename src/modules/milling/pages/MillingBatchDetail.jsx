@@ -90,7 +90,8 @@ export default function MillingBatchDetail() {
   });
   const [showYieldModal, setShowYieldModal] = useState(false);
   const [yieldForm, setYieldForm] = useState({
-    actualFinishedMT: '', brokenMT: '', branMT: '', huskMT: '', wastageMT: '',
+    actualFinishedMT: '', brokenMT: '', b1MT: '', b2MT: '', b3MT: '', csrMT: '', shortGrainMT: '',
+    branMT: '', huskMT: '', wastageMT: '',
   });
   const [showCostModal, setShowCostModal] = useState(false);
   const [costForm, setCostForm] = useState({});
@@ -259,6 +260,11 @@ export default function MillingBatchDetail() {
     setYieldForm({
       actualFinishedMT: batch.actualFinishedMT || '',
       brokenMT: batch.brokenMT || '',
+      b1MT: batch.b1MT || batch.b1_mt || '',
+      b2MT: batch.b2MT || batch.b2_mt || '',
+      b3MT: batch.b3MT || batch.b3_mt || '',
+      csrMT: batch.csrMT || batch.csr_mt || '',
+      shortGrainMT: batch.shortGrainMT || batch.short_grain_mt || '',
       branMT: batch.branMT || '',
       huskMT: batch.huskMT || '',
       wastageMT: batch.wastageMT || '',
@@ -285,6 +291,11 @@ export default function MillingBatchDetail() {
 
     const finished = parseFloat(yieldForm.actualFinishedMT) || 0;
     const broken = parseFloat(yieldForm.brokenMT) || 0;
+    const b1 = parseFloat(yieldForm.b1MT) || 0;
+    const b2 = parseFloat(yieldForm.b2MT) || 0;
+    const b3 = parseFloat(yieldForm.b3MT) || 0;
+    const csr = parseFloat(yieldForm.csrMT) || 0;
+    const shortGrain = parseFloat(yieldForm.shortGrainMT) || 0;
     const bran = parseFloat(yieldForm.branMT) || 0;
     const husk = parseFloat(yieldForm.huskMT) || 0;
     const wastage = parseFloat(yieldForm.wastageMT) || 0;
@@ -297,6 +308,11 @@ export default function MillingBatchDetail() {
         data: {
           actual_finished_mt: finished,
           broken_mt: broken,
+          b1_mt: b1,
+          b2_mt: b2,
+          b3_mt: b3,
+          csr_mt: csr,
+          short_grain_mt: shortGrain,
           bran_mt: bran,
           husk_mt: husk,
           wastage_mt: wastage,
@@ -1315,56 +1331,88 @@ export default function MillingBatchDetail() {
             <span className="font-semibold">Planned Finished:</span> {batch.plannedFinishedMT} MT
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          {/* Main outputs */}
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Finished Rice (MT)</label>
-              <input
-                type="number" step="0.1" min="0" required
-                value={yieldForm.actualFinishedMT}
+              <label className="block text-sm font-medium text-gray-700 mb-1">Finished Rice (MT) *</label>
+              <input type="number" step="0.01" min="0" required value={yieldForm.actualFinishedMT}
                 onChange={(e) => setYieldForm(prev => ({ ...prev, actualFinishedMT: e.target.value }))}
                 placeholder="e.g. 49.2"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500"
-              />
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Broken Rice (MT)</label>
-              <input
-                type="number" step="0.1" min="0"
-                value={yieldForm.brokenMT}
+              <label className="block text-sm font-medium text-gray-700 mb-1">Total Broken Rice (MT)</label>
+              <input type="number" step="0.01" min="0" value={yieldForm.brokenMT}
                 onChange={(e) => setYieldForm(prev => ({ ...prev, brokenMT: e.target.value }))}
-                placeholder="e.g. 5.8"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500"
-              />
+                placeholder="Total broken (sum of grades below)"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
             </div>
+          </div>
+
+          {/* Broken grade breakdown */}
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+            <p className="text-xs font-semibold text-amber-800 uppercase tracking-wide mb-2">Broken Grade Breakdown (optional)</p>
+            <div className="grid grid-cols-5 gap-2">
+              <div>
+                <label className="block text-[11px] font-medium text-gray-600 mb-1">B1 (MT)</label>
+                <input type="number" step="0.01" min="0" value={yieldForm.b1MT}
+                  onChange={(e) => setYieldForm(prev => ({ ...prev, b1MT: e.target.value }))}
+                  placeholder="0"
+                  className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-1 focus:ring-amber-500" />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-gray-600 mb-1">B2 (MT)</label>
+                <input type="number" step="0.01" min="0" value={yieldForm.b2MT}
+                  onChange={(e) => setYieldForm(prev => ({ ...prev, b2MT: e.target.value }))}
+                  placeholder="0"
+                  className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-1 focus:ring-amber-500" />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-gray-600 mb-1">B3 (MT)</label>
+                <input type="number" step="0.01" min="0" value={yieldForm.b3MT}
+                  onChange={(e) => setYieldForm(prev => ({ ...prev, b3MT: e.target.value }))}
+                  placeholder="0"
+                  className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-1 focus:ring-amber-500" />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-gray-600 mb-1">CSR (MT)</label>
+                <input type="number" step="0.01" min="0" value={yieldForm.csrMT}
+                  onChange={(e) => setYieldForm(prev => ({ ...prev, csrMT: e.target.value }))}
+                  placeholder="0"
+                  className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-1 focus:ring-amber-500" />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-gray-600 mb-1">Short Grain</label>
+                <input type="number" step="0.01" min="0" value={yieldForm.shortGrainMT}
+                  onChange={(e) => setYieldForm(prev => ({ ...prev, shortGrainMT: e.target.value }))}
+                  placeholder="0"
+                  className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-1 focus:ring-amber-500" />
+              </div>
+            </div>
+          </div>
+
+          {/* By-products */}
+          <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Rice Bran (MT)</label>
-              <input
-                type="number" step="0.1" min="0"
-                value={yieldForm.branMT}
+              <input type="number" step="0.01" min="0" value={yieldForm.branMT}
                 onChange={(e) => setYieldForm(prev => ({ ...prev, branMT: e.target.value }))}
                 placeholder="e.g. 5.2"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500"
-              />
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Rice Husk (MT)</label>
-              <input
-                type="number" step="0.1" min="0"
-                value={yieldForm.huskMT}
+              <input type="number" step="0.01" min="0" value={yieldForm.huskMT}
                 onChange={(e) => setYieldForm(prev => ({ ...prev, huskMT: e.target.value }))}
                 placeholder="e.g. 3.5"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500"
-              />
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Wastage (MT)</label>
-              <input
-                type="number" step="0.1" min="0"
-                value={yieldForm.wastageMT}
+              <input type="number" step="0.01" min="0" value={yieldForm.wastageMT}
                 onChange={(e) => setYieldForm(prev => ({ ...prev, wastageMT: e.target.value }))}
                 placeholder="e.g. 1.3"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500"
-              />
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
             </div>
           </div>
 
