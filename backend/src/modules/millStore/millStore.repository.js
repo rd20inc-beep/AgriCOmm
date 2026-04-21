@@ -319,6 +319,126 @@ const millStoreRepo = {
       recent_consumption: recentConsumption,
     };
   },
+
+  // ─── Adjustments ───
+  async createAdjustment(data) {
+    const [row] = await db('mill_stock_adjustments').insert(data).returning('*');
+    return row;
+  },
+
+  async listAdjustments({ status, itemId, limit = 100, offset = 0 } = {}) {
+    const q = db('mill_stock_adjustments as a')
+      .join('mill_items as mi', 'mi.id', 'a.item_id')
+      .leftJoin('warehouses as w', 'w.id', 'a.warehouse_id')
+      .leftJoin('users as req', 'req.id', 'a.requested_by')
+      .leftJoin('users as apr', 'apr.id', 'a.approved_by')
+      .select(
+        'a.*',
+        'mi.code as item_code',
+        'mi.name as item_name',
+        'mi.unit as item_unit',
+        'mi.category as item_category',
+        'w.name as warehouse_name',
+        'req.full_name as requested_by_name',
+        'apr.full_name as approved_by_name'
+      );
+
+    if (status) q.where('a.status', status);
+    if (itemId) q.where('a.item_id', itemId);
+
+    const [items, totalRow] = await Promise.all([
+      q.clone().orderBy('a.created_at', 'desc').limit(limit).offset(offset),
+      q.clone().clearSelect().clearOrder().count({ c: 'a.id' }).first(),
+    ]);
+    return { items, total: Number(totalRow?.c || 0) };
+  },
+
+  async getAdjustmentById(id) {
+    return db('mill_stock_adjustments as a')
+      .join('mill_items as mi', 'mi.id', 'a.item_id')
+      .leftJoin('warehouses as w', 'w.id', 'a.warehouse_id')
+      .leftJoin('users as req', 'req.id', 'a.requested_by')
+      .leftJoin('users as apr', 'apr.id', 'a.approved_by')
+      .select(
+        'a.*',
+        'mi.code as item_code',
+        'mi.name as item_name',
+        'mi.unit as item_unit',
+        'w.name as warehouse_name',
+        'req.full_name as requested_by_name',
+        'apr.full_name as approved_by_name'
+      )
+      .where('a.id', id)
+      .first();
+  },
+
+  async approveAdjustment(trx, id, approvedBy) {
+    const adj = await trx('mill_stock_adjustments').where('id', id).first();
+    if (!adj) return null;
+
+    // Update adjustment status
+    await trx('mill_stock_adjustments').where('id', id).update({
+      status: 'Approved',
+      approved_by: approvedBy,
+      approved_at: trx.fn.now(),
+    });
+
+    const delta = Number(adj.quantity_delta);
+    const warehouseId = adj.warehouse_id || null;
+
+    // Apply stock change
+    const stockRow = await trx('mill_stock')
+      .where({ item_id: adj.item_id, warehouse_id: warehouseId })
+      .first();
+
+    if (stockRow) {
+      const newQty = Math.max(0, Number(stockRow.quantity_available) + delta);
+      await trx('mill_stock').where('id', stockRow.id).update({
+        quantity_available: newQty,
+        updated_at: trx.fn.now(),
+      });
+    } else if (delta > 0) {
+      await trx('mill_stock').insert({
+        item_id: adj.item_id,
+        warehouse_id: warehouseId,
+        quantity_available: delta,
+        quantity_reserved: 0,
+      });
+    }
+
+    // Record movement
+    const item = await trx('mill_items').where('id', adj.item_id).first();
+    const costPerUnit = Number(item?.avg_cost_per_unit) || 0;
+    await trx('mill_stock_movements').insert({
+      item_id: adj.item_id,
+      warehouse_id: warehouseId,
+      movement_type: 'adjustment',
+      quantity: delta,
+      cost_per_unit: costPerUnit,
+      total_cost: Number((Math.abs(delta) * costPerUnit).toFixed(2)),
+      reference_type: 'adjustment',
+      reference_id: id,
+      reason: adj.reason,
+      performed_by: adj.requested_by,
+      approved_by: approvedBy,
+    });
+
+    return trx('mill_stock_adjustments as a')
+      .join('mill_items as mi', 'mi.id', 'a.item_id')
+      .select('a.*', 'mi.name as item_name', 'mi.code as item_code')
+      .where('a.id', id)
+      .first();
+  },
+
+  async rejectAdjustment(id, approvedBy, rejectionReason) {
+    const [row] = await db('mill_stock_adjustments').where('id', id).update({
+      status: 'Rejected',
+      approved_by: approvedBy,
+      approved_at: db.fn.now(),
+      rejection_reason: rejectionReason,
+    }).returning('*');
+    return row;
+  },
 };
 
 module.exports = millStoreRepo;

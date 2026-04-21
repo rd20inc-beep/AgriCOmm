@@ -120,6 +120,42 @@ const millStoreService = {
   async getSummary() {
     return repo.getSummary();
   },
+
+  // ─── Adjustments ───
+  async requestAdjustment(data, userId) {
+    const item = await repo.getItemById(data.item_id);
+    if (!item) throw new NotFoundError('Item not found.');
+    return repo.createAdjustment({
+      item_id: data.item_id,
+      warehouse_id: data.warehouse_id || null,
+      adjustment_type: data.adjustment_type,
+      quantity_delta: data.quantity_delta,
+      reason: data.reason,
+      status: 'Pending',
+      requested_by: userId,
+    });
+  },
+
+  async listAdjustments(params) {
+    return repo.listAdjustments(params);
+  },
+
+  async approveAdjustment(id, userId) {
+    const adj = await repo.getAdjustmentById(id);
+    if (!adj) throw new NotFoundError('Adjustment not found.');
+    if (adj.status !== 'Pending') throw new ValidationError(`Cannot approve — status is ${adj.status}.`);
+    return db.transaction(async (trx) => {
+      return repo.approveAdjustment(trx, id, userId);
+    });
+  },
+
+  async rejectAdjustment(id, userId, rejectionReason) {
+    const adj = await repo.getAdjustmentById(id);
+    if (!adj) throw new NotFoundError('Adjustment not found.');
+    if (adj.status !== 'Pending') throw new ValidationError(`Cannot reject — status is ${adj.status}.`);
+    if (!rejectionReason) throw new ValidationError('Rejection reason is required.');
+    return repo.rejectAdjustment(id, userId, rejectionReason);
+  },
 };
 
 module.exports = millStoreService;

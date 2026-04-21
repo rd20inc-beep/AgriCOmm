@@ -73,4 +73,25 @@ router.get('/items/:id/movements', authorize('mill_store', 'view'), ctrl.getItem
 // Summary / dashboard
 router.get('/summary', authorize('mill_store', 'view'), ctrl.getSummary);
 
+// Adjustments (approval-gated)
+router.get('/adjustments', authorize('mill_store', 'view'), ctrl.listAdjustments);
+router.post(
+  '/adjustments',
+  authorize('mill_store', 'request_adjustment'),
+  auditAction('request', 'mill_stock_adjustment'),
+  ctrl.requestAdjustment
+);
+router.put(
+  '/adjustments/:id/approve',
+  authorize('mill_store', 'approve_adjustment'),
+  auditAction('approve', 'mill_stock_adjustment', (req) => req.params.id),
+  ctrl.approveAdjustment
+);
+router.put(
+  '/adjustments/:id/reject',
+  authorize('mill_store', 'approve_adjustment'),
+  auditAction('reject', 'mill_stock_adjustment', (req) => req.params.id),
+  ctrl.rejectAdjustment
+);
+
 module.exports = router;

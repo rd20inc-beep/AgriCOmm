@@ -27,6 +27,12 @@ export const millStoreApi = {
   // Summary
   getSummary: () => api.get('/api/mill-store/summary'),
 
+  // Adjustments
+  listAdjustments: (params) => api.get('/api/mill-store/adjustments', params),
+  requestAdjustment: (data) => api.post('/api/mill-store/adjustments', data),
+  approveAdjustment: (id) => api.put(`/api/mill-store/adjustments/${id}/approve`),
+  rejectAdjustment: (id, data) => api.put(`/api/mill-store/adjustments/${id}/reject`, data),
+
   // Consumption (on milling routes)
   suggestConsumption: (batchId) => api.post(`/api/milling/batches/${batchId}/consumption/suggest`),
   confirmConsumption: (batchId, data) => api.post(`/api/milling/batches/${batchId}/consumption`, data),

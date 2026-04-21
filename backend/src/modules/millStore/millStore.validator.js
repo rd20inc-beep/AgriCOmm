@@ -59,6 +59,20 @@ const updatePaymentSchema = Joi.object({
   payment_status: Joi.string().valid('Unpaid', 'Partial', 'Paid').required(),
 });
 
+const ADJUSTMENT_TYPES = ['damage', 'correction', 'wastage', 'count'];
+
+const requestAdjustmentSchema = Joi.object({
+  item_id: Joi.number().integer().required(),
+  warehouse_id: Joi.number().integer().allow(null).optional(),
+  adjustment_type: Joi.string().valid(...ADJUSTMENT_TYPES).required(),
+  quantity_delta: Joi.number().not(0).required(),
+  reason: Joi.string().trim().min(3).required(),
+});
+
+const rejectAdjustmentSchema = Joi.object({
+  rejection_reason: Joi.string().trim().min(3).required(),
+});
+
 module.exports = {
   createItemSchema,
   updateItemSchema,
@@ -66,4 +80,6 @@ module.exports = {
   updateRatioSchema,
   createPurchaseSchema,
   updatePaymentSchema,
+  requestAdjustmentSchema,
+  rejectAdjustmentSchema,
 };

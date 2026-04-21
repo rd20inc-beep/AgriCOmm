@@ -120,3 +120,38 @@ export function useSuggestConsumption() {
     mutationFn: (batchId) => millStoreApi.suggestConsumption(batchId),
   });
 }
+
+// ─── Adjustments ───
+export function useMillStoreAdjustments(params = {}) {
+  return useQuery({
+    queryKey: ['mill-store', 'adjustments', params],
+    queryFn: async () => {
+      const res = await millStoreApi.listAdjustments(params);
+      return unwrap(res, 'adjustments') || [];
+    },
+  });
+}
+
+export function useRequestAdjustment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => millStoreApi.requestAdjustment(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['mill-store'] }),
+  });
+}
+
+export function useApproveAdjustment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => millStoreApi.approveAdjustment(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['mill-store'] }),
+  });
+}
+
+export function useRejectAdjustment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, rejection_reason }) => millStoreApi.rejectAdjustment(id, { rejection_reason }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['mill-store'] }),
+  });
+}

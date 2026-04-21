@@ -7,6 +7,8 @@ const {
   updateRatioSchema,
   createPurchaseSchema,
   updatePaymentSchema,
+  requestAdjustmentSchema,
+  rejectAdjustmentSchema,
 } = require('./millStore.validator');
 const { ValidationError } = require('../../shared/errors');
 
@@ -181,6 +183,50 @@ const millStoreController = {
     try {
       const summary = await service.getSummary();
       res.json({ success: true, data: { summary } });
+    } catch (err) { next(err); }
+  },
+
+  // ─── Adjustments ───
+  async requestAdjustment(req, res, next) {
+    try {
+      const data = validate(requestAdjustmentSchema, req.body);
+      const adj = await service.requestAdjustment(data, req.user?.id);
+      res.status(201).json({ success: true, data: { adjustment: adj } });
+    } catch (err) { next(err); }
+  },
+
+  async listAdjustments(req, res, next) {
+    try {
+      const { page, limit, offset } = parsePagination(req.query);
+      const { status, item_id } = req.query;
+      const result = await service.listAdjustments({
+        status,
+        itemId: item_id ? Number(item_id) : undefined,
+        limit,
+        offset,
+      });
+      res.json({
+        success: true,
+        data: {
+          adjustments: result.items,
+          pagination: paginationMeta(result.total, page, limit),
+        },
+      });
+    } catch (err) { next(err); }
+  },
+
+  async approveAdjustment(req, res, next) {
+    try {
+      const adj = await service.approveAdjustment(req.params.id, req.user?.id);
+      res.json({ success: true, data: { adjustment: adj } });
+    } catch (err) { next(err); }
+  },
+
+  async rejectAdjustment(req, res, next) {
+    try {
+      const data = validate(rejectAdjustmentSchema, req.body);
+      const adj = await service.rejectAdjustment(req.params.id, req.user?.id, data.rejection_reason);
+      res.json({ success: true, data: { adjustment: adj } });
     } catch (err) { next(err); }
   },
 };
