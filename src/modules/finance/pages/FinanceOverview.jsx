@@ -1,11 +1,10 @@
 import { useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
-  Landmark, ArrowDownLeft, ArrowUpRight, Activity,
-  DollarSign, TrendingUp, Percent, AlertTriangle,
+  Landmark, ArrowDownLeft, ArrowUpRight,
+  DollarSign, TrendingUp, AlertTriangle,
   Bell, Clock, RefreshCw,
 } from 'lucide-react';
-import { FinanceKPI, FinanceChart } from '../../../components/finance';
 import {
   useReceivables, useFinanceAlerts, useJournalEntries,
   useFinanceOverviewSummary,
@@ -25,6 +24,28 @@ function fmtUSD(n) {
   return `$${Math.round(n).toLocaleString()}`;
 }
 
+function StatCard({ label, value, sub, accent = 'gray', icon: Icon }) {
+  const accents = {
+    green: 'border-l-green-500 bg-green-50/50',
+    red: 'border-l-red-500 bg-red-50/50',
+    blue: 'border-l-blue-500 bg-blue-50/50',
+    amber: 'border-l-amber-500 bg-amber-50/50',
+    gray: 'border-l-gray-300 bg-gray-50/50',
+  };
+  return (
+    <div className={`border-l-4 rounded-r-lg p-3 ${accents[accent]}`}>
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-[11px] text-gray-500 font-medium uppercase tracking-wide">{label}</p>
+          <p className="text-lg font-bold text-gray-900 mt-0.5">{value}</p>
+          {sub && <p className="text-[11px] text-gray-500 mt-0.5">{sub}</p>}
+        </div>
+        {Icon && <Icon size={16} className="text-gray-400 flex-shrink-0" />}
+      </div>
+    </div>
+  );
+}
+
 export default function FinanceOverview() {
   const navigate = useNavigate();
   const { data: summary = {}, isLoading } = useFinanceOverviewSummary();
@@ -39,26 +60,26 @@ export default function FinanceOverview() {
   const cash = summary.cashPosition || {};
   const consolidated = summary.consolidated || {};
 
-  // Overdue receivables list
   const overdueRecv = useMemo(() =>
-    receivables.filter(r => r.status === 'Overdue' || r.status === 'overdue')
+    (Array.isArray(receivables) ? receivables : [])
+      .filter(r => r.status === 'Overdue' || r.status === 'overdue')
       .sort((a, b) => (b.outstanding || 0) - (a.outstanding || 0)).slice(0, 5),
     [receivables]
   );
 
-  const topAlerts = useMemo(() => (alertsData || []).slice(0, 5), [alertsData]);
+  const topAlerts = useMemo(() => (Array.isArray(alertsData) ? alertsData : []).slice(0, 5), [alertsData]);
+  const recentJournals = useMemo(() => (Array.isArray(journalData) ? journalData : []).slice(0, 6), [journalData]);
 
-  // Chart data (synthetic from current totals)
-  const cashFlowData = useMemo(() => {
-    const months = ['Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
-    const inflow = recv.totalOutstandingPkr || 0;
-    const outflow = pay.totalOutstandingPkr || 0;
-    return months.map((month, i) => ({
-      month,
-      'Money In': Math.round((inflow / 6) * (0.8 + i * 0.08)),
-      'Money Out': Math.round((outflow / 6) * (0.85 + i * 0.06)),
-    }));
-  }, [recv, pay]);
+  if (isLoading) {
+    return (
+      <div className="space-y-4">
+        <div className="animate-pulse h-8 bg-gray-100 rounded w-48" />
+        <div className="grid grid-cols-3 gap-4">
+          {[0,1,2].map(i => <div key={i} className="animate-pulse h-32 bg-gray-100 rounded-xl" />)}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -74,207 +95,163 @@ export default function FinanceOverview() {
         </div>
       )}
 
-      {/* Metadata bar */}
-      <div className="flex items-center gap-4 text-xs text-gray-400">
-        {summary.asOfTimestamp && (
-          <span className="flex items-center gap-1"><Clock size={12} /> {new Date(summary.asOfTimestamp).toLocaleString()}</span>
-        )}
+      {/* FX rate badge */}
+      <div className="flex items-center gap-3 text-xs text-gray-400">
         {summary.currentFxRate && (
-          <span className="flex items-center gap-1 bg-gray-100 px-2 py-0.5 rounded-full text-gray-600">
-            <RefreshCw size={10} /> 1 USD = {summary.currentFxRate} PKR
+          <span className="flex items-center gap-1 bg-gray-100 px-2.5 py-1 rounded-full text-gray-600 font-medium">
+            1 USD = {summary.currentFxRate} PKR
           </span>
         )}
-        <span className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">Base: PKR</span>
+        <span className="bg-blue-50 text-blue-600 px-2.5 py-1 rounded-full font-medium">Base: PKR</span>
       </div>
 
-      {/* PRIMARY KPIs — PKR base */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <FinanceKPI
-          icon={TrendingUp} title="Booked Revenue" value={fmtPKR(exp.revenuePkrBooked || 0)}
-          subtitle={`${fmtUSD(exp.revenueForeign || 0)} ${exp.revenueForeignCurrency || 'USD'}`}
-          status="info" onClick={() => navigate('/finance/profit')} loading={isLoading}
-        />
-        <FinanceKPI
-          icon={DollarSign} title="Booked Profit" value={fmtPKR(exp.bookedProfitPkr || 0)}
-          subtitle={`Margin ${exp.marginPct || 0}%`}
-          status={(exp.bookedProfitPkr || 0) > 0 ? 'good' : 'danger'}
-          onClick={() => navigate('/finance/profit')} loading={isLoading}
-        />
-        <FinanceKPI
-          icon={RefreshCw} title="FX Gain/Loss" value={fmtPKR(exp.fxGainLossPkr || 0)}
-          subtitle="Current vs booked rate"
-          status={(exp.fxGainLossPkr || 0) >= 0 ? 'good' : 'warning'}
-          loading={isLoading}
-        />
-        <FinanceKPI
-          icon={TrendingUp} title="Consolidated Profit" value={fmtPKR(consolidated.profitPkr || 0)}
-          subtitle={`Export + Mill (${fmtUSD(consolidated.profitForeign || 0)} eq.)`}
-          status={(consolidated.profitPkr || 0) > 0 ? 'good' : 'danger'}
-          onClick={() => navigate('/finance/profit')} loading={isLoading}
-        />
-      </div>
+      {/* 3-column snapshot: Money In / P&L / Money Out */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Money In */}
+        <div className="bg-white rounded-xl border border-gray-200 p-5 cursor-pointer hover:shadow-sm transition-shadow"
+          onClick={() => navigate('/finance/money-in')}>
+          <div className="flex items-center gap-2 mb-4">
+            <ArrowDownLeft size={18} className="text-green-600" />
+            <h3 className="text-sm font-semibold text-gray-700">Money In</h3>
+          </div>
+          <div className="space-y-2">
+            <StatCard label="Receivables" value={fmtUSD(recv.totalOutstandingForeign || 0)}
+              sub={`${recv.count || 0} open · ${fmtPKR(recv.totalOutstandingPkr || 0)}`} accent="blue" />
+            <StatCard label="Overdue" value={fmtUSD(recv.overdueAmountForeign || 0)}
+              accent={(recv.overdueAmountForeign || 0) > 0 ? 'red' : 'green'}
+              sub={(recv.overdueAmountForeign || 0) > 0 ? 'Past due date' : 'Nothing overdue'} />
+            <StatCard label="Collection Rate" value={`${summary.collectionRate || 0}%`}
+              accent={(summary.collectionRate || 0) >= 80 ? 'green' : 'amber'}
+              sub="Received / Expected" />
+          </div>
+        </div>
 
-      {/* SECONDARY KPIs — cash & working capital */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <FinanceKPI
-          icon={Landmark} title="Cash Position" value={fmtPKR(cash.bankBalancePkr || 0)}
-          subtitle="All bank accounts (PKR)"
-          status={(cash.bankBalancePkr || 0) > 0 ? 'good' : 'danger'}
-          onClick={() => navigate('/finance/cash')} loading={isLoading}
-        />
-        <FinanceKPI
-          icon={ArrowDownLeft} title="Receivables" value={fmtUSD(recv.totalOutstandingForeign || 0)}
-          subtitle={`${recv.count || 0} open (${fmtPKR(recv.totalOutstandingPkr || 0)})`}
-          status="info" onClick={() => navigate('/finance/money-in')} loading={isLoading}
-        />
-        <FinanceKPI
-          icon={ArrowUpRight} title="Payables" value={fmtPKR(pay.totalOutstandingPkr || 0)}
-          subtitle={`${pay.count || 0} outstanding`}
-          status="neutral" onClick={() => navigate('/finance/money-out')} loading={isLoading}
-        />
-        <FinanceKPI
-          icon={Percent} title="Collection Rate" value={`${summary.collectionRate || 0}%`}
-          subtitle="Received / Expected"
-          status={(summary.collectionRate || 0) >= 80 ? 'good' : (summary.collectionRate || 0) >= 50 ? 'warning' : 'danger'}
-          onClick={() => navigate('/finance/money-in')} loading={isLoading}
-        />
-      </div>
-
-      {/* Mill KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <FinanceKPI
-          icon={Activity} title="Mill Revenue" value={fmtPKR(mill.revenue || 0)}
-          subtitle={`${mill.batchCount || 0} batches (${mill.priceSource || 'none'})`}
-          status={(mill.revenue || 0) > 0 ? 'info' : 'warning'} loading={isLoading}
-        />
-        <FinanceKPI
-          icon={Activity} title="Mill Profit" value={fmtPKR(mill.grossProfit || 0)}
-          subtitle={`Margin ${mill.marginPct || 0}%`}
-          status={(mill.grossProfit || 0) > 0 ? 'good' : 'danger'} loading={isLoading}
-        />
-        <FinanceKPI
-          icon={AlertTriangle} title="Overdue Payables" value={fmtPKR(pay.overdueAmountPkr || 0)}
-          subtitle="Past due date"
-          status={(pay.overdueAmountPkr || 0) > 0 ? 'danger' : 'good'}
-          onClick={() => navigate('/finance/money-out')} loading={isLoading}
-        />
-        <FinanceKPI
-          icon={AlertTriangle} title="Overdue Receivables" value={fmtUSD(recv.overdueAmountForeign || 0)}
-          subtitle="Past due date"
-          status={(recv.overdueAmountForeign || 0) > 0 ? 'danger' : 'good'}
-          onClick={() => navigate('/finance/money-in')} loading={isLoading}
-        />
-      </div>
-
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <FinanceChart
-          title="Cash Flow Trend (PKR)" type="line" data={cashFlowData} currency="Rs "
-          series={[
-            { key: 'Money In', name: 'Money In', color: '#10b981' },
-            { key: 'Money Out', name: 'Money Out', color: '#ef4444' },
-          ]}
-          loading={isLoading}
-        />
+        {/* P&L Center */}
         <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-700 mb-4">Export Profit Breakdown (PKR)</h3>
-          <div className="space-y-3">
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Booked Revenue</span>
-              <span className="font-medium text-gray-900">{fmtPKR(exp.revenuePkrBooked || 0)}</span>
+          <div className="flex items-center gap-2 mb-4">
+            <TrendingUp size={18} className="text-blue-600" />
+            <h3 className="text-sm font-semibold text-gray-700">Profit & Loss</h3>
+          </div>
+          <div className="space-y-2">
+            <StatCard label="Export Revenue" value={fmtPKR(exp.revenuePkrBooked || 0)}
+              sub={`${fmtUSD(exp.revenueForeign || 0)} ${exp.revenueForeignCurrency || 'USD'}`} accent="blue" />
+            <StatCard label="Export Profit" value={fmtPKR(exp.bookedProfitPkr || 0)}
+              sub={`Margin ${exp.marginPct || 0}%`}
+              accent={(exp.bookedProfitPkr || 0) > 0 ? 'green' : 'red'} />
+            <StatCard label="Mill Profit" value={fmtPKR(mill.grossProfit || 0)}
+              sub={`${mill.batchCount || 0} batches · Margin ${mill.marginPct || 0}%`}
+              accent={(mill.grossProfit || 0) > 0 ? 'green' : 'red'} />
+            <div className="border-t pt-2 mt-2">
+              <div className="flex justify-between items-center">
+                <span className="text-xs font-semibold text-gray-600 uppercase">Consolidated</span>
+                <span className={`text-lg font-bold ${(consolidated.profitPkr || 0) >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                  {fmtPKR(consolidated.profitPkr || 0)}
+                </span>
+              </div>
+              {(exp.fxGainLossPkr || 0) !== 0 && (
+                <p className={`text-[11px] mt-0.5 ${(exp.fxGainLossPkr || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                  FX impact: {fmtPKR(exp.fxGainLossPkr || 0)}
+                </p>
+              )}
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Operational Costs</span>
-              <span className="font-medium text-red-600">-{fmtPKR(exp.operationalCostsPkr || 0)}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">COGS (Rice/Milling)</span>
-              <span className="font-medium text-red-600">-{fmtPKR(exp.cogsPkr || 0)}</span>
-            </div>
-            <div className="border-t pt-2 flex justify-between text-sm font-bold">
-              <span>Booked Profit</span>
-              <span className={(exp.bookedProfitPkr || 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}>{fmtPKR(exp.bookedProfitPkr || 0)}</span>
-            </div>
-            <div className="flex justify-between text-xs text-gray-400">
-              <span>FX Gain/Loss (rate change)</span>
-              <span className={(exp.fxGainLossPkr || 0) >= 0 ? 'text-emerald-500' : 'text-red-500'}>{fmtPKR(exp.fxGainLossPkr || 0)}</span>
-            </div>
+          </div>
+        </div>
+
+        {/* Money Out */}
+        <div className="bg-white rounded-xl border border-gray-200 p-5 cursor-pointer hover:shadow-sm transition-shadow"
+          onClick={() => navigate('/finance/money-out')}>
+          <div className="flex items-center gap-2 mb-4">
+            <ArrowUpRight size={18} className="text-red-600" />
+            <h3 className="text-sm font-semibold text-gray-700">Money Out</h3>
+          </div>
+          <div className="space-y-2">
+            <StatCard label="Payables" value={fmtPKR(pay.totalOutstandingPkr || 0)}
+              sub={`${pay.count || 0} outstanding`} accent="amber" />
+            <StatCard label="Overdue Payables" value={fmtPKR(pay.overdueAmountPkr || 0)}
+              accent={(pay.overdueAmountPkr || 0) > 0 ? 'red' : 'green'}
+              sub={(pay.overdueAmountPkr || 0) > 0 ? 'Past due date' : 'All current'} />
+            <StatCard label="Cash Position" value={fmtPKR(cash.bankBalancePkr || 0)}
+              sub="All bank accounts"
+              accent={(cash.bankBalancePkr || 0) > 0 ? 'green' : 'red'}
+              icon={Landmark} />
           </div>
         </div>
       </div>
 
-      {/* Bottom panels */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* Bottom panels — 3 col */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Overdue Collections */}
         <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-              <AlertTriangle size={15} className="text-red-500" /> Overdue Collections
+              <AlertTriangle size={14} className="text-red-500" /> Overdue
             </h3>
-            <button onClick={() => navigate('/finance/money-in')} className="text-xs text-blue-600 hover:text-blue-800 font-medium">View All</button>
+            <button onClick={() => navigate('/finance/money-in')} className="text-xs text-blue-600 hover:underline">View All</button>
           </div>
-          <div className="space-y-2">
-            {overdueRecv.length === 0 && <p className="text-sm text-gray-400 text-center py-4">No overdue receivables</p>}
-            {overdueRecv.map((r, i) => (
-              <Link key={r.id || i} to={r.orderId ? `/export/${r.orderId}` : '/finance/money-in'}
-                className="flex items-center justify-between p-2.5 rounded-lg bg-red-50 border border-red-100 hover:bg-red-100 transition-colors">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-gray-900 truncate">{r.customerName || r.party || `#${r.id}`}</p>
-                  <p className="text-xs text-blue-600">{r.recvNo || r.orderId || ''}</p>
-                </div>
-                <span className="text-sm font-bold text-red-600 flex-shrink-0 ml-2">{fmtUSD(parseFloat(r.outstanding) || 0)}</span>
-              </Link>
-            ))}
-          </div>
+          {overdueRecv.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-4">No overdue receivables</p>
+          ) : (
+            <div className="space-y-1.5">
+              {overdueRecv.map((r, i) => (
+                <Link key={r.id || i} to={r.orderId ? `/export/${r.orderId}` : '/finance/money-in'}
+                  className="flex items-center justify-between p-2 rounded-lg bg-red-50 hover:bg-red-100 transition-colors">
+                  <span className="text-sm text-gray-900 truncate">{r.customerName || r.party || `#${r.id}`}</span>
+                  <span className="text-sm font-bold text-red-600 ml-2">{fmtUSD(parseFloat(r.outstanding) || 0)}</span>
+                </Link>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Alerts */}
         <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-              <Bell size={15} className="text-amber-500" /> Finance Alerts
+              <Bell size={14} className="text-amber-500" /> Alerts
             </h3>
-            <button onClick={() => navigate('/finance/alerts')} className="text-xs text-blue-600 hover:text-blue-800 font-medium">View All</button>
+            <button onClick={() => navigate('/finance/alerts')} className="text-xs text-blue-600 hover:underline">View All</button>
           </div>
-          <div className="space-y-2">
-            {topAlerts.length === 0 && <p className="text-sm text-gray-400 text-center py-4">No active alerts</p>}
-            {topAlerts.map((a, i) => {
-              const dot = a.type === 'danger' ? 'bg-red-500' : a.type === 'warning' ? 'bg-amber-500' : 'bg-blue-500';
-              const bg = a.type === 'danger' ? 'bg-red-50' : a.type === 'warning' ? 'bg-amber-50' : 'bg-blue-50';
-              return (
-                <div key={a.id || i} className={`p-2.5 rounded-lg ${bg}`}>
-                  <div className="flex items-start gap-2">
-                    <span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${dot}`} />
-                    <div><p className="text-sm font-medium text-gray-900">{a.title}</p><p className="text-xs text-gray-500 mt-0.5 line-clamp-1">{a.message}</p></div>
+          {topAlerts.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-4">No alerts</p>
+          ) : (
+            <div className="space-y-1.5">
+              {topAlerts.map((a, i) => {
+                const bg = a.type === 'danger' ? 'bg-red-50' : a.type === 'warning' ? 'bg-amber-50' : 'bg-blue-50';
+                const dot = a.type === 'danger' ? 'bg-red-500' : a.type === 'warning' ? 'bg-amber-500' : 'bg-blue-500';
+                return (
+                  <div key={a.id || i} className={`p-2 rounded-lg ${bg}`}>
+                    <div className="flex items-start gap-2">
+                      <span className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${dot}`} />
+                      <p className="text-sm text-gray-900 line-clamp-1">{a.title || a.message}</p>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
-        {/* Recent Activity */}
+        {/* Recent Journal Entries */}
         <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-              <Clock size={15} className="text-indigo-500" /> Recent Activity
+              <Clock size={14} className="text-indigo-500" /> Recent Entries
             </h3>
-            <button onClick={() => navigate('/finance/accounting')} className="text-xs text-blue-600 hover:text-blue-800 font-medium">View All</button>
+            <button onClick={() => navigate('/finance/accounting')} className="text-xs text-blue-600 hover:underline">View All</button>
           </div>
-          <div className="space-y-1.5">
-            {(journalData || []).length === 0 && <p className="text-sm text-gray-400 text-center py-4">No recent activity</p>}
-            {(journalData || []).slice(0, 6).map((j, i) => (
-              <div key={j.id || i} className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50">
-                <div className="w-7 h-7 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
-                  <DollarSign size={13} className="text-indigo-600" />
+          {recentJournals.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-4">No recent entries</p>
+          ) : (
+            <div className="space-y-1">
+              {recentJournals.map((j, i) => (
+                <div key={j.id || i} className="flex items-center gap-2 p-1.5 rounded hover:bg-gray-50">
+                  <DollarSign size={12} className="text-indigo-400 flex-shrink-0" />
+                  <p className="text-sm text-gray-700 truncate flex-1">{j.description || j.narration || 'Entry'}</p>
+                  <span className="text-[10px] text-gray-400 flex-shrink-0">{j.date || ''}</span>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-gray-900 truncate">{j.description || j.narration || 'Entry'}</p>
-                  <p className="text-xs text-gray-400">{j.date || ''}</p>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
