@@ -99,9 +99,30 @@ const expensesService = {
 
       // ─── Link to order costs if export ───
       if (order_id && expense_type === 'export') {
+        // Get the order's fx_rate for PKR→USD conversion
+        const linkedOrder = await trx('export_orders').where('id', order_id).select('currency', 'fx_rate').first();
+        const orderFxRate = parseFloat(linkedOrder?.fx_rate) || 280;
+        const orderCurrency = linkedOrder?.currency || 'USD';
+
+        // If expense is PKR but order is USD, convert to USD for the cost row
+        let costAmount = amountNum;
+        let costCurrency = currency || 'PKR';
+        let costFxRate = rate;
+        let basePkr = amountPkr;
+
+        if (costCurrency === 'PKR' && orderCurrency !== 'PKR') {
+          costAmount = Number((amountNum / orderFxRate).toFixed(2));
+          costCurrency = orderCurrency;
+          costFxRate = orderFxRate;
+        }
+
         await trx('export_order_costs').insert({
-          order_id, category: category || 'miscellaneous',
-          amount: amountNum, currency: currency || 'USD',
+          order_id,
+          category: category || 'miscellaneous',
+          amount: costAmount,
+          currency: costCurrency,
+          fx_rate: costFxRate,
+          base_amount_pkr: basePkr,
           notes: `From business expense ${expenseNo}`,
         });
       }
