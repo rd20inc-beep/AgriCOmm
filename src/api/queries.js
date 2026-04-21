@@ -237,7 +237,17 @@ export function useMillingBatch(id) {
         const costsArr = res?.data?.costs || [];
         if (Array.isArray(costsArr) && costsArr.length > 0) {
           const costsObj = {};
-          costsArr.forEach(c => { costsObj[c.category] = parseFloat(c.amount) || 0; });
+          // Sum amounts per category — convert PKR entries using fx_rate or base_amount_pkr
+          const orderCurrency = raw.currency || 'USD';
+          costsArr.forEach(c => {
+            let amt = parseFloat(c.amount) || 0;
+            // If cost is in PKR but order is in USD, convert back
+            if (c.currency === 'PKR' && orderCurrency !== 'PKR' && amt > 0) {
+              const fxRate = parseFloat(c.fx_rate) || parseFloat(raw.fx_rate) || 280;
+              amt = amt / fxRate;
+            }
+            costsObj[c.category] = (costsObj[c.category] || 0) + amt;
+          });
           raw.costs = costsObj;
         }
         const quality = res?.data?.quality || {};

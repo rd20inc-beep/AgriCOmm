@@ -57,13 +57,22 @@ const docTypeKeyMap = {
 };
 
 /** Convert costs from API array format to frontend keyed object format */
-function transformCosts(costs) {
+function transformCosts(costs, orderCurrency) {
   if (!costs) return {};
   if (!Array.isArray(costs)) return costs;
   const result = {};
   costs.forEach(c => {
     const key = c.category || c.cost_category || '';
-    if (key) result[key] = parseFloat(c.amount) || 0;
+    if (!key) return;
+    let amt = parseFloat(c.amount) || 0;
+    // If cost is in PKR but order is in foreign currency, convert using fx_rate
+    const costCurrency = c.currency || 'USD';
+    const targetCurrency = orderCurrency || 'USD';
+    if (costCurrency === 'PKR' && targetCurrency !== 'PKR' && amt > 0) {
+      const rate = parseFloat(c.fx_rate) || 280;
+      amt = amt / rate;
+    }
+    result[key] = (result[key] || 0) + amt;
   });
   return result;
 }
@@ -185,7 +194,7 @@ export function transformOrder(dbOrder) {
     // Purchase lots allocated to this order
     purchaseLots: dbOrder.purchaseLots || [],
     // Costs — convert array to keyed object if needed
-    costs: transformCosts(dbOrder.costs),
+    costs: transformCosts(dbOrder.costs, dbOrder.currency),
     // Documents — convert array to keyed object if needed
     documents: transformDocuments(dbOrder.documents),
     // Activity log
