@@ -12,8 +12,6 @@ services:
       POSTGRES_DB: ${DB_NAME:-riceflow_erp}
       POSTGRES_USER: ${DB_USER:-riceflow}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-riceflow_secure_2026}
-    ports:
-      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
