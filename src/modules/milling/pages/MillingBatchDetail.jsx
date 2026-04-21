@@ -1420,26 +1420,63 @@ export default function MillingBatchDetail() {
           {(() => {
             const f = parseFloat(yieldForm.actualFinishedMT) || 0;
             const b = parseFloat(yieldForm.brokenMT) || 0;
+            const b1 = parseFloat(yieldForm.b1MT) || 0;
+            const b2 = parseFloat(yieldForm.b2MT) || 0;
+            const b3 = parseFloat(yieldForm.b3MT) || 0;
+            const csr = parseFloat(yieldForm.csrMT) || 0;
+            const sg = parseFloat(yieldForm.shortGrainMT) || 0;
             const br = parseFloat(yieldForm.branMT) || 0;
             const h = parseFloat(yieldForm.huskMT) || 0;
             const w = parseFloat(yieldForm.wastageMT) || 0;
+            const gradeTotal = b1 + b2 + b3 + csr + sg;
             const total = f + b + br + h + w;
-            const yieldPct = batch.rawQtyMT > 0 ? ((f / batch.rawQtyMT) * 100).toFixed(1) : '0.0';
-            const accounted = batch.rawQtyMT > 0 ? ((total / batch.rawQtyMT) * 100).toFixed(1) : '0.0';
+            const rawQty = batch.rawQtyMT || 0;
+            const yieldPct = rawQty > 0 ? ((f / rawQty) * 100).toFixed(1) : '0.0';
+            const accounted = rawQty > 0 ? ((total / rawQty) * 100).toFixed(1) : '0.0';
+
+            const rows = [
+              { label: 'Finished Rice', value: f, bold: true, color: 'text-blue-700' },
+              { label: 'Broken Rice (total)', value: b, color: 'text-amber-700' },
+            ];
+            if (gradeTotal > 0) {
+              if (b1) rows.push({ label: '  B1', value: b1, indent: true });
+              if (b2) rows.push({ label: '  B2', value: b2, indent: true });
+              if (b3) rows.push({ label: '  B3', value: b3, indent: true });
+              if (csr) rows.push({ label: '  CSR', value: csr, indent: true });
+              if (sg) rows.push({ label: '  Short Grain', value: sg, indent: true });
+            }
+            rows.push(
+              { label: 'Rice Bran', value: br },
+              { label: 'Rice Husk', value: h },
+              { label: 'Wastage', value: w, color: 'text-red-600' },
+            );
+
             return (
-              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200 text-sm space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Total Output</span>
-                  <span className="font-semibold text-gray-900">{total.toFixed(1)} MT</span>
+              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200 text-sm space-y-1.5">
+                {rows.map((r, i) => r.value > 0 && (
+                  <div key={i} className={`flex justify-between ${r.indent ? 'pl-4 text-xs text-gray-500' : ''}`}>
+                    <span className={r.bold ? 'font-semibold text-gray-900' : 'text-gray-600'}>{r.label}</span>
+                    <span className={`font-medium ${r.color || 'text-gray-900'}`}>{r.value.toFixed(2)} MT</span>
+                  </div>
+                ))}
+                {gradeTotal > 0 && b > 0 && Math.abs(gradeTotal - b) > 0.01 && (
+                  <div className="flex justify-between pl-4 text-xs text-red-500">
+                    <span>Grade total vs Broken total mismatch</span>
+                    <span>{gradeTotal.toFixed(2)} vs {b.toFixed(2)} MT</span>
+                  </div>
+                )}
+                <div className="border-t border-gray-200 pt-2 mt-2 flex justify-between">
+                  <span className="font-semibold text-gray-700">Total Output</span>
+                  <span className="font-bold text-gray-900">{total.toFixed(2)} MT</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Accounted for</span>
                   <span className={`font-semibold ${parseFloat(accounted) > 100 ? 'text-red-600' : parseFloat(accounted) >= 95 ? 'text-green-600' : 'text-amber-600'}`}>
-                    {accounted}% of {batch.rawQtyMT} MT raw input
+                    {accounted}% of {rawQty} MT
                   </span>
                 </div>
                 <div className="flex justify-between border-t border-gray-200 pt-2">
-                  <span className="text-gray-600 font-medium">Yield %</span>
+                  <span className="font-semibold text-gray-700">Yield %</span>
                   <span className={`text-lg font-bold ${parseFloat(yieldPct) >= 75 ? 'text-green-600' : parseFloat(yieldPct) >= 60 ? 'text-amber-600' : 'text-red-600'}`}>
                     {yieldPct}%
                   </span>
