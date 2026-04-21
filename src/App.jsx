@@ -28,6 +28,7 @@ const StoreOverview = lazy(() => import('./modules/millStore/pages/StoreOverview
 const NewPurchase = lazy(() => import('./modules/millStore/pages/NewPurchase'));
 const StoreAlerts = lazy(() => import('./modules/millStore/pages/StoreAlerts'));
 const StoreAdjustments = lazy(() => import('./modules/millStore/pages/StoreAdjustments'));
+const StoreRatios = lazy(() => import('./modules/millStore/pages/StoreRatios'));
 const MillingBatchDetail = lazy(() => import('./modules/milling/pages/MillingBatchDetail'));
 const MillFinanceDashboard = lazy(() => import('./modules/milling/pages/MillFinanceDashboard'));
 const QualityComparison = lazy(() => import('./modules/milling/pages/QualityComparison'));
@@ -124,6 +125,7 @@ function MillRoutes() {
         <Route path="/mill-store/purchases/new" element={<NewPurchase />} />
         <Route path="/mill-store/alerts" element={<StoreAlerts />} />
         <Route path="/mill-store/adjustments" element={<StoreAdjustments />} />
+        <Route path="/mill-store/ratios" element={<StoreRatios />} />
         <Route path="/stock-adjustments" element={<StockAdjustments />} />
         <Route path="/transfer" element={<InternalTransfer />} />
         <Route path="/lot-inventory" element={<LotInventory />} />

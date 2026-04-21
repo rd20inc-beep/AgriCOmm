@@ -116,6 +116,11 @@ const millStoreService = {
     return repo.getItemMovements(itemId, params);
   },
 
+  // ─── Forecast ───
+  async getForecast() {
+    return repo.getForecast();
+  },
+
   // ─── Summary ───
   async getSummary() {
     return repo.getSummary();

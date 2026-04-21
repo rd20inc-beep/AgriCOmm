@@ -289,6 +289,71 @@ const millStoreRepo = {
       .offset(offset);
   },
 
+  // ─── Forecast ───
+  async getForecast() {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    // Get all active items with current stock
+    const items = await db('mill_items as mi')
+      .leftJoin(
+        db('mill_stock')
+          .select('item_id')
+          .sum({ qty: 'quantity_available' })
+          .groupBy('item_id')
+          .as('ms'),
+        'ms.item_id', 'mi.id'
+      )
+      .select('mi.id', 'mi.code', 'mi.name', 'mi.category', 'mi.unit', 'mi.reorder_level',
+        db.raw('COALESCE(ms.qty, 0) as on_hand'))
+      .where('mi.is_active', true);
+
+    // Get consumption per item in last 30 days
+    const consumption = await db('mill_stock_movements')
+      .select('item_id')
+      .sum(db.raw('ABS(quantity) as total_consumed'))
+      .where('movement_type', 'consumption')
+      .where('created_at', '>=', thirtyDaysAgo)
+      .groupBy('item_id');
+
+    const consumptionMap = Object.fromEntries(
+      consumption.map(c => [c.item_id, Number(c.total_consumed) || 0])
+    );
+
+    return items.map(item => {
+      const consumed30d = consumptionMap[item.id] || 0;
+      const dailyRate = consumed30d / 30;
+      const onHand = Number(item.on_hand);
+      const daysUntilEmpty = dailyRate > 0 ? Math.round(onHand / dailyRate) : null;
+      const daysUntilReorder = dailyRate > 0
+        ? Math.round((onHand - Number(item.reorder_level)) / dailyRate)
+        : null;
+
+      return {
+        item_id: item.id,
+        item_code: item.code,
+        item_name: item.name,
+        category: item.category,
+        unit: item.unit,
+        on_hand: onHand,
+        reorder_level: Number(item.reorder_level),
+        consumed_30d: consumed30d,
+        daily_consumption_rate: Number(dailyRate.toFixed(3)),
+        days_until_empty: daysUntilEmpty,
+        days_until_reorder: daysUntilReorder,
+        risk: daysUntilEmpty !== null && daysUntilEmpty <= 7 ? 'critical'
+          : daysUntilReorder !== null && daysUntilReorder <= 7 ? 'warning'
+          : 'ok',
+      };
+    }).filter(i => i.consumed_30d > 0 || i.on_hand > 0)
+      .sort((a, b) => {
+        if (a.risk === 'critical' && b.risk !== 'critical') return -1;
+        if (a.risk !== 'critical' && b.risk === 'critical') return 1;
+        if (a.risk === 'warning' && b.risk === 'ok') return -1;
+        if (a.risk === 'ok' && b.risk === 'warning') return 1;
+        return (a.days_until_empty ?? 999) - (b.days_until_empty ?? 999);
+      });
+  },
+
   // ─── Summary (for dashboard) ───
   async getSummary() {
     const [itemCount, lowStockCount, stockValue, recentPurchases, recentConsumption] = await Promise.all([

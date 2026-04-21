@@ -186,6 +186,13 @@ const millStoreController = {
     } catch (err) { next(err); }
   },
 
+  async getForecast(req, res, next) {
+    try {
+      const forecast = await service.getForecast();
+      res.json({ success: true, data: { forecast } });
+    } catch (err) { next(err); }
+  },
+
   // ─── Adjustments ───
   async requestAdjustment(req, res, next) {
     try {

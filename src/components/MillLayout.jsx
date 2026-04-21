@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Factory, Package, DollarSign,
   BarChart3, Search, Bell, ChevronDown,
   User, Settings, X, LogOut, AlertTriangle, AlertCircle, Info,
-  FlaskConical, Menu, ArrowRightLeft, ShoppingCart, ClipboardEdit,
+  FlaskConical, Menu, ArrowRightLeft, ShoppingCart, ClipboardEdit, Gauge,
   ChevronsLeft, ChevronsRight, Sun, Moon,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
@@ -19,6 +19,7 @@ const millNav = [
   { label: 'Stock Overview', icon: ShoppingCart, to: '/mill-store' },
   { label: 'Alerts', icon: AlertTriangle, to: '/mill-store/alerts' },
   { label: 'Adjustments', icon: ClipboardEdit, to: '/mill-store/adjustments' },
+  { label: 'Ratios', icon: Gauge, to: '/mill-store/ratios' },
   { section: 'Inventory' },
   { label: 'Lot Inventory', icon: Package, to: '/lot-inventory' },
   { label: 'Stock Adjustments', icon: AlertTriangle, to: '/stock-adjustments' },

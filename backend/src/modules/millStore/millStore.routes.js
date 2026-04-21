@@ -72,6 +72,7 @@ router.get('/items/:id/movements', authorize('mill_store', 'view'), ctrl.getItem
 
 // Summary / dashboard
 router.get('/summary', authorize('mill_store', 'view'), ctrl.getSummary);
+router.get('/forecast', authorize('mill_store', 'view'), ctrl.getForecast);
 
 // Adjustments (approval-gated)
 router.get('/adjustments', authorize('mill_store', 'view'), ctrl.listAdjustments);
