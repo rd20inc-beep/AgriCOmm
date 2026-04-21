@@ -39,12 +39,35 @@ export default function FinancialsTab({ order, formatCurrency, totalCosts, gross
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Outflows (Costs)</h3>
         <div className="space-y-3">
-          {exportCostCategories.map(cat => (
-            <div key={cat.key} className="flex justify-between text-sm">
-              <span className="text-gray-600">{cat.label}</span>
-              <span className="font-medium text-gray-900">{formatCurrency(order.costs[cat.key] || 0)}</span>
-            </div>
-          ))}
+          {(() => {
+            // Merge known categories with any extra categories from actual costs
+            const costs = order.costs || {};
+            const knownKeys = new Set(exportCostCategories.map(c => c.key));
+            const extraKeys = Object.keys(costs).filter(k => !knownKeys.has(k) && costs[k] > 0);
+            const LABEL_MAP = {
+              transport: 'Transport',
+              documentation: 'Documentation',
+              customs: 'Customs',
+              raw_rice: 'Raw Rice',
+              milling: 'Milling',
+              other: 'Other',
+              miscellaneous: 'Miscellaneous',
+            };
+            const allCategories = [
+              ...exportCostCategories,
+              ...extraKeys.map(k => ({ key: k, label: LABEL_MAP[k] || k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) })),
+            ];
+            return allCategories.map(cat => {
+              const val = costs[cat.key] || 0;
+              if (val === 0 && !knownKeys.has(cat.key)) return null;
+              return (
+                <div key={cat.key} className="flex justify-between text-sm">
+                  <span className="text-gray-600">{cat.label}</span>
+                  <span className={`font-medium ${val > 0 ? 'text-gray-900' : 'text-gray-400'}`}>{formatCurrency(val)}</span>
+                </div>
+              );
+            });
+          })()}
           <div className="border-t border-gray-200 pt-2 flex justify-between text-sm font-semibold">
             <span className="text-gray-700">Total Costs</span>
             <span className="text-gray-900">{formatCurrency(totalCosts)}</span>

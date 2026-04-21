@@ -68,13 +68,15 @@ export function AppProvider({ children }) {
   const [exportCostCategories, setExportCostCategories] = useState([
     { key: 'rice', label: 'Rice Procurement' },
     { key: 'bags', label: 'Bags / Packaging' },
+    { key: 'transport', label: 'Transport' },
     { key: 'loading', label: 'Loading' },
     { key: 'clearing', label: 'Clearing Agent' },
-    { key: 'freight', label: 'Freight' },
+    { key: 'freight', label: 'Freight / Shipping' },
     { key: 'inspection', label: 'Inspection / SGS' },
     { key: 'fumigation', label: 'Fumigation' },
     { key: 'insurance', label: 'Insurance' },
     { key: 'commission', label: 'Commission / Brokerage' },
+    { key: 'documentation', label: 'Documentation' },
     { key: 'misc', label: 'Miscellaneous' },
   ]);
 
