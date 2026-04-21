@@ -50,21 +50,23 @@ exports.up = async function (knex) {
 
   // 6. Ensure CHECK constraints on mill_stock_adjustments exist
   //    (054 used multi-statement raw which may fail on some drivers)
-  try {
-    await knex.raw(`
+  //    Use DO $$ block to avoid aborting the migration transaction
+  await knex.raw(`
+    DO $$ BEGIN
       ALTER TABLE mill_stock_adjustments
-      ADD CONSTRAINT mill_stock_adjustments_type_chk
-      CHECK (adjustment_type IN ('damage','correction','wastage','count'))
-    `);
-  } catch { /* already exists from 054 */ }
-
-  try {
-    await knex.raw(`
+        ADD CONSTRAINT mill_stock_adjustments_type_chk
+        CHECK (adjustment_type IN ('damage','correction','wastage','count'));
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$
+  `);
+  await knex.raw(`
+    DO $$ BEGIN
       ALTER TABLE mill_stock_adjustments
-      ADD CONSTRAINT mill_stock_adjustments_status_chk
-      CHECK (status IN ('Pending','Approved','Rejected'))
-    `);
-  } catch { /* already exists from 054 */ }
+        ADD CONSTRAINT mill_stock_adjustments_status_chk
+        CHECK (status IN ('Pending','Approved','Rejected'));
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$
+  `);
 };
 
 exports.down = async function (knex) {
