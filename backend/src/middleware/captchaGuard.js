@@ -8,10 +8,17 @@
  * remains in place as a final ceiling.
  */
 
-const FAIL_THRESHOLD = 2;
-const WINDOW_MS = 15 * 60 * 1000; // 15 minutes — same as authLimiter
+const FAIL_THRESHOLD = 3;
+const WINDOW_MS = 5 * 60 * 1000; // 5 minutes — moderate window
 
 const failureCache = new Map(); // ip -> { count, firstAt }
+
+function getRealIP(req) {
+  return req.headers['cf-connecting-ip']
+    || req.headers['x-real-ip']
+    || req.ip
+    || 'unknown';
+}
 
 function pruneIfExpired(ip) {
   const entry = failureCache.get(ip);
@@ -71,7 +78,7 @@ async function verifyTurnstileToken(token, ip) {
 }
 
 async function requireCaptchaIfFlagged(req, res, next) {
-  const ip = req.ip;
+  const ip = getRealIP(req);
   const count = getFailureCount(ip);
 
   // Tell the client whether captcha is required (header read by the SPA)

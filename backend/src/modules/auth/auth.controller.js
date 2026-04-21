@@ -1,16 +1,25 @@
 const authService = require('./auth.service');
 const captchaGuard = require('../../middleware/captchaGuard');
 
+function getRealIP(req) {
+  return req.headers['cf-connecting-ip']
+    || req.headers['x-real-ip']
+    || req.ip
+    || 'unknown';
+}
+
 const authController = {
   async login(req, res, next) {
     try {
+      const ip = getRealIP(req);
       const { email, password } = req.body;
-      const result = await authService.login(email, password, req.ip);
-      captchaGuard.clearFailures(req.ip);
+      const result = await authService.login(email, password, ip);
+      captchaGuard.clearFailures(ip);
       return res.json({ success: true, data: result });
     } catch (err) {
-      captchaGuard.recordFailure(req.ip);
-      const willRequireCaptcha = captchaGuard.getFailureCount(req.ip) >= captchaGuard.FAIL_THRESHOLD;
+      const ip = getRealIP(req);
+      captchaGuard.recordFailure(ip);
+      const willRequireCaptcha = captchaGuard.getFailureCount(ip) >= captchaGuard.FAIL_THRESHOLD;
       res.set('X-Captcha-Required', willRequireCaptcha ? '1' : '0');
       next(err);
     }

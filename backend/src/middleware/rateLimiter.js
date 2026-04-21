@@ -1,27 +1,23 @@
 const rateLimit = require('express-rate-limit');
 
-// Strict limiter for auth endpoints: 5 requests per 15 minutes
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: {
-    success: false,
-    message: 'Too many attempts. Please try again after 15 minutes.',
-  },
-});
+function getRealIP(req) {
+  return req.headers['cf-connecting-ip']
+    || req.headers['x-real-ip']
+    || req.ip
+    || 'unknown';
+}
 
-// General API limiter: 100 requests per minute
+// General API limiter: 200 requests per minute per real client IP
 const apiLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 100,
+  windowMs: 60 * 1000,
+  max: 200,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: getRealIP,
   message: {
     success: false,
     message: 'Too many requests. Please try again later.',
   },
 });
 
-module.exports = { authLimiter, apiLimiter };
+module.exports = { apiLimiter };

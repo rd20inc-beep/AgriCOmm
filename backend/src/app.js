@@ -4,7 +4,7 @@ const helmet = require('helmet');
 const config = require('./config');
 const requestLogger = require('./middleware/requestLogger');
 const errorHandler = require('./middleware/errorHandler');
-const { authLimiter, apiLimiter } = require('./middleware/rateLimiter');
+const { apiLimiter } = require('./middleware/rateLimiter');
 
 function createApp() {
   const app = express();
@@ -46,9 +46,7 @@ function createApp() {
     res.json({ status: 'ok', uptime: process.uptime(), timestamp: new Date().toISOString() });
   });
 
-  // Rate limiting
-  app.use('/api/auth/login', authLimiter);
-  app.use('/api/auth/register', authLimiter);
+  // Rate limiting (general only — login uses captcha guard per-IP)
   app.use('/api', apiLimiter);
 
   // Mount routes
