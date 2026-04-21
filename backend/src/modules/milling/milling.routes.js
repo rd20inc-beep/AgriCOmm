@@ -414,4 +414,26 @@ router.get('/payroll/summary', authorize('milling', 'view'), async (req, res) =>
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
+// =============================================================================
+// Mill Store — Batch Consumption (from millStore module)
+// =============================================================================
+const consumptionCtrl = require('../millStore/consumption.controller');
+
+router.post(
+  '/batches/:id/consumption/suggest',
+  authorize('mill_store', 'record_consumption'),
+  consumptionCtrl.suggest
+);
+router.post(
+  '/batches/:id/consumption',
+  authorize('mill_store', 'record_consumption'),
+  auditAction('consume_stock', 'milling_batch', (req) => req.params.id),
+  consumptionCtrl.confirm
+);
+router.get(
+  '/batches/:id/consumption',
+  authorize('mill_store', 'view'),
+  consumptionCtrl.history
+);
+
 module.exports = router;
