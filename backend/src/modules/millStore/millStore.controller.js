@@ -5,6 +5,8 @@ const {
   updateItemSchema,
   createRatioSchema,
   updateRatioSchema,
+  createPurchaseSchema,
+  updatePaymentSchema,
 } = require('./millStore.validator');
 const { ValidationError } = require('../../shared/errors');
 
@@ -99,6 +101,86 @@ const millStoreController = {
     try {
       await service.deleteRatio(req.params.id);
       res.json({ success: true, message: 'Ratio deactivated.' });
+    } catch (err) { next(err); }
+  },
+
+  // ─── Purchases ───
+  async createPurchase(req, res, next) {
+    try {
+      const data = validate(createPurchaseSchema, req.body);
+      const purchase = await service.createPurchase(data, req.user?.id);
+      res.status(201).json({ success: true, data: { purchase } });
+    } catch (err) { next(err); }
+  },
+
+  async listPurchases(req, res, next) {
+    try {
+      const { page, limit, offset } = parsePagination(req.query);
+      const { supplier_id, payment_status } = req.query;
+      const result = await service.listPurchases({
+        supplierId: supplier_id ? Number(supplier_id) : undefined,
+        paymentStatus: payment_status,
+        limit,
+        offset,
+      });
+      res.json({
+        success: true,
+        data: {
+          purchases: result.items,
+          pagination: paginationMeta(result.total, page, limit),
+        },
+      });
+    } catch (err) { next(err); }
+  },
+
+  async getPurchase(req, res, next) {
+    try {
+      const purchase = await service.getPurchase(req.params.id);
+      res.json({ success: true, data: { purchase } });
+    } catch (err) { next(err); }
+  },
+
+  async updatePurchasePayment(req, res, next) {
+    try {
+      const data = validate(updatePaymentSchema, req.body);
+      const purchase = await service.updatePurchasePayment(req.params.id, data.payment_status);
+      res.json({ success: true, data: { purchase } });
+    } catch (err) { next(err); }
+  },
+
+  // ─── Stock ───
+  async getStockLevels(req, res, next) {
+    try {
+      const { category, warehouse_id, low_stock } = req.query;
+      const stock = await service.getStockLevels({
+        category,
+        warehouseId: warehouse_id ? Number(warehouse_id) : undefined,
+        onlyLowStock: low_stock === '1' || low_stock === 'true',
+      });
+      res.json({ success: true, data: { stock } });
+    } catch (err) { next(err); }
+  },
+
+  async getStockAlerts(req, res, next) {
+    try {
+      const alerts = await service.getStockAlerts();
+      res.json({ success: true, data: { alerts } });
+    } catch (err) { next(err); }
+  },
+
+  async getItemMovements(req, res, next) {
+    try {
+      const { page, limit, offset } = parsePagination(req.query, 100);
+      const movements = await service.getItemMovements(req.params.id, { limit, offset });
+      res.json({ success: true, data: { movements } });
+    } catch (err) { next(err); }
+  },
+
+  // ─── Summary ───
+  async getSummary(req, res, next) {
+    try {
+      const summary = await service.getSummary();
+      res.json({ success: true, data: { summary } });
     } catch (err) { next(err); }
   },
 };

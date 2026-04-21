@@ -40,9 +40,30 @@ const updateRatioSchema = Joi.object({
   is_active: Joi.boolean().optional(),
 }).min(1);
 
+const purchaseLineSchema = Joi.object({
+  item_id: Joi.number().integer().required(),
+  quantity: Joi.number().greater(0).required(),
+  cost_per_unit: Joi.number().min(0).required(),
+  warehouse_id: Joi.number().integer().allow(null).optional(),
+});
+
+const createPurchaseSchema = Joi.object({
+  supplier_id: Joi.number().integer().required(),
+  invoice_number: Joi.string().max(100).allow(null, '').optional(),
+  purchase_date: Joi.date().required(),
+  notes: Joi.string().allow(null, '').optional(),
+  lines: Joi.array().items(purchaseLineSchema).min(1).required(),
+});
+
+const updatePaymentSchema = Joi.object({
+  payment_status: Joi.string().valid('Unpaid', 'Partial', 'Paid').required(),
+});
+
 module.exports = {
   createItemSchema,
   updateItemSchema,
   createRatioSchema,
   updateRatioSchema,
+  createPurchaseSchema,
+  updatePaymentSchema,
 };

@@ -47,4 +47,30 @@ router.delete(
   ctrl.deleteRatio
 );
 
+// Purchases
+router.get('/purchases', authorize('mill_store', 'view'), ctrl.listPurchases);
+router.get('/purchases/:id', authorize('mill_store', 'view'), ctrl.getPurchase);
+router.post(
+  '/purchases',
+  authorize('mill_store', 'create_purchase'),
+  auditAction('create', 'mill_purchase'),
+  ctrl.createPurchase
+);
+router.put(
+  '/purchases/:id/pay',
+  authorize('mill_store', 'create_purchase'),
+  auditAction('update', 'mill_purchase', (req) => req.params.id),
+  ctrl.updatePurchasePayment
+);
+
+// Stock
+router.get('/stock', authorize('mill_store', 'view'), ctrl.getStockLevels);
+router.get('/stock/alerts', authorize('mill_store', 'view'), ctrl.getStockAlerts);
+
+// Item movement ledger
+router.get('/items/:id/movements', authorize('mill_store', 'view'), ctrl.getItemMovements);
+
+// Summary / dashboard
+router.get('/summary', authorize('mill_store', 'view'), ctrl.getSummary);
+
 module.exports = router;
