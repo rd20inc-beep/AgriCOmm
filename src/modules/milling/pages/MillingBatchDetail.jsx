@@ -20,12 +20,14 @@ import {
   Truck,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
+import { useAuth } from '../../../context/AuthContext';
 import { queryKeys } from '../../../api/queryClient';
 import {
   useMillingBatch, useSaveQuality, useRecordYield,
   useAddBatchCost, useAddVehicle, useUpdateMillingBatch,
 } from '../../../api/queries';
 import { millingApi } from '../../../api/services';
+import { millingApi as millingModApi } from '../api/services';
 import SearchSelect from '../../../components/SearchSelect';
 import Modal from '../../../components/Modal';
 import StatusBadge from '../../../components/StatusBadge';
@@ -60,6 +62,8 @@ export default function MillingBatchDetail() {
   const { id } = useParams();
   const qc = useQueryClient();
   const { addToast, millingCostCategories, companyProfileData, suppliersList } = useApp();
+  const { user } = useAuth();
+  const isOwnerOrAdmin = user?.role === 'Owner' || user?.role === 'Super Admin';
 
   // Fetch batch detail via TanStack Query
   const { data: batch, isLoading: batchLoading } = useMillingBatch(id);
@@ -431,6 +435,12 @@ export default function MillingBatchDetail() {
               <h1 className="text-2xl font-bold text-gray-900">{batch.id}</h1>
               <StatusBadge status={batch.status} />
             </div>
+            {batch.approvedByName && (
+              <p className="text-xs text-green-600 mt-0.5">Approved by: {batch.approvedByName}</p>
+            )}
+            {batch.rejectionReason && (
+              <p className="text-xs text-red-600 mt-0.5">Rejected: {batch.rejectionReason}</p>
+            )}
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 text-sm text-gray-500">
               {batch.linkedExportOrder && (
                 <span>
@@ -449,6 +459,39 @@ export default function MillingBatchDetail() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-4">
+            {batch.status === 'Pending Approval' && isOwnerOrAdmin && (
+              <>
+                <button
+                  onClick={async () => {
+                    try {
+                      await millingModApi.approveBatch(batch.dbId || batch.id);
+                      addToast('Batch approved — moved to Queued', 'success');
+                      invalidateBatch();
+                    } catch (err) { addToast(`Failed: ${err?.response?.data?.message || err.message}`, 'error'); }
+                  }}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors"
+                >
+                  <CheckCircle size={16} /> Approve
+                </button>
+                <button
+                  onClick={() => {
+                    const reason = prompt('Rejection reason:');
+                    if (!reason?.trim()) return;
+                    millingModApi.rejectBatch(batch.dbId || batch.id, { reason: reason.trim() })
+                      .then(() => { addToast('Batch rejected', 'success'); invalidateBatch(); })
+                      .catch(err => addToast(`Failed: ${err?.response?.data?.message || err.message}`, 'error'));
+                  }}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors"
+                >
+                  <XCircle size={16} /> Reject
+                </button>
+              </>
+            )}
+            {batch.status === 'Pending Approval' && !isOwnerOrAdmin && (
+              <span className="inline-flex items-center gap-2 px-4 py-2.5 bg-amber-50 text-amber-800 border border-amber-200 rounded-lg text-sm font-medium">
+                <PauseCircle size={16} /> Awaiting Owner approval
+              </span>
+            )}
             {!batch.supplierName && batch.status !== 'Completed' && batch.status !== 'Cancelled' && (
               <button
                 onClick={() => setShowSupplierModal(true)}

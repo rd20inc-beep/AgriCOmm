@@ -122,6 +122,8 @@ export default function MillHomeDashboard() {
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     // ─── Action queue ───
+    const pendingApproval = batches.filter(b => b.status === 'Pending Approval');
+
     const arrivalsPendingQC = batches.filter(b => {
       const hasArrival = Array.isArray(b.vehicleArrivals) && b.vehicleArrivals.length > 0;
       const hasArrivalAnalysis = !!b.arrivalAnalysis;
@@ -202,6 +204,7 @@ export default function MillHomeDashboard() {
     });
 
     return {
+      pendingApproval: pendingApproval.length,
       arrivalsPendingQC: arrivalsPendingQC.length,
       yieldNotRecorded: yieldNotRecorded.length,
       varianceFlagged: varianceFlagged.length,
@@ -231,7 +234,7 @@ export default function MillHomeDashboard() {
     );
   }
 
-  const totalActions = data.arrivalsPendingQC + data.yieldNotRecorded + data.varianceFlagged + data.stalledBatches;
+  const totalActions = data.pendingApproval + data.arrivalsPendingQC + data.yieldNotRecorded + data.varianceFlagged + data.stalledBatches;
 
   return (
     <div className="p-6 space-y-6">
@@ -256,6 +259,13 @@ export default function MillHomeDashboard() {
           <h2 className="text-base font-semibold text-gray-900">Needs Your Attention</h2>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <ActionRow
+            icon={Clock}
+            label="Batches pending Owner approval"
+            count={data.pendingApproval}
+            to="/milling"
+            accent="amber"
+          />
           <ActionRow
             icon={Truck}
             label="Arrivals awaiting QC analysis"

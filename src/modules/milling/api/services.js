@@ -25,4 +25,6 @@ export const millingApi = {
   listPlans: (params) => api.get('/api/milling/plans', params),
   createPlan: (data) => api.post('/api/milling/plans', data),
   recordDowntime: (data) => api.post('/api/milling/downtime', data),
+  approveBatch: (id) => api.put(`/api/milling/batches/${id}/approve`),
+  rejectBatch: (id, data) => api.put(`/api/milling/batches/${id}/reject`, data),
 };

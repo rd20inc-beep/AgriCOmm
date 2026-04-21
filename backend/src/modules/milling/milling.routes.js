@@ -4,6 +4,7 @@ const db = require('../../config/database');
 const controller = require('../../controllers/millingController');
 const advancedController = require('../../controllers/millingAdvancedController');
 const authorize = require('../../middleware/rbac');
+const { authorizeRole } = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
@@ -413,6 +414,22 @@ router.get('/payroll/summary', authorize('milling', 'view'), async (req, res) =>
     return res.json({ success: true, data: { summary, grandTotal, period: { startDate, endDate } } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
+
+// =============================================================================
+// Batch Approval (Owner / Super Admin only)
+// =============================================================================
+router.put(
+  '/batches/:id/approve',
+  authorizeRole('Owner', 'Super Admin'),
+  auditAction('approve_batch', 'milling_batch', (req) => req.params.id),
+  controller.approveBatch
+);
+router.put(
+  '/batches/:id/reject',
+  authorizeRole('Owner', 'Super Admin'),
+  auditAction('reject_batch', 'milling_batch', (req) => req.params.id),
+  controller.rejectBatch
+);
 
 // =============================================================================
 // Mill Store — Batch Consumption (from millStore module)

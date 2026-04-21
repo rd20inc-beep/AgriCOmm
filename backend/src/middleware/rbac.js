@@ -43,9 +43,9 @@ function authorize(module, action) {
         req.user._permissionsLoaded = true;
       }
 
-      // Super Admin bypass — always allowed
+      // Super Admin and Owner bypass — always allowed
       const role = await db('roles').where({ id: req.user.role_id }).select('name').first();
-      if (role && role.name === 'Super Admin') {
+      if (role && (role.name === 'Super Admin' || role.name === 'Owner')) {
         return next();
       }
 

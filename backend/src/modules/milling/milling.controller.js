@@ -40,9 +40,13 @@ const millingController = {
 
       let query = db('milling_batches as mb')
         .leftJoin('suppliers as s', 'mb.supplier_id', 's.id')
+        .leftJoin('users as approver', 'mb.approved_by', 'approver.id')
+        .leftJoin('users as creator', 'mb.created_by', 'creator.id')
         .select(
           'mb.*',
-          's.name as supplier_name'
+          's.name as supplier_name',
+          'approver.full_name as approved_by_name',
+          'creator.full_name as created_by_name'
         );
 
       if (status) {
@@ -200,7 +204,7 @@ const millingController = {
             purchase_price_per_kg: purchase_price_per_kg ? parseFloat(purchase_price_per_kg) : null,
             product_id: product_id ? parseInt(product_id) : null,
             notes: notes || null,
-            status: 'Pending',
+            status: 'Pending Approval',
             created_by: req.user.id,
           })
           .returning('*');
@@ -255,6 +259,61 @@ const millingController = {
       }
       console.error('Milling batch create error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  async approveBatch(req, res) {
+    try {
+      const id = await resolveBatchId(req.params.id);
+      if (!id) return res.status(404).json({ success: false, message: 'Batch not found.' });
+
+      const batch = await db('milling_batches').where('id', id).first();
+      if (!batch) return res.status(404).json({ success: false, message: 'Batch not found.' });
+      if (batch.status !== 'Pending Approval') {
+        return res.status(400).json({ success: false, message: `Cannot approve — batch status is "${batch.status}".` });
+      }
+
+      const [updated] = await db('milling_batches').where('id', id).update({
+        status: 'Queued',
+        approved_by: req.user.id,
+        approved_at: db.fn.now(),
+        updated_at: db.fn.now(),
+      }).returning('*');
+
+      return res.json({ success: true, data: { batch: updated } });
+    } catch (err) {
+      console.error('Batch approve error:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
+  async rejectBatch(req, res) {
+    try {
+      const id = await resolveBatchId(req.params.id);
+      if (!id) return res.status(404).json({ success: false, message: 'Batch not found.' });
+
+      const { reason } = req.body;
+      if (!reason || !reason.trim()) {
+        return res.status(400).json({ success: false, message: 'Rejection reason is required.' });
+      }
+
+      const batch = await db('milling_batches').where('id', id).first();
+      if (!batch) return res.status(404).json({ success: false, message: 'Batch not found.' });
+      if (batch.status !== 'Pending Approval') {
+        return res.status(400).json({ success: false, message: `Cannot reject — batch status is "${batch.status}".` });
+      }
+
+      const [updated] = await db('milling_batches').where('id', id).update({
+        status: 'Rejected',
+        rejected_by: req.user.id,
+        rejection_reason: reason.trim(),
+        updated_at: db.fn.now(),
+      }).returning('*');
+
+      return res.json({ success: true, data: { batch: updated } });
+    } catch (err) {
+      console.error('Batch reject error:', err);
+      return res.status(500).json({ success: false, message: err.message });
     }
   },
 
