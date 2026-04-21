@@ -4,7 +4,7 @@ import { useApp } from '../../../context/AppContext';
 import { useCreateExportOrder } from '../../../api/queries';
 import {
   Save, Send, DollarSign, Calculator, ArrowLeft, Package, Truck,
-  User, ShoppingBag, ChevronRight, Plus, Trash2, Info,
+  User, ShoppingBag, ChevronRight, ChevronDown, Plus, Trash2, Info, FileText,
 } from 'lucide-react';
 import { validateForm, required, positiveNonZero } from '../../../utils/validation';
 import { toKg, fromKg, allEquivalents, UNITS } from '../../../utils/unitConversion';
@@ -32,7 +32,7 @@ export default function CreateExportOrder() {
     // Section 3: Quantity
     qtyMT: '', quantityUnit: 'ton', pricePerMT: '',
     // Section 4: Order terms
-    currency: 'USD', incoterm: 'FOB', shipmentTargetDate: '', advancePct: 20, source: 'Internal Mill',
+    currency: 'USD', incoterm: 'FOB', advancePct: 20, source: 'Internal Mill',
     // Section 5: Receiving mode (shown after qty entered)
     receivingMode: '',
     // Section 6: Bag spec (shown only when receiving mode needs it)
@@ -46,6 +46,7 @@ export default function CreateExportOrder() {
 
   // Mixed packing lines
   const [packingLines, setPackingLines] = useState([{ ...EMPTY_PACKING_LINE }]);
+  const [specsOpen, setSpecsOpen] = useState(false);
 
   const set = (k, v) => setForm(p => {
     const u = { ...p, [k]: v };
@@ -129,7 +130,7 @@ export default function CreateExportOrder() {
       advance_pct: advPct,
       advance_expected: advExpected,
       balance_expected: contractValue - advExpected,
-      shipment_eta: form.shipmentTargetDate || null,
+      shipment_eta: form.shipmentWindowEnd || form.shipmentWindowStart || null,
       source: form.source,
       notes: form.notes || null,
       status,
@@ -269,10 +270,6 @@ export default function CreateExportOrder() {
             <label className="form-label">Advance %</label>
             <input type="number" value={form.advancePct} onChange={e => set('advancePct', e.target.value)} className="form-input" min="0" max="100" />
           </div>
-          <div className="form-group">
-            <label className="form-label">Shipment Date</label>
-            <input type="date" value={form.shipmentTargetDate} onChange={e => set('shipmentTargetDate', e.target.value)} className="form-input" />
-          </div>
         </div>
 
         {/* Weight equivalents helper */}
@@ -290,44 +287,6 @@ export default function CreateExportOrder() {
             )}
           </div>
         )}
-      </div>
-
-      {/* ═══ Contract & Product Specs ═══ */}
-      <div className="bg-white rounded-xl border border-gray-200 p-6">
-        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4 flex items-center gap-2"><Package className="w-4 h-4" /> Contract & Product Specs</h2>
-        <div className="form-grid">
-          <div className="form-group">
-            <label className="form-label">HS Code</label>
-            <input value={form.hsCode} onChange={e => set('hsCode', e.target.value)} className="form-input" placeholder="e.g. 1006.3098" />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Contract Number</label>
-            <input value={form.contractNumber} onChange={e => set('contractNumber', e.target.value)} className="form-input" placeholder="If different from order no." />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Consignee Type</label>
-            <select value={form.consigneeType} onChange={e => set('consigneeType', e.target.value)} className="form-input">
-              <option value="to_order_of_bank">To Order of Bank</option>
-              <option value="direct">Direct to Buyer</option>
-            </select>
-          </div>
-          <div className="form-group">
-            <label className="form-label">Broken % Target</label>
-            <input type="number" value={form.brokenPctTarget} onChange={e => set('brokenPctTarget', e.target.value)} className="form-input" placeholder="e.g. 2" min="0" max="100" step="0.5" />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Shipment Window Start</label>
-            <input type="date" value={form.shipmentWindowStart} onChange={e => set('shipmentWindowStart', e.target.value)} className="form-input" />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Shipment Window End</label>
-            <input type="date" value={form.shipmentWindowEnd} onChange={e => set('shipmentWindowEnd', e.target.value)} className="form-input" />
-          </div>
-          <div className="form-group sm:col-span-2 lg:col-span-3">
-            <label className="form-label">Quality Description</label>
-            <textarea value={form.qualityDescription} onChange={e => set('qualityDescription', e.target.value)} className="form-input resize-none" rows={2} placeholder="e.g. Pakistani Basmati White Rice - 2% Broken - Double polished & color sorted..." />
-          </div>
-        </div>
       </div>
 
       {/* ═══ Section 3: Buyer Receiving Preference (conditional) ═══ */}
@@ -463,6 +422,59 @@ export default function CreateExportOrder() {
           </div>
         </div>
       )}
+
+      {/* ═══ Contract & Product Specs (collapsible, optional at creation) ═══ */}
+      <div className="bg-white rounded-xl border border-gray-200">
+        <button
+          type="button"
+          onClick={() => setSpecsOpen(prev => !prev)}
+          className="w-full flex items-center justify-between p-6 text-left"
+        >
+          <div className="flex items-center gap-2">
+            <FileText className="w-4 h-4 text-gray-400" />
+            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">Contract & Product Specs</h2>
+            <span className="text-xs text-gray-400 font-normal normal-case ml-2">Optional — can be filled later from order detail</span>
+          </div>
+          <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${specsOpen ? 'rotate-180' : ''}`} />
+        </button>
+        {specsOpen && (
+          <div className="px-6 pb-6 pt-0">
+            <div className="form-grid">
+              <div className="form-group">
+                <label className="form-label">HS Code</label>
+                <input value={form.hsCode} onChange={e => set('hsCode', e.target.value)} className="form-input" placeholder="e.g. 1006.3098" />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Contract Number</label>
+                <input value={form.contractNumber} onChange={e => set('contractNumber', e.target.value)} className="form-input" placeholder="If different from order no." />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Consignee Type</label>
+                <select value={form.consigneeType} onChange={e => set('consigneeType', e.target.value)} className="form-input">
+                  <option value="to_order_of_bank">To Order of Bank</option>
+                  <option value="direct">Direct to Buyer</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Broken % Target</label>
+                <input type="number" value={form.brokenPctTarget} onChange={e => set('brokenPctTarget', e.target.value)} className="form-input" placeholder="e.g. 2" min="0" max="100" step="0.5" />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Shipment Window Start</label>
+                <input type="date" value={form.shipmentWindowStart} onChange={e => set('shipmentWindowStart', e.target.value)} className="form-input" />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Shipment Window End</label>
+                <input type="date" value={form.shipmentWindowEnd} onChange={e => set('shipmentWindowEnd', e.target.value)} className="form-input" />
+              </div>
+              <div className="form-group sm:col-span-2 lg:col-span-3">
+                <label className="form-label">Quality Description</label>
+                <textarea value={form.qualityDescription} onChange={e => set('qualityDescription', e.target.value)} className="form-input resize-none" rows={2} placeholder="e.g. Pakistani Basmati White Rice - 2% Broken - Double polished & color sorted..." />
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* ═══ Section 5: Notes ═══ */}
       <div className="bg-white rounded-xl border border-gray-200 p-6">
