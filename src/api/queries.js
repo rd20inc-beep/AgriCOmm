@@ -4,6 +4,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import api from './client';
 import { queryKeys } from './queryClient';
 import {
   exportOrdersApi, millingApi, inventoryApi, financeApi, accountingApi,
@@ -565,7 +566,7 @@ export function useCustomers(params = {}, opts = {}) {
   return useQuery({
     queryKey: queryKeys.customers.list(params),
     queryFn: async () => {
-      const res = await adminApi.customers({ limit: 3000, ...params });
+      const res = await customersApi.list({ limit: 3000, ...params });
       const list = unwrap(res, 'customers') || [];
       return list.map(transformCustomer);
     },
@@ -578,7 +579,7 @@ export function useSuppliers(params = {}, opts = {}) {
   return useQuery({
     queryKey: queryKeys.suppliers.list(params),
     queryFn: async () => {
-      const res = await adminApi.suppliers({ limit: 500, ...params });
+      const res = await api.get('/api/suppliers', { limit: 500, ...params });
       const list = unwrap(res, 'suppliers') || [];
       return list.map(transformSupplier);
     },
@@ -591,7 +592,7 @@ export function useProducts(params = {}, opts = {}) {
   return useQuery({
     queryKey: queryKeys.products.list(params),
     queryFn: async () => {
-      const res = await adminApi.products({ limit: 200, ...params });
+      const res = await api.get('/api/products', { limit: 200, ...params });
       const list = unwrap(res, 'products') || [];
       return list.map(transformProduct);
     },
