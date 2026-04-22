@@ -237,15 +237,9 @@ export function useMillingBatch(id) {
         const costsArr = res?.data?.costs || [];
         if (Array.isArray(costsArr) && costsArr.length > 0) {
           const costsObj = {};
-          // Sum amounts per category — convert PKR entries using fx_rate or base_amount_pkr
-          const orderCurrency = raw.currency || 'USD';
+          // Milling costs are always PKR — no currency conversion needed
           costsArr.forEach(c => {
-            let amt = parseFloat(c.amount) || 0;
-            // If cost is in PKR but order is in USD, convert back
-            if (c.currency === 'PKR' && orderCurrency !== 'PKR' && amt > 0) {
-              const fxRate = parseFloat(c.fx_rate) || parseFloat(raw.fx_rate) || 280;
-              amt = amt / fxRate;
-            }
+            const amt = parseFloat(c.amount) || 0;
             costsObj[c.category] = (costsObj[c.category] || 0) + amt;
           });
           raw.costs = costsObj;

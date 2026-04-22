@@ -1120,20 +1120,42 @@ export default function MillingBatchDetail() {
                     <th className="text-right py-2 px-3 text-xs font-medium text-gray-500 uppercase">%</th>
                   </tr></thead>
                   <tbody>
-                    {millingCostCategories.map(cat => {
-                      const value = parseFloat(safeCosts[cat.key]) || 0;
-                      const isRaw = cat.key === 'rawRice';
-                      const displayValue = isRaw && value === 0 && rawMaterialCostFromQuality > 0 ? rawMaterialCostFromQuality : value;
+                    {(() => {
+                      // Merge known categories with any extra from actual costs
+                      const knownKeys = new Set(millingCostCategories.map(c => c.key));
+                      // Also map snake_case equivalents
+                      const snakeMap = { rawRice: 'raw_rice', rawrice: 'raw_rice' };
+                      const extraKeys = Object.keys(safeCosts).filter(k => {
+                        if (knownKeys.has(k)) return false;
+                        // Check if it's a snake_case variant of a known key
+                        for (const [camel, snake] of Object.entries(snakeMap)) {
+                          if (k === snake && knownKeys.has(camel)) return false;
+                        }
+                        return safeCosts[k] > 0;
+                      });
+                      const LABEL_MAP = { raw_rice: 'Raw Rice / Paddy', packaging: 'Packaging', chemicals: 'Chemicals', diesel: 'Diesel / Fuel', maintenance: 'Maintenance', miscellaneous: 'Miscellaneous' };
+                      const allCats = [
+                        ...millingCostCategories,
+                        ...extraKeys.map(k => ({ key: k, label: LABEL_MAP[k] || k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) })),
+                      ];
                       const total = totalCosts > 0 ? totalCosts : effectiveRawCost;
-                      return displayValue > 0 ? (
-                        <tr key={cat.key} className={`border-b border-gray-50 hover:bg-gray-50 ${isRaw ? 'bg-amber-50/50' : ''}`}>
-                          <td className="py-2 px-3 font-medium text-gray-900">{cat.label}{isRaw && value === 0 && rawMaterialCostFromQuality > 0 ? <span className="text-xs text-amber-600 ml-1">(auto)</span> : ''}</td>
-                          <td className="py-2 px-3 text-right text-gray-700">{formatPKR(displayValue)}</td>
-                          <td className="py-2 px-3 text-right text-gray-500">{batch.rawQtyMT > 0 ? formatPKR(displayValue / batch.rawQtyMT) : '—'}</td>
-                          <td className="py-2 px-3 text-right text-gray-500">{total > 0 ? ((displayValue / total) * 100).toFixed(1) + '%' : '—'}</td>
-                        </tr>
-                      ) : null;
-                    })}
+                      return allCats.map(cat => {
+                        // Try camelCase key, then snake_case equivalent
+                        let value = parseFloat(safeCosts[cat.key]) || 0;
+                        if (value === 0 && snakeMap[cat.key]) value = parseFloat(safeCosts[snakeMap[cat.key]]) || 0;
+                        const isRaw = cat.key === 'rawRice' || cat.key === 'raw_rice';
+                        const displayValue = isRaw && value === 0 && rawMaterialCostFromQuality > 0 ? rawMaterialCostFromQuality : value;
+                        if (displayValue <= 0) return null;
+                        return (
+                          <tr key={cat.key} className={`border-b border-gray-50 hover:bg-gray-50 ${isRaw ? 'bg-amber-50/50' : ''}`}>
+                            <td className="py-2 px-3 font-medium text-gray-900">{cat.label}{isRaw && value === 0 && rawMaterialCostFromQuality > 0 ? <span className="text-xs text-amber-600 ml-1">(auto)</span> : ''}</td>
+                            <td className="py-2 px-3 text-right text-gray-700">{formatPKR(displayValue)}</td>
+                            <td className="py-2 px-3 text-right text-gray-500">{batch.rawQtyMT > 0 ? formatPKR(displayValue / batch.rawQtyMT) : '—'}</td>
+                            <td className="py-2 px-3 text-right text-gray-500">{total > 0 ? ((displayValue / total) * 100).toFixed(1) + '%' : '—'}</td>
+                          </tr>
+                        );
+                      });
+                    })()}
                   </tbody>
                   <tfoot>
                     <tr className="border-t-2 border-gray-300 bg-gray-50">
