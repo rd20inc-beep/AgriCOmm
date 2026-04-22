@@ -3,13 +3,12 @@ import { Link } from 'react-router-dom';
 import { DollarSign, Users, Zap, Shield, TrendingUp, TrendingDown, AlertTriangle, Plus, UserPlus, Package } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useMillExpenses, useCreateMillExpense, useMillWorkers, useCreateMillWorker, usePayrollSummary, useRecordAttendance, useInventory } from '../../../api/queries';
+import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import KPICard from '../../../components/KPICard';
 import Modal from '../../../components/Modal';
 
 const PKR = (v) => 'Rs ' + Math.round(v || 0).toLocaleString('en-PK');
-// Default prices — overridden by batch-specific confirmed prices
-const DEFAULT_PRICES = { finished: 72800, broken: 38000, bran: 28000, husk: 8400 };
-const batchPrice = (b, product) => b[`${product}PricePerMT`] || DEFAULT_PRICES[product];
+// REMOVED: hardcoded DEFAULT_PRICES — now uses useCommodityPrices() hook
 const EXPENSE_CATS = ['salaries', 'utilities', 'rent', 'maintenance', 'insurance', 'transport', 'fuel', 'packaging', 'misc'];
 const WORKER_ROLES = ['operator', 'laborer', 'supervisor', 'driver', 'guard', 'cleaner'];
 
@@ -24,6 +23,9 @@ const tabs = [
 
 export default function MillFinanceDashboard() {
   const { millingBatches, addToast } = useApp();
+  const cp = useCommodityPrices();
+  const DEFAULT_PRICES = { finished: cp.finished, broken: cp.broken, bran: cp.bran, husk: cp.husk };
+  const batchPrice = (b, product) => b[`${product}PricePerMT`] || DEFAULT_PRICES[product];
   // Fetch inventory directly — AppContext inventory may be empty due to timing
   const { data: directInventory = [] } = useInventory({});
   const inventory = Array.isArray(directInventory) ? directInventory : [];

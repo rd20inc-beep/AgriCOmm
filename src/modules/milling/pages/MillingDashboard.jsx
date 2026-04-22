@@ -27,6 +27,7 @@ import {
 } from 'recharts';
 import { useApp } from '../../../context/AppContext';
 import { useCreateMillingBatch, useMills, useMillExpenses, useCreateMillExpense, useInventory } from '../../../api/queries';
+import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import KPICard from '../../../components/KPICard';
 import StatusBadge from '../../../components/StatusBadge';
 import Modal from '../../../components/Modal';
@@ -36,19 +37,15 @@ function formatPKR(value) {
   return 'Rs ' + Math.round(value).toLocaleString('en-PK');
 }
 
-// PKR pricing constants for mill operations
-const MILL_PRICES_PKR = {
-  finishedRicePerMT: 72800,  // ~260 USD
-  brokenPerMT: 42000,        // ~150 USD
-  branPerMT: 22400,           // ~80 USD
-  huskPerMT: 8400,            // ~30 USD
-};
+// REMOVED: hardcoded MILL_PRICES_PKR — now uses useCommodityPrices() hook
 
 export default function MillingDashboard() {
   const navigate = useNavigate();
   const { millingBatches, suppliersList, addToast } = useApp();
   const { data: directInv = [] } = useInventory({});
   const inventory = Array.isArray(directInv) ? directInv : [];
+  const commodityPrices = useCommodityPrices();
+  const MILL_PRICES_PKR = { finishedRicePerMT: commodityPrices.finished, brokenPerMT: commodityPrices.broken, branPerMT: commodityPrices.bran, huskPerMT: commodityPrices.husk };
   const createBatchMut = useCreateMillingBatch();
   const { data: mills = [] } = useMills();
   const { data: expenseData } = useMillExpenses();

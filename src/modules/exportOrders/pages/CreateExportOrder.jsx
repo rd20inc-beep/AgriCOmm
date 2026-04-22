@@ -1,7 +1,9 @@
-import { useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useMemo, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { useApp } from '../../../context/AppContext';
 import { useCreateExportOrder } from '../../../api/queries';
+import api from '../../../api/client';
 import {
   Save, Send, DollarSign, Calculator, ArrowLeft, Package, Truck,
   User, ShoppingBag, ChevronRight, ChevronDown, Plus, Trash2, Info, FileText,
@@ -23,6 +25,22 @@ export default function CreateExportOrder() {
   const { addToast, customersList: customers, productsList: products, exportCostCategories, bagTypesList } = useApp();
   const createOrderMut = useCreateExportOrder();
   const navigate = useNavigate();
+  const qc = useQueryClient();
+
+  // Pre-fill from duplicate
+  const [searchParams] = useSearchParams();
+  useEffect(() => {
+    if (searchParams.get('dup') === '1') {
+      const fields = ['customerId', 'productId', 'country', 'currency', 'incoterm', 'hsCode', 'consigneeType', 'qualityDescription'];
+      const updates = {};
+      fields.forEach(f => { const v = searchParams.get(f); if (v) updates[f] = v; });
+      if (Object.keys(updates).length > 0) setForm(prev => ({ ...prev, ...updates }));
+    }
+  }, []);
+
+  // Quick-add customer
+  const [showAddCustomer, setShowAddCustomer] = useState(false);
+  const [newCust, setNewCust] = useState({ name: '', country: '', email: '', phone: '', contact_person: '' });
 
   const [form, setForm] = useState({
     // Section 1: Buyer
@@ -218,7 +236,13 @@ export default function CreateExportOrder() {
         <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4 flex items-center gap-2"><User className="w-4 h-4" /> Buyer & Order Basics</h2>
         <div className="form-grid">
           <div className="form-group">
-            <label className="form-label">Customer *</label>
+            <label className="form-label flex items-center justify-between">
+              <span>Customer *</span>
+              <button type="button" onClick={() => setShowAddCustomer(true)}
+                className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1">
+                <Plus className="w-3 h-3" /> New Buyer
+              </button>
+            </label>
             <SearchSelect
               value={form.customerId}
               onChange={val => set('customerId', val)}
@@ -535,6 +559,69 @@ export default function CreateExportOrder() {
         <button onClick={() => handleSubmit('Awaiting Advance')} disabled={!isValid} className="btn btn-primary mobile-full-btn disabled:opacity-50"><Send className="w-4 h-4" /> Create Order</button>
         <button onClick={() => handleSubmit('Awaiting Advance')} disabled={!isValid} className="btn mobile-full-btn disabled:opacity-50 bg-emerald-600 text-white hover:bg-emerald-700 border-emerald-600"><DollarSign className="w-4 h-4" /> Create & Request Advance</button>
       </div>
+
+      {/* Quick Add Customer Modal */}
+      {showAddCustomer && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowAddCustomer(false)}>
+          <div className="bg-white rounded-xl p-6 w-full max-w-md space-y-4" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold text-gray-900">Add New Buyer</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Company Name *</label>
+                <input type="text" value={newCust.name} onChange={e => setNewCust(p => ({ ...p, name: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="Buyer company name" autoFocus />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Country *</label>
+                  <input type="text" value={newCust.country} onChange={e => setNewCust(p => ({ ...p, country: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="e.g. UAE" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Contact Person</label>
+                  <input type="text" value={newCust.contact_person} onChange={e => setNewCust(p => ({ ...p, contact_person: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="Name" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Email</label>
+                  <input type="email" value={newCust.email} onChange={e => setNewCust(p => ({ ...p, email: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Phone</label>
+                  <input type="text" value={newCust.phone} onChange={e => setNewCust(p => ({ ...p, phone: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2 justify-end pt-2">
+              <button onClick={() => setShowAddCustomer(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+              <button
+                onClick={async () => {
+                  if (!newCust.name.trim()) { addToast('Company name is required', 'error'); return; }
+                  try {
+                    const res = await api.post('/api/customers', newCust);
+                    const created = res?.data?.data?.customer || res?.data?.customer || res?.data;
+                    if (created?.id) {
+                      set('customerId', created.id);
+                      set('country', created.country || newCust.country || '');
+                      qc.invalidateQueries({ queryKey: ['customers'] });
+                      addToast(`Buyer "${newCust.name}" added`, 'success');
+                    }
+                    setShowAddCustomer(false);
+                    setNewCust({ name: '', country: '', email: '', phone: '', contact_person: '' });
+                  } catch (err) { addToast(err?.response?.data?.message || 'Failed to add buyer', 'error'); }
+                }}
+                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
+              >
+                Add Buyer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

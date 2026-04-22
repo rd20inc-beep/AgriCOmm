@@ -28,6 +28,7 @@ import {
 } from '../../../api/queries';
 import { millingApi } from '../../../api/services';
 import { millingApi as millingModApi } from '../api/services';
+import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import SearchSelect from '../../../components/SearchSelect';
 import Modal from '../../../components/Modal';
 import StatusBadge from '../../../components/StatusBadge';
@@ -64,6 +65,7 @@ export default function MillingBatchDetail() {
   const { addToast, millingCostCategories, companyProfileData, suppliersList } = useApp();
   const { user } = useAuth();
   const isOwnerOrAdmin = user?.role === 'Owner' || user?.role === 'Super Admin';
+  const commodityPrices = useCommodityPrices();
 
   // Fetch batch detail via TanStack Query
   const { data: batch, isLoading: batchLoading } = useMillingBatch(id);
@@ -329,10 +331,10 @@ export default function MillingBatchDetail() {
           const res = await millingApi.getLastPrices();
           const lp = res?.data?.lastPrices || {};
           setPriceForm({
-            finished: String(lp.finished || 72800),
-            broken: String(lp.broken || 38000),
-            bran: String(lp.bran || 28000),
-            husk: String(lp.husk || 8400),
+            finished: String(lp.finished || commodityPrices.finished),
+            broken: String(lp.broken || commodityPrices.broken),
+            bran: String(lp.bran || commodityPrices.bran),
+            husk: String(lp.husk || commodityPrices.husk),
           });
         } catch { /* use defaults */ }
         setPriceLoading(false);
@@ -1039,7 +1041,7 @@ export default function MillingBatchDetail() {
           const effectiveRawCost = manualRawCost > 0 ? manualRawCost : rawMaterialCostFromQuality;
 
           // By-product values
-          const bpRates = { broken: 42000, bran: 22400, husk: 8400 };
+          const bpRates = { broken: commodityPrices.broken, bran: commodityPrices.bran, husk: commodityPrices.husk };
           const bpValue = (parseFloat(batch.brokenMT)||0)*bpRates.broken + (parseFloat(batch.branMT)||0)*bpRates.bran + (parseFloat(batch.huskMT)||0)*bpRates.husk;
           const netCost = totalCosts > 0 ? totalCosts - bpValue : effectiveRawCost - bpValue;
           const finishedKG = (parseFloat(batch.actualFinishedMT)||0) * 1000;
@@ -1586,7 +1588,7 @@ export default function MillingBatchDetail() {
 
       {/* Costing Sheet Modal */}
       <Modal isOpen={showCostSheet} onClose={() => setShowCostSheet(false)} title={`Costing Sheet — ${batch.id}`} size="lg">
-        <MillingCostSheet batch={batch} companyProfile={companyProfileData} millingCostCategories={millingCostCategories} vehicles={safeVehicles} />
+        <MillingCostSheet batch={batch} companyProfile={companyProfileData} millingCostCategories={millingCostCategories} vehicles={safeVehicles} byproductRates={{ broken: commodityPrices.broken, bran: commodityPrices.bran, husk: commodityPrices.husk }} />
       </Modal>
 
       {/* Add Vehicle Modal */}
@@ -1742,7 +1744,7 @@ export default function MillingBatchDetail() {
             try {
               const res = await millingApi.getLastPrices();
               const lp = res?.data?.lastPrices || {};
-              setPriceForm({ finished: String(lp.finished || 72800), broken: String(lp.broken || 38000), bran: String(lp.bran || 28000), husk: String(lp.husk || 8400) });
+              setPriceForm({ finished: String(lp.finished || commodityPrices.finished), broken: String(lp.broken || commodityPrices.broken), bran: String(lp.bran || commodityPrices.bran), husk: String(lp.husk || commodityPrices.husk) });
             } catch {}
             setPriceLoading(false);
             setShowPriceModal(true);

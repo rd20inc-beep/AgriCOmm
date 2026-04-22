@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useApp } from '../../../context/AppContext';
 import StatusBadge from '../../../components/StatusBadge';
-import { Plus, Search, Eye, ArrowUpDown, Ship, FileText, DollarSign, Package, Clock, Filter, FileDown, Mail } from 'lucide-react';
+import { Plus, Search, Eye, ArrowUpDown, Ship, FileText, DollarSign, Package, Clock, Filter, FileDown, Mail, Download } from 'lucide-react';
+import { downloadCSV } from '../../../utils/csvExport';
 import Modal from '../../../components/Modal';
 import ProformaInvoice from '../../../components/ProformaInvoice';
 import EmailComposer from '../../../components/EmailComposer';
@@ -105,6 +106,25 @@ export default function ExportOrders() {
     <div className="space-y-6">
       <div className="page-header">
         <h1 className="text-2xl font-bold text-gray-900">Export Orders</h1>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => downloadCSV(filteredOrders, [
+              { key: 'id', label: 'Order #' },
+              { key: 'customerName', label: 'Customer' },
+              { key: 'country', label: 'Country' },
+              { key: 'productName', label: 'Product' },
+              { key: 'qtyMT', label: 'Qty (MT)' },
+              { key: 'pricePerMT', label: 'Price/MT' },
+              { key: 'contractValue', label: 'Contract Value' },
+              { key: 'status', label: 'Status' },
+              { key: 'createdAt', label: 'Created' },
+            ], `export-orders-${new Date().toISOString().split('T')[0]}.csv`)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200"
+            title="Download CSV"
+          >
+            <Download className="w-4 h-4" /> CSV
+          </button>
+        </div>
         <Link
           to="/export/create"
           className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"

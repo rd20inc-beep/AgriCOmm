@@ -1,8 +1,9 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Plus, DollarSign, Search, Check, Loader2, CreditCard, User,
+  Plus, DollarSign, Search, Check, Loader2, CreditCard, User, Download,
 } from 'lucide-react';
+import { downloadCSV } from '../../../utils/csvExport';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useApp } from '../../../context/AppContext';
 import api from '../../../api/client';
@@ -226,10 +227,28 @@ export default function Expenses() {
           <h2 className="text-xl font-bold text-gray-900">Business Expenses</h2>
           <p className="text-sm text-gray-500">Record and track all operational costs</p>
         </div>
-        <button onClick={() => setShowForm(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">
-          <Plus size={16} /> Record Expense
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => downloadCSV(filtered, [
+              { key: 'expense_no', label: 'Ref' },
+              { key: 'expense_date', label: 'Date' },
+              { key: 'expense_type', label: 'Type' },
+              { key: 'category', label: 'Category' },
+              { key: 'amount', label: 'Amount' },
+              { key: 'currency', label: 'Currency' },
+              { key: 'vendor_name', label: 'Vendor' },
+              { key: 'description', label: 'Description' },
+              { key: 'payment_status', label: 'Status' },
+            ], `expenses-${new Date().toISOString().split('T')[0]}.csv`)}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200"
+          >
+            <Download size={14} /> CSV
+          </button>
+          <button onClick={() => setShowForm(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">
+            <Plus size={16} /> Record Expense
+          </button>
+        </div>
       </div>
 
       {/* Summary */}
