@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Plus } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { API_BASE } from '../../../api/client';
@@ -560,6 +559,20 @@ export default function ExportOrderDetail() {
         onNavigateBack={() => navigate('/export')}
         onShowInvoicePreview={() => setShowInvoicePreview(true)}
         onShowEmailComposer={() => setShowEmailComposer(true)}
+        onDuplicate={() => {
+          const params = new URLSearchParams({
+            dup: '1',
+            customerId: order.customerId || '',
+            productId: order.productId || '',
+            country: order.country || '',
+            currency: order.currency || 'USD',
+            incoterm: order.incoterm || 'FOB',
+            hsCode: order.hsCode || '',
+            consigneeType: order.consigneeType || '',
+            qualityDescription: order.qualityDescription || '',
+          });
+          navigate(`/export/create?${params.toString()}`);
+        }}
         canConfirmAdvance={canConfirmAdvance}
         canStartDocs={canStartDocs}
         canRequestBalance={canRequestBalance}
@@ -578,32 +591,6 @@ export default function ExportOrderDetail() {
 
       {/* Workflow Timeline */}
       <WorkflowTimeline order={order} />
-
-      {/* Action Banner — prominent CTA for current workflow step */}
-      {/* Duplicate Order Button */}
-      {order.status !== 'Draft' && (
-        <div className="flex justify-end">
-          <button
-            onClick={() => {
-              const params = new URLSearchParams({
-                dup: '1',
-                customerId: order.customerId || '',
-                productId: order.productId || '',
-                country: order.country || '',
-                currency: order.currency || 'USD',
-                incoterm: order.incoterm || 'FOB',
-                hsCode: order.hsCode || '',
-                consigneeType: order.consigneeType || '',
-                qualityDescription: order.qualityDescription || '',
-              });
-              navigate(`/export/create?${params.toString()}`);
-            }}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" /> Duplicate Order
-          </button>
-        </div>
-      )}
 
       {/* ═══ "What's Next?" Action Banner ═══ */}
       {order.status === 'Draft' && (
