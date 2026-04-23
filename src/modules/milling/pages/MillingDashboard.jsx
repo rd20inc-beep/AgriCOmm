@@ -317,9 +317,6 @@ export default function MillingDashboard() {
           <p className="text-xs text-gray-500 font-medium uppercase">Avg Yield</p>
           <p className="text-xl font-bold text-gray-900 mt-1">{avgYield}%</p>
         </div>
-        <Link to="/local-sales">
-          <KPICard icon={DollarSign} title="Local Sales" value={formatPKR(Math.round(localSalesValue))} subtitle="By-products & local rice" color="cyan" />
-        </Link>
       </div>
 
       {/* All Batches Table */}
