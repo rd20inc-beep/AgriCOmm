@@ -291,13 +291,12 @@ export default function LocalSales() {
   );
 }
 
-// ─── New Sale Modal (redesigned) ───
+// ─── New Sale Modal (single form) ───
 function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromApi }) {
   const createMutation = useCreateLocalSale();
   const { data: lots = [] } = useLotInventory({ status: 'Available' });
   const safeLots = Array.isArray(lots) ? lots : [];
 
-  const [step, setStep] = useState(1);
   const [form, setForm] = useState({
     customer_id: '', buyer_name: '', buyer_phone: '',
     lot_id: '', item_name: '', item_type: '',
@@ -318,195 +317,164 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   function handleLotSelect(lotId) {
     set('lot_id', lotId);
     const lot = safeLots.find(l => String(l.id) === String(lotId));
-    if (lot) {
-      set('item_name', lot.itemName || '');
-      set('item_type', lot.type || '');
-    }
+    if (lot) { set('item_name', lot.itemName || ''); set('item_type', lot.type || ''); }
   }
 
   async function handleSubmit() {
-    if (!form.item_name || !form.quantity_input || !form.rate_input) {
-      addToast('Item, quantity, and rate are required', 'error'); return;
-    }
-    if (!form.customer_id && !form.buyer_name) {
-      addToast('Select a customer or enter buyer name', 'error'); return;
-    }
+    if (!form.item_name || !form.quantity_input || !form.rate_input) { addToast('Item, quantity, and rate are required', 'error'); return; }
+    if (!form.customer_id && !form.buyer_name) { addToast('Select a customer or enter buyer name', 'error'); return; }
     try {
       const payload = { ...form, paid_amount: parseFloat(form.paid_amount) || totalAmount };
       const res = await createMutation.mutateAsync(payload);
       addToast(`Sale ${res?.data?.sale?.sale_no || ''} created — ${fmtPKR(totalAmount)}`, 'success');
       refreshFromApi('local-sales');
       onClose();
-      setStep(1);
       setForm({ customer_id: '', buyer_name: '', buyer_phone: '', lot_id: '', item_name: '', item_type: '', quantity_input: '', quantity_unit: 'katta', bag_weight_kg: '50', rate_input: '', rate_unit: 'katta', payment_mode: 'cash', paid_amount: '', vehicle_no: '', driver_name: '', notes: '' });
-    } catch (err) {
-      addToast(err.message || 'Sale failed', 'error');
-    }
+    } catch (err) { addToast(err.message || 'Sale failed', 'error'); }
   }
 
-  const canProceedStep1 = (form.customer_id || form.buyer_name) && form.item_name;
-  const canProceedStep2 = form.quantity_input && form.rate_input;
-
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="New Local Sale" size="lg">
+    <Modal isOpen={isOpen} onClose={onClose} title="New Local Sale" size="xl">
       <div className="space-y-5">
-        {/* Step indicator */}
-        <div className="flex items-center gap-2">
-          {['Buyer & Item', 'Qty & Rate', 'Payment'].map((label, i) => (
-            <div key={i} className="flex items-center gap-2">
-              {i > 0 && <div className={`w-8 h-0.5 ${step > i ? 'bg-blue-500' : 'bg-gray-200'}`} />}
-              <button
-                onClick={() => setStep(i + 1)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full ${step === i + 1 ? 'bg-blue-600 text-white' : step > i + 1 ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}
-              >
-                <span className="w-4 h-4 rounded-full bg-white/20 text-[10px] flex items-center justify-center font-bold">{i + 1}</span>
-                {label}
-              </button>
+
+        {/* Buyer */}
+        <div>
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Buyer</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className={LABEL}>Customer</label>
+              <select value={form.customer_id} onChange={e => set('customer_id', e.target.value)} className={SELECT}>
+                <option value="">Walk-in / not registered</option>
+                {(customers || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
             </div>
-          ))}
+            <div>
+              <label className={LABEL}>Buyer Name {!form.customer_id && '*'}</label>
+              <input value={form.buyer_name} onChange={e => set('buyer_name', e.target.value)} className={INPUT} placeholder="Walk-in buyer name" />
+            </div>
+            <div>
+              <label className={LABEL}>Phone</label>
+              <input value={form.buyer_phone} onChange={e => set('buyer_phone', e.target.value)} className={INPUT} placeholder="Phone number" />
+            </div>
+          </div>
         </div>
 
-        {/* Step 1: Buyer & Item */}
-        {step === 1 && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className={LABEL}>Customer (registered)</label>
-                <select value={form.customer_id} onChange={e => set('customer_id', e.target.value)} className={SELECT}>
-                  <option value="">Walk-in / not registered</option>
-                  {(customers || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className={LABEL}>Buyer Name {!form.customer_id && '*'}</label>
-                <input value={form.buyer_name} onChange={e => set('buyer_name', e.target.value)} className={INPUT} placeholder="Walk-in buyer name" />
-              </div>
+        {/* Item */}
+        <div>
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Item</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className={LABEL}>Select from Inventory</label>
+              <select value={form.lot_id} onChange={e => handleLotSelect(e.target.value)} className={SELECT}>
+                <option value="">No lot (manual entry)</option>
+                {safeLots.map(l => {
+                  const avail = (parseFloat(l.availableQty) || 0) * 1000;
+                  return <option key={l.id} value={l.id}>{l.lotNo} — {l.itemName} ({Math.round(avail).toLocaleString()} KG)</option>;
+                })}
+              </select>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className={LABEL}>Select from Inventory</label>
-                <select value={form.lot_id} onChange={e => handleLotSelect(e.target.value)} className={SELECT}>
-                  <option value="">No lot (manual entry)</option>
-                  {safeLots.map(l => {
-                    const avail = (parseFloat(l.availableQty) || 0) * 1000;
-                    return <option key={l.id} value={l.id}>{l.lotNo} — {l.itemName} ({Math.round(avail).toLocaleString()} KG)</option>;
-                  })}
-                </select>
-              </div>
-              <div>
-                <label className={LABEL}>Item Name *</label>
-                <input value={form.item_name} onChange={e => set('item_name', e.target.value)} className={INPUT} placeholder="e.g. Broken Rice, 1121 Sella" />
-              </div>
-            </div>
-            <div className="flex justify-end">
-              <button onClick={() => setStep(2)} disabled={!canProceedStep1}
-                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">
-                Next: Quantity & Rate
-              </button>
+            <div>
+              <label className={LABEL}>Item Name *</label>
+              <input value={form.item_name} onChange={e => set('item_name', e.target.value)} className={INPUT} placeholder="e.g. Broken Rice, 1121 Sella" />
             </div>
           </div>
-        )}
+        </div>
 
-        {/* Step 2: Quantity & Rate */}
-        {step === 2 && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
-                <label className={LABEL}>Quantity *</label>
-                <div className="flex gap-1">
-                  <input type="number" value={form.quantity_input} onChange={e => set('quantity_input', e.target.value)} className={`${INPUT} flex-1`} placeholder="Enter qty" />
-                  <select value={form.quantity_unit} onChange={e => set('quantity_unit', e.target.value)} className={`${SELECT} w-24`}>
-                    <option value="katta">Katta</option><option value="maund">Maund</option><option value="kg">KG</option><option value="ton">Ton</option>
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label className={LABEL}>Rate *</label>
-                <div className="flex gap-1">
-                  <input type="number" value={form.rate_input} onChange={e => set('rate_input', e.target.value)} className={`${INPUT} flex-1`} placeholder="Rate" />
-                  <select value={form.rate_unit} onChange={e => set('rate_unit', e.target.value)} className={`${SELECT} w-24`}>
-                    <option value="katta">/ Katta</option><option value="maund">/ Maund</option><option value="kg">/ KG</option><option value="ton">/ Ton</option>
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label className={LABEL}>Katta Weight (KG)</label>
-                <input type="number" value={form.bag_weight_kg} onChange={e => set('bag_weight_kg', e.target.value)} className={INPUT} />
-              </div>
-            </div>
-
-            {/* Live preview */}
-            {(form.quantity_input > 0 || form.rate_input > 0) && (
-              <div className="bg-blue-50 rounded-xl border border-blue-200 p-4">
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-                  <div><p className="text-[10px] text-blue-600 uppercase font-semibold">KG</p><p className="font-bold text-gray-900">{qtyEq.kg.toLocaleString()}</p></div>
-                  <div><p className="text-[10px] text-blue-600 uppercase font-semibold">Katta</p><p className="font-bold text-gray-900">{qtyEq.katta.toLocaleString()}</p></div>
-                  <div><p className="text-[10px] text-blue-600 uppercase font-semibold">Maund</p><p className="font-bold text-gray-900">{qtyEq.maund.toLocaleString()}</p></div>
-                  <div><p className="text-[10px] text-blue-600 uppercase font-semibold">Rate/KG</p><p className="font-bold text-gray-900">Rs {rateEq.perKg}</p></div>
-                </div>
-                <div className="mt-3 pt-3 border-t border-blue-200 flex items-center justify-between">
-                  <span className="text-sm font-semibold text-blue-800">Total Amount</span>
-                  <span className="text-xl font-bold text-green-700">Rs {totalAmount.toLocaleString()}</span>
-                </div>
-              </div>
-            )}
-
-            <div className="flex justify-between">
-              <button onClick={() => setStep(1)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Back</button>
-              <button onClick={() => setStep(3)} disabled={!canProceedStep2}
-                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">
-                Next: Payment
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Step 3: Payment & Dispatch */}
-        {step === 3 && (
-          <div className="space-y-4">
-            <div className="bg-green-50 rounded-lg border border-green-200 p-3 flex items-center justify-between">
-              <span className="text-sm text-green-800">{form.item_name} · {qtyEq.kg.toLocaleString()} KG</span>
-              <span className="text-lg font-bold text-green-700">Rs {totalAmount.toLocaleString()}</span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className={LABEL}>Payment Mode</label>
-                <select value={form.payment_mode} onChange={e => set('payment_mode', e.target.value)} className={SELECT}>
-                  <option value="cash">Cash</option><option value="cheque">Cheque</option><option value="bank_transfer">Bank Transfer</option><option value="credit">Credit (Udhaar)</option>
+        {/* Quantity & Rate — WIDE layout */}
+        <div>
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Quantity & Rate</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className={LABEL}>Quantity *</label>
+              <div className="flex gap-2">
+                <input type="number" value={form.quantity_input} onChange={e => set('quantity_input', e.target.value)}
+                  className="flex-1 border border-gray-300 rounded-lg px-4 py-3 text-base outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  placeholder="Enter quantity" />
+                <select value={form.quantity_unit} onChange={e => set('quantity_unit', e.target.value)}
+                  className="w-28 border border-gray-300 rounded-lg px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                  <option value="katta">Katta</option><option value="maund">Maund</option><option value="kg">KG</option><option value="ton">Ton</option>
                 </select>
-              </div>
-              <div>
-                <label className={LABEL}>Amount Received</label>
-                <input type="number" value={form.paid_amount} onChange={e => set('paid_amount', e.target.value)} className={INPUT}
-                  placeholder={totalAmount > 0 ? `Rs ${totalAmount.toLocaleString()} (full)` : 'Rs'} />
-                {form.payment_mode === 'credit' && <p className="text-xs text-amber-600 mt-1">Leave empty or enter partial for credit sale</p>}
-              </div>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className={LABEL}>Vehicle No</label>
-                <input value={form.vehicle_no} onChange={e => set('vehicle_no', e.target.value)} className={INPUT} placeholder="e.g. LHR-1234" />
-              </div>
-              <div>
-                <label className={LABEL}>Driver</label>
-                <input value={form.driver_name} onChange={e => set('driver_name', e.target.value)} className={INPUT} placeholder="Driver name" />
               </div>
             </div>
             <div>
-              <label className={LABEL}>Notes</label>
-              <textarea value={form.notes} onChange={e => set('notes', e.target.value)} className={INPUT + ' resize-none'} rows={2} placeholder="Sale notes..." />
+              <label className={LABEL}>Sale Rate *</label>
+              <div className="flex gap-2">
+                <input type="number" value={form.rate_input} onChange={e => set('rate_input', e.target.value)}
+                  className="flex-1 border border-gray-300 rounded-lg px-4 py-3 text-base outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  placeholder="Enter rate" />
+                <select value={form.rate_unit} onChange={e => set('rate_unit', e.target.value)}
+                  className="w-28 border border-gray-300 rounded-lg px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                  <option value="katta">/ Katta</option><option value="maund">/ Maund</option><option value="kg">/ KG</option><option value="ton">/ Ton</option>
+                </select>
+              </div>
             </div>
+          </div>
+          <div className="mt-3">
+            <label className={LABEL}>Katta Weight (KG per bag)</label>
+            <input type="number" value={form.bag_weight_kg} onChange={e => set('bag_weight_kg', e.target.value)}
+              className="w-32 border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+          </div>
+        </div>
 
-            <div className="flex justify-between pt-2">
-              <button onClick={() => setStep(2)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Back</button>
-              <button onClick={handleSubmit} disabled={createMutation.isPending}
-                className="flex items-center gap-2 px-5 py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50">
-                {createMutation.isPending ? 'Creating...' : `Create Sale — Rs ${totalAmount.toLocaleString()}`}
-              </button>
+        {/* Live preview */}
+        {(parseFloat(form.quantity_input) > 0 || parseFloat(form.rate_input) > 0) && (
+          <div className="bg-blue-50 rounded-xl border border-blue-200 p-4">
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 text-sm">
+              <div><p className="text-[10px] text-blue-600 uppercase font-semibold">KG</p><p className="font-bold text-gray-900">{qtyEq.kg.toLocaleString()}</p></div>
+              <div><p className="text-[10px] text-blue-600 uppercase font-semibold">Katta</p><p className="font-bold text-gray-900">{qtyEq.katta.toLocaleString()}</p></div>
+              <div><p className="text-[10px] text-blue-600 uppercase font-semibold">Maund</p><p className="font-bold text-gray-900">{qtyEq.maund.toLocaleString()}</p></div>
+              <div><p className="text-[10px] text-blue-600 uppercase font-semibold">Rate/KG</p><p className="font-bold text-gray-900">Rs {rateEq.perKg}</p></div>
+              <div><p className="text-[10px] text-blue-600 uppercase font-semibold">Rate/Katta</p><p className="font-bold text-gray-900">Rs {rateEq.perKatta.toLocaleString()}</p></div>
+              <div><p className="text-[10px] text-blue-600 uppercase font-semibold">Rate/Maund</p><p className="font-bold text-gray-900">Rs {rateEq.perMaund.toLocaleString()}</p></div>
+            </div>
+            <div className="mt-3 pt-3 border-t border-blue-200 flex items-center justify-between">
+              <span className="text-sm font-semibold text-blue-800">Total Amount</span>
+              <span className="text-2xl font-bold text-green-700">Rs {totalAmount.toLocaleString()}</span>
             </div>
           </div>
         )}
+
+        {/* Payment & Dispatch */}
+        <div>
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Payment & Dispatch</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className={LABEL}>Payment Mode</label>
+              <select value={form.payment_mode} onChange={e => set('payment_mode', e.target.value)} className={SELECT}>
+                <option value="cash">Cash</option><option value="cheque">Cheque</option><option value="bank_transfer">Bank Transfer</option><option value="credit">Credit (Udhaar)</option>
+              </select>
+            </div>
+            <div>
+              <label className={LABEL}>Amount Received</label>
+              <input type="number" value={form.paid_amount} onChange={e => set('paid_amount', e.target.value)} className={INPUT}
+                placeholder={totalAmount > 0 ? `Rs ${totalAmount.toLocaleString()} (full)` : 'Rs'} />
+              {form.payment_mode === 'credit' && <p className="text-xs text-amber-600 mt-1">Leave empty or partial for credit sale</p>}
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
+            <div>
+              <label className={LABEL}>Vehicle No</label>
+              <input value={form.vehicle_no} onChange={e => set('vehicle_no', e.target.value)} className={INPUT} placeholder="e.g. LHR-1234" />
+            </div>
+            <div>
+              <label className={LABEL}>Driver</label>
+              <input value={form.driver_name} onChange={e => set('driver_name', e.target.value)} className={INPUT} placeholder="Driver name" />
+            </div>
+            <div>
+              <label className={LABEL}>Notes</label>
+              <input value={form.notes} onChange={e => set('notes', e.target.value)} className={INPUT} placeholder="Sale notes" />
+            </div>
+          </div>
+        </div>
+
+        {/* Submit */}
+        <div className="flex justify-end gap-3 pt-3 border-t border-gray-200">
+          <button onClick={onClose} className="px-4 py-2.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+          <button onClick={handleSubmit} disabled={createMutation.isPending}
+            className="flex items-center gap-2 px-6 py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50">
+            {createMutation.isPending ? 'Creating...' : totalAmount > 0 ? `Create Sale — Rs ${totalAmount.toLocaleString()}` : 'Create Sale'}
+          </button>
+        </div>
       </div>
     </Modal>
   );
