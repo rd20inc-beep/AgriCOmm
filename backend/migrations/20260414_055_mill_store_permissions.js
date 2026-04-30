@@ -100,8 +100,17 @@ exports.up = async function (knex) {
     itemRows.push({ ...it, is_active: true });
   }
 
-  if (itemRows.length > 0) {
-    await knex('mill_items').insert(itemRows);
+  // Dedupe within batch: two bag_types may share size + material and produce
+  // the same code, which would violate mill_items_code_unique on bulk insert.
+  const seenCodes = new Set();
+  const uniqueRows = itemRows.filter((r) => {
+    if (seenCodes.has(r.code)) return false;
+    seenCodes.add(r.code);
+    return true;
+  });
+
+  if (uniqueRows.length > 0) {
+    await knex('mill_items').insert(uniqueRows);
   }
 };
 

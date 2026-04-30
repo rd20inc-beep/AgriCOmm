@@ -203,6 +203,53 @@ async function applyDocumentAction({ orderRef, userId, docType, targetStatus, fi
   return { doc, orderStatusChanged, orderId: order.id };
 }
 
+// Normalize an `items[]` payload into rows for `export_order_items`.
+// Returns null if items is not an array (caller should fall back to single-product handling).
+function normalizeItems(items) {
+  if (!Array.isArray(items) || items.length === 0) return null;
+  return items.map((it, idx) => {
+    const qty = parseFloat(it.qty_mt) || 0;
+    const price = parseFloat(it.price_per_mt) || 0;
+    return {
+      line_no: idx + 1,
+      product_id: it.product_id != null ? parseInt(it.product_id) || null : null,
+      product_name: it.product_name || null,
+      qty_mt: qty,
+      price_per_mt: price,
+      line_total: qty * price,
+      hs_code: it.hs_code || null,
+      packing: it.packing || null,
+      bag_size_kg: it.bag_size_kg != null && it.bag_size_kg !== '' ? parseFloat(it.bag_size_kg) : null,
+      bag_count: it.bag_count != null && it.bag_count !== '' ? parseInt(it.bag_count) : null,
+      bag_type: it.bag_type || null,
+      bag_quality: it.bag_quality || null,
+      bag_brand: it.bag_brand || null,
+      bag_color: it.bag_color || null,
+      bag_printing: it.bag_printing || null,
+      quality_description: it.quality_description || null,
+      broken_pct_target: it.broken_pct_target != null && it.broken_pct_target !== '' ? parseFloat(it.broken_pct_target) : null,
+      notes: it.notes || null,
+    };
+  });
+}
+
+// Aggregate normalized items into the summary fields stored on `export_orders`.
+// First item defines the order-level product/HS-code summary for backwards
+// compatibility with milling, document renderers, and dashboards.
+function summarizeItems(rows) {
+  const totalQty = rows.reduce((s, r) => s + (r.qty_mt || 0), 0);
+  const totalValue = rows.reduce((s, r) => s + (r.line_total || 0), 0);
+  const head = rows[0] || {};
+  return {
+    qty_mt: totalQty,
+    contract_value: totalValue,
+    price_per_mt: totalQty > 0 ? totalValue / totalQty : 0,
+    product_id: head.product_id || null,
+    product_name: head.product_name || null,
+    hs_code: head.hs_code || null,
+  };
+}
+
 const ALLOWED_UPDATE_FIELDS = [
   'customer_id', 'product_id', 'product_name', 'qty_mt', 'price_per_mt',
   'currency', 'incoterm', 'country', 'destination_port', 'advance_pct',
@@ -314,7 +361,7 @@ const exportOrderController = {
       }
 
       const orderId = order.id; // resolved numeric ID
-      const [costs, documents, statusHistory, millingBatch, packingLines, shipmentContainers] = await Promise.all([
+      const [costs, documents, statusHistory, millingBatch, packingLines, shipmentContainers, items] = await Promise.all([
         db('export_order_costs').where({ order_id: orderId }).orderBy('created_at', 'asc'),
         db('export_order_documents').where({ order_id: orderId }).orderBy('created_at', 'asc'),
         db('export_order_status_history')
@@ -323,7 +370,17 @@ const exportOrderController = {
         db('milling_batches').where({ linked_export_order_id: orderId }).first(),
         db('order_packing_lines').where({ order_id: orderId }).orderBy('line_no', 'asc'),
         db('shipment_containers').where({ order_id: orderId }).orderBy('sequence_no', 'asc'),
+        db('export_order_items as i')
+          .leftJoin('products as p', 'i.product_id', 'p.id')
+          .select('i.*', 'p.name as product_name_lookup')
+          .where({ order_id: orderId })
+          .orderBy('line_no', 'asc'),
       ]);
+
+      order.items = (items || []).map((it) => ({
+        ...it,
+        product_name: it.product_name || it.product_name_lookup || null,
+      }));
 
       order.shipment_containers = shipmentContainers || [];
       order.shipmentContainers = shipmentContainers || [];
@@ -496,19 +553,45 @@ const exportOrderController = {
         total_loose_weight_kg,
         packing_notes,
         packing_lines, // array of packing line objects for mixed mode
+        items, // array of P.I. line items (multi-product)
       } = req.body;
 
-      if (!customer_id || !product_id || !qty_mt || !price_per_mt) {
+      // When `items[]` is sent, derive summary fields from the lines so the
+      // single-product path below stays identical. The first line's product
+      // becomes the order's display/summary product for backwards compat.
+      const itemRows = normalizeItems(items);
+      let effectiveCustomerId = customer_id;
+      let effectiveProductId = product_id;
+      let effectiveProductName = product_name;
+      let effectiveQtyMt = qty_mt;
+      let effectivePricePerMt = price_per_mt;
+      if (itemRows) {
+        const summary = summarizeItems(itemRows);
+        effectiveProductId = summary.product_id || product_id;
+        effectiveProductName = summary.product_name || product_name;
+        effectiveQtyMt = summary.qty_mt;
+        effectivePricePerMt = summary.price_per_mt;
+      }
+
+      if (!effectiveCustomerId || !effectiveProductId || !effectiveQtyMt || !effectivePricePerMt) {
         return res.status(400).json({
           success: false,
-          message: 'customer_id, product_id, qty_mt, and price_per_mt are required.',
+          message: 'customer_id, product_id, qty_mt, and price_per_mt are required (or provide items[]).',
         });
       }
 
-      const contractValue = parseFloat(qty_mt) * parseFloat(price_per_mt);
+      const contractValue = parseFloat(effectiveQtyMt) * parseFloat(effectivePricePerMt);
       const advancePct = parseFloat(advance_pct) || 0;
       const advanceExpected = contractValue * (advancePct / 100);
       const balanceExpected = contractValue - advanceExpected;
+
+      // If no advance is required, skip the "Awaiting Advance" gate entirely so
+      // the order can proceed to procurement / docs preparation immediately.
+      const effectiveStatus = (() => {
+        if (!requestedStatus || requestedStatus === 'Draft') return requestedStatus || 'Draft';
+        if (advanceExpected === 0 && requestedStatus === 'Awaiting Advance') return 'Advance Received';
+        return requestedStatus;
+      })();
 
       // Get locked FX rate via service (unless manually provided)
       const fxRateService = require('../../services/fxRateService');
@@ -521,11 +604,11 @@ const exportOrderController = {
         const [order] = await trx('export_orders')
           .insert({
             order_no: orderNo,
-            customer_id,
-            product_id,
-            product_name: product_name || null,
-            qty_mt: parseFloat(qty_mt),
-            price_per_mt: parseFloat(price_per_mt),
+            customer_id: effectiveCustomerId,
+            product_id: effectiveProductId,
+            product_name: effectiveProductName || null,
+            qty_mt: parseFloat(effectiveQtyMt),
+            price_per_mt: parseFloat(effectivePricePerMt),
             currency: currency || 'USD',
             contract_value: contractValue,
             incoterm: incoterm || null,
@@ -538,8 +621,8 @@ const exportOrderController = {
             balance_received: 0,
             shipment_eta: shipment_eta || null,
             source: source || 'Internal Mill',
-            status: requestedStatus || 'Draft',
-            current_step: getStepForStatus(requestedStatus || 'Draft', 1),
+            status: effectiveStatus,
+            current_step: getStepForStatus(effectiveStatus, 1),
             notes: notes || null,
             created_by: req.user.id,
             // Bag specification
@@ -594,13 +677,18 @@ const exportOrderController = {
         await trx('export_order_costs').insert(costRows);
 
         // Insert initial status history (log actual status, not always Draft)
-        const initialStatus = requestedStatus || 'Draft';
+        const initialStatus = effectiveStatus;
+        const reasonText = initialStatus === 'Draft'
+          ? 'Order saved as draft'
+          : (advanceExpected === 0 && requestedStatus === 'Awaiting Advance'
+              ? 'Order created (0% advance — advance stage skipped)'
+              : 'Order created');
         await trx('export_order_status_history').insert({
           order_id: order.id,
           from_status: null,
           to_status: initialStatus,
           changed_by: req.user.id,
-          reason: initialStatus === 'Draft' ? 'Order saved as draft' : 'Order created',
+          reason: reasonText,
         });
 
         // Auto-create document checklist for export order
@@ -662,6 +750,39 @@ const exportOrderController = {
           });
         }
 
+        // Insert P.I. line items (multi-product). When absent, materialize a
+        // single line from the order's summary fields so every order has at
+        // least one row in export_order_items going forward.
+        if (itemRows && itemRows.length > 0) {
+          await trx('export_order_items').insert(
+            itemRows.map((r) => ({ ...r, order_id: order.id }))
+          );
+        } else {
+          await trx('export_order_items').insert({
+            order_id: order.id,
+            line_no: 1,
+            product_id: effectiveProductId,
+            product_name: effectiveProductName || null,
+            qty_mt: parseFloat(effectiveQtyMt),
+            price_per_mt: parseFloat(effectivePricePerMt),
+            line_total: contractValue,
+            hs_code: req.body.hs_code || null,
+            packing: bag_size_kg
+              ? `Packed in ${parseFloat(bag_size_kg)} KG ${bag_type || 'PP'} BAG`
+              : null,
+            bag_size_kg: bag_size_kg ? parseFloat(bag_size_kg) : null,
+            bag_count: input_total_bags ? parseInt(input_total_bags) : null,
+            bag_type: bag_type || null,
+            bag_quality: bag_quality || null,
+            bag_brand: bag_brand || null,
+            bag_color: bag_color || null,
+            bag_printing: bag_printing || null,
+            quality_description: req.body.quality_description || null,
+            broken_pct_target: req.body.broken_pct_target ? parseFloat(req.body.broken_pct_target) : null,
+            notes: packing_notes || null,
+          });
+        }
+
         // Insert packing lines for mixed/bags mode
         if (Array.isArray(packing_lines) && packing_lines.length > 0) {
           const lineRows = packing_lines.map((line, idx) => ({
@@ -705,6 +826,20 @@ const exportOrderController = {
         }
       }
 
+      // Multi-line items override qty/price/contract_value derived from the
+      // single-product fields. When items[] is provided, totals are computed
+      // from the line rows and the request's qty_mt/price_per_mt are ignored.
+      const itemRowsForUpdate = normalizeItems(updates.items);
+      if (itemRowsForUpdate) {
+        const summary = summarizeItems(itemRowsForUpdate);
+        safeUpdates.qty_mt = summary.qty_mt;
+        safeUpdates.price_per_mt = summary.price_per_mt;
+        safeUpdates.contract_value = summary.contract_value;
+        if (summary.product_id) safeUpdates.product_id = summary.product_id;
+        if (summary.product_name) safeUpdates.product_name = summary.product_name;
+        if (summary.hs_code) safeUpdates.hs_code = summary.hs_code;
+      }
+
       if (safeUpdates.qty_mt != null || safeUpdates.price_per_mt != null || safeUpdates.advance_pct != null) {
         const existing = await db('export_orders').where({ id }).first();
         if (!existing) {
@@ -732,6 +867,16 @@ const exportOrderController = {
           .returning('*');
 
         if (!order) return null;
+
+        // Replace P.I. line items if items[] was provided.
+        if (itemRowsForUpdate) {
+          await trx('export_order_items').where({ order_id: id }).del();
+          if (itemRowsForUpdate.length > 0) {
+            await trx('export_order_items').insert(
+              itemRowsForUpdate.map((r) => ({ ...r, order_id: parseInt(id) }))
+            );
+          }
+        }
 
         // Handle packing_lines update: delete old, insert new
         if (Array.isArray(packingLines)) {

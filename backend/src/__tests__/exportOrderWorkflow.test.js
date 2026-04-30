@@ -16,6 +16,7 @@ function resetState() {
     order_packing_lines: [],
     shipment_containers: [],
     inventory_lots: [],
+    export_order_items: [],
   };
   mockState.seq = {
     export_orders: 1,
@@ -29,6 +30,7 @@ function resetState() {
     order_packing_lines: 1,
     shipment_containers: 1,
     inventory_lots: 1,
+    export_order_items: 1,
   };
 }
 

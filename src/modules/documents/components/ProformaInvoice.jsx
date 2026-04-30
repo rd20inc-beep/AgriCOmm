@@ -66,6 +66,10 @@ export default function ProformaInvoice({ order, companyProfile }) {
     <>
       {/* Print-specific styles */}
       <style>{`
+        /* Setting an explicit @page margin suppresses the browser-injected
+           print header (date/time/URL) and footer (page numbers/URL) on
+           Chrome/Edge/Safari/Firefox. */
+        @page { size: A4; margin: 12mm; }
         @media print {
           body * { visibility: hidden; }
           .proforma-invoice, .proforma-invoice * { visibility: visible; }

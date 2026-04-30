@@ -59,6 +59,25 @@ const createExportOrder = Joi.object({
     bag_brand: Joi.string().max(255).allow('', null),
     notes: Joi.string().allow('', null),
   })).allow(null),
+  // Multi-line P.I. items — each line carries its own product/qty/price/HS code/packing
+  items: Joi.array().items(Joi.object({
+    product_id: Joi.number().integer().positive().allow(null),
+    product_name: Joi.string().max(255).allow('', null),
+    qty_mt: Joi.number().positive().required(),
+    price_per_mt: Joi.number().positive().required(),
+    hs_code: Joi.string().max(20).allow('', null),
+    packing: Joi.string().max(100).allow('', null),
+    bag_size_kg: Joi.number().positive().allow(null, ''),
+    bag_count: Joi.number().integer().min(0).allow(null, ''),
+    bag_type: Joi.string().max(100).allow('', null),
+    bag_quality: Joi.string().max(100).allow('', null),
+    bag_brand: Joi.string().max(255).allow('', null),
+    bag_color: Joi.string().max(100).allow('', null),
+    bag_printing: Joi.string().max(255).allow('', null),
+    quality_description: Joi.string().allow('', null),
+    broken_pct_target: Joi.number().min(0).max(100).allow(null, ''),
+    notes: Joi.string().allow('', null),
+  })).allow(null),
 });
 
 const updateExportShipment = Joi.object({

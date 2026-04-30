@@ -21,6 +21,13 @@ const RECEIVING_MODES = [
 
 const EMPTY_PACKING_LINE = { bagType: '', bagQuality: '', fillWeightKg: '25', bagCount: '', bagPrinting: '', notes: '' };
 
+const EMPTY_ITEM = {
+  productId: '', productName: '',
+  qtyMT: '', pricePerMT: '',
+  hsCode: '', packing: '',
+  bagSizeKg: '25', bagCount: '',
+};
+
 export default function CreateExportOrder() {
   const { addToast, customersList: customers, productsList: products, exportCostCategories, bagTypesList } = useApp();
   const createOrderMut = useCreateExportOrder();
@@ -66,6 +73,20 @@ export default function CreateExportOrder() {
   const [packingLines, setPackingLines] = useState([{ ...EMPTY_PACKING_LINE }]);
   const [specsOpen, setSpecsOpen] = useState(false);
 
+  // Multi-line P.I. items — one or more products per order
+  const [items, setItems] = useState([{ ...EMPTY_ITEM }]);
+  const addItem = () => setItems(prev => [...prev, { ...EMPTY_ITEM }]);
+  const removeItem = (idx) => setItems(prev => prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev);
+  const updateItem = (idx, field, value) => setItems(prev => prev.map((it, i) => {
+    if (i !== idx) return it;
+    const next = { ...it, [field]: value };
+    if (field === 'productId') {
+      const p = products.find(pp => pp.id === Number(value));
+      if (p) next.productName = p.name;
+    }
+    return next;
+  }));
+
   const set = (k, v) => setForm(p => {
     const u = { ...p, [k]: v };
     if (k === 'customerId') {
@@ -75,13 +96,17 @@ export default function CreateExportOrder() {
     return u;
   });
 
-  // ─── Computed values ───
-  const qtyMT = parseFloat(form.qtyMT) || 0;
+  // ─── Computed values (derived from line items) ───
+  const itemQtyMT = (it) => parseFloat(it.qtyMT) || 0;
+  const itemPrice = (it) => parseFloat(it.pricePerMT) || 0;
+  const itemTotal = (it) => itemQtyMT(it) * itemPrice(it);
+  const qtyMT = items.reduce((s, it) => s + itemQtyMT(it), 0);
   const totalKg = qtyMT * 1000;
-  const pricePerMT = parseFloat(form.pricePerMT) || 0;
-  const contractValue = qtyMT * pricePerMT;
+  const contractValue = items.reduce((s, it) => s + itemTotal(it), 0);
+  const pricePerMT = qtyMT > 0 ? contractValue / qtyMT : 0;
   const equivalents = allEquivalents(totalKg, parseFloat(form.bagSizeKg) || 25);
   const showReceivingMode = qtyMT > 0;
+  const isMultiItem = items.length > 1;
   const needsBagWidget = form.receivingMode === 'bags' || form.receivingMode === 'mixed' || form.receivingMode === 'custom';
   const isMixed = form.receivingMode === 'mixed';
 
@@ -118,28 +143,36 @@ export default function CreateExportOrder() {
   const [formErrors, setFormErrors] = useState({});
   function validate(isDraft) {
     const rules = { customerId: [() => required(form.customerId, 'Customer')] };
-    if (!isDraft) {
-      rules.productId = [() => required(form.productId, 'Product')];
-      rules.qtyMT = [() => required(form.qtyMT, 'Quantity'), () => positiveNonZero(form.qtyMT, 'Quantity')];
-      rules.pricePerMT = [() => required(form.pricePerMT, 'Price'), () => positiveNonZero(form.pricePerMT, 'Price')];
-    }
     const { valid, errors } = validateForm(form, rules);
     setFormErrors(errors);
+
+    if (!isDraft) {
+      const itemsValid = items.length > 0 && items.every(it =>
+        it.productId && itemQtyMT(it) > 0 && itemPrice(it) > 0
+      );
+      if (!itemsValid) {
+        addToast('Each line item needs a product, quantity, and price', 'error');
+        return false;
+      }
+    }
     if (!valid) addToast('Please fix highlighted errors', 'error');
     return valid;
   }
 
   // ─── Build API payload ───
   function buildPayload(status) {
-    const product = products.find(p => p.id === Number(form.productId));
     const advPct = parseFloat(form.advancePct) || 0;
     const advExpected = contractValue * (advPct / 100);
+    const head = items[0] || {};
+    const headProduct = products.find(p => p.id === Number(head.productId));
 
     const payload = {
       customer_id: Number(form.customerId),
       country: form.country,
-      product_id: Number(form.productId),
-      product_name: product?.name || '',
+      // Legacy/summary fields — kept in sync with the first line for code paths
+      // that still read order-level product/qty/price (milling, document renderers).
+      product_id: Number(head.productId) || null,
+      product_name: headProduct?.name || head.productName || '',
       qty_mt: qtyMT,
       price_per_mt: pricePerMT,
       currency: form.currency,
@@ -152,8 +185,22 @@ export default function CreateExportOrder() {
       source: form.source,
       notes: form.notes || null,
       status,
-      // Contract & product specs
-      hs_code: form.hsCode || null,
+      // Multi-line items — backend persists these to export_order_items.
+      items: items.map(it => {
+        const p = products.find(pp => pp.id === Number(it.productId));
+        return {
+          product_id: Number(it.productId) || null,
+          product_name: p?.name || it.productName || '',
+          qty_mt: itemQtyMT(it),
+          price_per_mt: itemPrice(it),
+          hs_code: it.hsCode || null,
+          packing: it.packing || null,
+          bag_size_kg: it.bagSizeKg ? parseFloat(it.bagSizeKg) : null,
+          bag_count: it.bagCount ? parseInt(it.bagCount) : null,
+        };
+      }),
+      // Contract & product specs (HS code mirrors first item for legacy renderers)
+      hs_code: head.hsCode || form.hsCode || null,
       contract_number: form.contractNumber || null,
       consignee_type: form.consigneeType || null,
       broken_pct_target: form.brokenPctTarget ? parseFloat(form.brokenPctTarget) : null,
@@ -214,7 +261,10 @@ export default function CreateExportOrder() {
     }
   }
 
-  const isValid = form.customerId && form.productId && qtyMT > 0 && pricePerMT > 0;
+  const itemsAllFilled = items.length > 0 && items.every(it =>
+    it.productId && itemQtyMT(it) > 0 && itemPrice(it) > 0
+  );
+  const isValid = !!form.customerId && itemsAllFilled;
 
   // ─── Packing line helpers ───
   function addPackingLine() { setPackingLines(prev => [...prev, { ...EMPTY_PACKING_LINE }]); }
@@ -254,30 +304,80 @@ export default function CreateExportOrder() {
             <label className="form-label">Destination Country</label>
             <input value={form.country} readOnly className="form-input bg-gray-50 text-gray-500" placeholder="Auto-filled" />
           </div>
-          <div className="form-group">
-            <label className="form-label">Product *</label>
-            <SearchSelect
-              value={form.productId}
-              onChange={val => set('productId', val)}
-              options={products.filter(p => !p.isByproduct).map(p => ({ value: p.id, label: p.name, sub: p.grade || '' }))}
-              placeholder="Type to search product..."
-            />
-          </div>
         </div>
       </div>
 
-      {/* ═══ Section 2: Quantity & Pricing ═══ */}
+      {/* ═══ Section 2: Line Items (multi-product P.I.) ═══ */}
       <div className="bg-white rounded-xl border border-gray-200 p-6">
-        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4 flex items-center gap-2"><Calculator className="w-4 h-4" /> Quantity & Pricing</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-2"><Package className="w-4 h-4" /> Line Items</h2>
+          <button type="button" onClick={addItem} className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1">
+            <Plus className="w-4 h-4" /> Add Item
+          </button>
+        </div>
+        <div className="space-y-4">
+          {items.map((it, idx) => (
+            <div key={idx} className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Item {idx + 1}</span>
+                {items.length > 1 && (
+                  <button type="button" onClick={() => removeItem(idx)} className="text-red-600 hover:text-red-800 text-xs flex items-center gap-1">
+                    <Trash2 className="w-3.5 h-3.5" /> Remove
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+                <div className="md:col-span-5">
+                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Product *</label>
+                  <SearchSelect
+                    value={it.productId}
+                    onChange={val => updateItem(idx, 'productId', val)}
+                    options={products.filter(p => !p.isByproduct).map(p => ({ value: p.id, label: p.name, sub: p.grade || '' }))}
+                    placeholder="Type to search product..."
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Qty (MT) *</label>
+                  <input type="number" min="0" step="0.01" value={it.qtyMT} onChange={e => updateItem(idx, 'qtyMT', e.target.value)} className="form-input" placeholder="MT" />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Rate / MT *</label>
+                  <input type="number" min="0" step="0.01" value={it.pricePerMT} onChange={e => updateItem(idx, 'pricePerMT', e.target.value)} className="form-input" placeholder={form.currency} />
+                </div>
+                <div className="md:col-span-3">
+                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">HS Code</label>
+                  <input type="text" value={it.hsCode} onChange={e => updateItem(idx, 'hsCode', e.target.value)} className="form-input" placeholder="e.g. 1006.3010" />
+                </div>
+                <div className="md:col-span-7">
+                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Packing</label>
+                  <input type="text" value={it.packing} onChange={e => updateItem(idx, 'packing', e.target.value)} className="form-input" placeholder="e.g. Packed in 25 KG PP BAG" />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Bag Size (kg)</label>
+                  <input type="number" min="0" step="0.5" value={it.bagSizeKg} onChange={e => updateItem(idx, 'bagSizeKg', e.target.value)} className="form-input" />
+                </div>
+                <div className="md:col-span-3">
+                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Line Total ({form.currency})</label>
+                  <div className="form-input bg-white text-right font-semibold text-gray-900">
+                    {itemTotal(it).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        {isMultiItem && (
+          <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center justify-between text-sm">
+            <span className="text-blue-700 font-semibold">Order total ({items.length} items)</span>
+            <span className="text-blue-900 font-bold">{qtyMT.toLocaleString()} MT · {form.currency} {contractValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+          </div>
+        )}
+      </div>
+
+      {/* ═══ Section 2b: Order Terms ═══ */}
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4 flex items-center gap-2"><Calculator className="w-4 h-4" /> Order Terms</h2>
         <div className="form-grid">
-          <div className="form-group">
-            <label className="form-label">Quantity (MT) *</label>
-            <input type="number" value={form.qtyMT} onChange={e => set('qtyMT', e.target.value)} className="form-input" placeholder="Metric tons" min="0" step="0.01" />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Price per MT ({form.currency}) *</label>
-            <input type="number" value={form.pricePerMT} onChange={e => set('pricePerMT', e.target.value)} className="form-input" placeholder="Rate per MT" min="0" />
-          </div>
           <div className="form-group">
             <label className="form-label">Currency</label>
             <select value={form.currency} onChange={e => set('currency', e.target.value)} className="form-input">
@@ -554,11 +654,19 @@ export default function CreateExportOrder() {
       )}
 
       {/* ═══ Submit Buttons ═══ */}
-      <div className="flex flex-wrap items-center justify-end gap-3">
-        <button onClick={() => handleSubmit('Draft')} className="btn btn-secondary mobile-full-btn"><Save className="w-4 h-4" /> Save Draft</button>
-        <button onClick={() => handleSubmit('Awaiting Advance')} disabled={!isValid} className="btn btn-primary mobile-full-btn disabled:opacity-50"><Send className="w-4 h-4" /> Create Order</button>
-        <button onClick={() => handleSubmit('Awaiting Advance')} disabled={!isValid} className="btn mobile-full-btn disabled:opacity-50 bg-emerald-600 text-white hover:bg-emerald-700 border-emerald-600"><DollarSign className="w-4 h-4" /> Create & Request Advance</button>
-      </div>
+      {(() => {
+        const advPct = parseFloat(form.advancePct) || 0;
+        const createStatus = advPct === 0 ? 'Advance Received' : 'Awaiting Advance';
+        return (
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <button onClick={() => handleSubmit('Draft')} className="btn btn-secondary mobile-full-btn"><Save className="w-4 h-4" /> Save Draft</button>
+            <button onClick={() => handleSubmit(createStatus)} disabled={!isValid} className="btn btn-primary mobile-full-btn disabled:opacity-50"><Send className="w-4 h-4" /> Create Order</button>
+            {advPct > 0 && (
+              <button onClick={() => handleSubmit('Awaiting Advance')} disabled={!isValid} className="btn mobile-full-btn disabled:opacity-50 bg-emerald-600 text-white hover:bg-emerald-700 border-emerald-600"><DollarSign className="w-4 h-4" /> Create & Request Advance</button>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Quick Add Customer Modal */}
       {showAddCustomer && (

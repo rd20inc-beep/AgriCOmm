@@ -1050,7 +1050,9 @@ const smartService = {
         docData.certificateNo = `COO-${order.order_no}`;
         docData.originCountry = 'Pakistan';
         docData.destinationCountry = order.country;
-        docData.hsCode = product ? `1006.30` : '1006.30'; // Rice HS code
+        // HS code reads from the order; no hardcoded default so the field is
+        // visibly empty if the user hasn't set one rather than silently wrong.
+        docData.hsCode = order.hs_code || '';
         break;
       }
       case 'phyto': {

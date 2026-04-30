@@ -39,7 +39,16 @@ async function gatherOrderData(orderId) {
   // Costs
   const costs = await db('export_order_costs').where({ order_id: orderId });
 
-  return { order, containers, settings, costs };
+  // P.I. line items (multi-product). Each row carries its own HS code,
+  // packing, qty, and price — used by document renderers that should show
+  // every line rather than a single rolled-up product.
+  const items = await db('export_order_items as i')
+    .leftJoin('products as p', 'i.product_id', 'p.id')
+    .select('i.*', 'p.name as product_name_lookup')
+    .where({ order_id: orderId })
+    .orderBy('line_no', 'asc');
+
+  return { order, containers, settings, costs, items };
 }
 
 function formatDate(d) {
@@ -73,7 +82,14 @@ const exportDocumentController = {
         return res.status(404).json({ success: false, message: 'Order not found.' });
       }
 
-      const { order, containers, settings, costs } = data;
+      const { order, containers, settings, costs, items } = data;
+
+      // Single source of truth for HS code: order → first item → settings default.
+      // No hardcoded fallback — if none of these are set, the document shows blank
+      // so the user can spot it rather than seeing a wrong number.
+      const firstItem = items && items[0] ? items[0] : null;
+      const orderHsCode = order.hs_code || (firstItem && firstItem.hs_code) || settings.default_hs_code || '';
+      const orderQualityDescription = order.quality_description || (firstItem && firstItem.quality_description) || '';
 
       // Common data shared across ALL documents
       const common = {
@@ -117,7 +133,7 @@ const exportDocumentController = {
           contractNumber: order.contract_number || order.order_no,
           invoiceNumber: order.invoice_number || order.order_no.replace('EX-', '155'),
           date: formatDate(order.created_at),
-          hsCode: order.hs_code || settings.default_hs_code || '1006.3098',
+          hsCode: orderHsCode,
           product: order.product_name || '',
           brandMarking: order.brand_marking || '',
           qtyMT: parseFloat(order.qty_mt) || 0,
@@ -134,7 +150,9 @@ const exportDocumentController = {
           portOfLoading: settings.port_of_loading || 'Karachi, Pakistan',
           destinationPort: order.destination_port || '',
           brokenPctTarget: order.broken_pct_target || 2,
-          qualityDescription: order.quality_description || `Pakistani ${order.product_name || 'Rice'} - ${order.broken_pct_target || 2}% Broken - Double (silky) polished & color sorted, Latest Crop - PACKED IN ${parseFloat(order.bag_size_kg) || 50} KGS ${order.bag_type || 'PP'} BAG - HS CODE: ${order.hs_code || settings.default_hs_code || '1006.3098'} - GMO FREE, FIT FOR HUMAN CONSUMPTION AT ANY STAGE, FREE FROM ALIVE AND DEAD WEEVILS/INSECTS`,
+          qualityDescription: orderQualityDescription || (orderHsCode
+            ? `Pakistani ${order.product_name || 'Rice'} - ${order.broken_pct_target || 2}% Broken - Double (silky) polished & color sorted, Latest Crop - PACKED IN ${parseFloat(order.bag_size_kg) || 50} KGS ${order.bag_type || 'PP'} BAG - HS CODE: ${orderHsCode} - GMO FREE, FIT FOR HUMAN CONSUMPTION AT ANY STAGE, FREE FROM ALIVE AND DEAD WEEVILS/INSECTS`
+            : `Pakistani ${order.product_name || 'Rice'} - ${order.broken_pct_target || 2}% Broken - Double (silky) polished & color sorted, Latest Crop - PACKED IN ${parseFloat(order.bag_size_kg) || 50} KGS ${order.bag_type || 'PP'} BAG - GMO FREE, FIT FOR HUMAN CONSUMPTION AT ANY STAGE, FREE FROM ALIVE AND DEAD WEEVILS/INSECTS`),
         },
 
         // Notify Party
@@ -201,6 +219,29 @@ const exportDocumentController = {
             brand: order.brand_marking || '',
           },
         },
+
+        // P.I. line items (multi-product). When the order has multiple lines
+        // each entry carries its own HS code, packing, qty, and price so
+        // document renderers can list every line.
+        items: (items || []).map((it) => ({
+          lineNo: it.line_no,
+          productId: it.product_id,
+          productName: it.product_name || it.product_name_lookup || '',
+          qtyMT: parseFloat(it.qty_mt) || 0,
+          pricePerMT: parseFloat(it.price_per_mt) || 0,
+          lineTotal: parseFloat(it.line_total) || 0,
+          hsCode: it.hs_code || '',
+          packing: it.packing || '',
+          bagSizeKg: it.bag_size_kg != null ? parseFloat(it.bag_size_kg) : null,
+          bagCount: it.bag_count != null ? parseInt(it.bag_count) : null,
+          bagType: it.bag_type || '',
+          bagBrand: it.bag_brand || '',
+          bagColor: it.bag_color || '',
+          bagPrinting: it.bag_printing || '',
+          qualityDescription: it.quality_description || '',
+          brokenPctTarget: it.broken_pct_target != null ? parseFloat(it.broken_pct_target) : null,
+          notes: it.notes || '',
+        })),
       };
 
       // Generate document-specific structure

@@ -50,7 +50,7 @@ export default function LotCostSheet({ lot, companyProfile, linkedBatch, transac
 
   return (
     <>
-      <style>{`@media print { body * { visibility: hidden; } .lot-cost-sheet, .lot-cost-sheet * { visibility: visible; } .lot-cost-sheet { position: absolute; left: 0; top: 0; width: 100%; } }`}</style>
+      <style>{`@page { size: A4; margin: 12mm; } @media print { body * { visibility: hidden; } .lot-cost-sheet, .lot-cost-sheet * { visibility: visible; } .lot-cost-sheet { position: absolute; left: 0; top: 0; width: 100%; } }`}</style>
 
       <div className="lot-cost-sheet text-sm" style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
 

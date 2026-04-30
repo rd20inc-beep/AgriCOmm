@@ -226,27 +226,78 @@ function renderCommercialInvoice(doc) {
 }
 
 function renderPackingList(doc) {
-  const { company, buyer, order, shipment, containers, totals } = doc;
-  return `
-    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:800px; margin:0 auto; padding:20px;">
-      ${renderHeader(company)}
-      <h2 style="text-align:center; font-size:16px; margin:10px 0;">ORIGINAL<br/>PACKING LIST</h2>
+  const { company, buyer, order, shipment, containers, totals, items } = doc;
 
-      <table style="width:100%; margin:15px 0;">
+  // Format helpers
+  const fmtKg = (n) => (parseFloat(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtMT = (kg) => ((parseFloat(kg) || 0) / 1000).toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+
+  // Build the row source. Multi-line P.I.s use items[]; otherwise fall back
+  // to a single synthesized row from the order's summary fields so legacy
+  // single-product orders still render.
+  const rows = (items && items.length > 0)
+    ? items.map((it) => {
+        const bagSize = it.bagSizeKg || order.bagSizeKg || 50;
+        const bagType = it.bagType || order.bagType || 'PP';
+        const bagCount = it.bagCount || (it.qtyMT && bagSize ? Math.round((it.qtyMT * 1000) / bagSize) : 0);
+        const grossKg = it.qtyMT * 1000;
+        // Net = rice weight + packaging tare. If no tare known, show same as gross.
+        const tarePerBagKg = order.bagWeightGm ? (order.bagWeightGm / 1000) : 0;
+        const netKg = grossKg + bagCount * tarePerBagKg;
+        const description = it.qualityDescription
+          || `${it.productName || order.product || 'Rice'} max 0-${it.brokenPctTarget != null ? it.brokenPctTarget : (order.brokenPctTarget || 2)}% broken, double (silky) polished and sortexed. Sound, loyal and merchantable, fit for human consumption at any stage. Free from alive and dead weevils/insects. GMO Free. Product to meet EU regulations at all times. Latest crop.${it.hsCode ? `<br/><strong>HS CODE ${it.hsCode}</strong>` : ''}`;
+        return {
+          label: (it.productName || order.product || '').toUpperCase(),
+          description,
+          packing: it.packing || `PACKED IN ${bagSize} KGS ${bagType} BAG`,
+          quantity: `${bagCount.toLocaleString()} Bags`,
+          grossKg,
+          netKg,
+          bagCount,
+        };
+      })
+    : (() => {
+        const bagSize = order.bagSizeKg || 50;
+        const bagType = order.bagType || 'PP';
+        const totalBags = order.totalBags || (order.qtyMT && bagSize ? Math.round((order.qtyMT * 1000) / bagSize) : 0);
+        const grossKg = (totals && totals.grossWeightMT ? totals.grossWeightMT : order.qtyMT) * 1000;
+        const netKg = (totals && totals.netWeightMT ? totals.netWeightMT : order.qtyMT) * 1000;
+        return [{
+          label: (order.brandMarking || order.product || '').toUpperCase(),
+          description: order.qualityDescription || order.product || '',
+          packing: `PACKED IN ${bagSize} KGS ${bagType} BAG`,
+          quantity: `${totalBags.toLocaleString()} Bags`,
+          grossKg,
+          netKg,
+          bagCount: totalBags,
+        }];
+      })();
+
+  const totalBags = rows.reduce((s, r) => s + (r.bagCount || 0), 0);
+  const totalGrossKg = rows.reduce((s, r) => s + (r.grossKg || 0), 0);
+  const totalNetKg = rows.reduce((s, r) => s + (r.netKg || 0), 0);
+  const containerCount = containers && containers.length > 0
+    ? `${String(containers.length).padStart(2, '0')} X 20' Fcl`
+    : (shipment && shipment.containerCount ? `${String(shipment.containerCount).padStart(2, '0')} X 20' Fcl` : '');
+
+  return `
+    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px;">
+      <h2 style="text-align:center; font-size:18px; margin:10px 0 18px; letter-spacing:1px;">PACKING LIST</h2>
+
+      <table style="width:100%; margin:0 0 12px; border-collapse:collapse;">
         <tr>
-          <td style="vertical-align:top; width:55%;">
-            <strong>Name & Address of Consignee:</strong><br/>
-            <div style="border:1px solid #333; padding:8px; margin-top:4px;">
-              ${buyer.name}<br/>${buyer.address}
-              ${buyer.vatNumber ? `<br/>VAT #: ${buyer.vatNumber}` : ''}
-              ${buyer.email ? `<br/>Email: ${buyer.email}` : ''}
+          <td style="vertical-align:top; width:55%; padding-right:10px;">
+            <div style="border:1px solid #333; padding:10px; min-height:80px;">
+              <strong style="text-transform:uppercase;">${buyer.name || ''}</strong><br/>
+              ${(buyer.address || '').replace(/\n/g, '<br/>')}
+              ${buyer.country ? `<br/>${buyer.country}` : ''}
             </div>
           </td>
           <td style="vertical-align:top; width:45%;">
             <table style="border-collapse:collapse; width:100%;">
-              <tr><td style="border:1px solid #333; padding:4px; font-weight:bold;">INVOICE NO:</td><td style="border:1px solid #333; padding:4px;">${order.invoiceNumber}</td></tr>
-              <tr><td style="border:1px solid #333; padding:4px; font-weight:bold;">CONTRACT No.</td><td style="border:1px solid #333; padding:4px;">${order.contractNumber}</td></tr>
-              <tr><td style="border:1px solid #333; padding:4px; font-weight:bold;">INVOICE DT:</td><td style="border:1px solid #333; padding:4px;">${order.date}</td></tr>
+              <tr><td style="border:1px solid #333; padding:5px 8px; font-weight:bold; width:42%;">INVOICE NO:</td><td style="border:1px solid #333; padding:5px 8px;">${order.invoiceNumber || ''}</td></tr>
+              <tr><td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">CONTRACT No.</td><td style="border:1px solid #333; padding:5px 8px;">${order.contractNumber || ''}</td></tr>
+              <tr><td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">INVOICE DT:</td><td style="border:1px solid #333; padding:5px 8px;">${order.date || ''}</td></tr>
             </table>
           </td>
         </tr>
@@ -254,118 +305,65 @@ function renderPackingList(doc) {
 
       <table style="width:100%; border-collapse:collapse; font-size:11px; margin-bottom:15px;">
         <tr>
-          <td style="border:1px solid #333; padding:4px; font-weight:bold;">Shipment Ports</td>
-          <td style="border:1px solid #333; padding:4px;">${order.portOfLoading} to ${order.destinationPort}</td>
-          ${shipment.fiNumber ? `<td style="border:1px solid #333; padding:4px; font-weight:bold;">F.I. #</td><td style="border:1px solid #333; padding:4px;">${shipment.fiNumber}</td>` : ''}
+          <td style="border:1px solid #333; padding:5px 8px; font-weight:bold; width:18%;">Shipment Ports</td>
+          <td style="border:1px solid #333; padding:5px 8px; width:32%;">${order.portOfLoading || ''}${buyer.country ? `, ${buyer.country}` : ''}</td>
+          <td style="border:1px solid #333; padding:5px 8px; font-weight:bold; width:18%;">F.I #</td>
+          <td style="border:1px solid #333; padding:5px 8px; width:32%;">${shipment.fiNumber || ''}</td>
         </tr>
         <tr>
-          <td style="border:1px solid #333; padding:4px; font-weight:bold;">Shipped by Sea as</td>
-          <td style="border:1px solid #333; padding:4px;">${shipment.vesselName || '—'}</td>
-          ${shipment.blNumber ? `<td style="border:1px solid #333; padding:4px; font-weight:bold;">BL #</td><td style="border:1px solid #333; padding:4px;">${shipment.blNumber}</td>` : ''}
+          <td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">No. of Container</td>
+          <td style="border:1px solid #333; padding:5px 8px;">${containerCount}</td>
+          <td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">F.I Date</td>
+          <td style="border:1px solid #333; padding:5px 8px;">${shipment.fiDate || ''}</td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">Shipped by Sea</td>
+          <td style="border:1px solid #333; padding:5px 8px;">${shipment.vesselName || ''}${shipment.voyageNumber ? ` / ${shipment.voyageNumber}` : ''}</td>
+          <td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">Payment Terms</td>
+          <td style="border:1px solid #333; padding:5px 8px;">${order.paymentTerms || ''}</td>
         </tr>
       </table>
 
-      ${/* Bag Specification */ ''}
-      ${order.bagType || order.bagSizeKg ? `
-        <table style="width:100%; border-collapse:collapse; margin-bottom:10px; font-size:11px;">
-          <tr style="background:#f9f9f9;">
-            <td style="border:1px solid #333; padding:4px; font-weight:bold;">Bag Type</td>
-            <td style="border:1px solid #333; padding:4px;">${order.bagType || '—'}</td>
-            <td style="border:1px solid #333; padding:4px; font-weight:bold;">Quality</td>
-            <td style="border:1px solid #333; padding:4px;">${order.bagQuality || '—'}</td>
-            <td style="border:1px solid #333; padding:4px; font-weight:bold;">Size</td>
-            <td style="border:1px solid #333; padding:4px;">${order.bagSizeKg || '—'} KG</td>
+      <table style="width:100%; border-collapse:collapse; font-size:11px;">
+        <thead>
+          <tr style="background:#f5f5f5;">
+            <th style="border:1px solid #333; padding:6px;">Container No.</th>
+            <th style="border:1px solid #333; padding:6px;">DESCRIPTION</th>
+            <th style="border:1px solid #333; padding:6px;">PACKING</th>
+            <th style="border:1px solid #333; padding:6px;">QUANTITY</th>
+            <th style="border:1px solid #333; padding:6px;" colspan="2">WEIGHT (IN KGS)<br/><span style="font-weight:normal; font-size:10px;">Gross &nbsp;|&nbsp; Net</span></th>
           </tr>
+        </thead>
+        <tbody>
+          ${rows.map((r) => `
+            <tr>
+              <td style="border:1px solid #333; padding:8px; vertical-align:top; font-weight:bold; font-style:italic; text-align:center;">${r.label}</td>
+              <td style="border:1px solid #333; padding:8px; vertical-align:top; font-size:10.5px; line-height:1.4;">${r.description}</td>
+              <td style="border:1px solid #333; padding:8px; vertical-align:top; text-align:center;">${r.packing}</td>
+              <td style="border:1px solid #333; padding:8px; vertical-align:top; text-align:center;">${r.quantity}</td>
+              <td style="border:1px solid #333; padding:8px; vertical-align:top; text-align:right;">${fmtKg(r.grossKg)}</td>
+              <td style="border:1px solid #333; padding:8px; vertical-align:top; text-align:right;">${fmtKg(r.netKg)}</td>
+            </tr>
+          `).join('')}
           <tr>
-            <td style="border:1px solid #333; padding:4px; font-weight:bold;">Printing</td>
-            <td style="border:1px solid #333; padding:4px;">${order.bagPrinting || '—'}</td>
-            <td style="border:1px solid #333; padding:4px; font-weight:bold;">Color</td>
-            <td style="border:1px solid #333; padding:4px;">${order.bagColor || '—'}</td>
-            <td style="border:1px solid #333; padding:4px; font-weight:bold;">Brand</td>
-            <td style="border:1px solid #333; padding:4px;">${order.bagBrand || order.brandMarking || '—'}</td>
+            <td colspan="3" rowspan="3" style="border:1px solid #333; padding:8px; vertical-align:top;">
+              <div style="font-weight:bold;">TOTAL BAGS &nbsp;:&nbsp; ${totalBags.toLocaleString()} Bags</div>
+              <div style="font-weight:bold; margin-top:4px;">GROSS WEIGHT &nbsp;:&nbsp; ${fmtMT(totalGrossKg)} MTS</div>
+              <div style="font-weight:bold;">NET WEIGHT &nbsp;:&nbsp; ${fmtMT(totalNetKg)} MTS</div>
+            </td>
+            <td style="border:1px solid #333; padding:8px; text-align:center; font-weight:bold;" rowspan="3">Total</td>
+            <td style="border:1px solid #333; padding:8px; text-align:right; font-weight:bold;" rowspan="3">${fmtKg(totalGrossKg)}</td>
+            <td style="border:1px solid #333; padding:8px; text-align:right; font-weight:bold;" rowspan="3">${fmtKg(totalNetKg)}</td>
           </tr>
-        </table>
-      ` : ''}
+          <tr></tr>
+          <tr></tr>
+        </tbody>
+      </table>
 
-      ${/* Packing Lines (mixed mode) */ ''}
-      ${order.packingLines && order.packingLines.length > 0 ? `
-        <h3 style="font-size:12px; margin:10px 0 5px;">PACKING BREAKDOWN</h3>
-        <table style="width:100%; border-collapse:collapse; font-size:11px; margin-bottom:15px;">
-          <thead>
-            <tr style="background:#f5f5f5;">
-              <th style="border:1px solid #333; padding:5px;">#</th>
-              <th style="border:1px solid #333; padding:5px;">BAG TYPE</th>
-              <th style="border:1px solid #333; padding:5px;">QUALITY</th>
-              <th style="border:1px solid #333; padding:5px;">FILL WT (KG)</th>
-              <th style="border:1px solid #333; padding:5px;">NO. OF BAGS</th>
-              <th style="border:1px solid #333; padding:5px;">TOTAL WT (KG)</th>
-              <th style="border:1px solid #333; padding:5px;">PRINTING</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${order.packingLines.map((l, i) => `
-              <tr>
-                <td style="border:1px solid #333; padding:5px; text-align:center;">${i + 1}</td>
-                <td style="border:1px solid #333; padding:5px;">${l.bagType || l.bag_type || '—'}</td>
-                <td style="border:1px solid #333; padding:5px;">${l.bagQuality || l.bag_quality || '—'}</td>
-                <td style="border:1px solid #333; padding:5px; text-align:right;">${l.fillWeightKg || l.fill_weight_kg || '—'}</td>
-                <td style="border:1px solid #333; padding:5px; text-align:right;">${(l.bagCount || l.bag_count || 0).toLocaleString()}</td>
-                <td style="border:1px solid #333; padding:5px; text-align:right;">${((parseFloat(l.fillWeightKg || l.fill_weight_kg || 0)) * parseInt(l.bagCount || l.bag_count || 0)).toLocaleString()}</td>
-                <td style="border:1px solid #333; padding:5px;">${l.bagPrinting || l.bag_printing || '—'}</td>
-              </tr>
-            `).join('')}
-            <tr style="font-weight:bold;">
-              <td colspan="4" style="border:1px solid #333; padding:5px; text-align:right;">Total</td>
-              <td style="border:1px solid #333; padding:5px; text-align:right;">${order.packingLines.reduce((s, l) => s + (parseInt(l.bagCount || l.bag_count || 0)), 0).toLocaleString()}</td>
-              <td style="border:1px solid #333; padding:5px; text-align:right;">${order.packingLines.reduce((s, l) => s + ((parseFloat(l.fillWeightKg || l.fill_weight_kg || 0)) * parseInt(l.bagCount || l.bag_count || 0)), 0).toLocaleString()}</td>
-              <td style="border:1px solid #333; padding:5px;"></td>
-            </tr>
-          </tbody>
-        </table>
-      ` : ''}
-
-      ${/* Container-level packing (shipment) */ ''}
-      ${containers.length > 0 ? `
-        <h3 style="font-size:12px; margin:10px 0 5px;">CONTAINER DETAILS</h3>
-        <table style="width:100%; border-collapse:collapse;">
-          <thead>
-            <tr style="background:#f5f5f5;">
-              <th style="border:1px solid #333; padding:6px;">LOT NUMBER</th>
-              <th style="border:1px solid #333; padding:6px;">CONTAINER No</th>
-              <th style="border:1px solid #333; padding:6px;">DESCRIPTION</th>
-              <th style="border:1px solid #333; padding:6px;">PACKING</th>
-              <th style="border:1px solid #333; padding:6px;">QUANTITY</th>
-              <th style="border:1px solid #333; padding:6px;" colspan="2">WEIGHT (IN KGS)<br/>Gross &nbsp;&nbsp; Net</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${containers.map(c => `
-              <tr>
-                <td style="border:1px solid #333; padding:6px; font-size:10px;">${c.lotNumber || '—'}</td>
-                <td style="border:1px solid #333; padding:6px;">${c.containerNo}</td>
-                <td style="border:1px solid #333; padding:6px; font-size:10px;">${order.brandMarking ? `<strong>${order.brandMarking}</strong><br/>` : ''}${order.product}</td>
-                <td style="border:1px solid #333; padding:6px; font-size:10px;">PACKED IN ${order.bagSizeKg || 25} KGS ${order.bagType || 'PP'} BAG</td>
-                <td style="border:1px solid #333; padding:6px; text-align:center;">${c.bagsCount || '—'} Bags</td>
-                <td style="border:1px solid #333; padding:6px; text-align:right;">${c.grossWeightKg ? c.grossWeightKg.toLocaleString('en-US', {minimumFractionDigits:2}) : '—'}</td>
-                <td style="border:1px solid #333; padding:6px; text-align:right;">${c.netWeightKg ? c.netWeightKg.toLocaleString('en-US', {minimumFractionDigits:2}) : '—'}</td>
-              </tr>
-            `).join('')}
-            <tr style="font-weight:bold;">
-              <td colspan="5" style="border:1px solid #333; padding:6px; text-align:right;">Total &gt;&gt;&gt;&gt;&gt;</td>
-              <td style="border:1px solid #333; padding:6px; text-align:right;">${(totals.grossWeightMT * 1000).toLocaleString('en-US', {minimumFractionDigits:2})}</td>
-              <td style="border:1px solid #333; padding:6px; text-align:right;">${(totals.netWeightMT * 1000).toLocaleString('en-US', {minimumFractionDigits:2})}</td>
-            </tr>
-          </tbody>
-        </table>
-      ` : '<p>No containers recorded yet.</p>'}
-
-      <p style="font-style:italic; font-size:11px; margin-top:15px;">
-        <em>Certification: Goods are shipped from Pakistan origin</em>
+      <p style="font-style:italic; font-size:11px; margin-top:18px; text-decoration:underline;">
+        Certification: Goods are shipped from Pakistan origin
       </p>
 
-      <div style="margin-top:40px; text-align:right;">
-        <p style="font-weight:bold;">${company.name}<br/>Proprietor</p>
-      </div>
       ${renderCompanyFooter(company)}
     </div>`;
 }
@@ -746,36 +744,67 @@ function renderInvoice(doc) {
 
 // ─── Bill of Lading ───
 function renderBillOfLading(doc) {
-  const { company, buyer, order, shipment, containers, totals } = doc;
+  const { company, buyer, order, shipment, containers, totals, items } = doc;
+
+  const containerCount = (containers && containers.length > 0)
+    ? containers.length
+    : (shipment && shipment.containerCount ? shipment.containerCount : 0);
+  const containerType = containers && containers[0]?.containerType === '40ft' ? '40' : '20';
+  const totalBags = (totals && totals.totalBags) || order.totalBags || 0;
+
+  // Multi-line P.I. items render as separate quality blocks within the
+  // Description cell so each line's HS code, packing, and quality clauses
+  // appear correctly. Falls back to the single-product summary text.
+  const descriptionItemsHtml = (items && items.length > 0)
+    ? items.map((it) => {
+        const bagSize = it.bagSizeKg || order.bagSizeKg || 50;
+        const bagType = it.bagType || order.bagType || 'PP';
+        const bagCount = it.bagCount || (it.qtyMT && bagSize ? Math.round((it.qtyMT * 1000) / bagSize) : 0);
+        const qualityText = it.qualityDescription
+          || `Pakistani ${it.productName || 'Rice'} - ${it.brokenPctTarget != null ? it.brokenPctTarget : (order.brokenPctTarget || 2)}% Broken - Double (silky) polished & color sorted, Latest Crop - PACKED IN ${bagSize} KGS ${bagType} BAG${it.hsCode ? ` - HS CODE: ${it.hsCode}` : ''} - GMO FREE, FIT FOR HUMAN CONSUMPTION AT ANY STAGE, FREE FROM ALIVE AND DEAD WEEVILS/INSECTS`;
+        return `<div style="margin-bottom:6px;"><strong>${(it.productName || '').toUpperCase()}</strong> — ${bagCount.toLocaleString()} bags<br/>${qualityText}${it.hsCode ? `<br/>HS code ${it.hsCode}` : ''}</div>`;
+      }).join('')
+    : `${order.qualityDescription || ''}${order.hsCode ? `<br/>HS code ${order.hsCode}` : ''}`;
+
+  // Place-of-delivery / discharge: avoid leading commas when port is empty.
+  const placeOfDelivery = [order.destinationPort, buyer.country].filter(Boolean).join(', ');
+  const portOfDischarge = order.destinationPort || buyer.country || '';
+
+  // Notify party — explicit notify_party_* on order beats buyer fallback.
+  const np = doc.notifyParty || {};
+  const notifyHtml = np.name
+    ? `${np.name}<br/>${np.address || ''}${np.phone ? `<br/>TEL: ${np.phone}` : ''}${np.email ? ` EMAIL: ${np.email}` : ''}`
+    : `${buyer.name || ''}<br/>${buyer.country || ''}${buyer.phone ? `<br/>TEL: ${buyer.phone}` : ''}${buyer.email ? ` EMAIL: ${buyer.email}` : ''}`;
+
   return `
     <div style="font-family: Arial, sans-serif; font-size:11px; max-width:800px; margin:0 auto; padding:10px;">
       <table style="width:100%; border-collapse:collapse;">
         <tr>
           <td style="border:2px solid #333; padding:10px; width:50%; vertical-align:top;">
             <strong>SHIPPER</strong><br/>
-            ${company.name}<br/>${company.address}<br/>
-            TEL ${company.phone} FAX: ${company.fax || '—'}
+            ${company.name || ''}<br/>${company.address || ''}<br/>
+            TEL ${company.phone || ''} FAX: ${company.fax || '—'}
           </td>
           <td style="border:2px solid #333; padding:10px; width:50%; vertical-align:top;">
             <strong style="font-size:14px;">BILL OF LADING FORMAT</strong><br/>
-            FROM<br/><strong>${company.name}</strong><br/>
+            FROM<br/><strong>${company.name || ''}</strong><br/>
             <strong>BOOKING NO: ${shipment.bookingNo || '—'}</strong>
           </td>
         </tr>
         <tr>
           <td style="border:2px solid #333; padding:10px; vertical-align:top;">
             <strong style="text-decoration:underline;">TO THE ORDER OF</strong><br/>
-            ${company.bank.name}<br/>${company.bank.branch},<br/>KARACHI, PAKISTAN
+            ${(company.bank && company.bank.name) || ''}<br/>${(company.bank && company.bank.branch) || ''},<br/>KARACHI, PAKISTAN
             ${shipment.fiNumber ? `<br/><br/>F.I: ${shipment.fiNumber}` : ''}
           </td>
           <td style="border:2px solid #333; padding:10px; vertical-align:top;" rowspan="2">
-            <strong>PLACE OF RECEIPT:</strong><br/>${order.portOfLoading || 'Karachi - Pakistan'}
+            <strong>PLACE OF RECEIPT:</strong><br/>${order.portOfLoading || 'Karachi, Pakistan'}
           </td>
         </tr>
         <tr>
           <td style="border:2px solid #333; padding:10px; vertical-align:top;">
             <strong style="text-decoration:underline;">NOTIFY PARTY:</strong><br/>
-            ${(doc.notifyParty?.name) ? `${doc.notifyParty.name}<br/>${doc.notifyParty.address || ''}${doc.notifyParty.phone ? `<br/>TEL: ${doc.notifyParty.phone}` : ''}${doc.notifyParty.email ? ` EMAIL: ${doc.notifyParty.email}` : ''}` : `${buyer.name}<br/>${buyer.address}<br/>${buyer.country}${buyer.vatNumber ? `<br/>VAT #: ${buyer.vatNumber}` : ''}${buyer.phone ? `<br/>TEL: ${buyer.phone}` : ''} ${buyer.email ? `EMAIL: ${buyer.email}` : ''}`}
+            ${notifyHtml}
           </td>
         </tr>
         <tr>
@@ -783,7 +812,7 @@ function renderBillOfLading(doc) {
             <strong>VESSEL AND VOYAGE NO:</strong><br/>${shipment.vesselName || '—'}${shipment.voyageNumber ? ' V.' + shipment.voyageNumber : ''}
           </td>
           <td style="border:2px solid #333; padding:10px;">
-            <strong>PLACE OF DELIVERY</strong><br/>${order.destinationPort}, ${buyer.country}
+            <strong>PLACE OF DELIVERY</strong><br/>${placeOfDelivery || '—'}
           </td>
         </tr>
         <tr>
@@ -791,7 +820,7 @@ function renderBillOfLading(doc) {
             <strong>PORT OF LOADING</strong><br/>${order.portOfLoading || 'Karachi, Pakistan'}
           </td>
           <td style="border:2px solid #333; padding:10px;">
-            <strong>PORT OF DISCHARGE</strong><br/>${order.destinationPort}
+            <strong>PORT OF DISCHARGE</strong><br/>${portOfDischarge || '—'}
           </td>
         </tr>
       </table>
@@ -804,36 +833,23 @@ function renderBillOfLading(doc) {
           </td>
           <td style="border:2px solid #333; padding:10px; width:70%; vertical-align:top;">
             <strong>Description</strong><br/>
-            ${containers.length} x ${containers[0]?.containerType === '40ft' ? '40' : '20'} Container containing ${totals?.totalBags || order.totalBags} bags<br/>
-            ${order.qualityDescription}<br/>
-            Sales contract # ${order.contractNumber} Dated ${order.date}<br/>
-            HS code ${order.hsCode}<br/>
-            Net Weight ${(totals?.netWeightMT || order.qtyMT).toFixed(2)} MT<br/>
-            Gross Weight ${(totals?.grossWeightMT || order.qtyMT + 0.1).toFixed(2)} MT
+            ${containerCount} x ${containerType} Container containing ${totalBags.toLocaleString()} bags<br/>
+            ${descriptionItemsHtml}
+            <div style="margin-top:6px;">Sales contract # ${order.contractNumber || ''}${order.date ? ` Dated ${order.date}` : ''}</div>
+            <div>Net Weight ${(((totals && totals.netWeightMT) || order.qtyMT) || 0).toFixed(2)} MT</div>
+            <div>Gross Weight ${(((totals && totals.grossWeightMT) || order.qtyMT) || 0).toFixed(2)} MT</div>
           </td>
         </tr>
       </table>
 
-      ${containers.length > 0 ? `
-        <table style="width:100%; border-collapse:collapse; margin-top:10px; font-size:10px;">
-          <tr><td colspan="2" style="border:2px solid #333; padding:6px; font-weight:bold;">CONTAINER</td></tr>
-          ${containers.map(c => `
-            <tr>
-              <td style="border:1px solid #333; padding:6px; width:30%;">${c.containerNo}</td>
-              <td style="border:1px solid #333; padding:6px;">${(c.netWeightKg / 1000).toFixed(0)} Mts of ${order.product} Packed in ${order.bagSizeKg} kgs PP bag total ${c.bagsCount} Bags<br/>LOT # ${c.lotNumber || '—'}</td>
-            </tr>
-          `).join('')}
-        </table>
-      ` : ''}
-
       <div style="text-align:center; margin:15px 0; font-size:16px; font-weight:bold;">
         14 DAYS FREE AT DESTINATION PORT<br/>
-        <span style="font-size:11px;">${shipment.freightTerms || 'FREIGHT COLLECT'}</span>
+        <span style="font-size:11px;">${shipment.freightTerms || 'COLLECT'}</span>
       </div>
 
       <table style="width:100%; border-collapse:collapse; font-size:10px;">
         <tr>
-          <td style="border:1px solid #333; padding:4px;"><strong>Total No of Containers</strong><br/>${containers.length} x ${containers[0]?.containerType === '40ft' ? "40'" : "20'"}HC</td>
+          <td style="border:1px solid #333; padding:4px;"><strong>Total No of Containers</strong><br/>${containerCount} x ${containerType === '40' ? "40'" : "20'"}HC</td>
           <td style="border:1px solid #333; padding:4px;"><strong>Movement</strong></td>
           <td style="border:1px solid #333; padding:4px;"><strong>Freight</strong></td>
         </tr>
@@ -925,43 +941,130 @@ function renderStatementOfOrigin(doc) {
 
 // ─── Certificate of Origin (data for KCCI form) ───
 function renderCertificateOfOrigin(doc) {
-  const { company, buyer, order, shipment, containers, totals } = doc;
-  const totalBags = totals?.totalBags || order.totalBags;
-  return `
-    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:800px; margin:0 auto; padding:20px;">
-      ${renderHeader(company)}
-      <h2 style="text-align:center; font-size:16px; margin:10px 0;">CERTIFICATE OF ORIGIN — DATA</h2>
-      <p style="text-align:center; font-size:11px; color:#666;">(Use this data to fill the KCCI Certificate of Origin form)</p>
+  const { company, buyer, order, shipment, containers, items } = doc;
 
-      <table style="width:100%; font-size:11px; line-height:2; margin-top:15px;">
-        <tr><td style="width:200px; font-weight:bold;">Exporter:</td><td>${company.name}<br/>${company.address}</td></tr>
-        <tr><td style="font-weight:bold;">Consignee:</td><td>${buyer.name}<br/>${buyer.address}<br/>${buyer.country}${buyer.vatNumber ? `<br/>VAT #: ${buyer.vatNumber}` : ''}${buyer.email ? `<br/>Email: ${buyer.email}` : ''}</td></tr>
-        <tr><td style="font-weight:bold;">Exporter's Membership #:</td><td>${company.kcciMembership || '—'}</td></tr>
-        <tr><td style="font-weight:bold;">Transport:</td><td>BY SEA &nbsp; ${shipment.vesselName || '—'}<br/>BILL OF LADING # ${shipment.blNumber || '—'} DTD: ${shipment.blDate || '—'}</td></tr>
-        <tr><td style="font-weight:bold;">Marks & Numbers:</td><td style="font-weight:bold; color:#d4a017;">${order.brandMarking || '—'}</td></tr>
-        <tr><td style="font-weight:bold;">Number of Packages:</td><td>${totalBags} BAGS</td></tr>
-        <tr><td style="font-weight:bold; vertical-align:top;">Description of Goods:</td><td>
-          ${containers.length} x ${containers[0]?.containerType === '40ft' ? '40' : '20'}' FCL<br/>
-          ${order.qualityDescription}<br/>
-          ${containers.map(c => c.lotNumber).filter(Boolean).join(',<br/>')}<br/><br/>
-          SALES CONTRACT # ${order.contractNumber} DTD: ${order.date}<br/>
-          H.S CODE # ${order.hsCode}<br/>
-          TOTAL BAGS: ${totalBags}<br/>
-          TOTAL NET WT: ${order.qtyMT.toFixed(3)} MT
-        </td></tr>
-        <tr><td style="font-weight:bold;">Gross Weight:</td><td>${(totals?.grossWeightMT || order.qtyMT + 0.1).toFixed(3)} MT</td></tr>
-        <tr><td style="font-weight:bold;">Country of Origin:</td><td>PAKISTAN</td></tr>
+  const fmtKg = (n) => (parseFloat(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+
+  // Build one row per multi-line P.I. item, falling back to a single
+  // synthesized row from the order's summary fields. Per-row weight is the
+  // item's weight in kg (rice + packaging tare when known).
+  const rows = (items && items.length > 0)
+    ? items.map((it, idx) => {
+        const bagSize = it.bagSizeKg || order.bagSizeKg || 50;
+        const bagType = it.bagType || order.bagType || 'PP';
+        const bagCount = it.bagCount || (it.qtyMT && bagSize ? Math.round((it.qtyMT * 1000) / bagSize) : 0);
+        const grossKg = it.qtyMT * 1000;
+        const tarePerBagKg = order.bagWeightGm ? (order.bagWeightGm / 1000) : 0;
+        const netKg = grossKg + bagCount * tarePerBagKg;
+        const containerLabel = `1X20 FCL ${Math.round(it.qtyMT)} MT`;
+        const qualityText = it.qualityDescription
+          || `${it.productName || 'Rice'} max 0-${it.brokenPctTarget != null ? it.brokenPctTarget : (order.brokenPctTarget || 2)}% broken, double (silky) polished and sortexed. Product to meet EU regulations at all times. Latest crop.`;
+        return {
+          label: it.productName || `Item ${idx + 1}`,
+          bags: bagCount,
+          description: `${containerLabel} ${qualityText}<br/>Packed in ${bagSize}KG bags`,
+          weightKg: netKg,
+          hsCode: it.hsCode || '',
+        };
+      })
+    : (() => {
+        const bagSize = order.bagSizeKg || 50;
+        const bagType = order.bagType || 'PP';
+        const totalBags = order.totalBags || (order.qtyMT && bagSize ? Math.round((order.qtyMT * 1000) / bagSize) : 0);
+        const grossKg = order.qtyMT * 1000;
+        return [{
+          label: order.brandMarking || order.product || '',
+          bags: totalBags,
+          description: `${containers.length || 1}X20 FCL ${Math.round(order.qtyMT)} MT ${order.qualityDescription || order.product || ''}<br/>Packed in ${bagSize}KG bags`,
+          weightKg: grossKg,
+          hsCode: order.hsCode || '',
+        }];
+      })();
+
+  const totalBags = rows.reduce((s, r) => s + (r.bags || 0), 0);
+  const totalWeightKg = rows.reduce((s, r) => s + (r.weightKg || 0), 0);
+  const totalNetKg = order.qtyMT ? order.qtyMT * 1000 : totalWeightKg;
+  const containerCount = containers && containers.length > 0
+    ? containers.length
+    : (shipment && shipment.containerCount ? shipment.containerCount : rows.length);
+
+  // HS codes — show all distinct codes across items so multi-line P.I.s with
+  // different HS codes per product render correctly.
+  const distinctHs = [...new Set(rows.map((r) => r.hsCode).filter(Boolean))];
+  const hsLine = distinctHs.length > 0 ? distinctHs.join(', ') : (order.hsCode || '');
+
+  const refNo = company.kcciMembership || '';
+
+  return `
+    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:780px; margin:0 auto; padding:18px;">
+
+      <table style="width:100%; border-collapse:collapse;">
+        <tr>
+          <td style="border:1px solid #333; padding:10px; vertical-align:top; width:65%;">
+            <strong style="font-size:13px;">${company.name || ''}</strong><br/>
+            ${(company.address || '').replace(/\n/g, '<br/>')}
+          </td>
+          <td style="border:1px solid #333; padding:10px; text-align:right; vertical-align:top; width:35%;">
+            <span style="font-size:18px; font-weight:bold;">${refNo}</span>
+          </td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #333; padding:10px; vertical-align:top;">
+            <strong style="text-transform:uppercase;">${buyer.name || ''}</strong><br/>
+            ${(buyer.address || '').replace(/\n/g, '<br/>')}${buyer.country ? `<br/>${buyer.country}` : ''}
+          </td>
+          <td style="border:1px solid #333; padding:10px; vertical-align:bottom; text-align:right; font-weight:bold;">
+            Total Gr. Weight
+          </td>
+        </tr>
       </table>
 
-      <div style="margin-top:20px; padding:10px; border:2px solid #333; text-align:center; font-weight:bold;">
-        CERTIFIED THAT THE ABOVE GOODS ARE OF PAKISTANI ORIGIN
+      <div style="margin:14px 0 6px; font-weight:bold;">
+        BY SEA &nbsp;&nbsp; ${shipment.vesselName || ''}${shipment.voyageNumber ? ` / ${shipment.voyageNumber}` : ''}
+      </div>
+      <div style="font-weight:bold;">
+        BL# : ${shipment.blNumber || ''} &nbsp;&nbsp; Dated : ${shipment.blDate || ''}
       </div>
 
-      <div style="margin-top:30px;">
-        <p>Name: <strong>${company.proprietor}</strong></p>
-        <p>Designation: <strong>PROPRIETOR</strong></p>
-        <p>Company: <strong>${company.name}</strong></p>
+      <div style="text-align:center; margin:12px 0 6px; font-weight:bold; text-decoration:underline;">
+        ${containerCount} X 20' FCL
       </div>
+
+      <table style="width:100%; border-collapse:collapse; font-size:11px;">
+        <tbody>
+          ${rows.map((r) => `
+            <tr>
+              <td style="padding:8px 6px; vertical-align:top; font-style:italic; width:18%; font-weight:bold;">${r.label}</td>
+              <td style="padding:8px 6px; vertical-align:top; width:8%; text-align:right;">${(r.bags || 0).toLocaleString()}</td>
+              <td style="padding:8px 6px; vertical-align:top; width:60%; line-height:1.4;">${r.description}</td>
+              <td style="padding:8px 6px; vertical-align:top; width:14%; text-align:right; font-weight:bold;">${fmtKg(r.weightKg)} MT</td>
+            </tr>
+          `).join('')}
+          <tr>
+            <td colspan="3" style="border-top:1px solid #333; padding:8px 6px; text-align:right; font-weight:bold;">Total Gr. Weight</td>
+            <td style="border-top:1px solid #333; padding:8px 6px; text-align:right; font-weight:bold;">${fmtKg(totalWeightKg)}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div style="margin-top:10px; padding-left:18%; line-height:1.7;">
+        <div><strong>SALES CONTRACT #</strong> ${order.contractNumber || ''}${order.date ? ` Dated: ${order.date}` : ''}</div>
+        <div><strong>H.S CODE</strong> &nbsp;&nbsp; # ${hsLine}</div>
+        <div><strong>TOTAL BAGS</strong> &nbsp; : ${totalBags.toLocaleString()} BAGS.</div>
+        <div><strong>TOTAL NET WT</strong>: ${fmtKg(totalNetKg)} KGS.</div>
+      </div>
+
+      <div style="margin-top:30px; text-align:center; font-weight:bold; font-size:13px; line-height:1.5;">
+        CERTIFIED THAT THE ABOVE GOODS<br/>
+        ARE OF PAKISTANI ORIGIN
+      </div>
+
+      <div style="margin-top:50px; text-align:center; line-height:2;">
+        <div style="font-weight:bold;">${company.proprietor || ''}</div>
+        <div style="font-weight:bold;">PROPRIETOR</div>
+        <div style="font-weight:bold;">${company.name || ''}</div>
+      </div>
+
       ${renderCompanyFooter(company)}
     </div>`;
 }
@@ -1151,10 +1254,23 @@ export default function DocumentCenter({ order }) {
     // Use the edited DOM content (user may have edited text inline)
     const editedHtml = printRef.current ? printRef.current.innerHTML : previewHtml;
     const printWindow = window.open('', '_blank');
+    // Setting an explicit @page margin suppresses Chrome/Edge/Safari's
+    // default print header (date, page title, URL) and footer (page numbers,
+    // URL). Firefox honors the same rule. The 1cm margin keeps the document
+    // visually well-padded without the browser-rendered chrome.
     printWindow.document.write(`
       <html>
-        <head><title>${previewDoc?.type || 'Document'} — ${order.id}</title></head>
-        <body style="margin:0; padding:0;">
+        <head>
+          <title>${previewDoc?.type || 'Document'} — ${order.id}</title>
+          <style>
+            @page { size: A4; margin: 12mm; }
+            html, body { margin: 0; padding: 0; }
+            @media print {
+              html, body { margin: 0; padding: 0; }
+            }
+          </style>
+        </head>
+        <body>
           ${editedHtml}
           <script>window.onload = function() { window.print(); }</script>
         </body>
