@@ -61,8 +61,8 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: 22
           debug: true
-          script_stop: true
           script: |
+            set -e
             cd /opt/riceflow-erp
             git pull origin main
             rsync -a --delete --exclude='.env' --exclude='node_modules' /opt/riceflow-erp/ /root/riceflow-erp/
