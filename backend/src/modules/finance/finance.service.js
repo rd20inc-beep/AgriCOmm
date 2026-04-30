@@ -41,6 +41,10 @@ const financeService = {
     const exportStats = await orderQuery.clone().select(
       db.raw("COUNT(*) as total_orders"),
       db.raw("COUNT(CASE WHEN status NOT IN ('Closed','Cancelled') THEN 1 END) as active_orders"),
+      // Pre-shipment = workflow stages before COGS gets locked at dispatch
+      db.raw("COUNT(CASE WHEN status IN ('Draft','Awaiting Advance','Advance Received','Procurement Pending','In Milling','Docs In Preparation','Awaiting Balance','Ready to Ship') THEN 1 END) as pre_shipment_orders"),
+      db.raw("COUNT(CASE WHEN status IN ('Shipped','Arrived','Closed') THEN 1 END) as shipped_orders"),
+      db.raw("COUNT(CASE WHEN status IN ('Shipped','Arrived','Closed') AND (inventory_cogs_total_pkr IS NULL OR inventory_cogs_total_pkr = 0) THEN 1 END) as shipped_missing_cogs"),
       db.raw("COALESCE(SUM(contract_value), 0) as total_revenue_foreign"),
       db.raw(hasPkrLocked
         ? "COALESCE(SUM(contract_value_pkr_locked), 0) as total_revenue_pkr_booked"
@@ -194,6 +198,12 @@ const financeService = {
         // Foreign equivalents for display
         bookedProfitForeign: revenuePkrBooked > 0 ? exportBookedProfitPkr / (revenuePkrBooked / revenueForeign) : 0,
         calculationStatus: exportCogsPkr > 0 ? 'exact' : (exportOpCostsPkr > 0 ? 'operational_margin_only' : 'no_costs'),
+        // COGS lifecycle breakdown — see warnings for explanation.
+        cogsStatus: {
+          preShipment: parseInt(exportStats.pre_shipment_orders),
+          shipped: parseInt(exportStats.shipped_orders),
+          shippedMissingCogs: parseInt(exportStats.shipped_missing_cogs),
+        },
       },
       mill: {
         batchCount: batches.length,
@@ -229,12 +239,38 @@ const financeService = {
         currency: 'PKR',
       },
       collectionRate: parseFloat(collectionRate.toFixed(1)),
-      warnings: [
-        ...(millPricesConfirmed < batches.length && !millRates.finished_rice ? [`${batches.length - millPricesConfirmed} batch(es) have unconfirmed prices and no commodity rates — mill revenue may be zero`] : []),
-        ...(millPricesConfirmed < batches.length && millRates.finished_rice ? [`${batches.length - millPricesConfirmed} batch(es) using commodity rate master prices (not confirmed batch prices)`] : []),
-        ...(exportCogsPkr === 0 && parseInt(exportStats.active_orders) > 0 ? ['Export COGS not yet locked — profit shows operational margin only'] : []),
-        ...(currentFx.source === 'system_settings_fallback' ? ['FX rate from system default — no current rate in fx_rates table'] : []),
-      ],
+      warnings: (() => {
+        const out = [];
+        const preShipped = parseInt(exportStats.pre_shipment_orders);
+        const shippedMissing = parseInt(exportStats.shipped_missing_cogs);
+
+        if (millPricesConfirmed < batches.length && !millRates.finished_rice) {
+          out.push(`${batches.length - millPricesConfirmed} milling batch(es) have unconfirmed prices and no commodity rates — mill revenue may be zero. Set prices on each batch or seed the commodity_rates table.`);
+        }
+        if (millPricesConfirmed < batches.length && millRates.finished_rice) {
+          out.push(`${batches.length - millPricesConfirmed} milling batch(es) using commodity-rate-master prices (estimated). Confirm prices on each batch for exact figures.`);
+        }
+
+        // Pre-shipment COGS: this is the *normal* state for any order that
+        // hasn't shipped yet — COGS locks automatically at dispatch. Phrase
+        // the warning so the user understands that, not as if something is
+        // broken.
+        if (preShipped > 0 && exportCogsPkr === 0) {
+          out.push(`${preShipped} active export order${preShipped === 1 ? '' : 's'} pre-shipment — exact COGS will lock automatically at dispatch. Profit shown is revenue minus operational costs only until then.`);
+        } else if (preShipped > 0 && exportCogsPkr > 0) {
+          out.push(`${preShipped} order${preShipped === 1 ? '' : 's'} still pre-shipment — their COGS will lock at dispatch and may shift the totals.`);
+        }
+
+        // Genuine red flag: an order has shipped but COGS never locked.
+        if (shippedMissing > 0) {
+          out.push(`${shippedMissing} shipped order${shippedMissing === 1 ? '' : 's'} missing COGS — run the COGS lock job or check inventory_reservations for those orders.`);
+        }
+
+        if (currentFx.source === 'system_settings_fallback') {
+          out.push("FX rate from system default — no current rate in fx_rates table. Add today's rate in Finance → Rates.");
+        }
+        return out;
+      })(),
     };
   },
 
