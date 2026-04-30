@@ -1149,7 +1149,19 @@ const inventoryService = {
   // =========================================================================
 
   /**
-   * Calculate COGS for an export order from dispatched/allocated lots
+   * Calculate COGS for an export order from dispatched/allocated lots.
+   *
+   * Source-of-truth precedence (first non-zero result wins):
+   *   1. inventory_reservations → exact lot-level cost
+   *   2. internal_transfers     → mill→export transfer price
+   *   3. linked milling batch   → sum of milling_costs for that batch,
+   *                                pro-rated by qty_mt vs batch finished_mt
+   *      (Estimated — used when seed/historical orders bypassed the
+   *       reservation flow but a linked batch with real costs exists.)
+   *
+   * Returns `source` so the caller can mark `cost_locked_at_dispatch` only
+   * when the precise paths produce a result, and use 'estimated' status
+   * otherwise.
    */
   async calculateOrderCOGS(trx, orderId) {
     const conn = trx || db;
@@ -1172,25 +1184,56 @@ const inventoryService = {
       totalQtyKg += qtyKg;
     }
 
-    // Also check internal transfers for this order
+    if (totalCOGS > 0) {
+      const cogsPerKg = totalQtyKg > 0 ? totalCOGS / totalQtyKg : 0;
+      return { totalCOGS, totalQtyKg, cogsPerKg, cogsPerMT: cogsPerKg * 1000, source: 'reservations' };
+    }
+
+    // Path 2: internal transfers
     const transfers = await conn('internal_transfers')
       .where('export_order_id', orderId)
       .select('qty_mt', 'transfer_price_pkr');
 
     for (const t of transfers) {
-      const tQtyKg = parseFloat(t.qty_mt) * 1000;
-      const tCostTotal = parseFloat(t.transfer_price_pkr) * parseFloat(t.qty_mt);
-      // Only add if not already counted via reservation
-      if (totalQtyKg === 0) {
-        totalCOGS += tCostTotal;
-        totalQtyKg += tQtyKg;
+      totalCOGS += parseFloat(t.transfer_price_pkr) * parseFloat(t.qty_mt);
+      totalQtyKg += parseFloat(t.qty_mt) * 1000;
+    }
+
+    if (totalCOGS > 0) {
+      const cogsPerKg = totalQtyKg > 0 ? totalCOGS / totalQtyKg : 0;
+      return { totalCOGS, totalQtyKg, cogsPerKg, cogsPerMT: cogsPerKg * 1000, source: 'internal_transfers' };
+    }
+
+    // Path 3: linked milling batch costs (estimated). Used when historical
+    // or seed orders bypassed the reservation/transfer flow.
+    const order = await conn('export_orders').where('id', orderId).first();
+    if (order) {
+      const batch = await conn('milling_batches').where('linked_export_order_id', orderId).first();
+      if (batch) {
+        const batchCostsRows = await conn('milling_costs').where('batch_id', batch.id).select('amount');
+        const batchCostsTotal = batchCostsRows.reduce((s, c) => s + (parseFloat(c.amount) || 0), 0);
+        const batchFinishedMt = parseFloat(batch.actual_finished_mt) || 0;
+        const orderQtyMt = parseFloat(order.qty_mt) || 0;
+        if (batchCostsTotal > 0 && batchFinishedMt > 0 && orderQtyMt > 0) {
+          // Pro-rate batch cost by the share of finished MT this order took.
+          // For seed data where order_qty == batch_finished, this is just
+          // the full batch cost; for partial allocations it scales down.
+          const ratio = Math.min(orderQtyMt / batchFinishedMt, 1);
+          const proratedCogs = batchCostsTotal * ratio;
+          const totalQtyKgFromBatch = orderQtyMt * 1000;
+          const cogsPerKg = totalQtyKgFromBatch > 0 ? proratedCogs / totalQtyKgFromBatch : 0;
+          return {
+            totalCOGS: proratedCogs,
+            totalQtyKg: totalQtyKgFromBatch,
+            cogsPerKg,
+            cogsPerMT: cogsPerKg * 1000,
+            source: 'linked_batch_estimate',
+          };
+        }
       }
     }
 
-    const cogsPerKg = totalQtyKg > 0 ? totalCOGS / totalQtyKg : 0;
-    const cogsPerMT = cogsPerKg * 1000;
-
-    return { totalCOGS, totalQtyKg, cogsPerKg, cogsPerMT };
+    return { totalCOGS: 0, totalQtyKg: 0, cogsPerKg: 0, cogsPerMT: 0, source: 'none' };
   },
 
   /**
@@ -1214,7 +1257,13 @@ const inventoryService = {
   },
 
   /**
-   * Lock COGS on an export order (called at dispatch)
+   * Lock COGS on an export order (called at dispatch).
+   *
+   * Sets `cost_locked_at_dispatch` only when COGS came from the precise
+   * paths (reservations or internal_transfers). Linked-batch estimates
+   * still get persisted into inventory_cogs_total_pkr so the dashboard
+   * shows a real number, but the lock flag stays false so a future
+   * reservation/transfer can override the estimate.
    */
   async lockOrderCOGS(trx, orderId, pkrRate) {
     const cogs = await inventoryService.calculateOrderCOGS(trx, orderId);
@@ -1224,16 +1273,21 @@ const inventoryService = {
     const contractValuePKR = parseFloat(order.contract_value) * (pkrRate || 280);
     const grossProfitPKR = contractValuePKR - cogs.totalCOGS;
     const grossProfitUSD = grossProfitPKR / (pkrRate || 280);
+    const isExact = cogs.source === 'reservations' || cogs.source === 'internal_transfers';
 
     await trx('export_orders').where('id', orderId).update({
       inventory_cogs_total_pkr: cogs.totalCOGS,
       inventory_cogs_per_mt_pkr: cogs.cogsPerMT,
       gross_profit_pkr: grossProfitPKR,
       gross_profit_usd: grossProfitUSD,
-      cost_locked_at_dispatch: true,
+      cost_locked_at_dispatch: isExact,
     });
 
-    return { ...cogs, grossProfitPKR, grossProfitUSD };
+    if (cogs.totalCOGS === 0) {
+      console.warn(`[lockOrderCOGS] Order ${orderId} has no COGS source — neither reservations, transfers, nor a linked batch with costs. Profit will show full revenue.`);
+    }
+
+    return { ...cogs, grossProfitPKR, grossProfitUSD, isExact };
   },
 
   /**

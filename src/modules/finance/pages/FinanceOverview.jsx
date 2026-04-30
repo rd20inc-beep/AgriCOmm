@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import {
   Landmark, ArrowDownLeft, ArrowUpRight,
   DollarSign, TrendingUp, AlertTriangle,
-  Bell, Clock, RefreshCw,
+  Bell, Clock, RefreshCw, Lock,
 } from 'lucide-react';
 import {
   useReceivables, useFinanceAlerts, useJournalEntries,
@@ -177,6 +177,36 @@ export default function FinanceOverview() {
           </div>
         </div>
       </div>
+
+      {/* COGS Status — explains reliability of the export profit numbers */}
+      {exp.cogsStatus && (exp.cogsStatus.preShipment > 0 || exp.cogsStatus.shippedMissingCogs > 0) && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <Lock size={16} className="text-indigo-600" />
+            <h3 className="text-sm font-semibold text-gray-700">Export COGS Lifecycle</h3>
+            <span className="text-[11px] text-gray-400 ml-auto">COGS locks at dispatch</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="rounded-lg p-3 bg-amber-50 border border-amber-100">
+              <p className="text-[11px] text-amber-700 font-medium uppercase tracking-wide">Pre-shipment</p>
+              <p className="text-2xl font-bold text-amber-800 mt-1">{exp.cogsStatus.preShipment}</p>
+              <p className="text-[11px] text-amber-700 mt-1">Profit shown is operational margin only</p>
+            </div>
+            <div className="rounded-lg p-3 bg-green-50 border border-green-100">
+              <p className="text-[11px] text-green-700 font-medium uppercase tracking-wide">Shipped (with COGS)</p>
+              <p className="text-2xl font-bold text-green-800 mt-1">{Math.max(0, (exp.cogsStatus.shipped || 0) - (exp.cogsStatus.shippedMissingCogs || 0))}</p>
+              <p className="text-[11px] text-green-700 mt-1">Exact profit available</p>
+            </div>
+            <div className={`rounded-lg p-3 border ${exp.cogsStatus.shippedMissingCogs > 0 ? 'bg-red-50 border-red-100' : 'bg-gray-50 border-gray-100'}`}>
+              <p className={`text-[11px] font-medium uppercase tracking-wide ${exp.cogsStatus.shippedMissingCogs > 0 ? 'text-red-700' : 'text-gray-500'}`}>Shipped (missing COGS)</p>
+              <p className={`text-2xl font-bold mt-1 ${exp.cogsStatus.shippedMissingCogs > 0 ? 'text-red-800' : 'text-gray-700'}`}>{exp.cogsStatus.shippedMissingCogs || 0}</p>
+              <p className={`text-[11px] mt-1 ${exp.cogsStatus.shippedMissingCogs > 0 ? 'text-red-700' : 'text-gray-500'}`}>
+                {exp.cogsStatus.shippedMissingCogs > 0 ? 'Needs investigation' : 'All clear'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Bottom panels — 3 col */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
