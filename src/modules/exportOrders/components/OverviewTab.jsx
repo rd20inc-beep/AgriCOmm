@@ -39,7 +39,19 @@ export default function OverviewTab({ order, formatCurrency, totalCosts, grossPr
 
   const saveSpecs = async () => {
     try {
-      await updateOrderMut.mutateAsync({ id: orderId, data: specs });
+      // Send null instead of '' for numeric/date fields so Postgres doesn't
+      // reject the update with "invalid input syntax for type numeric".
+      const NUMERIC = new Set(['broken_pct_target']);
+      const DATE = new Set(['production_date', 'expiry_date']);
+      const payload = Object.fromEntries(
+        Object.entries(specs).map(([k, v]) => {
+          if (typeof v === 'string' && v.trim() === '' && (NUMERIC.has(k) || DATE.has(k))) {
+            return [k, null];
+          }
+          return [k, v];
+        })
+      );
+      await updateOrderMut.mutateAsync({ id: orderId, data: payload });
       addToast('Document specs updated');
       setEditing(false);
     } catch (err) {

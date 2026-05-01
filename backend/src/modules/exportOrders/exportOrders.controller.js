@@ -268,6 +268,17 @@ const ALLOWED_UPDATE_FIELDS = [
   'shipment_remarks',
 ];
 
+// Columns where Postgres rejects '' — coerce empty strings to null on update.
+const NUMERIC_UPDATE_FIELDS = new Set([
+  'qty_mt', 'price_per_mt', 'advance_pct',
+  'bag_size_kg', 'bag_weight_gm', 'broken_pct_target',
+]);
+const DATE_UPDATE_FIELDS = new Set([
+  'shipment_eta', 'production_date', 'expiry_date',
+  'fi_date', 'bl_date', 'gd_date',
+  'shipment_window_start', 'shipment_window_end',
+]);
+
 const exportOrderController = {
   async list(req, res) {
     try {
@@ -822,7 +833,16 @@ const exportOrderController = {
       const safeUpdates = {};
       for (const key of ALLOWED_UPDATE_FIELDS) {
         if (updates[key] !== undefined) {
-          safeUpdates[key] = updates[key];
+          let v = updates[key];
+          // Postgres rejects '' for numeric/date columns. Coerce blank
+          // strings to null so the same payload works for "clear field"
+          // and "leave unset" semantics. Frontend forms send '' for
+          // empty inputs by default.
+          if (typeof v === 'string' && v.trim() === '' &&
+              (NUMERIC_UPDATE_FIELDS.has(key) || DATE_UPDATE_FIELDS.has(key))) {
+            v = null;
+          }
+          safeUpdates[key] = v;
         }
       }
 
