@@ -24,9 +24,10 @@ export default function OverviewTab({ order, formatCurrency, totalCosts, grossPr
 
   const startEditing = () => {
     setSpecs({
+      // HS Code is per-item now — see the Line Items card. Removed from here
+      // to avoid the dual source-of-truth that confused users.
       contract_number: order.contractNumber || '',
       invoice_number: order.invoiceNumber || '',
-      hs_code: order.hsCode || '',
       broken_pct_target: order.brokenPctTarget || '',
       freight_terms: order.freightTerms || 'COLLECT',
       consignee_type: order.consigneeType || 'to_order_of_bank',
@@ -318,7 +319,6 @@ export default function OverviewTab({ order, formatCurrency, totalCosts, grossPr
             {[
               ['Contract No', order.contractNumber || order.id],
               ['Invoice No', order.invoiceNumber || '\u2014'],
-              ['HS Code', order.hsCode || '\u2014'],
               ['Broken % Target', order.brokenPctTarget ? `${order.brokenPctTarget}%` : '\u2014'],
               ['Freight Terms', order.freightTerms || '\u2014'],
               ['Consignee Type', order.consigneeType === 'direct' ? 'Direct to Buyer' : 'To Order of Bank'],
@@ -351,10 +351,6 @@ export default function OverviewTab({ order, formatCurrency, totalCosts, grossPr
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Invoice No</label>
                 <input type="text" value={specs.invoice_number} onChange={e => setSpecs(s => ({ ...s, invoice_number: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">HS Code</label>
-                <input type="text" value={specs.hs_code} onChange={e => setSpecs(s => ({ ...s, hs_code: e.target.value }))} placeholder="e.g. 1006.3098" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Broken % Target</label>

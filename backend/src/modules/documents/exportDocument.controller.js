@@ -84,12 +84,15 @@ const exportDocumentController = {
 
       const { order, containers, settings, costs, items } = data;
 
-      // Single source of truth for HS code: order → first item → settings default.
-      // No hardcoded fallback — if none of these are set, the document shows blank
-      // so the user can spot it rather than seeing a wrong number.
+      // Single source of truth for HS code: first item → order (legacy) →
+      // settings default. Item-level wins because that's where the user
+      // enters HS code in the multi-line P.I. flow; the order-level field is
+      // only a fallback for legacy single-product orders.
+      // No hardcoded fallback — if none of these are set, the document shows
+      // blank so the user can spot it rather than seeing a wrong number.
       const firstItem = items && items[0] ? items[0] : null;
-      const orderHsCode = order.hs_code || (firstItem && firstItem.hs_code) || settings.default_hs_code || '';
-      const orderQualityDescription = order.quality_description || (firstItem && firstItem.quality_description) || '';
+      const orderHsCode = (firstItem && firstItem.hs_code) || order.hs_code || settings.default_hs_code || '';
+      const orderQualityDescription = (firstItem && firstItem.quality_description) || order.quality_description || '';
 
       // Common data shared across ALL documents
       const common = {

@@ -39,7 +39,7 @@ export default function CreateExportOrder() {
   const [searchParams] = useSearchParams();
   useEffect(() => {
     if (searchParams.get('dup') === '1') {
-      const fields = ['customerId', 'productId', 'country', 'currency', 'incoterm', 'hsCode', 'consigneeType', 'qualityDescription'];
+      const fields = ['customerId', 'productId', 'country', 'currency', 'incoterm', 'consigneeType', 'qualityDescription'];
       const updates = {};
       fields.forEach(f => { const v = searchParams.get(f); if (v) updates[f] = v; });
       if (Object.keys(updates).length > 0) setForm(prev => ({ ...prev, ...updates }));
@@ -64,7 +64,8 @@ export default function CreateExportOrder() {
     // Section 6: Bag spec (shown only when receiving mode needs it)
     bagType: '', bagQuality: '', bagSizeKg: '25', bagWeightGm: '', bagPrinting: '', bagColor: '', bagBrand: '',
     // Section 7: Contract & Product Specs (for document generation)
-    hsCode: '', contractNumber: '', consigneeType: 'to_order_of_bank', brokenPctTarget: '',
+    // HS Code is per-item now (in the Line Items section); no order-level field.
+    contractNumber: '', consigneeType: 'to_order_of_bank', brokenPctTarget: '',
     qualityDescription: '', shipmentWindowStart: '', shipmentWindowEnd: '',
     // Section 8: Notes
     notes: '', packingNotes: '',
@@ -201,7 +202,9 @@ export default function CreateExportOrder() {
         };
       }),
       // Contract & product specs (HS code mirrors first item for legacy renderers)
-      hs_code: head.hsCode || form.hsCode || null,
+      // HS code is per-item; the order-level value is set from the first line
+      // for backwards compat with legacy renderers / single-line readers.
+      hs_code: head.hsCode || null,
       contract_number: form.contractNumber || null,
       consignee_type: form.consigneeType || null,
       broken_pct_target: form.brokenPctTarget ? parseFloat(form.brokenPctTarget) : null,
@@ -570,10 +573,6 @@ export default function CreateExportOrder() {
         {specsOpen && (
           <div className="px-6 pb-6 pt-0">
             <div className="form-grid">
-              <div className="form-group">
-                <label className="form-label">HS Code</label>
-                <input value={form.hsCode} onChange={e => set('hsCode', e.target.value)} className="form-input" placeholder="e.g. 1006.3098" />
-              </div>
               <div className="form-group">
                 <label className="form-label">Contract Number</label>
                 <input value={form.contractNumber} onChange={e => set('contractNumber', e.target.value)} className="form-input" placeholder="If different from order no." />
