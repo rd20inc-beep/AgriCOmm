@@ -8,6 +8,78 @@ import { incotermLabel } from '../../../shared/constants/incoterms';
 // ─── Document Templates ───
 // Each function takes the document JSON and returns printable HTML
 
+/**
+ * Build line-item rows for any document's product table.
+ *
+ * Multi-line P.I.s use doc.items[]. Legacy single-product orders fall back
+ * to one synthesized row from the order summary fields. Either way the
+ * caller iterates the returned array.
+ *
+ * Each row exposes the same shape so every renderer can map over them
+ * consistently:
+ *   { sno, brand, productName, description, hsCode,
+ *     bagSizeKg, bagType, packing, bagCount, qtyMT, pricePerMT, amount }
+ */
+function buildLineItems(doc) {
+  const { order, items } = doc || {};
+  if (!order) return [];
+
+  const orderBagSize = parseFloat(order.bagSizeKg) || 50;
+  const orderBagType = order.bagType || 'PP';
+  const orderBrand = order.brandMarking || '';
+  const orderQuality = order.qualityDescription || order.product || '';
+
+  if (Array.isArray(items) && items.length > 0) {
+    return items.map((it, idx) => {
+      const qty = parseFloat(it.qtyMT) || 0;
+      const price = parseFloat(it.pricePerMT) || 0;
+      const bagSize = parseFloat(it.bagSizeKg) || orderBagSize;
+      const bagType = it.bagType || orderBagType;
+      const bagCount = parseInt(it.bagCount, 10)
+        || (qty > 0 && bagSize > 0 ? Math.round((qty * 1000) / bagSize) : 0);
+      const description = it.qualityDescription
+        || `${it.productName || 'Rice'} max 0-${it.brokenPctTarget != null ? it.brokenPctTarget : (order.brokenPctTarget || 2)}% broken, double (silky) polished and sortexed. Sound, loyal and merchantable, fit for human consumption at any stage. Free from alive and dead weevils/insects. GMO Free. Latest crop.${it.hsCode ? `<br/><strong>HS CODE ${it.hsCode}</strong>` : ''}`;
+      const packing = it.packing || `PACKED IN ${bagSize} KGS ${bagType} BAG`;
+      return {
+        sno: idx + 1,
+        brand: it.bagBrand || it.productName || orderBrand || '—',
+        productName: it.productName || '',
+        description,
+        hsCode: it.hsCode || '',
+        bagSizeKg: bagSize,
+        bagType,
+        packing,
+        bagCount,
+        qtyMT: qty,
+        pricePerMT: price,
+        amount: parseFloat(it.lineTotal) || qty * price,
+      };
+    });
+  }
+
+  // Single-product fallback for legacy orders.
+  const totalBags = parseInt(order.totalBags, 10)
+    || (order.qtyMT && orderBagSize ? Math.round((order.qtyMT * 1000) / orderBagSize) : 0);
+  return [{
+    sno: 1,
+    brand: orderBrand || '—',
+    productName: order.product || '',
+    description: orderQuality,
+    hsCode: order.hsCode || '',
+    bagSizeKg: orderBagSize,
+    bagType: orderBagType,
+    packing: `PACKED IN ${orderBagSize} KGS ${orderBagType} BAG`,
+    bagCount: totalBags,
+    qtyMT: parseFloat(order.qtyMT) || 0,
+    pricePerMT: parseFloat(order.pricePerMT) || 0,
+    amount: parseFloat(order.contractValue) || 0,
+  }];
+}
+
+// Number formatting helpers used by renderers.
+const fmtMoney = (n) => (parseFloat(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtMt = (n) => (parseFloat(n) || 0).toFixed(3);
+
 function renderHeader(company) {
   return `
     <div style="text-align:center; margin-bottom:20px; border-bottom:2px solid #1e3a5f; padding-bottom:15px;">
@@ -25,8 +97,11 @@ function renderCompanyFooter(company) {
 }
 
 function renderProformaInvoice(doc) {
-  const { company, buyer, order, shipment, containers } = doc;
-  const totalBags = order.totalBags || Math.round(order.qtyMT * 1000 / order.bagSizeKg);
+  const { company, buyer, order, shipment } = doc;
+  const lines = buildLineItems(doc);
+  const totalBags = lines.reduce((s, l) => s + (l.bagCount || 0), 0);
+  const totalQty = lines.reduce((s, l) => s + (l.qtyMT || 0), 0);
+  const totalAmt = lines.reduce((s, l) => s + (l.amount || 0), 0);
   return `
     <div style="font-family: Arial, sans-serif; font-size:12px; max-width:800px; margin:0 auto; padding:20px;">
       ${renderHeader(company)}
@@ -79,22 +154,24 @@ function renderProformaInvoice(doc) {
           </tr>
         </thead>
         <tbody>
-          <tr>
-            <td style="border:1px solid #333; padding:8px; text-align:center;">1</td>
-            <td style="border:1px solid #333; padding:8px; text-align:center; font-weight:bold; color:#d4a017;">${order.brandMarking || '—'}</td>
-            <td style="border:1px solid #333; padding:8px;">${order.qualityDescription}</td>
-            <td style="border:1px solid #333; padding:8px; text-align:center;">${order.bagSizeKg}</td>
-            <td style="border:1px solid #333; padding:8px; text-align:center;">${totalBags.toLocaleString()}</td>
-            <td style="border:1px solid #333; padding:8px; text-align:center;">${order.qtyMT.toFixed(3)}</td>
-            <td style="border:1px solid #333; padding:8px; text-align:center;">${order.pricePerMT.toFixed(2)}</td>
-            <td style="border:1px solid #333; padding:8px; text-align:right;">${order.contractValue.toLocaleString('en-US', {minimumFractionDigits:2})}</td>
-          </tr>
+          ${lines.map((l) => `
+            <tr>
+              <td style="border:1px solid #333; padding:8px; text-align:center;">${l.sno}</td>
+              <td style="border:1px solid #333; padding:8px; text-align:center; font-weight:bold; color:#d4a017;">${l.brand}</td>
+              <td style="border:1px solid #333; padding:8px;">${l.description}</td>
+              <td style="border:1px solid #333; padding:8px; text-align:center;">${l.bagSizeKg}</td>
+              <td style="border:1px solid #333; padding:8px; text-align:center;">${(l.bagCount || 0).toLocaleString()}</td>
+              <td style="border:1px solid #333; padding:8px; text-align:center;">${fmtMt(l.qtyMT)}</td>
+              <td style="border:1px solid #333; padding:8px; text-align:center;">${fmtMoney(l.pricePerMT)}</td>
+              <td style="border:1px solid #333; padding:8px; text-align:right;">${fmtMoney(l.amount)}</td>
+            </tr>
+          `).join('')}
           <tr style="font-weight:bold;">
             <td colspan="4" style="border:1px solid #333; padding:8px; text-align:center;">Total</td>
             <td style="border:1px solid #333; padding:8px; text-align:center;">${totalBags.toLocaleString()}</td>
-            <td style="border:1px solid #333; padding:8px; text-align:center;">${order.qtyMT.toFixed(2)}</td>
-            <td style="border:1px solid #333; padding:8px; text-align:center;">$</td>
-            <td style="border:1px solid #333; padding:8px; text-align:right;">${order.contractValue.toLocaleString('en-US', {minimumFractionDigits:2})}</td>
+            <td style="border:1px solid #333; padding:8px; text-align:center;">${totalQty.toFixed(2)}</td>
+            <td style="border:1px solid #333; padding:8px; text-align:center;">${order.currency}</td>
+            <td style="border:1px solid #333; padding:8px; text-align:right;">${fmtMoney(totalAmt)}</td>
           </tr>
         </tbody>
       </table>
@@ -122,7 +199,10 @@ function renderProformaInvoice(doc) {
 
 function renderCommercialInvoice(doc) {
   const { company, buyer, order, shipment, containers, totals } = doc;
-  const totalBags = totals.totalBags || order.totalBags;
+  const lines = buildLineItems(doc);
+  const totalBags = lines.reduce((s, l) => s + (l.bagCount || 0), 0) || (totals && totals.totalBags) || order.totalBags || 0;
+  const totalQty = lines.reduce((s, l) => s + (l.qtyMT || 0), 0);
+  const totalAmt = lines.reduce((s, l) => s + (l.amount || 0), 0);
   return `
     <div style="font-family: Arial, sans-serif; font-size:12px; max-width:800px; margin:0 auto; padding:20px;">
       ${renderHeader(company)}
@@ -189,16 +269,18 @@ function renderCommercialInvoice(doc) {
           </tr>
         </thead>
         <tbody>
-          <tr>
-            <td style="border:1px solid #333; padding:8px; text-align:center; font-weight:bold; font-style:italic; color:#d4a017;">${order.brandMarking || '—'}</td>
-            <td style="border:1px solid #333; padding:8px; text-align:center;">${totalBags.toLocaleString()} Bags<br/><br/>${order.qtyMT}<br/><br/>MT</td>
-            <td style="border:1px solid #333; padding:8px;">${order.qualityDescription}</td>
-            <td style="border:1px solid #333; padding:8px; text-align:center;">${order.pricePerMT.toFixed(2)}</td>
-            <td style="border:1px solid #333; padding:8px; text-align:right;">${order.contractValue.toLocaleString('en-US', {minimumFractionDigits:2})}</td>
-          </tr>
+          ${lines.map((l) => `
+            <tr>
+              <td style="border:1px solid #333; padding:8px; text-align:center; font-weight:bold; font-style:italic; color:#d4a017;">${l.brand}</td>
+              <td style="border:1px solid #333; padding:8px; text-align:center;">${(l.bagCount || 0).toLocaleString()} Bags<br/><br/>${fmtMt(l.qtyMT)}<br/><br/>MT</td>
+              <td style="border:1px solid #333; padding:8px;">${l.description}</td>
+              <td style="border:1px solid #333; padding:8px; text-align:center;">${fmtMoney(l.pricePerMT)}</td>
+              <td style="border:1px solid #333; padding:8px; text-align:right;">${fmtMoney(l.amount)}</td>
+            </tr>
+          `).join('')}
           <tr style="font-weight:bold;">
             <td colspan="4" style="border:1px solid #333; padding:8px; text-align:right;">Total</td>
-            <td style="border:1px solid #333; padding:8px; text-align:right;">${order.contractValue.toLocaleString('en-US', {minimumFractionDigits:2})}</td>
+            <td style="border:1px solid #333; padding:8px; text-align:right;">${fmtMoney(totalAmt)}</td>
           </tr>
         </tbody>
       </table>
@@ -381,6 +463,11 @@ function renderPackingList(doc) {
 
 function renderGenericDocument(doc) {
   const { company, buyer, order, shipment, containers } = doc;
+  const lines = buildLineItems(doc);
+  const totalQty = lines.reduce((s, l) => s + (l.qtyMT || 0), 0);
+  const totalBags = lines.reduce((s, l) => s + (l.bagCount || 0), 0);
+  const distinctHs = [...new Set(lines.map((l) => l.hsCode).filter(Boolean))];
+  const isMulti = lines.length > 1;
   return `
     <div style="font-family: Arial, sans-serif; font-size:12px; max-width:800px; margin:0 auto; padding:20px;">
       ${renderHeader(company)}
@@ -388,11 +475,15 @@ function renderGenericDocument(doc) {
       <table style="width:100%; font-size:12px; margin:15px 0;">
         <tr><td style="padding:4px 0; font-weight:bold; width:160px;">Buyer:</td><td>${buyer.name}, ${buyer.country}</td></tr>
         <tr><td style="padding:4px 0; font-weight:bold;">Contract No:</td><td>${order.contractNumber}</td></tr>
-        <tr><td style="padding:4px 0; font-weight:bold;">Product:</td><td>${order.product}</td></tr>
-        <tr><td style="padding:4px 0; font-weight:bold;">Quantity:</td><td>${order.qtyMT} MT (${order.totalBags} bags x ${order.bagSizeKg} kg)</td></tr>
-        <tr><td style="padding:4px 0; font-weight:bold;">Price:</td><td>${order.currency} ${order.pricePerMT.toFixed(2)} per MT ${order.incoterm}</td></tr>
-        <tr><td style="padding:4px 0; font-weight:bold;">Total:</td><td>${order.currency} ${order.contractValue.toLocaleString('en-US', {minimumFractionDigits:2})}</td></tr>
-        <tr><td style="padding:4px 0; font-weight:bold;">HS Code:</td><td>${order.hsCode}</td></tr>
+        <tr><td style="padding:4px 0; font-weight:bold; vertical-align:top;">Product${isMulti ? 's' : ''}:</td><td>${
+          isMulti
+            ? `<ul style="margin:0; padding-left:18px;">${lines.map((l) => `<li>${l.productName} — ${fmtMt(l.qtyMT)} MT @ ${order.currency} ${fmtMoney(l.pricePerMT)}/MT${l.hsCode ? ` · HS ${l.hsCode}` : ''}</li>`).join('')}</ul>`
+            : `${lines[0]?.productName || order.product || '—'}`
+        }</td></tr>
+        <tr><td style="padding:4px 0; font-weight:bold;">Quantity:</td><td>${totalQty.toFixed(3)} MT (${totalBags.toLocaleString()} bags)</td></tr>
+        ${!isMulti && lines[0] ? `<tr><td style="padding:4px 0; font-weight:bold;">Price:</td><td>${order.currency} ${fmtMoney(lines[0].pricePerMT)} per MT ${order.incoterm}</td></tr>` : ''}
+        <tr><td style="padding:4px 0; font-weight:bold;">Total:</td><td>${order.currency} ${fmtMoney(order.contractValue)}</td></tr>
+        <tr><td style="padding:4px 0; font-weight:bold;">HS Code${distinctHs.length > 1 ? 's' : ''}:</td><td>${distinctHs.length > 0 ? distinctHs.join(', ') : (order.hsCode || '—')}</td></tr>
         <tr><td style="padding:4px 0; font-weight:bold;">Payment Terms:</td><td>${order.paymentTerms}</td></tr>
         <tr><td style="padding:4px 0; font-weight:bold;">Port of Loading:</td><td>${order.portOfLoading}</td></tr>
         <tr><td style="padding:4px 0; font-weight:bold;">Destination:</td><td>${order.destinationPort}, ${buyer.country}</td></tr>
@@ -400,7 +491,7 @@ function renderGenericDocument(doc) {
         ${shipment.blNumber ? `<tr><td style="padding:4px 0; font-weight:bold;">BL Number:</td><td>${shipment.blNumber}</td></tr>` : ''}
         ${shipment.fiNumber ? `<tr><td style="padding:4px 0; font-weight:bold;">F.I. Number:</td><td>${shipment.fiNumber}</td></tr>` : ''}
       </table>
-      <p style="margin-top:10px;"><strong>Quality:</strong><br/>${order.qualityDescription}</p>
+      ${!isMulti ? `<p style="margin-top:10px;"><strong>Quality:</strong><br/>${order.qualityDescription || lines[0]?.description || ''}</p>` : ''}
       ${containers.length > 0 ? `
         <h3 style="margin-top:15px;">Containers</h3>
         <table style="width:100%; border-collapse:collapse;">
@@ -442,7 +533,21 @@ function renderGenericDocument(doc) {
 // ─── Sales Contract ───
 function renderSalesContract(doc) {
   const { company, buyer, order, shipment, packing } = doc;
-  const totalBags = order.totalBags || Math.round(order.qtyMT * 1000 / (order.bagSizeKg || 50));
+  const lines = buildLineItems(doc);
+  const totalQty = lines.reduce((s, l) => s + (l.qtyMT || 0), 0);
+  const totalAmt = lines.reduce((s, l) => s + (l.amount || 0), 0);
+  const isMulti = lines.length > 1;
+
+  // Per-line description block — bullet list when multi-line, single
+  // paragraph when there's only one item to keep the legacy look intact.
+  const productHtml = isMulti
+    ? `<ul style="margin:0; padding-left:20px;">${lines.map((l) => `
+          <li style="margin-bottom:6px;">
+            <strong>${l.productName || `Item ${l.sno}`}</strong> — ${fmtMt(l.qtyMT)} MT @ ${order.currency} ${fmtMoney(l.pricePerMT)}/MT · packed in ${l.bagSizeKg} kg ${l.bagType} bags${l.hsCode ? ` · HS code <strong>${l.hsCode}</strong>` : ''}
+          </li>`).join('')}</ul>
+        <p style="margin-top:8px; font-size:11px; color:#555;">Sound, loyal and merchantable, fit for human consumption at any stage. Free from alive and dead weevils/insects. GMO Free. Latest crop.</p>`
+    : `${lines[0]?.description || ''}<br/>Packed in ${lines[0]?.bagSizeKg || order.bagSizeKg || 50} kg Strong PP bags. Sound, loyal and merchantable, fit for human consumption at any stage. Free from alive and dead weevils/insects. GMO Free. Latest crop.`;
+
   return `
     <div style="font-family: Arial, sans-serif; font-size:12px; max-width:800px; margin:0 auto; padding:20px;">
       ${renderHeader(company)}
@@ -453,11 +558,13 @@ function renderSalesContract(doc) {
         <tr><td style="font-weight:bold; vertical-align:top;">Contract #</td><td>${order.contractNumber || order.orderNo}</td></tr>
         <tr><td style="font-weight:bold; vertical-align:top;">Buyer:</td><td>${buyer.name}<br/>${buyer.address}<br/>${buyer.country}${buyer.vatNumber ? `<br/>VAT: ${buyer.vatNumber}` : ''}</td></tr>
         <tr><td style="font-weight:bold; vertical-align:top;">Seller:</td><td>${company.name}<br/>${company.address}</td></tr>
-        <tr><td style="font-weight:bold;">Quantity:</td><td>About ${order.qtyMT} M/Tons net weight.</td></tr>
-        <tr><td style="font-weight:bold; vertical-align:top;">Product:</td><td>${order.qualityDescription}<br/>Packed in ${order.bagSizeKg || 50} kg Strong PP bags. Sound, loyal and merchantable, fit for human consumption at any stage. Free from alive and dead weevils/insects. GMO Free. Latest crop.</td></tr>
+        <tr><td style="font-weight:bold;">Quantity:</td><td>About ${totalQty.toFixed(3)} M/Tons net weight${isMulti ? ` (across ${lines.length} products)` : ''}.</td></tr>
+        <tr><td style="font-weight:bold; vertical-align:top;">Product${isMulti ? 's' : ''}:</td><td>${productHtml}</td></tr>
         <tr><td style="font-weight:bold;">Quality:</td><td>Aflatoxins, Ochratoxins, Heavy metal and Pesticide residues are in line with EU law.</td></tr>
-        <tr><td style="font-weight:bold;">Price:</td><td>@ ${order.currency} ${order.pricePerMT.toFixed(2)} per metric ton ${order.incoterm} ${order.portOfLoading || 'Karachi'}, Pakistan</td></tr>
-        <tr><td style="font-weight:bold;">Total Amount:</td><td>${order.currency} ${order.contractValue.toLocaleString('en-US', {minimumFractionDigits:2})}</td></tr>
+        <tr><td style="font-weight:bold; vertical-align:top;">Price:</td><td>${isMulti
+          ? `Per-line rates as above. Incoterm ${order.incoterm} ${order.portOfLoading || 'Karachi'}, Pakistan.`
+          : `@ ${order.currency} ${fmtMoney(lines[0]?.pricePerMT || order.pricePerMT)} per metric ton ${order.incoterm} ${order.portOfLoading || 'Karachi'}, Pakistan`}</td></tr>
+        <tr><td style="font-weight:bold;">Total Amount:</td><td>${order.currency} ${fmtMoney(totalAmt)}</td></tr>
         <tr><td style="font-weight:bold;">Shipment:</td><td>${packing?.shipmentWindowStart || '—'} - ${packing?.shipmentWindowEnd || '—'}</td></tr>
         <tr><td style="font-weight:bold;">Payment:</td><td>${order.paymentTerms}</td></tr>
       </table>
@@ -493,7 +600,9 @@ function renderSalesContract(doc) {
 // ─── Production Plan ───
 function renderProductionPlan(doc) {
   const { company, buyer, order, containers, packing } = doc;
-  const totalBags = order.totalBags || Math.round(order.qtyMT * 1000 / (order.bagSizeKg || 50));
+  const lines = buildLineItems(doc);
+  const totalQty = lines.reduce((s, l) => s + (l.qtyMT || 0), 0);
+  const totalBags = lines.reduce((s, l) => s + (l.bagCount || 0), 0);
   return `
     <div style="font-family: Arial, sans-serif; font-size:12px; max-width:800px; margin:0 auto; padding:20px;">
       ${renderHeader(company)}
@@ -521,18 +630,20 @@ function renderProductionPlan(doc) {
           </tr>
         </thead>
         <tbody>
-          <tr>
-            <td style="border:1px solid #333; padding:6px; text-align:center;">${containers.length || '—'}</td>
-            <td style="border:1px solid #333; padding:6px; text-align:center;">${order.brandMarking || '—'}</td>
-            <td style="border:1px solid #333; padding:6px;">${order.qualityDescription}</td>
-            <td style="border:1px solid #333; padding:6px; text-align:center;">${order.brokenPctTarget || '—'}%</td>
-            <td style="border:1px solid #333; padding:6px; text-align:center;">${order.qtyMT.toFixed(3)}</td>
-            <td style="border:1px solid #333; padding:6px; text-align:center;">${order.bagSizeKg || 50} KGS PP BAG</td>
-            <td style="border:1px solid #333; padding:6px; text-align:center;">${totalBags.toLocaleString()}</td>
-          </tr>
+          ${lines.map((l) => `
+            <tr>
+              <td style="border:1px solid #333; padding:6px; text-align:center;">${l.sno}</td>
+              <td style="border:1px solid #333; padding:6px; text-align:center;">${l.brand}</td>
+              <td style="border:1px solid #333; padding:6px;">${l.description}</td>
+              <td style="border:1px solid #333; padding:6px; text-align:center;">${order.brokenPctTarget || '—'}%</td>
+              <td style="border:1px solid #333; padding:6px; text-align:center;">${fmtMt(l.qtyMT)}</td>
+              <td style="border:1px solid #333; padding:6px; text-align:center;">${l.packing}</td>
+              <td style="border:1px solid #333; padding:6px; text-align:center;">${(l.bagCount || 0).toLocaleString()}</td>
+            </tr>
+          `).join('')}
           <tr style="font-weight:bold;">
             <td colspan="4" style="border:1px solid #333; padding:6px; text-align:right;">Total</td>
-            <td style="border:1px solid #333; padding:6px; text-align:center;">${order.qtyMT.toFixed(3)}</td>
+            <td style="border:1px solid #333; padding:6px; text-align:center;">${totalQty.toFixed(3)}</td>
             <td style="border:1px solid #333; padding:6px;"></td>
             <td style="border:1px solid #333; padding:6px; text-align:center;">${totalBags.toLocaleString()}</td>
           </tr>
@@ -562,7 +673,7 @@ function renderProductionPlan(doc) {
         <div style="margin-top:20px; display:grid; grid-template-columns:1fr 1fr; gap:15px;">
           ${containers.map((c, i) => `
             <div style="border:1px solid #333; padding:12px; font-size:11px;">
-              <h4 style="text-align:center; font-weight:bold; margin:0 0 8px 0;">${order.product || 'BASMATI WHITE RICE'}</h4>
+              <h4 style="text-align:center; font-weight:bold; margin:0 0 8px 0;">${lines.map((l) => l.productName).filter(Boolean).join(' / ') || order.product || 'BASMATI WHITE RICE'}</h4>
               <table style="width:100%;">
                 <tr><td style="font-weight:bold; width:55%;">WEIGHT</td><td>: ${order.bagSizeKg || 50}KG</td></tr>
                 <tr><td style="font-weight:bold;">COUNTRY OF ORIGIN</td><td>: PAKISTAN</td></tr>
@@ -634,14 +745,18 @@ function renderBankFIRequest(doc) {
           <th style="border:1px solid #333; padding:6px;">ORIGIN</th>
           <th style="border:1px solid #333; padding:6px;">UNIT PRICE</th>
         </tr></thead>
-        <tbody><tr>
-          <td style="border:1px solid #333; padding:6px;">${order.hsCode}</td>
-          <td style="border:1px solid #333; padding:6px;">${order.product}</td>
-          <td style="border:1px solid #333; padding:6px;">${order.qtyMT}</td>
-          <td style="border:1px solid #333; padding:6px;">MT</td>
-          <td style="border:1px solid #333; padding:6px;">PAKISTAN</td>
-          <td style="border:1px solid #333; padding:6px;">${order.currency} ${order.pricePerMT.toFixed(2)}</td>
-        </tr></tbody>
+        <tbody>
+          ${buildLineItems(doc).map((l) => `
+            <tr>
+              <td style="border:1px solid #333; padding:6px;">${l.hsCode || '—'}</td>
+              <td style="border:1px solid #333; padding:6px;">${l.productName}</td>
+              <td style="border:1px solid #333; padding:6px;">${fmtMt(l.qtyMT)}</td>
+              <td style="border:1px solid #333; padding:6px;">MT</td>
+              <td style="border:1px solid #333; padding:6px;">PAKISTAN</td>
+              <td style="border:1px solid #333; padding:6px;">${order.currency} ${fmtMoney(l.pricePerMT)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
       </table>
 
       <div style="margin-top:20px; font-size:9px; line-height:1.6; color:#444;">
@@ -665,13 +780,22 @@ function renderExportUndertaking(doc) {
       <p>Dear Sir,</p>
       <h3 style="text-align:center; text-decoration:underline; margin:15px 0;">EXPORT UNDERTAKING</h3>
 
-      <p>The said export transaction relates to sale of <u>${order.product}</u> for a value of <u>${order.currency} ${order.contractValue.toLocaleString()}</u> with our client <u>${buyer.name}, ${buyer.country}</u> as per mutually agreed contract / Proforma Invoice No. <u>${order.invoiceNumber}</u> dated <u>${order.date}</u> with payment term <u>${order.paymentTerms}</u>.</p>
+      <p>The said export transaction relates to sale of ${(() => {
+        const lines = buildLineItems(doc);
+        const productList = lines.length > 1
+          ? lines.map((l) => `<u>${l.productName || `Item ${l.sno}`}</u>`).join(', ')
+          : `<u>${(lines[0] && lines[0].productName) || order.product || '—'}</u>`;
+        return productList;
+      })()} for a value of <u>${order.currency} ${order.contractValue.toLocaleString()}</u> with our client <u>${buyer.name}, ${buyer.country}</u> as per mutually agreed contract / Proforma Invoice No. <u>${order.invoiceNumber}</u> dated <u>${order.date}</u> with payment term <u>${order.paymentTerms}</u>.</p>
 
       <p>We are very much satisfied with the credentials, sound financial standing and good repute of our client (the importer/foreign buyer/consignee) and confirm their bona fide.</p>
 
       <p>I / We further confirm that:</p>
       <ol style="line-height:2; font-size:11px;">
-        <li>The merchandise being exported falls under HS Code Number(s): <u>${order.hsCode}</u>, is freely exportable / not subject to export license / does not contravene any of the provision of the aforesaid rules and regulations.</li>
+        <li>The merchandise being exported falls under HS Code Number(s): <u>${(() => {
+          const codes = [...new Set(buildLineItems(doc).map((l) => l.hsCode).filter(Boolean))];
+          return codes.length > 0 ? codes.join(', ') : (order.hsCode || '—');
+        })()}</u>, is freely exportable / not subject to export license / does not contravene any of the provision of the aforesaid rules and regulations.</li>
         <li>We are commercial exporter / registered as an Industrial Unit with Trade Development Authority of Pakistan and hold valid export registration (GST Certificate) and membership of a recognized trade association.</li>
         <li>We are fully aware and suitably conversant with all the valid and applicable rules and regulations governing exports from Pakistan.</li>
         <li>We shall ensure to timely submit to you all the required shipping documents for onward dispatch to concerned foreign bank or submission to State bank of Pakistan.</li>
@@ -694,7 +818,9 @@ function renderExportUndertaking(doc) {
 // ─── Simple Invoice (pre-shipping) ───
 function renderInvoice(doc) {
   const { company, buyer, order, totals } = doc;
-  const totalBags = order.totalBags || Math.round(order.qtyMT * 1000 / (order.bagSizeKg || 50));
+  const lines = buildLineItems(doc);
+  const totalBags = lines.reduce((s, l) => s + (l.bagCount || 0), 0);
+  const totalQty = lines.reduce((s, l) => s + (l.qtyMT || 0), 0);
   return `
     <div style="font-family: Arial, sans-serif; font-size:12px; max-width:800px; margin:0 auto; padding:20px;">
       ${renderHeader(company)}
@@ -735,11 +861,19 @@ function renderInvoice(doc) {
           <th style="border:1px solid #333; padding:8px;">QUANTITY</th>
           <th style="border:1px solid #333; padding:8px;">DESCRIPTION</th>
         </tr></thead>
-        <tbody><tr>
-          <td style="border:1px solid #333; padding:12px; text-align:center; font-weight:bold; color:#d4a017;">${order.brandMarking || '—'}</td>
-          <td style="border:1px solid #333; padding:12px; text-align:center;">${totalBags.toLocaleString()} Bags<br/><br/>${order.qtyMT} MT</td>
-          <td style="border:1px solid #333; padding:12px;">${order.qualityDescription}<br/><br/>TOTAL BAGS &nbsp; ; &nbsp; ${totalBags.toLocaleString()} Bags<br/>GROSS WEIGHT : ${(totals?.grossWeightMT || order.qtyMT + 0.1).toFixed(2)} MT<br/>NET WEIGHT &nbsp; : ${order.qtyMT.toFixed(2)} MT</td>
-        </tr></tbody>
+        <tbody>
+          ${lines.map((l) => `
+            <tr>
+              <td style="border:1px solid #333; padding:12px; text-align:center; font-weight:bold; color:#d4a017;">${l.brand}</td>
+              <td style="border:1px solid #333; padding:12px; text-align:center;">${(l.bagCount || 0).toLocaleString()} Bags<br/><br/>${fmtMt(l.qtyMT)} MT</td>
+              <td style="border:1px solid #333; padding:12px;">${l.description}</td>
+            </tr>
+          `).join('')}
+          <tr style="font-weight:bold; background:#fafafa;">
+            <td style="border:1px solid #333; padding:8px; text-align:right;" colspan="2">TOTAL</td>
+            <td style="border:1px solid #333; padding:8px;">${totalBags.toLocaleString()} Bags · GROSS ${((totals?.grossWeightMT) || totalQty + 0.1).toFixed(2)} MT · NET ${totalQty.toFixed(2)} MT</td>
+          </tr>
+        </tbody>
       </table>
 
       <p style="font-style:italic; font-size:11px; margin-top:15px;">
