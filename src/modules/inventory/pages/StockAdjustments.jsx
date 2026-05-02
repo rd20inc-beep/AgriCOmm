@@ -1,46 +1,106 @@
-import { useState, useEffect } from 'react';
-import { AlertTriangle, Plus, CheckCircle, XCircle, Search, Shield } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { Plus, CheckCircle, XCircle, Shield, RefreshCw, Info } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { lotInventoryApi } from '../../../api/services';
 import { useLotInventory } from '../../../api/queries';
 import Modal from '../../../components/Modal';
 import StatusBadge from '../../../components/StatusBadge';
 import SearchSelect from '../../../components/SearchSelect';
-
-const ADJ_TYPES = [
-  { value: 'shortage_found', label: 'Shortage Found', color: 'red' },
-  { value: 'excess_found', label: 'Excess Found', color: 'green' },
-  { value: 'damaged', label: 'Damaged', color: 'red' },
-  { value: 'spoiled', label: 'Spoiled', color: 'red' },
-  { value: 'moisture_loss', label: 'Moisture Loss', color: 'amber' },
-  { value: 'bag_loss', label: 'Bag Loss', color: 'amber' },
-  { value: 'manual_correction', label: 'Manual Correction', color: 'blue' },
-];
+import {
+  AdjustmentTypeChip,
+  AdjustmentKPIBar,
+  AdjustmentFilters,
+  STOCK_ADJ_TYPES,
+  findStockType,
+  themeFor,
+} from '../../../shared/components/adjustments';
 
 const PKR = (v) => 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString();
+
+// Period for KPI calc — last 30 days, computed once per render.
+function periodStart() {
+  const d = new Date();
+  d.setDate(d.getDate() - 30);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
 
 export default function StockAdjustments() {
   const { addToast } = useApp();
   const { data: lots = [] } = useLotInventory({});
   const [adjustments, setAdjustments] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('all');
+  const [filters, setFilters] = useState({ status: 'all', types: [], fromDate: '', toDate: '' });
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ lot_id: '', adjustmentType: 'shortage_found', quantityKg: '', reason: '' });
   const [reconciliation, setReconciliation] = useState(null);
+  const [expanded, setExpanded] = useState(null); // adjustment id whose reason is expanded
 
   function loadAdjustments() {
-    const params = filter !== 'all' ? { status: filter } : {};
+    setLoading(true);
+    // Backend currently only filters by status; type/date filters are applied client-side below.
+    const params = filters.status !== 'all' && filters.status !== '' ? { status: filters.status } : {};
     lotInventoryApi.listAdjustments(params)
       .then(res => setAdjustments(res?.data?.adjustments || []))
       .catch(() => {})
       .finally(() => setLoading(false));
   }
 
-  useEffect(() => { loadAdjustments(); }, [filter]);
+  useEffect(() => { loadAdjustments(); }, [filters.status]);
+
+  // Apply client-side filters: type chips + date range.
+  const visibleAdjustments = useMemo(() => {
+    return adjustments.filter((a) => {
+      if (filters.types.length > 0 && !filters.types.includes(a.adjustment_type)) return false;
+      if (filters.fromDate && a.created_at && new Date(a.created_at) < new Date(filters.fromDate)) return false;
+      if (filters.toDate) {
+        const cutoff = new Date(filters.toDate);
+        cutoff.setHours(23, 59, 59, 999);
+        if (a.created_at && new Date(a.created_at) > cutoff) return false;
+      }
+      return true;
+    });
+  }, [adjustments, filters.types, filters.fromDate, filters.toDate]);
+
+  // KPI bar values — across the FULL adjustments list (not just visible ones)
+  // so the numbers don't shift as the user changes filters.
+  const kpis = useMemo(() => {
+    const since = periodStart();
+    const inPeriod = adjustments.filter((a) => a.created_at && new Date(a.created_at) >= since);
+    const pendingCount = adjustments.filter((a) => a.approval_status === 'pending_approval').length;
+    const periodCount = inPeriod.length;
+    const periodImpact = inPeriod
+      .filter((a) => a.approval_status === 'approved')
+      .reduce((s, a) => s + Math.abs(parseFloat(a.total_cost_impact) || 0), 0);
+    const decided = inPeriod.filter((a) => a.approval_status === 'approved' || a.approval_status === 'rejected').length;
+    const approved = inPeriod.filter((a) => a.approval_status === 'approved').length;
+    const approvalRate = decided > 0 ? approved / decided : null;
+    return { pendingCount, periodCount, periodImpact, approvalRate };
+  }, [adjustments]);
+
+  // Cost-impact preview while filling the modal — shows the operator what
+  // they're about to write off before they submit.
+  const costPreview = useMemo(() => {
+    const lot = lots.find((l) => Number(l.id) === Number(form.lot_id));
+    if (!lot) return null;
+    const qty = parseFloat(form.quantityKg) || 0;
+    if (qty <= 0) return null;
+    const costPerKg = parseFloat(lot.landedCostPerKg) || parseFloat(lot.ratePerKg) || 0;
+    const type = findStockType(form.adjustmentType);
+    const sign = type ? type.sign : '-';
+    return {
+      qty,
+      costPerKg,
+      total: costPerKg * qty,
+      direction: sign === '+' ? 'add' : sign === '-' ? 'remove' : 'change',
+      lotNo: lot.lotNo,
+      lotName: lot.itemName,
+      lotQtyMT: parseFloat(lot.qty),
+    };
+  }, [form.lot_id, form.quantityKg, form.adjustmentType, lots]);
 
   async function handleCreate() {
-    if (!form.lot_id || !form.quantityKg) { addToast('Lot and quantity required', 'error'); return; }
+    if (!form.lot_id || !form.quantityKg) { addToast('Lot and quantity are required', 'error'); return; }
     try {
       await lotInventoryApi.createAdjustment({
         lotId: parseInt(form.lot_id),
@@ -48,8 +108,9 @@ export default function StockAdjustments() {
         quantityKg: parseFloat(form.quantityKg),
         reason: form.reason,
       });
-      addToast('Adjustment created — pending approval');
+      addToast('Adjustment submitted — pending approval');
       setShowModal(false);
+      setForm({ lot_id: '', adjustmentType: 'shortage_found', quantityKg: '', reason: '' });
       loadAdjustments();
     } catch (err) { addToast(err.message || 'Failed', 'error'); }
   }
@@ -74,20 +135,22 @@ export default function StockAdjustments() {
     try {
       const res = await lotInventoryApi.getReconciliation();
       setReconciliation(res?.data || null);
-      addToast(`Reconciliation complete: ${res?.data?.discrepancies?.length || 0} discrepancies`);
+      addToast(`Reconciliation complete — ${res?.data?.discrepancies?.length || 0} discrepancies`);
     } catch (err) { addToast(err.message || 'Failed', 'error'); }
   }
 
-  const pendingCount = adjustments.filter(a => a.approval_status === 'pending_approval').length;
-
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Stock Adjustments</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Shortage, excess, damage, and corrections with approval workflow</p>
+          <p className="text-sm text-gray-500 mt-0.5">Shortage, excess, damage and corrections — with approval workflow</p>
         </div>
         <div className="flex gap-2">
+          <button onClick={loadAdjustments} className="btn btn-sm btn-secondary" title="Refresh">
+            <RefreshCw className="w-3.5 h-3.5" /> Refresh
+          </button>
           <button onClick={runReconciliation} className="btn btn-sm bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100">
             <Shield className="w-3.5 h-3.5" /> Run Reconciliation
           </button>
@@ -97,89 +160,143 @@ export default function StockAdjustments() {
         </div>
       </div>
 
-      {pendingCount > 0 && (
-        <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex items-center gap-3">
-          <AlertTriangle className="w-5 h-5 text-amber-500" />
-          <span className="text-sm font-medium text-amber-800">{pendingCount} adjustment{pendingCount > 1 ? 's' : ''} pending approval</span>
-        </div>
-      )}
+      {/* KPI bar */}
+      <AdjustmentKPIBar
+        pendingCount={kpis.pendingCount}
+        periodCount={kpis.periodCount}
+        periodImpact={kpis.periodImpact}
+        approvalRate={kpis.approvalRate}
+      />
 
-      {/* Reconciliation Results */}
+      {/* Reconciliation panel — appears once user runs it */}
       {reconciliation && (
         <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-700 mb-3">Reconciliation Report</h3>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+              <Shield size={14} className="text-purple-500" /> Reconciliation Report
+            </h3>
+            <button onClick={() => setReconciliation(null)} className="text-xs text-gray-400 hover:text-gray-700">Dismiss</button>
+          </div>
           <div className="flex gap-4 mb-3 text-sm">
-            <span className="text-gray-500">Total lots: <strong>{reconciliation.total}</strong></span>
+            <span className="text-gray-500">Total lots: <strong className="text-gray-900">{reconciliation.total}</strong></span>
             <span className="text-green-600">Reconciled: <strong>{reconciliation.reconciled}</strong></span>
             <span className="text-red-600">Discrepancies: <strong>{reconciliation.discrepancies?.length || 0}</strong></span>
           </div>
           {reconciliation.discrepancies?.length > 0 && (
-            <table className="w-full text-sm">
-              <thead><tr className="border-b"><th className="text-left py-2">Lot</th><th className="text-right py-2">System (MT)</th><th className="text-right py-2">Ledger (KG)</th><th className="text-right py-2">Discrepancy</th></tr></thead>
-              <tbody>
-                {reconciliation.discrepancies.map(d => (
-                  <tr key={d.lotId} className="border-b border-gray-100 hover:bg-red-50">
-                    <td className="py-2 font-medium text-blue-600">{d.lotNo}</td>
-                    <td className="py-2 text-right">{d.systemQtyMT?.toFixed(2)} MT</td>
-                    <td className="py-2 text-right">{d.ledgerQtyKg?.toFixed(0)} KG</td>
-                    <td className="py-2 text-right text-red-600 font-medium">{d.discrepancyKg?.toFixed(0)} KG</td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-xs uppercase text-gray-500">
+                    <th className="text-left py-2">Lot</th>
+                    <th className="text-right py-2">System (MT)</th>
+                    <th className="text-right py-2">Ledger (KG)</th>
+                    <th className="text-right py-2">Discrepancy</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {reconciliation.discrepancies.map((d) => (
+                    <tr key={d.lotId} className="border-b border-gray-100 hover:bg-red-50">
+                      <td className="py-2 font-medium text-blue-600">{d.lotNo}</td>
+                      <td className="py-2 text-right">{d.systemQtyMT?.toFixed(2)} MT</td>
+                      <td className="py-2 text-right">{d.ledgerQtyKg?.toFixed(0)} KG</td>
+                      <td className="py-2 text-right text-red-600 font-medium">{d.discrepancyKg?.toFixed(0)} KG</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}
 
-      {/* Filter */}
-      <div className="flex gap-2">
-        {['all', 'pending_approval', 'approved', 'rejected'].map(f => (
-          <button key={f} onClick={() => setFilter(f)}
-            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${filter === f ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-            {f === 'all' ? 'All' : f.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())}
-          </button>
-        ))}
-      </div>
+      {/* Filters */}
+      <AdjustmentFilters
+        value={filters}
+        onChange={setFilters}
+        types={STOCK_ADJ_TYPES}
+        statuses={['all', 'pending_approval', 'approved', 'rejected']}
+      />
 
-      {/* Adjustments Table */}
+      {/* Adjustments table */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <table className="w-full text-sm">
-          <thead><tr className="bg-gray-50 border-b">
-            <th className="text-left px-4 py-3">Lot</th>
-            <th className="text-left px-4 py-3">Type</th>
-            <th className="text-right px-4 py-3">Qty (KG)</th>
-            <th className="text-left px-4 py-3">Reason</th>
-            <th className="text-right px-4 py-3">Cost Impact</th>
-            <th className="text-left px-4 py-3">Requested By</th>
-            <th className="text-center px-4 py-3">Status</th>
-            <th className="text-center px-4 py-3">Actions</th>
-          </tr></thead>
+          <thead>
+            <tr className="bg-gray-50 border-b text-xs uppercase tracking-wide text-gray-500">
+              <th className="text-left px-4 py-3">Lot</th>
+              <th className="text-left px-4 py-3">Type</th>
+              <th className="text-right px-4 py-3">Qty (KG)</th>
+              <th className="text-left px-4 py-3">Reason</th>
+              <th className="text-right px-4 py-3">Cost Impact</th>
+              <th className="text-left px-4 py-3">Requested By</th>
+              <th className="text-center px-4 py-3">Status</th>
+              <th className="text-center px-4 py-3">Actions</th>
+            </tr>
+          </thead>
           <tbody className="divide-y divide-gray-100">
-            {adjustments.map(a => (
-              <tr key={a.id} className={`hover:bg-gray-50 ${a.approval_status === 'pending_approval' ? 'bg-amber-50/30' : ''}`}>
-                <td className="px-4 py-3 font-medium text-blue-600">{a.lot_no || `LOT-${a.lot_id}`}</td>
-                <td className="px-4 py-3 capitalize">{(a.adjustment_type || '').replace(/_/g, ' ')}</td>
-                <td className="px-4 py-3 text-right font-medium">{parseFloat(a.quantity_kg)?.toLocaleString()} KG</td>
-                <td className="px-4 py-3 text-gray-600 max-w-[200px] truncate">{a.reason || '—'}</td>
-                <td className="px-4 py-3 text-right">{PKR(a.total_cost_impact)}</td>
-                <td className="px-4 py-3 text-gray-600">{a.requested_by_name || '—'}</td>
-                <td className="px-4 py-3 text-center"><StatusBadge status={a.approval_status?.replace('_', ' ')} /></td>
-                <td className="px-4 py-3 text-center">
-                  {a.approval_status === 'pending_approval' && (
-                    <div className="flex gap-1 justify-center">
-                      <button onClick={() => handleApprove(a.id)} className="p-1.5 text-green-600 bg-green-50 rounded hover:bg-green-100" title="Approve">
-                        <CheckCircle className="w-4 h-4" />
+            {loading && (
+              <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">Loading…</td></tr>
+            )}
+            {!loading && visibleAdjustments.map((a) => {
+              const type = findStockType(a.adjustment_type);
+              const t = themeFor(type ? type.color : 'slate');
+              const isPending = a.approval_status === 'pending_approval';
+              const isExpanded = expanded === a.id;
+              return (
+                <tr
+                  key={a.id}
+                  className={`hover:bg-gray-50 ${isPending ? t.rowTint : ''}`}
+                >
+                  <td className="px-4 py-3 font-medium text-blue-600 align-top">{a.lot_no || `LOT-${a.lot_id}`}</td>
+                  <td className="px-4 py-3 align-top">
+                    <AdjustmentTypeChip type={type} />
+                  </td>
+                  <td className="px-4 py-3 text-right font-medium align-top">
+                    {parseFloat(a.quantity_kg)?.toLocaleString()} KG
+                  </td>
+                  <td className="px-4 py-3 text-gray-600 max-w-[260px] align-top">
+                    {a.reason ? (
+                      <button
+                        type="button"
+                        onClick={() => setExpanded(isExpanded ? null : a.id)}
+                        className="text-left w-full"
+                      >
+                        <span className={isExpanded ? 'whitespace-pre-wrap break-words' : 'truncate inline-block max-w-full'}>
+                          {a.reason}
+                        </span>
+                        {a.reason.length > 60 && (
+                          <span className="block text-[10px] text-blue-500 hover:underline mt-0.5">
+                            {isExpanded ? 'Show less' : 'Show more'}
+                          </span>
+                        )}
                       </button>
-                      <button onClick={() => handleReject(a.id)} className="p-1.5 text-red-600 bg-red-50 rounded hover:bg-red-100" title="Reject">
-                        <XCircle className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {adjustments.length === 0 && (
-              <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No adjustments found</td></tr>
+                    ) : '—'}
+                  </td>
+                  <td className="px-4 py-3 text-right align-top">
+                    <span className={(parseFloat(a.total_cost_impact) || 0) > 0 ? 'text-red-600 font-medium' : 'text-gray-700'}>
+                      {PKR(a.total_cost_impact)}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-gray-600 align-top">{a.requested_by_name || '—'}</td>
+                  <td className="px-4 py-3 text-center align-top">
+                    <StatusBadge status={a.approval_status?.replace('_', ' ')} />
+                  </td>
+                  <td className="px-4 py-3 text-center align-top">
+                    {isPending && (
+                      <div className="flex gap-1 justify-center">
+                        <button onClick={() => handleApprove(a.id)} className="p-1.5 text-green-600 bg-green-50 rounded hover:bg-green-100" title="Approve">
+                          <CheckCircle className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => handleReject(a.id)} className="p-1.5 text-red-600 bg-red-50 rounded hover:bg-red-100" title="Reject">
+                          <XCircle className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+            {!loading && visibleAdjustments.length === 0 && (
+              <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No adjustments match the current filters.</td></tr>
             )}
           </tbody>
         </table>
@@ -192,26 +309,76 @@ export default function StockAdjustments() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Lot *</label>
             <SearchSelect
               value={form.lot_id}
-              onChange={v => setForm(p => ({ ...p, lot_id: v }))}
-              options={lots.map(l => ({ value: l.id, label: l.lotNo, sub: `${l.itemName} — ${parseFloat(l.qty).toFixed(1)} MT` }))}
-              placeholder="Search lot..."
+              onChange={(v) => setForm((p) => ({ ...p, lot_id: v }))}
+              options={lots.map((l) => ({ value: l.id, label: l.lotNo, sub: `${l.itemName} — ${parseFloat(l.qty).toFixed(1)} MT` }))}
+              placeholder="Search lot…"
             />
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Type *</label>
-              <select value={form.adjustmentType} onChange={e => setForm(p => ({ ...p, adjustmentType: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none bg-white">
-                {ADJ_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-              </select>
+
+          {/* Type as chips */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Type *</label>
+            <div className="flex flex-wrap gap-2">
+              {STOCK_ADJ_TYPES.map((t) => {
+                const selected = form.adjustmentType === t.value;
+                return (
+                  <button
+                    key={t.value}
+                    type="button"
+                    onClick={() => setForm((p) => ({ ...p, adjustmentType: t.value }))}
+                    className={`transition-all ${selected ? 'ring-2 ring-blue-500 ring-offset-1 rounded-full' : 'opacity-60 hover:opacity-100'}`}
+                  >
+                    <AdjustmentTypeChip type={t} size="lg" />
+                  </button>
+                );
+              })}
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Quantity (KG) *</label>
-              <input type="number" value={form.quantityKg} onChange={e => setForm(p => ({ ...p, quantityKg: e.target.value }))} placeholder="e.g. 500" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
-            </div>
+            {form.adjustmentType && (
+              <p className="text-[11px] text-gray-500 mt-2 leading-snug">{findStockType(form.adjustmentType)?.desc}</p>
+            )}
           </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Quantity (KG) *</label>
+            <input
+              type="number"
+              value={form.quantityKg}
+              onChange={(e) => setForm((p) => ({ ...p, quantityKg: e.target.value }))}
+              placeholder="e.g. 500"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none"
+            />
+          </div>
+
+          {/* Cost-impact preview */}
+          {costPreview && (
+            <div className={`rounded-lg p-3 border ${costPreview.direction === 'add' ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+              <div className="flex items-start gap-2 text-sm">
+                <Info size={14} className={`mt-0.5 ${costPreview.direction === 'add' ? 'text-green-600' : 'text-red-600'}`} />
+                <div>
+                  <div className="font-medium text-gray-900">
+                    {costPreview.direction === 'add' ? 'Adds ' : costPreview.direction === 'remove' ? 'Writes off ' : 'Changes '}
+                    <span className={costPreview.direction === 'add' ? 'text-green-700' : 'text-red-700'}>
+                      {PKR(costPreview.total)}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-gray-600 mt-0.5">
+                    {costPreview.qty.toLocaleString()} KG × {PKR(costPreview.costPerKg)}/kg ·
+                    Lot {costPreview.lotNo} ({costPreview.lotName} · {costPreview.lotQtyMT?.toFixed(2)} MT on hand)
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Reason</label>
-            <textarea value={form.reason} onChange={e => setForm(p => ({ ...p, reason: e.target.value }))} rows={2} placeholder="Describe the adjustment reason..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none resize-none" />
+            <textarea
+              value={form.reason}
+              onChange={(e) => setForm((p) => ({ ...p, reason: e.target.value }))}
+              rows={2}
+              placeholder="Describe what happened — for the audit trail."
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none resize-none"
+            />
           </div>
           <div className="flex justify-end gap-2 pt-2 border-t">
             <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
