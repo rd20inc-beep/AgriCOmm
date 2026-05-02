@@ -377,8 +377,21 @@ const exportDocumentController = {
           document = { type: 'PCSIR / Lab Test Request', ...common };
           break;
 
-        default:
+        default: {
+          // Upload-only documents — issued by external authorities (DPP for
+          // phyto, licensed fumigators for fumigation, shipping line for the
+          // signed BL). These can't be system-generated; the user uploads the
+          // received PDF on the Documents tab.
+          const UPLOAD_ONLY = new Set(['phyto', 'fumigation', 'bl_draft', 'bl_final']);
+          if (UPLOAD_ONLY.has(docType)) {
+            return res.status(400).json({
+              success: false,
+              code: 'UPLOAD_ONLY_DOCUMENT',
+              message: 'This document is issued by an external authority and cannot be generated. Please upload the received certificate on the Documents tab.',
+            });
+          }
           return res.status(400).json({ success: false, message: `Unknown document type: ${docType}` });
+        }
       }
 
       return res.json({ success: true, data: { document } });
