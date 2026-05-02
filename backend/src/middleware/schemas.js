@@ -20,7 +20,11 @@ const createExportOrder = Joi.object({
   }),
   currency: Joi.string().valid('USD', 'EUR', 'GBP').default('USD'),
   contract_value: Joi.number().positive().required(),
-  incoterm: Joi.string().valid('FOB', 'CIF', 'CNF', 'CFR', 'EXW', 'DDP').required(),
+  // Incoterms 2020 — kept in sync with src/shared/constants/incoterms.js.
+  // CNF is the alt-spelling of CFR commonly used in South Asia; both accepted.
+  incoterm: Joi.string().valid(
+    'EXW', 'FCA', 'FAS', 'FOB', 'CFR', 'CNF', 'CIF', 'CPT', 'CIP', 'DAP', 'DPU', 'DDP'
+  ).required(),
   advance_pct: Joi.number().min(0).max(100).default(20),
   advance_expected: Joi.number().min(0).default(0),
   balance_expected: Joi.number().min(0).default(0),

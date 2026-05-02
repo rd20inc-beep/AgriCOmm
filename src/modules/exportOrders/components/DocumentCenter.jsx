@@ -3,6 +3,7 @@ import { FileText, Download, Printer, Eye, CheckCircle, Clock, Loader2, Edit2 } 
 import api from '../../../api/client';
 import { useApp } from '../../../context/AppContext';
 import Modal from '../../../components/Modal';
+import { incotermLabel } from '../../../shared/constants/incoterms';
 
 // ─── Document Templates ───
 // Each function takes the document JSON and returns printable HTML
@@ -591,7 +592,7 @@ function renderBankFIRequest(doc) {
         <tr><td style="font-weight:bold;">Consignee Address</td><td>${buyer.address || buyer.country}</td></tr>
         <tr><td style="font-weight:bold;">Consignee Country</td><td>${buyer.country}</td></tr>
         <tr><td style="font-weight:bold;">Port of Discharge</td><td>${order.destinationPort || '—'}</td></tr>
-        <tr><td style="font-weight:bold;">Delivery Terms</td><td>${order.incoterm} - ${order.incoterm === 'FOB' ? 'Free on Board' : order.incoterm === 'CIF' ? 'Cost Insurance Freight' : order.incoterm}</td></tr>
+        <tr><td style="font-weight:bold;">Delivery Terms</td><td>${incotermLabel(order.incoterm)}</td></tr>
       </table>
 
       <table style="width:70%; border-collapse:collapse; margin:15px 0;">

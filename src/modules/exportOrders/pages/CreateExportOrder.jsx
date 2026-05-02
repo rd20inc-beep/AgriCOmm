@@ -11,6 +11,7 @@ import {
 import { validateForm, required, positiveNonZero } from '../../../utils/validation';
 import { toKg, fromKg, allEquivalents, UNITS } from '../../../utils/unitConversion';
 import SearchSelect from '../../../components/SearchSelect';
+import { INCOTERMS, incotermHint } from '../../../shared/constants/incoterms';
 
 const RECEIVING_MODES = [
   { value: 'bags', label: 'In Bags', desc: 'Standard packed bags', icon: ShoppingBag },
@@ -387,8 +388,13 @@ export default function CreateExportOrder() {
           <div className="form-group">
             <label className="form-label">Incoterm</label>
             <select value={form.incoterm} onChange={e => set('incoterm', e.target.value)} className="form-input">
-              <option value="FOB">FOB</option><option value="CIF">CIF</option><option value="CNF">CNF</option>
+              {INCOTERMS.map(it => (
+                <option key={it.code} value={it.code}>{it.code} — {it.name}</option>
+              ))}
             </select>
+            {form.incoterm && (
+              <p className="text-[11px] text-gray-500 mt-1 leading-snug">{incotermHint(form.incoterm)}</p>
+            )}
           </div>
           <div className="form-group">
             <label className="form-label">Advance %</label>

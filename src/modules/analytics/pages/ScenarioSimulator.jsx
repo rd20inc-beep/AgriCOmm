@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useRunScenario, useCostPredict } from '../../../api/queries';
+import { INCOTERMS } from '../../../shared/constants/incoterms';
 
 function formatCurrency(v, cur = 'USD') {
   if (!v && v !== 0) return '—';
@@ -251,7 +252,9 @@ function FullOrderSimulator() {
         <div className="form-group">
           <label className="form-label">Incoterm</label>
           <select value={form.incoterm} onChange={e => setForm(p => ({ ...p, incoterm: e.target.value }))} className="form-input">
-            <option>FOB</option><option>CIF</option><option>CNF</option>
+            {INCOTERMS.map(it => (
+              <option key={it.code} value={it.code}>{it.code} — {it.name}</option>
+            ))}
           </select>
         </div>
         <div className="form-group">

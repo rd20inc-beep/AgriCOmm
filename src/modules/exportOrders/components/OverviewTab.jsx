@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { ExternalLink, Pencil, Save, X } from 'lucide-react';
 import { useUpdateOrder } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
+import { INCOTERMS, incotermHint } from '../../../shared/constants/incoterms';
 
 // Statuses where qty/price/advance % can still be safely edited.
 // After milling starts, these changes would desync downstream artifacts.
@@ -176,11 +177,16 @@ export default function OverviewTab({ order, formatCurrency, totalCosts, grossPr
                   <option value="USD">USD</option><option value="EUR">EUR</option><option value="GBP">GBP</option>
                 </select>
               </div>
-              <div>
+              <div className="col-span-2">
                 <label className="block text-xs font-medium text-gray-600 mb-1">Incoterm</label>
                 <select value={contract.incoterm} onChange={e => setContract(c => ({ ...c, incoterm: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
-                  <option value="FOB">FOB</option><option value="CIF">CIF</option><option value="CNF">CNF</option>
+                  {INCOTERMS.map(it => (
+                    <option key={it.code} value={it.code}>{it.code} — {it.name}</option>
+                  ))}
                 </select>
+                {contract.incoterm && (
+                  <p className="text-[11px] text-gray-500 mt-1 leading-snug">{incotermHint(contract.incoterm)}</p>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Advance %</label>
