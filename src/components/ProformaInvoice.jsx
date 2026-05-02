@@ -53,6 +53,38 @@ export default function ProformaInvoice({ order, companyProfile }) {
   const currency = order.currency || 'USD';
   const currencySymbol = currency === 'USD' ? '$' : currency === 'EUR' ? '\u20AC' : currency;
 
+  // Build line-item rows. Multi-line P.I.s use order.items[]; legacy single-
+  // product orders synthesize one row from the summary fields.
+  const lineRows = (Array.isArray(order.items) && order.items.length > 0)
+    ? order.items.map((it, idx) => {
+        const itemQty = parseFloat(it.qtyMT) || 0;
+        const itemPrice = parseFloat(it.pricePerMT) || 0;
+        const itemBagSize = parseFloat(it.bagSizeKg) || bagSizeKg;
+        const itemBags = parseInt(it.bagCount, 10)
+          || (itemQty > 0 && itemBagSize > 0 ? Math.round((itemQty * 1000) / itemBagSize) : 0);
+        return {
+          sno: idx + 1,
+          description: it.productName || `Item ${idx + 1}`,
+          bagSizeKg: itemBagSize,
+          bags: itemBags,
+          qtyMT: itemQty,
+          pricePerMT: itemPrice,
+          amount: parseFloat(it.lineTotal) || itemQty * itemPrice,
+        };
+      })
+    : [{
+        sno: 1,
+        description: order.productName || '',
+        bagSizeKg,
+        bags,
+        qtyMT,
+        pricePerMT,
+        amount: totalAmount,
+      }];
+
+  const computedSubtotal = lineRows.reduce((s, r) => s + (r.amount || 0), 0);
+  const subtotal = computedSubtotal > 0 ? computedSubtotal : totalAmount;
+
   const formatCurrency = (val) =>
     currencySymbol + (parseFloat(val) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -66,6 +98,10 @@ export default function ProformaInvoice({ order, companyProfile }) {
     <>
       {/* Print-specific styles */}
       <style>{`
+        /* Setting an explicit @page margin suppresses the browser-injected
+           print header (date/time/URL) and footer (page numbers/URL) on
+           Chrome/Edge/Safari/Firefox. */
+        @page { size: A4; margin: 12mm; }
         @media print {
           body * { visibility: hidden; }
           .proforma-invoice, .proforma-invoice * { visibility: visible; }
@@ -208,26 +244,28 @@ export default function ProformaInvoice({ order, companyProfile }) {
               </tr>
             </thead>
             <tbody>
-              {/* Product Row */}
-              <tr style={{ backgroundColor: '#f8fafc' }}>
-                <td className="py-3 px-4 border-b" style={{ borderColor: '#e2e8f0', color: '#334155' }}>1</td>
-                <td className="py-3 px-4 border-b font-semibold" style={{ borderColor: '#e2e8f0', color: '#1e3a5f' }}>
-                  {order.productName}
-                </td>
-                <td className="py-3 px-4 border-b text-center" style={{ borderColor: '#e2e8f0', color: '#334155' }}>{bagSizeKg} KG</td>
-                <td className="py-3 px-4 border-b text-center font-medium" style={{ borderColor: '#e2e8f0', color: '#334155' }}>
-                  {bags.toLocaleString()}
-                </td>
-                <td className="py-3 px-4 border-b text-center font-medium" style={{ borderColor: '#e2e8f0', color: '#334155' }}>
-                  {qtyMT.toLocaleString()}
-                </td>
-                <td className="py-3 px-4 border-b text-right" style={{ borderColor: '#e2e8f0', color: '#334155' }}>
-                  {formatCurrency(pricePerMT)}
-                </td>
-                <td className="py-3 px-4 border-b text-right font-bold" style={{ borderColor: '#e2e8f0', color: '#1e3a5f' }}>
-                  {formatCurrency(totalAmount)}
-                </td>
-              </tr>
+              {/* One row per P.I. line item */}
+              {lineRows.map((row) => (
+                <tr key={row.sno} style={{ backgroundColor: '#f8fafc' }}>
+                  <td className="py-3 px-4 border-b" style={{ borderColor: '#e2e8f0', color: '#334155' }}>{row.sno}</td>
+                  <td className="py-3 px-4 border-b font-semibold" style={{ borderColor: '#e2e8f0', color: '#1e3a5f' }}>
+                    {row.description}
+                  </td>
+                  <td className="py-3 px-4 border-b text-center" style={{ borderColor: '#e2e8f0', color: '#334155' }}>{row.bagSizeKg} KG</td>
+                  <td className="py-3 px-4 border-b text-center font-medium" style={{ borderColor: '#e2e8f0', color: '#334155' }}>
+                    {row.bags.toLocaleString()}
+                  </td>
+                  <td className="py-3 px-4 border-b text-center font-medium" style={{ borderColor: '#e2e8f0', color: '#334155' }}>
+                    {row.qtyMT.toLocaleString()}
+                  </td>
+                  <td className="py-3 px-4 border-b text-right" style={{ borderColor: '#e2e8f0', color: '#334155' }}>
+                    {formatCurrency(row.pricePerMT)}
+                  </td>
+                  <td className="py-3 px-4 border-b text-right font-bold" style={{ borderColor: '#e2e8f0', color: '#1e3a5f' }}>
+                    {formatCurrency(row.amount)}
+                  </td>
+                </tr>
+              ))}
 
               {/* Subtotal Row */}
               <tr>
@@ -236,7 +274,7 @@ export default function ProformaInvoice({ order, companyProfile }) {
                   Subtotal:
                 </td>
                 <td className="py-3 px-4 text-right font-bold border-b" style={{ borderColor: '#e2e8f0', color: '#1e3a5f' }}>
-                  {formatCurrency(totalAmount)}
+                  {formatCurrency(subtotal)}
                 </td>
               </tr>
 
