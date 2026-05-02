@@ -8,6 +8,23 @@ const { publishExportOrderUpdate } = require('../../services/exportOrderEventBus
 const workflowService = require('../../services/exportOrderWorkflowService');
 const { MONEY_EPSILON, settledAmount, getStepForStatus, getAllowedActions } = workflowService;
 
+/**
+ * Resolve an :id route param to a numeric export_orders.id.
+ * The same param sometimes arrives as a numeric id ("21") and sometimes as
+ * the order number ("EX-007"). Use this at the top of any handler that
+ * does `where({ id })` so callers can use either form interchangeably.
+ *
+ * Returns the numeric id, or null if no order matches.
+ */
+async function resolveExportOrderId(idOrOrderNo, trxOrDb) {
+  if (idOrOrderNo == null) return null;
+  const conn = trxOrDb || db;
+  const s = String(idOrOrderNo);
+  if (/^\d+$/.test(s)) return parseInt(s, 10);
+  const row = await conn('export_orders').where({ order_no: s }).select('id').first();
+  return row ? row.id : null;
+}
+
 async function generateOrderNo(trx) {
   // Get the highest order number by parsing the numeric part
   const all = await (trx || db)('export_orders').select('order_no');
@@ -829,7 +846,8 @@ const exportOrderController = {
 
   async update(req, res) {
     try {
-      const { id } = req.params;
+      const id = await resolveExportOrderId(req.params.id);
+      if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
       const updates = req.body || {};
       const safeUpdates = {};
       for (const key of ALLOWED_UPDATE_FIELDS) {
@@ -940,7 +958,8 @@ const exportOrderController = {
 
   async updateStatus(req, res) {
     try {
-      const { id } = req.params;
+      const id = await resolveExportOrderId(req.params.id);
+      if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
       const { status, notes } = req.body;
 
       if (!status) {
@@ -979,7 +998,8 @@ const exportOrderController = {
 
   async updateShipment(req, res) {
     try {
-      const { id } = req.params;
+      const id = await resolveExportOrderId(req.params.id);
+      if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
       const {
         vessel_name, booking_no, container_no, containers,
         bl_number, bl_date, shipping_line, etd, atd, eta, ata,
@@ -1122,7 +1142,8 @@ const exportOrderController = {
 
   async startDocsPreparation(req, res) {
     try {
-      const { id } = req.params;
+      const id = await resolveExportOrderId(req.params.id);
+      if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
       const { notes } = req.body;
 
       const order = await db('export_orders').where({ id }).first();
@@ -1212,7 +1233,8 @@ const exportOrderController = {
 
   async addCost(req, res) {
     try {
-      const { id } = req.params;
+      const id = await resolveExportOrderId(req.params.id);
+      if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
       const { category, amount, notes } = req.body;
 
       if (!category || amount == null) {
@@ -1262,7 +1284,8 @@ const exportOrderController = {
 
   async uploadDocument(req, res) {
     try {
-      const { id } = req.params;
+      const id = await resolveExportOrderId(req.params.id);
+      if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
       const { doc_type, file_path, version, notes } = req.body;
       const result = await applyDocumentAction({
         orderRef: id,
@@ -1286,7 +1309,8 @@ const exportOrderController = {
 
   async approveDocument(req, res) {
     try {
-      const { id } = req.params;
+      const id = await resolveExportOrderId(req.params.id);
+      if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
       const { doc_type, file_path, version, notes } = req.body;
       const result = await applyDocumentAction({
         orderRef: id,
@@ -1310,7 +1334,8 @@ const exportOrderController = {
 
   async finalizeDocument(req, res) {
     try {
-      const { id } = req.params;
+      const id = await resolveExportOrderId(req.params.id);
+      if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
       const { doc_type, file_path, version, notes } = req.body;
       const result = await applyDocumentAction({
         orderRef: id,
