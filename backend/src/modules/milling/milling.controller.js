@@ -154,6 +154,9 @@ const millingController = {
         transport_mode,
         purchase_price_per_kg,
         product_id,
+        mill_id,
+        machine_line,
+        shift,
         notes,
       } = req.body;
 
@@ -161,6 +164,28 @@ const millingController = {
         return res.status(400).json({
           success: false,
           message: 'raw_qty_mt is required.',
+        });
+      }
+
+      // Resolve mill_id: take what the client sent, otherwise fall back to
+      // the first active mill in the DB. The "Create Milling Demand" modal
+      // on the export order doesn't ask for a mill yet, so this default
+      // keeps the flow working until a selector is added.
+      let resolvedMillId = mill_id ? parseInt(mill_id) : null;
+      if (!resolvedMillId) {
+        let fallback = null;
+        try {
+          fallback = await db('mills').where({ is_active: true }).orderBy('id', 'asc').first('id');
+        } catch (_) { /* mills table or column may be unavailable in some envs */ }
+        if (!fallback) {
+          try { fallback = await db('mills').orderBy('id', 'asc').first('id'); } catch (_) { /* ignore */ }
+        }
+        resolvedMillId = fallback ? fallback.id : null;
+      }
+      if (!resolvedMillId) {
+        return res.status(400).json({
+          success: false,
+          message: 'No active mill found in the system. Add a mill before creating milling batches.',
         });
       }
 
@@ -196,6 +221,7 @@ const millingController = {
           .insert({
             batch_no: batchNo,
             supplier_id,
+            mill_id: resolvedMillId,
             linked_export_order_id: linked_export_order_id || null,
             raw_qty_mt: parseFloat(raw_qty_mt),
             planned_finished_mt: planned_finished_mt ? parseFloat(planned_finished_mt) : null,
@@ -203,6 +229,8 @@ const millingController = {
             transport_mode: transport_mode || 'with',
             purchase_price_per_kg: purchase_price_per_kg ? parseFloat(purchase_price_per_kg) : null,
             product_id: product_id ? parseInt(product_id) : null,
+            machine_line: machine_line || null,
+            shift: shift || 'Day',
             notes: notes || null,
             status: 'Pending Approval',
             created_by: req.user.id,

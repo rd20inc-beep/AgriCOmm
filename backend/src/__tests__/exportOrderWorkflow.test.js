@@ -17,6 +17,9 @@ function resetState() {
     shipment_containers: [],
     inventory_lots: [],
     export_order_items: [],
+    // Default active mill so the milling-create controller's mill_id
+    // fallback resolves without hitting a real DB.
+    mills: [{ id: 1, name: 'Default Mill', is_active: true }],
   };
   mockState.seq = {
     export_orders: 1,
@@ -31,6 +34,7 @@ function resetState() {
     shipment_containers: 1,
     inventory_lots: 1,
     export_order_items: 1,
+    mills: 2,
   };
 }
 
