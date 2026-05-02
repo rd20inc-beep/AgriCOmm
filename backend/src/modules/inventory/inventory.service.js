@@ -409,6 +409,16 @@ const inventoryService = {
 
       const lotNo = await inventoryService.generateLotNo(trx);
 
+      // Resolve product_id for raw-paddy lots. inventory_lots.product_id is
+      // NOT NULL since migration 067 — every lot must point at a real
+      // product. The "Raw Paddy" product is seeded by migration 075; if
+      // a fresh install is missing it, look up by name as a soft fallback.
+      let rawPaddyProduct = await trx('products').where({ code: 'RAW-PADDY' }).first('id');
+      if (!rawPaddyProduct) {
+        rawPaddyProduct = await trx('products').whereILike('name', '%paddy%').first('id');
+      }
+      const rawPaddyProductId = rawPaddyProduct ? rawPaddyProduct.id : null;
+
       [lot] = await trx('inventory_lots')
         .insert({
           lot_no: lotNo,
@@ -416,6 +426,7 @@ const inventoryService = {
           type: 'raw',
           entity: 'mill',
           warehouse_id: warehouse.id,
+          product_id: rawPaddyProductId,
           qty: 0,
           unit: 'MT',
           batch_ref: `batch-${batchId}`,
@@ -525,6 +536,33 @@ const inventoryService = {
 
     const results = { lots: [], movements: [] };
 
+    // Resolve product_id for each lot type. inventory_lots.product_id is
+    // NOT NULL since migration 067 — every lot must reference a real product.
+    const batchRow = await trx('milling_batches').where({ id: batchId }).first();
+    let finishedProductId = batchRow && batchRow.product_id ? batchRow.product_id : null;
+    if (!finishedProductId && batchRow && batchRow.linked_export_order_id) {
+      const linked = await trx('export_orders').where({ id: batchRow.linked_export_order_id }).first('product_id');
+      if (linked && linked.product_id) finishedProductId = linked.product_id;
+    }
+    if (!finishedProductId && productName) {
+      const named = await trx('products').whereILike('name', productName).first('id');
+      if (named) finishedProductId = named.id;
+    }
+    // Resolve byproduct products by item_name — these are seeded with stable ids.
+    const byproductProductLookup = async (itemName) => {
+      const byCode = {
+        'Broken Rice': 'BROKEN-RICE',
+        'Rice Bran': 'RICE-BRAN',
+        'Rice Husk': 'RICE-HUSK',
+      }[itemName];
+      if (byCode) {
+        const p = await trx('products').where({ code: byCode }).first('id');
+        if (p) return p.id;
+      }
+      const named = await trx('products').whereILike('name', itemName).first('id');
+      return named ? named.id : null;
+    };
+
     // Find or create Mill Finished Goods warehouse
     let fgWarehouse = await trx('warehouses')
       .where({ entity: 'mill', type: 'finished' })
@@ -558,6 +596,7 @@ const inventoryService = {
           type: 'finished',
           entity: 'mill',
           warehouse_id: fgWarehouse.id,
+          product_id: finishedProductId,
           qty: 0,
           unit: 'MT',
           batch_ref: `batch-${batchId}`,
@@ -619,6 +658,7 @@ const inventoryService = {
       const bpCostPerMT = bpCostPerKg * 1000;
 
       const lotNo = await inventoryService.generateLotNo(trx);
+      const bpProductId = await byproductProductLookup(bp.name);
       const [lot] = await trx('inventory_lots')
         .insert({
           lot_no: lotNo,
@@ -626,6 +666,7 @@ const inventoryService = {
           type: 'byproduct',
           entity: 'mill',
           warehouse_id: bpWarehouse.id,
+          product_id: bpProductId,
           qty: 0,
           unit: 'MT',
           batch_ref: `batch-${batchId}`,
@@ -738,6 +779,7 @@ const inventoryService = {
         type: 'finished',
         entity: 'export',
         warehouse_id: exportWarehouse.id,
+        product_id: sourceLot.product_id || null,
         qty: 0,
         unit: sourceLot.unit || 'MT',
         batch_ref: sourceLot.batch_ref || null,
