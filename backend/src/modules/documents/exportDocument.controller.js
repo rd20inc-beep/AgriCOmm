@@ -148,7 +148,10 @@ const exportDocumentController = {
           currency: order.currency || 'USD',
           contractValue: parseFloat(order.contract_value) || 0,
           incoterm: order.incoterm || 'FOB',
-          paymentTerms: order.customer_payment_terms || `${order.advance_pct}% advance, balance against documents`,
+          // Precedence: per-order override → customer default → auto-generated.
+          paymentTerms: order.payment_terms
+            || order.customer_payment_terms
+            || `${order.advance_pct}% advance, balance against documents`,
           origin: 'PAKISTAN',
           portOfLoading: settings.port_of_loading || 'Karachi, Pakistan',
           destinationPort: order.destination_port || '',

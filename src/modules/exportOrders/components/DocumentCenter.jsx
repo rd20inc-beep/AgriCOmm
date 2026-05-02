@@ -242,8 +242,12 @@ function renderPackingList(doc) {
         const bagType = it.bagType || order.bagType || 'PP';
         const bagCount = it.bagCount || (it.qtyMT && bagSize ? Math.round((it.qtyMT * 1000) / bagSize) : 0);
         const grossKg = it.qtyMT * 1000;
-        // Net = rice weight + packaging tare. If no tare known, show same as gross.
-        const tarePerBagKg = order.bagWeightGm ? (order.bagWeightGm / 1000) : 0;
+        // Net = rice + packaging tare. Use the order's explicit bag_weight_gm
+        // when set; otherwise fall back to a realistic default based on bag
+        // size so the two columns are never accidentally equal.
+        // Typical PP bag tares: 50kg→~90g, 25kg→~50g, 5kg→~20g.
+        const defaultTareGm = bagSize >= 50 ? 90 : bagSize >= 25 ? 50 : bagSize >= 10 ? 30 : 20;
+        const tarePerBagKg = (order.bagWeightGm || defaultTareGm) / 1000;
         const netKg = grossKg + bagCount * tarePerBagKg;
         const description = it.qualityDescription
           || `${it.productName || order.product || 'Rice'} max 0-${it.brokenPctTarget != null ? it.brokenPctTarget : (order.brokenPctTarget || 2)}% broken, double (silky) polished and sortexed. Sound, loyal and merchantable, fit for human consumption at any stage. Free from alive and dead weevils/insects. GMO Free. Product to meet EU regulations at all times. Latest crop.${it.hsCode ? `<br/><strong>HS CODE ${it.hsCode}</strong>` : ''}`;
@@ -261,8 +265,14 @@ function renderPackingList(doc) {
         const bagSize = order.bagSizeKg || 50;
         const bagType = order.bagType || 'PP';
         const totalBags = order.totalBags || (order.qtyMT && bagSize ? Math.round((order.qtyMT * 1000) / bagSize) : 0);
+        // Use shipment-container totals when present; otherwise compute net
+        // from qty_mt and gross from net + (bag tare × bag count).
         const grossKg = (totals && totals.grossWeightMT ? totals.grossWeightMT : order.qtyMT) * 1000;
-        const netKg = (totals && totals.netWeightMT ? totals.netWeightMT : order.qtyMT) * 1000;
+        const defaultTareGm = bagSize >= 50 ? 90 : bagSize >= 25 ? 50 : bagSize >= 10 ? 30 : 20;
+        const tarePerBagKg = (order.bagWeightGm || defaultTareGm) / 1000;
+        const netKg = (totals && totals.netWeightMT)
+          ? totals.netWeightMT * 1000
+          : grossKg + totalBags * tarePerBagKg;
         return [{
           label: (order.brandMarking || order.product || '').toUpperCase(),
           description: order.qualityDescription || order.product || '',

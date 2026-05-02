@@ -266,6 +266,7 @@ const ALLOWED_UPDATE_FIELDS = [
   'voyage_number', 'gd_number', 'gd_date', 'fi_number_2', 'fi_number_3',
   'notify_party_name', 'notify_party_address', 'notify_party_phone', 'notify_party_email',
   'shipment_remarks',
+  'payment_terms',
 ];
 
 // Columns where Postgres rejects '' — coerce empty strings to null on update.

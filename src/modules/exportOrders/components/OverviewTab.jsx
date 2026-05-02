@@ -5,11 +5,20 @@ import { useUpdateOrder } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
 import { INCOTERMS, incotermHint } from '../../../shared/constants/incoterms';
 
-// Statuses where qty/price/advance % can still be safely edited.
-// After milling starts, these changes would desync downstream artifacts.
-const CONTRACT_EDITABLE_STATUSES = new Set([
+// Statuses where ANY contract field is fully editable.
+// After milling starts, qty/price changes can desync downstream artifacts —
+// but soft fields (incoterm, port, ETA, advance %) stay editable through
+// dispatch via SOFT_EDITABLE below.
+const CONTRACT_FULLY_EDITABLE = new Set([
   'Draft', 'Awaiting Advance', 'Advance Received', 'Procurement Pending',
 ]);
+// Statuses where soft fields can still be edited (everything before Shipped).
+// Once Shipped, every contract field is locked — the BL/invoice are out.
+const CONTRACT_SOFT_EDITABLE = new Set([
+  'Draft', 'Awaiting Advance', 'Advance Received', 'Procurement Pending',
+  'In Milling', 'Docs In Preparation', 'Awaiting Balance', 'Ready to Ship',
+]);
+const TERMINAL_STATUSES = new Set(['Shipped', 'Arrived', 'Closed', 'Cancelled']);
 
 export default function OverviewTab({ order, formatCurrency, totalCosts, grossProfit, marginPct, exportCostCategories }) {
   const { addToast } = useApp();
@@ -20,7 +29,9 @@ export default function OverviewTab({ order, formatCurrency, totalCosts, grossPr
   const [contract, setContract] = useState({});
 
   const orderId = order?.dbId || order?.id;
-  const contractEditable = CONTRACT_EDITABLE_STATUSES.has(order?.status);
+  // Soft edit is allowed pre-shipment; hard edit (qty/price) only pre-milling.
+  const contractEditable = CONTRACT_SOFT_EDITABLE.has(order?.status);
+  const qtyPriceEditable = CONTRACT_FULLY_EDITABLE.has(order?.status);
 
   const startEditing = () => {
     setSpecs({
@@ -33,6 +44,7 @@ export default function OverviewTab({ order, formatCurrency, totalCosts, grossPr
       consignee_type: order.consigneeType || 'to_order_of_bank',
       production_date: order.productionDate || '',
       expiry_date: order.expiryDate || '',
+      payment_terms: order.paymentTerms || '',
       quality_description: order.qualityDescription || '',
       production_remarks: order.productionRemarks || '',
     });
@@ -75,18 +87,23 @@ export default function OverviewTab({ order, formatCurrency, totalCosts, grossPr
   };
 
   const saveContract = async () => {
+    // Always-editable soft fields
     const payload = {
-      qty_mt: parseFloat(contract.qty_mt) || 0,
-      price_per_mt: parseFloat(contract.price_per_mt) || 0,
       currency: contract.currency,
       incoterm: contract.incoterm,
       advance_pct: parseFloat(contract.advance_pct) || 0,
       destination_port: contract.destination_port || null,
       shipment_eta: contract.shipment_eta || null,
     };
-    if (payload.qty_mt <= 0 || payload.price_per_mt <= 0) {
-      addToast('Quantity and price must be positive', 'error');
-      return;
+    // Only send qty/price when they're actually editable, so the server's
+    // recompute path doesn't fire for an order that's locked them out.
+    if (qtyPriceEditable) {
+      payload.qty_mt = parseFloat(contract.qty_mt) || 0;
+      payload.price_per_mt = parseFloat(contract.price_per_mt) || 0;
+      if (payload.qty_mt <= 0 || payload.price_per_mt <= 0) {
+        addToast('Quantity and price must be positive', 'error');
+        return;
+      }
     }
     if (payload.advance_pct < 0 || payload.advance_pct > 100) {
       addToast('Advance % must be between 0 and 100', 'error');
@@ -110,7 +127,11 @@ export default function OverviewTab({ order, formatCurrency, totalCosts, grossPr
             <button
               onClick={startContractEditing}
               disabled={!contractEditable}
-              title={contractEditable ? 'Edit core P.I. fields' : `Locked: cannot edit after status "${order.status}"`}
+              title={contractEditable
+                ? (qtyPriceEditable
+                    ? 'Edit any P.I. field'
+                    : 'Edit incoterm / port / ETA / advance — qty & price are locked once milling has started')
+                : `Fully locked: order is ${order.status}`}
               className={`text-xs font-medium flex items-center gap-1 ${contractEditable ? 'text-blue-600 hover:text-blue-700' : 'text-gray-400 cursor-not-allowed'}`}
             >
               <Pencil className="w-3.5 h-3.5" /> Edit
@@ -165,12 +186,18 @@ export default function OverviewTab({ order, formatCurrency, totalCosts, grossPr
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Quantity (MT)</label>
-                <input type="number" min="0" step="0.01" value={contract.qty_mt} onChange={e => setContract(c => ({ ...c, qty_mt: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Quantity (MT)
+                  {!qtyPriceEditable && <span className="ml-1 text-amber-600 text-[10px]">(locked — past Procurement)</span>}
+                </label>
+                <input type="number" min="0" step="0.01" value={contract.qty_mt} disabled={!qtyPriceEditable} onChange={e => setContract(c => ({ ...c, qty_mt: e.target.value }))} className={`w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none ${!qtyPriceEditable ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`} />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Price per MT</label>
-                <input type="number" min="0" step="0.01" value={contract.price_per_mt} onChange={e => setContract(c => ({ ...c, price_per_mt: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Price per MT
+                  {!qtyPriceEditable && <span className="ml-1 text-amber-600 text-[10px]">(locked)</span>}
+                </label>
+                <input type="number" min="0" step="0.01" value={contract.price_per_mt} disabled={!qtyPriceEditable} onChange={e => setContract(c => ({ ...c, price_per_mt: e.target.value }))} className={`w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none ${!qtyPriceEditable ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`} />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Currency</label>
@@ -319,11 +346,16 @@ export default function OverviewTab({ order, formatCurrency, totalCosts, grossPr
             {[
               ['Contract No', order.contractNumber || order.id],
               ['Invoice No', order.invoiceNumber || '\u2014'],
+              // HS Code shown read-only here as a summary; edit per-line in the
+              // Line Items card. Falls back to the order's legacy hs_code field
+              // for single-product orders that pre-date the items table.
+              ['HS Code', (order.items && order.items[0] && order.items[0].hsCode) || order.hsCode || '\u2014 set in Line Items'],
               ['Broken % Target', order.brokenPctTarget ? `${order.brokenPctTarget}%` : '\u2014'],
               ['Freight Terms', order.freightTerms || '\u2014'],
               ['Consignee Type', order.consigneeType === 'direct' ? 'Direct to Buyer' : 'To Order of Bank'],
               ['Production Date', order.productionDate || '\u2014'],
               ['Expiry Date', order.expiryDate || '\u2014'],
+              ['Payment Terms', order.paymentTerms || `${order.advancePct || 0}% advance, balance against documents`],
             ].map(([label, value]) => (
               <div key={label} className="flex justify-between text-sm">
                 <span className="text-gray-500">{label}</span>
@@ -376,6 +408,11 @@ export default function OverviewTab({ order, formatCurrency, totalCosts, grossPr
                 <label className="block text-xs font-medium text-gray-600 mb-1">Expiry Date</label>
                 <input type="date" value={specs.expiry_date} onChange={e => setSpecs(s => ({ ...s, expiry_date: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
               </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Payment Terms</label>
+              <input type="text" value={specs.payment_terms} placeholder='e.g. "20% Advance / 80% Against BL" or "100% LC at sight"' onChange={e => setSpecs(s => ({ ...s, payment_terms: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              <p className="text-[11px] text-gray-500 mt-1">Free text — appears on Proforma Invoice and Bank docs. Leave blank to use the customer's default or auto-generated text.</p>
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Quality Description</label>
