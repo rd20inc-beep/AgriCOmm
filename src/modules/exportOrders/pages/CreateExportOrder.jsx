@@ -28,6 +28,7 @@ const EMPTY_ITEM = {
   hsCode: '', packing: '',
   bagSizeKg: '25', bagCount: '',
   masterBagSizeKg: '',
+  bagBrand: '',
 };
 
 // Retail bag sizes that need to be packed inside an outer "master bag"
@@ -221,6 +222,7 @@ export default function CreateExportOrder() {
           bag_size_kg: it.bagSizeKg ? parseFloat(it.bagSizeKg) : null,
           bag_count: it.bagCount ? parseInt(it.bagCount) : null,
           master_bag_size_kg: it.masterBagSizeKg ? parseFloat(it.masterBagSizeKg) : null,
+          bag_brand: it.bagBrand || null,
         };
       }),
       // Contract & product specs (HS code mirrors first item for legacy renderers)
@@ -375,9 +377,19 @@ export default function CreateExportOrder() {
                   <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">HS Code</label>
                   <input type="text" value={it.hsCode} onChange={e => updateItem(idx, 'hsCode', e.target.value)} className="form-input" placeholder="e.g. 1006.3010" />
                 </div>
-                <div className="md:col-span-7">
+                <div className="md:col-span-4">
                   <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Packing</label>
                   <input type="text" value={it.packing} onChange={e => updateItem(idx, 'packing', e.target.value)} className="form-input" placeholder="e.g. Packed in 25 KG PP BAG" />
+                </div>
+                <div className="md:col-span-3">
+                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Brand / Marking</label>
+                  <input
+                    type="text"
+                    value={it.bagBrand}
+                    onChange={e => updateItem(idx, 'bagBrand', e.target.value)}
+                    className="form-input"
+                    placeholder={form.bagBrand ? `defaults to ${form.bagBrand}` : 'Brand on bag'}
+                  />
                 </div>
                 <div className="md:col-span-2">
                   <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Bag Size (kg)</label>

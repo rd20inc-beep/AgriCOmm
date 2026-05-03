@@ -296,6 +296,7 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
                 <tr className="border-b border-gray-200 text-left text-xs uppercase text-gray-500">
                   <th className="py-2 pr-3">#</th>
                   <th className="py-2 pr-3">Product</th>
+                  <th className="py-2 pr-3">Brand</th>
                   <th className="py-2 pr-3">HS Code</th>
                   <th className="py-2 pr-3">Packing</th>
                   <th className="py-2 pr-3">Bag / Master</th>
@@ -309,6 +310,7 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
                   <tr key={it.id || it.lineNo} className="border-b border-gray-100 last:border-0">
                     <td className="py-2 pr-3 text-gray-500">{it.lineNo}</td>
                     <td className="py-2 pr-3 font-medium text-gray-900">{it.productName || '—'}</td>
+                    <td className="py-2 pr-3 text-gray-700">{it.bagBrand || order.bagBrand || '—'}</td>
                     <td className="py-2 pr-3 text-gray-700">{it.hsCode || '—'}</td>
                     <td className="py-2 pr-3 text-gray-700">{it.packing || '—'}</td>
                     <td className="py-2 pr-3 text-gray-700 whitespace-nowrap">
@@ -323,7 +325,7 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-gray-200">
-                  <td colSpan={5} className="py-2 pr-3 text-right text-xs uppercase text-gray-500 font-semibold">Total</td>
+                  <td colSpan={6} className="py-2 pr-3 text-right text-xs uppercase text-gray-500 font-semibold">Total</td>
                   <td className="py-2 pr-3 text-right font-bold text-gray-900">{order.qtyMT.toLocaleString(undefined, { maximumFractionDigits: 3 })}</td>
                   <td className="py-2 pr-3"></td>
                   <td className="py-2 pl-3 text-right font-bold text-gray-900">{formatCurrency(order.contractValue)}</td>
