@@ -17,6 +17,8 @@ router.get('/warehouses', authorize('admin', 'view'), controller.listWarehouses)
 router.get('/warehouses/:id', authorize('admin', 'view'), controller.getWarehouse);
 router.get('/bank-accounts', authorize('admin', 'view'), controller.listBankAccounts);
 router.get('/bank-accounts/:id', authorize('admin', 'view'), controller.getBankAccount);
+router.get('/document-templates', authorize('admin', 'view'), controller.listDocumentTemplates);
+router.get('/document-templates/:id', authorize('admin', 'view'), controller.getDocumentTemplate);
 router.get('/settings', authorize('admin', 'view'), controller.getSettings);
 
 // Master data management
@@ -132,6 +134,25 @@ router.delete(
   authorize('admin', 'manage_master_data'),
   auditAction('delete', 'bank_account', (req) => req.params.id),
   controller.deleteBankAccount
+);
+
+router.post(
+  '/document-templates',
+  authorize('admin', 'manage_master_data'),
+  auditAction('create', 'document_template', (req, data) => data.data && data.data.id ? data.data.id : null),
+  controller.createDocumentTemplate
+);
+router.put(
+  '/document-templates/:id',
+  authorize('admin', 'manage_master_data'),
+  auditAction('update', 'document_template', (req) => req.params.id),
+  controller.updateDocumentTemplate
+);
+router.delete(
+  '/document-templates/:id',
+  authorize('admin', 'manage_master_data'),
+  auditAction('delete', 'document_template', (req) => req.params.id),
+  controller.deleteDocumentTemplate
 );
 
 // Settings management

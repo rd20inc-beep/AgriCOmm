@@ -218,6 +218,12 @@ router.put(
   auditAction('update', 'mill', (req) => req.params.id),
   advancedController.updateMill
 );
+router.delete(
+  '/mills/:id',
+  authorize('milling', 'edit'),
+  auditAction('delete', 'mill', (req) => req.params.id),
+  advancedController.deleteMill
+);
 
 // =============================================================================
 // Analytics

@@ -595,6 +595,29 @@ const millingAdvancedController = {
     }
   },
 
+  // Refuse to delete a mill that any milling_batch points at — a cascade
+  // would orphan production history. Surface a friendly error instead.
+  async deleteMill(req, res) {
+    try {
+      const { id } = req.params;
+      const inUse = await db('milling_batches').where({ mill_id: id }).count('* as n').first();
+      if (parseInt(inUse.n, 10) > 0) {
+        return res.status(409).json({
+          success: false,
+          message: `Cannot delete: this mill is referenced by ${inUse.n} milling batch(es). Reassign or close them first.`,
+        });
+      }
+      const deleted = await db('mills').where({ id }).del();
+      if (deleted === 0) {
+        return res.status(404).json({ success: false, message: 'Mill not found.' });
+      }
+      return res.json({ success: true });
+    } catch (err) {
+      console.error('deleteMill error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
   // =========================================================================
   // Analytics
   // =========================================================================

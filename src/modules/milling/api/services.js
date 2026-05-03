@@ -22,6 +22,7 @@ export const millingApi = {
   listMills: (params) => api.get('/api/milling/mills', params),
   createMill: (data) => api.post('/api/milling/mills', data),
   updateMill: (id, data) => api.put(`/api/milling/mills/${id}`, data),
+  deleteMill: (id) => api.delete(`/api/milling/mills/${id}`),
   listPlans: (params) => api.get('/api/milling/plans', params),
   createPlan: (data) => api.post('/api/milling/plans', data),
   recordDowntime: (data) => api.post('/api/milling/downtime', data),

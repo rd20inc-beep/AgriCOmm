@@ -941,6 +941,48 @@ export function useUpdateMill() {
   });
 }
 
+export function useDeleteMill() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => millingApi.deleteMill(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['mills'] }),
+  });
+}
+
+// ----- Document Templates (master data) -----
+
+export function useDocumentTemplates() {
+  return useQuery({
+    queryKey: ['document-templates'],
+    queryFn: async () => {
+      const res = await adminApi.documentTemplates({ limit: 200 });
+      return transformKeys(unwrap(res, 'document_templates') || unwrap(res, 'documentTemplates') || unwrap(res, 'rows') || []);
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+export function useCreateDocumentTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => adminApi.createDocumentTemplate(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['document-templates'] }),
+  });
+}
+export function useUpdateDocumentTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => adminApi.updateDocumentTemplate(id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['document-templates'] }),
+  });
+}
+export function useDeleteDocumentTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => adminApi.deleteDocumentTemplate(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['document-templates'] }),
+  });
+}
+
 // ===================== DASHBOARD =====================
 
 export function useDashboard() {

@@ -119,6 +119,7 @@ const productsCrud = createCrud('products', 'product');
 const bagTypesCrud = createCrud('bag_types', 'bag_type');
 const warehousesCrud = createCrud('warehouses', 'warehouse');
 const bankAccountsCrud = createCrud('bank_accounts', 'bank_account');
+const documentTemplatesCrud = createCrud('document_templates', 'document_template');
 
 const adminController = {
   // Customers
@@ -162,6 +163,13 @@ const adminController = {
   createBankAccount: bankAccountsCrud.create,
   updateBankAccount: bankAccountsCrud.update,
   deleteBankAccount: bankAccountsCrud.delete,
+
+  // Document Templates
+  listDocumentTemplates: documentTemplatesCrud.list,
+  getDocumentTemplate: documentTemplatesCrud.getById,
+  createDocumentTemplate: documentTemplatesCrud.create,
+  updateDocumentTemplate: documentTemplatesCrud.update,
+  deleteDocumentTemplate: documentTemplatesCrud.delete,
 
   // Settings
   async getSettings(req, res) {
