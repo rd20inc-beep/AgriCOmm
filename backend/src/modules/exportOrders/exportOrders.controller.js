@@ -712,6 +712,7 @@ const exportOrderController = {
           amount: 0,
           currency: 'PKR', // outflow payments on export orders are always PKR
           notes: null,
+          created_by: req.user?.id || null,
         }));
 
         await trx('export_order_costs').insert(costRows);
@@ -1279,6 +1280,7 @@ const exportOrderController = {
             amount: parseFloat(amount),
             currency: 'PKR', // outflow payments on export orders are always PKR
             notes: notes || null,
+            created_by: req.user?.id || null,
           })
           .returning('*');
       }

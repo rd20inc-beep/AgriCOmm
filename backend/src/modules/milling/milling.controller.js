@@ -462,6 +462,7 @@ const millingController = {
               category: 'raw_rice',
               amount: rawRiceCost,
               notes: `Auto-calculated: ${price_per_mt}/mt x ${batch.raw_qty_mt} mt`,
+              created_by: req.user?.id || null,
             });
           }
         }
@@ -804,6 +805,7 @@ const millingController = {
               base_amount_pkr: batchCostTotal,
               fx_rate: orderFxRate,
               notes: `From milling batch ${batch.batch_no} (PKR ${Math.round(batchCostTotal).toLocaleString()} ÷ ${orderFxRate})`,
+              created_by: req.user?.id || null,
             });
           }
         }
@@ -866,6 +868,7 @@ const millingController = {
             category,
             amount: parseFloat(amount),
             notes: notes || null,
+            created_by: req.user?.id || null,
           })
           .returning('*');
       }
@@ -918,6 +921,7 @@ const millingController = {
             total_bags: totalBags,
             arrival_date: arrival_date || trx.fn.now(),
             notes: notes || null,
+            created_by: req.user?.id || null,
           })
           .returning('*');
 
