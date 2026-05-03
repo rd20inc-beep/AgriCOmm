@@ -828,12 +828,23 @@ export default function MillingBatchDetail() {
                       {safeSample?.pricePerMT && safeArrival?.pricePerMT && (() => {
                         const arrP = parseFloat(safeArrival.pricePerMT) || 0;
                         const samP = parseFloat(safeSample.pricePerMT) || 0;
+                        const diff = arrP - samP;
                         return (
-                        <div className={`mt-2 text-xs px-3 py-2 rounded-lg ${
+                        <div className={`mt-2 text-xs px-3 py-2 rounded-lg flex items-center justify-between gap-3 ${
                           arrP > samP ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'
                         }`}>
-                          Price difference: Rs {Math.abs(Math.round(arrP - samP)).toLocaleString()} /MT
-                          ({arrP > samP ? 'higher' : 'lower'} than sample)
+                          <span>
+                            Price difference: Rs {Math.abs(Math.round(diff)).toLocaleString()} /MT
+                            ({arrP > samP ? 'higher' : 'lower'} than sample)
+                          </span>
+                          {Math.abs(diff) > 0 && (
+                            <button
+                              onClick={() => openAnalysisModal('arrival')}
+                              className="px-2.5 py-1 rounded bg-white/80 text-blue-700 font-medium hover:bg-white border border-blue-200 text-[11px]"
+                            >
+                              Revise Arrival Price
+                            </button>
+                          )}
                         </div>
                         );
                       })()}

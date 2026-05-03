@@ -407,27 +407,41 @@ const millingController = {
       }
 
       const result = await db.transaction(async (trx) => {
-        const [sample] = await trx('milling_quality_samples')
-          .insert({
-            batch_id: id,
-            analysis_type,
-            moisture: moisture != null ? parseFloat(moisture) : null,
-            broken: broken != null ? parseFloat(broken) : null,
-            b1_pct: b1_pct != null ? parseFloat(b1_pct) : null,
-            b2_pct: b2_pct != null ? parseFloat(b2_pct) : null,
-            b3_pct: b3_pct != null ? parseFloat(b3_pct) : null,
-            csr_pct: csr_pct != null ? parseFloat(csr_pct) : null,
-            short_grain_pct: short_grain_pct != null ? parseFloat(short_grain_pct) : null,
-            chalky: chalky != null ? parseFloat(chalky) : null,
-            foreign_matter: foreign_matter != null ? parseFloat(foreign_matter) : null,
-            discoloration: discoloration != null ? parseFloat(discoloration) : null,
-            purity: purity != null ? parseFloat(purity) : null,
-            grain_size: grain_size || null,
-            price_per_kg: price_per_kg != null ? parseFloat(price_per_kg) : null,
-            price_per_mt: price_per_mt != null ? parseFloat(price_per_mt) : null,
-            created_by: req.user?.id,
-          })
-          .returning('*');
+        // Upsert: one canonical row per (batch, analysis_type). Editing
+        // the arrival price after seeing the sample-vs-arrival variance
+        // updates the existing row instead of stacking duplicates.
+        const fields = {
+          batch_id: id,
+          analysis_type,
+          moisture: moisture != null ? parseFloat(moisture) : null,
+          broken: broken != null ? parseFloat(broken) : null,
+          b1_pct: b1_pct != null ? parseFloat(b1_pct) : null,
+          b2_pct: b2_pct != null ? parseFloat(b2_pct) : null,
+          b3_pct: b3_pct != null ? parseFloat(b3_pct) : null,
+          csr_pct: csr_pct != null ? parseFloat(csr_pct) : null,
+          short_grain_pct: short_grain_pct != null ? parseFloat(short_grain_pct) : null,
+          chalky: chalky != null ? parseFloat(chalky) : null,
+          foreign_matter: foreign_matter != null ? parseFloat(foreign_matter) : null,
+          discoloration: discoloration != null ? parseFloat(discoloration) : null,
+          purity: purity != null ? parseFloat(purity) : null,
+          grain_size: grain_size || null,
+          price_per_kg: price_per_kg != null ? parseFloat(price_per_kg) : null,
+          price_per_mt: price_per_mt != null ? parseFloat(price_per_mt) : null,
+        };
+        const existing = await trx('milling_quality_samples')
+          .where({ batch_id: id, analysis_type })
+          .first();
+        let sample;
+        if (existing) {
+          [sample] = await trx('milling_quality_samples')
+            .where({ id: existing.id })
+            .update({ ...fields, updated_at: trx.fn.now() })
+            .returning('*');
+        } else {
+          [sample] = await trx('milling_quality_samples')
+            .insert({ ...fields, created_by: req.user?.id })
+            .returning('*');
+        }
 
         // If arrival type with price_per_mt, auto-calculate raw rice cost
         if (analysis_type === 'arrival' && price_per_mt) {
