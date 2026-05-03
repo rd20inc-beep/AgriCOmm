@@ -734,6 +734,36 @@ export function useDeleteBagType() {
   });
 }
 
+export function useUpdateWarehouse() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => adminApi.updateWarehouse(id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.warehouses.all }),
+  });
+}
+export function useDeleteWarehouse() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => adminApi.deleteWarehouse(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.warehouses.all }),
+  });
+}
+
+export function useUpdateBankAccount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => adminApi.updateBankAccount(id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.bankAccounts.all }),
+  });
+}
+export function useDeleteBankAccount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => adminApi.deleteBankAccount(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.bankAccounts.all }),
+  });
+}
+
 export function useCreateBankAccount() {
   const qc = useQueryClient();
   return useMutation({
