@@ -61,17 +61,10 @@ const financeService = {
     const revenuePkrCurrent = revenueForeign * pkrRate;
     const fxGainLossTotal = revenuePkrCurrent - revenuePkrBooked;
 
-    // Export operational costs (PKR) — exclude internal allocations
-    // Currency-aware: if cost.currency='PKR', use amount as-is. Otherwise multiply by FX rate.
-    // This handles both production data (PKR amounts) and seed data (USD amounts).
-    // Currency-aware cost-to-PKR conversion with sanity check:
-    // - currency='PKR' → use as-is
-    // - currency='USD' but amount > 100000 → likely PKR stored incorrectly, use as-is
-    // - currency='USD' and amount <= 100000 → normal USD, multiply by FX rate
-    const hasEocCurrency = await db.schema.hasColumn('export_order_costs', 'currency');
-    const costToPkrExpr = hasEocCurrency
-      ? "CASE WHEN eoc.currency = 'PKR' THEN eoc.amount WHEN eoc.amount > 100000 THEN eoc.amount ELSE eoc.amount * COALESCE(eo.booked_fx_rate, " + pkrRate + ") END"
-      : "CASE WHEN eoc.amount > 100000 THEN eoc.amount ELSE eoc.amount * COALESCE(eo.booked_fx_rate, " + pkrRate + ") END";
+    // Export operational costs are paid to local Pakistani vendors and
+    // stored in PKR (business rule, enforced by migration 079 and the
+    // addCost handler). Sum amount directly — no FX conversion needed.
+    const costToPkrExpr = 'eoc.amount';
 
     const exportOpResult = await db('export_order_costs as eoc')
       .join('export_orders as eo', 'eoc.order_id', 'eo.id')

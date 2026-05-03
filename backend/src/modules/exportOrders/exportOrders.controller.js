@@ -700,6 +700,7 @@ const exportOrderController = {
           order_id: order.id,
           category,
           amount: 0,
+          currency: 'PKR', // outflow payments on export orders are always PKR
           notes: null,
         }));
 
@@ -1266,6 +1267,7 @@ const exportOrderController = {
             order_id: id,
             category,
             amount: parseFloat(amount),
+            currency: 'PKR', // outflow payments on export orders are always PKR
             notes: notes || null,
           })
           .returning('*');

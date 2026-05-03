@@ -20,7 +20,8 @@ const CONTRACT_SOFT_EDITABLE = new Set([
 ]);
 const TERMINAL_STATUSES = new Set(['Shipped', 'Arrived', 'Closed', 'Cancelled']);
 
-export default function OverviewTab({ order, formatCurrency, totalCosts, grossProfit, marginPct, exportCostCategories }) {
+export default function OverviewTab({ order, formatCurrency, formatPKR, totalCosts, grossProfit, marginPct, exportCostCategories }) {
+  const formatCost = formatPKR || formatCurrency;
   const { addToast } = useApp();
   const updateOrderMut = useUpdateOrder();
   const [editing, setEditing] = useState(false);
@@ -448,7 +449,7 @@ export default function OverviewTab({ order, formatCurrency, totalCosts, grossPr
 
       {/* Expected vs Actual Cost Snapshot */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-        <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Cost Snapshot</h3>
+        <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Cost Snapshot (PKR)</h3>
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-200">
@@ -472,14 +473,14 @@ export default function OverviewTab({ order, formatCurrency, totalCosts, grossPr
                   {exportCostCategories.map(cat => (
                     <tr key={cat.key}>
                       <td className="py-2 text-gray-600">{cat.label}</td>
-                      <td className="py-2 text-right text-gray-900">{est[cat.key] != null ? formatCurrency(est[cat.key]) : '\u2014'}</td>
-                      <td className="py-2 text-right text-gray-900">{formatCurrency(order.costs[cat.key] || 0)}</td>
+                      <td className="py-2 text-right text-gray-900">{est[cat.key] != null ? formatCost(est[cat.key]) : '\u2014'}</td>
+                      <td className="py-2 text-right text-gray-900">{formatCost(order.costs[cat.key] || 0)}</td>
                     </tr>
                   ))}
                   <tr className="border-t-2 border-gray-300">
                     <td className="py-2 font-semibold text-gray-900">Total</td>
-                    <td className="py-2 text-right font-semibold text-gray-900">{formatCurrency(estTotal)}</td>
-                    <td className="py-2 text-right font-semibold text-gray-900">{formatCurrency(totalCosts)}</td>
+                    <td className="py-2 text-right font-semibold text-gray-900">{formatCost(estTotal)}</td>
+                    <td className="py-2 text-right font-semibold text-gray-900">{formatCost(totalCosts)}</td>
                   </tr>
                 </>
               );

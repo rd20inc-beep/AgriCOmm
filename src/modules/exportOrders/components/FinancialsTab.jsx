@@ -1,7 +1,8 @@
 import React from 'react';
 import { DollarSign, Plus } from 'lucide-react';
 
-export default function FinancialsTab({ order, formatCurrency, totalCosts, grossProfit, marginPct, onConfirmAdvance, onRequestBalance, onAddExpense, onAddReceivable, canConfirmAdvance, canRequestBalance, exportCostCategories }) {
+export default function FinancialsTab({ order, formatCurrency, formatPKR, totalCosts, grossProfit, marginPct, onConfirmAdvance, onRequestBalance, onAddExpense, onAddReceivable, canConfirmAdvance, canRequestBalance, exportCostCategories }) {
+  const formatCost = formatPKR || formatCurrency;
   const totalReceivables = order.advanceExpected + order.balanceExpected;
   const totalReceived = order.advanceReceived + order.balanceReceived;
   const outstandingBalance = totalReceivables - totalReceived;
@@ -37,7 +38,7 @@ export default function FinancialsTab({ order, formatCurrency, totalCosts, gross
 
       {/* Outflows */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-        <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Outflows (Costs)</h3>
+        <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Outflows (Costs, PKR)</h3>
         <div className="space-y-3">
           {(() => {
             // Merge known categories with any extra categories from actual costs
@@ -63,15 +64,16 @@ export default function FinancialsTab({ order, formatCurrency, totalCosts, gross
               return (
                 <div key={cat.key} className="flex justify-between text-sm">
                   <span className="text-gray-600">{cat.label}</span>
-                  <span className={`font-medium ${val > 0 ? 'text-gray-900' : 'text-gray-400'}`}>{formatCurrency(val)}</span>
+                  <span className={`font-medium ${val > 0 ? 'text-gray-900' : 'text-gray-400'}`}>{formatCost(val)}</span>
                 </div>
               );
             });
           })()}
           <div className="border-t border-gray-200 pt-2 flex justify-between text-sm font-semibold">
             <span className="text-gray-700">Total Costs</span>
-            <span className="text-gray-900">{formatCurrency(totalCosts)}</span>
+            <span className="text-gray-900">{formatCost(totalCosts)}</span>
           </div>
+          <p className="text-xs text-gray-400 italic pt-1">All outflows paid to local vendors in PKR.</p>
         </div>
       </div>
 

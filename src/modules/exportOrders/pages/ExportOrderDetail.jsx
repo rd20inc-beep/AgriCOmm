@@ -187,7 +187,10 @@ export default function ExportOrderDetail() {
   const totalCosts = Object.values(order.costs || {}).reduce((sum, c) => sum + (parseFloat(c) || 0), 0);
   const grossProfit = (parseFloat(order.contractValue) || 0) - totalCosts;
   const marginPct = order.contractValue > 0 ? ((grossProfit / (parseFloat(order.contractValue) || 1)) * 100).toFixed(1) : '0.0';
-  const formatCurrency = (value) => '$' + (parseFloat(value) || 0).toLocaleString();
+  const currencySymbols = { USD: '$', EUR: '€', GBP: '£' };
+  const orderSymbol = currencySymbols[order.currency] || '$';
+  const formatCurrency = (value) => orderSymbol + (parseFloat(value) || 0).toLocaleString();
+  const formatPKR = (value) => 'Rs ' + (parseFloat(value) || 0).toLocaleString();
   const backendActions = order.allowedActions || {};
 
   // --- Modal openers (reset form state then show) ---
@@ -473,7 +476,7 @@ export default function ExportOrderDetail() {
         id: orderId,
         data: { category: expenseCategory, amount, notes: expenseNotes },
       });
-      addToast(`$${amount.toLocaleString()} added to ${expenseCategory}`);
+      addToast(`Rs ${amount.toLocaleString()} added to ${expenseCategory}`);
     } catch (err) {
       addToast(err.message || 'Failed to add expense', 'error');
     }
@@ -696,11 +699,12 @@ export default function ExportOrderDetail() {
 
       {/* Tab Content */}
       <div>
-        {activeTab === 'overview' && <OverviewTab order={order} formatCurrency={formatCurrency} totalCosts={totalCosts} grossProfit={grossProfit} marginPct={marginPct} exportCostCategories={exportCostCategories} />}
+        {activeTab === 'overview' && <OverviewTab order={order} formatCurrency={formatCurrency} formatPKR={formatPKR} totalCosts={totalCosts} grossProfit={grossProfit} marginPct={marginPct} exportCostCategories={exportCostCategories} />}
         {activeTab === 'financials' && (
           <FinancialsTab
             order={order}
             formatCurrency={formatCurrency}
+            formatPKR={formatPKR}
             totalCosts={totalCosts}
             grossProfit={grossProfit}
             marginPct={marginPct}
