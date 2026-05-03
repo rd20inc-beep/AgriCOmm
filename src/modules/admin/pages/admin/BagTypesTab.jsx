@@ -20,13 +20,17 @@ export default function BagTypesTab() {
   const openCreate = () => { setEditingId(null); setForm(EMPTY); setOpen(true); };
   const openEdit = (b) => {
     setEditingId(b.id);
+    // Postgres numeric columns come back as strings like "25.00" — coerce
+    // through parseFloat so the value matches the <option> ("25", not "25.00").
+    const sizeNum = parseFloat(b.sizeKg);
+    const reorderNum = parseInt(b.reorderLevel, 10);
     setForm({
       name: b.name || '',
       category: b.category || 'empty',
-      sizeKg: b.sizeKg != null ? String(b.sizeKg) : '25',
+      sizeKg: !isNaN(sizeNum) ? String(sizeNum) : '25',
       material: b.material || '',
       description: b.description || '',
-      reorderLevel: b.reorderLevel != null ? String(b.reorderLevel) : '100',
+      reorderLevel: !isNaN(reorderNum) ? String(reorderNum) : '100',
     });
     setOpen(true);
   };
