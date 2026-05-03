@@ -4,13 +4,13 @@ import { useApp } from '../../../context/AppContext';
 import { useBuyers, useSaveBuyer, useDeleteBuyer } from '../../../api/queries';
 import Modal from '../../../components/Modal';
 import StatusBadge from '../../../components/StatusBadge';
+import { PAYMENT_TERMS } from '../../../shared/constants/paymentTerms';
 
-const PAYMENT_TERMS = ['Advance', 'Net 15', 'Net 30', 'Net 45', 'Net 60', 'LC at Sight', 'LC 30 Days', 'LC 60 Days', 'CAD', 'Open Account'];
 const CURRENCIES = ['USD', 'PKR', 'EUR', 'GBP', 'AED'];
 
 const emptyForm = {
   name: '', country: '', contact_person: '', email: '', phone: '', address: '',
-  payment_terms: 'Advance', currency: 'USD', credit_limit: '',
+  payment_terms: 'CAD', currency: 'USD', credit_limit: '',
   bank_name: '', bank_account: '', bank_swift: '', bank_iban: '',
 };
 
@@ -61,7 +61,7 @@ export default function Buyers() {
       email: buyer.email || '',
       phone: buyer.phone || '',
       address: buyer.address || '',
-      payment_terms: buyer.payment_terms || 'Advance',
+      payment_terms: buyer.payment_terms || 'CAD',
       currency: buyer.currency || 'USD',
       credit_limit: buyer.credit_limit || '',
       bank_name: buyer.bank_name || '',

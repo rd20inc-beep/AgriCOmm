@@ -580,6 +580,7 @@ const exportOrderController = {
         bag_notes,
         master_bag_size_kg,
         master_bag_type,
+        payment_terms,
         // Packing / receiving mode
         receiving_mode,
         quantity_unit,
@@ -672,6 +673,7 @@ const exportOrderController = {
             bag_notes: bag_notes || null,
             master_bag_size_kg: master_bag_size_kg ? parseFloat(master_bag_size_kg) : null,
             master_bag_type: master_bag_type || null,
+            payment_terms: payment_terms || null,
             // Packing / receiving mode
             receiving_mode: receiving_mode || null,
             quantity_unit: quantity_unit || null,

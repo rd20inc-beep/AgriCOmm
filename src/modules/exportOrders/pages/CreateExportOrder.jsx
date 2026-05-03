@@ -12,6 +12,7 @@ import { validateForm, required, positiveNonZero } from '../../../utils/validati
 import { toKg, fromKg, allEquivalents, UNITS } from '../../../utils/unitConversion';
 import SearchSelect from '../../../components/SearchSelect';
 import { INCOTERMS, incotermHint } from '../../../shared/constants/incoterms';
+import { PAYMENT_TERMS } from '../../../shared/constants/paymentTerms';
 
 const RECEIVING_MODES = [
   { value: 'bags', label: 'In Bags', desc: 'Standard packed bags', icon: ShoppingBag },
@@ -70,6 +71,7 @@ export default function CreateExportOrder() {
     qtyMT: '', quantityUnit: 'ton', pricePerMT: '',
     // Section 4: Order terms
     currency: 'USD', incoterm: 'FOB', advancePct: 20, source: 'Internal Mill',
+    paymentTerms: 'CAD',
     // Section 5: Receiving mode (shown after qty entered)
     receivingMode: '',
     // Section 6: Bag spec (shown only when receiving mode needs it)
@@ -205,6 +207,7 @@ export default function CreateExportOrder() {
       advance_pct: advPct,
       advance_expected: advExpected,
       balance_expected: contractValue - advExpected,
+      payment_terms: form.paymentTerms || null,
       shipment_eta: form.shipmentWindowEnd || form.shipmentWindowStart || null,
       source: form.source,
       notes: form.notes || null,
@@ -475,6 +478,13 @@ export default function CreateExportOrder() {
           <div className="form-group">
             <label className="form-label">Advance %</label>
             <input type="number" value={form.advancePct} onChange={e => set('advancePct', e.target.value)} className="form-input" min="0" max="100" />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Payment Terms</label>
+            <select value={form.paymentTerms} onChange={e => set('paymentTerms', e.target.value)} className="form-input">
+              <option value="">Select…</option>
+              {PAYMENT_TERMS.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
           </div>
         </div>
 

@@ -4,6 +4,7 @@ import { ExternalLink, Pencil, Save, X } from 'lucide-react';
 import { useUpdateOrder } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
 import { INCOTERMS, incotermHint } from '../../../shared/constants/incoterms';
+import { PAYMENT_TERMS } from '../../../shared/constants/paymentTerms';
 
 // Statuses where ANY contract field is fully editable.
 // After milling starts, qty/price changes can desync downstream artifacts —
@@ -419,8 +420,18 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Payment Terms</label>
-              <input type="text" value={specs.payment_terms} placeholder='e.g. "20% Advance / 80% Against BL" or "100% LC at sight"' onChange={e => setSpecs(s => ({ ...s, payment_terms: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
-              <p className="text-[11px] text-gray-500 mt-1">Free text — appears on Proforma Invoice and Bank docs. Leave blank to use the customer's default or auto-generated text.</p>
+              <input
+                type="text"
+                list="payment-terms-suggestions"
+                value={specs.payment_terms}
+                placeholder='e.g. "CAD" or "LC 60 Days" or "20% Advance / 80% Against BL"'
+                onChange={e => setSpecs(s => ({ ...s, payment_terms: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              />
+              <datalist id="payment-terms-suggestions">
+                {PAYMENT_TERMS.map(t => <option key={t} value={t} />)}
+              </datalist>
+              <p className="text-[11px] text-gray-500 mt-1">Pick a standard term or type a custom one. Appears on Proforma Invoice and Bank docs.</p>
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Quality Description</label>
