@@ -165,6 +165,8 @@ export function transformOrder(dbOrder) {
     grossProfitPkr: parseFloat(dbOrder.gross_profit_pkr) || 0,
     grossProfitUsd: parseFloat(dbOrder.gross_profit_usd) || 0,
     costLockedAtDispatch: !!dbOrder.cost_locked_at_dispatch,
+    bookedFxRate: parseFloat(dbOrder.booked_fx_rate) || null,
+    contractValuePkrLocked: parseFloat(dbOrder.contract_value_pkr_locked) || 0,
     shipmentContainers,
     createdAt: dbOrder.created_at,
     notes: dbOrder.notes,

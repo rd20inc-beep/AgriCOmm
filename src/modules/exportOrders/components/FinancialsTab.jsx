@@ -82,9 +82,9 @@ export default function FinancialsTab({ order, formatCurrency, formatPKR, totalC
         <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Summary</h3>
         <div className="space-y-3">
           <div className="flex justify-between text-sm">
-            <span className="text-gray-600">Gross Profit</span>
+            <span className="text-gray-600">Gross Profit (PKR)</span>
             <span className={`font-semibold ${grossProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-              {formatCurrency(grossProfit)}
+              {formatCost(grossProfit)}
             </span>
           </div>
           <div className="flex justify-between text-sm">
@@ -99,6 +99,7 @@ export default function FinancialsTab({ order, formatCurrency, formatPKR, totalC
               {formatCurrency(outstandingBalance)}
             </span>
           </div>
+          <p className="text-xs text-gray-400 italic pt-1">Profit converts contract value to PKR at the order's booked FX rate, then subtracts PKR costs.</p>
         </div>
       </div>
 
