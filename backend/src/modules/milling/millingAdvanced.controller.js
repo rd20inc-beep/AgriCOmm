@@ -595,17 +595,33 @@ const millingAdvancedController = {
     }
   },
 
-  // Refuse to delete a mill that any milling_batch points at — a cascade
-  // would orphan production history. Surface a friendly error instead.
+  // Refuse to delete a mill that any child table points at — a delete
+  // would either orphan production history (CASCADE) or 23503 (NO
+  // ACTION). Proactively count refs across all known children so the
+  // user gets a specific message naming the blocker, and catch any
+  // residual FK violation from tables we forgot.
   async deleteMill(req, res) {
+    const CHILD_TABLES = [
+      ['milling_batches',     'milling batch(es)'],
+      ['mill_workers',        'worker(s)'],
+      ['mill_expenses',       'expense record(s)'],
+      ['mill_performance',    'performance record(s)'],
+      ['utility_consumption', 'utility-consumption record(s)'],
+      ['machine_downtime',    'downtime record(s)'],
+      ['production_plans',    'production plan(s)'],
+    ];
     try {
       const { id } = req.params;
-      const inUse = await db('milling_batches').where({ mill_id: id }).count('* as n').first();
-      if (parseInt(inUse.n, 10) > 0) {
-        return res.status(409).json({
-          success: false,
-          message: `Cannot delete: this mill is referenced by ${inUse.n} milling batch(es). Reassign or close them first.`,
-        });
+      for (const [table, label] of CHILD_TABLES) {
+        const exists = await db.schema.hasTable(table);
+        if (!exists) continue;
+        const row = await db(table).where({ mill_id: id }).count('* as n').first();
+        if (parseInt(row.n, 10) > 0) {
+          return res.status(409).json({
+            success: false,
+            message: `Cannot delete: this mill is referenced by ${row.n} ${label}. Reassign or remove them first.`,
+          });
+        }
       }
       const deleted = await db('mills').where({ id }).del();
       if (deleted === 0) {
@@ -613,6 +629,15 @@ const millingAdvancedController = {
       }
       return res.json({ success: true });
     } catch (err) {
+      // Belt-and-braces: some other table we didn't list above also has
+      // an FK on mills.id. Surface the generic friendly message instead
+      // of a 500.
+      if (err.code === '23503') {
+        return res.status(409).json({
+          success: false,
+          message: 'Cannot delete: this mill is referenced by other records. Reassign or remove them first.',
+        });
+      }
       console.error('deleteMill error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
