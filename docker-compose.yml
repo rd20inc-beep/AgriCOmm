@@ -52,6 +52,9 @@ services:
       - "3001:3001"
     volumes:
       - uploads:/app/uploads
+      # WhatsApp Web (Baileys) session state — must persist across
+      # container rebuilds so users don't have to re-scan the QR.
+      - wa_session:/app/wa-session
 
   # Frontend (Nginx serving built static files)
   frontend:
@@ -70,3 +73,4 @@ services:
 volumes:
   pgdata:
   uploads:
+  wa_session:

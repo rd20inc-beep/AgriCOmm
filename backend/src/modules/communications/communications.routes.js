@@ -28,6 +28,21 @@ router.post('/whatsapp/send', communicationController.sendWhatsAppMessage);
 router.post('/whatsapp/preview', communicationController.previewWhatsAppTemplate);
 router.get('/whatsapp/logs', communicationController.getWhatsAppLogs);
 
+// QR-pairing channel (WhatsApp Web). Free, no Meta API, but breaks ToS
+// — use for internal comms; keep API for customer-facing transactional.
+const whatsappQr = require('./whatsappQr.service');
+router.get('/whatsapp/qr/status', async (_req, res) => {
+  return res.json({ success: true, data: whatsappQr.getStatus() });
+});
+router.post('/whatsapp/qr/start', async (_req, res) => {
+  const status = await whatsappQr.start();
+  return res.json({ success: true, data: status });
+});
+router.post('/whatsapp/qr/logout', async (_req, res) => {
+  const status = await whatsappQr.logout();
+  return res.json({ success: true, data: status });
+});
+
 // ============================================================
 // Comments
 // ============================================================

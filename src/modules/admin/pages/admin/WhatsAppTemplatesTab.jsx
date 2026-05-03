@@ -221,13 +221,65 @@ export default function WhatsAppTemplatesTab() {
   // ─ Copied variable indicator ─
   const [copiedVar, setCopiedVar] = useState(null);
 
+  // ─ QR-pairing channel state (alternative to API) ─
+  const [qrStatus, setQrStatus] = useState({ status: 'disconnected', qrDataUrl: null, phone: null, error: null });
+  const [qrBusy, setQrBusy] = useState(false);
+
   const bodyRef = useRef(null);
 
   // ─ Fetch templates on mount ─
   useEffect(() => {
     fetchTemplates();
     fetchConfig();
+    pollQrStatus();
   }, []);
+
+  // While the QR card is on screen, poll status every 2s so the QR
+  // updates as Baileys cycles it and we see "connected" the moment
+  // the user finishes scanning.
+  useEffect(() => {
+    if (qrStatus.status === 'connected' || qrStatus.status === 'disconnected') return;
+    const id = setInterval(pollQrStatus, 2000);
+    return () => clearInterval(id);
+  }, [qrStatus.status]);
+
+  const pollQrStatus = async () => {
+    try {
+      const res = await api.get('/api/communication/whatsapp/qr/status');
+      const next = res?.data || res;
+      if (next && next.status) setQrStatus(next);
+    } catch {
+      // backend may be on an older deploy — silently keep current state
+    }
+  };
+
+  const handleQrStart = async () => {
+    setQrBusy(true);
+    try {
+      const res = await api.post('/api/communication/whatsapp/qr/start', {});
+      const next = res?.data || res;
+      if (next?.status) setQrStatus(next);
+    } catch (err) {
+      addToast(err.message || 'Could not start WhatsApp QR session', 'error');
+    } finally {
+      setQrBusy(false);
+    }
+  };
+
+  const handleQrLogout = async () => {
+    if (!window.confirm('Disconnect the WhatsApp QR session? Templates routed via QR will stop sending until you re-pair.')) return;
+    setQrBusy(true);
+    try {
+      const res = await api.post('/api/communication/whatsapp/qr/logout', {});
+      const next = res?.data || res;
+      if (next?.status) setQrStatus(next);
+      addToast('Disconnected from WhatsApp', 'info');
+    } catch (err) {
+      addToast(err.message || 'Logout failed', 'error');
+    } finally {
+      setQrBusy(false);
+    }
+  };
 
   // The backend whatsapp_templates table uses snake_case columns AND
   // lower-cased enum values (entity='export', recipient_type='customer'),
@@ -500,6 +552,85 @@ export default function WhatsAppTemplatesTab() {
 
   return (
     <div className="space-y-6">
+      {/* Section 0: QR Pairing (WhatsApp Web) */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: '#128C7E' }}>
+                <MessageSquare className="w-4 h-4 text-white" />
+              </div>
+              WhatsApp QR Pairing
+            </h2>
+            <p className="text-xs text-gray-500 mt-1 leading-snug max-w-xl">
+              Pair the server with your WhatsApp account by scanning a QR code — same as WhatsApp Web. No API fees or
+              business verification, but it violates WhatsApp's ToS so the number can be banned. Best for internal-only
+              comms (mill staff alerts) — keep the API channel below for customer-facing messages.
+            </p>
+          </div>
+          <div className="text-right shrink-0">
+            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
+              qrStatus.status === 'connected' ? 'bg-green-100 text-green-700' :
+              qrStatus.status === 'qr' ? 'bg-amber-100 text-amber-700' :
+              qrStatus.status === 'connecting' ? 'bg-blue-100 text-blue-700' :
+              qrStatus.status === 'error' ? 'bg-red-100 text-red-700' :
+              'bg-gray-100 text-gray-600'
+            }`}>
+              {qrStatus.status === 'connected' && <Check className="w-3 h-3 mr-1" />}
+              {qrStatus.status === 'qr' && <RefreshCw className="w-3 h-3 mr-1 animate-spin" />}
+              {qrStatus.status === 'connecting' && <RefreshCw className="w-3 h-3 mr-1 animate-spin" />}
+              {qrStatus.status === 'connected' ? `Connected${qrStatus.phone ? ` · +${qrStatus.phone}` : ''}` :
+                qrStatus.status === 'qr' ? 'Awaiting Scan' :
+                qrStatus.status === 'connecting' ? 'Connecting...' :
+                qrStatus.status === 'error' ? 'Error' : 'Disconnected'}
+            </span>
+          </div>
+        </div>
+
+        {qrStatus.status === 'connected' ? (
+          <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-4 py-3">
+            <div className="text-sm text-green-800">
+              <div className="font-medium">Linked to {qrStatus.phone ? `+${qrStatus.phone}` : 'this device'}</div>
+              <div className="text-xs text-green-700 mt-0.5">Templates with channel "QR" will send through this connection.</div>
+            </div>
+            <button
+              onClick={handleQrLogout}
+              disabled={qrBusy}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-700 bg-white border border-red-200 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-50"
+            >
+              {qrBusy ? <RefreshCw className="w-4 h-4 animate-spin" /> : <X className="w-4 h-4" />}
+              Disconnect
+            </button>
+          </div>
+        ) : qrStatus.status === 'qr' && qrStatus.qrDataUrl ? (
+          <div className="flex flex-col sm:flex-row items-center gap-4">
+            <img src={qrStatus.qrDataUrl} alt="WhatsApp pairing QR code" className="w-44 h-44 rounded-lg border border-gray-200" />
+            <ol className="text-xs text-gray-700 space-y-1 list-decimal pl-4">
+              <li>Open WhatsApp on your phone.</li>
+              <li>Tap <strong>Settings → Linked Devices → Link a Device</strong>.</li>
+              <li>Point your phone at the QR code on this screen.</li>
+              <li>Status will flip to <strong>Connected</strong> within a few seconds.</li>
+              <li>QR codes expire after ~60s — a fresh one auto-appears.</li>
+            </ol>
+          </div>
+        ) : (
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleQrStart}
+              disabled={qrBusy}
+              className="inline-flex items-center gap-2 text-white px-4 py-2.5 rounded-lg hover:opacity-90 transition-colors font-medium text-sm disabled:opacity-50"
+              style={{ backgroundColor: '#128C7E' }}
+            >
+              {qrBusy ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+              {qrStatus.status === 'connecting' ? 'Starting...' : 'Generate QR Code'}
+            </button>
+            {qrStatus.error && (
+              <span className="text-xs text-red-600">{qrStatus.error}</span>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Section A: WhatsApp API Configuration */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2 mb-6">
