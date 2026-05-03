@@ -4,7 +4,10 @@ import { useApp } from '../../../../context/AppContext';
 import { useCreateProduct, useUpdateProduct, useDeleteProduct } from '../../../../api/queries';
 import Modal from '../../../../components/Modal';
 
-const EMPTY = { name: '', code: '', broken_pct: 5, grade: 'Premium' };
+// Note: broken % is a per-order quality target (export_order_items.
+// broken_pct_target), not a product-level attribute, so it isn't on
+// this form. The products table holds name + code + grade + category.
+const EMPTY = { name: '', code: '', grade: 'Premium', category: '', description: '' };
 
 export default function ProductsTab() {
   const { productsList, addToast } = useApp();
@@ -23,8 +26,9 @@ export default function ProductsTab() {
     setForm({
       name: p.name || '',
       code: p.code || '',
-      broken_pct: p.brokenPct ?? p.broken_pct ?? 5,
       grade: p.grade || 'Premium',
+      category: p.category || '',
+      description: p.description || '',
     });
     setOpen(true);
   };
@@ -34,9 +38,10 @@ export default function ProductsTab() {
     if (!name) { addToast('Product name is required', 'error'); return; }
     const payload = {
       name,
-      code: form.code.trim(),
-      broken_pct: parseFloat(form.broken_pct) || 0,
-      grade: form.grade,
+      code: form.code.trim() || null,
+      grade: form.grade || null,
+      category: form.category.trim() || null,
+      description: form.description.trim() || null,
     };
     try {
       if (editingId) {
@@ -142,10 +147,6 @@ export default function ProductsTab() {
             <input type="text" value={form.code} onChange={(e) => set('code', e.target.value)} placeholder="e.g. IR-5-P" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Broken %</label>
-            <input type="number" step="1" min="0" max="100" value={form.broken_pct} onChange={(e) => set('broken_pct', parseFloat(e.target.value) || 0)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
-          </div>
-          <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Grade</label>
             <select value={form.grade} onChange={(e) => set('grade', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white">
               <option value="Premium">Premium</option>
@@ -153,6 +154,14 @@ export default function ProductsTab() {
               <option value="Economy">Economy</option>
               <option value="Specialty">Specialty</option>
             </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+            <input type="text" value={form.category} onChange={(e) => set('category', e.target.value)} placeholder="e.g. Rice, By-Product" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+            <textarea value={form.description} onChange={(e) => set('description', e.target.value)} rows={2} placeholder="Optional description" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none" />
           </div>
           <div className="flex justify-end gap-2 pt-2 border-t border-gray-200">
             <button onClick={() => setOpen(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>

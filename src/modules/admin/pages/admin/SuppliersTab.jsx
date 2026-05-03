@@ -4,7 +4,11 @@ import { useApp } from '../../../../context/AppContext';
 import { useCreateSupplier, useUpdateSupplier, useDeleteSupplier } from '../../../../api/queries';
 import Modal from '../../../../components/Modal';
 
-const EMPTY = { name: '', type: 'Farmer Cooperative', location: '', contact_person: '' };
+// Note: the suppliers table column is `address` (matching customers).
+// We label it "Location" in the UI for our trade convention but post
+// it as `address` so the createCrud insert doesn't 500 on an unknown
+// column.
+const EMPTY = { name: '', type: 'Farmer Cooperative', address: '', contact_person: '' };
 
 export default function SuppliersTab() {
   const { suppliersList, addToast } = useApp();
@@ -23,7 +27,7 @@ export default function SuppliersTab() {
     setForm({
       name: s.name || '',
       type: s.type || 'Farmer Cooperative',
-      location: s.location || '',
+      address: s.address || s.location || '',
       contact_person: s.contact || s.contact_person || '',
     });
     setOpen(true);
@@ -35,7 +39,7 @@ export default function SuppliersTab() {
     const payload = {
       name,
       type: form.type,
-      location: form.location.trim(),
+      address: form.address.trim(),
       contact_person: form.contact_person.trim(),
     };
     try {
@@ -145,7 +149,7 @@ export default function SuppliersTab() {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Location</label>
-            <input type="text" value={form.location} onChange={(e) => set('location', e.target.value)} placeholder="e.g. Lahore, Punjab" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+            <input type="text" value={form.address} onChange={(e) => set('address', e.target.value)} placeholder="e.g. Lahore, Punjab" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Contact Person</label>
