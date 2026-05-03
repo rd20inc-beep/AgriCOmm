@@ -229,19 +229,39 @@ export default function WhatsAppTemplatesTab() {
     fetchConfig();
   }, []);
 
-  // The backend whatsapp_templates table uses snake_case columns
-  // (body_template, trigger_event, recipient_type, is_active, auto_send)
-  // while this component renders the camelCase shape used by the
-  // hardcoded DEFAULT_TEMPLATES. Normalise so tpl.body, tpl.triggerEvent,
-  // etc. always exist — otherwise tpl.body.substring(...) crashes the
-  // whole tab the moment a real DB row loads.
+  // The backend whatsapp_templates table uses snake_case columns AND
+  // lower-cased enum values (entity='export', recipient_type='customer'),
+  // while this component's constants are camelCase + Capitalized
+  // ('Export', 'Customer'). Without normalisation:
+  //   - tpl.body.substring(...) throws (body_template never copied)
+  //   - <select value="export"> warns "no matching option"
+  //   - ENTITY_COLORS[tpl.entity] returns undefined → grey-outline tag
+  //   - the Trigger lookup TRIGGER_EVENTS[tpl.entity].find(...) returns
+  //     undefined for 'export' (we only key on 'Export') and the label
+  //     falls back to the raw enum, looking ugly.
+  // Map both directions: read maps DB → display, save maps display → DB.
+  const ENTITY_DB_TO_UI = {
+    export: 'Export',
+    milling: 'Milling',
+    local_sale: 'Local Sale',
+    finance: 'Finance',
+    general: 'General',
+  };
+  const RECIPIENT_DB_TO_UI = {
+    customer: 'Customer',
+    supplier: 'Supplier',
+    internal: 'Internal',
+  };
+  const normalizeEntity = (e) => ENTITY_DB_TO_UI[String(e || '').toLowerCase()] || (e || 'General');
+  const normalizeRecipient = (r) => RECIPIENT_DB_TO_UI[String(r || '').toLowerCase()] || (r || 'Customer');
+
   const normalizeTemplate = (row) => ({
     id: row.id,
     name: row.name || '',
     slug: row.slug || '',
-    entity: row.entity || 'General',
+    entity: normalizeEntity(row.entity),
     triggerEvent: row.triggerEvent || row.trigger_event || 'custom',
-    recipientType: row.recipientType || row.recipient_type || 'Customer',
+    recipientType: normalizeRecipient(row.recipientType || row.recipient_type),
     autoSend: row.autoSend ?? row.auto_send ?? false,
     active: row.active ?? row.is_active ?? true,
     body: row.body || row.body_template || '',
@@ -365,13 +385,18 @@ export default function WhatsAppTemplatesTab() {
       body: formBody,
       active: editingTemplate ? editingTemplate.active : true,
     };
-    // Backend (whatsapp_templates table) shape — snake_case columns.
+    // Backend (whatsapp_templates table) shape — snake_case columns
+    // AND lowercase/snake enum values to match existing rows.
+    const ENTITY_UI_TO_DB = {
+      Export: 'export', Milling: 'milling',
+      'Local Sale': 'local_sale', Finance: 'finance', General: 'general',
+    };
     const wireData = {
       name: formName,
       slug: formSlug,
-      entity: formEntity,
+      entity: ENTITY_UI_TO_DB[formEntity] || String(formEntity || '').toLowerCase(),
       trigger_event: formTrigger,
-      recipient_type: formRecipient,
+      recipient_type: String(formRecipient || '').toLowerCase(),
       auto_send: formAutoSend,
       body_template: formBody,
       is_active: editingTemplate ? editingTemplate.active : true,
