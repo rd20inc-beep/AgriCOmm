@@ -1,45 +1,64 @@
 import { useState } from 'react';
-import { Truck, Plus, MapPin } from 'lucide-react';
+import { Truck, Plus, MapPin, Pencil, Trash2 } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
-import { useCreateSupplier } from '../../../../api/queries';
+import { useCreateSupplier, useUpdateSupplier, useDeleteSupplier } from '../../../../api/queries';
 import Modal from '../../../../components/Modal';
+
+const EMPTY = { name: '', type: 'Farmer Cooperative', location: '', contact_person: '' };
 
 export default function SuppliersTab() {
   const { suppliersList, addToast } = useApp();
-  const createSupplierMut = useCreateSupplier();
+  const createMut = useCreateSupplier();
+  const updateMut = useUpdateSupplier();
+  const deleteMut = useDeleteSupplier();
 
-  const [supplierModal, setSupplierModal] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [form, setForm] = useState(EMPTY);
+  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
-  // Supplier form state
-  const [suppName, setSuppName] = useState('');
-  const [suppType, setSuppType] = useState('Farmer Cooperative');
-  const [suppLocation, setSuppLocation] = useState('');
-  const [suppContact, setSuppContact] = useState('');
-
-  const resetSupplierForm = () => {
-    setSuppName('');
-    setSuppType('Farmer Cooperative');
-    setSuppLocation('');
-    setSuppContact('');
+  const openCreate = () => { setEditingId(null); setForm(EMPTY); setOpen(true); };
+  const openEdit = (s) => {
+    setEditingId(s.id);
+    setForm({
+      name: s.name || '',
+      type: s.type || 'Farmer Cooperative',
+      location: s.location || '',
+      contact_person: s.contact || s.contact_person || '',
+    });
+    setOpen(true);
   };
 
-  const handleSaveSupplier = async () => {
-    if (!suppName.trim()) {
-      addToast('Supplier name is required', 'error');
-      return;
-    }
+  const handleSave = async () => {
+    const name = form.name.trim();
+    if (!name) { addToast('Supplier name is required', 'error'); return; }
+    const payload = {
+      name,
+      type: form.type,
+      location: form.location.trim(),
+      contact_person: form.contact_person.trim(),
+    };
     try {
-      await createSupplierMut.mutateAsync({
-        name: suppName.trim(),
-        type: suppType,
-        location: suppLocation.trim(),
-        contact_person: suppContact.trim(),
-      });
-      addToast(`Supplier "${suppName.trim()}" added successfully`, 'success');
-      resetSupplierForm();
-      setSupplierModal(false);
+      if (editingId) {
+        await updateMut.mutateAsync({ id: editingId, data: payload });
+        addToast(`Supplier "${name}" updated`, 'success');
+      } else {
+        await createMut.mutateAsync(payload);
+        addToast(`Supplier "${name}" added`, 'success');
+      }
+      setOpen(false);
     } catch (err) {
-      addToast(`Failed to create supplier: ${err.message}`, 'error');
+      addToast(`Failed to save: ${err.message}`, 'error');
+    }
+  };
+
+  const handleDelete = async (s) => {
+    if (!window.confirm(`Delete supplier "${s.name}"? This cannot be undone.`)) return;
+    try {
+      await deleteMut.mutateAsync(s.id);
+      addToast(`Supplier "${s.name}" deleted`, 'success');
+    } catch (err) {
+      addToast(err.message || 'Delete failed (the supplier may be in use by a milling batch or lot)', 'error');
     }
   };
 
@@ -52,7 +71,7 @@ export default function SuppliersTab() {
             Suppliers
           </h2>
           <button
-            onClick={() => { resetSupplierForm(); setSupplierModal(true); }}
+            onClick={openCreate}
             className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
           >
             <Plus className="w-4 h-4" />
@@ -68,6 +87,7 @@ export default function SuppliersTab() {
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">Type</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">Location</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">Contact Person</th>
+                <th className="text-right px-4 py-3 font-semibold text-gray-600">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -91,6 +111,16 @@ export default function SuppliersTab() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-gray-900">{s.contact}</td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="inline-flex gap-1">
+                      <button onClick={() => openEdit(s)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit">
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => handleDelete(s)} className="p-1.5 rounded hover:bg-red-50 text-red-600" title="Delete">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -98,69 +128,32 @@ export default function SuppliersTab() {
         </div>
       </div>
 
-      {/* Add Supplier Modal */}
-      <Modal
-        isOpen={supplierModal}
-        onClose={() => { resetSupplierForm(); setSupplierModal(false); }}
-        title="Add New Supplier"
-        size="md"
-      >
+      <Modal isOpen={open} onClose={() => setOpen(false)} title={editingId ? 'Edit Supplier' : 'Add New Supplier'} size="md">
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-            <input
-              type="text"
-              value={suppName}
-              onChange={(e) => setSuppName(e.target.value)}
-              placeholder="Supplier name"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-            />
+            <input type="text" value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Supplier name" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
-            <select
-              value={suppType}
-              onChange={(e) => setSuppType(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
-            >
+            <select value={form.type} onChange={(e) => set('type', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white">
               <option value="Farmer Cooperative">Farmer Cooperative</option>
               <option value="Paddy Supplier">Paddy Supplier</option>
               <option value="External Mill">External Mill</option>
+              <option value="Broker">Broker</option>
             </select>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Location</label>
-            <input
-              type="text"
-              value={suppLocation}
-              onChange={(e) => setSuppLocation(e.target.value)}
-              placeholder="e.g. Abakaliki, Ebonyi"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-            />
+            <input type="text" value={form.location} onChange={(e) => set('location', e.target.value)} placeholder="e.g. Lahore, Punjab" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Contact Person</label>
-            <input
-              type="text"
-              value={suppContact}
-              onChange={(e) => setSuppContact(e.target.value)}
-              placeholder="Contact person name"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-            />
+            <input type="text" value={form.contact_person} onChange={(e) => set('contact_person', e.target.value)} placeholder="Contact person name" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
           </div>
           <div className="flex justify-end gap-2 pt-2 border-t border-gray-200">
-            <button
-              onClick={() => setSupplierModal(false)}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSaveSupplier}
-              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              Save Supplier
-            </button>
+            <button onClick={() => setOpen(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
+            <button onClick={handleSave} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">{editingId ? 'Save Changes' : 'Add Supplier'}</button>
           </div>
         </div>
       </Modal>

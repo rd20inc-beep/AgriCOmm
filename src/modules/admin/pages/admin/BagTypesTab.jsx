@@ -1,35 +1,68 @@
 import { useState } from 'react';
-import { ShoppingBag, Plus } from 'lucide-react';
+import { ShoppingBag, Plus, Pencil, Trash2 } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
-import { useCreateBagType } from '../../../../api/queries';
+import { useCreateBagType, useUpdateBagType, useDeleteBagType } from '../../../../api/queries';
 import Modal from '../../../../components/Modal';
+
+const EMPTY = { name: '', category: 'empty', sizeKg: '25', material: '', description: '', reorderLevel: '100' };
 
 export default function BagTypesTab() {
   const { bagTypesList, addToast } = useApp();
-  const createBagTypeMut = useCreateBagType();
+  const createMut = useCreateBagType();
+  const updateMut = useUpdateBagType();
+  const deleteMut = useDeleteBagType();
 
-  const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState({ name: '', category: 'empty', sizeKg: '25', material: '', description: '', reorderLevel: '100' });
+  const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [form, setForm] = useState(EMPTY);
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
-  const resetForm = () => setForm({ name: '', category: 'empty', sizeKg: '25', material: '', description: '', reorderLevel: '100' });
+  const openCreate = () => { setEditingId(null); setForm(EMPTY); setOpen(true); };
+  const openEdit = (b) => {
+    setEditingId(b.id);
+    setForm({
+      name: b.name || '',
+      category: b.category || 'empty',
+      sizeKg: b.sizeKg != null ? String(b.sizeKg) : '25',
+      material: b.material || '',
+      description: b.description || '',
+      reorderLevel: b.reorderLevel != null ? String(b.reorderLevel) : '100',
+    });
+    setOpen(true);
+  };
 
   const handleSave = async () => {
-    if (!form.name.trim()) { addToast('Bag type name is required', 'error'); return; }
+    const name = form.name.trim();
+    if (!name) { addToast('Bag type name is required', 'error'); return; }
+    const payload = {
+      name,
+      category: form.category,
+      size_kg: parseFloat(form.sizeKg) || null,
+      material: form.material.trim() || null,
+      description: form.description.trim() || null,
+      reorder_level: parseInt(form.reorderLevel) || 0,
+    };
     try {
-      await createBagTypeMut.mutateAsync({
-        name: form.name.trim(),
-        category: form.category,
-        size_kg: parseFloat(form.sizeKg) || null,
-        material: form.material.trim() || null,
-        description: form.description.trim() || null,
-        reorder_level: parseInt(form.reorderLevel) || 0,
-      });
-      addToast(`Bag type "${form.name.trim()}" created`, 'success');
-      resetForm();
-      setShowModal(false);
+      if (editingId) {
+        await updateMut.mutateAsync({ id: editingId, data: payload });
+        addToast(`Bag type "${name}" updated`, 'success');
+      } else {
+        await createMut.mutateAsync(payload);
+        addToast(`Bag type "${name}" added`, 'success');
+      }
+      setOpen(false);
     } catch (err) {
-      addToast(`Failed to create bag type: ${err.message}`, 'error');
+      addToast(`Failed to save: ${err.message}`, 'error');
+    }
+  };
+
+  const handleDelete = async (b) => {
+    if (!window.confirm(`Delete bag type "${b.name}"? This cannot be undone.`)) return;
+    try {
+      await deleteMut.mutateAsync(b.id);
+      addToast(`Bag type "${b.name}" deleted`, 'success');
+    } catch (err) {
+      addToast(err.message || 'Delete failed (the bag type may be referenced by stock)', 'error');
     }
   };
 
@@ -42,7 +75,7 @@ export default function BagTypesTab() {
             Bag Types
           </h2>
           <button
-            onClick={() => { resetForm(); setShowModal(true); }}
+            onClick={openCreate}
             className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
           >
             <Plus className="w-4 h-4" />
@@ -65,6 +98,7 @@ export default function BagTypesTab() {
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">Material</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">Description</th>
                 <th className="text-right px-4 py-3 font-semibold text-gray-600">Reorder Level</th>
+                <th className="text-right px-4 py-3 font-semibold text-gray-600">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -85,6 +119,16 @@ export default function BagTypesTab() {
                   <td className="px-4 py-3 text-gray-600">{b.material || '—'}</td>
                   <td className="px-4 py-3 text-gray-500 text-xs max-w-[200px] truncate">{b.description || '—'}</td>
                   <td className="px-4 py-3 text-right text-gray-900">{b.reorderLevel}</td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="inline-flex gap-1">
+                      <button onClick={() => openEdit(b)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit">
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => handleDelete(b)} className="p-1.5 rounded hover:bg-red-50 text-red-600" title="Delete">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -92,7 +136,7 @@ export default function BagTypesTab() {
         </div>
       </div>
 
-      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Add Bag Type" size="md">
+      <Modal isOpen={open} onClose={() => setOpen(false)} title={editingId ? 'Edit Bag Type' : 'Add Bag Type'} size="md">
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
@@ -110,9 +154,14 @@ export default function BagTypesTab() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Size (kg)</label>
               <select value={form.sizeKg} onChange={e => set('sizeKg', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                <option value="0.5">0.5 kg</option>
+                <option value="1">1 kg</option>
+                <option value="2">2 kg</option>
                 <option value="5">5 kg</option>
                 <option value="10">10 kg</option>
+                <option value="20">20 kg (master)</option>
                 <option value="25">25 kg</option>
+                <option value="40">40 kg (master)</option>
                 <option value="50">50 kg</option>
                 <option value="100">100 kg</option>
               </select>
@@ -131,8 +180,8 @@ export default function BagTypesTab() {
             <input type="number" value={form.reorderLevel} onChange={e => set('reorderLevel', e.target.value)} placeholder="100" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
           </div>
           <div className="flex justify-end gap-2 pt-2 border-t border-gray-200">
-            <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
-            <button onClick={handleSave} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">Save Bag Type</button>
+            <button onClick={() => setOpen(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
+            <button onClick={handleSave} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">{editingId ? 'Save Changes' : 'Add Bag Type'}</button>
           </div>
         </div>
       </Modal>

@@ -669,6 +669,71 @@ export function useCreateBagType() {
   });
 }
 
+// ----- Master-data update / delete hooks -----
+//
+// These hit /api/admin/* — same routes as create, just PUT/DELETE.
+// Each invalidates the matching list cache so the table re-renders.
+
+export function useUpdateCustomer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => adminApi.updateCustomer(id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.customers.all }),
+  });
+}
+export function useDeleteCustomer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => adminApi.deleteCustomer(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.customers.all }),
+  });
+}
+
+export function useUpdateSupplier() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => adminApi.updateSupplier(id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.suppliers.all }),
+  });
+}
+export function useDeleteSupplier() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => adminApi.deleteSupplier(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.suppliers.all }),
+  });
+}
+
+export function useUpdateProduct() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => adminApi.updateProduct(id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.products.all }),
+  });
+}
+export function useDeleteProduct() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => adminApi.deleteProduct(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.products.all }),
+  });
+}
+
+export function useUpdateBagType() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => adminApi.updateBagType(id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['bag-types'] }),
+  });
+}
+export function useDeleteBagType() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => adminApi.deleteBagType(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['bag-types'] }),
+  });
+}
+
 export function useCreateBankAccount() {
   const qc = useQueryClient();
   return useMutation({
