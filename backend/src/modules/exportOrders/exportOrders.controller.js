@@ -243,6 +243,8 @@ function normalizeItems(items) {
       bag_brand: it.bag_brand || null,
       bag_color: it.bag_color || null,
       bag_printing: it.bag_printing || null,
+      master_bag_size_kg: it.master_bag_size_kg != null && it.master_bag_size_kg !== '' ? parseFloat(it.master_bag_size_kg) : null,
+      master_bag_type: it.master_bag_type || null,
       quality_description: it.quality_description || null,
       broken_pct_target: it.broken_pct_target != null && it.broken_pct_target !== '' ? parseFloat(it.broken_pct_target) : null,
       notes: it.notes || null,
@@ -273,6 +275,7 @@ const ALLOWED_UPDATE_FIELDS = [
   'shipment_eta', 'source', 'notes',
   'bag_type', 'bag_quality', 'bag_size_kg', 'bag_weight_gm',
   'bag_printing', 'bag_color', 'bag_brand', 'bag_notes',
+  'master_bag_size_kg', 'master_bag_type',
   'receiving_mode', 'quantity_unit', 'packing_notes',
   'packing_lines',
   // Document generation fields
@@ -290,6 +293,7 @@ const ALLOWED_UPDATE_FIELDS = [
 const NUMERIC_UPDATE_FIELDS = new Set([
   'qty_mt', 'price_per_mt', 'advance_pct',
   'bag_size_kg', 'bag_weight_gm', 'broken_pct_target',
+  'master_bag_size_kg',
 ]);
 const DATE_UPDATE_FIELDS = new Set([
   'shipment_eta', 'production_date', 'expiry_date',
@@ -574,6 +578,8 @@ const exportOrderController = {
         bag_brand,
         units_per_bag,
         bag_notes,
+        master_bag_size_kg,
+        master_bag_type,
         // Packing / receiving mode
         receiving_mode,
         quantity_unit,
@@ -664,6 +670,8 @@ const exportOrderController = {
             bag_brand: bag_brand || null,
             units_per_bag: units_per_bag ? parseInt(units_per_bag) : null,
             bag_notes: bag_notes || null,
+            master_bag_size_kg: master_bag_size_kg ? parseFloat(master_bag_size_kg) : null,
+            master_bag_type: master_bag_type || null,
             // Packing / receiving mode
             receiving_mode: receiving_mode || null,
             quantity_unit: quantity_unit || null,

@@ -27,6 +27,16 @@ const EMPTY_ITEM = {
   qtyMT: '', pricePerMT: '',
   hsCode: '', packing: '',
   bagSizeKg: '25', bagCount: '',
+  masterBagSizeKg: '',
+};
+
+// Retail bag sizes that need to be packed inside an outer "master bag"
+// (carton / sack) for shipping. Larger bags ship as-is.
+const RETAIL_BAG_SIZES_KG = [0.5, 1, 2, 5, 10];
+const MASTER_BAG_SIZES_KG = [20, 40];
+const requiresMasterBag = (sizeKg) => {
+  const v = parseFloat(sizeKg);
+  return RETAIL_BAG_SIZES_KG.includes(v);
 };
 
 export default function CreateExportOrder() {
@@ -63,6 +73,7 @@ export default function CreateExportOrder() {
     receivingMode: '',
     // Section 6: Bag spec (shown only when receiving mode needs it)
     bagType: '', bagQuality: '', bagSizeKg: '25', bagWeightGm: '', bagPrinting: '', bagColor: '', bagBrand: '',
+    masterBagSizeKg: '', masterBagType: '',
     // Section 7: Contract & Product Specs (for document generation)
     // HS Code is per-item now (in the Line Items section); no order-level field.
     contractNumber: '', consigneeType: 'to_order_of_bank', brokenPctTarget: '',
@@ -156,6 +167,16 @@ export default function CreateExportOrder() {
         addToast('Each line item needs a product, quantity, and price', 'error');
         return false;
       }
+      // Master bag is mandatory for retail-sized bags.
+      const missingMaster = items.find(it => requiresMasterBag(it.bagSizeKg) && !it.masterBagSizeKg);
+      if (missingMaster) {
+        addToast(`Line ${items.indexOf(missingMaster) + 1}: select a master bag size for retail bags`, 'error');
+        return false;
+      }
+      if (needsBagWidget && requiresMasterBag(form.bagSizeKg) && !form.masterBagSizeKg) {
+        addToast('Select a master bag size for retail bags', 'error');
+        return false;
+      }
     }
     if (!valid) addToast('Please fix highlighted errors', 'error');
     return valid;
@@ -199,6 +220,7 @@ export default function CreateExportOrder() {
           packing: it.packing || null,
           bag_size_kg: it.bagSizeKg ? parseFloat(it.bagSizeKg) : null,
           bag_count: it.bagCount ? parseInt(it.bagCount) : null,
+          master_bag_size_kg: it.masterBagSizeKg ? parseFloat(it.masterBagSizeKg) : null,
         };
       }),
       // Contract & product specs (HS code mirrors first item for legacy renderers)
@@ -228,6 +250,7 @@ export default function CreateExportOrder() {
       payload.bag_color = form.bagColor || null;
       payload.bag_brand = form.bagBrand || null;
       payload.total_bags = singleBagCount || null;
+      payload.master_bag_size_kg = form.masterBagSizeKg ? parseFloat(form.masterBagSizeKg) : null;
     }
 
     // Mixed packing lines
@@ -358,14 +381,52 @@ export default function CreateExportOrder() {
                 </div>
                 <div className="md:col-span-2">
                   <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Bag Size (kg)</label>
-                  <input type="number" min="0" step="0.5" value={it.bagSizeKg} onChange={e => updateItem(idx, 'bagSizeKg', e.target.value)} className="form-input" />
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={it.bagSizeKg}
+                    onChange={e => {
+                      const v = e.target.value;
+                      updateItem(idx, 'bagSizeKg', v);
+                      if (requiresMasterBag(v) && !it.masterBagSizeKg) {
+                        updateItem(idx, 'masterBagSizeKg', '20');
+                      } else if (!requiresMasterBag(v)) {
+                        updateItem(idx, 'masterBagSizeKg', '');
+                      }
+                    }}
+                    className="form-input"
+                  />
                 </div>
-                <div className="md:col-span-3">
-                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Line Total ({form.currency})</label>
-                  <div className="form-input bg-white text-right font-semibold text-gray-900">
-                    {itemTotal(it).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                {requiresMasterBag(it.bagSizeKg) ? (
+                  <>
+                    <div className="md:col-span-2">
+                      <label className="block text-xs font-semibold text-amber-700 uppercase mb-1">Master Bag *</label>
+                      <select
+                        value={it.masterBagSizeKg}
+                        onChange={e => updateItem(idx, 'masterBagSizeKg', e.target.value)}
+                        className="form-input"
+                      >
+                        {MASTER_BAG_SIZES_KG.map(s => (
+                          <option key={s} value={String(s)}>{s} KG</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="md:col-span-1">
+                      <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Total ({form.currency})</label>
+                      <div className="form-input bg-white text-right font-semibold text-gray-900">
+                        {itemTotal(it).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="md:col-span-3">
+                    <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Line Total ({form.currency})</label>
+                    <div className="form-input bg-white text-right font-semibold text-gray-900">
+                      {itemTotal(it).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             </div>
           ))}
@@ -466,10 +527,47 @@ export default function CreateExportOrder() {
             </div>
             <div className="form-group">
               <label className="form-label">Bag Size (KG)</label>
-              <select value={form.bagSizeKg} onChange={e => set('bagSizeKg', e.target.value)} className="form-input">
-                <option value="5">5 KG</option><option value="10">10 KG</option><option value="25">25 KG</option><option value="50">50 KG</option><option value="100">100 KG</option>
+              <select
+                value={form.bagSizeKg}
+                onChange={e => {
+                  const v = e.target.value;
+                  set('bagSizeKg', v);
+                  // Auto-default master bag when switching to a retail size
+                  if (requiresMasterBag(v) && !form.masterBagSizeKg) {
+                    set('masterBagSizeKg', '20');
+                  } else if (!requiresMasterBag(v)) {
+                    set('masterBagSizeKg', '');
+                  }
+                }}
+                className="form-input"
+              >
+                <option value="0.5">500 g (retail)</option>
+                <option value="1">1 KG (retail)</option>
+                <option value="2">2 KG (retail)</option>
+                <option value="5">5 KG (retail)</option>
+                <option value="10">10 KG (retail)</option>
+                <option value="25">25 KG</option>
+                <option value="50">50 KG</option>
+                <option value="100">100 KG</option>
               </select>
             </div>
+            {requiresMasterBag(form.bagSizeKg) && (
+              <div className="form-group">
+                <label className="form-label">Master Bag (KG) <span className="text-red-500">*</span></label>
+                <select
+                  value={form.masterBagSizeKg}
+                  onChange={e => set('masterBagSizeKg', e.target.value)}
+                  className="form-input"
+                >
+                  {MASTER_BAG_SIZES_KG.map(s => (
+                    <option key={s} value={String(s)}>{s} KG</option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-amber-700 mt-1">
+                  Required: retail bags must be packed inside a master bag for shipment.
+                </p>
+              </div>
+            )}
             <div className="form-group">
               <label className="form-label">Bag Printing</label>
               <select value={form.bagPrinting} onChange={e => set('bagPrinting', e.target.value)} className="form-input">
@@ -493,6 +591,16 @@ export default function CreateExportOrder() {
               <span className="font-semibold">Estimated: </span>
               {singleBagCount.toLocaleString()} bags x {form.bagSizeKg} KG = {totalKg.toLocaleString()} KG
               {form.bagType && ` | ${form.bagType}`}
+              {requiresMasterBag(form.bagSizeKg) && form.masterBagSizeKg && (() => {
+                const mbSize = parseFloat(form.masterBagSizeKg);
+                const masterBagCount = mbSize > 0 ? Math.ceil(totalKg / mbSize) : 0;
+                const retailPerMaster = mbSize > 0 ? Math.floor(mbSize / (parseFloat(form.bagSizeKg) || 1)) : 0;
+                return (
+                  <div className="mt-1 text-[12px] text-amber-700">
+                    {masterBagCount.toLocaleString()} master bags @ {mbSize} KG · {retailPerMaster} retail bags per master
+                  </div>
+                );
+              })()}
             </div>
           )}
         </div>

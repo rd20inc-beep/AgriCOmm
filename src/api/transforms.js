@@ -179,6 +179,8 @@ export function transformOrder(dbOrder) {
     bagPrinting: dbOrder.bag_printing || '',
     bagColor: dbOrder.bag_color || '',
     bagBrand: dbOrder.bag_brand || '',
+    masterBagSizeKg: dbOrder.master_bag_size_kg ? parseFloat(dbOrder.master_bag_size_kg) : null,
+    masterBagType: dbOrder.master_bag_type || '',
     unitsPerBag: dbOrder.units_per_bag ? parseInt(dbOrder.units_per_bag) : null,
     bagNotes: dbOrder.bag_notes || '',
     // Packing / receiving mode
@@ -206,6 +208,8 @@ export function transformOrder(dbOrder) {
       bagBrand: it.bag_brand || '',
       bagColor: it.bag_color || '',
       bagPrinting: it.bag_printing || '',
+      masterBagSizeKg: it.master_bag_size_kg != null ? parseFloat(it.master_bag_size_kg) : null,
+      masterBagType: it.master_bag_type || '',
       qualityDescription: it.quality_description || '',
       brokenPctTarget: it.broken_pct_target != null ? parseFloat(it.broken_pct_target) : null,
       notes: it.notes || '',

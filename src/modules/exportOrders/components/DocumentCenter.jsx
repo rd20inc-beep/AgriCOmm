@@ -28,6 +28,14 @@ function buildLineItems(doc) {
   const orderBagType = order.bagType || 'PP';
   const orderBrand = order.brandMarking || '';
   const orderQuality = order.qualityDescription || order.product || '';
+  const orderMasterBag = parseFloat(order.masterBagSizeKg) || 0;
+
+  // Returns a packing string that appends master-bag info when the
+  // retail bag is small enough to require an outer.
+  const composePacking = (bagSize, bagType, masterBagSize) => {
+    const base = `PACKED IN ${bagSize} KG${bagSize === 1 ? '' : 'S'} ${bagType} BAG`;
+    return masterBagSize > 0 ? `${base}, MASTER ${masterBagSize} KG OUTER` : base;
+  };
 
   if (Array.isArray(items) && items.length > 0) {
     return items.map((it, idx) => {
@@ -35,11 +43,13 @@ function buildLineItems(doc) {
       const price = parseFloat(it.pricePerMT) || 0;
       const bagSize = parseFloat(it.bagSizeKg) || orderBagSize;
       const bagType = it.bagType || orderBagType;
+      const masterBagSize = parseFloat(it.masterBagSizeKg) || orderMasterBag || 0;
       const bagCount = parseInt(it.bagCount, 10)
         || (qty > 0 && bagSize > 0 ? Math.round((qty * 1000) / bagSize) : 0);
+      const masterBagCount = masterBagSize > 0 ? Math.ceil((qty * 1000) / masterBagSize) : 0;
       const description = it.qualityDescription
         || `${it.productName || 'Rice'} max 0-${it.brokenPctTarget != null ? it.brokenPctTarget : (order.brokenPctTarget || 2)}% broken, double (silky) polished and sortexed. Sound, loyal and merchantable, fit for human consumption at any stage. Free from alive and dead weevils/insects. GMO Free. Latest crop.${it.hsCode ? `<br/><strong>HS CODE ${it.hsCode}</strong>` : ''}`;
-      const packing = it.packing || `PACKED IN ${bagSize} KGS ${bagType} BAG`;
+      const packing = it.packing || composePacking(bagSize, bagType, masterBagSize);
       return {
         sno: idx + 1,
         brand: it.bagBrand || it.productName || orderBrand || '—',
@@ -48,6 +58,8 @@ function buildLineItems(doc) {
         hsCode: it.hsCode || '',
         bagSizeKg: bagSize,
         bagType,
+        masterBagSizeKg: masterBagSize,
+        masterBagCount,
         packing,
         bagCount,
         qtyMT: qty,
@@ -60,6 +72,7 @@ function buildLineItems(doc) {
   // Single-product fallback for legacy orders.
   const totalBags = parseInt(order.totalBags, 10)
     || (order.qtyMT && orderBagSize ? Math.round((order.qtyMT * 1000) / orderBagSize) : 0);
+  const masterBagCount = orderMasterBag > 0 ? Math.ceil(((parseFloat(order.qtyMT) || 0) * 1000) / orderMasterBag) : 0;
   return [{
     sno: 1,
     brand: orderBrand || '—',
@@ -68,7 +81,9 @@ function buildLineItems(doc) {
     hsCode: order.hsCode || '',
     bagSizeKg: orderBagSize,
     bagType: orderBagType,
-    packing: `PACKED IN ${orderBagSize} KGS ${orderBagType} BAG`,
+    masterBagSizeKg: orderMasterBag,
+    masterBagCount,
+    packing: composePacking(orderBagSize, orderBagType, orderMasterBag),
     bagCount: totalBags,
     qtyMT: parseFloat(order.qtyMT) || 0,
     pricePerMT: parseFloat(order.pricePerMT) || 0,
@@ -322,47 +337,61 @@ function renderPackingList(doc) {
     ? items.map((it) => {
         const bagSize = it.bagSizeKg || order.bagSizeKg || 50;
         const bagType = it.bagType || order.bagType || 'PP';
+        const masterBagSize = parseFloat(it.masterBagSizeKg) || parseFloat(order.masterBagSizeKg) || 0;
         const bagCount = it.bagCount || (it.qtyMT && bagSize ? Math.round((it.qtyMT * 1000) / bagSize) : 0);
+        const masterBagCount = masterBagSize > 0 ? Math.ceil((it.qtyMT * 1000) / masterBagSize) : 0;
         const grossKg = it.qtyMT * 1000;
-        // Net = rice + packaging tare. Use the order's explicit bag_weight_gm
-        // when set; otherwise fall back to a realistic default based on bag
-        // size so the two columns are never accidentally equal.
-        // Typical PP bag tares: 50kg→~90g, 25kg→~50g, 5kg→~20g.
         const defaultTareGm = bagSize >= 50 ? 90 : bagSize >= 25 ? 50 : bagSize >= 10 ? 30 : 20;
         const tarePerBagKg = (order.bagWeightGm || defaultTareGm) / 1000;
         const netKg = grossKg + bagCount * tarePerBagKg;
         const description = it.qualityDescription
           || `${it.productName || order.product || 'Rice'} max 0-${it.brokenPctTarget != null ? it.brokenPctTarget : (order.brokenPctTarget || 2)}% broken, double (silky) polished and sortexed. Sound, loyal and merchantable, fit for human consumption at any stage. Free from alive and dead weevils/insects. GMO Free. Product to meet EU regulations at all times. Latest crop.${it.hsCode ? `<br/><strong>HS CODE ${it.hsCode}</strong>` : ''}`;
+        const packingBase = it.packing || `PACKED IN ${bagSize} KGS ${bagType} BAG`;
+        const packing = masterBagSize > 0
+          ? `${packingBase}<br/><span style="color:#92400e">Master pack: ${masterBagCount.toLocaleString()} × ${masterBagSize} KG outer (${Math.floor(masterBagSize / bagSize)} retail bags per master)</span>`
+          : packingBase;
+        const quantity = masterBagSize > 0
+          ? `${bagCount.toLocaleString()} retail bags<br/>${masterBagCount.toLocaleString()} master bags`
+          : `${bagCount.toLocaleString()} Bags`;
         return {
           label: (it.productName || order.product || '').toUpperCase(),
           description,
-          packing: it.packing || `PACKED IN ${bagSize} KGS ${bagType} BAG`,
-          quantity: `${bagCount.toLocaleString()} Bags`,
+          packing,
+          quantity,
           grossKg,
           netKg,
           bagCount,
+          masterBagCount,
         };
       })
     : (() => {
         const bagSize = order.bagSizeKg || 50;
         const bagType = order.bagType || 'PP';
+        const masterBagSize = parseFloat(order.masterBagSizeKg) || 0;
         const totalBags = order.totalBags || (order.qtyMT && bagSize ? Math.round((order.qtyMT * 1000) / bagSize) : 0);
-        // Use shipment-container totals when present; otherwise compute net
-        // from qty_mt and gross from net + (bag tare × bag count).
+        const masterBagCount = masterBagSize > 0 ? Math.ceil(((parseFloat(order.qtyMT) || 0) * 1000) / masterBagSize) : 0;
         const grossKg = (totals && totals.grossWeightMT ? totals.grossWeightMT : order.qtyMT) * 1000;
         const defaultTareGm = bagSize >= 50 ? 90 : bagSize >= 25 ? 50 : bagSize >= 10 ? 30 : 20;
         const tarePerBagKg = (order.bagWeightGm || defaultTareGm) / 1000;
         const netKg = (totals && totals.netWeightMT)
           ? totals.netWeightMT * 1000
           : grossKg + totalBags * tarePerBagKg;
+        const packingBase = `PACKED IN ${bagSize} KGS ${bagType} BAG`;
+        const packing = masterBagSize > 0
+          ? `${packingBase}<br/><span style="color:#92400e">Master pack: ${masterBagCount.toLocaleString()} × ${masterBagSize} KG outer (${Math.floor(masterBagSize / bagSize)} retail bags per master)</span>`
+          : packingBase;
+        const quantity = masterBagSize > 0
+          ? `${totalBags.toLocaleString()} retail bags<br/>${masterBagCount.toLocaleString()} master bags`
+          : `${totalBags.toLocaleString()} Bags`;
         return [{
           label: (order.brandMarking || order.product || '').toUpperCase(),
           description: order.qualityDescription || order.product || '',
-          packing: `PACKED IN ${bagSize} KGS ${bagType} BAG`,
-          quantity: `${totalBags.toLocaleString()} Bags`,
+          packing,
+          quantity,
           grossKg,
           netKg,
           bagCount: totalBags,
+          masterBagCount,
         }];
       })();
 

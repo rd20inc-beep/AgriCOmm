@@ -298,6 +298,7 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
                   <th className="py-2 pr-3">Product</th>
                   <th className="py-2 pr-3">HS Code</th>
                   <th className="py-2 pr-3">Packing</th>
+                  <th className="py-2 pr-3">Bag / Master</th>
                   <th className="py-2 pr-3 text-right">Qty (MT)</th>
                   <th className="py-2 pr-3 text-right">Rate / MT</th>
                   <th className="py-2 pl-3 text-right">Line Total</th>
@@ -310,6 +311,10 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
                     <td className="py-2 pr-3 font-medium text-gray-900">{it.productName || '—'}</td>
                     <td className="py-2 pr-3 text-gray-700">{it.hsCode || '—'}</td>
                     <td className="py-2 pr-3 text-gray-700">{it.packing || '—'}</td>
+                    <td className="py-2 pr-3 text-gray-700 whitespace-nowrap">
+                      {it.bagSizeKg ? `${it.bagSizeKg} kg` : '—'}
+                      {it.masterBagSizeKg ? <span className="text-amber-700"> · master {it.masterBagSizeKg} kg</span> : ''}
+                    </td>
                     <td className="py-2 pr-3 text-right text-gray-900">{it.qtyMT.toLocaleString(undefined, { maximumFractionDigits: 3 })}</td>
                     <td className="py-2 pr-3 text-right text-gray-900">{formatCurrency(it.pricePerMT)}</td>
                     <td className="py-2 pl-3 text-right font-semibold text-gray-900">{formatCurrency(it.lineTotal)}</td>
@@ -318,7 +323,7 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-gray-200">
-                  <td colSpan={4} className="py-2 pr-3 text-right text-xs uppercase text-gray-500 font-semibold">Total</td>
+                  <td colSpan={5} className="py-2 pr-3 text-right text-xs uppercase text-gray-500 font-semibold">Total</td>
                   <td className="py-2 pr-3 text-right font-bold text-gray-900">{order.qtyMT.toLocaleString(undefined, { maximumFractionDigits: 3 })}</td>
                   <td className="py-2 pr-3"></td>
                   <td className="py-2 pl-3 text-right font-bold text-gray-900">{formatCurrency(order.contractValue)}</td>
