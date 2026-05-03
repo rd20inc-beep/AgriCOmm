@@ -229,12 +229,31 @@ export default function WhatsAppTemplatesTab() {
     fetchConfig();
   }, []);
 
+  // The backend whatsapp_templates table uses snake_case columns
+  // (body_template, trigger_event, recipient_type, is_active, auto_send)
+  // while this component renders the camelCase shape used by the
+  // hardcoded DEFAULT_TEMPLATES. Normalise so tpl.body, tpl.triggerEvent,
+  // etc. always exist — otherwise tpl.body.substring(...) crashes the
+  // whole tab the moment a real DB row loads.
+  const normalizeTemplate = (row) => ({
+    id: row.id,
+    name: row.name || '',
+    slug: row.slug || '',
+    entity: row.entity || 'General',
+    triggerEvent: row.triggerEvent || row.trigger_event || 'custom',
+    recipientType: row.recipientType || row.recipient_type || 'Customer',
+    autoSend: row.autoSend ?? row.auto_send ?? false,
+    active: row.active ?? row.is_active ?? true,
+    body: row.body || row.body_template || '',
+  });
+
   const fetchTemplates = async () => {
     setLoading(true);
     try {
       const res = await api.get('/api/communication/whatsapp/templates');
-      if (res?.data?.templates) {
-        setTemplates(res.data.templates);
+      const rows = res?.data?.templates || res?.data || [];
+      if (Array.isArray(rows) && rows.length > 0) {
+        setTemplates(rows.map(normalizeTemplate));
       }
     } catch {
       // Use default templates on error (demo mode)
@@ -334,7 +353,9 @@ export default function WhatsAppTemplatesTab() {
       return;
     }
     setSaving(true);
-    const data = {
+    // Local cache shape (camelCase) — what the rest of this component
+    // already reads from `templates`.
+    const local = {
       name: formName,
       slug: formSlug,
       entity: formEntity,
@@ -344,24 +365,35 @@ export default function WhatsAppTemplatesTab() {
       body: formBody,
       active: editingTemplate ? editingTemplate.active : true,
     };
+    // Backend (whatsapp_templates table) shape — snake_case columns.
+    const wireData = {
+      name: formName,
+      slug: formSlug,
+      entity: formEntity,
+      trigger_event: formTrigger,
+      recipient_type: formRecipient,
+      auto_send: formAutoSend,
+      body_template: formBody,
+      is_active: editingTemplate ? editingTemplate.active : true,
+    };
 
     try {
       if (editingTemplate) {
-        await api.put(`/api/communication/whatsapp/templates/${editingTemplate.id}`, data);
-        setTemplates(prev => prev.map(t => t.id === editingTemplate.id ? { ...t, ...data } : t));
+        await api.put(`/api/communication/whatsapp/templates/${editingTemplate.id}`, wireData);
+        setTemplates(prev => prev.map(t => t.id === editingTemplate.id ? { ...t, ...local } : t));
       } else {
-        const res = await api.post('/api/communication/whatsapp/templates', data);
-        const newId = res?.data?.id || Date.now();
-        setTemplates(prev => [...prev, { ...data, id: newId }]);
+        const res = await api.post('/api/communication/whatsapp/templates', wireData);
+        const newId = res?.data?.id || res?.data?.template?.id || Date.now();
+        setTemplates(prev => [...prev, { ...local, id: newId }]);
       }
       addToast(`Template ${editingTemplate ? 'updated' : 'created'} successfully`, 'success');
       setEditorOpen(false);
     } catch {
       // Optimistic local update on API error (demo mode)
       if (editingTemplate) {
-        setTemplates(prev => prev.map(t => t.id === editingTemplate.id ? { ...t, ...data } : t));
+        setTemplates(prev => prev.map(t => t.id === editingTemplate.id ? { ...t, ...local } : t));
       } else {
-        setTemplates(prev => [...prev, { ...data, id: Date.now() }]);
+        setTemplates(prev => [...prev, { ...local, id: Date.now() }]);
       }
       addToast(`Template ${editingTemplate ? 'updated' : 'created'} (local)`, 'success');
       setEditorOpen(false);
@@ -381,27 +413,29 @@ export default function WhatsAppTemplatesTab() {
     addToast('Template deleted', 'success');
   };
 
+  // Send only the column the toggle owns, in the snake_case shape the
+  // backend expects. Spreading the whole local object would drop
+  // camelCase keys like `body` into the update and 500 with "column
+  // body of relation whatsapp_templates does not exist".
   const handleToggleActive = async (id) => {
-    setTemplates(prev => prev.map(t => {
-      if (t.id === id) return { ...t, active: !t.active };
-      return t;
-    }));
     const tpl = templates.find(t => t.id === id);
+    if (!tpl) return;
+    const next = !tpl.active;
+    setTemplates(prev => prev.map(t => t.id === id ? { ...t, active: next } : t));
     try {
-      await api.put(`/api/communication/whatsapp/templates/${id}`, { ...tpl, active: !tpl.active });
+      await api.put(`/api/communication/whatsapp/templates/${id}`, { is_active: next });
     } catch {
       // local-only toggle
     }
   };
 
   const handleToggleAutoSend = async (id) => {
-    setTemplates(prev => prev.map(t => {
-      if (t.id === id) return { ...t, autoSend: !t.autoSend };
-      return t;
-    }));
     const tpl = templates.find(t => t.id === id);
+    if (!tpl) return;
+    const next = !tpl.autoSend;
+    setTemplates(prev => prev.map(t => t.id === id ? { ...t, autoSend: next } : t));
     try {
-      await api.put(`/api/communication/whatsapp/templates/${id}`, { ...tpl, autoSend: !tpl.autoSend });
+      await api.put(`/api/communication/whatsapp/templates/${id}`, { auto_send: next });
     } catch {
       // local-only toggle
     }
