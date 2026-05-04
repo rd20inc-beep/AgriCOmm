@@ -37,6 +37,7 @@ const InternalTransfer = lazy(() => import('./modules/inventory/pages/InternalTr
 const Inventory = lazy(() => import('./modules/inventory/pages/Inventory'));
 const Documents = lazy(() => import('./modules/documents/pages/Documents'));
 const Reports = lazy(() => import('./modules/analytics/pages/Reports'));
+const PrintableReports = lazy(() => import('./modules/analytics/pages/PrintableReports'));
 const Approvals = lazy(() => import('./modules/admin/pages/Approvals'));
 const AuditLog = lazy(() => import('./modules/admin/pages/AuditLog'));
 const LotInventory = lazy(() => import('./modules/inventory/pages/LotInventory'));
@@ -161,6 +162,7 @@ function StandardRoutes() {
         <Route path="/lot-inventory/:id" element={<ProtectedRoute module="inventory" action="view"><LotDetail /></ProtectedRoute>} />
         <Route path="/documents" element={<ProtectedRoute module="documents" action="view"><Documents /></ProtectedRoute>} />
         <Route path="/reports" element={<ProtectedRoute module="reports" action="view"><Reports /></ProtectedRoute>} />
+        <Route path="/reports/print" element={<ProtectedRoute module="reports" action="view"><PrintableReports /></ProtectedRoute>} />
         <Route path="/exceptions" element={<ProtectedRoute module="admin" action="view"><ExceptionDashboard /></ProtectedRoute>} />
         <Route path="/intelligence" element={<ProtectedRoute anyOf={[{ module: 'finance', action: 'view' }, { module: 'admin', action: 'view' }]}><Intelligence /></ProtectedRoute>} />
         <Route path="/simulator" element={<ProtectedRoute anyOf={[{ module: 'finance', action: 'view' }, { module: 'admin', action: 'view' }]}><ScenarioSimulator /></ProtectedRoute>} />

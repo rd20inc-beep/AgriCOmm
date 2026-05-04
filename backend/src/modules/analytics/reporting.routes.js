@@ -43,6 +43,12 @@ router.get('/inventory/stock-turnover', authorize('reports', 'view'), controller
 router.get('/inventory/stock-valuation', authorize('reports', 'view'), controller.stockValuation);
 
 // ═══════════════════════════════════════════════════════════════════
+// Printable reports — production & stock for daily / weekly / monthly
+// ═══════════════════════════════════════════════════════════════════
+router.get('/printable/production', authorize('reports', 'view'), controller.printableProduction);
+router.get('/printable/stock',      authorize('reports', 'view'), controller.printableStock);
+
+// ═══════════════════════════════════════════════════════════════════
 // Production
 // ═══════════════════════════════════════════════════════════════════
 router.get('/production/mill-efficiency', authorize('reports', 'view'), controller.millEfficiency);

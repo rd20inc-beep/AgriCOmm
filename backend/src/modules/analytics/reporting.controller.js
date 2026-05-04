@@ -465,6 +465,167 @@ const reportingController = {
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
   },
+
+  // ═══════════════════════════════════════════════════════════════════
+  // PRINTABLE REPORTS — Production & Stock for daily / weekly / monthly
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Production for a date range. Returns:
+  //   - summary: total batches, raw input MT, finished MT, avg yield
+  //   - byMill: per-mill aggregates
+  //   - byProduct: per-product aggregates
+  //   - batches: every batch in the range with the headline numbers
+  // The FE renders this into a print-styled HTML view.
+  async printableProduction(req, res) {
+    try {
+      const db = require('../../db');
+      const { from, to } = req.query;
+      if (!from || !to) {
+        return res.status(400).json({ success: false, message: 'from and to dates are required.' });
+      }
+      const fromDate = new Date(from);
+      const toDate = new Date(to);
+      if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
+        return res.status(400).json({ success: false, message: 'Invalid from/to date.' });
+      }
+
+      const batches = await db('milling_batches as b')
+        .leftJoin('mills as m', 'b.mill_id', 'm.id')
+        .leftJoin('suppliers as s', 'b.supplier_id', 's.id')
+        .leftJoin('products as p', 'b.product_id', 'p.id')
+        .select(
+          'b.id', 'b.batch_no', 'b.status',
+          'b.raw_qty_mt', 'b.planned_finished_mt', 'b.actual_finished_mt', 'b.yield_pct',
+          'b.created_at', 'b.completed_at',
+          'm.name as mill_name',
+          's.name as supplier_name',
+          'p.name as product_name',
+        )
+        .whereBetween('b.created_at', [fromDate, toDate])
+        .orderBy('b.created_at', 'asc');
+
+      const num = (v) => parseFloat(v) || 0;
+      const summary = batches.reduce(
+        (acc, b) => {
+          acc.batchCount += 1;
+          acc.rawMt += num(b.raw_qty_mt);
+          acc.finishedMt += num(b.actual_finished_mt);
+          acc.plannedMt += num(b.planned_finished_mt);
+          if (b.status === 'Completed' || b.status === 'Approved') acc.completed += 1;
+          return acc;
+        },
+        { batchCount: 0, rawMt: 0, finishedMt: 0, plannedMt: 0, completed: 0 }
+      );
+      summary.avgYieldPct = summary.rawMt > 0 ? (summary.finishedMt / summary.rawMt) * 100 : 0;
+
+      const groupBy = (key, label) => {
+        const map = new Map();
+        for (const b of batches) {
+          const k = b[key] || '—';
+          const r = map.get(k) || { name: k, batchCount: 0, rawMt: 0, finishedMt: 0 };
+          r.batchCount += 1;
+          r.rawMt += num(b.raw_qty_mt);
+          r.finishedMt += num(b.actual_finished_mt);
+          map.set(k, r);
+        }
+        return Array.from(map.values()).map(r => ({
+          ...r,
+          yieldPct: r.rawMt > 0 ? (r.finishedMt / r.rawMt) * 100 : 0,
+        })).sort((a, b) => b.finishedMt - a.finishedMt);
+      };
+
+      return res.json({
+        success: true,
+        data: {
+          range: { from: fromDate.toISOString(), to: toDate.toISOString() },
+          summary,
+          byMill:    groupBy('mill_name'),
+          byProduct: groupBy('product_name'),
+          batches:   batches.map(b => ({
+            id: b.id, batchNo: b.batch_no, status: b.status,
+            rawMt: num(b.raw_qty_mt),
+            plannedMt: num(b.planned_finished_mt),
+            finishedMt: num(b.actual_finished_mt),
+            yieldPct: num(b.yield_pct) || (num(b.raw_qty_mt) > 0 ? num(b.actual_finished_mt) / num(b.raw_qty_mt) * 100 : 0),
+            millName: b.mill_name,
+            supplierName: b.supplier_name,
+            productName: b.product_name,
+            createdAt: b.created_at,
+            completedAt: b.completed_at,
+          })),
+        },
+      });
+    } catch (err) {
+      console.error('Printable production report error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  // Stock as-of snapshot. Always reflects the current inventory_lots
+  // state — no historical roll-back. Grouped per the requested key.
+  async printableStock(req, res) {
+    try {
+      const db = require('../../db');
+      const { group_by = 'product', status = 'Available' } = req.query;
+
+      let groupCol, nameCol;
+      if (group_by === 'supplier')   { groupCol = 'l.supplier_id';  nameCol = 's.name'; }
+      else if (group_by === 'warehouse') { groupCol = 'l.warehouse_id'; nameCol = 'w.name'; }
+      else if (group_by === 'variety') { groupCol = 'l.variety';      nameCol = 'l.variety'; }
+      else if (group_by === 'type')    { groupCol = 'l.type';         nameCol = 'l.type'; }
+      else                              { groupCol = 'l.product_id';  nameCol = 'p.name'; }
+
+      let q = db('inventory_lots as l')
+        .leftJoin('suppliers as s',  'l.supplier_id',  's.id')
+        .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
+        .leftJoin('products as p',   'l.product_id',   'p.id');
+      if (status && status !== 'all') q = q.where('l.status', status);
+
+      const rows = await q
+        .select(
+          db.raw(`COALESCE(${nameCol}, '—') as group_name`),
+          db.raw('COUNT(l.id)::int as lot_count'),
+          db.raw('COALESCE(SUM(CASE WHEN l.net_weight_kg > 0 THEN l.net_weight_kg ELSE CAST(l.qty AS DECIMAL) * 1000 END), 0)::numeric as total_kg'),
+          db.raw('COALESCE(SUM(CAST(l.available_qty AS DECIMAL) * 1000), 0)::numeric as available_kg'),
+          db.raw('COALESCE(SUM(CAST(l.reserved_qty AS DECIMAL) * 1000), 0)::numeric as reserved_kg'),
+          db.raw('COALESCE(SUM(CASE WHEN l.landed_cost_total > 0 THEN l.landed_cost_total ELSE l.total_value END), 0)::numeric as total_value_pkr'),
+        )
+        .groupBy(groupCol, nameCol)
+        .orderBy('total_kg', 'desc');
+
+      const num = (v) => parseFloat(v) || 0;
+      const grand = rows.reduce(
+        (a, r) => ({
+          lotCount: a.lotCount + r.lot_count,
+          totalKg: a.totalKg + num(r.total_kg),
+          availableKg: a.availableKg + num(r.available_kg),
+          reservedKg: a.reservedKg + num(r.reserved_kg),
+          valuePkr: a.valuePkr + num(r.total_value_pkr),
+        }),
+        { lotCount: 0, totalKg: 0, availableKg: 0, reservedKg: 0, valuePkr: 0 }
+      );
+
+      return res.json({
+        success: true,
+        data: {
+          asOf: new Date().toISOString(),
+          groupBy: group_by,
+          rows: rows.map(r => ({
+            name:        r.group_name,
+            lotCount:    r.lot_count,
+            totalKg:     num(r.total_kg),
+            availableKg: num(r.available_kg),
+            reservedKg:  num(r.reserved_kg),
+            valuePkr:    num(r.total_value_pkr),
+          })),
+          grand,
+        },
+      });
+    } catch (err) {
+      console.error('Printable stock report error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
 };
 
 module.exports = reportingController;

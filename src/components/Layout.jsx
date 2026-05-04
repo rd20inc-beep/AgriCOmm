@@ -6,7 +6,7 @@ import {
   User, Users, Plus, X, LogOut, AlertTriangle, AlertCircle, Info, CreditCard,
   ArrowRightLeft, FlaskConical, Menu, ShieldCheck, Shield,
   ChevronsLeft, ChevronsRight, Sun, Moon,
-  Zap, Brain, Beaker,
+  Zap, Brain, Beaker, Printer,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
@@ -39,6 +39,7 @@ const sidebarNav = [
   },
   { section: 'Reports' },
   { label: 'Reports', icon: BarChart3, to: '/reports', permission: { module: 'reports', action: 'view' } },
+  { label: 'Print Reports', icon: Printer, to: '/reports/print', permission: { module: 'reports', action: 'view' } },
   { section: 'Intelligence' },
   { label: 'Exceptions', icon: Zap, to: '/exceptions', permission: { module: 'admin', action: 'view' } },
   { label: 'Analytics', icon: Brain, to: '/intelligence' },
