@@ -3,7 +3,9 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   Ship, Factory, DollarSign, AlertTriangle, Clock,
   CheckCircle2, ArrowRight, TrendingUp, CreditCard,
-  FileText, Truck, Package, RefreshCw,
+  FileText, Truck, Package, RefreshCw, Activity,
+  Plus, ArrowDownLeft, ArrowUpRight, ArrowRightLeft,
+  Wallet, Zap, BarChart3,
 } from 'lucide-react';
 import { SkeletonDashboard as DashboardSkeleton } from '../../../components/Skeleton';
 import { useApp } from '../../../context/AppContext';
@@ -13,72 +15,28 @@ import { millingApi } from '../../../modules/milling/api/services';
 import YieldDistributionChart from './dashboard/YieldDistributionChart';
 import RecentActivity from './dashboard/RecentActivity';
 
+// ─── Formatting ────────────────────────────────────────────────────────
 const fmt = (v) => '$' + (Number(v) || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
-const fmtPKR = (v) => 'Rs ' + Math.round(Number(v) || 0).toLocaleString('en-PK');
+const fmtMt = (v) => `${(Number(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} MT`;
+const fmtPctSafe = (v) => v == null || isNaN(v) ? '—' : `${Number(v).toFixed(1)}%`;
 
-function KPI({ icon: Icon, label, value, sub, accent = 'blue', to }) {
-  const colors = {
-    blue: 'text-blue-600 bg-blue-50',
-    green: 'text-green-600 bg-green-50',
-    amber: 'text-amber-600 bg-amber-50',
-    red: 'text-red-600 bg-red-50',
-    purple: 'text-purple-600 bg-purple-50',
-  };
-  const inner = (
-    <div className="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-sm transition-shadow">
-      <div className="flex items-start justify-between">
-        <div className="min-w-0">
-          <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">{label}</p>
-          <p className="text-2xl font-bold text-gray-900 mt-1">{value}</p>
-          {sub && <p className="text-xs text-gray-500 mt-1 truncate">{sub}</p>}
-        </div>
-        <div className={`p-2 rounded-lg ${colors[accent]}`}><Icon size={18} /></div>
-      </div>
-    </div>
-  );
-  return to ? <Link to={to}>{inner}</Link> : inner;
-}
-
-function ActionItem({ icon: Icon, label, count, to, accent = 'amber', onAction, actionLabel }) {
-  const colors = {
-    amber: 'bg-amber-50 border-amber-200 text-amber-900 hover:bg-amber-100',
-    red: 'bg-red-50 border-red-200 text-red-900 hover:bg-red-100',
-    blue: 'bg-blue-50 border-blue-200 text-blue-900 hover:bg-blue-100',
-    green: 'bg-green-50 border-green-200 text-green-900 hover:bg-green-100',
-  };
-  if (count === 0) return null;
-  return (
-    <div className={`flex items-center justify-between p-3 rounded-lg border ${colors[accent]} transition-colors`}>
-      <div className="flex items-center gap-3">
-        <Icon size={18} />
-        <span className="text-sm font-medium">{label}</span>
-      </div>
-      <div className="flex items-center gap-2">
-        <span className="px-2 py-0.5 bg-white rounded-full text-xs font-bold">{count}</span>
-        <Link to={to} className="text-xs font-medium hover:underline flex items-center gap-1">
-          View <ArrowRight size={12} />
-        </Link>
-      </div>
-    </div>
-  );
-}
-
-// Compact pipeline — group 11 statuses into 5 phases
+// ─── Pipeline phase grouping ───────────────────────────────────────────
 const PHASES = [
-  { label: 'New', statuses: ['Draft', 'Awaiting Advance'], color: 'bg-amber-500' },
-  { label: 'Funded', statuses: ['Advance Received', 'Procurement Pending'], color: 'bg-green-500' },
-  { label: 'Production', statuses: ['In Milling', 'Docs In Preparation'], color: 'bg-blue-500' },
-  { label: 'Shipping', statuses: ['Awaiting Balance', 'Ready to Ship', 'Shipped'], color: 'bg-purple-500' },
-  { label: 'Delivered', statuses: ['Arrived', 'Closed'], color: 'bg-slate-500' },
+  { label: 'New',        statuses: ['Draft', 'Awaiting Advance'],                               color: 'bg-amber-500',  ring: 'ring-amber-200' },
+  { label: 'Funded',     statuses: ['Advance Received', 'Procurement Pending'],                  color: 'bg-emerald-500',ring: 'ring-emerald-200' },
+  { label: 'Production', statuses: ['In Milling', 'Docs In Preparation'],                        color: 'bg-blue-500',   ring: 'ring-blue-200' },
+  { label: 'Shipping',   statuses: ['Awaiting Balance', 'Ready to Ship', 'Shipped'],             color: 'bg-violet-500', ring: 'ring-violet-200' },
+  { label: 'Delivered',  statuses: ['Arrived', 'Closed'],                                        color: 'bg-slate-500',  ring: 'ring-slate-200' },
 ];
 
+// ─── Page ─────────────────────────────────────────────────────────────
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { exportOrders, millingBatches, alerts, dismissAlert, dataLoading, refreshFromApi, addToast } = useApp();
+  const { exportOrders, millingBatches, dataLoading, refreshFromApi, addToast } = useApp();
   const { user } = useAuth();
   const isOwnerOrAdmin = user?.role === 'Owner' || user?.role === 'Super Admin';
 
-  if (dataLoading && exportOrders.length === 0) {
+  if (dataLoading && (exportOrders || []).length === 0) {
     return <DashboardSkeleton />;
   }
 
@@ -92,6 +50,7 @@ export default function Dashboard() {
   const readyToShip = safeOrders.filter(o => o.status === 'Ready to Ship').length;
   const awaitingBalance = safeOrders.filter(o => o.status === 'Awaiting Balance').length;
   const varianceAlerts = safeBatches.filter(b => b.variancePct != null && Math.abs(Number(b.variancePct)) > 1).length;
+  const totalActions = pendingApprovalBatches.length + awaitingAdvance + docsInPrep + readyToShip + varianceAlerts;
 
   // ─── KPIs ───
   const activeOrders = safeOrders.filter(o => !['Draft', 'Closed', 'Cancelled'].includes(o.status)).length;
@@ -105,14 +64,50 @@ export default function Dashboard() {
     const costs = Object.values(o.costs || {}).reduce((cs, c) => cs + (parseFloat(c) || 0), 0);
     return costs > 0 ? s + ((Number(o.contractValue) || 0) - costs) : s;
   }, 0);
+  const totalContractValue = safeOrders.reduce((s, o) => s + (Number(o.contractValue) || 0), 0);
 
-  // ─── Pipeline phases ───
+  // ─── Pipeline ───
   const phaseCounts = PHASES.map(phase => ({
     ...phase,
     count: safeOrders.filter(o => phase.statuses.includes(o.status)).length,
     value: safeOrders.filter(o => phase.statuses.includes(o.status)).reduce((s, o) => s + (Number(o.contractValue) || 0), 0),
   }));
   const totalPipelineOrders = phaseCounts.reduce((s, p) => s + p.count, 0);
+
+  // ─── Production summary (this week / month) ───
+  const now = new Date();
+  const startOfWeek = new Date(now);
+  startOfWeek.setDate(now.getDate() - ((now.getDay() || 7) - 1));
+  startOfWeek.setHours(0, 0, 0, 0);
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const sumProduction = (since) => safeBatches.reduce(
+    (a, b) => {
+      const d = b.createdAt ? new Date(b.createdAt) : null;
+      if (!d || d < since) return a;
+      a.batches += 1;
+      a.rawMt += Number(b.rawQtyMT) || 0;
+      a.finishedMt += Number(b.actualFinishedMT) || 0;
+      return a;
+    },
+    { batches: 0, rawMt: 0, finishedMt: 0 }
+  );
+  const productionWeek = sumProduction(startOfWeek);
+  const productionMonth = sumProduction(startOfMonth);
+  const yieldWeek = productionWeek.rawMt > 0 ? (productionWeek.finishedMt / productionWeek.rawMt) * 100 : null;
+
+  // ─── Money flow snapshot — derived from order receipts ───
+  const moneyFlow = safeOrders.reduce(
+    (a, o) => {
+      const recv = (Number(o.advanceReceived) || 0) + (Number(o.balanceReceived) || 0);
+      a.received += recv;
+      a.outstanding += Math.max(0, (Number(o.contractValue) || 0) - recv);
+      return a;
+    },
+    { received: 0, outstanding: 0 }
+  );
+  const collectionRate = (moneyFlow.received + moneyFlow.outstanding) > 0
+    ? Math.round((moneyFlow.received / (moneyFlow.received + moneyFlow.outstanding)) * 100)
+    : 0;
 
   // ─── Yield distribution ───
   const yieldDistribution = useMemo(() => {
@@ -149,47 +144,75 @@ export default function Dashboard() {
     return items.length > 0 ? items : [{ id: 1, type: 'finance', action: 'No recent activity', by: '', time: '' }];
   }, [safeOrders]);
 
-  const totalActions = pendingApprovalBatches.length + awaitingAdvance + docsInPrep + readyToShip + varianceAlerts;
+  // ─── Recent shipments (top 5 most recently shipped/arrived) ───
+  const recentShipments = useMemo(() => {
+    return safeOrders
+      .filter(o => o.status === 'Shipped' || o.status === 'Arrived' || o.status === 'Closed')
+      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+      .slice(0, 4);
+  }, [safeOrders]);
+
+  const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Operations overview</p>
+    <div className="space-y-5 pb-4">
+      {/* ─── HERO BAND ────────────────────────────────────────────── */}
+      <div className="rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-blue-900 p-5 sm:p-6 text-white shadow-sm relative overflow-hidden">
+        <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'radial-gradient(circle at 80% 30%, white 0%, transparent 60%)' }} />
+        <div className="relative flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 text-xs uppercase tracking-wider opacity-80 mb-1">
+              <Activity size={14} /> {today}
+            </div>
+            <h1 className="text-3xl font-bold leading-tight">
+              {user?.fullName ? `Welcome back, ${user.fullName.split(' ')[0]}` : 'Operations Overview'}
+            </h1>
+            <p className="text-sm opacity-80 mt-1">
+              {totalActions > 0
+                ? `${totalActions} item${totalActions === 1 ? '' : 's'} need attention today.`
+                : 'Everything is on track.'}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <HeroStat label="Active Orders" value={activeOrders} accent="blue" />
+            <HeroStat label="Active Batches" value={activeBatches} accent="amber" />
+            <HeroStat label="In Transit" value={shipmentsInTransit} accent="emerald" />
+            <button
+              onClick={() => refreshFromApi('orders')}
+              className="bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors"
+              title="Refresh"
+            >
+              <RefreshCw size={12} className={dataLoading ? 'animate-spin' : ''} /> Refresh
+            </button>
+          </div>
         </div>
-        <button
-          onClick={() => refreshFromApi('orders')}
-          className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg"
-          title="Refresh"
-        >
-          <RefreshCw size={16} className={dataLoading ? 'animate-spin' : ''} />
-        </button>
       </div>
 
-      {/* Action Queue — what needs attention NOW */}
+      {/* ─── ACTION QUEUE ─────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-gray-200 p-5">
-        <div className="flex items-center gap-2 mb-4">
-          <AlertTriangle size={18} className="text-amber-600" />
-          <h2 className="text-base font-semibold text-gray-900">Needs Your Attention</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+            <AlertTriangle size={14} className="text-amber-500" /> Needs Your Attention
+          </h2>
+          {totalActions > 0 && (
+            <span className="text-xs px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full font-semibold">{totalActions} open</span>
+          )}
         </div>
 
-        {/* Pending Batch Approvals — Owner/Admin only, inline cards */}
+        {/* Pending Batch Approvals — Owner/Admin only */}
         {isOwnerOrAdmin && pendingApprovalBatches.length > 0 && (
           <div className="mb-4">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-              Milling Batches Awaiting Approval ({pendingApprovalBatches.length})
+            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">
+              Milling batches awaiting approval ({pendingApprovalBatches.length})
             </p>
             <div className="space-y-2">
-              {pendingApprovalBatches.slice(0, 5).map(b => (
+              {pendingApprovalBatches.slice(0, 3).map(b => (
                 <div key={b.id} className="flex items-center justify-between p-3 bg-amber-50 border border-amber-200 rounded-lg">
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-gray-900">{b.id}</p>
                     <p className="text-xs text-gray-600">
                       {b.supplierName || 'No supplier'} · {Number(b.rawQtyMT || 0).toFixed(1)} MT
                       {b.linkedExportOrder && <span> · Order: {b.linkedExportOrder}</span>}
-                      {b.createdByName && <span className="text-gray-400"> · by {b.createdByName}</span>}
                     </p>
                   </div>
                   <div className="flex items-center gap-2 ml-3">
@@ -201,7 +224,7 @@ export default function Dashboard() {
                           refreshFromApi('batches');
                         } catch (err) { addToast(err?.response?.data?.message || 'Failed', 'error'); }
                       }}
-                      className="px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700"
+                      className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700"
                     >
                       Approve
                     </button>
@@ -213,22 +236,17 @@ export default function Dashboard() {
                           .then(() => { addToast(`Batch ${b.id} rejected`, 'success'); refreshFromApi('batches'); })
                           .catch(err => addToast(err?.response?.data?.message || 'Failed', 'error'));
                       }}
-                      className="px-3 py-1.5 bg-red-100 text-red-700 text-xs font-medium rounded-lg hover:bg-red-200"
+                      className="px-3 py-1.5 bg-rose-100 text-rose-700 text-xs font-medium rounded-lg hover:bg-rose-200"
                     >
                       Reject
                     </button>
-                    <Link
-                      to={`/milling/${b.id}`}
-                      className="px-2 py-1.5 text-xs text-blue-600 hover:underline"
-                    >
-                      Details
-                    </Link>
+                    <Link to={`/milling/${b.id}`} className="px-2 py-1.5 text-xs text-blue-600 hover:underline">Details</Link>
                   </div>
                 </div>
               ))}
-              {pendingApprovalBatches.length > 5 && (
+              {pendingApprovalBatches.length > 3 && (
                 <Link to="/milling" className="block text-xs text-blue-600 hover:underline text-center py-1">
-                  +{pendingApprovalBatches.length - 5} more pending...
+                  +{pendingApprovalBatches.length - 3} more pending →
                 </Link>
               )}
             </div>
@@ -237,72 +255,169 @@ export default function Dashboard() {
 
         {/* Other action items */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-          <ActionItem icon={CreditCard} label="Awaiting advance payment" count={awaitingAdvance} to="/export?status=Awaiting+Advance" accent="amber" />
-          <ActionItem icon={FileText} label="Documents in preparation" count={docsInPrep} to="/export?status=Docs+In+Preparation" accent="blue" />
-          <ActionItem icon={Ship} label="Ready to ship" count={readyToShip} to="/export?status=Ready+to+Ship" accent="green" />
-          <ActionItem icon={Clock} label="Awaiting balance payment" count={awaitingBalance} to="/export?status=Awaiting+Balance" accent="amber" />
-          <ActionItem icon={AlertTriangle} label="Mill yield variance alerts" count={varianceAlerts} to="/quality" accent="red" />
+          <ActionItem icon={CreditCard}     label="Awaiting advance payment"  count={awaitingAdvance} to="/export?status=Awaiting+Advance"      accent="amber" />
+          <ActionItem icon={FileText}       label="Documents in preparation"  count={docsInPrep}      to="/export?status=Docs+In+Preparation"   accent="blue" />
+          <ActionItem icon={Ship}           label="Ready to ship"             count={readyToShip}     to="/export?status=Ready+to+Ship"         accent="green" />
+          <ActionItem icon={Clock}          label="Awaiting balance payment"  count={awaitingBalance} to="/export?status=Awaiting+Balance"      accent="amber" />
+          <ActionItem icon={AlertTriangle}  label="Mill yield variance"       count={varianceAlerts}  to="/quality"                              accent="red" />
         </div>
 
-        {totalActions === 0 && !isOwnerOrAdmin && (
-          <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg text-green-900">
-            <CheckCircle2 size={18} />
+        {totalActions === 0 && (
+          <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-900">
+            <CheckCircle2 size={16} />
             <span className="text-sm font-medium">All caught up — nothing needs attention.</span>
           </div>
         )}
       </div>
 
-      {/* KPI Row */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <KPI icon={Ship} label="Active Orders" value={activeOrders} to="/export" accent="blue" />
-        <KPI icon={Factory} label="Active Batches" value={activeBatches} to="/milling" accent="purple" />
-        <KPI icon={Truck} label="In Transit" value={shipmentsInTransit} accent="green" />
-        <KPI icon={DollarSign} label="Receivables" value={fmt(totalReceivable)} accent="amber" />
-        <KPI icon={TrendingUp} label="Export Profit" value={fmt(exportProfit)} accent="green" />
+      {/* ─── PRIMARY KPI ROW ──────────────────────────────────────── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <KpiTile
+          icon={Ship}
+          tone="blue"
+          label="Order Book"
+          primary={fmt(totalContractValue)}
+          secondary={`${activeOrders} active orders`}
+          hint={`${shipmentsInTransit} in transit`}
+          onClick={() => navigate('/export')}
+        />
+        <KpiTile
+          icon={Wallet}
+          tone="emerald"
+          label="Money Received"
+          primary={fmt(moneyFlow.received)}
+          secondary={`${collectionRate}% of expected`}
+          hint={collectionRate >= 80 ? 'On target' : 'Below 80%'}
+          hintBad={collectionRate < 80}
+          onClick={() => navigate('/finance/money-in')}
+        />
+        <KpiTile
+          icon={Clock}
+          tone="amber"
+          label="Outstanding"
+          primary={fmt(moneyFlow.outstanding)}
+          secondary="Open balance to collect"
+          hint={awaitingBalance > 0 ? `${awaitingBalance} awaiting balance` : 'No urgent collections'}
+          hintBad={awaitingBalance > 0}
+          onClick={() => navigate('/finance/money-in')}
+        />
+        <KpiTile
+          icon={TrendingUp}
+          tone="violet"
+          label="Booked Profit"
+          primary={fmt(exportProfit)}
+          secondary="Across all open orders"
+          hint={exportProfit > 0 ? 'Positive' : 'Below break-even'}
+          hintBad={exportProfit <= 0}
+          onClick={() => navigate('/finance/profit')}
+        />
       </div>
 
-      {/* Compact Pipeline */}
+      {/* ─── ORDER PIPELINE ───────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-gray-200 p-5">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">Order Pipeline</h2>
+          <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+            <Activity size={14} className="text-blue-500" /> Order Pipeline
+            <span className="text-xs text-gray-400 font-normal">({totalPipelineOrders} orders · {fmt(phaseCounts.reduce((s, p) => s + p.value, 0))})</span>
+          </h2>
           <Link to="/export" className="text-xs text-blue-600 hover:underline">All orders →</Link>
         </div>
 
-        {/* Phase bar */}
-        {totalPipelineOrders > 0 && (
-          <div className="flex h-3 rounded-full overflow-hidden mb-4">
-            {phaseCounts.map(phase => (
-              phase.count > 0 && (
+        {totalPipelineOrders > 0 ? (
+          <>
+            <div className="flex h-2.5 rounded-full overflow-hidden mb-4 bg-gray-100">
+              {phaseCounts.map(phase => phase.count > 0 && (
                 <div
                   key={phase.label}
                   className={`${phase.color} transition-all`}
                   style={{ width: `${(phase.count / totalPipelineOrders) * 100}%` }}
-                  title={`${phase.label}: ${phase.count}`}
+                  title={`${phase.label}: ${phase.count} orders`}
                 />
-              )
-            ))}
-          </div>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+              {phaseCounts.map(phase => (
+                <button
+                  key={phase.label}
+                  onClick={() => navigate('/export?status=' + encodeURIComponent(phase.statuses[0]))}
+                  className="p-3 text-left border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50/40 transition-colors group"
+                >
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <div className={`w-2 h-2 rounded-full ${phase.color}`} />
+                    <p className="text-[11px] font-semibold text-gray-600 uppercase tracking-wider">{phase.label}</p>
+                  </div>
+                  <p className="text-2xl font-bold text-gray-900 leading-none">{phase.count}</p>
+                  <p className="text-[11px] text-gray-500 mt-1">{fmt(phase.value)}</p>
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <p className="text-center text-gray-400 py-6 text-sm">No orders in the pipeline.</p>
         )}
+      </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          {phaseCounts.map(phase => (
-            <button
-              key={phase.label}
-              onClick={() => navigate('/export?status=' + encodeURIComponent(phase.statuses[0]))}
-              className="p-3 text-left border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50/50 transition-colors"
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <div className={`w-2.5 h-2.5 rounded-full ${phase.color}`} />
-                <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">{phase.label}</p>
-              </div>
-              <p className="text-xl font-bold text-gray-900">{phase.count}</p>
-              <p className="text-[11px] text-gray-500">{fmt(phase.value)}</p>
-            </button>
-          ))}
+      {/* ─── PRODUCTION + RECENT SHIPMENTS ────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Production summary */}
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+              <Factory size={14} className="text-orange-500" /> Production Summary
+            </h2>
+            <Link to="/reports/print" className="text-xs text-blue-600 hover:underline">Print report →</Link>
+          </div>
+          <div className="grid grid-cols-2 gap-3 mb-4">
+            <ProductionCell label="This Week" batches={productionWeek.batches} rawMt={productionWeek.rawMt} finishedMt={productionWeek.finishedMt} />
+            <ProductionCell label="This Month" batches={productionMonth.batches} rawMt={productionMonth.rawMt} finishedMt={productionMonth.finishedMt} />
+          </div>
+          <div className="flex items-center justify-between text-xs pt-3 border-t border-gray-100">
+            <span className="text-gray-500">Avg yield (this week)</span>
+            <span className={`font-bold ${yieldWeek != null && yieldWeek >= 65 ? 'text-emerald-600' : yieldWeek != null && yieldWeek >= 60 ? 'text-amber-600' : 'text-gray-700'}`}>
+              {fmtPctSafe(yieldWeek)}
+            </span>
+          </div>
+        </div>
+
+        {/* Recent shipments */}
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+              <Truck size={14} className="text-cyan-500" /> Recent Shipments
+            </h2>
+            <Link to="/export" className="text-xs text-blue-600 hover:underline">All shipments →</Link>
+          </div>
+          {recentShipments.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-6">No shipments yet</p>
+          ) : (
+            <ul className="space-y-2">
+              {recentShipments.map(o => {
+                const statusTone = o.status === 'Shipped' ? 'bg-cyan-100 text-cyan-700'
+                  : o.status === 'Arrived' ? 'bg-emerald-100 text-emerald-700'
+                  : 'bg-slate-100 text-slate-700';
+                return (
+                  <li key={o.id}>
+                    <Link to={`/export/${o.id}`} className="flex items-center gap-3 p-2.5 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors">
+                      <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center flex-shrink-0">
+                        <Ship size={14} className="text-cyan-500" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">{o.id} · {o.customerName}</p>
+                        <p className="text-[11px] text-gray-500 truncate">
+                          {o.qtyMT} MT to {o.country}{o.vesselName ? ` · ${o.vesselName}` : ''}
+                        </p>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${statusTone} flex-shrink-0`}>{o.status}</span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
       </div>
 
-      {/* Bottom row */}
+      {/* ─── YIELD CHART + RECENT ACTIVITY ─────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-1">
           <YieldDistributionChart data={yieldDistribution} />
@@ -311,6 +426,126 @@ export default function Dashboard() {
           <RecentActivity activities={recentActivities} />
         </div>
       </div>
+
+      {/* ─── QUICK ACTIONS ────────────────────────────────────────── */}
+      <div className="bg-gradient-to-r from-gray-900 to-gray-800 rounded-xl p-4 text-white">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-xs uppercase tracking-wider text-gray-400 mr-2">Quick actions</span>
+          <QuickAction icon={Plus}            label="New Export Order"  onClick={() => navigate('/export?new=1')}    tone="blue" />
+          <QuickAction icon={Factory}         label="New Milling Batch" onClick={() => navigate('/milling?new=1')}    tone="amber" />
+          <QuickAction icon={ArrowDownLeft}   label="Record Receipt"    onClick={() => navigate('/finance/money-in')} tone="emerald" />
+          <QuickAction icon={ArrowUpRight}    label="Make Payment"      onClick={() => navigate('/finance/money-out')} tone="rose" />
+          <QuickAction icon={BarChart3}       label="Print Reports"     onClick={() => navigate('/reports/print')}    tone="violet" />
+        </div>
+      </div>
     </div>
+  );
+}
+
+// ─── Sub-components ───────────────────────────────────────────────────
+
+function HeroStat({ label, value, accent }) {
+  const tones = {
+    blue: 'border-blue-400/40 bg-blue-500/10',
+    amber: 'border-amber-400/40 bg-amber-500/10',
+    emerald: 'border-emerald-400/40 bg-emerald-500/10',
+  };
+  return (
+    <div className={`px-4 py-2.5 rounded-xl border backdrop-blur-sm ${tones[accent]}`}>
+      <div className="text-[10px] uppercase tracking-wider opacity-80">{label}</div>
+      <div className="text-xl font-bold leading-none mt-0.5">{value}</div>
+    </div>
+  );
+}
+
+function ActionItem({ icon: Icon, label, count, to, accent = 'amber' }) {
+  if (count === 0) return null;
+  const colors = {
+    amber: 'bg-amber-50 border-amber-200 text-amber-900 hover:bg-amber-100',
+    red: 'bg-rose-50 border-rose-200 text-rose-900 hover:bg-rose-100',
+    blue: 'bg-blue-50 border-blue-200 text-blue-900 hover:bg-blue-100',
+    green: 'bg-emerald-50 border-emerald-200 text-emerald-900 hover:bg-emerald-100',
+  };
+  return (
+    <Link to={to} className={`flex items-center justify-between p-3 rounded-lg border ${colors[accent]} transition-colors`}>
+      <div className="flex items-center gap-3">
+        <Icon size={16} />
+        <span className="text-sm font-medium">{label}</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="px-2 py-0.5 bg-white rounded-full text-xs font-bold">{count}</span>
+        <ArrowRight size={14} />
+      </div>
+    </Link>
+  );
+}
+
+function KpiTile({ icon: Icon, tone = 'gray', label, primary, secondary, hint, hintBad, onClick }) {
+  const tones = {
+    blue:    { ring: 'ring-blue-100',    icon: 'text-blue-500 bg-blue-50' },
+    emerald: { ring: 'ring-emerald-100', icon: 'text-emerald-500 bg-emerald-50' },
+    amber:   { ring: 'ring-amber-100',   icon: 'text-amber-500 bg-amber-50' },
+    violet:  { ring: 'ring-violet-100',  icon: 'text-violet-500 bg-violet-50' },
+    rose:    { ring: 'ring-rose-100',    icon: 'text-rose-500 bg-rose-50' },
+    gray:    { ring: 'ring-gray-100',    icon: 'text-gray-500 bg-gray-50' },
+  };
+  const t = tones[tone] || tones.gray;
+  const Cmp = onClick ? 'button' : 'div';
+  return (
+    <Cmp
+      onClick={onClick}
+      className={`bg-white rounded-xl border border-gray-200 ${onClick ? 'hover:border-gray-300 cursor-pointer hover:shadow-sm' : ''} transition-all p-4 text-left ring-1 ${t.ring}`}
+    >
+      <div className="flex items-start justify-between mb-2">
+        <span className="text-[11px] uppercase tracking-wider text-gray-500 font-medium">{label}</span>
+        {Icon && <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${t.icon}`}><Icon size={14} /></span>}
+      </div>
+      <div className="text-xl font-bold text-gray-900 leading-none">{primary}</div>
+      {secondary && <div className="text-[11px] text-gray-500 mt-1">{secondary}</div>}
+      {hint && (
+        <div className={`text-[11px] mt-2 ${hintBad ? 'text-rose-600' : 'text-emerald-600'} font-medium`}>
+          {hintBad ? '● ' : '✓ '}{hint}
+        </div>
+      )}
+    </Cmp>
+  );
+}
+
+function ProductionCell({ label, batches, rawMt, finishedMt }) {
+  const yieldPct = rawMt > 0 ? (finishedMt / rawMt) * 100 : null;
+  return (
+    <div className="border border-gray-200 rounded-lg p-3">
+      <div className="text-[11px] uppercase tracking-wider text-gray-500 font-medium mb-1">{label}</div>
+      <div className="flex items-baseline gap-1">
+        <span className="text-xl font-bold text-gray-900">{batches}</span>
+        <span className="text-[11px] text-gray-500">batches</span>
+      </div>
+      <div className="text-[11px] text-gray-600 mt-1">
+        Raw {fmtMt(rawMt)} → Output {fmtMt(finishedMt)}
+      </div>
+      {yieldPct != null && (
+        <div className="text-[11px] text-gray-500 mt-0.5">
+          Yield <span className="font-semibold text-gray-700">{yieldPct.toFixed(1)}%</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function QuickAction({ icon: Icon, label, onClick, tone }) {
+  const tones = {
+    blue:    'hover:bg-blue-500/20 text-blue-300',
+    emerald: 'hover:bg-emerald-500/20 text-emerald-300',
+    rose:    'hover:bg-rose-500/20 text-rose-300',
+    amber:   'hover:bg-amber-500/20 text-amber-300',
+    violet:  'hover:bg-violet-500/20 text-violet-300',
+  };
+  return (
+    <button
+      onClick={onClick}
+      className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm font-medium transition-colors ${tones[tone] || ''}`}
+    >
+      <Icon size={14} /> {label}
+    </button>
   );
 }
