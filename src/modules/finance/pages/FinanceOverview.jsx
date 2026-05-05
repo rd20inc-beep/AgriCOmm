@@ -304,7 +304,7 @@ export default function FinanceOverview() {
           <span className="text-xs uppercase tracking-wider text-gray-400 mr-2">Quick actions</span>
           <QuickAction icon={ArrowDownLeft} label="Record Receipt" onClick={() => navigate('/finance/money-in')} tone="emerald" />
           <QuickAction icon={ArrowUpRight} label="Make Payment" onClick={() => navigate('/finance/money-out')} tone="rose" />
-          <QuickAction icon={ArrowRightLeft} label="Internal Transfer" onClick={() => navigate('/finance/internal-transfers')} tone="indigo" />
+          <QuickAction icon={ArrowRightLeft} label="Internal Transfer" onClick={() => navigate('/finance/transfers')} tone="indigo" />
           <QuickAction icon={Landmark} label="Reconcile" onClick={() => navigate('/finance/cash')} tone="violet" />
           <QuickAction icon={TrendingUp} label="Profitability" onClick={() => navigate('/finance/profit')} tone="amber" />
         </div>

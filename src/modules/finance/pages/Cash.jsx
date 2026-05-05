@@ -48,14 +48,33 @@ export default function Cash() {
     { key: 'counterparty', label: 'Counterparty', render: (v) => v || '—' },
   ];
 
-  // Cash flow chart from account data
-  const cashData = useMemo(() => {
-    const months = ['Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
-    return months.map((month, i) => ({
-      month,
-      Balance: Math.round(totalBalance * (0.7 + i * 0.06)),
-    }));
-  }, [totalBalance]);
+  // Last-30-days net flow chart bucketed by day, computed from real
+  // bank_transactions (was previously a fabricated curve based on
+  // current-balance × i*0.06).
+  const cashFlowData = useMemo(() => {
+    const txs = Array.isArray(transactions) ? transactions : [];
+    const dayBuckets = new Map();
+    const now = new Date();
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(now.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      dayBuckets.set(key, { day: key.slice(5), In: 0, Out: 0, Net: 0 });
+    }
+    for (const t of txs) {
+      const dRaw = t.transactionDate || t.transaction_date || t.date;
+      if (!dRaw) continue;
+      const key = String(dRaw).slice(0, 10);
+      const bucket = dayBuckets.get(key);
+      if (!bucket) continue;
+      const amt = Math.abs(parseFloat(t.amount) || 0);
+      if (t.type === 'credit') bucket.In += amt; else bucket.Out += amt;
+      bucket.Net = bucket.In - bucket.Out;
+    }
+    return Array.from(dayBuckets.values());
+  }, [transactions]);
+
+  const hasFlow = cashFlowData.some(b => b.In > 0 || b.Out > 0);
 
   return (
     <div className="space-y-6">
@@ -70,8 +89,25 @@ export default function Cash() {
           subtitle="In use" status="neutral" loading={loadingAccounts} />
       </div>
 
-      <FinanceChart title="Cash Balance Trend" type="line" data={cashData} currency="Rs "
-        series={[{ key: 'Balance', name: 'Balance', color: '#3b82f6' }]} height={220} loading={loadingAccounts} />
+      {hasFlow ? (
+        <FinanceChart
+          title="Cash Flow — Last 30 Days"
+          type="bar"
+          data={cashFlowData}
+          xKey="day"
+          currency="Rs "
+          series={[
+            { key: 'In',  name: 'In',  color: '#10b981' },
+            { key: 'Out', name: 'Out', color: '#ef4444' },
+          ]}
+          height={220}
+          loading={loadingTx}
+        />
+      ) : (
+        <div className="bg-white rounded-xl border border-gray-200 p-6 text-center text-sm text-gray-400">
+          No bank transactions in the last 30 days yet — record receipts or payments to populate this chart.
+        </div>
+      )}
 
       <FinanceTable title="Bank Accounts" columns={accountColumns} data={accounts}
         searchKeys={['name', 'bankName', 'accountNumber']} exportFilename="bank-accounts" loading={loadingAccounts} />

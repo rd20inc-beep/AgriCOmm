@@ -49,18 +49,22 @@ export default function MoneyOut() {
     return ['All', ...Array.from(cats).sort()];
   }, [payables]);
 
+  // Case-insensitive status compare so off-canon writes (e.g. legacy
+  // 'pending') don't silently drop out of filters and KPIs.
+  const eqStatus = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase();
+
   const filtered = useMemo(() => {
     return payables.filter(p => {
       if (entityFilter !== 'All' && p.entity !== entityFilter.toLowerCase()) return false;
       if (categoryFilter !== 'All' && p.category !== categoryFilter) return false;
-      if (statusFilter !== 'All' && p.status !== statusFilter) return false;
+      if (statusFilter !== 'All' && !eqStatus(p.status, statusFilter)) return false;
       return true;
     });
   }, [payables, entityFilter, categoryFilter, statusFilter]);
 
   // KPIs
-  const totalOutstanding = payables.filter(p => p.status !== 'Paid').reduce((s, p) => s + (parseFloat(p.outstanding) || 0), 0);
-  const overdueAmount = payables.filter(p => p.status === 'Overdue' || (p.dueDate && new Date(p.dueDate) < new Date() && p.status !== 'Paid'))
+  const totalOutstanding = payables.filter(p => !eqStatus(p.status, 'Paid')).reduce((s, p) => s + (parseFloat(p.outstanding) || 0), 0);
+  const overdueAmount = payables.filter(p => eqStatus(p.status, 'Overdue') || (p.dueDate && new Date(p.dueDate) < new Date() && !eqStatus(p.status, 'Paid')))
     .reduce((s, p) => s + (parseFloat(p.outstanding) || 0), 0);
   const paidTotal = payables.reduce((s, p) => s + (parseFloat(p.paidAmount) || 0), 0);
   const supplierCount = new Set(payables.filter(p => p.supplierName).map(p => p.supplierName)).size;
@@ -75,10 +79,12 @@ export default function MoneyOut() {
     return Object.entries(cats).map(([name, value]) => ({ name, value: Math.round(value) })).sort((a, b) => b.value - a.value);
   }, [payables]);
 
-  // Available receivable funds (for "pay from received funds")
-  const availableRecvFunds = receivables
-    .filter(r => parseFloat(r.receivedAmount) > 0)
-    .map(r => ({ id: r.id, label: `${r.recvNo} — ${r.customerName || 'Customer'} (${r.currency} ${parseFloat(r.receivedAmount).toLocaleString()})`, amount: parseFloat(r.receivedAmount) }));
+  // Cash accounts vs bank accounts (split bank_accounts by type so the
+  // payment form's tab buttons map to real selectable accounts —
+  // previously "Received Funds" sent `recv-${id}` as bank_account_id
+  // which the backend rejects as a non-integer).
+  const bankOnlyAccounts = bankAccounts.filter(a => a.type !== 'cash');
+  const cashAccounts = bankAccounts.filter(a => a.type === 'cash');
 
   const columns = [
     { key: 'payNo', label: 'Ref', sortable: true, width: '100px' },
@@ -239,10 +245,6 @@ export default function MoneyOut() {
                       className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${payForm.fundSource === 'bank' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}>
                       Bank Account
                     </button>
-                    <button type="button" onClick={() => setPayForm({ ...payForm, fundSource: 'received', bankAccountId: '' })}
-                      className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${payForm.fundSource === 'received' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}>
-                      Received Funds
-                    </button>
                     <button type="button" onClick={() => setPayForm({ ...payForm, fundSource: 'cash', bankAccountId: '' })}
                       className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${payForm.fundSource === 'cash' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}>
                       Cash
@@ -250,14 +252,14 @@ export default function MoneyOut() {
                   </div>
                 </div>
 
-                {/* Bank Account Dropdown */}
+                {/* Bank Account Dropdown — non-cash accounts only */}
                 {payForm.fundSource === 'bank' && (
                   <div>
                     <label className="text-xs text-gray-500 block mb-1">Bank Account</label>
                     <select required value={payForm.bankAccountId} onChange={e => setPayForm({ ...payForm, bankAccountId: e.target.value })}
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                       <option value="">Select bank account...</option>
-                      {bankAccounts.map(a => (
+                      {bankOnlyAccounts.map(a => (
                         <option key={a.id} value={a.id}>
                           {a.name} — {a.bankName || ''} ({a.currency || 'PKR'} {Math.round(parseFloat(a.currentBalance) || 0).toLocaleString()})
                         </option>
@@ -266,18 +268,25 @@ export default function MoneyOut() {
                   </div>
                 )}
 
-                {/* Received Funds Dropdown */}
-                {payForm.fundSource === 'received' && (
+                {/* Cash Account Dropdown — type='cash' rows on bank_accounts */}
+                {payForm.fundSource === 'cash' && (
                   <div>
-                    <label className="text-xs text-gray-500 block mb-1">Pay From Received Funds</label>
-                    <select required value={payForm.bankAccountId} onChange={e => setPayForm({ ...payForm, bankAccountId: e.target.value })}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                      <option value="">Select receivable source...</option>
-                      {availableRecvFunds.map(r => (
-                        <option key={r.id} value={`recv-${r.id}`}>{r.label}</option>
-                      ))}
-                    </select>
-                    <p className="text-xs text-gray-400 mt-1">Use funds received from a customer to pay this vendor</p>
+                    <label className="text-xs text-gray-500 block mb-1">Cash Account</label>
+                    {cashAccounts.length === 0 ? (
+                      <div className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                        No cash accounts configured. Add one in Admin → Bank Accounts (type: cash).
+                      </div>
+                    ) : (
+                      <select required value={payForm.bankAccountId} onChange={e => setPayForm({ ...payForm, bankAccountId: e.target.value })}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">Select cash account...</option>
+                        {cashAccounts.map(a => (
+                          <option key={a.id} value={a.id}>
+                            {a.name} ({a.currency || 'PKR'} {Math.round(parseFloat(a.currentBalance) || 0).toLocaleString()})
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </div>
                 )}
 

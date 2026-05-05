@@ -59,14 +59,9 @@ const Accounting = lazy(() => import('./modules/finance/pages/Accounting'));
 const RatesCenter = lazy(() => import('./modules/finance/pages/RatesCenter'));
 const FinanceAlerts = lazy(() => import('./modules/finance/pages/Alerts'));
 // Legacy routes (still accessible via direct URL)
-const Receivables = lazy(() => import('./modules/finance/pages/Receivables'));
-const Payables = lazy(() => import('./modules/finance/pages/Payables'));
 const FinanceConfirmations = lazy(() => import('./modules/finance/pages/Confirmations'));
 const CostAllocation = lazy(() => import('./modules/finance/pages/CostAllocation'));
 const FinanceTransfers = lazy(() => import('./modules/finance/pages/InternalTransfers'));
-const Profitability = lazy(() => import('./modules/finance/pages/Profitability'));
-const CashBank = lazy(() => import('./modules/finance/pages/CashBank'));
-const Ledger = lazy(() => import('./modules/finance/pages/Ledger'));
 const Reconciliation = lazy(() => import('./modules/finance/pages/Reconciliation'));
 const Expenses = lazy(() => import('./modules/finance/pages/Expenses'));
 

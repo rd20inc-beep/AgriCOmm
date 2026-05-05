@@ -23,22 +23,27 @@ export default function MoneyIn() {
   const [typeFilter, setTypeFilter] = useState('All');
   const [drawer, setDrawer] = useState(null);
 
+  // Status comparisons are case-insensitive — the CHECK constraint
+  // forces capitalised values today, but Local Sales / future writers
+  // could drift. eqStatus normalises the comparison.
+  const eqStatus = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase();
+
   const filtered = useMemo(() => {
     return receivables.filter(r => {
-      if (statusFilter !== 'All' && r.status !== statusFilter) return false;
+      if (statusFilter !== 'All' && !eqStatus(r.status, statusFilter)) return false;
       if (typeFilter !== 'All' && r.type !== typeFilter) return false;
       return true;
     }).map(r => ({
       ...r,
-      _highlight: r.status === 'Overdue' ? 'danger' : undefined,
+      _highlight: eqStatus(r.status, 'Overdue') ? 'danger' : undefined,
     }));
   }, [receivables, statusFilter, typeFilter]);
 
   // KPI calculations
-  const totalOutstanding = receivables.filter(r => r.status !== 'Paid').reduce((s, r) => s + (parseFloat(r.outstanding) || 0), 0);
-  const overdueAmount = receivables.filter(r => r.status === 'Overdue').reduce((s, r) => s + (parseFloat(r.outstanding) || 0), 0);
+  const totalOutstanding = receivables.filter(r => !eqStatus(r.status, 'Paid')).reduce((s, r) => s + (parseFloat(r.outstanding) || 0), 0);
+  const overdueAmount = receivables.filter(r => eqStatus(r.status, 'Overdue')).reduce((s, r) => s + (parseFloat(r.outstanding) || 0), 0);
   const collectedThisMonth = receivables.reduce((s, r) => s + (parseFloat(r.receivedAmount) || 0), 0);
-  const pendingCount = receivables.filter(r => r.status === 'Pending').length;
+  const pendingCount = receivables.filter(r => eqStatus(r.status, 'Pending')).length;
 
   // Aging data
   const agingData = useMemo(() => {

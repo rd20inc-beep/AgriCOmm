@@ -19,7 +19,6 @@ function fmtUSD(n) {
 }
 
 const TABS = ['Export', 'Mill', 'Consolidated'];
-const VIEW_MODES = ['Booked', 'Current FX', 'Both'];
 
 function AccuracyBadge({ status }) {
   if (status === 'exact') return <span className="inline-flex items-center gap-0.5 text-xs text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full"><CheckCircle size={10} /> Exact</span>;
@@ -32,7 +31,6 @@ function AccuracyBadge({ status }) {
 export default function Profit() {
   const { data: summary = {}, isLoading } = useProfitabilitySummary();
   const [tab, setTab] = useState('Export');
-  const [viewMode, setViewMode] = useState('Booked');
 
   const exportRows = summary.export?.rows || [];
   const millRows = summary.mill?.rows || [];
@@ -60,7 +58,7 @@ export default function Profit() {
     { key: 'fxGainLossPkr', label: 'FX +/-', sortable: true, align: 'right', render: (v) => (
       <span className={v >= 0 ? 'text-blue-600' : 'text-orange-600'}>{fmtPKR(v)}</span>
     )},
-    { key: 'marginPct', label: 'Margin', sortable: true, align: 'right', render: (v) => `${v}%` },
+    { key: 'marginPct', label: 'Margin', sortable: true, align: 'right', render: (v) => v == null || isNaN(v) ? '—' : `${v}%`},
     { key: 'calculationStatus', label: 'Accuracy', render: (v) => <AccuracyBadge status={v} /> },
   ];
 
@@ -76,19 +74,38 @@ export default function Profit() {
     { key: 'grossProfit', label: 'Profit (PKR)', sortable: true, align: 'right', render: (v) => (
       <span className={v >= 0 ? 'text-emerald-600 font-medium' : 'text-red-600 font-medium'}>{fmtPKR(v)}</span>
     )},
-    { key: 'marginPct', label: 'Margin', sortable: true, align: 'right', render: (v) => `${v}%` },
+    { key: 'marginPct', label: 'Margin', sortable: true, align: 'right', render: (v) => v == null || isNaN(v) ? '—' : `${v}%`},
     { key: 'priceSource', label: 'Price Source', render: (v) => (
       <span className={`text-xs px-1.5 py-0.5 rounded ${v === 'confirmed' ? 'bg-emerald-50 text-emerald-700' : v === 'commodity_rates' ? 'bg-blue-50 text-blue-700' : 'bg-red-50 text-red-700'}`}>{v || 'none'}</span>
     )},
     { key: 'calculationStatus', label: 'Accuracy', render: (v) => <AccuracyBadge status={v} /> },
   ];
 
-  // Chart data
+  // Chart data per tab. Consolidated rolls export + mill into one
+  // bar each so the user sees the totals side-by-side, instead of the
+  // previous behaviour where Consolidated silently showed the export
+  // chart only.
   const chartData = useMemo(() => {
     if (tab === 'Mill') {
       return millRows.filter(r => r.revenue > 0 || r.costs > 0).map(r => ({
         name: r.batchNo, Revenue: r.revenue, Cost: r.costs, Profit: r.grossProfit,
       }));
+    }
+    if (tab === 'Consolidated') {
+      const exportTotals = exportRows.reduce((a, r) => ({
+        Revenue: a.Revenue + (parseFloat(r.revenuePkrBooked) || 0),
+        Cost:    a.Cost    + (parseFloat(r.totalCostPkr)     || 0),
+        Profit:  a.Profit  + (parseFloat(r.bookedProfitPkr)  || 0),
+      }), { Revenue: 0, Cost: 0, Profit: 0 });
+      const millTotals = millRows.reduce((a, r) => ({
+        Revenue: a.Revenue + (parseFloat(r.revenue)     || 0),
+        Cost:    a.Cost    + (parseFloat(r.costs)       || 0),
+        Profit:  a.Profit  + (parseFloat(r.grossProfit) || 0),
+      }), { Revenue: 0, Cost: 0, Profit: 0 });
+      const data = [];
+      if (exportTotals.Revenue || exportTotals.Cost) data.push({ name: 'Export', ...exportTotals });
+      if (millTotals.Revenue   || millTotals.Cost)   data.push({ name: 'Mill',   ...millTotals });
+      return data;
     }
     return exportRows.filter(r => r.revenuePkrBooked > 0).map(r => ({
       name: r.orderNo, Revenue: r.revenuePkrBooked, Cost: r.totalCostPkr, Profit: r.bookedProfitPkr,

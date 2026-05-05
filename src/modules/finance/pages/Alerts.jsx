@@ -9,37 +9,51 @@ const SEVERITY_CONFIG = {
   info:    { bg: 'bg-blue-50',  border: 'border-blue-200',  dot: 'bg-blue-500',  icon: Info,          iconColor: 'text-blue-500' },
 };
 
-const FILTER_TABS = ['All', 'Critical', 'Warning', 'Info', 'Resolved'];
+// 'Resolved' was removed — alerts are computed from live conditions
+// (overdue receivables, low stock, etc.) so clicking Resolve never
+// persisted; fix the underlying condition and the alert auto-clears.
+const FILTER_TABS = ['All', 'Critical', 'Warning', 'Info'];
 
 export default function Alerts() {
   const { data: alertsData = [], isLoading } = useFinanceAlerts();
   const [filter, setFilter] = useState('All');
-  const [resolved, setResolved] = useState(new Set());
+  // Local-only dismiss set so the user can hide a noisy alert this
+  // session. There is no backend resolve endpoint — alerts are
+  // recomputed from live conditions on each refresh.
+  const [dismissed, setDismissed] = useState(new Set());
+
+  // Backend emits both `type` and `severity`. Normalise so 'critical'
+  // and 'high' map to danger; 'medium' to warning; everything else
+  // (info, low, default) to info. Otherwise critical alerts collapse
+  // to blue info badges and disappear from the Critical filter.
+  const toSeverity = (a) => {
+    const raw = String(a.severity || a.type || '').toLowerCase();
+    if (['danger', 'critical', 'high', 'urgent'].includes(raw)) return 'danger';
+    if (['warning', 'medium', 'warn'].includes(raw)) return 'warning';
+    return 'info';
+  };
 
   const alerts = useMemo(() => {
-    return alertsData.map(a => ({
-      ...a,
-      severity: a.type === 'danger' ? 'danger' : a.type === 'warning' ? 'warning' : 'info',
-      isResolved: resolved.has(a.id),
-    }));
-  }, [alertsData, resolved]);
+    return alertsData
+      .filter(a => !dismissed.has(a.id))
+      .map(a => ({ ...a, severity: toSeverity(a) }));
+  }, [alertsData, dismissed]);
 
   const filtered = useMemo(() => {
     return alerts.filter(a => {
-      if (filter === 'Resolved') return a.isResolved;
-      if (filter === 'Critical') return a.severity === 'danger' && !a.isResolved;
-      if (filter === 'Warning') return a.severity === 'warning' && !a.isResolved;
-      if (filter === 'Info') return a.severity === 'info' && !a.isResolved;
+      if (filter === 'Critical') return a.severity === 'danger';
+      if (filter === 'Warning') return a.severity === 'warning';
+      if (filter === 'Info') return a.severity === 'info';
       return true;
     });
   }, [alerts, filter]);
 
-  const criticalCount = alerts.filter(a => a.severity === 'danger' && !a.isResolved).length;
-  const warningCount = alerts.filter(a => a.severity === 'warning' && !a.isResolved).length;
-  const resolvedCount = alerts.filter(a => a.isResolved).length;
+  const criticalCount = alerts.filter(a => a.severity === 'danger').length;
+  const warningCount = alerts.filter(a => a.severity === 'warning').length;
+  const infoCount = alerts.filter(a => a.severity === 'info').length;
 
-  function handleResolve(id) {
-    setResolved(prev => new Set([...prev, id]));
+  function handleDismiss(id) {
+    setDismissed(prev => new Set([...prev, id]));
   }
 
   return (
@@ -52,8 +66,8 @@ export default function Alerts() {
           status={criticalCount > 0 ? 'danger' : 'good'} loading={isLoading} />
         <FinanceKPI icon={AlertCircle} title="Warnings" value={String(warningCount)}
           status={warningCount > 0 ? 'warning' : 'good'} loading={isLoading} />
-        <FinanceKPI icon={CheckCircle} title="Resolved" value={String(resolvedCount)}
-          status="good" loading={isLoading} />
+        <FinanceKPI icon={Info} title="Informational" value={String(infoCount)}
+          status="info" loading={isLoading} />
       </div>
 
       {/* Filter tabs */}
@@ -63,9 +77,9 @@ export default function Alerts() {
             className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
               filter === t ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
             }`}>{t}
-            {t !== 'All' && t !== 'Resolved' && (
+            {t !== 'All' && (
               <span className="ml-1 text-xs">{
-                t === 'Critical' ? criticalCount : t === 'Warning' ? warningCount : alerts.filter(a => a.severity === 'info' && !a.isResolved).length
+                t === 'Critical' ? criticalCount : t === 'Warning' ? warningCount : infoCount
               }</span>
             )}
           </button>
@@ -83,17 +97,13 @@ export default function Alerts() {
           const config = SEVERITY_CONFIG[alert.severity] || SEVERITY_CONFIG.info;
           const Icon = config.icon;
           return (
-            <div key={alert.id || i}
-              className={`${config.bg} border ${config.border} rounded-xl p-4 transition-opacity ${alert.isResolved ? 'opacity-50' : ''}`}>
+            <div key={alert.id || i} className={`${config.bg} border ${config.border} rounded-xl p-4`}>
               <div className="flex items-start gap-3">
                 <Icon size={18} className={`${config.iconColor} mt-0.5 flex-shrink-0`} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
                     <h4 className="text-sm font-semibold text-gray-900">{alert.title}</h4>
                     <span className={`w-2 h-2 rounded-full ${config.dot}`} />
-                    {alert.isResolved && (
-                      <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">Resolved</span>
-                    )}
                   </div>
                   <p className="text-sm text-gray-600">{alert.message}</p>
                   {alert.date && (
@@ -102,14 +112,14 @@ export default function Alerts() {
                     </p>
                   )}
                 </div>
-                {!alert.isResolved && (
-                  <div className="flex items-center gap-1 flex-shrink-0">
-                    <button onClick={() => handleResolve(alert.id)}
-                      className="text-xs px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 font-medium">
-                      Resolve
-                    </button>
-                  </div>
-                )}
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <button
+                    onClick={() => handleDismiss(alert.id)}
+                    title="Hide this alert in the current session. Alerts are recomputed on refresh — fix the underlying condition to make it go away."
+                    className="text-xs px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 font-medium">
+                    Dismiss
+                  </button>
+                </div>
               </div>
             </div>
           );

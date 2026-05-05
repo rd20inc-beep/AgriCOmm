@@ -183,8 +183,41 @@ const millStoreRepo = {
 
     // Update purchase total
     const totalAmount = lines.reduce((s, l) => s + (l.quantity * l.cost_per_unit), 0);
-    await trx('mill_purchases').where('id', purchase.id).update({ total_amount: Number(totalAmount.toFixed(2)) });
-    purchase.total_amount = Number(totalAmount.toFixed(2));
+    const totalRounded = Number(totalAmount.toFixed(2));
+    await trx('mill_purchases').where('id', purchase.id).update({ total_amount: totalRounded });
+    purchase.total_amount = totalRounded;
+
+    // Create the corresponding payable so the mill-store purchase
+    // shows up on the Money Out tab and contributes to AP totals.
+    // Without this, stock cost is recognised but the supplier debt
+    // is invisible to finance — they'd have to record it twice.
+    if (purchase.supplier_id && totalRounded > 0) {
+      const last = await trx('payables')
+        .where('pay_no', 'like', 'PAY-MS%')
+        .orderBy('id', 'desc')
+        .first();
+      const nextSeq = last
+        ? (parseInt(String(last.pay_no).replace(/^PAY-MS/, ''), 10) || 0) + 1
+        : 1;
+      const payNo = `PAY-MS${String(nextSeq).padStart(4, '0')}`;
+      await trx('payables').insert({
+        pay_no: payNo,
+        entity: 'mill',
+        category: 'mill_store',
+        supplier_id: purchase.supplier_id,
+        linked_ref: purchase.purchase_no,
+        original_amount: totalRounded,
+        paid_amount: 0,
+        outstanding: totalRounded,
+        currency: 'PKR',
+        due_date: header.purchase_date,
+        status: 'Pending',
+        source_table: 'mill_purchases',
+        source_id: purchase.id,
+        payable_type: 'purchase',
+        notes: header.invoice_number ? `Mill store purchase ${purchase.purchase_no} (Invoice ${header.invoice_number})` : `Mill store purchase ${purchase.purchase_no}`,
+      });
+    }
 
     return purchase;
   },
