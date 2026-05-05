@@ -278,12 +278,27 @@ const financeController = {
         countQuery,
       ]);
 
+      // Attach the underlying journal_lines so the FE can show the
+      // DR/CR account split per entry without a per-row query.
+      const entryIds = entries.map(e => e.id);
+      const lines = entryIds.length
+        ? await db('journal_lines').whereIn('journal_id', entryIds).orderBy(['journal_id', 'id'])
+        : [];
+      const linesByJournal = lines.reduce((acc, l) => {
+        (acc[l.journal_id] = acc[l.journal_id] || []).push(l);
+        return acc;
+      }, {});
+      const entriesWithLines = entries.map(e => ({
+        ...e,
+        lines: linesByJournal[e.id] || [],
+      }));
+
       const total = parseInt(countResult.total);
 
       return res.json({
         success: true,
         data: {
-          entries,
+          entries: entriesWithLines,
           pagination: {
             page: parseInt(page),
             limit: parseInt(limit),

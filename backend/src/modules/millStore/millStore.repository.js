@@ -1,4 +1,5 @@
 const db = require('../../config/database');
+const accountingService = require('../accounting/accounting.service');
 
 const millStoreRepo = {
   // ─── Items ───
@@ -217,6 +218,26 @@ const millStoreRepo = {
         payable_type: 'purchase',
         notes: header.invoice_number ? `Mill store purchase ${purchase.purchase_no} (Invoice ${header.invoice_number})` : `Mill store purchase ${purchase.purchase_no}`,
       });
+
+      // Auto-post journal: store_purchase rule (DR Bags & Packaging
+      // Stock, CR Supplier Payable). Wrapped so accounting failures
+      // don't block the purchase.
+      try {
+        await accountingService.autoPost(trx, {
+          triggerEvent: 'store_purchase',
+          entity: 'mill',
+          amount: totalRounded,
+          currency: 'PKR',
+          refType: 'Mill Purchase',
+          refNo: purchase.purchase_no,
+          description: header.invoice_number
+            ? `Mill store purchase ${purchase.purchase_no} (Invoice ${header.invoice_number})`
+            : `Mill store purchase ${purchase.purchase_no}`,
+          userId: header.created_by,
+        });
+      } catch (e) {
+        console.warn('Mill purchase journal post failed:', e.message);
+      }
     }
 
     return purchase;

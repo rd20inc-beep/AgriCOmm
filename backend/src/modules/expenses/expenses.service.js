@@ -1,5 +1,6 @@
 const db = require('../../config/database');
 const { NotFoundError, ValidationError } = require('../../shared/errors');
+const accountingService = require('../accounting/accounting.service');
 
 const CATEGORY_MAP = {
   general: [
@@ -152,6 +153,25 @@ const expensesService = {
           current_balance: trx.raw('current_balance - ?', [amountPkr]),
           updated_at: trx.fn.now(),
         });
+      }
+
+      // ─── Auto-post journal entry ───
+      // expense_recorded rule: DR Operating Expenses, CR Supplier Payable.
+      // Wrapped in try/catch so accounting failures never block the
+      // user-facing expense save (matches the pattern in other flows).
+      try {
+        await accountingService.autoPost(trx, {
+          triggerEvent: 'expense_recorded',
+          entity: expense_type === 'mill' ? 'mill' : expense_type === 'export' ? 'export' : 'general',
+          amount: amountPkr,
+          currency: 'PKR',
+          refType: 'Business Expense',
+          refNo: expenseNo,
+          description: `${vendorLabel}: ${(category || 'expense').replace(/_/g, ' ')} — ${description || 'no description'}`.slice(0, 240),
+          userId,
+        });
+      } catch (e) {
+        console.warn('Expense journal post failed:', e.message);
       }
 
       return expense;
