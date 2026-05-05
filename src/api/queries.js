@@ -1064,6 +1064,56 @@ export function useOrderProfitability(params = {}) {
   });
 }
 
+export function useCustomerProfitability(params = {}) {
+  return useQuery({
+    queryKey: ['customer-profitability', params],
+    queryFn: async () => {
+      const res = await reportingApi.customerProfitability(params);
+      return transformKeys(unwrap(res, 'customers') || unwrap(res) || []);
+    },
+  });
+}
+
+export function useCountryAnalysis(params = {}) {
+  return useQuery({
+    queryKey: ['country-analysis', params],
+    queryFn: async () => {
+      const res = await reportingApi.countryAnalysis(params);
+      return transformKeys(unwrap(res, 'countries') || unwrap(res) || []);
+    },
+  });
+}
+
+export function useStockAgingReport() {
+  return useQuery({
+    queryKey: ['stock-aging-report'],
+    queryFn: async () => {
+      const res = await reportingApi.stockAging();
+      return transformKeys(unwrap(res, 'aging') || unwrap(res) || []);
+    },
+  });
+}
+
+export function useSupplierQualityRanking(params = {}) {
+  return useQuery({
+    queryKey: ['supplier-quality-ranking', params],
+    queryFn: async () => {
+      const res = await reportingApi.supplierQualityRanking(params);
+      return transformKeys(unwrap(res, 'suppliers') || unwrap(res) || []);
+    },
+  });
+}
+
+export function useCashForecast(params = {}) {
+  return useQuery({
+    queryKey: ['cash-forecast', params],
+    queryFn: async () => {
+      const res = await reportingApi.cashForecast(params);
+      return transformKeys(unwrap(res) || {});
+    },
+  });
+}
+
 // ===================== NOTIFICATIONS =====================
 
 export function useNotifications(params = {}) {

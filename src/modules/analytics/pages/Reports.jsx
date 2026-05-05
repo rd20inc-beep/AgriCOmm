@@ -1,771 +1,441 @@
-import { useState, useMemo } from 'react';
-import { TrendingUp, AlertTriangle, BarChart3, DollarSign } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
-  BarChart,
-  Bar,
-  LineChart,
-  Line,
-  PieChart,
-  Pie,
-  Cell,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
+  BarChart3, TrendingUp, Users, Globe, Package, Award, Coins, Printer, RefreshCw,
+  ArrowUpRight, ArrowDownLeft, Activity, Calendar, ExternalLink, AlertTriangle,
+} from 'lucide-react';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell,
 } from 'recharts';
-import { useApp } from '../../../context/AppContext';
-import StatusBadge from '../../../components/StatusBadge';
-// Chart data computed from real order/batch data below (no mock imports)
+import {
+  useExecutiveSummary, useOrderProfitability, useCustomerProfitability,
+  useCountryAnalysis, useStockAgingReport, useSupplierQualityRanking,
+} from '../../../api/queries';
 
-const entityTabs = ['Export', 'Mill', 'Consolidated'];
-
-function formatCurrency(value, currency) {
-  if (currency === 'PKR') return 'Rs ' + Math.round(value).toLocaleString('en-PK');
-  return '$' + value.toLocaleString('en-US');
+// ─── Formatting ────────────────────────────────────────────────────────
+function fmtPKR(n) {
+  if (n == null || isNaN(n)) return 'Rs 0';
+  if (Math.abs(n) >= 10_000_000) return `Rs ${(n / 10_000_000).toFixed(2)}Cr`;
+  if (Math.abs(n) >= 100_000) return `Rs ${(n / 100_000).toFixed(2)}L`;
+  if (Math.abs(n) >= 1_000) return `Rs ${(n / 1_000).toFixed(0)}K`;
+  return `Rs ${Math.round(n).toLocaleString()}`;
+}
+function fmtUSD(n) {
+  if (n == null || isNaN(n)) return '$0';
+  if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
+  if (Math.abs(n) >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
+  return `$${Math.round(n).toLocaleString()}`;
+}
+function fmtPct(n) {
+  if (n == null || isNaN(n)) return '—';
+  return `${Number(n).toFixed(1)}%`;
 }
 
+// ─── Range presets ────────────────────────────────────────────────────
+const RANGES = [
+  { value: '',        label: 'All Time' },
+  { value: 'today',   label: 'Today' },
+  { value: 'week',    label: 'This Week' },
+  { value: 'month',   label: 'This Month' },
+  { value: 'quarter', label: 'This Quarter' },
+  { value: 'year',    label: 'This Year' },
+];
+
+function rangeToParams(range) {
+  if (!range) return {};
+  const now = new Date();
+  const startOf = (d) => { const x = new Date(d); x.setHours(0,0,0,0); return x.toISOString().slice(0,10); };
+  const endOf   = (d) => { const x = new Date(d); x.setHours(23,59,59,999); return x.toISOString().slice(0,10); };
+  switch (range) {
+    case 'today':   return { from_date: startOf(now), to_date: endOf(now) };
+    case 'week':    {
+      const day = now.getDay() || 7;
+      const monday = new Date(now); monday.setDate(now.getDate() - (day - 1));
+      const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+      return { from_date: startOf(monday), to_date: endOf(sunday) };
+    }
+    case 'month':   return { from_date: startOf(new Date(now.getFullYear(), now.getMonth(), 1)),     to_date: endOf(new Date(now.getFullYear(), now.getMonth() + 1, 0)) };
+    case 'quarter': {
+      const q = Math.floor(now.getMonth() / 3);
+      return { from_date: startOf(new Date(now.getFullYear(), q * 3, 1)), to_date: endOf(new Date(now.getFullYear(), q * 3 + 3, 0)) };
+    }
+    case 'year':    return { from_date: startOf(new Date(now.getFullYear(), 0, 1)), to_date: endOf(new Date(now.getFullYear(), 11, 31)) };
+    default:        return {};
+  }
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────
+const TABS = [
+  { key: 'orders',    label: 'Orders',     icon: TrendingUp },
+  { key: 'customers', label: 'Customers',  icon: Users },
+  { key: 'countries', label: 'Countries',  icon: Globe },
+  { key: 'inventory', label: 'Inventory',  icon: Package },
+  { key: 'quality',   label: 'Quality',    icon: Award },
+];
+
 export default function Reports() {
-  const { exportOrders, millingBatches } = useApp();
-  const [activeEntity, setActiveEntity] = useState('Export');
+  const [range, setRange] = useState('');
+  const [tab, setTab] = useState('orders');
+  const params = useMemo(() => rangeToParams(range), [range]);
 
-  // Compute chart data from real data
-  const receivablesPayables = useMemo(() => {
-    const months = ['Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
-    const totalRec = exportOrders.reduce((s, o) => s + Math.max(0, o.contractValue - o.advanceReceived - o.balanceReceived), 0);
-    const totalPay = exportOrders.reduce((s, o) => s + Object.values(o.costs || {}).reduce((cs, c) => cs + c, 0), 0);
-    return months.map((month, i) => ({
-      month,
-      receivables: Math.max(0, Math.round((totalRec / 6) * (1 + (i - 3) * 0.1))),
-      payables: Math.max(0, Math.round((totalPay / 6) * (1 + (i - 2) * 0.08))),
-    }));
-  }, [exportOrders]);
+  const { data: exec = {}, isLoading: execLoading, refetch: refetchExec } = useExecutiveSummary(params);
 
-  // Export profitability rows
-  const exportRows = useMemo(() => {
-    return exportOrders.map(order => {
-      const totalCosts = Object.values(order.costs || {}).reduce((s, c) => s + c, 0);
-      const grossProfit = order.contractValue - totalCosts;
-      const netProfit = grossProfit - (grossProfit * 0.05); // estimate 5% overhead
-      const marginPct = order.contractValue > 0 ? (grossProfit / order.contractValue) * 100 : 0;
-      return {
-        id: order.id,
-        label: `${order.id} - ${order.customerName}`,
-        inflows: order.contractValue,
-        outflows: totalCosts,
-        costBreakdown: order.costs,
-        grossProfit,
-        netProfit,
-        marginPct,
-        riskFlag: totalCosts > 0 && marginPct < 5,
-      };
-    });
-  }, [exportOrders]);
-
-  // Mill profitability rows (all in PKR)
-  const millRows = useMemo(() => {
-    return millingBatches.map(batch => {
-      const totalCosts = Object.values(batch.costs || {}).reduce((s, c) => s + c, 0);
-      // Revenue in PKR: finished rice @ Rs 72,800/MT + by-products
-      const estRevenue = batch.actualFinishedMT * 72800;
-      const byproductRevenue = (batch.brokenMT * 42000) + (batch.branMT * 22400) + (batch.huskMT * 8400);
-      const inflows = estRevenue + byproductRevenue;
-      const grossProfit = inflows - totalCosts;
-      const netProfit = grossProfit - (grossProfit * 0.05);
-      const marginPct = inflows > 0 ? (grossProfit / inflows) * 100 : 0;
-      return {
-        id: batch.id,
-        label: `${batch.id} - ${batch.supplierName}`,
-        inflows,
-        outflows: totalCosts,
-        costBreakdown: batch.costs,
-        grossProfit,
-        netProfit,
-        marginPct,
-        riskFlag: totalCosts > 0 && marginPct < 5,
-        currency: 'PKR',
-      };
-    });
-  }, [millingBatches]);
-
-  const currentRows = activeEntity === 'Export' ? exportRows : activeEntity === 'Mill' ? millRows : null;
-
-  // Order-wise profitability chart data
-  const profitChartData = useMemo(() => {
-    const rows = activeEntity === 'Export' ? exportRows : activeEntity === 'Mill' ? millRows : exportRows;
-    return rows
-      .filter(r => r.outflows > 0)
-      .map(r => ({
-        name: r.id,
-        profit: Math.round(r.grossProfit),
-        margin: parseFloat(r.marginPct.toFixed(1)),
-      }));
-  }, [activeEntity, exportRows, millRows]);
-
-  // Cost per MT trend
-  const costPerMTData = useMemo(() => {
-    // Calculate from actual export orders and milling batches
-    const months = ['Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
-    return months.map((month, idx) => {
-      // Use deterministic calculations based on index
-      const exportBase = exportRows.length > 0
-        ? Math.round(exportRows.reduce((sum, r) => sum + (r.outflows > 0 ? r.outflows / (exportOrders.find(o => o.id === r.id)?.qtyMT || 1) : 0), 0) / Math.max(exportRows.filter(r => r.outflows > 0).length, 1))
-        : 380;
-      const millBase = millRows.length > 0
-        ? Math.round(millRows.reduce((sum, r) => sum + (r.outflows > 0 ? r.outflows / (millingBatches.find(b => b.id === r.id)?.rawQtyMT || 1) : 0), 0) / Math.max(millRows.filter(r => r.outflows > 0).length, 1))
-        : 61600; // ~220 USD in PKR
-      const eCost = exportBase + (idx - 3) * 8;
-      const mCost = millBase + (idx - 3) * 5;
-      return {
-        month,
-        exportCostPerMT: isNaN(eCost) ? 380 : eCost,
-        millCostPerMT: isNaN(mCost) ? 220 : mCost,
-      };
-    });
-  }, [exportRows, millRows, exportOrders, millingBatches]);
-
-  // GAP 16: Customer-wise profitability (export)
-  const customerProfitability = useMemo(() => {
-    const map = {};
-    exportRows.forEach(row => {
-      const customer = row.label.split(' - ')[1] || 'Unknown';
-      if (!map[customer]) map[customer] = { customer, orders: 0, totalInflows: 0, totalProfit: 0, totalMarginSum: 0 };
-      map[customer].orders += 1;
-      map[customer].totalInflows += row.inflows;
-      map[customer].totalProfit += row.grossProfit;
-      map[customer].totalMarginSum += row.marginPct;
-    });
-    return Object.values(map).map(c => ({
-      ...c,
-      avgMargin: c.orders > 0 ? (c.totalMarginSum / c.orders).toFixed(1) : '0.0',
-    }));
-  }, [exportRows]);
-
-  // GAP 17: Country-wise sales (export)
-  const countrySales = useMemo(() => {
-    const map = {};
-    exportOrders.forEach(order => {
-      const country = order.country || 'Unknown';
-      if (!map[country]) map[country] = { country, orders: 0, totalValue: 0, totalQtyMT: 0 };
-      map[country].orders += 1;
-      map[country].totalValue += order.contractValue;
-      map[country].totalQtyMT += order.qtyMT;
-    });
-    return Object.values(map);
-  }, [exportOrders]);
-
-  // GAP 18: Batch yield analysis (mill)
-  const batchYieldData = useMemo(() => {
-    return millingBatches
-      .filter(b => b.yieldPct > 0)
-      .map(b => ({ name: b.id, yieldPct: parseFloat(b.yieldPct.toFixed(1)) }));
-  }, [millingBatches]);
-
-  // GAP 19: By-product contribution (mill)
-  const byProductData = useMemo(() => {
-    let brokenRev = 0, branRev = 0, huskRev = 0;
-    millingBatches.forEach(b => {
-      brokenRev += (b.brokenMT || 0) * 42000;
-      branRev += (b.branMT || 0) * 22400;
-      huskRev += (b.huskMT || 0) * 8400;
-    });
-    return [
-      { name: 'Broken Rice', value: Math.round(brokenRev) },
-      { name: 'Bran', value: Math.round(branRev) },
-      { name: 'Husk', value: Math.round(huskRev) },
-    ];
-  }, [millingBatches]);
-  const BY_PRODUCT_COLORS = ['#f59e0b', '#10b981', '#6366f1'];
-
-  // GAP 20: Receivables aging (export)
-  const receivablesAging = useMemo(() => {
-    const now = new Date();
-    const buckets = { '0-30d': 0, '31-60d': 0, '61-90d': 0, '>90d': 0 };
-    exportOrders.forEach(order => {
-      const outstanding = order.contractValue - (order.advanceReceived || 0) - (order.balanceReceived || 0);
-      if (outstanding <= 0) return;
-      const created = new Date(order.createdAt);
-      const days = Math.floor((now - created) / (1000 * 60 * 60 * 24));
-      if (days <= 30) buckets['0-30d'] += outstanding;
-      else if (days <= 60) buckets['31-60d'] += outstanding;
-      else if (days <= 90) buckets['61-90d'] += outstanding;
-      else buckets['>90d'] += outstanding;
-    });
-    return buckets;
-  }, [exportOrders]);
-  const agingColors = { '0-30d': '#22c55e', '31-60d': '#f59e0b', '61-90d': '#f97316', '>90d': '#ef4444' };
-
-  // GAP 21: Working capital locked
-  const workingCapital = useMemo(() => {
-    let locked = 0;
-    let activeCount = 0;
-    exportOrders.forEach(order => {
-      if (order.status === 'Closed' || order.status === 'Cancelled') return;
-      const totalCosts = Object.values(order.costs || {}).reduce((s, c) => s + c, 0);
-      locked += (order.advanceReceived || 0) + (order.balanceReceived || 0) - totalCosts;
-      activeCount += 1;
-    });
-    return { locked: Math.round(locked), activeCount };
-  }, [exportOrders]);
+  const refetchAll = () => refetchExec();
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Reports & Profitability</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Financial analysis across entities</p>
-        </div>
-      </div>
-
-      {/* GAP 21: Working Capital Locked KPI */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 flex items-center gap-4">
-        <div className="flex-shrink-0 w-12 h-12 rounded-lg bg-blue-50 flex items-center justify-center">
-          <DollarSign className="w-6 h-6 text-blue-600" />
-        </div>
-        <div>
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Working Capital Locked</p>
-          <p className={`text-2xl font-bold ${workingCapital.locked >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-            {formatCurrency(workingCapital.locked)}
-          </p>
-          <p className="text-xs text-gray-400 mt-0.5">across {workingCapital.activeCount} active orders</p>
-        </div>
-      </div>
-
-      {/* Entity Toggle */}
-      <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 w-fit overflow-x-auto">
-        {entityTabs.map(tab => (
-          <button
-            key={tab}
-            onClick={() => setActiveEntity(tab)}
-            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-              activeEntity === tab
-                ? 'bg-white text-blue-600 shadow-sm'
-                : 'text-gray-600 hover:text-gray-800'
-            }`}
-          >
-            {tab}
-          </button>
-        ))}
-      </div>
-
-      {/* GAP 16-17: Customer-wise Profitability & Country-wise Sales */}
-      {(activeEntity === 'Export' || activeEntity === 'Consolidated') && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Customer-wise Profitability */}
-          <div className="table-container p-5">
-            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">Customer-wise Profitability</h2>
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="bg-gray-50 border-b border-gray-200">
-                    <th className="text-left px-3 py-2 font-semibold text-gray-600">Customer</th>
-                    <th className="text-right px-3 py-2 font-semibold text-gray-600">Orders</th>
-                    <th className="text-right px-3 py-2 font-semibold text-gray-600">Total Inflows</th>
-                    <th className="text-right px-3 py-2 font-semibold text-gray-600">Total Profit</th>
-                    <th className="text-right px-3 py-2 font-semibold text-gray-600">Avg Margin%</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {customerProfitability.map(c => (
-                    <tr key={c.customer} className="hover:bg-gray-50">
-                      <td className="px-3 py-2 font-medium text-gray-900 truncate max-w-[160px]">{c.customer}</td>
-                      <td className="px-3 py-2 text-right text-gray-700">{c.orders}</td>
-                      <td className="px-3 py-2 text-right text-gray-700">{formatCurrency(Math.round(c.totalInflows))}</td>
-                      <td className={`px-3 py-2 text-right font-medium ${c.totalProfit >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                        {formatCurrency(Math.round(c.totalProfit))}
-                      </td>
-                      <td className={`px-3 py-2 text-right font-bold ${parseFloat(c.avgMargin) < 5 ? 'text-red-600' : parseFloat(c.avgMargin) < 15 ? 'text-amber-600' : 'text-green-600'}`}>
-                        {c.avgMargin}%
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+    <div className="space-y-5 pb-4">
+      {/* ─── Hero band ─────────────────────────────────────────── */}
+      <div className="rounded-2xl bg-gradient-to-r from-indigo-900 via-blue-800 to-cyan-700 p-5 sm:p-6 text-white shadow-sm relative overflow-hidden">
+        <div className="absolute inset-0 opacity-15" style={{ backgroundImage: 'radial-gradient(circle at 80% 20%, white 0%, transparent 60%)' }} />
+        <div className="relative flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 text-xs uppercase tracking-wider opacity-80 mb-1">
+              <BarChart3 size={14} /> Reports & Analytics
             </div>
+            <h1 className="text-3xl font-bold leading-tight">Business Reports</h1>
+            <p className="text-sm opacity-80 mt-1">
+              Real-time view of every order, customer and shipment — sourced directly from production data.
+            </p>
           </div>
-
-          {/* Country-wise Sales */}
-          <div className="table-container p-5">
-            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">Country-wise Sales</h2>
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="bg-gray-50 border-b border-gray-200">
-                    <th className="text-left px-3 py-2 font-semibold text-gray-600">Country</th>
-                    <th className="text-right px-3 py-2 font-semibold text-gray-600">Orders</th>
-                    <th className="text-right px-3 py-2 font-semibold text-gray-600">Total Value</th>
-                    <th className="text-right px-3 py-2 font-semibold text-gray-600">Total Qty MT</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {countrySales.map(c => (
-                    <tr key={c.country} className="hover:bg-gray-50">
-                      <td className="px-3 py-2 font-medium text-gray-900">{c.country}</td>
-                      <td className="px-3 py-2 text-right text-gray-700">{c.orders}</td>
-                      <td className="px-3 py-2 text-right text-gray-700">{formatCurrency(Math.round(c.totalValue))}</td>
-                      <td className="px-3 py-2 text-right text-gray-700">{c.totalQtyMT.toFixed(1)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="bg-white/15 backdrop-blur-sm rounded-lg flex items-center gap-1.5 px-2 py-1.5">
+              <Calendar size={13} className="opacity-80" />
+              <select value={range} onChange={e => setRange(e.target.value)}
+                className="bg-transparent border-0 text-xs font-medium text-white outline-none cursor-pointer pr-2">
+                {RANGES.map(r => <option key={r.value} value={r.value} className="text-gray-900">{r.label}</option>)}
+              </select>
             </div>
+            <button onClick={refetchAll}
+              className="bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors">
+              <RefreshCw size={12} /> Refresh
+            </button>
+            <Link to="/reports/print"
+              className="bg-white text-slate-900 hover:bg-gray-100 px-4 py-2 rounded-lg text-sm font-medium inline-flex items-center gap-2 shadow-sm transition-colors">
+              <Printer size={14} /> Print Reports
+            </Link>
           </div>
-        </div>
-      )}
-
-      {/* Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Order-wise Profitability Bar Chart */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
-          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4 flex items-center gap-2">
-            <BarChart3 className="w-4 h-4 text-blue-600" />
-            {activeEntity === 'Mill' ? 'Batch' : 'Order'}-wise Profitability
-          </h2>
-          <div className="h-48 sm:h-64 lg:h-72">
-            {profitChartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={profitChartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                  <XAxis
-                    dataKey="name"
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fontSize: 11, fill: '#94a3b8' }}
-                  />
-                  <YAxis
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fontSize: 12, fill: '#94a3b8' }}
-                    tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#fff',
-                      border: '1px solid #e2e8f0',
-                      borderRadius: '8px',
-                      fontSize: '12px',
-                    }}
-                    formatter={(value, name) => {
-                      if (name === 'profit') return [`$${value.toLocaleString()}`, 'Gross Profit'];
-                      return [value + '%', 'Margin'];
-                    }}
-                  />
-                  <Legend
-                    verticalAlign="top"
-                    align="right"
-                    iconType="circle"
-                    iconSize={8}
-                    wrapperStyle={{ fontSize: '12px', paddingBottom: '8px' }}
-                  />
-                  <Bar
-                    dataKey="profit"
-                    name="Gross Profit"
-                    fill="#3b82f6"
-                    radius={[4, 4, 0, 0]}
-                    barSize={32}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex items-center justify-center h-full text-gray-400 text-sm">
-                No data with costs recorded yet
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Receivables Aging Chart */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
-          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4 flex items-center gap-2">
-            <DollarSign className="w-4 h-4 text-emerald-600" />
-            Receivables vs Payables Aging
-          </h2>
-          <div className="h-48 sm:h-64 lg:h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={receivablesPayables} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                <XAxis
-                  dataKey="month"
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{ fontSize: 12, fill: '#94a3b8' }}
-                />
-                <YAxis
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{ fontSize: 12, fill: '#94a3b8' }}
-                  tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#fff',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: '8px',
-                    fontSize: '12px',
-                  }}
-                  formatter={(value) => [`$${value.toLocaleString()}`, undefined]}
-                />
-                <Legend
-                  verticalAlign="top"
-                  align="right"
-                  iconType="circle"
-                  iconSize={8}
-                  wrapperStyle={{ fontSize: '12px', paddingBottom: '8px' }}
-                />
-                <Bar dataKey="receivables" name="Receivables" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={28} />
-                <Bar dataKey="payables" name="Payables" fill="#f59e0b" radius={[4, 4, 0, 0]} barSize={28} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* GAP 18: Batch Yield Analysis (Mill / Consolidated) */}
-        {(activeEntity === 'Mill' || activeEntity === 'Consolidated') && (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
-            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4 flex items-center gap-2">
-              <BarChart3 className="w-4 h-4 text-emerald-600" />
-              Batch Yield Analysis
-            </h2>
-            <div className="h-48 sm:h-64 lg:h-72">
-              {batchYieldData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={batchYieldData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#94a3b8' }} />
-                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} tickFormatter={(v) => `${v}%`} domain={[60, 85]} />
-                    <Tooltip
-                      contentStyle={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '12px' }}
-                      formatter={(value) => [`${value}%`, 'Yield']}
-                    />
-                    <Bar dataKey="yieldPct" name="Yield %" fill="#10b981" radius={[4, 4, 0, 0]} barSize={32} />
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="flex items-center justify-center h-full text-gray-400 text-sm">No batch yield data</div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* GAP 19: By-Product Contribution (Mill / Consolidated) */}
-        {(activeEntity === 'Mill' || activeEntity === 'Consolidated') && (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
-            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4 flex items-center gap-2">
-              <BarChart3 className="w-4 h-4 text-violet-600" />
-              By-Product Contribution (PKR)
-            </h2>
-            <div className="h-48 sm:h-64 lg:h-72 flex items-center justify-center">
-              {byProductData.some(d => d.value > 0) ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={byProductData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={50}
-                      outerRadius={90}
-                      paddingAngle={3}
-                      dataKey="value"
-                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(1)}%`}
-                    >
-                      {byProductData.map((entry, idx) => (
-                        <Cell key={entry.name} fill={BY_PRODUCT_COLORS[idx % BY_PRODUCT_COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '12px' }}
-                      formatter={(value) => [`Rs ${Math.round(value).toLocaleString()}`, 'Revenue']}
-                    />
-                    <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: '12px' }} />
-                  </PieChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="text-gray-400 text-sm">No by-product data</div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Cost per MT Trend Line Chart */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
-        <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4 flex items-center gap-2">
-          <TrendingUp className="w-4 h-4 text-violet-600" />
-          Cost per MT Trend
-        </h2>
-        <div className="h-48 sm:h-64 lg:h-72">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={costPerMTData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-              <XAxis
-                dataKey="month"
-                axisLine={false}
-                tickLine={false}
-                tick={{ fontSize: 12, fill: '#94a3b8' }}
-              />
-              <YAxis
-                axisLine={false}
-                tickLine={false}
-                tick={{ fontSize: 12, fill: '#94a3b8' }}
-                tickFormatter={(v) => `$${v}`}
-                yAxisId="usd"
-              />
-              <YAxis
-                yAxisId="pkr"
-                orientation="right"
-                axisLine={false}
-                tickLine={false}
-                tick={{ fontSize: 11, fill: '#10b981' }}
-                tickFormatter={(v) => `Rs ${(v / 1000).toFixed(0)}k`}
-              />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: '#fff',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '8px',
-                  fontSize: '12px',
-                }}
-                formatter={(value, name) => {
-                  if (name === 'Export Cost/MT (USD)') return [`$${value}/MT`, name];
-                  return [`Rs ${Math.round(value).toLocaleString()}/MT`, name];
-                }}
-              />
-              <Legend
-                verticalAlign="top"
-                align="right"
-                iconType="circle"
-                iconSize={8}
-                wrapperStyle={{ fontSize: '12px', paddingBottom: '8px' }}
-              />
-              <Line
-                type="monotone"
-                dataKey="exportCostPerMT"
-                name="Export Cost/MT (USD)"
-                stroke="#3b82f6"
-                strokeWidth={2}
-                dot={{ r: 4 }}
-                activeDot={{ r: 6 }}
-                yAxisId="usd"
-              />
-              <Line
-                type="monotone"
-                dataKey="millCostPerMT"
-                name="Mill Cost/MT (PKR)"
-                stroke="#10b981"
-                strokeWidth={2}
-                dot={{ r: 4 }}
-                activeDot={{ r: 6 }}
-                yAxisId="pkr"
-              />
-            </LineChart>
-          </ResponsiveContainer>
         </div>
       </div>
 
-      {/* Profitability Tables */}
-      {activeEntity === 'Consolidated' ? (
-        /* Consolidated: show both entities side by side as separate tables */
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          <ProfitTable
-            title="Export Division (USD)"
-            label="Order No"
-            rows={exportRows}
-            formatFn={(v) => formatCurrency(v)}
-          />
-          <ProfitTable
-            title="Milling Division (PKR)"
-            label="Batch No"
-            rows={millRows}
-            formatFn={(v) => formatCurrency(v, 'PKR')}
-          />
-        </div>
-      ) : (
-      <div className="table-container">
-        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">
-            {activeEntity} Profitability Breakdown {activeEntity === 'Mill' ? '(PKR)' : '(USD)'}
-          </h2>
-          <div className="flex items-center gap-2 text-xs text-gray-500">
-            <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
-            Red flag = margin below 5%
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-200">
-                <th className="text-left px-4 py-3 font-semibold text-gray-600">
-                  {activeEntity === 'Mill' ? 'Batch No' : 'Order No'}
-                </th>
-                <th className="text-right px-4 py-3 font-semibold text-gray-600">Inflows</th>
-                <th className="text-right px-4 py-3 font-semibold text-gray-600">Outflows</th>
-                <th className="text-right px-4 py-3 font-semibold text-gray-600">Gross Profit</th>
-                <th className="text-right px-4 py-3 font-semibold text-gray-600">Net Profit (est.)</th>
-                <th className="text-right px-4 py-3 font-semibold text-gray-600">Margin %</th>
-                <th className="text-center px-4 py-3 font-semibold text-gray-600">Risk</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {currentRows.map(row => (
-                <tr
-                  key={row.id}
-                  className={`hover:bg-gray-50 transition-colors ${row.riskFlag ? 'bg-red-50/40' : ''}`}
-                >
-                  <td className="px-4 py-3">
-                    <div className="font-medium text-gray-900">{row.id}</div>
-                    <div className="text-xs text-gray-500">{row.label.split(' - ')[1]}</div>
-                  </td>
-                  <td className="px-4 py-3 text-right font-medium text-gray-900">
-                    {formatCurrency(Math.round(row.inflows), row.currency)}
-                  </td>
-                  <td className="px-4 py-3 text-right font-medium text-gray-900">
-                    {formatCurrency(Math.round(row.outflows), row.currency)}
-                  </td>
-                  <td className={`px-4 py-3 text-right font-medium ${row.grossProfit >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                    {formatCurrency(Math.round(row.grossProfit), row.currency)}
-                  </td>
-                  <td className={`px-4 py-3 text-right font-medium ${row.netProfit >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                    {formatCurrency(Math.round(row.netProfit), row.currency)}
-                  </td>
-                  <td className={`px-4 py-3 text-right font-bold ${
-                    row.marginPct < 5 ? 'text-red-600' : row.marginPct < 15 ? 'text-amber-600' : 'text-green-600'
-                  }`}>
-                    {row.outflows > 0 ? row.marginPct.toFixed(1) + '%' : '-'}
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    {row.riskFlag ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
-                        <AlertTriangle className="w-3 h-3" />
-                        Low Margin
-                      </span>
-                    ) : row.outflows > 0 ? (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
-                        OK
-                      </span>
-                    ) : (
-                      <span className="text-gray-400">-</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {currentRows.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-gray-500">
-                    No profitability data available.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+      {/* ─── Executive KPI strip ──────────────────────────────── */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        <KpiTile icon={TrendingUp}    tone="blue"    label="Total Orders"     primary={exec.totalOrders ?? '—'} secondary={`${exec.activeOrders ?? 0} active`} loading={execLoading} />
+        <KpiTile icon={ArrowDownLeft} tone="emerald" label="Total Revenue"    primary={fmtPKR(exec.totalRevenuePkr)} secondary={`${exec.totalShipments ?? 0} shipped`} loading={execLoading} />
+        <KpiTile icon={Coins}         tone="amber"   label="Outstanding A/R"  primary={fmtPKR(exec.totalOutstandingPkr)} secondary={`${exec.openReceivables ?? 0} open`} loading={execLoading} />
+        <KpiTile icon={Activity}      tone="violet"  label="Booked Profit"    primary={fmtPKR(exec.bookedProfitPkr)} secondary={`Margin ${fmtPct(exec.avgMarginPct)}`} loading={execLoading} />
+        <KpiTile icon={Award}         tone="rose"    label="Avg Yield"        primary={fmtPct(exec.avgYieldPct)} secondary={`${exec.totalBatches ?? 0} batches`} loading={execLoading} />
       </div>
-      )}
 
-      {/* GAP 20: Receivables Aging */}
-      {(activeEntity === 'Export' || activeEntity === 'Consolidated') && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
-          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4 flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-orange-500" />
-            Receivables Aging
-          </h2>
-          {(() => {
-            const totalOutstanding = Object.values(receivablesAging).reduce((s, v) => s + v, 0);
-            if (totalOutstanding === 0) return <p className="text-sm text-gray-400">No outstanding receivables.</p>;
+      {/* ─── Tabs ─────────────────────────────────────────────── */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <nav className="flex overflow-x-auto border-b border-gray-200">
+          {TABS.map(t => {
+            const Icon = t.icon;
             return (
-              <div className="space-y-3">
-                {/* Stacked bar */}
-                <div className="flex rounded-lg overflow-hidden h-8">
-                  {Object.entries(receivablesAging).map(([bucket, amount]) => {
-                    const pct = (amount / totalOutstanding) * 100;
-                    if (pct === 0) return null;
-                    return (
-                      <div
-                        key={bucket}
-                        style={{ width: `${pct}%`, backgroundColor: agingColors[bucket] }}
-                        className="flex items-center justify-center text-white text-[10px] font-bold min-w-[40px]"
-                        title={`${bucket}: $${amount.toLocaleString()}`}
-                      >
-                        {pct > 8 ? bucket : ''}
-                      </div>
-                    );
-                  })}
-                </div>
-                {/* Legend cards */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {Object.entries(receivablesAging).map(([bucket, amount]) => (
-                    <div key={bucket} className="rounded-lg border border-gray-100 p-3 text-center">
-                      <div className="flex items-center justify-center gap-1.5 mb-1">
-                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: agingColors[bucket] }} />
-                        <span className="text-xs font-semibold text-gray-600">{bucket}</span>
-                      </div>
-                      <p className="text-sm font-bold text-gray-900">{formatCurrency(Math.round(amount))}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <button key={t.key} onClick={() => setTab(t.key)}
+                className={`flex items-center gap-1.5 px-4 sm:px-5 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+                  tab === t.key ? 'border-blue-600 text-blue-600 bg-blue-50/40' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                }`}>
+                <Icon size={15} /> {t.label}
+              </button>
             );
-          })()}
+          })}
+        </nav>
+
+        <div className="p-4 sm:p-6">
+          {tab === 'orders'    && <OrdersTab params={params} />}
+          {tab === 'customers' && <CustomersTab params={params} />}
+          {tab === 'countries' && <CountriesTab params={params} />}
+          {tab === 'inventory' && <InventoryTab />}
+          {tab === 'quality'   && <QualityTab params={params} />}
         </div>
-      )}
+      </div>
     </div>
   );
 }
 
-function ProfitTable({ title, label, rows, formatFn }) {
+// ─── Tab: Orders ──────────────────────────────────────────────────────
+function OrdersTab({ params }) {
+  const { data: rows = [], isLoading } = useOrderProfitability(params);
+
+  const sorted = useMemo(() =>
+    [...rows].sort((a, b) => (parseFloat(b.bookedProfitPkr) || 0) - (parseFloat(a.bookedProfitPkr) || 0)),
+    [rows]);
+
+  const chartData = useMemo(() =>
+    sorted.slice(0, 10).map(r => ({
+      name: r.orderNo,
+      Revenue: parseFloat(r.revenuePkrBooked) || 0,
+      Cost:    parseFloat(r.totalCostPkr)     || 0,
+      Profit:  parseFloat(r.bookedProfitPkr)  || 0,
+    })),
+    [sorted]);
+
+  if (isLoading) return <Skeleton />;
+  if (rows.length === 0) return <Empty msg="No orders in this period." />;
+
   return (
-    <div className="table-container">
-      <div className="px-5 py-3 border-b border-gray-200 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
-        <div className="flex items-center gap-1 text-[10px] text-gray-400">
-          <AlertTriangle className="w-3 h-3 text-red-400" />
-          Red = margin &lt; 5%
-        </div>
+    <div className="space-y-4">
+      <SectionHeader title="Order-level Profitability" subtitle="Top 10 by booked profit (PKR)" />
+      <ChartBlock data={chartData} />
+      <Table
+        head={['Order', 'Customer', 'Status', 'Currency', 'Revenue (PKR)', 'Cost (PKR)', 'Profit (PKR)', 'Margin']}
+        align={['left','left','left','left','right','right','right','right']}
+        rows={sorted.map(r => [
+          <Link to={`/export/${r.orderNo || r.id}`} className="text-blue-600 hover:underline font-medium">{r.orderNo}</Link>,
+          r.customerName || '—',
+          <StatusChip s={r.status} />,
+          r.currency || 'PKR',
+          fmtPKR(r.revenuePkrBooked),
+          fmtPKR(r.totalCostPkr),
+          <ProfitCell v={r.bookedProfitPkr} />,
+          fmtPct(r.marginPct),
+        ])}
+      />
+    </div>
+  );
+}
+
+// ─── Tab: Customers ───────────────────────────────────────────────────
+function CustomersTab({ params }) {
+  const { data: rows = [], isLoading } = useCustomerProfitability(params);
+  if (isLoading) return <Skeleton />;
+  if (rows.length === 0) return <Empty msg="No customer activity in this period." />;
+
+  const sorted = [...rows].sort((a, b) => (parseFloat(b.totalProfitPkr) || 0) - (parseFloat(a.totalProfitPkr) || 0));
+
+  return (
+    <div className="space-y-4">
+      <SectionHeader title="Customer Profitability" subtitle="Ranked by total booked profit" />
+      <Table
+        head={['#', 'Customer', 'Country', 'Orders', 'Revenue (PKR)', 'Profit (PKR)', 'Avg Margin']}
+        align={['left','left','left','right','right','right','right']}
+        rows={sorted.map((r, i) => [
+          i + 1,
+          r.customerName || '—',
+          r.country || '—',
+          r.orderCount || 0,
+          fmtPKR(r.totalRevenuePkr),
+          <ProfitCell v={r.totalProfitPkr} />,
+          fmtPct(r.avgMarginPct),
+        ])}
+      />
+    </div>
+  );
+}
+
+// ─── Tab: Countries ───────────────────────────────────────────────────
+function CountriesTab({ params }) {
+  const { data: rows = [], isLoading } = useCountryAnalysis(params);
+  if (isLoading) return <Skeleton />;
+  if (rows.length === 0) return <Empty msg="No country data for this period." />;
+
+  const sorted = [...rows].sort((a, b) => (parseFloat(b.totalRevenuePkr) || 0) - (parseFloat(a.totalRevenuePkr) || 0));
+  const chartData = sorted.slice(0, 8).map(r => ({
+    name: r.country || '—',
+    Revenue: parseFloat(r.totalRevenuePkr) || 0,
+    Profit:  parseFloat(r.totalProfitPkr)  || 0,
+  }));
+
+  return (
+    <div className="space-y-4">
+      <SectionHeader title="Sales by Country" subtitle="Revenue and profit destination breakdown" />
+      <ChartBlock data={chartData} />
+      <Table
+        head={['Country', 'Orders', 'Quantity (MT)', 'Revenue (PKR)', 'Profit (PKR)', 'Margin']}
+        align={['left','right','right','right','right','right']}
+        rows={sorted.map(r => [
+          r.country || '—',
+          r.orderCount || 0,
+          (parseFloat(r.totalQtyMt) || 0).toFixed(1),
+          fmtPKR(r.totalRevenuePkr),
+          <ProfitCell v={r.totalProfitPkr} />,
+          fmtPct(r.avgMarginPct),
+        ])}
+      />
+    </div>
+  );
+}
+
+// ─── Tab: Inventory ───────────────────────────────────────────────────
+function InventoryTab() {
+  const { data: rows = [], isLoading } = useStockAgingReport();
+  if (isLoading) return <Skeleton />;
+  if (rows.length === 0) return <Empty msg="No stock to report." />;
+
+  const totalValue = rows.reduce((s, r) => s + (parseFloat(r.totalValuePkr) || parseFloat(r.totalValue) || 0), 0);
+  const totalKg    = rows.reduce((s, r) => s + (parseFloat(r.totalKg) || 0), 0);
+
+  return (
+    <div className="space-y-4">
+      <SectionHeader title="Stock Aging" subtitle="Inventory grouped by holding period" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <SummaryCell label="Total weight"  value={`${(totalKg / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 })} MT`} />
+        <SummaryCell label="Total value"   value={fmtPKR(totalValue)} />
+        <SummaryCell label="Aging buckets" value={String(rows.length)} />
+        <SummaryCell label="See printable" value={<Link to="/reports/print" className="text-blue-600 hover:underline inline-flex items-center gap-1">/reports/print <ExternalLink size={12} /></Link>} />
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="bg-gray-50 border-b border-gray-200">
-              <th className="text-left px-3 py-2 font-semibold text-gray-600">{label}</th>
-              <th className="text-right px-3 py-2 font-semibold text-gray-600">Inflows</th>
-              <th className="text-right px-3 py-2 font-semibold text-gray-600">Outflows</th>
-              <th className="text-right px-3 py-2 font-semibold text-gray-600">Gross Profit</th>
-              <th className="text-right px-3 py-2 font-semibold text-gray-600">Margin</th>
-              <th className="text-center px-3 py-2 font-semibold text-gray-600">Risk</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {rows.map(row => (
-              <tr key={row.id} className={`hover:bg-gray-50 ${row.riskFlag ? 'bg-red-50/40' : ''}`}>
-                <td className="px-3 py-2">
-                  <div className="font-medium text-gray-900">{row.id}</div>
-                  <div className="text-[10px] text-gray-400">{row.label.split(' - ')[1]}</div>
-                </td>
-                <td className="px-3 py-2 text-right font-medium text-gray-900">{formatFn(Math.round(row.inflows))}</td>
-                <td className="px-3 py-2 text-right font-medium text-gray-900">{formatFn(Math.round(row.outflows))}</td>
-                <td className={`px-3 py-2 text-right font-medium ${row.grossProfit >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                  {formatFn(Math.round(row.grossProfit))}
-                </td>
-                <td className={`px-3 py-2 text-right font-bold ${row.marginPct < 5 ? 'text-red-600' : row.marginPct < 15 ? 'text-amber-600' : 'text-green-600'}`}>
-                  {row.outflows > 0 ? row.marginPct.toFixed(1) + '%' : '-'}
-                </td>
-                <td className="px-3 py-2 text-center">
-                  {row.riskFlag ? (
-                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-red-100 text-red-700">
-                      <AlertTriangle className="w-2.5 h-2.5" /> Low
-                    </span>
-                  ) : row.outflows > 0 ? (
-                    <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-green-100 text-green-700">OK</span>
-                  ) : <span className="text-gray-400">-</span>}
-                </td>
-              </tr>
+      <Table
+        head={['Bucket', 'Lots', 'Quantity (kg)', 'Value (PKR)']}
+        align={['left','right','right','right']}
+        rows={rows.map(r => [
+          r.ageBucket || r.bucket || '—',
+          r.lotCount || 0,
+          (parseFloat(r.totalKg) || 0).toLocaleString(),
+          fmtPKR(parseFloat(r.totalValuePkr) || parseFloat(r.totalValue) || 0),
+        ])}
+      />
+    </div>
+  );
+}
+
+// ─── Tab: Quality ─────────────────────────────────────────────────────
+function QualityTab({ params }) {
+  const { data: rows = [], isLoading } = useSupplierQualityRanking(params);
+  if (isLoading) return <Skeleton />;
+  if (rows.length === 0) return <Empty msg="No quality data yet — record arrival samples on milling batches to populate this report." />;
+
+  const sorted = [...rows].sort((a, b) => (parseFloat(b.avgYieldPct) || 0) - (parseFloat(a.avgYieldPct) || 0));
+
+  return (
+    <div className="space-y-4">
+      <SectionHeader title="Supplier Quality Ranking" subtitle="Yield + variance by supplier" />
+      <Table
+        head={['#', 'Supplier', 'Batches', 'Avg Yield', 'Avg Broken %', 'Avg Moisture %', 'Variance Flags']}
+        align={['left','left','right','right','right','right','right']}
+        rows={sorted.map((r, i) => [
+          i + 1,
+          r.supplierName || '—',
+          r.batchCount || 0,
+          fmtPct(r.avgYieldPct),
+          fmtPct(r.avgBrokenPct),
+          fmtPct(r.avgMoisturePct),
+          r.varianceFlags > 0 ? (
+            <span className="inline-flex items-center gap-1 text-rose-600 font-medium">
+              <AlertTriangle size={12} /> {r.varianceFlags}
+            </span>
+          ) : <span className="text-emerald-600 font-medium">none</span>,
+        ])}
+      />
+    </div>
+  );
+}
+
+// ─── Shared subcomponents ────────────────────────────────────────────
+function KpiTile({ icon: Icon, tone = 'gray', label, primary, secondary, loading }) {
+  const tones = {
+    blue:    { ring: 'ring-blue-100',    icon: 'text-blue-500 bg-blue-50' },
+    emerald: { ring: 'ring-emerald-100', icon: 'text-emerald-500 bg-emerald-50' },
+    amber:   { ring: 'ring-amber-100',   icon: 'text-amber-500 bg-amber-50' },
+    violet:  { ring: 'ring-violet-100',  icon: 'text-violet-500 bg-violet-50' },
+    rose:    { ring: 'ring-rose-100',    icon: 'text-rose-500 bg-rose-50' },
+    gray:    { ring: 'ring-gray-100',    icon: 'text-gray-500 bg-gray-50' },
+  };
+  const t = tones[tone] || tones.gray;
+  return (
+    <div className={`bg-white rounded-xl border border-gray-200 p-4 ring-1 ${t.ring}`}>
+      <div className="flex items-start justify-between mb-2">
+        <span className="text-[11px] uppercase tracking-wider text-gray-500 font-medium">{label}</span>
+        {Icon && <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${t.icon}`}><Icon size={14} /></span>}
+      </div>
+      <div className="text-xl font-bold text-gray-900 leading-none">
+        {loading ? <span className="inline-block w-16 h-4 bg-gray-100 rounded animate-pulse" /> : primary}
+      </div>
+      {secondary && <div className="text-[11px] text-gray-500 mt-1">{secondary}</div>}
+    </div>
+  );
+}
+
+function SectionHeader({ title, subtitle }) {
+  return (
+    <div>
+      <h2 className="text-base font-semibold text-gray-900">{title}</h2>
+      {subtitle && <p className="text-xs text-gray-500 mt-0.5">{subtitle}</p>}
+    </div>
+  );
+}
+
+function SummaryCell({ label, value }) {
+  return (
+    <div className="bg-gray-50 rounded-lg border border-gray-200 p-3">
+      <div className="text-[11px] uppercase tracking-wider text-gray-500 font-medium">{label}</div>
+      <div className="text-base font-bold text-gray-900 mt-1">{value}</div>
+    </div>
+  );
+}
+
+function ChartBlock({ data }) {
+  if (!data || data.length === 0) return null;
+  return (
+    <div className="bg-gray-50 rounded-xl p-4 border border-gray-200" style={{ height: 280 }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 30 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+          <XAxis dataKey="name" angle={-25} textAnchor="end" interval={0} tick={{ fontSize: 10, fill: '#6b7280' }} />
+          <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} tickFormatter={(v) => v >= 1_000_000 ? `${(v/1_000_000).toFixed(1)}M` : v >= 1_000 ? `${(v/1_000).toFixed(0)}K` : v} />
+          <Tooltip formatter={(v) => fmtPKR(v)} />
+          <Legend wrapperStyle={{ fontSize: 11 }} />
+          <Bar dataKey="Revenue" fill="#3b82f6" />
+          {Object.keys(data[0] || {}).includes('Cost')   && <Bar dataKey="Cost"   fill="#f59e0b" />}
+          {Object.keys(data[0] || {}).includes('Profit') && <Bar dataKey="Profit" fill="#10b981" />}
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function StatusChip({ s }) {
+  const tone =
+    s === 'Closed' || s === 'Arrived' ? 'bg-slate-100 text-slate-700'
+    : s === 'Shipped' ? 'bg-cyan-100 text-cyan-700'
+    : s === 'Cancelled' ? 'bg-rose-100 text-rose-700'
+    : 'bg-blue-100 text-blue-700';
+  return <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${tone}`}>{s || '—'}</span>;
+}
+
+function ProfitCell({ v }) {
+  const n = parseFloat(v) || 0;
+  const cls = n > 0 ? 'text-emerald-600' : n < 0 ? 'text-rose-600' : 'text-gray-500';
+  return <span className={`font-semibold ${cls}`}>{fmtPKR(n)}</span>;
+}
+
+function Table({ head, align = [], rows }) {
+  if (!rows || rows.length === 0) return <Empty msg="No rows." />;
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-gray-200 bg-gray-50">
+            {head.map((h, i) => (
+              <th key={i} className={`text-${align[i] || 'left'} py-2.5 px-3 text-xs font-semibold text-gray-600 uppercase tracking-wider`}>{h}</th>
             ))}
-            {rows.length === 0 && (
-              <tr><td colSpan={6} className="px-3 py-8 text-center text-gray-400 text-xs">No data</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          {rows.map((row, ri) => (
+            <tr key={ri} className="hover:bg-gray-50">
+              {row.map((cell, ci) => (
+                <td key={ci} className={`text-${align[ci] || 'left'} py-2.5 px-3 text-gray-800`}>{cell}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function Empty({ msg }) {
+  return <div className="text-center text-sm text-gray-400 py-12">{msg}</div>;
+}
+
+function Skeleton() {
+  return (
+    <div className="space-y-3 animate-pulse">
+      <div className="h-32 bg-gray-100 rounded" />
+      <div className="h-8 bg-gray-100 rounded" />
+      <div className="h-8 bg-gray-100 rounded" />
+      <div className="h-8 bg-gray-100 rounded" />
     </div>
   );
 }
