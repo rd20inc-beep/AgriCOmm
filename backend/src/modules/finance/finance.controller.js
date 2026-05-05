@@ -50,7 +50,7 @@ const financeController = {
         query = query.where('r.customer_id', customer_id);
       }
       if (overdue === 'true') {
-        query = query.where('r.due_date', '<', db.fn.now()).where('r.status', '!=', 'paid');
+        query = query.where('r.due_date', '<', db.fn.now()).where('r.status', '!=', 'Paid');
       }
       // Honour the global date-range filter from FinanceLayout. Filters
       // on created_at — "this month" means receivables generated this
@@ -113,7 +113,7 @@ const financeController = {
 
         if (status) query = query.where('p.status', status);
         if (supplier_id) query = query.where('p.supplier_id', supplier_id);
-        if (overdue === 'true') query = query.where('p.due_date', '<', db.fn.now()).where('p.status', '!=', 'paid');
+        if (overdue === 'true') query = query.where('p.due_date', '<', db.fn.now()).where('p.status', '!=', 'Paid');
         // Honour the global date-range filter from FinanceLayout.
         if (from_date) query = query.where('p.created_at', '>=', from_date);
         if (to_date)   query = query.where('p.created_at', '<=', to_date);
@@ -320,13 +320,13 @@ const financeController = {
       const [overdueReceivables, overduePayables, pendingOrders] = await Promise.all([
         db('receivables')
           .where('due_date', '<', today)
-          .whereNot('status', 'paid')
+          .whereNot('status', 'Paid')
           .count('id as count')
           .sum('outstanding as total')
           .first(),
         db('payables')
           .where('due_date', '<', today)
-          .whereNot('status', 'paid')
+          .whereNot('status', 'Paid')
           .count('id as count')
           .sum('outstanding as total')
           .first(),
@@ -386,11 +386,11 @@ const financeController = {
           .sum('contract_value as total')
           .first(),
         db('receivables')
-          .whereNot('status', 'paid')
+          .whereNot('status', 'Paid')
           .sum('outstanding as total')
           .first(),
         db('payables')
-          .whereNot('status', 'paid')
+          .whereNot('status', 'Paid')
           .sum('outstanding as total')
           .first(),
         db('milling_batches')
@@ -474,7 +474,10 @@ const financeController = {
             await trx('receivables').where({ id: linked_receivable_id }).update({
               received_amount: newPaid,
               outstanding: Math.max(0, newOutstanding),
-              status: fullyPaid ? 'paid' : 'partial',
+              // CHECK constraints on receivables.status / payables.status
+              // require capitalised values { Pending, Partial, Paid,
+              // Overdue, Written Off }. Lowercase silently 23514s.
+              status: fullyPaid ? 'Paid' : 'Partial',
               updated_at: trx.fn.now(),
             });
           }
@@ -492,9 +495,35 @@ const financeController = {
             await trx('payables').where({ id: linked_payable_id }).update({
               paid_amount: newPaid,
               outstanding: Math.max(0, newOutstanding),
-              status: fullyPaid ? 'paid' : 'partial',
+              // CHECK constraints on receivables.status / payables.status
+              // require capitalised values { Pending, Partial, Paid,
+              // Overdue, Written Off }. Lowercase silently 23514s.
+              status: fullyPaid ? 'Paid' : 'Partial',
               updated_at: trx.fn.now(),
             });
+
+            // Mirror the status back to the source row so the Expenses
+            // / Mill Purchases tabs reflect the same payment state
+            // instead of forever showing Unpaid.
+            if (payable.source_table === 'business_expenses' && payable.source_id) {
+              await trx('business_expenses')
+                .where({ id: payable.source_id })
+                .update({
+                  payment_status: fullyPaid ? 'Paid' : 'Partial',
+                  paid_date: fullyPaid ? new Date() : null,
+                  bank_account_id: bank_account_id || null,
+                  payment_method: payment_method || null,
+                  payment_reference: bank_reference || null,
+                  updated_at: trx.fn.now(),
+                });
+            } else if (payable.source_table === 'mill_purchases' && payable.source_id) {
+              await trx('mill_purchases')
+                .where({ id: payable.source_id })
+                .update({
+                  payment_status: fullyPaid ? 'Paid' : 'Partial',
+                  updated_at: trx.fn.now(),
+                });
+            }
           }
           if (bank_account_id) {
             await trx('bank_accounts')
