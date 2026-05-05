@@ -198,7 +198,9 @@ function MoneyFlowTab({ kind, params, totalLabel }) {
         else if (pt === 'vendor')   key = 'Supplier Payment';
         else key = 'Other Payment';
       }
-      const pkr = parseFloat(p.baseAmountPkr) || (parseFloat(p.amount) || 0) * (parseFloat(p.fxRate) || 1);
+      // Backend pre-normalises this so the FE doesn't have to repeat
+      // the fallback chain (base_amount_pkr → amount × fx_rate → amount × 280).
+      const pkr = parseFloat(p.baseAmountPkrNormalized) || parseFloat(p.baseAmountPkr) || 0;
       const cur = buckets.get(key) || { name: key, count: 0, totalPkr: 0 };
       cur.count += 1; cur.totalPkr += pkr;
       buckets.set(key, cur);
@@ -253,7 +255,7 @@ function MoneyFlowTab({ kind, params, totalLabel }) {
           head={['Date', 'Ref', 'Counterparty', 'Source', 'Bank', 'Amount']}
           align={['left','left','left','left','left','right']}
           rows={rows.map(p => {
-            const pkr = parseFloat(p.baseAmountPkr) || (parseFloat(p.amount) || 0) * (parseFloat(p.fxRate) || 1);
+            const pkr = parseFloat(p.baseAmountPkrNormalized) || parseFloat(p.baseAmountPkr) || 0;
             const isForeign = (p.currency || 'PKR') !== 'PKR';
             const amountCell = isForeign ? (
               <div className="text-right">

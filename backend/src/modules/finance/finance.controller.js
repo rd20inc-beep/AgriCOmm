@@ -2,6 +2,21 @@ const db = require('../../config/database');
 const inventoryService = require('../../services/inventoryService');
 const accountingService = require('../../services/accountingService');
 
+// Resolve a payment row to its PKR equivalent using the strongest
+// signal we have: stored base_amount_pkr first, then amount × fx_rate
+// when the rate is real (>1), then amount × 280 as a final fallback
+// for legacy non-PKR rows missing a rate. PKR rows pass through.
+function paymentToPkr(p) {
+  const base = parseFloat(p.base_amount_pkr);
+  if (base && base > 0) return base;
+  const amount = parseFloat(p.amount) || 0;
+  const cur = (p.currency || 'PKR').toUpperCase();
+  if (cur === 'PKR') return amount;
+  const rate = parseFloat(p.fx_rate);
+  if (rate && rate > 1) return amount * rate;
+  return amount * 280;
+}
+
 async function generateTransferNo(trx) {
   const last = await (trx || db)('internal_transfers')
     .select('transfer_no')
@@ -466,16 +481,23 @@ const financeController = {
         return { ...r, counterparty, sourceRef, sourceHref };
       });
 
-      // Totals across the filtered set, in PKR (using base_amount_pkr
-      // when present, else falling back to amount × fx_rate).
-      const total = enriched.reduce((s, r) => {
-        const pkr = parseFloat(r.base_amount_pkr) || (parseFloat(r.amount) || 0) * (parseFloat(r.fx_rate) || 1);
-        return s + pkr;
-      }, 0);
+      // PKR totals across the filtered set. Resolve order:
+      //   1. base_amount_pkr if present (post round-094/095 entries)
+      //   2. amount × fx_rate if fx_rate > 1
+      //   3. for non-PKR currency with no rate, fall back to 280 (the
+      //      historical default) so legacy rows don't silently render
+      //      as 1× the foreign amount in the PKR total
+      //   4. amount as-is for PKR rows
+      const totalPkr = enriched.reduce((s, r) => s + paymentToPkr(r), 0);
+      // Re-stamp each row with a normalized basePkr field so the FE
+      // doesn't have to repeat this fallback chain.
+      for (const r of enriched) {
+        r.base_amount_pkr_normalized = paymentToPkr(r);
+      }
 
       return res.json({
         success: true,
-        data: { payments: enriched, totalPkr: Number(total.toFixed(2)), count: enriched.length },
+        data: { payments: enriched, totalPkr: Number(totalPkr.toFixed(2)), count: enriched.length },
       });
     } catch (err) {
       console.error('List payments error:', err);
