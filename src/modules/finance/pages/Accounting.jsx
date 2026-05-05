@@ -4,9 +4,11 @@ import { FileText, ChevronRight, ChevronDown } from 'lucide-react';
 import { useJournalEntries } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 
-function fmtAmount(v) {
+function fmtAmount(v, currency = 'PKR') {
   if (!v || Number(v) === 0) return '—';
-  return `Rs ${Math.round(parseFloat(v)).toLocaleString()}`;
+  const n = Math.round(parseFloat(v)).toLocaleString();
+  const sym = currency === 'USD' ? '$' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : 'Rs';
+  return `${sym} ${n}`;
 }
 
 const ENTITY_TONE = {
@@ -32,8 +34,20 @@ export default function Accounting() {
     return null;
   };
 
-  const totalDebit  = journalData.reduce((s, j) => s + (parseFloat(j.totalDebit  || j.total_debit  || 0)), 0);
-  const totalCredit = journalData.reduce((s, j) => s + (parseFloat(j.totalCredit || j.total_credit || 0)), 0);
+  // Sum totals in PKR base — multiply by fx_rate when journal is in
+  // a foreign currency. New journals (post round-101) are always
+  // posted in PKR with fx_rate=1, so this only matters for legacy
+  // foreign-currency entries.
+  const toPkr = (j, key) => {
+    const amt = parseFloat(j[key] || j[key.replace(/([A-Z])/g, '_$1').toLowerCase()] || 0);
+    if (!amt) return 0;
+    const cur = j.currency || 'PKR';
+    if (cur === 'PKR') return amt;
+    const r = parseFloat(j.fxRate || j.fx_rate || 0) || 1;
+    return amt * r;
+  };
+  const totalDebit  = journalData.reduce((s, j) => s + toPkr(j, 'totalDebit'),  0);
+  const totalCredit = journalData.reduce((s, j) => s + toPkr(j, 'totalCredit'), 0);
 
   return (
     <div className="space-y-4">
@@ -101,8 +115,8 @@ export default function Accounting() {
                       <td className="py-2.5 px-3 text-gray-700">
                         <span className="truncate max-w-[260px] block">{j.description || '—'}</span>
                       </td>
-                      <td className="py-2.5 px-3 text-right font-medium text-gray-900">{fmtAmount(j.totalDebit  || j.total_debit)}</td>
-                      <td className="py-2.5 px-3 text-right font-medium text-gray-900">{fmtAmount(j.totalCredit || j.total_credit)}</td>
+                      <td className="py-2.5 px-3 text-right font-medium text-gray-900">{fmtAmount(j.totalDebit  || j.total_debit,  j.currency)}</td>
+                      <td className="py-2.5 px-3 text-right font-medium text-gray-900">{fmtAmount(j.totalCredit || j.total_credit, j.currency)}</td>
                       <td className="py-2.5 px-3">
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                           j.status === 'Posted' ? 'bg-emerald-50 text-emerald-700'
@@ -133,14 +147,14 @@ export default function Accounting() {
                                   <tr key={l.id || i} className="text-gray-700">
                                     <td className="py-1.5 pr-3 font-medium">{l.account || `#${l.account_id}`}</td>
                                     <td className="py-1.5 pr-3 text-gray-500">{l.narration || '—'}</td>
-                                    <td className="py-1.5 pr-3 text-right">{l.debit > 0 ? fmtAmount(l.debit) : '—'}</td>
-                                    <td className="py-1.5 text-right">{l.credit > 0 ? fmtAmount(l.credit) : '—'}</td>
+                                    <td className="py-1.5 pr-3 text-right">{l.debit > 0 ? fmtAmount(l.debit, j.currency) : '—'}</td>
+                                    <td className="py-1.5 text-right">{l.credit > 0 ? fmtAmount(l.credit, j.currency) : '—'}</td>
                                   </tr>
                                 ))}
                                 <tr className="font-semibold border-t-2 border-blue-200">
                                   <td colSpan={2} className="pt-1.5 text-gray-500 uppercase text-[10px]">Totals</td>
-                                  <td className="pt-1.5 pr-3 text-right">{fmtAmount(lines.reduce((s, l) => s + (parseFloat(l.debit)  || 0), 0))}</td>
-                                  <td className="pt-1.5 text-right">{fmtAmount(lines.reduce((s, l) => s + (parseFloat(l.credit) || 0), 0))}</td>
+                                  <td className="pt-1.5 pr-3 text-right">{fmtAmount(lines.reduce((s, l) => s + (parseFloat(l.debit)  || 0), 0), j.currency)}</td>
+                                  <td className="pt-1.5 text-right">{fmtAmount(lines.reduce((s, l) => s + (parseFloat(l.credit) || 0), 0), j.currency)}</td>
                                 </tr>
                               </tbody>
                             </table>

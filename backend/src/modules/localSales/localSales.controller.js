@@ -5,6 +5,7 @@
 const db = require('../../config/database');
 const uc = require('../../services/unitConversion');
 const inventoryService = require('../../services/inventoryService');
+const accountingService = require('../accounting/accounting.service');
 
 async function generateSaleNo(trx) {
   const count = await (trx || db)('local_sales').count('id as c').first();
@@ -239,6 +240,28 @@ module.exports = {
         // Phase 5: Lock COGS on sale
         if (sale.id && lot_id) {
           await inventoryService.lockSaleCOGS(trx, sale.id);
+        }
+
+        // Auto-post journal: local_sale_recorded — DR Local AR,
+        // CR Local Rice Sales. The cash receipt (when paid_amount > 0)
+        // would normally have its own DR Cash, CR Local AR entry; for
+        // now the running cash position is captured by the payments
+        // row + bank_accounts.current_balance update elsewhere, so the
+        // single revenue-recognition entry keeps the books balanced
+        // without double-counting.
+        try {
+          await accountingService.autoPost(trx, {
+            triggerEvent: 'local_sale_recorded',
+            entity: 'mill',
+            amount: totalAmount,
+            currency: 'PKR',
+            refType: 'Local Sale',
+            refNo: saleNo,
+            description: `Local sale ${saleNo} — ${buyer_name || 'walk-in'} — ${item_name}`.slice(0, 240),
+            userId: req.user?.id,
+          });
+        } catch (e) {
+          console.warn('Local sale journal post failed:', e.message);
         }
 
         return sale;

@@ -1520,17 +1520,25 @@ const exportOrderController = {
           orderId: order.id,
           orderNo: order.order_no,
           currency: order.currency || 'USD',
+          fxRate: effectiveFxRate,
+          advancePkr,
           newAdvanceReceived,
         };
       });
 
-      // Auto-post journal & automation OUTSIDE transaction (non-blocking)
+      // Auto-post journal & automation OUTSIDE transaction (non-blocking).
+      // Per the "single conversion point" rule, journal entries are
+      // posted in PKR using the receipt-time FX rate. The foreign
+      // amount and rate are preserved on the journal header for audit.
       try {
         await accountingService.autoPost(db, {
           triggerEvent: 'advance_receipt', entity: 'export',
-          amount: confirmedAmount, currency: paymentContext.currency,
+          amount: paymentContext.advancePkr, currency: 'PKR',
           refType: 'Export Order', refNo: paymentContext.orderNo,
-          description: `Adv rcpt ${paymentContext.orderNo}`, userId: req.user?.id,
+          description: paymentContext.currency === 'PKR'
+            ? `Adv rcpt ${paymentContext.orderNo}`
+            : `Adv rcpt ${paymentContext.orderNo} (${paymentContext.currency} ${confirmedAmount.toLocaleString()} @ ${paymentContext.fxRate})`,
+          userId: req.user?.id,
         });
       } catch (e) { console.warn('Advance journal failed:', e.message); }
       try {
@@ -1650,20 +1658,36 @@ const exportOrderController = {
           userId: req.user.id,
           reason: `Balance payment of ${confirmedAmount} confirmed`,
         });
+        // Post balance receipts in PKR too. Until the balance modal
+        // collects an at-receipt FX rate (round 094 only did advance),
+        // fall back to the order's booked rate.
+        const balanceCurrency = order.currency || 'USD';
+        const balanceFxRate = balanceCurrency === 'PKR'
+          ? 1
+          : (parseFloat(order.advance_fx_rate) || parseFloat(order.booked_fx_rate) || 280);
+        const balancePkr = settledAmount(confirmedAmount * balanceFxRate);
+
         return {
           orderId: order.id,
           orderNo: order.order_no,
-          currency: order.currency || 'USD',
+          currency: balanceCurrency,
+          fxRate: balanceFxRate,
+          balancePkr,
         };
       });
 
-      // Auto-post journal & automation OUTSIDE transaction (non-blocking)
+      // Auto-post journal & automation OUTSIDE transaction (non-blocking).
+      // Posted in PKR with the foreign amount + rate captured in the
+      // narration for audit.
       try {
         await accountingService.autoPost(db, {
           triggerEvent: 'balance_receipt', entity: 'export',
-          amount: confirmedAmount, currency: paymentContext.currency,
+          amount: paymentContext.balancePkr, currency: 'PKR',
           refType: 'Export Order', refNo: paymentContext.orderNo,
-          description: `Bal rcpt ${paymentContext.orderNo}`, userId: req.user?.id,
+          description: paymentContext.currency === 'PKR'
+            ? `Bal rcpt ${paymentContext.orderNo}`
+            : `Bal rcpt ${paymentContext.orderNo} (${paymentContext.currency} ${confirmedAmount.toLocaleString()} @ ${paymentContext.fxRate})`,
+          userId: req.user?.id,
         });
       } catch (e) { console.warn('Balance journal failed:', e.message); }
       try {
