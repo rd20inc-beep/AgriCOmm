@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { ArrowUpRight, AlertTriangle, CheckCircle, Clock, Eye, X, DollarSign, Landmark } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceFilterBar } from '../../../components/finance';
 import { usePayables, useRecordPayment, useBankAccounts, useReceivables } from '../../../api/queries';
+import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
 import StatusBadge from '../../../components/StatusBadge';
 
@@ -20,7 +21,8 @@ function fmtAmount(v, currency) {
 
 export default function MoneyOut() {
   const { addToast } = useApp();
-  const { data: payables = [], isLoading } = usePayables();
+  const { queryParams: rangeParams } = useFinanceDateRange();
+  const { data: payables = [], isLoading } = usePayables(rangeParams);
   const { data: bankAccounts = [] } = useBankAccounts();
   const { data: receivables = [] } = useReceivables();
   const recordPaymentMut = useRecordPayment();

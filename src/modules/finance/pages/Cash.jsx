@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { Landmark, ArrowDownLeft, ArrowUpRight, Wallet } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart } from '../../../components/finance';
 import { useBankAccounts, useBankTransactions } from '../../../api/queries';
+import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 
 function fmtPKR(n) {
   if (n == null || isNaN(n)) return 'Rs 0';
@@ -11,8 +12,9 @@ function fmtPKR(n) {
 }
 
 export default function Cash() {
+  const { queryParams: rangeParams } = useFinanceDateRange();
   const { data: accounts = [], isLoading: loadingAccounts } = useBankAccounts();
-  const { data: txData, isLoading: loadingTx } = useBankTransactions();
+  const { data: txData, isLoading: loadingTx } = useBankTransactions(rangeParams);
   const transactions = txData?.transactions || txData || [];
 
   const totalBalance = accounts.reduce((s, a) => s + (parseFloat(a.currentBalance) || 0), 0);

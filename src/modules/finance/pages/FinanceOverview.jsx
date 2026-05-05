@@ -11,6 +11,7 @@ import {
   useReceivables, usePayables, useFinanceAlerts, useJournalEntries,
   useFinanceOverviewSummary,
 } from '../../../api/queries';
+import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 
 // ─── Formatting helpers ───────────────────────────────────────────────
 function fmtPKR(n) {
@@ -51,11 +52,12 @@ const BUCKET_COLORS = {
 // ─── Page ─────────────────────────────────────────────────────────────
 export default function FinanceOverview() {
   const navigate = useNavigate();
+  const { queryParams: rangeParams } = useFinanceDateRange();
   const { data: summary = {}, isLoading, refetch } = useFinanceOverviewSummary();
-  const { data: receivables = [] } = useReceivables();
-  const { data: payables = [] } = usePayables();
+  const { data: receivables = [] } = useReceivables(rangeParams);
+  const { data: payables = [] } = usePayables(rangeParams);
   const { data: alertsData = [] } = useFinanceAlerts();
-  const { data: journalData = [] } = useJournalEntries();
+  const { data: journalData = [] } = useJournalEntries(rangeParams);
 
   const exp = summary.export || {};
   const mill = summary.mill || {};

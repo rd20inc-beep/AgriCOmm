@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { FileText } from 'lucide-react';
 import { FinanceTable } from '../../../components/finance';
 import { useJournalEntries } from '../../../api/queries';
+import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 
 function fmtAmount(v) {
   if (!v || v === 0) return '—';
@@ -17,7 +18,8 @@ function fmtAmount(v) {
 // Journal Entries (the source of truth) and drop the fake tab.
 
 export default function Accounting() {
-  const { data: journalData = [], isLoading } = useJournalEntries();
+  const { queryParams: rangeParams } = useFinanceDateRange();
+  const { data: journalData = [], isLoading } = useJournalEntries(rangeParams);
 
   function RefLink({ refNo }) {
     if (!refNo) return <span className="text-gray-400">—</span>;

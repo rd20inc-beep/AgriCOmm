@@ -33,7 +33,7 @@ async function generatePaymentNo(trx) {
 const financeController = {
   async getReceivables(req, res) {
     try {
-      const { page = 1, limit = 20, status, customer_id, overdue } = req.query;
+      const { page = 1, limit = 20, status, customer_id, overdue, from_date, to_date } = req.query;
       const offset = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
 
       let query = db('receivables as r')
@@ -52,6 +52,11 @@ const financeController = {
       if (overdue === 'true') {
         query = query.where('r.due_date', '<', db.fn.now()).where('r.status', '!=', 'paid');
       }
+      // Honour the global date-range filter from FinanceLayout. Filters
+      // on created_at — "this month" means receivables generated this
+      // month, not those falling due this month.
+      if (from_date) query = query.where('r.created_at', '>=', from_date);
+      if (to_date)   query = query.where('r.created_at', '<=', to_date);
 
       const countQuery = query.clone().clearSelect().clearOrder().count('r.id as total').first();
 
@@ -82,7 +87,7 @@ const financeController = {
 
   async getPayables(req, res) {
     try {
-      const { page = 1, limit = 200, status, supplier_id, overdue } = req.query;
+      const { page = 1, limit = 200, status, supplier_id, overdue, from_date, to_date } = req.query;
       const offset = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
 
       // Check if the payables table has data
@@ -101,6 +106,9 @@ const financeController = {
         if (status) query = query.where('p.status', status);
         if (supplier_id) query = query.where('p.supplier_id', supplier_id);
         if (overdue === 'true') query = query.where('p.due_date', '<', db.fn.now()).where('p.status', '!=', 'paid');
+        // Honour the global date-range filter from FinanceLayout.
+        if (from_date) query = query.where('p.created_at', '>=', from_date);
+        if (to_date)   query = query.where('p.created_at', '<=', to_date);
 
         const countQuery = query.clone().clearSelect().clearOrder().count('p.id as total').first();
         const [payables, countResult] = await Promise.all([

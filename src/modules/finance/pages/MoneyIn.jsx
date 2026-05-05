@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ArrowDownLeft, DollarSign, AlertTriangle, CheckCircle, Clock, Eye, X } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart, FinanceFilterBar } from '../../../components/finance';
 import { useReceivables, useRecordPayment, useBankAccounts } from '../../../api/queries';
+import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
 import StatusBadge from '../../../components/StatusBadge';
 
@@ -17,7 +18,8 @@ function fmt(n) {
 export default function MoneyIn() {
   const { addToast } = useApp();
   const qc = useQueryClient();
-  const { data: receivables = [], isLoading } = useReceivables();
+  const { queryParams: rangeParams } = useFinanceDateRange();
+  const { data: receivables = [], isLoading } = useReceivables(rangeParams);
   const recordPaymentMut = useRecordPayment();
   const [statusFilter, setStatusFilter] = useState('All');
   const [typeFilter, setTypeFilter] = useState('All');

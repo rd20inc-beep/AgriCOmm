@@ -8,6 +8,7 @@ import { downloadCSV } from '../../../utils/csvExport';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useApp } from '../../../context/AppContext';
 import api from '../../../api/client';
+import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 
 // ─── Formatting ──────────────────────────────────────────────────────
 function fmtPKR(n) {
@@ -149,12 +150,14 @@ const STATUS_COLORS = {
 // ─── Page ────────────────────────────────────────────────────────────
 export default function Expenses() {
   const { addToast, suppliersList, bankAccountsList, millingBatches, exportOrders } = useApp();
+  const { queryParams: rangeParams } = useFinanceDateRange();
   const [typeFilter, setTypeFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [search, setSearch] = useState('');
   const { data: expenses = [], isLoading } = useExpenses({
     ...(typeFilter ? { expense_type: typeFilter } : {}),
     ...(statusFilter ? { payment_status: statusFilter } : {}),
+    ...rangeParams,
     limit: 100,
   });
   const { data: summary = {} } = useExpenseSummary();
