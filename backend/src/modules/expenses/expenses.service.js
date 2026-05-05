@@ -99,9 +99,12 @@ const expensesService = {
 
       // ─── Link to order costs if export ───
       if (order_id && expense_type === 'export') {
-        // Get the order's fx_rate for PKR→USD conversion
-        const linkedOrder = await trx('export_orders').where('id', order_id).select('currency', 'fx_rate').first();
-        const orderFxRate = parseFloat(linkedOrder?.fx_rate) || 280;
+        // Get the order's booked FX rate for PKR→USD conversion.
+        // Column is `booked_fx_rate` (set when the order is created /
+        // FX is locked) — not `fx_rate` (which never existed on this
+        // table and produced a 500 when an export expense was linked).
+        const linkedOrder = await trx('export_orders').where('id', order_id).select('currency', 'booked_fx_rate').first();
+        const orderFxRate = parseFloat(linkedOrder?.booked_fx_rate) || 280;
         const orderCurrency = linkedOrder?.currency || 'USD';
 
         // If expense is PKR but order is USD, convert to USD for the cost row
