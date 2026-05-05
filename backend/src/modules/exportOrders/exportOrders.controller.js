@@ -1376,7 +1376,7 @@ const exportOrderController = {
       const rawId = req.params.id;
       const isNumeric = /^\d+$/.test(rawId);
       const whereClause = isNumeric ? { id: parseInt(rawId) } : { order_no: rawId };
-      const { amount, payment_date, payment_method, reference, bank_reference, bank_account_id, notes } = req.body;
+      const { amount, payment_date, payment_method, reference, bank_reference, bank_account_id, notes, fx_rate } = req.body;
       const bankRef = bank_reference || reference || null;
 
       if (!amount || parseFloat(amount) <= 0) {
@@ -1384,6 +1384,11 @@ const exportOrderController = {
       }
 
       const confirmedAmount = settledAmount(amount);
+      // FX rate captured at receipt time. For PKR-denominated orders
+      // this is always 1; for foreign orders the FE collects it from
+      // the user (the rate the bank actually applied) — that's the
+      // single point where USD→PKR conversion gets locked.
+      const requestedFxRate = parseFloat(fx_rate);
       const paymentContext = await db.transaction(async (trx) => {
         const order = await lockRow(trx('export_orders').where(whereClause)).first();
         if (!order) {
@@ -1416,10 +1421,32 @@ const exportOrderController = {
 
         const newAdvanceReceived = settledAmount(receivedAdvance + confirmedAmount);
 
-        // Update order advance fields
+        // Resolve effective FX rate for this advance receipt.
+        // For PKR orders: 1. For foreign orders: prefer the rate the
+        // user provided in the modal; fall back to the order's
+        // booked_fx_rate so older clients (no fx_rate sent) keep
+        // working.
+        const orderCurrency = order.currency || 'USD';
+        const isPkrOrder = orderCurrency === 'PKR';
+        const effectiveFxRate = isPkrOrder
+          ? 1
+          : (Number.isFinite(requestedFxRate) && requestedFxRate > 0
+              ? requestedFxRate
+              : (parseFloat(order.booked_fx_rate) || 280));
+        const advancePkr = settledAmount(confirmedAmount * effectiveFxRate);
+        const totalAdvancePkr = settledAmount(
+          (parseFloat(order.advance_received_pkr) || 0) + advancePkr
+        );
+
+        // Update order advance fields. advance_fx_rate locks the rate
+        // for the most recent receipt; advance_received_pkr is the
+        // running PKR equivalent banked. Together they let the FX
+        // gain/loss vs booked_fx_rate be computed at any time.
         await trx('export_orders').where({ id: order.id }).update({
           advance_received: newAdvanceReceived,
           advance_date: payment_date || trx.fn.now(),
+          advance_fx_rate: isPkrOrder ? null : effectiveFxRate,
+          advance_received_pkr: totalAdvancePkr,
           updated_at: trx.fn.now(),
         });
 
@@ -1433,7 +1460,9 @@ const exportOrderController = {
           type: 'receipt',
           linked_receivable_id: advReceivable ? advReceivable.id : null,
           amount: confirmedAmount,
-          currency: order.currency || 'USD',
+          currency: orderCurrency,
+          fx_rate: effectiveFxRate,
+          base_amount_pkr: advancePkr,
           payment_method: payment_method || null,
           bank_account_id: bank_account_id || null,
           bank_reference: bankRef,
@@ -1454,11 +1483,16 @@ const exportOrderController = {
           });
         }
 
-        // Credit bank account balance if a bank account was selected
+        // Credit bank account balance if a bank account was selected.
+        // Use the amount in the account's currency: PKR accounts get
+        // the converted PKR amount; foreign-currency accounts that
+        // match the order currency get the original amount.
         if (bank_account_id) {
+          const bank = await trx('bank_accounts').where({ id: bank_account_id }).first();
+          const credit = bank && bank.currency === orderCurrency ? confirmedAmount : advancePkr;
           await trx('bank_accounts')
             .where({ id: bank_account_id })
-            .increment('current_balance', confirmedAmount);
+            .increment('current_balance', credit);
         }
 
         await workflowService.maybePromoteAfterAdvance(trx, {

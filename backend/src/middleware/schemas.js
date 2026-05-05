@@ -118,6 +118,9 @@ const exportOrderDocumentAction = Joi.object({
 
 const confirmAdvance = Joi.object({
   amount: Joi.number().positive().required(),
+  // Rate the bank actually applied to convert the foreign-currency
+  // advance into PKR. PKR-denominated orders can omit / send 1.
+  fx_rate: Joi.number().positive().allow(null),
   payment_date: Joi.date().iso().allow(null, ''),
   payment_method: Joi.string().max(50).allow(null, ''),
   bank_account_id: Joi.number().integer().positive().allow(null),

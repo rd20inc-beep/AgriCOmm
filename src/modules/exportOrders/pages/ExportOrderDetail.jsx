@@ -77,6 +77,7 @@ export default function ExportOrderDetail() {
   const [advanceBankAccountId, setAdvanceBankAccountId] = useState('');
   const [advanceBankRef, setAdvanceBankRef] = useState('');
   const [advanceNotes, setAdvanceNotes] = useState('');
+  const [advanceFxRate, setAdvanceFxRate] = useState('');
 
   // Balance Payment form state
   const [balanceAmount, setBalanceAmount] = useState('');
@@ -221,6 +222,9 @@ export default function ExportOrderDetail() {
     setAdvanceBankAccountId('');
     setAdvanceBankRef('');
     setAdvanceNotes('');
+    // Pre-fill FX rate from the order's booked rate so the user just
+    // tweaks if the bank applied something different.
+    setAdvanceFxRate(order?.bookedFxRate ? String(order.bookedFxRate) : '');
     setShowAdvanceModal(true);
   };
 
@@ -299,12 +303,19 @@ export default function ExportOrderDetail() {
       addToast('Please enter a valid amount', 'error');
       return;
     }
+    const isForeign = (order?.currency || 'USD') !== 'PKR';
+    const fxRate = parseFloat(advanceFxRate) || 0;
+    if (isForeign && fxRate <= 0) {
+      addToast('Please enter the FX rate the bank applied', 'error');
+      return;
+    }
     setShowAdvanceModal(false);
     try {
       const res = await confirmAdvanceMut.mutateAsync({
         id: orderId,
         data: {
           amount,
+          fx_rate: isForeign ? fxRate : 1,
           payment_date: advanceDate,
           payment_method: advanceMethod,
           bank_account_id: advanceBankAccountId || null,
@@ -765,6 +776,8 @@ export default function ExportOrderDetail() {
         setAdvanceBankAccountId={setAdvanceBankAccountId}
         advanceBankRef={advanceBankRef}
         setAdvanceBankRef={setAdvanceBankRef}
+        advanceFxRate={advanceFxRate}
+        setAdvanceFxRate={setAdvanceFxRate}
         advanceNotes={advanceNotes}
         setAdvanceNotes={setAdvanceNotes}
         bankAccountsList={bankAccountsList}
