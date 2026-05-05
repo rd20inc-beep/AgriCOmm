@@ -99,8 +99,16 @@ const financeController = {
           .leftJoin('suppliers as s', 'p.supplier_id', 's.id')
           .select('p.*', 's.name as supplier_name')
           .where(function() {
-            // Only show real vendor payables, not internal cost allocations
-            this.where('p.payable_type', 'vendor').orWhereNull('p.payable_type');
+            // Show every real money-out liability:
+            //   - 'vendor'   : invoiced supplier debt (legacy)
+            //   - 'expense'  : business expense awaiting payment
+            //   - 'purchase' : mill-store stock purchase
+            //   - NULL       : older rows seeded before the column existed
+            // Internal cost allocations were the only thing previously
+            // filtered, but those don't actually land in this table —
+            // they live on export_order_costs / milling_costs.
+            this.whereIn('p.payable_type', ['vendor', 'expense', 'purchase'])
+                .orWhereNull('p.payable_type');
           });
 
         if (status) query = query.where('p.status', status);

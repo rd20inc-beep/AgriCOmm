@@ -119,7 +119,17 @@ const expensesService = {
       // payables schema: entity, category, supplier_id, linked_ref, original_amount,
       // paid_amount, outstanding, due_date, status, currency, source_table, source_id, payable_type
       const vendorLabel = vendor_name || (supplier_id ? (await trx('suppliers').where('id', supplier_id).first())?.name : null) || 'Vendor';
+      // Generate a pay_no so the row shows as e.g. PAY-EXP0042 on the
+      // Money Out tab (rather than a blank Ref column).
+      const lastPay = await trx('payables')
+        .where('pay_no', 'like', 'PAY-EXP%')
+        .orderBy('id', 'desc').first();
+      const nextSeq = lastPay
+        ? (parseInt(String(lastPay.pay_no).replace(/^PAY-EXP/, ''), 10) || 0) + 1
+        : 1;
+      const payNo = `PAY-EXP${String(nextSeq).padStart(4, '0')}`;
       await trx('payables').insert({
+        pay_no: payNo,
         entity: expense_type === 'mill' ? 'mill' : expense_type === 'export' ? 'export' : 'general',
         category: category || 'miscellaneous',
         supplier_id: supplier_id || null,
