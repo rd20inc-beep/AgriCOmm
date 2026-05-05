@@ -530,15 +530,9 @@ export function useProfitLoss(params = {}) {
   });
 }
 
-export function useCashForecast(params = {}) {
-  return useQuery({
-    queryKey: ['cash-forecast', params],
-    queryFn: async () => {
-      const res = await reportingApi.cashForecast(params);
-      return transformKeys(unwrap(res, 'forecast') || unwrap(res) || []);
-    },
-  });
-}
+// useCashForecast is defined further down (line ~1107) — keeping a
+// single declaration for the hook used by Reports + the existing
+// Cash forecast tile.
 
 // ===================== DOCUMENTS =====================
 
