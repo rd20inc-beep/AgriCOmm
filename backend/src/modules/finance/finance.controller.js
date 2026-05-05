@@ -418,6 +418,71 @@ const financeController = {
     }
   },
 
+  // Unified payments feed — every receipt and payment from the
+  // payments table, joined with receivables/payables/local_sales for
+  // human-friendly counterparty + source labels. Powers the Money In
+  // and Money Out tabs on the Reports hub.
+  async listPayments(req, res) {
+    try {
+      const { type, from_date, to_date, limit = 500 } = req.query;
+      let q = db('payments as p')
+        .leftJoin('receivables as r', 'p.linked_receivable_id', 'r.id')
+        .leftJoin('payables as pa',   'p.linked_payable_id',    'pa.id')
+        .leftJoin('customers as c',   'r.customer_id',          'c.id')
+        .leftJoin('suppliers as s',   'pa.supplier_id',         's.id')
+        .leftJoin('local_sales as ls','p.local_sale_id',        'ls.id')
+        .leftJoin('bank_accounts as ba','p.bank_account_id',    'ba.id')
+        .select(
+          'p.id', 'p.payment_no', 'p.type', 'p.amount', 'p.currency',
+          'p.fx_rate', 'p.base_amount_pkr', 'p.payment_method',
+          'p.payment_date', 'p.bank_reference', 'p.notes', 'p.created_at',
+          'p.linked_receivable_id', 'p.linked_payable_id', 'p.local_sale_id',
+          'r.recv_no as recv_no', 'r.entity as recv_entity', 'r.type as recv_type',
+          'pa.pay_no as pay_no', 'pa.entity as pay_entity', 'pa.payable_type', 'pa.linked_ref as pay_linked_ref',
+          'c.name as customer_name',
+          's.name as supplier_name',
+          'ls.sale_no as sale_no', 'ls.buyer_name as sale_buyer',
+          'ba.name as bank_name', 'ba.currency as bank_currency'
+        );
+      if (type) q = q.where('p.type', type);
+      if (from_date) q = q.where('p.payment_date', '>=', from_date);
+      if (to_date)   q = q.where('p.payment_date', '<=', to_date);
+      const rows = await q.orderBy('p.payment_date', 'desc').limit(parseInt(limit));
+
+      // Compose a single counterparty + source label per row so the FE
+      // doesn't have to do the joining gymnastics.
+      const enriched = rows.map(r => {
+        let counterparty = '—';
+        let sourceRef = null;
+        let sourceHref = null;
+        if (r.type === 'receipt') {
+          counterparty = r.customer_name || r.sale_buyer || 'Walk-in customer';
+          sourceRef = r.recv_no || r.sale_no || null;
+          if (r.recv_no && r.recv_no.startsWith('RCV-LS')) sourceHref = '/local-sales';
+        } else {
+          counterparty = r.supplier_name || r.pay_linked_ref || 'Vendor';
+          sourceRef = r.pay_no || null;
+        }
+        return { ...r, counterparty, sourceRef, sourceHref };
+      });
+
+      // Totals across the filtered set, in PKR (using base_amount_pkr
+      // when present, else falling back to amount × fx_rate).
+      const total = enriched.reduce((s, r) => {
+        const pkr = parseFloat(r.base_amount_pkr) || (parseFloat(r.amount) || 0) * (parseFloat(r.fx_rate) || 1);
+        return s + pkr;
+      }, 0);
+
+      return res.json({
+        success: true,
+        data: { payments: enriched, totalPkr: Number(total.toFixed(2)), count: enriched.length },
+      });
+    } catch (err) {
+      console.error('List payments error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
   async recordPayment(req, res) {
     try {
       const {

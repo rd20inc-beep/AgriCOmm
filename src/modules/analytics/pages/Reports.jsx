@@ -10,6 +10,7 @@ import {
 import {
   useExecutiveSummary, useOrderProfitability, useCustomerProfitability,
   useCountryAnalysis, useStockAgingReport, useSupplierQualityRanking,
+  usePayments, useReceivables, usePayables,
 } from '../../../api/queries';
 
 // ─── Formatting ────────────────────────────────────────────────────────
@@ -66,6 +67,8 @@ function rangeToParams(range) {
 
 // ─── Page ─────────────────────────────────────────────────────────────
 const TABS = [
+  { key: 'moneyIn',   label: 'Money In',   icon: ArrowDownLeft },
+  { key: 'moneyOut',  label: 'Money Out',  icon: ArrowUpRight },
   { key: 'orders',    label: 'Orders',     icon: TrendingUp },
   { key: 'customers', label: 'Customers',  icon: Users },
   { key: 'countries', label: 'Countries',  icon: Globe },
@@ -75,12 +78,20 @@ const TABS = [
 
 export default function Reports() {
   const [range, setRange] = useState('');
-  const [tab, setTab] = useState('orders');
+  const [tab, setTab] = useState('moneyIn');
   const params = useMemo(() => rangeToParams(range), [range]);
 
   const { data: exec = {}, isLoading: execLoading, refetch: refetchExec } = useExecutiveSummary(params);
+  // Headline money totals across the system — receipts vs payments
+  // from the unified payments feed. These power both the KPI strip
+  // and the Money In/Out tabs without each tab refetching.
+  const { data: receiptsData,  refetch: refetchReceipts }  = usePayments({ ...params, type: 'receipt' });
+  const { data: paymentsData,  refetch: refetchPayments }  = usePayments({ ...params, type: 'payment' });
+  const totalIn  = receiptsData?.totalPkr || 0;
+  const totalOut = paymentsData?.totalPkr || 0;
+  const netFlow  = totalIn - totalOut;
 
-  const refetchAll = () => refetchExec();
+  const refetchAll = () => { refetchExec(); refetchReceipts(); refetchPayments(); };
 
   return (
     <div className="space-y-5 pb-4">
@@ -117,13 +128,14 @@ export default function Reports() {
         </div>
       </div>
 
-      {/* ─── Executive KPI strip ──────────────────────────────── */}
+      {/* ─── Money KPI strip (the headline numbers across the whole system) */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        <KpiTile icon={TrendingUp}    tone="blue"    label="Total Orders"     primary={exec.totalOrders ?? '—'} secondary={`${exec.activeOrders ?? 0} active`} loading={execLoading} />
-        <KpiTile icon={ArrowDownLeft} tone="emerald" label="Total Revenue"    primary={fmtPKR(exec.totalRevenuePkr)} secondary={`${exec.totalShipments ?? 0} shipped`} loading={execLoading} />
-        <KpiTile icon={Coins}         tone="amber"   label="Outstanding A/R"  primary={fmtPKR(exec.totalOutstandingPkr)} secondary={`${exec.openReceivables ?? 0} open`} loading={execLoading} />
-        <KpiTile icon={Activity}      tone="violet"  label="Booked Profit"    primary={fmtPKR(exec.bookedProfitPkr)} secondary={`Margin ${fmtPct(exec.avgMarginPct)}`} loading={execLoading} />
-        <KpiTile icon={Award}         tone="rose"    label="Avg Yield"        primary={fmtPct(exec.avgYieldPct)} secondary={`${exec.totalBatches ?? 0} batches`} loading={execLoading} />
+        <KpiTile icon={ArrowDownLeft} tone="emerald" label="Total Money In"  primary={fmtPKR(totalIn)}  secondary={`${receiptsData?.count ?? 0} receipts`} />
+        <KpiTile icon={ArrowUpRight}  tone="rose"    label="Total Money Out" primary={fmtPKR(totalOut)} secondary={`${paymentsData?.count ?? 0} payments`} />
+        <KpiTile icon={Activity}      tone={netFlow >= 0 ? 'violet' : 'rose'} label="Net Cashflow"
+                 primary={fmtPKR(netFlow)} secondary={netFlow >= 0 ? 'Positive' : 'Negative'} />
+        <KpiTile icon={Coins}         tone="amber"   label="Outstanding A/R" primary={fmtPKR(exec.totalOutstandingPkr)} secondary={`${exec.openReceivables ?? 0} open`} loading={execLoading} />
+        <KpiTile icon={TrendingUp}    tone="blue"    label="Booked Profit"   primary={fmtPKR(exec.bookedProfitPkr)} secondary={`Margin ${fmtPct(exec.avgMarginPct)}`} loading={execLoading} />
       </div>
 
       {/* ─── Tabs ─────────────────────────────────────────────── */}
@@ -143,6 +155,8 @@ export default function Reports() {
         </nav>
 
         <div className="p-4 sm:p-6">
+          {tab === 'moneyIn'   && <MoneyFlowTab kind="receipt" params={params} totalLabel="Money In"  />}
+          {tab === 'moneyOut'  && <MoneyFlowTab kind="payment" params={params} totalLabel="Money Out" />}
           {tab === 'orders'    && <OrdersTab params={params} />}
           {tab === 'customers' && <CustomersTab params={params} />}
           {tab === 'countries' && <CountriesTab params={params} />}
@@ -150,6 +164,118 @@ export default function Reports() {
           {tab === 'quality'   && <QualityTab params={params} />}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Tab: Money In / Money Out (the unified payments feed) ──────────
+function MoneyFlowTab({ kind, params, totalLabel }) {
+  const { data, isLoading } = usePayments({ ...params, type: kind });
+  // Receivables / payables backdrop so we can show the open balance
+  // alongside the realised cash flow on the same screen.
+  const { data: receivables = [] } = useReceivables(params);
+  const { data: payables    = [] } = usePayables(params);
+
+  const rows  = data?.payments || [];
+  const total = data?.totalPkr || 0;
+
+  // Source breakdown — group receipts by recv_entity / recv_type
+  // (export advance vs balance vs local sale), payments by
+  // payable_type (vendor / expense / purchase).
+  const sourceBreakdown = useMemo(() => {
+    const buckets = new Map();
+    for (const p of rows) {
+      let key;
+      if (kind === 'receipt') {
+        if (p.localSaleId) key = 'Local Sale';
+        else if ((p.recvType || '').toLowerCase().includes('advance')) key = 'Advance';
+        else if ((p.recvType || '').toLowerCase().includes('balance')) key = 'Balance';
+        else key = 'Other Receipt';
+      } else {
+        const pt = (p.payableType || '').toLowerCase();
+        if (pt === 'expense')  key = 'Business Expense';
+        else if (pt === 'purchase') key = 'Mill Purchase';
+        else if (pt === 'vendor')   key = 'Supplier Payment';
+        else key = 'Other Payment';
+      }
+      const pkr = parseFloat(p.baseAmountPkr) || (parseFloat(p.amount) || 0) * (parseFloat(p.fxRate) || 1);
+      const cur = buckets.get(key) || { name: key, count: 0, totalPkr: 0 };
+      cur.count += 1; cur.totalPkr += pkr;
+      buckets.set(key, cur);
+    }
+    return Array.from(buckets.values()).sort((a, b) => b.totalPkr - a.totalPkr);
+  }, [rows, kind]);
+
+  // Open-balance summary (receivable side for receipts, payable side
+  // for payments).
+  const openBalance = useMemo(() => {
+    const list = kind === 'receipt' ? receivables : payables;
+    return list.reduce((s, x) => s + (parseFloat(x.outstanding) || 0), 0);
+  }, [kind, receivables, payables]);
+
+  if (isLoading) return <Skeleton />;
+
+  const tone = kind === 'receipt' ? 'emerald' : 'rose';
+
+  return (
+    <div className="space-y-5">
+      <SectionHeader
+        title={`${totalLabel} — every ${kind === 'receipt' ? 'receipt' : 'payment'} across the system`}
+        subtitle="Sourced from the unified payments feed (export advances/balances, local sales, supplier payments, expenses, mill purchases)."
+      />
+
+      {/* Summary cells */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <SummaryCell label={`Total ${totalLabel}`} value={fmtPKR(total)} />
+        <SummaryCell label="Transactions" value={String(rows.length)} />
+        <SummaryCell label={kind === 'receipt' ? 'Open Receivables' : 'Open Payables'} value={fmtPKR(openBalance)} />
+        <SummaryCell label="Sources"       value={String(sourceBreakdown.length)} />
+      </div>
+
+      {/* Source breakdown chips */}
+      {sourceBreakdown.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {sourceBreakdown.map(b => (
+            <div key={b.name} className={`px-3 py-2 rounded-lg border bg-${tone}-50 border-${tone}-200`}>
+              <div className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">{b.name}</div>
+              <div className="text-sm font-bold text-gray-900">{fmtPKR(b.totalPkr)}</div>
+              <div className="text-[11px] text-gray-500">{b.count} {b.count === 1 ? 'txn' : 'txns'}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Feed */}
+      {rows.length === 0 ? (
+        <Empty msg={`No ${kind === 'receipt' ? 'receipts' : 'payments'} in this period.`} />
+      ) : (
+        <Table
+          head={['Date', 'Ref', 'Counterparty', 'Source', 'Bank', 'Amount']}
+          align={['left','left','left','left','left','right']}
+          rows={rows.map(p => {
+            const pkr = parseFloat(p.baseAmountPkr) || (parseFloat(p.amount) || 0) * (parseFloat(p.fxRate) || 1);
+            const isForeign = (p.currency || 'PKR') !== 'PKR';
+            const amountCell = isForeign ? (
+              <div className="text-right">
+                <div className="font-semibold text-gray-900">{fmtPKR(pkr)}</div>
+                <div className="text-[11px] text-gray-400">{p.currency} {Number(p.amount).toLocaleString()} @ {p.fxRate}</div>
+              </div>
+            ) : <span className="font-semibold text-gray-900">{fmtPKR(pkr)}</span>;
+            return [
+              p.paymentDate ? new Date(p.paymentDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—',
+              <span className="font-mono text-xs">{p.paymentNo}</span>,
+              <span className="font-medium">{p.counterparty}</span>,
+              p.sourceRef
+                ? (p.sourceHref
+                    ? <Link to={p.sourceHref} className="text-blue-600 hover:underline text-xs">{p.sourceRef}</Link>
+                    : <span className="text-xs text-gray-600">{p.sourceRef}</span>)
+                : <span className="text-xs text-gray-400">—</span>,
+              <span className="text-xs text-gray-600">{p.bankName || p.paymentMethod || '—'}</span>,
+              amountCell,
+            ];
+          })}
+        />
+      )}
     </div>
   );
 }

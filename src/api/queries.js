@@ -435,6 +435,22 @@ export function usePayables(params = {}) {
   });
 }
 
+export function usePayments(params = {}) {
+  return useQuery({
+    queryKey: ['payments-feed', params],
+    queryFn: async () => {
+      const res = await financeApi.payments(params);
+      const d = res?.data || {};
+      return {
+        payments: transformKeys(d.payments || []),
+        totalPkr: parseFloat(d.totalPkr) || 0,
+        count: parseInt(d.count) || 0,
+      };
+    },
+    staleTime: 10 * 1000,
+  });
+}
+
 export function useRecordPayment() {
   const qc = useQueryClient();
   return useMutation({
