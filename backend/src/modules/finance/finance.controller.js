@@ -533,6 +533,27 @@ const financeController = {
       const result = await db.transaction(async (trx) => {
         const paymentNo = await generatePaymentNo(trx);
 
+        // Resolve fx_rate + base_amount_pkr at write time so the
+        // payment row carries its own PKR equivalent forever, no
+        // matter what the linked source rates do later.
+        const amtNum = parseFloat(amount);
+        const cur = (currency || 'PKR').toUpperCase();
+        let stampedFxRate = 1;
+        if (cur !== 'PKR') {
+          // Pull the linked order's booked rate when available so the
+          // ledger inherits the same rate as the order it pays against.
+          let orderRate = null;
+          if (linked_receivable_id) {
+            const r = await trx('receivables').where({ id: linked_receivable_id }).first();
+            if (r?.order_id) {
+              const eo = await trx('export_orders').where({ id: r.order_id }).first();
+              orderRate = parseFloat(eo?.advance_fx_rate) || parseFloat(eo?.booked_fx_rate) || null;
+            }
+          }
+          stampedFxRate = orderRate || 280;
+        }
+        const stampedPkr = cur === 'PKR' ? amtNum : amtNum * stampedFxRate;
+
         // Create payment record
         const [payment] = await trx('payments')
           .insert({
@@ -540,8 +561,10 @@ const financeController = {
             type,
             linked_receivable_id: linked_receivable_id || null,
             linked_payable_id: linked_payable_id || null,
-            amount: parseFloat(amount),
-            currency: currency || 'USD',
+            amount: amtNum,
+            currency: cur,
+            fx_rate: stampedFxRate,
+            base_amount_pkr: Number(stampedPkr.toFixed(2)),
             payment_method: payment_method || null,
             bank_account_id: bank_account_id || null,
             bank_reference: bank_reference || null,
