@@ -96,7 +96,8 @@ const accountingService = {
           description: description || null,
           status: 'Draft',
           currency: currency || 'PKR',
-          fx_rate: fxRate || null,
+          // fx_rate is NOT NULL on journal_entries; default PKR to 1
+          fx_rate: fxRate || 1,
           is_auto: isAuto,
           posting_rule_id: postingRuleId || null,
           period_id: period ? period.id : null,

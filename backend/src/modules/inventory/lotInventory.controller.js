@@ -200,11 +200,15 @@ module.exports = {
         : normalizedPaymentStatus === 'partial'
           ? Math.max(0, Math.min(landedPayableAmount, parseFloat(req.body.paid_amount) || 0))
           : Math.max(0, parseFloat(req.body.paid_amount) || 0);
+      // Capitalised status values match the CHECK constraint on payables.status
+      // (Pending / Partial / Paid). Keep `payableStatusLower` for inventory_lots,
+      // which uses the lowercase form on its own column.
       const payableStatus = paidAmount >= landedPayableAmount - 0.01
-        ? 'paid'
+        ? 'Paid'
         : paidAmount > 0
-          ? 'partial'
-          : 'pending';
+          ? 'Partial'
+          : 'Pending';
+      const payableStatusLower = payableStatus.toLowerCase();
 
       const result = await db.transaction(async (trx) => {
         // Generate lot number
@@ -212,12 +216,39 @@ module.exports = {
         const cnt = await trx('inventory_lots').count('id as c').first();
         const lotNo = `LOT-${today}-${String((cnt?.c || 0) + 1).padStart(4, '0')}`;
 
+        // warehouse_id is NOT NULL on inventory_lots — resolve a sensible
+        // default based on type/entity if the wizard didn't supply one.
+        let resolvedWarehouseId = warehouse_id || null;
+        if (!resolvedWarehouseId) {
+          const matchType = type === 'finished' ? 'finished'
+            : type === 'byproduct' ? 'byproduct'
+            : 'raw';
+          let wh = await trx('warehouses')
+            .where({ entity: entity || 'mill', type: matchType, is_active: true })
+            .orderBy('id', 'asc').first();
+          if (!wh) {
+            // Fallback: any warehouse for the entity
+            wh = await trx('warehouses').where({ entity: entity || 'mill', is_active: true }).orderBy('id', 'asc').first();
+          }
+          if (!wh) {
+            // Last resort: create a default warehouse so the insert can proceed
+            const [created] = await trx('warehouses').insert({
+              name: entity === 'export' ? 'Export Warehouse' : `Mill ${matchType === 'raw' ? 'Raw Stock' : matchType === 'finished' ? 'Finished' : 'By-products'}`,
+              entity: entity || 'mill',
+              type: matchType,
+              is_active: true,
+            }).returning('*');
+            wh = created;
+          }
+          resolvedWarehouseId = wh.id;
+        }
+
         const [lot] = await trx('inventory_lots').insert({
           lot_no: lotNo,
           item_name,
           type,
           entity,
-          warehouse_id: warehouse_id || null,
+          warehouse_id: resolvedWarehouseId,
           product_id: product_id || null,
           qty: uc.kgToTon(netWeightKg), // legacy field in MT
           unit: 'MT',
@@ -270,8 +301,8 @@ module.exports = {
           damaged_weight_kg: 0,
           cost_per_unit: landedCostPerKg * 1000, // per MT for legacy
           total_value: landedCostTotal,
-          // Payment
-          payment_status: payableStatus,
+          // Payment (inventory_lots.payment_status is lowercase; payables.status is title-case)
+          payment_status: payableStatusLower,
           paid_amount: paidAmount,
           due_amount: Math.max(0, landedPayableAmount - paidAmount),
           notes: notes || null,
@@ -286,7 +317,7 @@ module.exports = {
           lot_id: lot.id,
           transaction_type: 'purchase_in',
           reference_module: 'purchase',
-          warehouse_to_id: warehouse_id || null,
+          warehouse_to_id: resolvedWarehouseId,
           input_unit: quantity_unit,
           input_qty: parseFloat(quantity_input),
           quantity_kg: netWeightKg,
@@ -300,6 +331,8 @@ module.exports = {
           balance_bags: totalBags,
           remarks: `Purchase: ${parseFloat(quantity_input)} ${quantity_unit} @ ${parseFloat(rate_input)}/${rate_unit}`,
           created_by: req.user?.id || null,
+          performed_by: req.user?.id || null,
+          performed_at: new Date(),
         });
 
         // Also create legacy inventory_movements entry
@@ -307,7 +340,7 @@ module.exports = {
           lot_id: lot.id,
           movement_type: 'purchase_receipt',
           qty: uc.kgToTon(netWeightKg),
-          to_warehouse_id: warehouse_id || null,
+          to_warehouse_id: resolvedWarehouseId,
           dest_entity: entity,
           notes: `Purchase lot ${lotNo}`,
           cost_per_unit: landedCostPerKg * 1000,

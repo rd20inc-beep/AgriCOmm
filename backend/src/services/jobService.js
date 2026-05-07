@@ -409,6 +409,8 @@ const jobService = {
           ref_no: `OB-${row.account_code}`,
           description: row.description || `Opening balance for ${account.name}`,
           status: 'Posted',
+          currency: 'PKR',
+          fx_rate: 1,
           total_debit: parseFloat(row.debit) || 0,
           total_credit: parseFloat(row.credit) || 0,
         }).returning('id');
