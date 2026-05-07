@@ -120,6 +120,7 @@ const bagTypesCrud = createCrud('bag_types', 'bag_type');
 const warehousesCrud = createCrud('warehouses', 'warehouse');
 const bankAccountsCrud = createCrud('bank_accounts', 'bank_account');
 const documentTemplatesCrud = createCrud('document_templates', 'document_template');
+const productCategoriesCrud = createCrud('product_categories', 'product_category');
 
 const adminController = {
   // Customers
@@ -170,6 +171,28 @@ const adminController = {
   createDocumentTemplate: documentTemplatesCrud.create,
   updateDocumentTemplate: documentTemplatesCrud.update,
   deleteDocumentTemplate: documentTemplatesCrud.delete,
+
+  // Product Categories (with parent for subcategories)
+  async listProductCategories(req, res) {
+    try {
+      const rows = await db('product_categories as pc')
+        .leftJoin('product_categories as parent', 'pc.parent_id', 'parent.id')
+        .select(
+          'pc.*',
+          'parent.name as parent_name',
+          'parent.group_key as parent_group_key',
+        )
+        .orderByRaw("COALESCE(pc.parent_id, pc.id), pc.id");
+      return res.json({ success: true, data: { product_categories: rows } });
+    } catch (err) {
+      console.error('List product categories error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+  getProductCategory: productCategoriesCrud.getById,
+  createProductCategory: productCategoriesCrud.create,
+  updateProductCategory: productCategoriesCrud.update,
+  deleteProductCategory: productCategoriesCrud.delete,
 
   // Settings
   async getSettings(req, res) {

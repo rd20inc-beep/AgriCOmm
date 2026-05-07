@@ -19,6 +19,8 @@ router.get('/bank-accounts', authorize('admin', 'view'), controller.listBankAcco
 router.get('/bank-accounts/:id', authorize('admin', 'view'), controller.getBankAccount);
 router.get('/document-templates', authorize('admin', 'view'), controller.listDocumentTemplates);
 router.get('/document-templates/:id', authorize('admin', 'view'), controller.getDocumentTemplate);
+router.get('/product-categories', authorize('admin', 'view'), controller.listProductCategories);
+router.get('/product-categories/:id', authorize('admin', 'view'), controller.getProductCategory);
 router.get('/settings', authorize('admin', 'view'), controller.getSettings);
 
 // Master data management
@@ -153,6 +155,26 @@ router.delete(
   authorize('admin', 'manage_master_data'),
   auditAction('delete', 'document_template', (req) => req.params.id),
   controller.deleteDocumentTemplate
+);
+
+// Product Categories
+router.post(
+  '/product-categories',
+  authorize('admin', 'manage_master_data'),
+  auditAction('create', 'product_category', (req, data) => data.data && data.data.id ? data.data.id : null),
+  controller.createProductCategory
+);
+router.put(
+  '/product-categories/:id',
+  authorize('admin', 'manage_master_data'),
+  auditAction('update', 'product_category', (req) => req.params.id),
+  controller.updateProductCategory
+);
+router.delete(
+  '/product-categories/:id',
+  authorize('admin', 'manage_master_data'),
+  auditAction('delete', 'product_category', (req) => req.params.id),
+  controller.deleteProductCategory
 );
 
 // Settings management

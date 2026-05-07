@@ -51,10 +51,12 @@ function formatDate(dateStr) {
   return new Date(dateStr).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-function formatCurrency(amount, currency = 'USD') {
+function formatCurrency(amount, currency = 'PKR') {
   if (!amount) return '—';
-  if (currency === 'PKR') return 'Rs ' + Math.round(amount).toLocaleString('en-PK');
-  return '$' + parseFloat(amount).toLocaleString('en-US');
+  if (currency === 'USD') return '$' + parseFloat(amount).toLocaleString('en-US');
+  if (currency === 'EUR') return '€' + parseFloat(amount).toLocaleString('en-US');
+  if (currency === 'GBP') return '£' + parseFloat(amount).toLocaleString('en-US');
+  return 'Rs ' + Math.round(amount).toLocaleString('en-PK');
 }
 
 function timeUntilExpiry(expiresAt) {

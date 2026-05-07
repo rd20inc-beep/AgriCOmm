@@ -4,6 +4,7 @@ import { Users, Truck, Package, Warehouse, Settings, ShoppingBag, Landmark, Tags
 import CustomersTab from './admin/CustomersTab';
 import SuppliersTab from './admin/SuppliersTab';
 import ProductsTab from './admin/ProductsTab';
+import CategoriesTab from './admin/CategoriesTab';
 import BagTypesTab from './admin/BagTypesTab';
 import WarehousesTab from './admin/WarehousesTab';
 import BankAccountsTab from './admin/BankAccountsTab';
@@ -18,6 +19,7 @@ const tabs = [
   { key: 'customers', label: 'Customers', icon: Users },
   { key: 'suppliers', label: 'Suppliers', icon: Truck },
   { key: 'products', label: 'Products', icon: Package },
+  { key: 'categories', label: 'Categories', icon: Tags },
   { key: 'bagTypes', label: 'Bag Types', icon: ShoppingBag },
   { key: 'warehouses', label: 'Warehouses', icon: Warehouse },
   { key: 'bankAccounts', label: 'Bank Accounts', icon: Landmark },
@@ -33,6 +35,7 @@ const tabComponents = {
   customers: CustomersTab,
   suppliers: SuppliersTab,
   products: ProductsTab,
+  categories: CategoriesTab,
   bagTypes: BagTypesTab,
   warehouses: WarehousesTab,
   bankAccounts: BankAccountsTab,

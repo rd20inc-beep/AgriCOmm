@@ -73,20 +73,20 @@ export default function MillingDashboard() {
   const [showNewBatch, setShowNewBatch] = useState(false);
   const [batchForm, setBatchForm] = useState({
     millingType: 'own_stock',
-    supplierId: '', rawQtyMT: '', plannedFinishedMT: '',
+    supplierId: '', rawQtyKg: '', totalBags: '', plannedFinishedKg: '',
     millId: '', shift: 'Day', notes: '',
     // Service milling fields
     clientName: '', clientContact: '', millingFeePerMT: '',
   });
   const setBF = (k, v) => setBatchForm(p => ({ ...p, [k]: v }));
   const resetBatchForm = () => setBatchForm({
-    millingType: 'own_stock', supplierId: '', rawQtyMT: '', plannedFinishedMT: '',
+    millingType: 'own_stock', supplierId: '', rawQtyKg: '', totalBags: '', plannedFinishedKg: '',
     millingFeePerKg: '5',
     millId: '', shift: 'Day', notes: '', clientName: '', clientContact: '', millingFeePerMT: '',
   });
 
   async function handleCreateBatch() {
-    if (!batchForm.supplierId || !batchForm.rawQtyMT) {
+    if (!batchForm.supplierId || !batchForm.rawQtyKg) {
       addToast('Supplier and raw quantity are required', 'error');
       return;
     }
@@ -94,8 +94,10 @@ export default function MillingDashboard() {
       addToast('Client name is required for service milling', 'error');
       return;
     }
-    const rawQty = parseFloat(batchForm.rawQtyMT);
-    const planned = parseFloat(batchForm.plannedFinishedMT) || Math.round(rawQty * 0.65);
+    const rawKg = parseFloat(batchForm.rawQtyKg);
+    const rawQty = rawKg / 1000; // backend stores MT
+    const plannedKg = parseFloat(batchForm.plannedFinishedKg) || Math.round(rawKg * 0.65);
+    const planned = plannedKg / 1000;
 
     try {
       const payload = {
@@ -1004,22 +1006,38 @@ export default function MillingDashboard() {
           {/* Quantities */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Raw Qty (MT) *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Raw Qty (KG) *</label>
               <input
                 type="number"
-                value={batchForm.rawQtyMT}
+                value={batchForm.rawQtyKg}
                 onChange={e => {
-                  setBF('rawQtyMT', e.target.value);
-                  if (e.target.value) setBF('plannedFinishedMT', String(Math.round(parseFloat(e.target.value) * 0.65)));
+                  setBF('rawQtyKg', e.target.value);
+                  if (e.target.value) setBF('plannedFinishedKg', String(Math.round(parseFloat(e.target.value) * 0.65)));
                 }}
-                placeholder="Paddy quantity"
+                placeholder="e.g. 30000"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none"
               />
+              {batchForm.rawQtyKg && (
+                <p className="text-xs text-gray-400 mt-0.5">{(parseFloat(batchForm.rawQtyKg) / 1000).toFixed(2)} MT</p>
+              )}
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Expected Finished (MT)</label>
-              <input type="number" value={batchForm.plannedFinishedMT} onChange={e => setBF('plannedFinishedMT', e.target.value)} placeholder="Auto: ~65% of raw" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
+              <label className="block text-sm font-medium text-gray-700 mb-1">Number of Bags</label>
+              <input
+                type="number"
+                value={batchForm.totalBags}
+                onChange={e => setBF('totalBags', e.target.value)}
+                placeholder="e.g. 600"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none"
+              />
+              {batchForm.rawQtyKg && batchForm.totalBags && parseInt(batchForm.totalBags, 10) > 0 && (
+                <p className="text-xs text-emerald-600 mt-0.5 font-medium">Avg: {(parseFloat(batchForm.rawQtyKg) / parseInt(batchForm.totalBags, 10)).toFixed(2)} kg/bag</p>
+              )}
             </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Expected Finished (KG)</label>
+            <input type="number" value={batchForm.plannedFinishedKg} onChange={e => setBF('plannedFinishedKg', e.target.value)} placeholder="Auto: ~65% of raw" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
           </div>
 
           {/* Mill & Shift */}
@@ -1055,15 +1073,18 @@ export default function MillingDashboard() {
           </div>
 
           {/* Summary */}
-          {batchForm.rawQtyMT && (
+          {batchForm.rawQtyKg && (
             <div className="bg-gray-50 rounded-lg border border-gray-200 p-3 text-sm">
               <div className="flex justify-between"><span className="text-gray-500">Type</span><span className="font-medium">{batchForm.millingType === 'service_milling' ? 'Service Milling' : 'Own Stock'}</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">Raw Input</span><span className="font-medium">{batchForm.rawQtyMT} MT</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">Expected Output</span><span className="font-medium">{batchForm.plannedFinishedMT || Math.round(parseFloat(batchForm.rawQtyMT) * 0.65)} MT</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Raw Input</span><span className="font-medium">{parseFloat(batchForm.rawQtyKg).toLocaleString()} kg ({(parseFloat(batchForm.rawQtyKg) / 1000).toFixed(2)} MT)</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Expected Output</span><span className="font-medium">{(parseFloat(batchForm.plannedFinishedKg) || Math.round(parseFloat(batchForm.rawQtyKg) * 0.65)).toLocaleString()} kg</span></div>
+              {batchForm.totalBags && parseInt(batchForm.totalBags, 10) > 0 && (
+                <div className="flex justify-between"><span className="text-gray-500">Bags</span><span className="font-medium">{batchForm.totalBags} bags · {(parseFloat(batchForm.rawQtyKg) / parseInt(batchForm.totalBags, 10)).toFixed(2)} kg/bag avg</span></div>
+              )}
               {batchForm.millingType === 'service_milling' && batchForm.millingFeePerMT && (
                 <div className="flex justify-between border-t border-gray-200 mt-1 pt-1">
                   <span className="text-gray-500">Milling Revenue</span>
-                  <span className="font-bold text-green-700">PKR {Math.round(parseFloat(batchForm.millingFeePerMT) * parseFloat(batchForm.rawQtyMT)).toLocaleString()}</span>
+                  <span className="font-bold text-green-700">PKR {Math.round(parseFloat(batchForm.millingFeePerMT) * (parseFloat(batchForm.rawQtyKg) / 1000)).toLocaleString()}</span>
                 </div>
               )}
             </div>

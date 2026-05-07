@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Plus, Trash2, ShoppingCart } from 'lucide-react';
+import { useNavigate, Link } from 'react-router-dom';
+import { Plus, Trash2, ShoppingCart, Package, ExternalLink } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useMillStoreItems, useCreatePurchase } from '../api/queries';
 
@@ -53,8 +53,20 @@ export default function NewPurchase() {
 
   return (
     <div className="p-6 max-w-3xl mx-auto">
-      <h1 className="text-2xl font-bold text-gray-900 mb-1">New Purchase</h1>
-      <p className="text-sm text-gray-500 mb-6">Record a consumable materials purchase</p>
+      <div className="flex items-start justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 mb-1">New Purchase</h1>
+          <p className="text-sm text-gray-500">Record a consumable materials purchase</p>
+        </div>
+        <div className="flex gap-2">
+          <Link to="/inventory" className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg border border-blue-200">
+            <Package size={14} /> Open Inventory <ExternalLink size={12} />
+          </Link>
+          <Link to="/mill-store/items" className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200">
+            <Plus size={14} /> Add Item
+          </Link>
+        </div>
+      </div>
 
       <form onSubmit={handleSubmit} className="space-y-5">
         {/* Header */}

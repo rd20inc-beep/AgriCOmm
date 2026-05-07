@@ -328,6 +328,29 @@ export function useAddVehicle() {
   });
 }
 
+export function useDeleteVehicle() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, vehicleId }) => millingApi.deleteVehicle(id, vehicleId),
+    onSuccess: (_, { id }) => {
+      qc.invalidateQueries({ queryKey: queryKeys.batches.detail(id) });
+      qc.invalidateQueries({ queryKey: queryKeys.batches.list() });
+      qc.invalidateQueries({ queryKey: queryKeys.inventory.all });
+    },
+  });
+}
+
+export function useDeleteBatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => millingApi.deleteBatch(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.batches.list() });
+      qc.invalidateQueries({ queryKey: queryKeys.inventory.all });
+    },
+  });
+}
+
 // ===================== INVENTORY =====================
 
 export function useInventory(params = {}, opts = {}) {
@@ -1020,6 +1043,40 @@ export function useDeleteDocumentTemplate() {
   return useMutation({
     mutationFn: (id) => adminApi.deleteDocumentTemplate(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['document-templates'] }),
+  });
+}
+
+// ----- Product Categories -----
+
+export function useProductCategories() {
+  return useQuery({
+    queryKey: ['product-categories'],
+    queryFn: async () => {
+      const res = await adminApi.productCategories({ limit: 500 });
+      return transformKeys(unwrap(res, 'product_categories') || unwrap(res, 'productCategories') || unwrap(res, 'rows') || []);
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+export function useCreateProductCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => adminApi.createProductCategory(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['product-categories'] }),
+  });
+}
+export function useUpdateProductCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => adminApi.updateProductCategory(id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['product-categories'] }),
+  });
+}
+export function useDeleteProductCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => adminApi.deleteProductCategory(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['product-categories'] }),
   });
 }
 

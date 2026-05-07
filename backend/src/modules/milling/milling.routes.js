@@ -80,6 +80,18 @@ router.post(
   auditAction('add_vehicle', 'milling_batch', (req) => req.params.id),
   controller.addVehicle
 );
+router.delete(
+  '/batches/:id/vehicles/:vehicleId',
+  authorize('milling', 'edit'),
+  auditAction('delete_vehicle', 'milling_batch', (req) => req.params.id),
+  controller.deleteVehicle
+);
+router.delete(
+  '/batches/:id',
+  authorizeRole('Super Admin', 'Mill Manager'),
+  auditAction('delete', 'milling_batch', (req) => req.params.id),
+  controller.deleteBatch
+);
 
 // =============================================================================
 // Production Planning

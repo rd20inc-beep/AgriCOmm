@@ -3,8 +3,9 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   Package, Search, Plus, Warehouse, Truck, Eye, Filter,
   ArrowUpDown, RefreshCw, BarChart3, DollarSign, AlertTriangle,
+  Layers, Scale, Beaker, Check, ChevronLeft, ChevronRight, X, UserPlus,
 } from 'lucide-react';
-import { useLotInventory, useCreatePurchaseLot } from '../../../api/queries';
+import { useLotInventory, useCreatePurchaseLot, useProductCategories, useCreateSupplier } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
 import { LoadingSpinner, ErrorState, EmptyState } from '../../../components/LoadingState';
 import StatusBadge from '../../../components/StatusBadge';
@@ -244,16 +245,23 @@ export default function LotInventory() {
 // ─── Purchase Lot Creation Modal ───
 function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, addToast, refetch }) {
   const createMutation = useCreatePurchaseLot();
+  const createSupplierMut = useCreateSupplier();
+  const { data: categories = [] } = useProductCategories();
   const [sources, setSources] = useState([]);
   const [sourcesLoading, setSourcesLoading] = useState(false);
   const [selectedSource, setSelectedSource] = useState(''); // 'batch-{id}' or 'vehicle-{batchId}-{vehicleId}'
+  const [step, setStep] = useState(1); // 1=Source/Item, 2=Qty/Pricing, 3=Quality/Review
+  const [showAddSupplier, setShowAddSupplier] = useState(false);
+  const [newSupplierName, setNewSupplierName] = useState('');
   const [form, setForm] = useState({
-    item_name: '', type: 'raw', entity: 'mill', warehouse_id: '', product_id: '', supplier_id: '',
+    item_name: '', type: 'raw', entity: 'mill', warehouse_id: '',
+    category_id: '', product_id: '', supplier_id: '',
     purchase_date: new Date().toISOString().slice(0, 10), crop_year: '2025-26',
     variety: '', grade: '', moisture_pct: '', broken_pct: '', sortex_status: '',
-    bag_type: '', bag_quality: '', bag_weight_kg: '50',
-    quantity_input: '', quantity_unit: 'katta',
-    rate_input: '', rate_unit: 'ton',
+    bag_type: '', bag_quality: '',
+    // kg-canonical: user enters kg + bag count, we compute bag_weight_kg + send as kg unit
+    weight_kg: '', total_bags: '',
+    rate_input: '', rate_unit: 'kg',
     transport_cost: '', labor_cost: '', unloading_cost: '', packing_cost: '', other_cost: '',
     notes: '',
   });
@@ -269,10 +277,74 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
           .finally(() => setSourcesLoading(false));
       });
     }
+    if (isOpen) setStep(1);
   }, [isOpen]);
 
+  async function handleAddSupplier() {
+    const name = newSupplierName.trim();
+    if (!name) return;
+    try {
+      const res = await createSupplierMut.mutateAsync({ name });
+      const created = res?.data?.supplier || res?.data;
+      if (created?.id) {
+        // Optimistically add to local list and select
+        suppliers.unshift({ id: created.id, name: created.name || name });
+        set('supplier_id', created.id);
+        addToast(`Supplier "${name}" added`, 'success');
+      }
+      setNewSupplierName('');
+      setShowAddSupplier(false);
+    } catch (err) {
+      addToast(err?.response?.data?.message || err.message || 'Failed to add supplier', 'error');
+    }
+  }
+
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
-  const bagWt = parseFloat(form.bag_weight_kg) || 50;
+  // Derive bag_weight_kg from kg ÷ bags; fall back to 50 if either is missing
+  const kgEntered = parseFloat(form.weight_kg) || 0;
+  const bagsEntered = parseInt(form.total_bags, 10) || 0;
+  const derivedBagWt = kgEntered > 0 && bagsEntered > 0 ? kgEntered / bagsEntered : 0;
+  const bagWt = derivedBagWt > 0 ? derivedBagWt : 50;
+
+  // Top-level groups + ordered list (parents first, then children indented)
+  const safeCategories = Array.isArray(categories) ? categories : [];
+  const categoryOptions = useMemo(() => {
+    const tops = safeCategories.filter(c => !c.parentId);
+    const opts = [];
+    tops.forEach(t => {
+      opts.push({ id: t.id, label: t.name, isParent: true });
+      safeCategories.filter(c => c.parentId === t.id).forEach(child => {
+        opts.push({ id: child.id, label: `   ↳ ${child.name}`, isParent: false });
+      });
+    });
+    return opts;
+  }, [safeCategories]);
+
+  // Filter products by selected category (parent OR direct child)
+  const safeProducts = Array.isArray(products) ? products : [];
+  const filteredProducts = useMemo(() => {
+    if (!form.category_id) return safeProducts;
+    const cid = parseInt(form.category_id, 10);
+    // Include products in this category OR in its child categories
+    const childIds = safeCategories.filter(c => c.parentId === cid).map(c => c.id);
+    const allowed = new Set([cid, ...childIds]);
+    return safeProducts.filter(p => allowed.has(p.categoryId));
+  }, [safeProducts, safeCategories, form.category_id]);
+
+  // When product picked, auto-fill item_name + map type/entity sensibly if user hasn't overridden
+  function handleProductSelect(productId) {
+    set('product_id', productId);
+    if (!productId) return;
+    const p = safeProducts.find(x => String(x.id) === String(productId));
+    if (!p) return;
+    setForm(prev => ({
+      ...prev,
+      product_id: productId,
+      item_name: prev.item_name && prev.item_name !== '' ? prev.item_name : p.name,
+      // Map by-product flag → type
+      type: p.isByproduct ? 'byproduct' : (prev.type || 'raw'),
+    }));
+  }
 
   // Build dropdown options: group by batch, with vehicles as sub-items
   const sourceOptions = useMemo(() => {
@@ -333,6 +405,9 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
       ? `Raw Paddy (${vehicle.vehicle_no})`
       : `Raw Paddy (${batch.batch_no})`;
 
+    const kgFromSource = qtyMT > 0 ? Math.round(qtyMT * 1000) : 0;
+    const bagsFromVehicle = vehicle?.total_bags ? parseInt(vehicle.total_bags, 10) : '';
+
     setForm(prev => ({
       ...prev,
       item_name: itemName,
@@ -345,10 +420,10 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
       broken_pct: quality.broken != null ? String(quality.broken) : '',
       sortex_status: sortex,
       grade: batch.post_milling_grade || '',
-      // Quantity auto-fill
-      quantity_input: qtyMT > 0 ? String(qtyMT) : '',
-      quantity_unit: 'ton',
-      // Rate auto-fill from quality price
+      // Quantity auto-fill (kg-first)
+      weight_kg: kgFromSource > 0 ? String(kgFromSource) : '',
+      total_bags: bagsFromVehicle ? String(bagsFromVehicle) : '',
+      // Rate auto-fill from quality price (per MT → keep MT unit so user sees what they entered upstream)
       rate_input: pricePerMt > 0 ? String(pricePerMt) : '',
       rate_unit: 'ton',
       // Notes
@@ -358,8 +433,8 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
     }));
   }
 
-  // Live conversion preview
-  const qtyKg = toKg(form.quantity_input, form.quantity_unit, bagWt);
+  // Live conversion preview — quantity is canonical kg
+  const qtyKg = kgEntered;
   const ratePerKg = rateToPerKg(form.rate_input, form.rate_unit, bagWt);
   const purchaseAmt = Math.round(qtyKg * ratePerKg);
   const qtyEquiv = allEquivalents(qtyKg, bagWt);
@@ -374,215 +449,391 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
   const selectedBatch = selectedOption?.batch;
 
   async function handleSubmit() {
-    if (!form.item_name || !form.quantity_input || !form.rate_input) {
-      addToast('Item name, quantity, and rate are required', 'error');
-      return;
-    }
+    if (!form.item_name) { addToast('Item name is required', 'error'); return; }
+    if (!(kgEntered > 0)) { addToast('Weight (kg) must be greater than 0', 'error'); return; }
+    if (!form.rate_input) { addToast('Rate is required', 'error'); return; }
     try {
-      await createMutation.mutateAsync(form);
+      const payload = {
+        ...form,
+        // Backend kg-canonical: send qty as kg, bag_weight_kg derived from kg/bags
+        quantity_input: kgEntered,
+        quantity_unit: 'kg',
+        bag_weight_kg: bagWt,
+        total_bags: bagsEntered || null,
+        product_id: form.product_id ? parseInt(form.product_id, 10) : null,
+        supplier_id: form.supplier_id ? parseInt(form.supplier_id, 10) : null,
+        warehouse_id: form.warehouse_id ? parseInt(form.warehouse_id, 10) : null,
+      };
+      // Strip FE-only fields the backend doesn't expect
+      delete payload.weight_kg;
+      delete payload.category_id;
+      await createMutation.mutateAsync(payload);
       addToast('Purchase lot created successfully', 'success');
       refetch();
       onClose();
       setSelectedSource('');
-      setForm(p => ({ ...p, item_name: '', quantity_input: '', rate_input: '', variety: '', grade: '', moisture_pct: '', broken_pct: '' }));
+      setForm(p => ({
+        ...p, item_name: '', weight_kg: '', total_bags: '', rate_input: '',
+        variety: '', grade: '', moisture_pct: '', broken_pct: '',
+        category_id: '', product_id: '',
+      }));
     } catch (err) {
       addToast(err.message || 'Failed to create lot', 'error');
     }
   }
+  // Per-step validation
+  const step1Valid = !!(form.item_name && form.item_name.trim());
+  const step2Valid = kgEntered > 0 && parseFloat(form.rate_input) > 0;
+  const canNext = step === 1 ? step1Valid : step === 2 ? step2Valid : true;
+
+  function tryNext() {
+    if (step === 1 && !step1Valid) { addToast('Item name is required', 'error'); return; }
+    if (step === 2 && !step2Valid) { addToast('Weight and rate are required', 'error'); return; }
+    setStep(s => Math.min(3, s + 1));
+  }
+
+  const STEPS = [
+    { n: 1, label: 'Source & Item' },
+    { n: 2, label: 'Quantity & Pricing' },
+    { n: 3, label: 'Quality & Review' },
+  ];
+
+  // Reusable minimal classes
+  const inputCls = 'w-full bg-transparent border-0 border-b border-gray-200 rounded-none px-0 py-1.5 text-sm text-gray-900 placeholder-gray-300 focus:border-gray-900 focus:ring-0 outline-none transition-colors';
+  const labelCls = 'text-[11px] font-medium text-gray-500 uppercase tracking-wide';
+  const fieldCls = 'space-y-1';
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="New Purchase Lot" size="xl">
-      <div className="space-y-5">
-        {/* Source Selection */}
-        <div>
-          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">Source</h3>
-          <div className="form-group">
-            <label className="form-label">Select Milling Batch / Vehicle Arrival</label>
-            <select
-              value={selectedSource}
-              onChange={e => handleSourceSelect(e.target.value)}
-              className="form-input"
-              disabled={sourcesLoading}
-            >
-              <option value="">{sourcesLoading ? 'Loading sources...' : 'Select a source to auto-fill...'}</option>
-              {sourceOptions.map(opt => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
+      <div className="flex flex-col -mx-6 -mt-2 -mb-2" style={{ minHeight: '64vh' }}>
+        {/* Step indicator — thin progress with dots */}
+        <div className="px-8 pt-3 pb-4 border-b border-gray-100">
+          <div className="flex items-center justify-between max-w-md mx-auto">
+            {STEPS.map((s, idx) => {
+              const isActive = step === s.n;
+              const isDone = step > s.n;
+              return (
+                <div key={s.n} className="flex items-center flex-1">
+                  <button
+                    type="button"
+                    onClick={() => setStep(s.n)}
+                    className="flex flex-col items-center group"
+                  >
+                    <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-medium transition-all ${
+                      isActive ? 'bg-gray-900 text-white' :
+                      isDone ? 'bg-emerald-600 text-white' :
+                      'bg-white border border-gray-200 text-gray-400 group-hover:border-gray-400'
+                    }`}>
+                      {isDone ? <Check size={13} /> : s.n}
+                    </span>
+                    <span className={`mt-1.5 text-[10px] font-medium uppercase tracking-wider whitespace-nowrap ${
+                      isActive ? 'text-gray-900' : isDone ? 'text-emerald-600' : 'text-gray-400'
+                    }`}>{s.label}</span>
+                  </button>
+                  {idx < STEPS.length - 1 && (
+                    <div className={`flex-1 h-px mx-2 -mt-4 transition-colors ${step > s.n ? 'bg-emerald-500' : 'bg-gray-200'}`} />
+                  )}
+                </div>
+              );
+            })}
           </div>
+        </div>
 
-          {/* Source info card */}
-          {selectedBatch && (
-            <div className="mt-3 bg-indigo-50 rounded-xl border border-indigo-200 p-4">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-                <div>
-                  <p className="text-xs text-indigo-600 font-medium">Batch</p>
-                  <p className="font-bold text-gray-900">{selectedBatch.batch_no}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-indigo-600 font-medium">Supplier</p>
-                  <p className="font-bold text-gray-900">{selectedBatch.supplier_name || '\u2014'}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-indigo-600 font-medium">Raw Qty</p>
-                  <p className="font-bold text-gray-900">{selectedBatch.raw_qty_mt} MT</p>
-                </div>
-                <div>
-                  <p className="text-xs text-indigo-600 font-medium">Status</p>
-                  <p className="font-bold text-gray-900">{selectedBatch.status}</p>
-                </div>
-                {selectedBatch.quality?.arrival && (
-                  <>
-                    <div>
-                      <p className="text-xs text-indigo-600 font-medium">Moisture</p>
-                      <p className="font-bold text-gray-900">{selectedBatch.quality.arrival.moisture}%</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-indigo-600 font-medium">Broken</p>
-                      <p className="font-bold text-gray-900">{selectedBatch.quality.arrival.broken}%</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-indigo-600 font-medium">Purity</p>
-                      <p className="font-bold text-gray-900">{selectedBatch.quality.arrival.purity}%</p>
-                    </div>
-                    {selectedBatch.quality.arrival.price_per_mt && (
-                      <div>
-                        <p className="text-xs text-indigo-600 font-medium">Price/MT</p>
-                        <p className="font-bold text-emerald-700">Rs {parseFloat(selectedBatch.quality.arrival.price_per_mt).toLocaleString()}</p>
-                      </div>
-                    )}
-                  </>
+        {/* Scrollable content */}
+        <div className="flex-1 overflow-y-auto px-8 py-6 space-y-6" style={{ maxHeight: '58vh' }}>
+          {step === 1 && (
+            <div className="space-y-6">
+              {/* Source — single line */}
+              <div className={fieldCls}>
+                <label className={labelCls}>Auto-fill from</label>
+                <select
+                  value={selectedSource}
+                  onChange={e => handleSourceSelect(e.target.value)}
+                  className={inputCls}
+                  disabled={sourcesLoading}
+                >
+                  <option value="">{sourcesLoading ? 'Loading…' : 'None — enter manually'}</option>
+                  {sourceOptions.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+                {selectedBatch && (
+                  <p className="text-xs text-gray-500 pt-1">
+                    {selectedBatch.batch_no} · {selectedBatch.supplier_name || '—'} · {selectedBatch.raw_qty_mt} MT · <span className="text-gray-400">{selectedBatch.status}</span>
+                  </p>
                 )}
               </div>
-              {selectedBatch.vehicles?.length > 0 && (
-                <div className="mt-3 pt-3 border-t border-indigo-200">
-                  <p className="text-xs text-indigo-600 font-medium mb-1">Vehicles ({selectedBatch.vehicles.length})</p>
-                  <div className="flex flex-wrap gap-2">
-                    {selectedBatch.vehicles.map(v => (
-                      <span key={v.id} className="text-xs bg-white border border-indigo-200 rounded-full px-2 py-0.5 text-gray-700">
-                        {v.vehicle_no}{v.weight_mt ? ` (${v.weight_mt} MT)` : ''}
-                      </span>
+
+              {/* Type / Entity inline pills */}
+              <div className="grid grid-cols-2 gap-6">
+                <div className={fieldCls}>
+                  <label className={labelCls}>Stock Type</label>
+                  <div className="flex gap-1">
+                    {['raw', 'finished', 'byproduct'].map(t => (
+                      <button key={t} type="button" onClick={() => set('type', t)}
+                        className={`flex-1 px-2 py-1.5 text-xs font-medium rounded border transition-colors ${
+                          form.type === t ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                        }`}>
+                        {t === 'raw' ? 'Raw' : t === 'finished' ? 'Finished' : 'By-product'}
+                      </button>
                     ))}
+                  </div>
+                </div>
+                <div className={fieldCls}>
+                  <label className={labelCls}>Location</label>
+                  <div className="flex gap-1">
+                    {['mill', 'export'].map(e => (
+                      <button key={e} type="button" onClick={() => set('entity', e)}
+                        className={`flex-1 px-2 py-1.5 text-xs font-medium rounded border transition-colors ${
+                          form.entity === e ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                        }`}>
+                        {e === 'mill' ? 'Mill' : 'Export'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Category + Product */}
+              <div className="grid grid-cols-2 gap-6">
+                <div className={fieldCls}>
+                  <label className={labelCls}>Category</label>
+                  <select value={form.category_id} onChange={e => { set('category_id', e.target.value); set('product_id', ''); }} className={inputCls}>
+                    <option value="">Any</option>
+                    {categoryOptions.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                  </select>
+                </div>
+                <div className={fieldCls}>
+                  <label className={labelCls}>Product</label>
+                  <select value={form.product_id} onChange={e => handleProductSelect(e.target.value)} className={inputCls}>
+                    <option value="">{form.category_id ? `From ${filteredProducts.length}` : 'Optional'}</option>
+                    {filteredProducts.map(p => <option key={p.id} value={p.id}>{p.name}{p.code ? ` (${p.code})` : ''}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              {/* Item name */}
+              <div className={fieldCls}>
+                <label className={labelCls}>Item Name <span className="text-red-400 normal-case">*</span></label>
+                <input value={form.item_name} onChange={e => set('item_name', e.target.value)} className={inputCls} placeholder="e.g. Raw Paddy, 1121 Basmati" />
+              </div>
+
+              {/* Supplier with inline add */}
+              <div className={fieldCls}>
+                <div className="flex items-center justify-between">
+                  <label className={labelCls}>Supplier</label>
+                  <button type="button" onClick={() => setShowAddSupplier(s => !s)} className="text-[11px] text-gray-500 hover:text-gray-900 inline-flex items-center gap-1">
+                    <UserPlus size={11} /> {showAddSupplier ? 'Cancel' : 'New'}
+                  </button>
+                </div>
+                {!showAddSupplier ? (
+                  <select value={form.supplier_id} onChange={e => set('supplier_id', e.target.value)} className={inputCls}>
+                    <option value="">Select…</option>
+                    {suppliers.slice(0, 200).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                ) : (
+                  <div className="flex gap-2 items-end">
+                    <input
+                      autoFocus
+                      value={newSupplierName}
+                      onChange={e => setNewSupplierName(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddSupplier(); } }}
+                      placeholder="New supplier name"
+                      className={`${inputCls} flex-1`}
+                    />
+                    <button type="button" onClick={handleAddSupplier} disabled={!newSupplierName.trim() || createSupplierMut.isPending}
+                      className="px-3 py-1.5 text-xs font-medium bg-gray-900 text-white rounded hover:bg-gray-700 disabled:bg-gray-300">
+                      {createSupplierMut.isPending ? '…' : 'Add'}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Warehouse / Variety / Grade */}
+              <div className="grid grid-cols-3 gap-6">
+                <div className={fieldCls}>
+                  <label className={labelCls}>Warehouse</label>
+                  <select value={form.warehouse_id} onChange={e => set('warehouse_id', e.target.value)} className={inputCls}>
+                    <option value="">Select…</option>
+                    {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                  </select>
+                </div>
+                <div className={fieldCls}>
+                  <label className={labelCls}>Variety</label>
+                  <input value={form.variety} onChange={e => set('variety', e.target.value)} className={inputCls} placeholder="Super Kernel" />
+                </div>
+                <div className={fieldCls}>
+                  <label className={labelCls}>Grade</label>
+                  <select value={form.grade} onChange={e => set('grade', e.target.value)} className={inputCls}>
+                    <option value="">—</option>
+                    <option>A</option><option>B</option><option>C</option><option>Sella</option><option>Steam</option><option>Raw</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Date / Crop year */}
+              <div className="grid grid-cols-2 gap-6">
+                <div className={fieldCls}>
+                  <label className={labelCls}>Purchase Date</label>
+                  <input type="date" value={form.purchase_date} onChange={e => set('purchase_date', e.target.value)} className={inputCls} />
+                </div>
+                <div className={fieldCls}>
+                  <label className={labelCls}>Crop Year</label>
+                  <input value={form.crop_year} onChange={e => set('crop_year', e.target.value)} className={inputCls} placeholder="2025-26" />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="space-y-8">
+              {/* Primary inputs row */}
+              <div className="grid grid-cols-3 gap-6">
+                <div className={fieldCls}>
+                  <label className={labelCls}>Weight (kg) <span className="text-red-400 normal-case">*</span></label>
+                  <input type="number" value={form.weight_kg} onChange={e => set('weight_kg', e.target.value)} className={`${inputCls} text-2xl font-light`} placeholder="0" />
+                  {kgEntered > 0 && <p className="text-[11px] text-gray-400">{(kgEntered / 1000).toFixed(2)} MT</p>}
+                </div>
+                <div className={fieldCls}>
+                  <label className={labelCls}>Number of Bags</label>
+                  <input type="number" value={form.total_bags} onChange={e => set('total_bags', e.target.value)} className={`${inputCls} text-2xl font-light`} placeholder="0" />
+                  {kgEntered > 0 && bagsEntered > 0 && (
+                    <p className="text-[11px] text-emerald-600">{derivedBagWt.toFixed(2)} kg/bag</p>
+                  )}
+                </div>
+                <div className={fieldCls}>
+                  <label className={labelCls}>Rate <span className="text-red-400 normal-case">*</span></label>
+                  <div className="flex items-baseline gap-2">
+                    <input type="number" value={form.rate_input} onChange={e => set('rate_input', e.target.value)} className={`${inputCls} text-2xl font-light flex-1`} placeholder="0" />
+                    <select value={form.rate_unit} onChange={e => set('rate_unit', e.target.value)} className="bg-transparent border-0 text-xs text-gray-500 focus:ring-0 outline-none cursor-pointer">
+                      <option value="kg">/kg</option><option value="katta">/bag</option><option value="maund">/maund</option><option value="ton">/ton</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Conversion preview — minimal text strip */}
+              {(kgEntered > 0 || form.rate_input > 0) && (
+                <div className="border-y border-gray-100 py-3 text-xs text-gray-600 flex flex-wrap gap-x-5 gap-y-1">
+                  <span><span className="text-gray-400">≈</span> <span className="font-medium text-gray-900">{qtyEquiv.katta.toLocaleString()}</span> bags ({bagWt.toFixed(0)} kg)</span>
+                  <span><span className="text-gray-400">·</span> <span className="font-medium text-gray-900">{qtyEquiv.maund.toLocaleString()}</span> maund</span>
+                  <span><span className="text-gray-400">·</span> <span className="font-medium text-gray-900">{qtyEquiv.ton}</span> MT</span>
+                  <span className="ml-auto"><span className="text-gray-400">Rate</span> Rs {rateEquiv.perKg}/kg <span className="text-gray-300 mx-1">·</span> Rs {rateEquiv.perKatta.toLocaleString()}/bag</span>
+                </div>
+              )}
+
+              {/* Additional Costs */}
+              <div className="space-y-2">
+                <label className={labelCls}>Additional Costs <span className="normal-case text-gray-400">— optional</span></label>
+                <div className="grid grid-cols-5 gap-4">
+                  {['transport_cost', 'labor_cost', 'unloading_cost', 'packing_cost', 'other_cost'].map(k => (
+                    <div key={k} className="space-y-0.5">
+                      <p className="text-[10px] text-gray-400 uppercase tracking-wide">{k.replace(/_cost$/, '').replace(/_/g, ' ')}</p>
+                      <input type="number" value={form[k]} onChange={e => set(k, e.target.value)} className={inputCls} placeholder="0" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Landed cost — minimal numeric line */}
+              {qtyKg > 0 && (
+                <div className="bg-gray-50 rounded-lg p-4 grid grid-cols-3 gap-4">
+                  <div>
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wide">Purchase</p>
+                    <p className="text-base font-medium text-gray-900">Rs {purchaseAmt.toLocaleString()}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wide">+ Costs</p>
+                    <p className="text-base font-medium text-gray-900">Rs {directCosts.toLocaleString()}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wide">Landed Total</p>
+                    <p className="text-base font-medium text-emerald-700">Rs {landedTotal.toLocaleString()} <span className="text-[11px] text-gray-400 font-normal">· Rs {landedPerKg.toFixed(2)}/kg</span></p>
                   </div>
                 </div>
               )}
             </div>
           )}
-        </div>
 
-        {/* Item & Details */}
-        <div>
-          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">Item Details</h3>
-          <div className="form-grid">
-            <div className="form-group"><label className="form-label">Item Name *</label>
-              <input value={form.item_name} onChange={e => set('item_name', e.target.value)} className="form-input" placeholder="e.g. Raw Paddy, 1121 Basmati" /></div>
-            <div className="form-group"><label className="form-label">Supplier</label>
-              <select value={form.supplier_id} onChange={e => set('supplier_id', e.target.value)} className="form-input">
-                <option value="">Select...</option>
-                {suppliers.slice(0, 200).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select></div>
-            <div className="form-group"><label className="form-label">Warehouse</label>
-              <select value={form.warehouse_id} onChange={e => set('warehouse_id', e.target.value)} className="form-input">
-                <option value="">Select...</option>
-                {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-              </select></div>
-            <div className="form-group"><label className="form-label">Variety</label>
-              <input value={form.variety} onChange={e => set('variety', e.target.value)} className="form-input" placeholder="e.g. Super Kernel" /></div>
-            <div className="form-group"><label className="form-label">Grade</label>
-              <select value={form.grade} onChange={e => set('grade', e.target.value)} className="form-input">
-                <option value="">Select...</option>
-                <option>A</option><option>B</option><option>C</option><option>Sella</option><option>Steam</option><option>Raw</option>
-              </select></div>
-            <div className="form-group"><label className="form-label">Crop Year</label>
-              <input value={form.crop_year} onChange={e => set('crop_year', e.target.value)} className="form-input" placeholder="2025-26" /></div>
-          </div>
-        </div>
+          {step === 3 && (
+            <div className="space-y-6">
+              <div className="space-y-2">
+                <div className="flex items-baseline justify-between">
+                  <label className={labelCls}>Quality</label>
+                  {selectedSource && <span className="text-[10px] text-emerald-600 uppercase tracking-wide">Auto-filled</span>}
+                </div>
+                <div className="grid grid-cols-3 gap-6">
+                  <div className={fieldCls}>
+                    <p className="text-[10px] text-gray-400 uppercase tracking-wide">Moisture %</p>
+                    <input type="number" value={form.moisture_pct} onChange={e => set('moisture_pct', e.target.value)} className={inputCls} step="0.1" placeholder="0" />
+                  </div>
+                  <div className={fieldCls}>
+                    <p className="text-[10px] text-gray-400 uppercase tracking-wide">Broken %</p>
+                    <input type="number" value={form.broken_pct} onChange={e => set('broken_pct', e.target.value)} className={inputCls} step="0.1" placeholder="0" />
+                  </div>
+                  <div className={fieldCls}>
+                    <p className="text-[10px] text-gray-400 uppercase tracking-wide">Sortex</p>
+                    <select value={form.sortex_status} onChange={e => set('sortex_status', e.target.value)} className={inputCls}>
+                      <option value="">—</option><option>Done</option><option>Pending</option><option>N/A</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
 
-        {/* Quantity & Rate with live conversion */}
-        <div>
-          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">Quantity & Rate</h3>
-          <div className="form-grid">
-            <div className="form-group"><label className="form-label">Bag Weight (KG per Katta)</label>
-              <input type="number" value={form.bag_weight_kg} onChange={e => set('bag_weight_kg', e.target.value)} className="form-input" /></div>
-            <div className="form-group"><label className="form-label">Quantity *</label>
-              <div className="flex gap-2">
-                <input type="number" value={form.quantity_input} onChange={e => set('quantity_input', e.target.value)} className="form-input flex-1" placeholder="Enter quantity" />
-                <select value={form.quantity_unit} onChange={e => set('quantity_unit', e.target.value)} className="form-input w-24">
-                  <option value="katta">Katta</option><option value="maund">Maund</option><option value="kg">KG</option><option value="ton">Ton</option>
-                </select>
-              </div></div>
-            <div className="form-group"><label className="form-label">Rate *</label>
-              <div className="flex gap-2">
-                <input type="number" value={form.rate_input} onChange={e => set('rate_input', e.target.value)} className="form-input flex-1" placeholder="Rate per unit" />
-                <select value={form.rate_unit} onChange={e => set('rate_unit', e.target.value)} className="form-input w-24">
-                  <option value="katta">/ Katta</option><option value="maund">/ Maund</option><option value="kg">/ KG</option><option value="ton">/ Ton</option>
-                </select>
-              </div></div>
-          </div>
+              <div className={fieldCls}>
+                <label className={labelCls}>Notes</label>
+                <textarea value={form.notes} onChange={e => set('notes', e.target.value)} className={`${inputCls} resize-none`} rows={2} placeholder="Optional remarks…" />
+              </div>
 
-          {/* Live conversion preview */}
-          {(form.quantity_input > 0 || form.rate_input > 0) && (
-            <div className="mt-3 bg-blue-50 rounded-xl border border-blue-200 p-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-              <div><p className="text-xs text-blue-600 font-medium">KG</p><p className="font-bold text-gray-900">{qtyEquiv.kg.toLocaleString()}</p></div>
-              <div><p className="text-xs text-blue-600 font-medium">Katta</p><p className="font-bold text-gray-900">{qtyEquiv.katta.toLocaleString()}</p></div>
-              <div><p className="text-xs text-blue-600 font-medium">Maund</p><p className="font-bold text-gray-900">{qtyEquiv.maund.toLocaleString()}</p></div>
-              <div><p className="text-xs text-blue-600 font-medium">Ton</p><p className="font-bold text-gray-900">{qtyEquiv.ton}</p></div>
-              <div><p className="text-xs text-blue-600 font-medium">Rate/KG</p><p className="font-bold text-gray-900">Rs {rateEquiv.perKg}</p></div>
-              <div><p className="text-xs text-blue-600 font-medium">Rate/Katta</p><p className="font-bold text-gray-900">Rs {rateEquiv.perKatta.toLocaleString()}</p></div>
-              <div><p className="text-xs text-blue-600 font-medium">Rate/Maund</p><p className="font-bold text-gray-900">Rs {rateEquiv.perMaund.toLocaleString()}</p></div>
-              <div><p className="text-xs text-blue-600 font-medium">Purchase Amt</p><p className="font-bold text-emerald-700">Rs {purchaseAmt.toLocaleString()}</p></div>
+              {/* Review — clean key/value list */}
+              <div className="border-t border-gray-100 pt-5">
+                <p className={`${labelCls} mb-3`}>Review</p>
+                <dl className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
+                  <div className="flex justify-between"><dt className="text-gray-500">Item</dt><dd className="font-medium text-gray-900">{form.item_name || '—'}</dd></div>
+                  <div className="flex justify-between"><dt className="text-gray-500">Type · Location</dt><dd className="font-medium text-gray-900 capitalize">{form.type} · {form.entity}</dd></div>
+                  <div className="flex justify-between"><dt className="text-gray-500">Supplier</dt><dd className="font-medium text-gray-900 truncate ml-2">{(suppliers.find(s => String(s.id) === String(form.supplier_id)))?.name || '—'}</dd></div>
+                  <div className="flex justify-between"><dt className="text-gray-500">Quantity</dt><dd className="font-medium text-gray-900">{kgEntered.toLocaleString()} kg{bagsEntered ? ` · ${bagsEntered} bags` : ''}</dd></div>
+                  <div className="flex justify-between"><dt className="text-gray-500">Rate</dt><dd className="font-medium text-gray-900">Rs {rateEquiv.perKg}/kg</dd></div>
+                  <div className="flex justify-between"><dt className="text-gray-500">Purchase</dt><dd className="font-medium text-gray-900">Rs {purchaseAmt.toLocaleString()}</dd></div>
+                  <div className="flex justify-between"><dt className="text-gray-500">Add'l Costs</dt><dd className="font-medium text-gray-900">Rs {directCosts.toLocaleString()}</dd></div>
+                  <div className="flex justify-between border-t border-gray-100 pt-2 col-span-2 mt-1">
+                    <dt className="text-gray-900 font-medium">Landed Total</dt>
+                    <dd className="font-semibold text-emerald-700 text-base">Rs {landedTotal.toLocaleString()} <span className="text-xs text-gray-400 font-normal ml-1">Rs {landedPerKg.toFixed(2)}/kg</span></dd>
+                  </div>
+                </dl>
+              </div>
             </div>
           )}
         </div>
 
-        {/* Quality */}
-        <div>
-          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">
-            Quality
-            {selectedSource && <span className="text-xs font-normal text-green-600 ml-2">(auto-filled from source)</span>}
-          </h3>
-          <div className="form-grid">
-            <div className="form-group"><label className="form-label">Moisture %</label>
-              <input type="number" value={form.moisture_pct} onChange={e => set('moisture_pct', e.target.value)} className="form-input" step="0.1" /></div>
-            <div className="form-group"><label className="form-label">Broken %</label>
-              <input type="number" value={form.broken_pct} onChange={e => set('broken_pct', e.target.value)} className="form-input" step="0.1" /></div>
-            <div className="form-group"><label className="form-label">Sortex</label>
-              <select value={form.sortex_status} onChange={e => set('sortex_status', e.target.value)} className="form-input">
-                <option value="">Select...</option><option>Done</option><option>Pending</option><option>N/A</option>
-              </select></div>
+        {/* Sticky Footer */}
+        <div className="border-t border-gray-100 px-8 py-3 bg-white flex items-center justify-between gap-3">
+          <div className="text-xs text-gray-500 flex items-center gap-4">
+            {kgEntered > 0 && <span><span className="font-medium text-gray-900">{kgEntered.toLocaleString()}</span> kg</span>}
+            {bagsEntered > 0 && <span><span className="font-medium text-gray-900">{bagsEntered}</span> bags</span>}
+            {landedTotal > 0 && <span><span className="text-gray-400">Landed</span> <span className="font-medium text-emerald-700">Rs {landedTotal.toLocaleString()}</span></span>}
           </div>
-        </div>
-
-        {/* Additional Costs */}
-        <div>
-          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">Additional Costs</h3>
-          <div className="form-grid">
-            {['transport_cost', 'labor_cost', 'unloading_cost', 'packing_cost', 'other_cost'].map(k => (
-              <div key={k} className="form-group"><label className="form-label">{k.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</label>
-                <input type="number" value={form[k]} onChange={e => set(k, e.target.value)} className="form-input" placeholder="Rs" /></div>
-            ))}
+          <div className="flex items-center gap-2">
+            <button onClick={onClose} className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors">Cancel</button>
+            {step > 1 && (
+              <button onClick={() => setStep(s => Math.max(1, s - 1))} className="px-3 py-1.5 text-sm text-gray-700 hover:text-gray-900 inline-flex items-center gap-1 transition-colors">
+                <ChevronLeft size={14} /> Back
+              </button>
+            )}
+            {step < 3 ? (
+              <button onClick={tryNext} disabled={!canNext}
+                className={`px-4 py-1.5 text-sm font-medium rounded inline-flex items-center gap-1 transition-colors ${
+                  canNext ? 'bg-gray-900 text-white hover:bg-gray-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                }`}>
+                Next <ChevronRight size={14} />
+              </button>
+            ) : (
+              <button onClick={handleSubmit} disabled={createMutation.isPending || !step2Valid || !step1Valid}
+                className="px-4 py-1.5 text-sm font-medium text-white bg-emerald-600 rounded hover:bg-emerald-700 disabled:bg-gray-300 transition-colors">
+                {createMutation.isPending ? 'Creating…' : 'Create Lot'}
+              </button>
+            )}
           </div>
-
-          {/* Landed cost preview */}
-          {qtyKg > 0 && (
-            <div className="mt-3 bg-amber-50 rounded-xl border border-amber-200 p-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-              <div><p className="text-xs text-amber-600 font-medium">Landed Total</p><p className="font-bold text-gray-900">Rs {landedTotal.toLocaleString()}</p></div>
-              <div><p className="text-xs text-amber-600 font-medium">Landed/KG</p><p className="font-bold text-gray-900">Rs {landedPerKg.toFixed(2)}</p></div>
-              <div><p className="text-xs text-amber-600 font-medium">Landed/Katta</p><p className="font-bold text-gray-900">Rs {(landedPerKg * bagWt).toFixed(0)}</p></div>
-              <div><p className="text-xs text-amber-600 font-medium">Landed/Maund</p><p className="font-bold text-gray-900">Rs {(landedPerKg * 40).toFixed(0)}</p></div>
-            </div>
-          )}
-        </div>
-
-        {/* Notes & Submit */}
-        <div className="form-group"><label className="form-label">Notes</label>
-          <textarea value={form.notes} onChange={e => set('notes', e.target.value)} className="form-input resize-none" rows={2} /></div>
-
-        <div className="flex justify-end gap-3 pt-3 border-t border-gray-200">
-          <button onClick={onClose} className="btn btn-secondary">Cancel</button>
-          <button onClick={handleSubmit} disabled={createMutation.isPending} className="btn btn-primary">
-            {createMutation.isPending ? 'Creating...' : 'Create Purchase Lot'}
-          </button>
         </div>
       </div>
     </Modal>

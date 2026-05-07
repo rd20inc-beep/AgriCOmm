@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
@@ -18,6 +18,7 @@ import {
   Edit3,
   Plus,
   Truck,
+  Trash2,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
@@ -25,6 +26,7 @@ import { queryKeys } from '../../../api/queryClient';
 import {
   useMillingBatch, useSaveQuality, useRecordYield,
   useAddBatchCost, useAddVehicle, useUpdateMillingBatch,
+  useDeleteVehicle, useDeleteBatch,
 } from '../../../api/queries';
 import { millingApi } from '../../../api/services';
 import { millingApi as millingModApi } from '../api/services';
@@ -61,10 +63,11 @@ function formatPKR(value) {
 
 export default function MillingBatchDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const { addToast, millingCostCategories, companyProfileData, suppliersList } = useApp();
   const { user } = useAuth();
-  const isOwnerOrAdmin = user?.role === 'Owner' || user?.role === 'Super Admin';
+  const isOwnerOrAdmin = user?.role === 'Owner' || user?.role === 'Super Admin' || user?.role === 'Mill Manager';
   const commodityPrices = useCommodityPrices();
 
   // Fetch batch detail via TanStack Query
@@ -76,6 +79,8 @@ export default function MillingBatchDetail() {
   const addCostMut = useAddBatchCost();
   const addVehicleMut = useAddVehicle();
   const updateBatchMut = useUpdateMillingBatch();
+  const deleteVehicleMut = useDeleteVehicle();
+  const deleteBatchMut = useDeleteBatch();
 
   const invalidateBatch = () => {
     qc.invalidateQueries({ queryKey: queryKeys.batches.detail(id) });
@@ -105,7 +110,9 @@ export default function MillingBatchDetail() {
   const [priceForm, setPriceForm] = useState({ finished: '', broken: '', bran: '', husk: '' });
   const [priceLoading, setPriceLoading] = useState(false);
   const [vehicleForm, setVehicleForm] = useState({
-    vehicleNo: '', driverName: '', driverPhone: '', weightMT: '', arrivalDate: new Date().toISOString().split('T')[0], notes: '',
+    vehicleNo: '', driverName: '', driverPhone: '',
+    weightKg: '', totalBags: '',
+    arrivalDate: new Date().toISOString().split('T')[0], notes: '',
   });
 
   if (batchLoading && !batch) {
@@ -353,13 +360,17 @@ export default function MillingBatchDetail() {
       return;
     }
     try {
+      const kg = parseFloat(vehicleForm.weightKg) || 0;
+      const bags = parseInt(vehicleForm.totalBags, 10) || 0;
       await addVehicleMut.mutateAsync({
         id: batchId,
         data: {
           vehicle_no: vehicleForm.vehicleNo.trim(),
           driver_name: vehicleForm.driverName.trim(),
           driver_phone: vehicleForm.driverPhone.trim(),
-          weight_mt: parseFloat(vehicleForm.weightMT) || 0,
+          weight_kg: kg,
+          total_bags: bags || null,
+          bag_size_kg: kg > 0 && bags > 0 ? kg / bags : null,
           arrival_date: vehicleForm.arrivalDate,
           notes: vehicleForm.notes.trim(),
         },
@@ -368,7 +379,7 @@ export default function MillingBatchDetail() {
     } catch (err) {
       addToast(err.message || 'Failed to add vehicle', 'error');
     }
-    setVehicleForm({ vehicleNo: '', driverName: '', driverPhone: '', weightMT: '', arrivalDate: new Date().toISOString().split('T')[0], notes: '' });
+    setVehicleForm({ vehicleNo: '', driverName: '', driverPhone: '', weightKg: '', totalBags: '', arrivalDate: new Date().toISOString().split('T')[0], notes: '' });
     setShowVehicleModal(false);
   }
 
@@ -526,6 +537,24 @@ export default function MillingBatchDetail() {
               <DollarSign size={16} />
               Costing Sheet
             </button>
+            {isOwnerOrAdmin && batch.status !== 'Completed' && (
+              <button
+                onClick={async () => {
+                  if (!window.confirm(`Delete batch ${batch.id}? This will also remove its raw paddy receipts. This cannot be undone.`)) return;
+                  try {
+                    await deleteBatchMut.mutateAsync(batch.dbId || batch.id);
+                    addToast('Batch deleted', 'success');
+                    navigate('/milling');
+                  } catch (err) {
+                    addToast(err?.response?.data?.message || err.message || 'Failed to delete', 'error');
+                  }
+                }}
+                className="inline-flex items-center gap-2 px-3 py-2 bg-red-50 text-red-700 border border-red-200 rounded-lg text-sm font-medium hover:bg-red-100 transition-colors"
+                title="Delete batch (admin/manager only)"
+              >
+                <Trash2 size={14} /> Delete
+              </button>
+            )}
             <div className="text-right">
               <div className="text-xs text-gray-500">Raw Qty</div>
               <div className="text-lg font-bold text-gray-900">{batch.rawQtyMT} MT</div>
@@ -645,21 +674,46 @@ export default function MillingBatchDetail() {
                 </div>
                 {(safeVehicles && safeVehicles.length > 0) ? (
                   <div className="space-y-2">
-                    {safeVehicles.map((v, idx) => (
-                      <div key={v.id || idx} className="flex flex-wrap items-center justify-between text-sm bg-gray-50 rounded-lg px-3 py-2 gap-2">
-                        <div>
-                          <span className="font-bold text-gray-900 font-mono">{v.vehicleNo}</span>
-                          {v.driverName && <span className="text-gray-500 ml-2">({v.driverName})</span>}
+                    {safeVehicles.map((v, idx) => {
+                      const kg = (parseFloat(v.weightMT) || 0) * 1000;
+                      const bags = parseInt(v.totalBags, 10) || 0;
+                      const avg = kg > 0 && bags > 0 ? (kg / bags).toFixed(2) : null;
+                      return (
+                        <div key={v.id || idx} className="flex flex-wrap items-center justify-between text-sm bg-gray-50 rounded-lg px-3 py-2 gap-2">
+                          <div>
+                            <span className="font-bold text-gray-900 font-mono">{v.vehicleNo}</span>
+                            {v.driverName && <span className="text-gray-500 ml-2">({v.driverName})</span>}
+                          </div>
+                          <div className="flex items-center gap-2 text-right">
+                            <div>
+                              <span className="font-medium text-gray-900">{kg > 0 ? `${kg.toLocaleString()} kg` : '—'}</span>
+                              {bags > 0 && <span className="text-gray-500 text-xs ml-2">{bags} bags{avg ? ` · ${avg} kg/bag` : ''}</span>}
+                              <span className="text-gray-400 text-xs ml-2">{v.arrivalDate}</span>
+                            </div>
+                            {isOwnerOrAdmin && v.id && (
+                              <button
+                                onClick={async () => {
+                                  if (!window.confirm(`Delete vehicle ${v.vehicleNo} arrival? This will reverse the inventory receipt.`)) return;
+                                  try {
+                                    await deleteVehicleMut.mutateAsync({ id: batchId, vehicleId: v.id });
+                                    addToast('Vehicle arrival deleted', 'success');
+                                  } catch (err) {
+                                    addToast(err?.response?.data?.message || err.message || 'Failed to delete', 'error');
+                                  }
+                                }}
+                                className="p-1 rounded hover:bg-red-50 text-red-500"
+                                title="Delete arrival"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <span className="font-medium text-gray-900">{v.weightMT > 0 ? `${v.weightMT} MT` : '—'}</span>
-                          <span className="text-gray-400 text-xs ml-2">{v.arrivalDate}</span>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                     <div className="text-xs text-gray-500 pt-1 border-t border-gray-100 flex justify-between">
                       <span>{safeVehicles.length} vehicle(s)</span>
-                      <span>Total: {safeVehicles.reduce((s, v) => s + (v.weightMT || 0), 0).toFixed(1)} MT</span>
+                      <span>Total: {(safeVehicles.reduce((s, v) => s + (parseFloat(v.weightMT) || 0), 0) * 1000).toLocaleString()} kg</span>
                     </div>
                   </div>
                 ) : (
@@ -1647,18 +1701,36 @@ export default function MillingBatchDetail() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Weight (MT)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Weight (KG)</label>
               <input
                 type="number"
-                step="0.1"
+                step="1"
                 min="0"
-                value={vehicleForm.weightMT}
-                onChange={(e) => setVehicleForm(prev => ({ ...prev, weightMT: e.target.value }))}
-                placeholder="e.g. 16.5"
+                value={vehicleForm.weightKg}
+                onChange={(e) => setVehicleForm(prev => ({ ...prev, weightKg: e.target.value }))}
+                placeholder="e.g. 30000"
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
+              {vehicleForm.weightKg && (
+                <p className="text-xs text-gray-400 mt-0.5">{(parseFloat(vehicleForm.weightKg) / 1000).toFixed(2)} MT</p>
+              )}
             </div>
             <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Number of Bags</label>
+              <input
+                type="number"
+                step="1"
+                min="0"
+                value={vehicleForm.totalBags}
+                onChange={(e) => setVehicleForm(prev => ({ ...prev, totalBags: e.target.value }))}
+                placeholder="e.g. 600"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              {vehicleForm.weightKg && vehicleForm.totalBags && parseInt(vehicleForm.totalBags, 10) > 0 && (
+                <p className="text-xs text-emerald-600 mt-0.5 font-medium">Avg: {(parseFloat(vehicleForm.weightKg) / parseInt(vehicleForm.totalBags, 10)).toFixed(2)} kg/bag</p>
+              )}
+            </div>
+            <div className="col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
               <input
                 type="text"

@@ -893,7 +893,9 @@ const millingController = {
         driver_name,
         driver_phone,
         weight_mt,
+        weight_kg,
         bag_size_kg,
+        total_bags,
         arrival_date,
         notes,
       } = req.body;
@@ -904,11 +906,24 @@ const millingController = {
       }
 
       const vehicle = await db.transaction(async (trx) => {
-        const parsedWeight = weight_mt ? parseFloat(weight_mt) : null;
-        const parsedBagSize = bag_size_kg ? parseFloat(bag_size_kg) : null;
-        const totalBags = parsedWeight && parsedBagSize && parsedBagSize > 0
-          ? Math.ceil((parsedWeight * 1000) / parsedBagSize)
-          : null;
+        // Accept either weight_kg (canonical) or legacy weight_mt
+        let parsedWeight = null;
+        if (weight_kg != null && weight_kg !== '') {
+          parsedWeight = parseFloat(weight_kg) / 1000;
+        } else if (weight_mt != null && weight_mt !== '') {
+          parsedWeight = parseFloat(weight_mt);
+        }
+
+        // Bag count + size: prefer explicit total_bags from FE; derive size if missing
+        const parsedTotalBags = total_bags != null && total_bags !== '' ? parseInt(total_bags, 10) : null;
+        let parsedBagSize = bag_size_kg != null && bag_size_kg !== '' ? parseFloat(bag_size_kg) : null;
+        if (!parsedBagSize && parsedWeight && parsedTotalBags && parsedTotalBags > 0) {
+          parsedBagSize = (parsedWeight * 1000) / parsedTotalBags;
+        }
+        const totalBags = parsedTotalBags
+          || (parsedWeight && parsedBagSize && parsedBagSize > 0
+            ? Math.ceil((parsedWeight * 1000) / parsedBagSize)
+            : null);
 
         const [v] = await trx('milling_vehicle_arrivals')
           .insert({
@@ -965,6 +980,115 @@ const millingController = {
     } catch (err) {
       console.error('Milling addVehicle error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  // Delete a single vehicle arrival and reverse its inventory receipt
+  async deleteVehicle(req, res) {
+    try {
+      const batchId = await resolveBatchId(req.params.id);
+      if (!batchId) return res.status(404).json({ success: false, message: 'Milling batch not found.' });
+      const vehicleId = parseInt(req.params.vehicleId, 10);
+      if (!vehicleId) return res.status(400).json({ success: false, message: 'Invalid vehicle id.' });
+
+      await db.transaction(async (trx) => {
+        const v = await trx('milling_vehicle_arrivals').where({ id: vehicleId, batch_id: batchId }).first();
+        if (!v) {
+          const err = new Error('Vehicle arrival not found.');
+          err.statusCode = 404;
+          throw err;
+        }
+
+        const wt = parseFloat(v.weight_mt) || 0;
+        if (wt > 0) {
+          // Reverse the inventory receipt
+          const lot = await trx('inventory_lots')
+            .where({ batch_ref: `batch-${batchId}`, type: 'raw', entity: 'mill' })
+            .first();
+          if (lot) {
+            await inventoryService.postMovement(trx, {
+              movementType: inventoryService.MOVEMENT_TYPES.ADJUSTMENT_MINUS,
+              lotId: lot.id,
+              qty: wt,
+              fromWarehouseId: lot.warehouse_id,
+              sourceEntity: 'mill',
+              notes: `Reversal: vehicle arrival ${v.vehicle_no || vehicleId} deleted`,
+              currency: 'PKR',
+              batchId,
+              userId: req.user?.id,
+            });
+          }
+        }
+
+        await trx('milling_vehicle_arrivals').where({ id: vehicleId }).del();
+
+        // Recompute batch raw_qty_mt to current vehicle total
+        const totals = await trx('milling_vehicle_arrivals')
+          .where({ batch_id: batchId })
+          .sum('weight_mt as total').first();
+        const totalReceived = parseFloat(totals?.total) || 0;
+        await trx('milling_batches').where({ id: batchId }).update({
+          raw_qty_mt: totalReceived,
+          updated_at: trx.fn.now(),
+        });
+      });
+
+      return res.json({ success: true, message: 'Vehicle arrival deleted; inventory reversed.' });
+    } catch (err) {
+      console.error('Milling deleteVehicle error:', err);
+      return res.status(err.statusCode || 500).json({ success: false, message: err.message || 'Internal server error.' });
+    }
+  },
+
+  // Delete an entire batch (admin/manager only). Reverses raw paddy lot if not consumed.
+  async deleteBatch(req, res) {
+    try {
+      const batchId = await resolveBatchId(req.params.id);
+      if (!batchId) return res.status(404).json({ success: false, message: 'Milling batch not found.' });
+
+      await db.transaction(async (trx) => {
+        const batch = await trx('milling_batches').where({ id: batchId }).first();
+        if (!batch) {
+          const err = new Error('Milling batch not found.');
+          err.statusCode = 404;
+          throw err;
+        }
+
+        if (batch.status === 'Completed') {
+          const err = new Error('Completed batches cannot be deleted. Reverse the yield first.');
+          err.statusCode = 400;
+          throw err;
+        }
+
+        // Detach raw lot if it exists and has no movements other than receipts
+        const lot = await trx('inventory_lots')
+          .where({ batch_ref: `batch-${batchId}`, type: 'raw', entity: 'mill' })
+          .first();
+        if (lot) {
+          const consumed = await trx('inventory_movements')
+            .where('lot_id', lot.id)
+            .whereIn('movement_type', ['production_issue', 'adjustment_minus'])
+            .count('* as n').first();
+          if (parseInt(consumed.n, 10) > 0) {
+            const err = new Error('Raw paddy from this batch has already been consumed/adjusted; cannot delete.');
+            err.statusCode = 400;
+            throw err;
+          }
+          await trx('inventory_movements').where('lot_id', lot.id).del();
+          await trx('lot_transactions').where('lot_id', lot.id).del();
+          await trx('inventory_lots').where('id', lot.id).del();
+        }
+
+        await trx('milling_vehicle_arrivals').where({ batch_id: batchId }).del();
+        await trx('milling_quality_samples').where({ batch_id: batchId }).del();
+        try { await trx('milling_costs').where({ batch_id: batchId }).del(); } catch (_) { /* table may differ */ }
+        await trx('milling_batches').where({ id: batchId }).del();
+      });
+
+      return res.json({ success: true, message: 'Batch deleted.' });
+    } catch (err) {
+      console.error('Milling deleteBatch error:', err);
+      return res.status(err.statusCode || 500).json({ success: false, message: err.message || 'Internal server error.' });
     }
   },
 };

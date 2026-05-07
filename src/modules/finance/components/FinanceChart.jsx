@@ -22,12 +22,12 @@ function formatTick(v) {
  *   nameKey   — data key for pie labels (default 'name')
  *   xKey      — x-axis data key (default 'month')
  *   height    — default 280
- *   currency  — prefix for tooltip (default '$')
+ *   currency  — prefix for tooltip (default 'Rs')
  *   loading   — show skeleton
  */
 export default function FinanceChart({
   title, type = 'bar', data = [], series = [], pieKey, nameKey = 'name',
-  xKey = 'month', height = 280, currency = '$', loading,
+  xKey = 'month', height = 280, currency = 'Rs', loading,
 }) {
   if (loading) {
     return (

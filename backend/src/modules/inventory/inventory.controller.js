@@ -23,11 +23,19 @@ const inventoryController = {
         .leftJoin('warehouses as w', 'il.warehouse_id', 'w.id')
         .leftJoin('products as p', 'il.product_id', 'p.id')
         .leftJoin('suppliers as s', 'il.supplier_id', 's.id')
+        .leftJoin('product_categories as pc', 'p.category_id', 'pc.id')
+        .leftJoin('product_categories as pcp', 'pc.parent_id', 'pcp.id')
         .select(
           'il.*',
           'w.name as warehouse_name',
           'p.name as product_name',
-          's.name as supplier_name'
+          's.name as supplier_name',
+          'pc.id as category_id',
+          'pc.name as category_name',
+          'pc.group_key as category_group_key',
+          'pcp.id as parent_category_id',
+          'pcp.name as parent_category_name',
+          'pcp.group_key as parent_group_key'
         );
 
       if (type) query = query.where('il.type', type);

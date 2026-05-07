@@ -21,6 +21,7 @@ export default function Inventory() {
   const [entityFilter, setEntityFilter] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
   const [displayUnit, setDisplayUnit] = useState('kg');
+  const [groupByCategory, setGroupByCategory] = useState(true);
 
   const params = {};
   if (activeTab !== 'all') params.type = activeTab;
@@ -41,6 +42,31 @@ export default function Inventory() {
       (l.warehouseName || '').toLowerCase().includes(t)
     );
   }, [lots, searchTerm]);
+
+  // Heuristic-grouping: prefer parent_group_key, then category_group_key, then type fallback
+  const groupForLot = (lot) => {
+    const key = lot.parentGroupKey || lot.categoryGroupKey;
+    if (key === 'ready_rice') return { key: 'ready_rice', label: 'READY RICE' };
+    if (key === 'by_products') return { key: 'by_products', label: 'BY-PRODUCTS' };
+    if (key === 'raw_rice') return { key: 'raw_rice', label: 'RAW RICE' };
+    // fallback by lot.type
+    if (lot.type === 'raw') return { key: 'raw_rice', label: 'RAW RICE' };
+    if (lot.type === 'byproduct') return { key: 'by_products', label: 'BY-PRODUCTS' };
+    if (lot.type === 'finished') return { key: 'ready_rice', label: 'READY RICE' };
+    return { key: 'other', label: 'OTHER' };
+  };
+
+  const grouped = useMemo(() => {
+    if (!groupByCategory) return null;
+    const buckets = new Map();
+    const order = ['ready_rice', 'by_products', 'raw_rice', 'other'];
+    for (const lot of filtered) {
+      const g = groupForLot(lot);
+      if (!buckets.has(g.key)) buckets.set(g.key, { key: g.key, label: g.label, lots: [] });
+      buckets.get(g.key).lots.push(lot);
+    }
+    return order.filter(k => buckets.has(k)).map(k => buckets.get(k));
+  }, [filtered, groupByCategory]);
 
   // Summary KPIs from report data
   const kpis = useMemo(() => {
@@ -130,6 +156,13 @@ export default function Inventory() {
               </button>
             ))}
           </div>
+          <button
+            onClick={() => setGroupByCategory(g => !g)}
+            className={`px-2.5 py-1 text-xs font-medium rounded-lg border ${groupByCategory ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-white border-gray-200 text-gray-600'}`}
+            title="Group rows by category"
+          >
+            {groupByCategory ? 'Grouped' : 'Flat'}
+          </button>
         </div>
       </div>
 
@@ -153,16 +186,33 @@ export default function Inventory() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(lot => {
+              {(groupByCategory ? (grouped || []).flatMap(g => [{ __group: g }, ...g.lots]) : filtered).map((row, idx) => {
+                if (row.__group) {
+                  const g = row.__group;
+                  const groupNetKg = g.lots.reduce((s, l) => s + (parseFloat(l.netWeightKg) || parseFloat(l.qty) * 1000 || 0), 0);
+                  const groupValue = g.lots.reduce((s, l) => s + (parseFloat(l.landedCostTotal) || parseFloat(l.totalValue) || 0), 0);
+                  return (
+                    <tr key={`g-${g.key}`} className="bg-gradient-to-r from-emerald-50 to-blue-50 border-y border-emerald-100">
+                      <td colSpan={5} className="px-3 py-2 font-bold text-emerald-800 text-xs uppercase tracking-wider">
+                        {g.label} <span className="text-gray-500 font-normal ml-2">· {g.lots.length} lot(s)</span>
+                      </td>
+                      <td className="text-right tabular-nums font-bold text-emerald-800">{(fromKg(groupNetKg, displayUnit, 50) || 0).toLocaleString()}</td>
+                      <td colSpan={2} className="text-right tabular-nums text-emerald-800 font-semibold text-xs">{fmtPKR(groupValue)}</td>
+                      <td colSpan={3}></td>
+                    </tr>
+                  );
+                }
+                const lot = row;
                 const netKg = parseFloat(lot.netWeightKg) || parseFloat(lot.qty) * 1000 || 0;
                 const availKg = (parseFloat(lot.availableQty) || 0) * 1000;
                 const bw = parseFloat(lot.bagWeightKg) || 50;
                 return (
-                  <tr key={lot.id}>
+                  <tr key={lot.id || idx}>
                     <td><Link to={`/lot-inventory/${lot.lotNo || lot.id}`} className="font-medium text-blue-600 hover:text-blue-800">{lot.lotNo}</Link></td>
                     <td>
                       <div className="text-gray-900 font-medium">{lot.itemName}</div>
                       {lot.variety && <div className="text-xs text-gray-400">{lot.variety}{lot.grade ? ` (${lot.grade})` : ''}</div>}
+                      {lot.categoryName && <div className="text-[10px] text-emerald-600 font-medium uppercase tracking-wide">{lot.categoryName}</div>}
                     </td>
                     <td className="text-gray-600 text-xs">{lot.supplierName || '—'}</td>
                     <td className="text-gray-600 text-xs">{lot.warehouseName || '—'}</td>
