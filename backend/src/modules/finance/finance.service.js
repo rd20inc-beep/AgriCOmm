@@ -132,6 +132,25 @@ const financeService = {
     const millGrossProfit = millRevenue - millCost - overheadTotal;
     const millMargin = millRevenue > 0 ? (millGrossProfit / millRevenue * 100) : 0;
 
+    // ── Local sales metrics ──
+    // All amounts are PKR (local sales are domestic). cogs_total_pkr and
+    // gross_profit_pkr are stamped at sale time / lockSaleCOGS.
+    let localQuery = db('local_sales').whereNotIn('status', ['Cancelled', 'Voided', 'Returned']);
+    if (startDate || endDate) localQuery = dateFilter(localQuery, 'sale_date');
+    const localStats = await localQuery.clone().select(
+      db.raw("COUNT(*) AS sale_count"),
+      db.raw("COUNT(CASE WHEN status = 'Completed' THEN 1 END) AS completed_count"),
+      db.raw("COALESCE(SUM(total_amount), 0) AS revenue_pkr"),
+      db.raw("COALESCE(SUM(cogs_total_pkr), 0) AS cogs_pkr"),
+      db.raw("COALESCE(SUM(gross_profit_pkr), 0) AS gross_profit_pkr"),
+      db.raw("COALESCE(SUM(paid_amount), 0) AS collected_pkr"),
+      db.raw("COALESCE(SUM(due_amount), 0) AS outstanding_pkr"),
+    ).first();
+    const localRevenue = parseFloat(localStats.revenue_pkr) || 0;
+    const localCogs = parseFloat(localStats.cogs_pkr) || 0;
+    const localGrossProfit = parseFloat(localStats.gross_profit_pkr) || (localRevenue - localCogs);
+    const localMargin = localRevenue > 0 ? (localGrossProfit / localRevenue * 100) : 0;
+
     // ── Receivables ──
     const hasRecvBasePkr = await db.schema.hasColumn('receivables', 'base_amount_pkr');
     const recvStats = await db('receivables').whereNot('status', 'Paid').select(
@@ -167,7 +186,7 @@ const financeService = {
       ? (parseFloat(totalReceived?.total) / parseFloat(totalExpected?.total) * 100) : 0;
 
     // ── Consolidated profit (PKR) ──
-    const consolidatedProfitPkr = exportBookedProfitPkr + millGrossProfit;
+    const consolidatedProfitPkr = exportBookedProfitPkr + millGrossProfit + localGrossProfit;
 
     return {
       asOfTimestamp: new Date().toISOString(),
@@ -207,6 +226,17 @@ const financeService = {
         overheads: overheadTotal,
         grossProfit: millGrossProfit,
         marginPct: parseFloat(millMargin.toFixed(1)),
+        currency: 'PKR',
+      },
+      local: {
+        saleCount: parseInt(localStats.sale_count) || 0,
+        completedCount: parseInt(localStats.completed_count) || 0,
+        revenue: localRevenue,
+        cogs: localCogs,
+        grossProfit: localGrossProfit,
+        marginPct: parseFloat(localMargin.toFixed(1)),
+        collected: parseFloat(localStats.collected_pkr) || 0,
+        outstanding: parseFloat(localStats.outstanding_pkr) || 0,
         currency: 'PKR',
       },
       consolidated: {

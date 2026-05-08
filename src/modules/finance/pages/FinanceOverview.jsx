@@ -61,6 +61,7 @@ export default function FinanceOverview() {
 
   const exp = summary.export || {};
   const mill = summary.mill || {};
+  const local = summary.local || {};
   const recv = summary.receivables || {};
   const pay = summary.payables || {};
   const cash = summary.cashPosition || {};
@@ -111,6 +112,7 @@ export default function FinanceOverview() {
             </div>
             <div className="text-xs opacity-90 mt-1">
               Export {fmtPKR(exp.bookedProfitPkr || 0)} · Mill {fmtPKR(mill.grossProfit || 0)}
+              {(local.grossProfit || 0) !== 0 && <> · Local {fmtPKR(local.grossProfit || 0)}</>}
               {(exp.fxGainLossPkr || 0) !== 0 && (
                 <> · FX {(exp.fxGainLossPkr || 0) >= 0 ? '+' : ''}{fmtPKR(exp.fxGainLossPkr || 0)}</>
               )}
@@ -180,6 +182,46 @@ export default function FinanceOverview() {
           secondary="Received vs expected"
           hint={(summary.collectionRate || 0) >= 80 ? 'On target' : 'Below 80%'}
           hintBad={(summary.collectionRate || 0) < 80}
+        />
+      </div>
+
+      {/* ─── BUSINESS SEGMENTS ────────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+        <SegmentCard
+          tone="blue"
+          title="Export Operations"
+          subtitle={`${exp.activeOrders || 0} active · ${exp.totalOrders || 0} total`}
+          revenueLabel="Revenue (PKR)"
+          revenue={fmtPKR(exp.revenuePkrBooked || 0)}
+          revenueSub={`${fmtUSD(exp.revenueForeign || 0)} foreign`}
+          profitLabel="Booked Profit"
+          profit={fmtPKR(exp.bookedProfitPkr || 0)}
+          marginPct={exp.marginPct}
+          onClick={() => navigate('/export')}
+        />
+        <SegmentCard
+          tone="amber"
+          title="Mill Operations"
+          subtitle={`${mill.batchCount || 0} completed batches${mill.priceSource && mill.priceSource !== 'confirmed' ? ` · prices ${mill.priceSource.replace(/_/g, ' ')}` : ''}`}
+          revenueLabel="Revenue (PKR)"
+          revenue={fmtPKR(mill.revenue || 0)}
+          revenueSub={`Costs ${fmtPKR((mill.directCosts || 0) + (mill.overheads || 0))}`}
+          profitLabel="Gross Profit"
+          profit={fmtPKR(mill.grossProfit || 0)}
+          marginPct={mill.marginPct}
+          onClick={() => navigate('/milling')}
+        />
+        <SegmentCard
+          tone="emerald"
+          title="Local Sales"
+          subtitle={`${local.completedCount || 0} completed · ${local.saleCount || 0} total${(local.outstanding || 0) > 0 ? ` · ${fmtPKR(local.outstanding)} due` : ''}`}
+          revenueLabel="Revenue (PKR)"
+          revenue={fmtPKR(local.revenue || 0)}
+          revenueSub={`Collected ${fmtPKR(local.collected || 0)}`}
+          profitLabel="Gross Profit"
+          profit={fmtPKR(local.grossProfit || 0)}
+          marginPct={local.marginPct}
+          onClick={() => navigate('/local-sales')}
         />
       </div>
 
@@ -359,6 +401,49 @@ function KpiTile({ icon: Icon, tone = 'gray', label, primary, secondary, hint, h
           {hintBad ? '● ' : '✓ '}{hint}
         </div>
       )}
+    </Cmp>
+  );
+}
+
+// ─── Segment card (Export / Mill / Local Sales) ───────────────────────
+function SegmentCard({ tone = 'gray', title, subtitle, revenueLabel, revenue, revenueSub, profitLabel, profit, marginPct, onClick }) {
+  const tones = {
+    blue:    { bar: 'bg-blue-500',    accent: 'text-blue-600',    ring: 'ring-blue-100' },
+    amber:   { bar: 'bg-amber-500',   accent: 'text-amber-600',   ring: 'ring-amber-100' },
+    emerald: { bar: 'bg-emerald-500', accent: 'text-emerald-600', ring: 'ring-emerald-100' },
+    gray:    { bar: 'bg-gray-400',    accent: 'text-gray-600',    ring: 'ring-gray-100' },
+  };
+  const t = tones[tone] || tones.gray;
+  const margin = parseFloat(marginPct) || 0;
+  const profitNum = typeof profit === 'string' ? parseFloat(profit.replace(/[^0-9.-]/g, '')) : profit;
+  const profitColor = profitNum >= 0 ? 'text-emerald-700' : 'text-rose-600';
+  const Cmp = onClick ? 'button' : 'div';
+  return (
+    <Cmp
+      onClick={onClick}
+      className={`bg-white rounded-xl border border-gray-200 ${onClick ? 'hover:border-gray-300 cursor-pointer hover:shadow-sm' : ''} transition-all p-5 text-left ring-1 ${t.ring} relative overflow-hidden`}
+    >
+      <div className={`absolute top-0 left-0 right-0 h-0.5 ${t.bar}`} />
+      <div className="flex items-center justify-between mb-3">
+        <h3 className={`text-sm font-semibold ${t.accent}`}>{title}</h3>
+        {margin !== 0 && (
+          <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${margin >= 15 ? 'bg-emerald-50 text-emerald-700' : margin >= 5 ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700'}`}>
+            {margin.toFixed(1)}% margin
+          </span>
+        )}
+      </div>
+      {subtitle && <p className="text-[11px] text-gray-500 mb-3">{subtitle}</p>}
+      <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-100">
+        <div>
+          <p className="text-[10px] uppercase tracking-wider text-gray-400 font-medium">{revenueLabel}</p>
+          <p className="text-base font-bold text-gray-900 mt-0.5">{revenue}</p>
+          {revenueSub && <p className="text-[10px] text-gray-400 mt-0.5">{revenueSub}</p>}
+        </div>
+        <div>
+          <p className="text-[10px] uppercase tracking-wider text-gray-400 font-medium">{profitLabel}</p>
+          <p className={`text-base font-bold mt-0.5 ${profitColor}`}>{profit}</p>
+        </div>
+      </div>
     </Cmp>
   );
 }
