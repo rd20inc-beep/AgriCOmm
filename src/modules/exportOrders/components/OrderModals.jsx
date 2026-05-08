@@ -160,10 +160,19 @@ export function BalancePaymentModal({
   balanceBankAccountId, setBalanceBankAccountId,
   balanceBankRef, setBalanceBankRef,
   balanceNotes, setBalanceNotes,
+  balanceFxRate, setBalanceFxRate,
   bankAccountsList,
   onConfirm,
 }) {
   const outstanding = Math.max(0, (order.balanceExpected || 0) - (order.balanceReceived || 0));
+  const orderCurrency = order?.currency || 'USD';
+  const symbol = orderCurrency === 'USD' ? '$' : orderCurrency === 'EUR' ? '€' : orderCurrency === 'GBP' ? '£' : orderCurrency;
+  const isForeign = orderCurrency !== 'PKR';
+  const fxRateNum = parseFloat(balanceFxRate) || 0;
+  const amountNum = parseFloat(balanceAmount) || 0;
+  const pkrEquivalent = isForeign ? amountNum * fxRateNum : amountNum;
+  // Locked rate from advance receipt — most realistic comparison anchor
+  const lockedRate = parseFloat(order?.advanceFxRate) || parseFloat(order?.bookedFxRate) || 0;
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Confirm Balance Payment" size="md">
       <div className="space-y-4">
@@ -189,9 +198,53 @@ export function BalancePaymentModal({
           </div>
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Amount Received ($)</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Amount Received ({symbol})</label>
           <input type="number" value={balanceAmount} onChange={e => setBalanceAmount(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
         </div>
+
+        {/* Exchange rate — required for foreign-currency orders, mirroring
+            the advance modal. Locks $→PKR for the balance leg so PKR
+            totals downstream are exact. */}
+        {isForeign && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
+            <div>
+              <label className="block text-sm font-medium text-amber-900 mb-1">
+                Exchange Rate (1 {symbol} = ? Rs) <span className="text-red-600">*</span>
+              </label>
+              <input
+                type="number"
+                step="0.0001"
+                value={balanceFxRate}
+                onChange={e => setBalanceFxRate(e.target.value)}
+                placeholder={lockedRate ? `Advance locked: ${lockedRate}` : 'e.g. 285.5000'}
+                className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none bg-white"
+              />
+              <p className="text-[11px] text-amber-700 mt-1">
+                Rate the bank actually applied for the balance credit. PKR-equivalent banked amount is computed from this.
+              </p>
+            </div>
+            {fxRateNum > 0 && amountNum > 0 && (
+              <div className="bg-white border border-amber-200 rounded-md px-3 py-2 flex items-center justify-between text-sm">
+                <span className="text-gray-500">PKR equivalent banked</span>
+                <span className="font-bold text-gray-900">Rs {pkrEquivalent.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+              </div>
+            )}
+            {lockedRate > 0 && fxRateNum > 0 && (
+              (() => {
+                const delta = fxRateNum - lockedRate;
+                if (Math.abs(delta) < 0.01) return null;
+                const isGain = delta > 0;
+                const pkrDelta = amountNum * Math.abs(delta);
+                return (
+                  <div className={`text-[11px] flex items-center justify-between px-3 py-1.5 rounded-md ${isGain ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+                    <span>vs advance/booked {lockedRate}: {isGain ? '+' : '-'}{Math.abs(delta).toFixed(4)} Rs/{symbol}</span>
+                    <span className="font-semibold">{isGain ? '+' : '-'}Rs {pkrDelta.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                  </div>
+                );
+              })()
+            )}
+          </div>
+        )}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
           <input type="date" value={balanceDate} onChange={e => setBalanceDate(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />

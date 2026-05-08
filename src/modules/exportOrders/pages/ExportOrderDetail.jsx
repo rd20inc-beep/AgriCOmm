@@ -86,6 +86,7 @@ export default function ExportOrderDetail() {
   const [balanceBankAccountId, setBalanceBankAccountId] = useState('');
   const [balanceBankRef, setBalanceBankRef] = useState('');
   const [balanceNotes, setBalanceNotes] = useState('');
+  const [balanceFxRate, setBalanceFxRate] = useState('');
 
   // Milling Demand form state
   const [millingRawQty, setMillingRawQty] = useState('');
@@ -339,12 +340,19 @@ export default function ExportOrderDetail() {
       addToast('Please enter a valid amount', 'error');
       return;
     }
+    const isForeign = (order?.currency || 'USD') !== 'PKR';
+    const fxRate = parseFloat(balanceFxRate) || 0;
+    if (isForeign && fxRate <= 0) {
+      addToast('Please enter the FX rate the bank applied for the balance', 'error');
+      return;
+    }
     setShowBalanceModal(false);
     try {
       const res = await confirmBalanceMut.mutateAsync({
         id: orderId,
         data: {
           amount,
+          fx_rate: isForeign ? fxRate : 1,
           payment_date: balanceDate,
           payment_method: balanceMethod,
           bank_account_id: balanceBankAccountId || null,
@@ -801,6 +809,8 @@ export default function ExportOrderDetail() {
         setBalanceBankRef={setBalanceBankRef}
         balanceNotes={balanceNotes}
         setBalanceNotes={setBalanceNotes}
+        balanceFxRate={balanceFxRate}
+        setBalanceFxRate={setBalanceFxRate}
         bankAccountsList={bankAccountsList}
         onConfirm={handleConfirmBalance}
       />

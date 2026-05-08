@@ -1568,8 +1568,9 @@ const exportOrderController = {
       const rawId = req.params.id;
       const isNumericBal = /^\d+$/.test(rawId);
       const whereClauseBal = isNumericBal ? { id: parseInt(rawId) } : { order_no: rawId };
-      const { amount, payment_date, payment_method, reference, bank_reference, bank_account_id, notes } = req.body;
+      const { amount, payment_date, payment_method, reference, bank_reference, bank_account_id, notes, fx_rate } = req.body;
       const bankRef = bank_reference || reference || null;
+      const requestedFxRate = parseFloat(fx_rate);
 
       if (!amount || parseFloat(amount) <= 0) {
         return res.status(400).json({ success: false, message: 'A positive amount is required.' });
@@ -1608,9 +1609,28 @@ const exportOrderController = {
 
         const newBalanceReceived = settledAmount(receivedBalance + confirmedAmount);
 
+        // Resolve the FX rate to lock for this balance leg.
+        // Foreign currency: require an explicit rate from the operator
+        // (per business rule — bank's actual applied rate at receipt).
+        // Fall back to advance/booked rate only when none was supplied,
+        // so older clients keep working.
+        const balanceCurrency = order.currency || 'USD';
+        const isPkrOrder = balanceCurrency === 'PKR';
+        const effectiveBalanceFxRate = isPkrOrder
+          ? 1
+          : (requestedFxRate > 0
+              ? requestedFxRate
+              : (parseFloat(order.advance_fx_rate) || parseFloat(order.booked_fx_rate) || 280));
+        const balancePkr = settledAmount(confirmedAmount * effectiveBalanceFxRate);
+        const totalBalanceReceivedPkr = settledAmount(
+          (parseFloat(order.balance_received_pkr) || 0) + balancePkr
+        );
+
         await trx('export_orders').where({ id: order.id }).update({
           balance_received: newBalanceReceived,
           balance_date: payment_date || trx.fn.now(),
+          balance_fx_rate: isPkrOrder ? null : effectiveBalanceFxRate,
+          balance_received_pkr: totalBalanceReceivedPkr,
           updated_at: trx.fn.now(),
         });
 
@@ -1624,7 +1644,9 @@ const exportOrderController = {
           type: 'receipt',
           linked_receivable_id: balReceivable ? balReceivable.id : null,
           amount: confirmedAmount,
-          currency: order.currency || 'USD',
+          currency: balanceCurrency,
+          fx_rate: effectiveBalanceFxRate,
+          base_amount_pkr: balancePkr,
           payment_method: payment_method || null,
           bank_account_id: bank_account_id || null,
           bank_reference: bankRef,
@@ -1658,20 +1680,11 @@ const exportOrderController = {
           userId: req.user.id,
           reason: `Balance payment of ${confirmedAmount} confirmed`,
         });
-        // Post balance receipts in PKR too. Until the balance modal
-        // collects an at-receipt FX rate (round 094 only did advance),
-        // fall back to the order's booked rate.
-        const balanceCurrency = order.currency || 'USD';
-        const balanceFxRate = balanceCurrency === 'PKR'
-          ? 1
-          : (parseFloat(order.advance_fx_rate) || parseFloat(order.booked_fx_rate) || 280);
-        const balancePkr = settledAmount(confirmedAmount * balanceFxRate);
-
         return {
           orderId: order.id,
           orderNo: order.order_no,
           currency: balanceCurrency,
-          fxRate: balanceFxRate,
+          fxRate: effectiveBalanceFxRate,
           balancePkr,
         };
       });

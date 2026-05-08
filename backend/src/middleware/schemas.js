@@ -131,6 +131,9 @@ const confirmAdvance = Joi.object({
 
 const confirmBalance = Joi.object({
   amount: Joi.number().positive().required(),
+  // Rate the bank actually applied for the balance credit. Mirrors
+  // confirmAdvance — PKR-denominated orders can omit / send 1.
+  fx_rate: Joi.number().positive().allow(null),
   payment_date: Joi.date().iso().allow(null, ''),
   payment_method: Joi.string().max(50).allow(null, ''),
   bank_account_id: Joi.number().integer().positive().allow(null),
