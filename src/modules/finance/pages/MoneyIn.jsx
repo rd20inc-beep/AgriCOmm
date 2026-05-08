@@ -8,12 +8,35 @@ import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
 import StatusBadge from '../../../components/StatusBadge';
 
-function fmt(n) {
-  if (n == null || isNaN(n)) return '$0';
-  if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
-  if (Math.abs(n) >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
-  return `$${Math.round(n).toLocaleString()}`;
+// Currency-aware formatter — picks $ / Rs / € / £ from the row's currency.
+function fmtCur(n, currency = 'USD') {
+  const symbol = currency === 'PKR' ? 'Rs '
+    : currency === 'EUR' ? '€'
+    : currency === 'GBP' ? '£'
+    : currency === 'AED' ? 'AED '
+    : '$';
+  if (n == null || isNaN(n)) return `${symbol}0`;
+  if (Math.abs(n) >= 1_000_000) return `${symbol}${(n / 1_000_000).toFixed(2)}M`;
+  if (Math.abs(n) >= 100_000) return `${symbol}${(n / 100_000).toFixed(2)}L`;
+  if (Math.abs(n) >= 1_000) return `${symbol}${(n / 1_000).toFixed(1)}K`;
+  return `${symbol}${Math.round(n).toLocaleString()}`;
 }
+// PKR equivalent of any row — prefers locked base_amount_pkr, falls back
+// to amount × fx_rate, finally amount as-is for PKR rows.
+function pkrOf(row, key = 'outstanding') {
+  const amount = parseFloat(row?.[key]) || 0;
+  if (!amount) return 0;
+  if ((row?.currency || 'USD') === 'PKR') return amount;
+  const base = parseFloat(row?.baseAmountPkr) || 0;
+  if (base > 0 && key === 'expectedAmount') return base;
+  const fx = parseFloat(row?.fxRate) || 0;
+  if (fx > 1) return amount * fx;
+  // Final fallback: 280 historical default for legacy USD rows
+  return amount * 280;
+}
+// Backwards-compat helper kept for existing call sites that don't yet
+// pass a currency (treats input as already-formatted number in PKR).
+function fmt(n) { return fmtCur(n, 'USD'); }
 
 export default function MoneyIn() {
   const { addToast } = useApp();
@@ -41,11 +64,15 @@ export default function MoneyIn() {
     }));
   }, [receivables, statusFilter, typeFilter]);
 
-  // KPI calculations
-  const totalOutstanding = receivables.filter(r => !eqStatus(r.status, 'Paid')).reduce((s, r) => s + (parseFloat(r.outstanding) || 0), 0);
-  const overdueAmount = receivables.filter(r => eqStatus(r.status, 'Overdue')).reduce((s, r) => s + (parseFloat(r.outstanding) || 0), 0);
-  const collectedThisMonth = receivables.reduce((s, r) => s + (parseFloat(r.receivedAmount) || 0), 0);
+  // KPI calculations — totals in PKR so USD and local currency rows aggregate correctly
+  const totalOutstandingPkr = receivables.filter(r => !eqStatus(r.status, 'Paid')).reduce((s, r) => s + pkrOf(r, 'outstanding'), 0);
+  const overdueAmountPkr = receivables.filter(r => eqStatus(r.status, 'Overdue')).reduce((s, r) => s + pkrOf(r, 'outstanding'), 0);
+  const collectedThisMonthPkr = receivables.reduce((s, r) => s + pkrOf(r, 'receivedAmount'), 0);
   const pendingCount = receivables.filter(r => eqStatus(r.status, 'Pending')).length;
+  // Foreign-currency exposure (USD/EUR/GBP) for the "$ also" sub-line on KPIs
+  const totalOutstandingForeign = receivables
+    .filter(r => !eqStatus(r.status, 'Paid') && (r.currency || 'USD') !== 'PKR')
+    .reduce((s, r) => s + (parseFloat(r.outstanding) || 0), 0);
 
   // Aging data
   const agingData = useMemo(() => {
@@ -69,11 +96,28 @@ export default function MoneyIn() {
     { key: 'type', label: 'Type', sortable: true, render: (v) => (
       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${v === 'Advance' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>{v}</span>
     )},
-    { key: 'expectedAmount', label: 'Amount', sortable: true, align: 'right', render: (v) => fmt(v) },
-    { key: 'receivedAmount', label: 'Received', sortable: true, align: 'right', render: (v) => <span className="text-emerald-600">{fmt(v)}</span> },
-    { key: 'outstanding', label: 'Outstanding', sortable: true, align: 'right', render: (v) => (
-      <span className={parseFloat(v) > 0 ? 'text-red-600 font-medium' : 'text-gray-400'}>{parseFloat(v) > 0 ? fmt(v) : '—'}</span>
+    { key: 'expectedAmount', label: 'Amount', sortable: true, align: 'right', render: (v, row) => (
+      <div className="flex flex-col items-end">
+        <span className="text-gray-900">{fmtCur(v, row.currency)}</span>
+        {(row.currency || 'USD') !== 'PKR' && <span className="text-[10px] text-gray-400">{fmtCur(pkrOf(row, 'expectedAmount'), 'PKR')}</span>}
+      </div>
     )},
+    { key: 'receivedAmount', label: 'Received', sortable: true, align: 'right', render: (v, row) => (
+      <div className="flex flex-col items-end">
+        <span className="text-emerald-600">{fmtCur(v, row.currency)}</span>
+        {(row.currency || 'USD') !== 'PKR' && parseFloat(v) > 0 && <span className="text-[10px] text-gray-400">{fmtCur(pkrOf(row, 'receivedAmount'), 'PKR')}</span>}
+      </div>
+    )},
+    { key: 'outstanding', label: 'Outstanding', sortable: true, align: 'right', render: (v, row) => {
+      const n = parseFloat(v) || 0;
+      if (n <= 0) return <span className="text-gray-400">—</span>;
+      return (
+        <div className="flex flex-col items-end">
+          <span className="text-red-600 font-medium">{fmtCur(v, row.currency)}</span>
+          {(row.currency || 'USD') !== 'PKR' && <span className="text-[10px] text-gray-400">{fmtCur(pkrOf(row, 'outstanding'), 'PKR')}</span>}
+        </div>
+      );
+    }},
     { key: 'dueDate', label: 'Due', sortable: true, render: (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—' },
     { key: 'status', label: 'Status', sortable: true },
   ];
@@ -116,13 +160,13 @@ export default function MoneyIn() {
 
   return (
     <div className="space-y-6">
-      {/* Summary KPIs */}
+      {/* Summary KPIs — totals in PKR; foreign equivalent shown when present */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <FinanceKPI icon={ArrowDownLeft} title="Total Receivables" value={fmt(totalOutstanding)}
-          subtitle={`${receivables.filter(r => r.status !== 'Paid').length} open`} status="info" loading={isLoading} />
-        <FinanceKPI icon={AlertTriangle} title="Overdue" value={fmt(overdueAmount)}
-          subtitle="Past due date" status={overdueAmount > 0 ? 'danger' : 'good'} loading={isLoading} />
-        <FinanceKPI icon={CheckCircle} title="Collected" value={fmt(collectedThisMonth)}
+        <FinanceKPI icon={ArrowDownLeft} title="Total Receivables" value={fmtCur(totalOutstandingPkr, 'PKR')}
+          subtitle={totalOutstandingForeign > 0 ? `${fmtCur(totalOutstandingForeign, 'USD')} · ${receivables.filter(r => r.status !== 'Paid').length} open` : `${receivables.filter(r => r.status !== 'Paid').length} open`} status="info" loading={isLoading} />
+        <FinanceKPI icon={AlertTriangle} title="Overdue" value={fmtCur(overdueAmountPkr, 'PKR')}
+          subtitle="Past due date" status={overdueAmountPkr > 0 ? 'danger' : 'good'} loading={isLoading} />
+        <FinanceKPI icon={CheckCircle} title="Collected" value={fmtCur(collectedThisMonthPkr, 'PKR')}
           subtitle="Total received" status="good" loading={isLoading} />
         <FinanceKPI icon={Clock} title="Pending" value={String(pendingCount)}
           subtitle="Awaiting payment" status={pendingCount > 0 ? 'warning' : 'good'} loading={isLoading} />
