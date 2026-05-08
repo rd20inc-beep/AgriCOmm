@@ -6,7 +6,7 @@ import { useCreateExportOrder } from '../../../api/queries';
 import api from '../../../api/client';
 import {
   Save, Send, DollarSign, Calculator, ArrowLeft, Package, Truck,
-  User, ShoppingBag, ChevronRight, ChevronDown, Plus, Trash2, Info, FileText,
+  User, ShoppingBag, ChevronRight, ChevronDown, ChevronLeft, Plus, Trash2, Info, FileText, Check,
 } from 'lucide-react';
 import { validateForm, required, positiveNonZero } from '../../../utils/validation';
 import { toKg, fromKg, allEquivalents, UNITS } from '../../../utils/unitConversion';
@@ -154,6 +154,10 @@ export default function CreateExportOrder() {
   }, [qtyMT, pricePerMT, form.incoterm, form.receivingMode, contractValue]);
 
   const fmtUSD = (v) => '$' + Math.round(v).toLocaleString();
+
+  // ─── Wizard step ───
+  // 1 = Buyer & Items, 2 = Terms & Packing, 3 = Specs & Review
+  const [step, setStep] = useState(1);
 
   // ─── Validation ───
   const [formErrors, setFormErrors] = useState({});
@@ -305,14 +309,63 @@ export default function CreateExportOrder() {
     setPackingLines(prev => prev.map((l, i) => i === idx ? { ...l, [field]: value } : l));
   }
 
+  // Per-step validation
+  const step1Valid = !!form.customerId && items.length > 0 && items.every(it => it.productId && itemQtyMT(it) > 0 && itemPrice(it) > 0);
+  const step2Valid = !!form.receivingMode;
+  const canNext = step === 1 ? step1Valid : step === 2 ? step2Valid : true;
+
+  function tryNext() {
+    if (step === 1 && !step1Valid) { addToast('Pick a customer and add at least one item with qty + price', 'error'); return; }
+    if (step === 2 && !step2Valid) { addToast('Choose a receiving mode', 'error'); return; }
+    setStep(s => Math.min(3, s + 1));
+  }
+
+  const STEPS = [
+    { n: 1, label: 'Buyer & Items' },
+    { n: 2, label: 'Terms & Packing' },
+    { n: 3, label: 'Specs & Review' },
+  ];
+
   return (
     <div className="space-y-6 max-w-5xl">
-      {/* Header */}
+      {/* Header + Step indicator */}
       <div className="flex items-center gap-4">
         <button onClick={() => navigate(-1)} className="p-2 hover:bg-gray-100 rounded-lg"><ArrowLeft className="w-5 h-5 text-gray-600" /></button>
         <h1 className="text-2xl font-bold text-gray-900">Create Export Order</h1>
       </div>
+      <div className="bg-white rounded-xl border border-gray-200 px-6 py-4">
+        <div className="flex items-center justify-between max-w-2xl mx-auto">
+          {STEPS.map((s, idx) => {
+            const isActive = step === s.n;
+            const isDone = step > s.n;
+            return (
+              <div key={s.n} className="flex items-center flex-1">
+                <button
+                  type="button"
+                  onClick={() => setStep(s.n)}
+                  className="flex flex-col items-center group"
+                >
+                  <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-medium transition-all ${
+                    isActive ? 'bg-gray-900 text-white' :
+                    isDone ? 'bg-emerald-600 text-white' :
+                    'bg-white border border-gray-200 text-gray-400 group-hover:border-gray-400'
+                  }`}>
+                    {isDone ? <Check size={13} /> : s.n}
+                  </span>
+                  <span className={`mt-1.5 text-[10px] font-medium uppercase tracking-wider whitespace-nowrap ${
+                    isActive ? 'text-gray-900' : isDone ? 'text-emerald-600' : 'text-gray-400'
+                  }`}>{s.label}</span>
+                </button>
+                {idx < STEPS.length - 1 && (
+                  <div className={`flex-1 h-px mx-2 -mt-4 transition-colors ${step > s.n ? 'bg-emerald-500' : 'bg-gray-200'}`} />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
+      {step === 1 && <>
       {/* ═══ Section 1: Buyer + Order Basics ═══ */}
       <div className="bg-white rounded-xl border border-gray-200 p-6">
         <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4 flex items-center gap-2"><User className="w-4 h-4" /> Buyer & Order Basics</h2>
@@ -453,7 +506,9 @@ export default function CreateExportOrder() {
           </div>
         )}
       </div>
+      </>}
 
+      {step === 2 && <>
       {/* ═══ Section 2b: Order Terms ═══ */}
       <div className="bg-white rounded-xl border border-gray-200 p-6">
         <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4 flex items-center gap-2"><Calculator className="w-4 h-4" /> Order Terms</h2>
@@ -734,7 +789,9 @@ export default function CreateExportOrder() {
           </div>
         )}
       </div>
+      </>}
 
+      {step === 3 && <>
       {/* ═══ Section 5: Notes ═══ */}
       <div className="bg-white rounded-xl border border-gray-200 p-6">
         <div className="form-grid">
@@ -799,6 +856,37 @@ export default function CreateExportOrder() {
             {advPct > 0 && (
               <button onClick={() => handleSubmit('Awaiting Advance')} disabled={!isValid} className="btn mobile-full-btn disabled:opacity-50 bg-emerald-600 text-white hover:bg-emerald-700 border-emerald-600"><DollarSign className="w-4 h-4" /> Create & Request Advance</button>
             )}
+          </div>
+        );
+      })()}
+      </>}
+
+      {/* ═══ Wizard Navigation (sticky-ish) ═══ */}
+      {(() => {
+        const advPct = parseFloat(form.advancePct) || 0;
+        const advExpected = contractValue * (advPct / 100);
+        const balExpected = contractValue - advExpected;
+        return (
+          <div className="bg-white rounded-xl border border-gray-200 px-6 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sticky bottom-0">
+            <div className="text-xs text-gray-500 flex items-center gap-4 flex-wrap">
+              {qtyMT > 0 && <span><span className="font-medium text-gray-900">{qtyMT.toLocaleString()}</span> MT</span>}
+              {contractValue > 0 && <span><span className="text-gray-400">Value</span> <span className="font-medium text-gray-900">{form.currency} {contractValue.toLocaleString()}</span></span>}
+              {advExpected > 0 && <span><span className="text-gray-400">Adv</span> <span className="font-medium text-gray-900">{form.currency} {advExpected.toLocaleString()}</span></span>}
+              {balExpected > 0 && <span><span className="text-gray-400">Bal</span> <span className="font-medium text-emerald-700">{form.currency} {balExpected.toLocaleString()}</span></span>}
+            </div>
+            <div className="flex items-center gap-2">
+              {step > 1 && (
+                <button onClick={() => setStep(s => Math.max(1, s - 1))} className="px-3 py-1.5 text-sm text-gray-700 hover:text-gray-900 inline-flex items-center gap-1">
+                  <ChevronLeft size={14} /> Back
+                </button>
+              )}
+              {step < 3 && (
+                <button onClick={tryNext} disabled={!canNext}
+                  className={`px-4 py-1.5 text-sm font-medium rounded inline-flex items-center gap-1 ${canNext ? 'bg-gray-900 text-white hover:bg-gray-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}>
+                  Next <ChevronRight size={14} />
+                </button>
+              )}
+            </div>
           </div>
         );
       })()}
