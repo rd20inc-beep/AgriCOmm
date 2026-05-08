@@ -448,14 +448,21 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
   const selectedOption = sourceOptions.find(o => o.value === selectedSource);
   const selectedBatch = selectedOption?.batch;
 
-  async function handleSubmit() {
+  // Multi-lot per arrival: track running totals so the user can see how
+  // much of the source vehicle/batch they've already split off.
+  const [createdSoFar, setCreatedSoFar] = useState({ kg: 0, count: 0 });
+
+  // `keepSource=true` ➜ "Save & Add Another": submit then reset only the
+  // qty/bags/rate/quality/notes fields, keep source+supplier+warehouse+
+  // category+product+type+entity, jump back to step 2 so the user can
+  // immediately enter the next split.
+  async function handleSubmit({ keepSource = false } = {}) {
     if (!form.item_name) { addToast('Item name is required', 'error'); return; }
     if (!(kgEntered > 0)) { addToast('Weight (kg) must be greater than 0', 'error'); return; }
     if (!form.rate_input) { addToast('Rate is required', 'error'); return; }
     try {
       const payload = {
         ...form,
-        // Backend kg-canonical: send qty as kg, bag_weight_kg derived from kg/bags
         quantity_input: kgEntered,
         quantity_unit: 'kg',
         bag_weight_kg: bagWt,
@@ -464,19 +471,39 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
         supplier_id: form.supplier_id ? parseInt(form.supplier_id, 10) : null,
         warehouse_id: form.warehouse_id ? parseInt(form.warehouse_id, 10) : null,
       };
-      // Strip FE-only fields the backend doesn't expect
       delete payload.weight_kg;
       delete payload.category_id;
-      await createMutation.mutateAsync(payload);
-      addToast('Purchase lot created successfully', 'success');
+      const res = await createMutation.mutateAsync(payload);
+      const lotNo = res?.data?.lot?.lot_no || 'lot';
+      const justKg = kgEntered;
+      addToast(`Lot ${lotNo} created — ${justKg.toLocaleString()} kg`, 'success');
       refetch();
-      onClose();
-      setSelectedSource('');
-      setForm(p => ({
-        ...p, item_name: '', weight_kg: '', total_bags: '', rate_input: '',
-        variety: '', grade: '', moisture_pct: '', broken_pct: '',
-        category_id: '', product_id: '',
-      }));
+
+      if (keepSource) {
+        // Stay open; keep source + relationship fields, reset only what's per-lot
+        setCreatedSoFar(prev => ({ kg: prev.kg + justKg, count: prev.count + 1 }));
+        setForm(p => ({
+          ...p,
+          // Per-lot: clear
+          item_name: '', weight_kg: '', total_bags: '', rate_input: '',
+          variety: '', grade: '', moisture_pct: '', broken_pct: '',
+          product_id: '',
+          transport_cost: '', labor_cost: '', unloading_cost: '', packing_cost: '', other_cost: '',
+          notes: '',
+          // Per-source: keep
+          // (supplier_id, warehouse_id, category_id, type, entity, purchase_date, crop_year, sortex_status retained)
+        }));
+        setStep(2);
+      } else {
+        onClose();
+        setSelectedSource('');
+        setCreatedSoFar({ kg: 0, count: 0 });
+        setForm(p => ({
+          ...p, item_name: '', weight_kg: '', total_bags: '', rate_input: '',
+          variety: '', grade: '', moisture_pct: '', broken_pct: '',
+          category_id: '', product_id: '',
+        }));
+      }
     } catch (err) {
       addToast(err.message || 'Failed to create lot', 'error');
     }
@@ -808,13 +835,21 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
 
         {/* Sticky Footer */}
         <div className="border-t border-gray-100 px-8 py-3 bg-white flex items-center justify-between gap-3">
-          <div className="text-xs text-gray-500 flex items-center gap-4">
+          <div className="text-xs text-gray-500 flex items-center gap-4 flex-wrap">
             {kgEntered > 0 && <span><span className="font-medium text-gray-900">{kgEntered.toLocaleString()}</span> kg</span>}
             {bagsEntered > 0 && <span><span className="font-medium text-gray-900">{bagsEntered}</span> bags</span>}
             {landedTotal > 0 && <span><span className="text-gray-400">Landed</span> <span className="font-medium text-emerald-700">Rs {landedTotal.toLocaleString()}</span></span>}
+            {createdSoFar.count > 0 && (
+              <span className="text-emerald-700 font-medium border-l border-gray-200 pl-3">
+                <Check size={11} className="inline mr-0.5" />
+                {createdSoFar.count} lot{createdSoFar.count > 1 ? 's' : ''} created · {createdSoFar.kg.toLocaleString()} kg total
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={onClose} className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors">Cancel</button>
+            <button onClick={onClose} className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors">
+              {createdSoFar.count > 0 ? 'Done' : 'Cancel'}
+            </button>
             {step > 1 && (
               <button onClick={() => setStep(s => Math.max(1, s - 1))} className="px-3 py-1.5 text-sm text-gray-700 hover:text-gray-900 inline-flex items-center gap-1 transition-colors">
                 <ChevronLeft size={14} /> Back
@@ -828,10 +863,21 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
                 Next <ChevronRight size={14} />
               </button>
             ) : (
-              <button onClick={handleSubmit} disabled={createMutation.isPending || !step2Valid || !step1Valid}
-                className="px-4 py-1.5 text-sm font-medium text-white bg-emerald-600 rounded hover:bg-emerald-700 disabled:bg-gray-300 transition-colors">
-                {createMutation.isPending ? 'Creating…' : 'Create Lot'}
-              </button>
+              <>
+                {/* Multi-lot: only when source is selected, since the value of repeat-creation is splitting one arrival */}
+                {selectedSource && (
+                  <button onClick={() => handleSubmit({ keepSource: true })} disabled={createMutation.isPending || !step2Valid || !step1Valid}
+                    className="px-3 py-1.5 text-sm font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded inline-flex items-center gap-1 transition-colors disabled:opacity-50"
+                    title="Create this lot then start another from the same source — useful when one arrival splits into multiple grades or products">
+                    <Plus size={14} /> Save & Add Another
+                  </button>
+                )}
+                <button onClick={() => handleSubmit({ keepSource: false })} disabled={createMutation.isPending || !step2Valid || !step1Valid}
+                  className="px-4 py-1.5 text-sm font-medium text-white bg-emerald-600 rounded hover:bg-emerald-700 disabled:bg-gray-300 transition-colors">
+                  {createMutation.isPending ? 'Creating…' : createdSoFar.count > 0 ? 'Create Final Lot' : 'Create Lot'}
+                </button>
+              </>
+
             )}
           </div>
         </div>
