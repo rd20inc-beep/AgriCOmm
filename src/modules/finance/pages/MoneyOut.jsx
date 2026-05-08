@@ -7,16 +7,33 @@ import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
 import StatusBadge from '../../../components/StatusBadge';
 
-function fmtPKR(n) {
-  if (n == null || isNaN(n)) return 'Rs 0';
-  if (Math.abs(n) >= 1_000_000) return `Rs ${(n / 1_000_000).toFixed(1)}M`;
-  if (Math.abs(n) >= 1_000) return `Rs ${(n / 1_000).toFixed(0)}K`;
-  return `Rs ${Math.round(n).toLocaleString()}`;
+// Currency-aware formatter — picks Rs / $ / € / £ / AED based on the row's currency
+function fmtCur(n, currency = 'PKR') {
+  const symbol = currency === 'PKR' ? 'Rs '
+    : currency === 'USD' ? '$'
+    : currency === 'EUR' ? '€'
+    : currency === 'GBP' ? '£'
+    : currency === 'AED' ? 'AED '
+    : 'Rs ';
+  if (n == null || isNaN(n)) return `${symbol}0`;
+  if (Math.abs(n) >= 1_000_000) return `${symbol}${(n / 1_000_000).toFixed(2)}M`;
+  if (Math.abs(n) >= 100_000) return `${symbol}${(n / 100_000).toFixed(2)}L`;
+  if (Math.abs(n) >= 1_000) return `${symbol}${(n / 1_000).toFixed(1)}K`;
+  return `${symbol}${Math.round(n).toLocaleString()}`;
 }
-
-function fmtAmount(v, currency) {
-  if (currency === 'USD') return `$${Math.round(v).toLocaleString()}`;
-  return fmtPKR(v);
+// Backwards-compat helpers
+function fmtPKR(n) { return fmtCur(n, 'PKR'); }
+function fmtAmount(v, currency) { return fmtCur(v, currency || 'PKR'); }
+// PKR equivalent of any payable row — prefers locked base_amount_pkr, falls back to amount × fx_rate, finally amount as-is for PKR rows.
+function pkrOf(row, key = 'outstanding') {
+  const amount = parseFloat(row?.[key]) || 0;
+  if (!amount) return 0;
+  if ((row?.currency || 'PKR') === 'PKR') return amount;
+  const base = parseFloat(row?.baseAmountPkr) || 0;
+  if (base > 0 && key === 'originalAmount') return base;
+  const fx = parseFloat(row?.fxRate) || 0;
+  if (fx > 1) return amount * fx;
+  return amount * 280;
 }
 
 export default function MoneyOut() {
@@ -64,12 +81,16 @@ export default function MoneyOut() {
     });
   }, [payables, entityFilter, categoryFilter, statusFilter]);
 
-  // KPIs
-  const totalOutstanding = payables.filter(p => !eqStatus(p.status, 'Paid')).reduce((s, p) => s + (parseFloat(p.outstanding) || 0), 0);
-  const overdueAmount = payables.filter(p => eqStatus(p.status, 'Overdue') || (p.dueDate && new Date(p.dueDate) < new Date() && !eqStatus(p.status, 'Paid')))
-    .reduce((s, p) => s + (parseFloat(p.outstanding) || 0), 0);
-  const paidTotal = payables.reduce((s, p) => s + (parseFloat(p.paidAmount) || 0), 0);
+  // KPIs — totals in PKR so foreign-currency rows aggregate correctly
+  const totalOutstandingPkr = payables.filter(p => !eqStatus(p.status, 'Paid')).reduce((s, p) => s + pkrOf(p, 'outstanding'), 0);
+  const overdueAmountPkr = payables.filter(p => eqStatus(p.status, 'Overdue') || (p.dueDate && new Date(p.dueDate) < new Date() && !eqStatus(p.status, 'Paid')))
+    .reduce((s, p) => s + pkrOf(p, 'outstanding'), 0);
+  const paidTotalPkr = payables.reduce((s, p) => s + pkrOf(p, 'paidAmount'), 0);
   const supplierCount = new Set(payables.filter(p => p.supplierName).map(p => p.supplierName)).size;
+  // Foreign-currency exposure (rare on payables — mostly PKR vendor invoices) for the Total tile sub-line
+  const totalOutstandingForeign = payables
+    .filter(p => !eqStatus(p.status, 'Paid') && (p.currency || 'PKR') !== 'PKR')
+    .reduce((s, p) => s + (parseFloat(p.outstanding) || 0), 0);
 
   // Category breakdown
   const byCategory = useMemo(() => {
@@ -103,10 +124,22 @@ export default function MoneyOut() {
       if (href) return <Link to={href} className="text-blue-600 hover:text-blue-800 font-medium hover:underline" onClick={e => e.stopPropagation()}>{v}</Link>;
       return <span className="text-gray-700 font-medium">{v}</span>;
     }},
-    { key: 'originalAmount', label: 'Amount', sortable: true, align: 'right', render: (v, row) => fmtAmount(v, row.currency) },
-    { key: 'outstanding', label: 'Outstanding', sortable: true, align: 'right', render: (v, row) => (
-      <span className={parseFloat(v) > 0 ? 'text-red-600 font-medium' : 'text-gray-400'}>{parseFloat(v) > 0 ? fmtAmount(v, row.currency) : '—'}</span>
+    { key: 'originalAmount', label: 'Amount', sortable: true, align: 'right', render: (v, row) => (
+      <div className="flex flex-col items-end">
+        <span className="text-gray-900">{fmtCur(v, row.currency)}</span>
+        {(row.currency || 'PKR') !== 'PKR' && <span className="text-[10px] text-gray-400">{fmtCur(pkrOf(row, 'originalAmount'), 'PKR')}</span>}
+      </div>
     )},
+    { key: 'outstanding', label: 'Outstanding', sortable: true, align: 'right', render: (v, row) => {
+      const n = parseFloat(v) || 0;
+      if (n <= 0) return <span className="text-gray-400">—</span>;
+      return (
+        <div className="flex flex-col items-end">
+          <span className="text-red-600 font-medium">{fmtCur(v, row.currency)}</span>
+          {(row.currency || 'PKR') !== 'PKR' && <span className="text-[10px] text-gray-400">{fmtCur(pkrOf(row, 'outstanding'), 'PKR')}</span>}
+        </div>
+      );
+    }},
     { key: 'status', label: 'Status', sortable: true },
   ];
 
@@ -136,13 +169,13 @@ export default function MoneyOut() {
 
   return (
     <div className="space-y-6">
-      {/* Summary KPIs */}
+      {/* Summary KPIs — totals in PKR; foreign-currency exposure shown when present */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <FinanceKPI icon={ArrowUpRight} title="Total Payables" value={fmtPKR(totalOutstanding)}
-          subtitle={`${payables.filter(p => p.status !== 'Paid').length} outstanding`} status="neutral" loading={isLoading} />
-        <FinanceKPI icon={AlertTriangle} title="Overdue" value={fmtPKR(overdueAmount)}
-          subtitle="Past due date" status={overdueAmount > 0 ? 'danger' : 'good'} loading={isLoading} />
-        <FinanceKPI icon={CheckCircle} title="Paid" value={fmtPKR(paidTotal)}
+        <FinanceKPI icon={ArrowUpRight} title="Total Payables" value={fmtPKR(totalOutstandingPkr)}
+          subtitle={totalOutstandingForeign > 0 ? `${fmtCur(totalOutstandingForeign, 'USD')} · ${payables.filter(p => p.status !== 'Paid').length} outstanding` : `${payables.filter(p => p.status !== 'Paid').length} outstanding`} status="neutral" loading={isLoading} />
+        <FinanceKPI icon={AlertTriangle} title="Overdue" value={fmtPKR(overdueAmountPkr)}
+          subtitle="Past due date" status={overdueAmountPkr > 0 ? 'danger' : 'good'} loading={isLoading} />
+        <FinanceKPI icon={CheckCircle} title="Paid" value={fmtPKR(paidTotalPkr)}
           subtitle="Total paid" status="good" loading={isLoading} />
         <FinanceKPI icon={DollarSign} title="Suppliers" value={String(supplierCount)}
           subtitle="Active vendors" status="info" loading={isLoading} />
