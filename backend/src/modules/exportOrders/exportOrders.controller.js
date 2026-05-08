@@ -1478,7 +1478,7 @@ const exportOrderController = {
           await trx('receivables').where({ id: advReceivable.id }).update({
             received_amount: newReceived,
             outstanding: newOutstanding,
-            status: newOutstanding <= MONEY_EPSILON ? 'Received' : 'Partial',
+            status: newOutstanding <= MONEY_EPSILON ? 'Paid' : 'Partial',
             updated_at: trx.fn.now(),
           });
         }
@@ -1640,7 +1640,7 @@ const exportOrderController = {
           await trx('receivables').where({ id: balReceivable.id }).update({
             received_amount: newReceived,
             outstanding: newOutstanding,
-            status: newOutstanding <= MONEY_EPSILON ? 'Received' : 'Partial',
+            status: newOutstanding <= MONEY_EPSILON ? 'Paid' : 'Partial',
             updated_at: trx.fn.now(),
           });
         }

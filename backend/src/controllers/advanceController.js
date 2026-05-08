@@ -202,7 +202,7 @@ const advanceController = {
           await trx('receivables').where({ id: advReceivable.id }).update({
             received_amount: newReceived,
             outstanding: newOutstanding,
-            status: newOutstanding <= 0.01 ? 'Received' : 'Partial',
+            status: newOutstanding <= 0.01 ? 'Paid' : 'Partial',
             updated_at: trx.fn.now(),
           });
         }

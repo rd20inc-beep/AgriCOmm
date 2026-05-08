@@ -571,7 +571,7 @@ describe('Export order workflow', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body.data.order.status).toBe('Advance Received');
     expect(res.body.data.order.current_step).toBe(3);
-    expect(mockState.tables.receivables.find((row) => row.type === 'Advance').status).toBe('Received');
+    expect(mockState.tables.receivables.find((row) => row.type === 'Advance').status).toBe('Paid');
   });
 
   it('derives allowed actions from the backend workflow state', () => {

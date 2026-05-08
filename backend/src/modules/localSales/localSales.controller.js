@@ -336,7 +336,7 @@ module.exports = {
           await trx('receivables').where({ id: receivable.id }).update({
             received_amount: uc.round2(rcvNewReceived),
             outstanding: uc.round2(rcvNewOutstanding),
-            status: rcvNewOutstanding <= 0 ? 'Received' : 'Partial',
+            status: rcvNewOutstanding <= 0 ? 'Paid' : 'Partial',
             updated_at: trx.fn.now(),
           });
         }
