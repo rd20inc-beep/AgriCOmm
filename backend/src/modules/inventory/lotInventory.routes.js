@@ -11,6 +11,27 @@ const schemas = require('../../middleware/schemas');
 // Lot sources (dropdown for purchase lot creation)
 router.get('/sources', authorize('inventory', 'view'), controller.getLotSources);
 
+// Saved supplier templates (owner-private)
+router.get('/templates', authorize('inventory', 'view'), controller.listTemplates);
+router.post(
+  '/templates',
+  authorize('inventory', 'create'),
+  auditAction('create_lot_template', 'purchase_lot_template'),
+  controller.createTemplate
+);
+router.put(
+  '/templates/:id',
+  authorize('inventory', 'edit'),
+  auditAction('update_lot_template', 'purchase_lot_template', (req) => req.params.id),
+  controller.updateTemplate
+);
+router.delete(
+  '/templates/:id',
+  authorize('inventory', 'edit'),
+  auditAction('delete_lot_template', 'purchase_lot_template', (req) => req.params.id),
+  controller.deleteTemplate
+);
+
 // Lot queries
 router.get('/lots', authorize('inventory', 'view'), controller.listLots);
 router.get('/lots/:id', authorize('inventory', 'view'), controller.getLotDetail);

@@ -4,8 +4,12 @@ import {
   Package, Search, Plus, Warehouse, Truck, Eye, Filter,
   ArrowUpDown, RefreshCw, BarChart3, DollarSign, AlertTriangle,
   Layers, Scale, Beaker, Check, ChevronLeft, ChevronRight, X, UserPlus,
+  BookmarkPlus, Trash2,
 } from 'lucide-react';
-import { useLotInventory, useCreatePurchaseLot, useProductCategories, useCreateSupplier } from '../../../api/queries';
+import {
+  useLotInventory, useCreatePurchaseLot, useProductCategories, useCreateSupplier,
+  useLotTemplates, useCreateLotTemplate, useDeleteLotTemplate,
+} from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
 import { LoadingSpinner, ErrorState, EmptyState } from '../../../components/LoadingState';
 import StatusBadge from '../../../components/StatusBadge';
@@ -247,6 +251,11 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
   const createMutation = useCreatePurchaseLot();
   const createSupplierMut = useCreateSupplier();
   const { data: categories = [] } = useProductCategories();
+  const { data: templates = [] } = useLotTemplates();
+  const createTemplateMut = useCreateLotTemplate();
+  const deleteTemplateMut = useDeleteLotTemplate();
+  const [showSaveTemplate, setShowSaveTemplate] = useState(false);
+  const [newTemplateName, setNewTemplateName] = useState('');
   const [sources, setSources] = useState([]);
   const [sourcesLoading, setSourcesLoading] = useState(false);
   const [selectedSource, setSelectedSource] = useState(''); // 'batch-{id}' or 'vehicle-{batchId}-{vehicleId}'
@@ -279,6 +288,76 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
     }
     if (isOpen) setStep(1);
   }, [isOpen]);
+
+  // ─── Saved templates ───
+  const safeTemplates = Array.isArray(templates) ? templates : [];
+
+  function applyTemplate(templateId) {
+    if (!templateId) return;
+    const t = safeTemplates.find(x => String(x.id) === String(templateId));
+    if (!t) return;
+    setForm(prev => ({
+      ...prev,
+      supplier_id: t.supplierId || '',
+      warehouse_id: t.warehouseId || '',
+      category_id: t.categoryId || '',
+      product_id: t.productId || '',
+      type: t.type || prev.type || 'raw',
+      entity: t.entity || prev.entity || 'mill',
+      grade: t.grade || prev.grade || '',
+      variety: t.variety || prev.variety || '',
+      crop_year: t.cropYear || prev.crop_year || '',
+      // Defaults that flow into step 2 — keep as overridable
+      rate_input: t.defaultRatePerKg ? String(t.defaultRatePerKg) : prev.rate_input,
+      rate_unit: t.defaultRateUnit || 'kg',
+      // Item name auto-fills from product if it was blank
+      item_name: prev.item_name || (t.productName || ''),
+    }));
+    addToast(`Applied template "${t.name}"`, 'success');
+  }
+
+  async function handleSaveTemplate() {
+    const name = newTemplateName.trim();
+    if (!name) return;
+    try {
+      const ratePerKg = (() => {
+        const v = parseFloat(form.rate_input);
+        if (!v) return null;
+        // Normalise rate to per-kg using current bagWt
+        return rateToPerKg(form.rate_input, form.rate_unit, bagWt);
+      })();
+      await createTemplateMut.mutateAsync({
+        name,
+        supplier_id: form.supplier_id ? parseInt(form.supplier_id, 10) : null,
+        warehouse_id: form.warehouse_id ? parseInt(form.warehouse_id, 10) : null,
+        category_id: form.category_id ? parseInt(form.category_id, 10) : null,
+        product_id: form.product_id ? parseInt(form.product_id, 10) : null,
+        type: form.type || 'raw',
+        entity: form.entity || 'mill',
+        grade: form.grade || null,
+        variety: form.variety || null,
+        default_rate_per_kg: ratePerKg,
+        default_bag_weight_kg: bagWt > 0 ? bagWt : null,
+        default_rate_unit: 'kg',
+        crop_year: form.crop_year || null,
+      });
+      addToast(`Template "${name}" saved`, 'success');
+      setNewTemplateName('');
+      setShowSaveTemplate(false);
+    } catch (err) {
+      addToast(err?.response?.data?.message || err.message || 'Failed to save template', 'error');
+    }
+  }
+
+  async function handleDeleteTemplate(t) {
+    if (!window.confirm(`Delete template "${t.name}"?`)) return;
+    try {
+      await deleteTemplateMut.mutateAsync(t.id);
+      addToast(`Template "${t.name}" deleted`, 'success');
+    } catch (err) {
+      addToast(err.message || 'Delete failed', 'error');
+    }
+  }
 
   async function handleAddSupplier() {
     const name = newSupplierName.trim();
@@ -570,6 +649,55 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
         <div className="flex-1 overflow-y-auto px-8 py-6 space-y-6" style={{ maxHeight: '58vh' }}>
           {step === 1 && (
             <div className="space-y-6">
+              {/* Saved templates */}
+              <div className={fieldCls}>
+                <div className="flex items-center justify-between">
+                  <label className={labelCls}>Saved Template{safeTemplates.length > 0 && ` · ${safeTemplates.length}`}</label>
+                  <button type="button" onClick={() => setShowSaveTemplate(s => !s)}
+                    className="text-[11px] text-gray-500 hover:text-gray-900 inline-flex items-center gap-1">
+                    <BookmarkPlus size={11} /> {showSaveTemplate ? 'Cancel' : 'Save current as template'}
+                  </button>
+                </div>
+                {!showSaveTemplate ? (
+                  safeTemplates.length === 0 ? (
+                    <p className="text-[11px] text-gray-400">No saved templates yet — fill the wizard once and click <span className="font-medium text-gray-500">Save current as template</span> to reuse the supplier + warehouse + product config next time.</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {safeTemplates.map(t => (
+                        <span key={t.id}
+                          className="inline-flex items-center gap-1 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded text-xs px-2 py-1 group transition-colors">
+                          <button type="button" onClick={() => applyTemplate(t.id)} className="text-gray-700 hover:text-gray-900 font-medium">
+                            {t.name}
+                          </button>
+                          <span className="text-gray-300">·</span>
+                          <span className="text-[10px] text-gray-400">{t.supplierName || 'no supplier'}</span>
+                          <button type="button" onClick={() => handleDeleteTemplate(t)}
+                            className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 transition-opacity ml-0.5"
+                            title="Delete template">
+                            <Trash2 size={10} />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )
+                ) : (
+                  <div className="flex gap-2 items-end">
+                    <input
+                      autoFocus
+                      value={newTemplateName}
+                      onChange={e => setNewTemplateName(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSaveTemplate(); } }}
+                      placeholder="Template name (e.g. AGR Hyderabad standard)"
+                      className={`${inputCls} flex-1`}
+                    />
+                    <button type="button" onClick={handleSaveTemplate} disabled={!newTemplateName.trim() || createTemplateMut.isPending}
+                      className="px-3 py-1.5 text-xs font-medium bg-gray-900 text-white rounded hover:bg-gray-700 disabled:bg-gray-300">
+                      {createTemplateMut.isPending ? '…' : 'Save'}
+                    </button>
+                  </div>
+                )}
+              </div>
+
               {/* Source — single line */}
               <div className={fieldCls}>
                 <label className={labelCls}>Auto-fill from</label>

@@ -33,4 +33,9 @@ export const lotInventoryApi = {
   getDataProblems: () => api.get('/api/lot-inventory/data-problems'),
   repairLotCost: (id, data) => api.post(`/api/lot-inventory/repair-lot-cost/${id}`, data),
   getRepairLog: () => api.get('/api/lot-inventory/repair-log'),
+  // Saved supplier templates (owner-private)
+  listTemplates: () => api.get('/api/lot-inventory/templates'),
+  createTemplate: (data) => api.post('/api/lot-inventory/templates', data),
+  updateTemplate: (id, data) => api.put(`/api/lot-inventory/templates/${id}`, data),
+  deleteTemplate: (id) => api.delete(`/api/lot-inventory/templates/${id}`),
 };

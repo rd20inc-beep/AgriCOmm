@@ -1529,6 +1529,32 @@ export function useCreatePurchaseLot() {
   });
 }
 
+// ─── Saved Purchase Lot Templates ───
+export function useLotTemplates() {
+  return useQuery({
+    queryKey: ['lot-templates'],
+    queryFn: async () => {
+      const res = await lotInventoryApi.listTemplates();
+      return transformKeys(unwrap(res, 'templates') || []);
+    },
+    staleTime: 60 * 1000,
+  });
+}
+export function useCreateLotTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => lotInventoryApi.createTemplate(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['lot-templates'] }),
+  });
+}
+export function useDeleteLotTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => lotInventoryApi.deleteTemplate(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['lot-templates'] }),
+  });
+}
+
 export function useRecordLotTransaction() {
   const qc = useQueryClient();
   return useMutation({

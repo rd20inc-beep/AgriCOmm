@@ -696,4 +696,104 @@ module.exports = {
       return res.status(500).json({ success: false, message: err.message });
     }
   },
+
+  // ─── Saved supplier templates ───
+  // Owner-private. The wizard reads them on step 1 to prefill
+  // supplier+warehouse+category+product+defaults in one click.
+  async listTemplates(req, res) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ success: false, message: 'Auth required.' });
+      const rows = await db('purchase_lot_templates as t')
+        .leftJoin('suppliers as s', 't.supplier_id', 's.id')
+        .leftJoin('products as p', 't.product_id', 'p.id')
+        .leftJoin('warehouses as w', 't.warehouse_id', 'w.id')
+        .leftJoin('product_categories as pc', 't.category_id', 'pc.id')
+        .where('t.owner_id', userId)
+        .select(
+          't.*',
+          's.name as supplier_name',
+          'p.name as product_name',
+          'w.name as warehouse_name',
+          'pc.name as category_name',
+        )
+        .orderBy('t.name', 'asc');
+      return res.json({ success: true, data: { templates: rows } });
+    } catch (err) {
+      console.error('listTemplates error:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
+  async createTemplate(req, res) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ success: false, message: 'Auth required.' });
+      const {
+        name, supplier_id, warehouse_id, category_id, product_id,
+        type, entity, grade, variety,
+        default_rate_per_kg, default_bag_weight_kg, default_rate_unit, crop_year,
+      } = req.body;
+      if (!name || !String(name).trim()) {
+        return res.status(400).json({ success: false, message: 'Template name is required.' });
+      }
+      const [row] = await db('purchase_lot_templates').insert({
+        name: String(name).trim(),
+        owner_id: userId,
+        supplier_id: supplier_id || null,
+        warehouse_id: warehouse_id || null,
+        category_id: category_id || null,
+        product_id: product_id || null,
+        type: type || 'raw',
+        entity: entity || 'mill',
+        grade: grade || null,
+        variety: variety || null,
+        default_rate_per_kg: default_rate_per_kg || null,
+        default_bag_weight_kg: default_bag_weight_kg || null,
+        default_rate_unit: default_rate_unit || 'kg',
+        crop_year: crop_year || null,
+      }).returning('*');
+      return res.status(201).json({ success: true, data: { template: row } });
+    } catch (err) {
+      if (err.code === '23505') {
+        return res.status(409).json({ success: false, message: 'A template with this name already exists.' });
+      }
+      console.error('createTemplate error:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
+  async updateTemplate(req, res) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ success: false, message: 'Auth required.' });
+      const updates = { ...req.body };
+      delete updates.id;
+      delete updates.owner_id;
+      delete updates.created_at;
+      updates.updated_at = db.fn.now();
+      const [row] = await db('purchase_lot_templates')
+        .where({ id: req.params.id, owner_id: userId })
+        .update(updates)
+        .returning('*');
+      if (!row) return res.status(404).json({ success: false, message: 'Template not found.' });
+      return res.json({ success: true, data: { template: row } });
+    } catch (err) {
+      console.error('updateTemplate error:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
+  async deleteTemplate(req, res) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ success: false, message: 'Auth required.' });
+      const n = await db('purchase_lot_templates').where({ id: req.params.id, owner_id: userId }).del();
+      if (!n) return res.status(404).json({ success: false, message: 'Template not found.' });
+      return res.json({ success: true, message: 'Template deleted.' });
+    } catch (err) {
+      console.error('deleteTemplate error:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
 };
