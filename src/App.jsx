@@ -128,6 +128,7 @@ function MillRoutes() {
         <Route path="/transfer" element={<InternalTransfer />} />
         <Route path="/lot-inventory" element={<LotInventory />} />
         <Route path="/lot-inventory/:id" element={<LotDetail />} />
+        <Route path="/local-sales" element={<LocalSales />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
