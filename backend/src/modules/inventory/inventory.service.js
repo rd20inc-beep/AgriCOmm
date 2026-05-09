@@ -538,6 +538,9 @@ const inventoryService = {
 
     // Resolve product_id for each lot type. inventory_lots.product_id is
     // NOT NULL since migration 067 — every lot must reference a real product.
+    // Resolution chain: batch.product_id → linked export order's product_id
+    // → product matching productName → seeded FINISHED-RICE fallback
+    // → any non-byproduct rice product → first product as last resort.
     const batchRow = await trx('milling_batches').where({ id: batchId }).first();
     let finishedProductId = batchRow && batchRow.product_id ? batchRow.product_id : null;
     if (!finishedProductId && batchRow && batchRow.linked_export_order_id) {
@@ -548,15 +551,36 @@ const inventoryService = {
       const named = await trx('products').whereILike('name', productName).first('id');
       if (named) finishedProductId = named.id;
     }
-    // Resolve byproduct products by item_name — these are seeded with stable ids.
+    if (!finishedProductId) {
+      // Seeded generic product (migration 114). Stable code = won't shift on rebuilds.
+      const fallback = await trx('products').where({ code: 'FINISHED-RICE' }).first('id');
+      if (fallback) finishedProductId = fallback.id;
+    }
+    if (!finishedProductId) {
+      // Last-resort fallback: any non-byproduct, non-Raw-Paddy product.
+      // Better to record the lot under a defaulted product_id than to 500 the
+      // entire yield transaction.
+      const any = await trx('products')
+        .where({ is_byproduct: false })
+        .whereNot('code', 'RAW-PADDY')
+        .first('id');
+      if (any) finishedProductId = any.id;
+    }
+    if (!finishedProductId) {
+      throw new Error(
+        'Cannot resolve product_id for finished rice lot. Seed at least one finished-rice product (e.g. via migration 114) or set product_id on the milling batch / linked export order.'
+      );
+    }
+    // Resolve byproduct products by item_name — these are seeded with stable
+    // PROD-* codes (round 075). Code-first lookup, then name fallback.
     const byproductProductLookup = async (itemName) => {
       const byCode = {
-        'Broken Rice': 'BROKEN-RICE',
-        'Rice Bran': 'RICE-BRAN',
-        'Rice Husk': 'RICE-HUSK',
-      }[itemName];
-      if (byCode) {
-        const p = await trx('products').where({ code: byCode }).first('id');
+        'Broken Rice': ['PROD-BROKEN-RICE', 'BROKEN-RICE'],
+        'Rice Bran':   ['PROD-RICE-BRAN',   'RICE-BRAN'],
+        'Rice Husk':   ['PROD-RICE-HUSK',   'RICE-HUSK'],
+      }[itemName] || [];
+      for (const code of byCode) {
+        const p = await trx('products').where({ code }).first('id');
         if (p) return p.id;
       }
       const named = await trx('products').whereILike('name', itemName).first('id');
