@@ -474,6 +474,21 @@ export function usePayments(params = {}) {
   });
 }
 
+export function usePurchases(params = {}) {
+  return useQuery({
+    queryKey: ['purchases-feed', params],
+    queryFn: async () => {
+      const res = await financeApi.purchases(params);
+      const d = res?.data || {};
+      return {
+        purchases: transformKeys(d.purchases || []),
+        totals: d.totals || { totalPkr: 0, count: 0, bySource: {}, byStatus: {} },
+      };
+    },
+    staleTime: 10 * 1000,
+  });
+}
+
 export function useRecordPayment() {
   const qc = useQueryClient();
   return useMutation({

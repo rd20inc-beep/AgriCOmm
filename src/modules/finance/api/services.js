@@ -5,6 +5,7 @@ export const financeApi = {
   payables: (params) => api.get('/api/finance/payables', params),
   recordPayment: (data) => api.post('/api/finance/payments', data),
   payments: (params) => api.get('/api/finance/payments', params),
+  purchases: (params) => api.get('/api/finance/purchases', params),
   bankAccounts: () => api.get('/api/finance/bank-accounts'),
   bankTransactions: (params) => api.get('/api/finance/bank-transactions', params),
   journalEntries: (params) => api.get('/api/finance/journal-entries', params),

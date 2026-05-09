@@ -1026,4 +1026,155 @@ financeController.removeAllocationLine = async function (req, res) {
   }
 };
 
+// Unified purchases feed — every spend the company recorded, regardless
+// of which module created it. Inventory lots (raw paddy / finished /
+// byproducts), mill-store consumable purchases, export-order operational
+// costs, and business expenses are merged into a single sortable list
+// with supplier, category, PKR amount, payment status, who created it,
+// and (for expenses) who approved it.
+//
+// FE filters by source / date range; the dashboard's Purchases tab
+// uses this to show approver-tagged company spend at a glance.
+financeController.listPurchases = async (req, res) => {
+  try {
+    const { from_date, to_date, source, limit = 500 } = req.query;
+    const dateFilter = (q, col) => {
+      if (from_date) q = q.where(col, '>=', from_date);
+      if (to_date) q = q.where(col, '<=', to_date);
+      return q;
+    };
+
+    const wantSource = source && source !== 'all' ? source : null;
+    const all = [];
+
+    // ── Inventory lot purchases (raw / finished / byproduct) ──
+    if (!wantSource || wantSource === 'lot') {
+      let q = db('inventory_lots as il')
+        .leftJoin('suppliers as s', 'il.supplier_id', 's.id')
+        .leftJoin('users as creator', 'il.created_by', 'creator.id')
+        .where('il.landed_cost_total', '>', 0)
+        .select(
+          db.raw("'lot' AS source"),
+          'il.id as ref_id',
+          'il.lot_no as ref',
+          'il.purchase_date as date',
+          'il.landed_cost_total as amount_pkr',
+          'il.landed_cost_total as amount',
+          'il.cost_currency as currency',
+          's.name as supplier_name',
+          db.raw("INITCAP(il.type) || ' ' || COALESCE(il.item_name, '') as category"),
+          'il.payment_status',
+          'creator.full_name as created_by_name',
+          db.raw('NULL::text as approved_by_name'),
+          db.raw('NULL::text as approved_at'),
+          'il.created_at',
+        );
+      q = dateFilter(q, 'il.purchase_date');
+      all.push(...await q);
+    }
+
+    // ── Mill-store consumable purchases ──
+    if (!wantSource || wantSource === 'mill_store') {
+      let q = db('mill_purchases as mp')
+        .leftJoin('suppliers as s', 'mp.supplier_id', 's.id')
+        .leftJoin('users as creator', 'mp.created_by', 'creator.id')
+        .select(
+          db.raw("'mill_store' AS source"),
+          'mp.id as ref_id',
+          'mp.purchase_no as ref',
+          'mp.purchase_date as date',
+          // mill_purchases.total_amount is already PKR (domestic vendor)
+          'mp.total_amount as amount_pkr',
+          'mp.total_amount as amount',
+          'mp.currency',
+          's.name as supplier_name',
+          db.raw("'Mill Store' as category"),
+          'mp.payment_status',
+          'creator.full_name as created_by_name',
+          db.raw('NULL::text as approved_by_name'),
+          db.raw('NULL::text as approved_at'),
+          'mp.created_at',
+        );
+      q = dateFilter(q, 'mp.purchase_date');
+      all.push(...await q);
+    }
+
+    // ── Export-order operational costs (transport / loading / etc.) ──
+    if (!wantSource || wantSource === 'export_cost') {
+      let q = db('export_order_costs as eoc')
+        .leftJoin('export_orders as eo', 'eoc.order_id', 'eo.id')
+        .leftJoin('users as creator', 'eoc.created_by', 'creator.id')
+        .select(
+          db.raw("'export_cost' AS source"),
+          'eoc.id as ref_id',
+          'eo.order_no as ref',
+          db.raw('eoc.created_at::date as date'),
+          db.raw('COALESCE(eoc.base_amount_pkr, eoc.amount * COALESCE(eoc.fx_rate, 1)) as amount_pkr'),
+          'eoc.amount',
+          'eoc.currency',
+          db.raw('NULL::text as supplier_name'),
+          'eoc.category',
+          db.raw("'Pending'::text as payment_status"),
+          'creator.full_name as created_by_name',
+          db.raw('NULL::text as approved_by_name'),
+          db.raw('NULL::text as approved_at'),
+          'eoc.created_at',
+        );
+      q = dateFilter(q, 'eoc.created_at');
+      all.push(...await q);
+    }
+
+    // ── Business expenses (utilities / salaries / misc) — has approver! ──
+    if (!wantSource || wantSource === 'expense') {
+      let q = db('business_expenses as be')
+        .leftJoin('suppliers as s', 'be.supplier_id', 's.id')
+        .leftJoin('users as creator', 'be.created_by', 'creator.id')
+        .leftJoin('users as approver', 'be.approved_by', 'approver.id')
+        .select(
+          db.raw("'expense' AS source"),
+          'be.id as ref_id',
+          'be.expense_no as ref',
+          'be.expense_date as date',
+          'be.amount_pkr',
+          'be.amount',
+          'be.currency',
+          db.raw("COALESCE(s.name, be.vendor_name) as supplier_name"),
+          'be.category',
+          'be.payment_status',
+          'creator.full_name as created_by_name',
+          'approver.full_name as approved_by_name',
+          db.raw('be.paid_date as approved_at'),
+          'be.created_at',
+        );
+      q = dateFilter(q, 'be.expense_date');
+      all.push(...await q);
+    }
+
+    // Sort newest-first by date, then by ref desc
+    all.sort((a, b) => {
+      const da = new Date(a.date || a.created_at).getTime();
+      const dbt = new Date(b.date || b.created_at).getTime();
+      if (da !== dbt) return dbt - da;
+      return String(b.ref || '').localeCompare(String(a.ref || ''));
+    });
+    const sliced = all.slice(0, parseInt(limit, 10));
+
+    // Aggregate totals across the FILTERED set so the FE can show
+    // top-line spend without a second round-trip.
+    const totals = sliced.reduce((acc, r) => {
+      const pkr = parseFloat(r.amount_pkr) || 0;
+      acc.total_pkr += pkr;
+      acc.by_source[r.source] = (acc.by_source[r.source] || 0) + pkr;
+      const k = String(r.payment_status || 'Pending').toLowerCase();
+      acc.by_status[k] = (acc.by_status[k] || 0) + pkr;
+      return acc;
+    }, { total_pkr: 0, count: sliced.length, by_source: {}, by_status: {} });
+
+    return res.json({ success: true, data: { purchases: sliced, totals } });
+  } catch (err) {
+    console.error('Finance listPurchases error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+};
+
 module.exports = financeController;

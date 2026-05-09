@@ -19,6 +19,7 @@ router.post(
   controller.recordPayment
 );
 router.get('/payments', authorize('finance', 'view'), controller.listPayments);
+router.get('/purchases', authorize('finance', 'view'), controller.listPurchases);
 router.get('/bank-accounts', authorize('finance', 'view'), controller.getBankAccounts);
 router.get('/bank-transactions', authorize('finance', 'view'), controller.getBankTransactions);
 router.get('/internal-transfers', authorize('finance', 'view'), controller.getInternalTransfers);

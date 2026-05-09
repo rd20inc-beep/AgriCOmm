@@ -64,6 +64,7 @@ const CostAllocation = lazy(() => import('./modules/finance/pages/CostAllocation
 const FinanceTransfers = lazy(() => import('./modules/finance/pages/InternalTransfers'));
 const Reconciliation = lazy(() => import('./modules/finance/pages/Reconciliation'));
 const Expenses = lazy(() => import('./modules/finance/pages/Expenses'));
+const Purchases = lazy(() => import('./modules/finance/pages/Purchases'));
 
 function FinanceRoutes() {
   return (
@@ -74,6 +75,7 @@ function FinanceRoutes() {
         <Route path="expenses" element={<Expenses />} />
         <Route path="money-in" element={<MoneyIn />} />
         <Route path="money-out" element={<MoneyOut />} />
+        <Route path="purchases" element={<Purchases />} />
         <Route path="cash" element={<Cash />} />
         <Route path="profit" element={<Profit />} />
         <Route path="rates" element={<RatesCenter />} />

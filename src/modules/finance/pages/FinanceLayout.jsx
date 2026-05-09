@@ -1,11 +1,12 @@
 import { NavLink, useSearchParams } from 'react-router-dom';
 import {
   LayoutDashboard, ArrowDownLeft, ArrowUpRight, DollarSign,
-  TrendingUp, Landmark, BookOpen, Bell, Clock, Settings,
+  TrendingUp, Landmark, BookOpen, Bell, Clock, Settings, ShoppingCart,
 } from 'lucide-react';
 
 const tabs = [
   { label: 'Overview',    path: '/finance',              icon: LayoutDashboard, end: true },
+  { label: 'Purchases',   path: '/finance/purchases',    icon: ShoppingCart },
   { label: 'Expenses',    path: '/finance/expenses',     icon: DollarSign },
   { label: 'Money In',    path: '/finance/money-in',     icon: ArrowDownLeft },
   { label: 'Money Out',   path: '/finance/money-out',    icon: ArrowUpRight },
