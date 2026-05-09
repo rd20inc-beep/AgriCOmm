@@ -24,6 +24,8 @@ const millNav = [
   { label: 'Lot Inventory', icon: Package, to: '/lot-inventory' },
   { label: 'Stock Adjustments', icon: AlertTriangle, to: '/stock-adjustments' },
   { label: 'Transfers', icon: ArrowRightLeft, to: '/transfer' },
+  { section: 'Sales' },
+  { label: 'Local Sales', icon: ShoppingCart, to: '/local-sales' },
   { section: 'Finance' },
   { label: 'Mill Finance', icon: DollarSign, to: '/milling/finance' },
   { section: 'Reports' },
