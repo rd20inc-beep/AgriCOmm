@@ -12,6 +12,7 @@ import {
   ArrowRight,
   Eye,
   Plus,
+  ShoppingCart,
 } from 'lucide-react';
 import {
   LineChart,
@@ -293,12 +294,21 @@ export default function MillingDashboard() {
             Mill operations, batches, and quality overview
           </p>
         </div>
-        <button
-          onClick={() => { resetBatchForm(); setShowNewBatch(true); }}
-          className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
-        >
-          <Plus className="w-4 h-4" /> New Batch
-        </button>
+        <div className="flex items-center gap-2">
+          <Link
+            to="/local-sales"
+            className="inline-flex items-center gap-2 bg-emerald-50 text-emerald-700 border border-emerald-200 px-4 py-2.5 rounded-lg hover:bg-emerald-100 transition-colors font-medium text-sm"
+            title="Sell finished rice or by-products to a local buyer"
+          >
+            <ShoppingCart className="w-4 h-4" /> Sell Locally
+          </Link>
+          <button
+            onClick={() => { resetBatchForm(); setShowNewBatch(true); }}
+            className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
+          >
+            <Plus className="w-4 h-4" /> New Batch
+          </button>
+        </div>
       </div>
 
       {/* Compact KPI Row */}
