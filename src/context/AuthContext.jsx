@@ -32,53 +32,68 @@ export function AuthProvider({ children }) {
 
   const isAuthenticated = !!user && !!token;
 
-  // Validate token on mount
-  useEffect(() => {
-    async function validateToken() {
-      const storedToken = localStorage.getItem('riceflow_token');
-      if (!storedToken) {
-        setIsLoading(false);
-        return;
-      }
-
-      try {
-        const res = await fetch(`${API_BASE}/api/auth/me`, {
-          headers: { Authorization: `Bearer ${storedToken}` },
-        });
-        if (res.ok) {
-          const json = await res.json();
-          const payload = json.data || json;
-          const userData = payload.user || payload;
-          // Merge permissions into user object
-          if (payload.permissions && !userData.permissions) {
-            userData.permissions = payload.permissions;
-          }
-          setUser(userData);
-          setToken(storedToken);
-        } else {
-          // Token invalid
-          localStorage.removeItem('riceflow_token');
-          setToken(null);
-          setUser(null);
-        }
-      } catch {
-        // Network error — prototype mode fallback (dev only)
-        if (import.meta.env.DEV && storedToken === MOCK_TOKEN) {
-          console.warn('Mock auth fallback activated — backend unreachable (dev mode)');
-          setUser(MOCK_USER);
-          setToken(MOCK_TOKEN);
-        } else {
-          localStorage.removeItem('riceflow_token');
-          setToken(null);
-          setUser(null);
-        }
-      } finally {
-        setIsLoading(false);
-      }
+  // Refresh user + permissions from /api/auth/me. Called on mount,
+  // when the tab regains focus, and when admin migrations grant a new
+  // permission while the user is mid-session — without this, a stale
+  // `user.permissions` array can hide nav items the backend now allows
+  // (e.g. mill_manager couldn't see Local Sales after migration 113
+  // until they logged out and back in).
+  const refreshAuth = useCallback(async ({ silent = false } = {}) => {
+    const storedToken = localStorage.getItem('riceflow_token');
+    if (!storedToken) {
+      if (!silent) setIsLoading(false);
+      return;
     }
-
-    validateToken();
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${storedToken}` },
+      });
+      if (res.ok) {
+        const json = await res.json();
+        const payload = json.data || json;
+        const userData = payload.user || payload;
+        // Always overwrite permissions with the freshly-fetched list
+        // (don't preserve stale cached perms on refresh).
+        if (payload.permissions) userData.permissions = payload.permissions;
+        setUser(userData);
+        setToken(storedToken);
+      } else if (!silent) {
+        localStorage.removeItem('riceflow_token');
+        setToken(null);
+        setUser(null);
+      }
+    } catch {
+      // Network error — prototype-mode fallback only on initial mount
+      if (!silent && import.meta.env.DEV && storedToken === MOCK_TOKEN) {
+        console.warn('Mock auth fallback activated — backend unreachable (dev mode)');
+        setUser(MOCK_USER);
+        setToken(MOCK_TOKEN);
+      } else if (!silent) {
+        localStorage.removeItem('riceflow_token');
+        setToken(null);
+        setUser(null);
+      }
+    } finally {
+      if (!silent) setIsLoading(false);
+    }
   }, []);
+
+  // Initial token validation on mount
+  useEffect(() => { refreshAuth(); }, [refreshAuth]);
+
+  // Re-fetch permissions whenever the tab regains focus. Keeps the
+  // cached perm list in sync with backend changes (RBAC edits, new
+  // role grants) without requiring the user to log out.
+  useEffect(() => {
+    function onFocus() { refreshAuth({ silent: true }); }
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') refreshAuth({ silent: true });
+    });
+    return () => {
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [refreshAuth]);
 
   const login = useCallback(async (email, password, captchaToken) => {
     try {
