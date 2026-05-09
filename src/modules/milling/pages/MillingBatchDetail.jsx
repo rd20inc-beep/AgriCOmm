@@ -37,14 +37,17 @@ import StatusBadge from '../../../components/StatusBadge';
 import MillingCostSheet from '../../../components/MillingCostSheet';
 import ConsumptionPanel from '../../millStore/components/ConsumptionPanel';
 
+// Pakistani-rice per-grade quality split. Stored on milling_quality_samples
+// in snake_case (b1_pct / b2_pct / cobba_pct / csr_pct / nb_pct / ov_pct);
+// FE uses camelCase via the standard transformKeys pipeline.
 const qualityParams = [
-  { key: 'moisture', label: 'Moisture %', unit: '%' },
-  { key: 'broken', label: 'Broken %', unit: '%' },
-  { key: 'chalky', label: 'Chalky %', unit: '%' },
-  { key: 'foreignMatter', label: 'Foreign Matter %', unit: '%' },
-  { key: 'discoloration', label: 'Discoloration %', unit: '%' },
-  { key: 'purity', label: 'Purity %', unit: '%' },
-  { key: 'grainSize', label: 'Grain Size (mm)', unit: 'mm' },
+  { key: 'moisture', label: 'Moisture %', unit: '%', backendKey: 'moisture' },
+  { key: 'b1Pct', label: 'B-1', unit: '%', backendKey: 'b1_pct' },
+  { key: 'b2Pct', label: 'B-2', unit: '%', backendKey: 'b2_pct' },
+  { key: 'cobbaPct', label: 'Cobba', unit: '%', backendKey: 'cobba_pct' },
+  { key: 'csrPct', label: 'C.S', unit: '%', backendKey: 'csr_pct' },
+  { key: 'nbPct', label: 'N.B', unit: '%', backendKey: 'nb_pct' },
+  { key: 'ovPct', label: 'O.V', unit: '%', backendKey: 'ov_pct' },
 ];
 
 const tabs = [
@@ -91,9 +94,12 @@ export default function MillingBatchDetail() {
   const [activeTab, setActiveTab] = useState('overview');
   const [showAnalysisModal, setShowAnalysisModal] = useState(false);
   const [analysisModalType, setAnalysisModalType] = useState('arrival');
-  const [analysisForm, setAnalysisForm] = useState({
-    moisture: '', broken: '', chalky: '', foreignMatter: '', discoloration: '', purity: '', grainSize: '',
-    pricePerKg: '', pricePerMT: '',
+  // Initial state seeded from qualityParams keys so adding/removing a
+  // quality field only requires updating the qualityParams array.
+  const [analysisForm, setAnalysisForm] = useState(() => {
+    const init = { pricePerKg: '', pricePerMT: '' };
+    qualityParams.forEach(p => { init[p.key] = ''; });
+    return init;
   });
   const [showYieldModal, setShowYieldModal] = useState(false);
   const [yieldForm, setYieldForm] = useState({
@@ -190,21 +196,14 @@ export default function MillingBatchDetail() {
   function openAnalysisModal(type = 'arrival') {
     setAnalysisModalType(type);
     const source = type === 'sample' ? safeSample : safeArrival;
+    const next = { pricePerKg: '', pricePerMT: '' };
+    qualityParams.forEach(p => { next[p.key] = ''; });
     if (source) {
-      setAnalysisForm({
-        moisture: source.moisture ?? '',
-        broken: source.broken ?? '',
-        chalky: source.chalky ?? '',
-        foreignMatter: source.foreignMatter ?? '',
-        discoloration: source.discoloration ?? '',
-        purity: source.purity ?? '',
-        grainSize: source.grainSize ?? '',
-        pricePerKg: source.pricePerKg ?? '',
-        pricePerMT: source.pricePerMT ?? '',
-      });
-    } else {
-      setAnalysisForm({ moisture: '', broken: '', chalky: '', foreignMatter: '', discoloration: '', purity: '', grainSize: '', pricePerKg: '', pricePerMT: '' });
+      qualityParams.forEach(p => { next[p.key] = source[p.key] ?? ''; });
+      next.pricePerKg = source.pricePerKg ?? '';
+      next.pricePerMT = source.pricePerMT ?? '';
     }
+    setAnalysisForm(next);
     setShowAnalysisModal(true);
   }
 
@@ -222,18 +221,15 @@ export default function MillingBatchDetail() {
     if (!isNaN(pkgPrice)) formValues.pricePerKg = pkgPrice;
     if (!isNaN(pmtPrice)) formValues.pricePerMT = pmtPrice;
 
+    // Map FE camelCase keys → backend snake_case using qualityParams.backendKey
     const qualityPayload = {
       analysis_type: analysisModalType,
-      moisture: formValues.moisture,
-      broken: formValues.broken,
-      chalky: formValues.chalky,
-      foreign_matter: formValues.foreignMatter,
-      discoloration: formValues.discoloration,
-      purity: formValues.purity,
-      grain_size: formValues.grainSize,
       price_per_kg: formValues.pricePerKg,
       price_per_mt: formValues.pricePerMT,
     };
+    qualityParams.forEach(p => {
+      if (formValues[p.key] != null) qualityPayload[p.backendKey] = formValues[p.key];
+    });
 
     try {
       await saveQualityMut.mutateAsync({ id: batchId, data: qualityPayload });

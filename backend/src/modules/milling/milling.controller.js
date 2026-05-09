@@ -385,6 +385,8 @@ const millingController = {
         analysis_type,
         moisture,
         broken, b1_pct, b2_pct, b3_pct, csr_pct, short_grain_pct,
+        // Pakistani-rice per-grade percentages (added 116)
+        cobba_pct, nb_pct, ov_pct,
         chalky,
         foreign_matter,
         discoloration,
@@ -420,6 +422,9 @@ const millingController = {
           b3_pct: b3_pct != null ? parseFloat(b3_pct) : null,
           csr_pct: csr_pct != null ? parseFloat(csr_pct) : null,
           short_grain_pct: short_grain_pct != null ? parseFloat(short_grain_pct) : null,
+          cobba_pct: cobba_pct != null ? parseFloat(cobba_pct) : null,
+          nb_pct: nb_pct != null ? parseFloat(nb_pct) : null,
+          ov_pct: ov_pct != null ? parseFloat(ov_pct) : null,
           chalky: chalky != null ? parseFloat(chalky) : null,
           foreign_matter: foreign_matter != null ? parseFloat(foreign_matter) : null,
           discoloration: discoloration != null ? parseFloat(discoloration) : null,
