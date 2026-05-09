@@ -540,18 +540,55 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
     if (!(kgEntered > 0)) { addToast('Weight (kg) must be greater than 0', 'error'); return; }
     if (!form.rate_input) { addToast('Rate is required', 'error'); return; }
     try {
+      // Helpers — Joi number fields reject empty strings, so we coerce
+      // unfilled fields to either null (nullable foreign keys / quality)
+      // or 0 (cost defaults). Without this, a Mill Manager who fills
+      // only required fields hits 10+ validation errors on submit.
+      const num = (v) => {
+        const f = parseFloat(v);
+        return Number.isFinite(f) ? f : null;
+      };
+      const numOrZero = (v) => {
+        const f = parseFloat(v);
+        return Number.isFinite(f) ? f : 0;
+      };
+      const intOrNull = (v) => {
+        const i = parseInt(v, 10);
+        return Number.isFinite(i) ? i : null;
+      };
+      const strOrNull = (v) => (v && String(v).trim() ? String(v) : null);
+
       const payload = {
-        ...form,
+        item_name: form.item_name,
+        type: form.type || 'raw',
+        entity: form.entity || 'mill',
+        warehouse_id: intOrNull(form.warehouse_id),
+        product_id: intOrNull(form.product_id),
+        supplier_id: intOrNull(form.supplier_id),
+        purchase_date: form.purchase_date || null,
+        crop_year: strOrNull(form.crop_year),
+        variety: strOrNull(form.variety),
+        grade: strOrNull(form.grade),
+        moisture_pct: num(form.moisture_pct),
+        broken_pct: num(form.broken_pct),
+        sortex_status: strOrNull(form.sortex_status),
+        bag_type: strOrNull(form.bag_type),
+        bag_quality: strOrNull(form.bag_quality),
+        notes: strOrNull(form.notes),
+        // Quantity & rate
         quantity_input: kgEntered,
         quantity_unit: 'kg',
         bag_weight_kg: bagWt,
         total_bags: bagsEntered || null,
-        product_id: form.product_id ? parseInt(form.product_id, 10) : null,
-        supplier_id: form.supplier_id ? parseInt(form.supplier_id, 10) : null,
-        warehouse_id: form.warehouse_id ? parseInt(form.warehouse_id, 10) : null,
+        rate_input: num(form.rate_input),
+        rate_unit: form.rate_unit || 'kg',
+        // Costs default to 0 when blank
+        transport_cost: numOrZero(form.transport_cost),
+        labor_cost: numOrZero(form.labor_cost),
+        unloading_cost: numOrZero(form.unloading_cost),
+        packing_cost: numOrZero(form.packing_cost),
+        other_cost: numOrZero(form.other_cost),
       };
-      delete payload.weight_kg;
-      delete payload.category_id;
       const res = await createMutation.mutateAsync(payload);
       const lotNo = res?.data?.lot?.lot_no || 'lot';
       const justKg = kgEntered;

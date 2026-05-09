@@ -243,13 +243,45 @@ module.exports = {
           resolvedWarehouseId = wh.id;
         }
 
+        // product_id is NOT NULL on inventory_lots since round 067 —
+        // resolve a fallback when the wizard didn't pick one.
+        // Type-aware: raw → RAW-PADDY, finished → FINISHED-RICE,
+        // byproduct → first byproduct product. Always succeeds (last
+        // resort: any non-Raw-Paddy product) so the insert can proceed.
+        let resolvedProductId = product_id || null;
+        if (!resolvedProductId) {
+          const fallbackCode = type === 'finished' ? 'FINISHED-RICE'
+            : type === 'raw' ? 'RAW-PADDY'
+            : null;
+          if (fallbackCode) {
+            const p = await trx('products').where({ code: fallbackCode }).first('id');
+            if (p) resolvedProductId = p.id;
+          }
+          if (!resolvedProductId && type === 'byproduct') {
+            const p = await trx('products').where({ is_byproduct: true }).orderBy('id').first('id');
+            if (p) resolvedProductId = p.id;
+          }
+          if (!resolvedProductId) {
+            const p = await trx('products')
+              .where({ is_byproduct: false })
+              .whereNot('code', 'RAW-PADDY')
+              .orderBy('id').first('id');
+            if (p) resolvedProductId = p.id;
+          }
+          if (!resolvedProductId) {
+            // Truly empty products table — refuse rather than crash with
+            // a confusing constraint message.
+            throw new Error('Cannot resolve product_id for new lot: no products exist. Seed at least one product first.');
+          }
+        }
+
         const [lot] = await trx('inventory_lots').insert({
           lot_no: lotNo,
           item_name,
           type,
           entity,
           warehouse_id: resolvedWarehouseId,
-          product_id: product_id || null,
+          product_id: resolvedProductId,
           qty: uc.kgToTon(netWeightKg), // legacy field in MT
           unit: 'MT',
           status: 'Available',
