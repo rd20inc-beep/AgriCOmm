@@ -27,6 +27,7 @@ import {
   Legend,
 } from 'recharts';
 import { useApp } from '../../../context/AppContext';
+import { useAuth } from '../../../context/AuthContext';
 import { useCreateMillingBatch, useMills, useMillExpenses, useCreateMillExpense, useInventory } from '../../../api/queries';
 import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import KPICard from '../../../components/KPICard';
@@ -43,6 +44,8 @@ function formatPKR(value) {
 export default function MillingDashboard() {
   const navigate = useNavigate();
   const { millingBatches, suppliersList, addToast } = useApp();
+  const { hasPermission } = useAuth();
+  const canSellLocally = hasPermission('inventory', 'view');
   const { data: directInv = [] } = useInventory({});
   const inventory = Array.isArray(directInv) ? directInv : [];
   const commodityPrices = useCommodityPrices();
@@ -295,13 +298,15 @@ export default function MillingDashboard() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Link
-            to="/local-sales"
-            className="inline-flex items-center gap-2 bg-emerald-50 text-emerald-700 border border-emerald-200 px-4 py-2.5 rounded-lg hover:bg-emerald-100 transition-colors font-medium text-sm"
-            title="Sell finished rice or by-products to a local buyer"
-          >
-            <ShoppingCart className="w-4 h-4" /> Sell Locally
-          </Link>
+          {canSellLocally && (
+            <Link
+              to="/local-sales"
+              className="inline-flex items-center gap-2 bg-emerald-50 text-emerald-700 border border-emerald-200 px-4 py-2.5 rounded-lg hover:bg-emerald-100 transition-colors font-medium text-sm"
+              title="Sell finished rice or by-products to a local buyer"
+            >
+              <ShoppingCart className="w-4 h-4" /> Sell Locally
+            </Link>
+          )}
           <button
             onClick={() => { resetBatchForm(); setShowNewBatch(true); }}
             className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
