@@ -3,10 +3,10 @@ const router = express.Router();
 const authController = require('./auth.controller');
 const authenticate = require('../../middleware/auth');
 const { apiLimiter } = require('../../middleware/rateLimiter');
-const { requireCaptchaIfFlagged } = require('../../middleware/captchaGuard');
 
-// Login: captcha guards after 3 failed attempts per real client IP
-router.post('/login', requireCaptchaIfFlagged, authController.login);
+// Login — captcha guard removed (Cloudflare Turnstile was intermittent).
+// The express-rate-limiter remains as the final ceiling against brute-force.
+router.post('/login', authController.login);
 router.post('/register', apiLimiter, authenticate, authController.register);
 router.get('/me', authenticate, authController.me);
 router.post('/refresh-token', authController.refreshToken);

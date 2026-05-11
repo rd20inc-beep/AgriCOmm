@@ -19,7 +19,6 @@ function createApp() {
   app.use(cors({
     origin: config.corsOrigin,
     credentials: true,
-    exposedHeaders: ['X-Captcha-Required'],
   }));
 
   // Body parsing

@@ -95,18 +95,13 @@ export function AuthProvider({ children }) {
     };
   }, [refreshAuth]);
 
-  const login = useCallback(async (email, password, captchaToken) => {
+  const login = useCallback(async (email, password) => {
     try {
-      const body = { email, password };
-      if (captchaToken) body.captchaToken = captchaToken;
-
       const res = await fetch(`${API_BASE}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ email, password }),
       });
-
-      const captchaRequired = res.headers.get('X-Captcha-Required') === '1';
 
       if (res.ok) {
         const json = await res.json();
@@ -126,14 +121,10 @@ export function AuthProvider({ children }) {
           qc.invalidateQueries();
           return { success: true };
         }
-        return { success: false, error: 'No token received', captchaRequired };
+        return { success: false, error: 'No token received' };
       } else {
         const json = await res.json().catch(() => ({}));
-        return {
-          success: false,
-          error: json.message || 'Invalid credentials',
-          captchaRequired: captchaRequired || !!json.captchaRequired,
-        };
+        return { success: false, error: json.message || 'Invalid credentials' };
       }
     } catch {
       // Network error — prototype mode fallback (dev only)

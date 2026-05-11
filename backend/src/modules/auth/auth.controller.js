@@ -1,5 +1,4 @@
 const authService = require('./auth.service');
-const captchaGuard = require('../../middleware/captchaGuard');
 
 function getRealIP(req) {
   return req.headers['cf-connecting-ip']
@@ -14,13 +13,10 @@ const authController = {
       const ip = getRealIP(req);
       const { email, password } = req.body;
       const result = await authService.login(email, password, ip);
-      captchaGuard.clearFailures(ip);
       return res.json({ success: true, data: result });
     } catch (err) {
-      const ip = getRealIP(req);
-      captchaGuard.recordFailure(ip);
-      const willRequireCaptcha = captchaGuard.getFailureCount(ip) >= captchaGuard.FAIL_THRESHOLD;
-      res.set('X-Captcha-Required', willRequireCaptcha ? '1' : '0');
+      // Captcha guard removed — Cloudflare Turnstile was unreliable.
+      // express-rate-limiter remains as the brute-force ceiling.
       next(err);
     }
   },
