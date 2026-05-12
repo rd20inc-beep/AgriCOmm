@@ -478,7 +478,7 @@ const reportingController = {
   // The FE renders this into a print-styled HTML view.
   async printableProduction(req, res) {
     try {
-      const db = require('../../db');
+      const db = require('../../config/database');
       const { from, to } = req.query;
       if (!from || !to) {
         return res.status(400).json({ success: false, message: 'from and to dates are required.' });
@@ -565,7 +565,7 @@ const reportingController = {
   // state — no historical roll-back. Grouped per the requested key.
   async printableStock(req, res) {
     try {
-      const db = require('../../db');
+      const db = require('../../config/database');
       const { group_by = 'product', status = 'Available' } = req.query;
 
       let groupCol, nameCol;
