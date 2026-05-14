@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ShoppingCart, Package, Factory, Ship, Receipt,
   Search, Download, RefreshCw, CheckCircle, Clock, X, Plus, ChevronDown,
@@ -46,14 +46,37 @@ const ADD_OPTIONS = [
   { label: 'Business Expense',    description: 'Utilities, salaries, admin',            icon: Receipt,  to: '/finance/expenses?action=new' },
 ];
 
+const RANGE_LABEL = {
+  today:   'Today',
+  week:    'This Week',
+  month:   'This Month',
+  quarter: 'This Quarter',
+  year:    'This Year',
+};
+
 export default function Purchases() {
   const navigate = useNavigate();
-  const { queryParams: rangeParams } = useFinanceDateRange();
+  const { queryParams: rangeParams, rangeKey } = useFinanceDateRange();
   const [source, setSource] = useState('all');
   const [statusFilter, setStatusFilter] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const addRef = useRef(null);
+  const [, setUrlParams] = useSearchParams();
+
+  function clearDateRange() {
+    setUrlParams(prev => {
+      const next = new URLSearchParams(prev);
+      next.delete('range');
+      return next;
+    }, { replace: true });
+  }
+  function clearAllFilters() {
+    setSource('all');
+    setStatusFilter('All');
+    setSearchTerm('');
+    clearDateRange();
+  }
 
   useEffect(() => {
     if (!addOpen) return;
@@ -191,6 +214,46 @@ export default function Purchases() {
         <KpiTile label="Avg per purchase" primary={fmtPKR(filteredTotals.count > 0 ? filteredTotals.totalPkr / filteredTotals.count : 0)} secondary="In current view" tone="blue" />
       </div>
 
+      {/* Active filter chips — surface every constraint that could be hiding rows,
+          including the global date range from FinanceLayout's header dropdown. */}
+      {(rangeKey || source !== 'all' || statusFilter !== 'All' || searchTerm) && (
+        <div className="flex items-center gap-2 flex-wrap text-xs">
+          <span className="text-gray-500 font-medium">Active filters:</span>
+          {rangeKey && (
+            <button onClick={clearDateRange}
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100">
+              Date: {RANGE_LABEL[rangeKey] || rangeKey}
+              <X size={11} />
+            </button>
+          )}
+          {source !== 'all' && (
+            <button onClick={() => setSource('all')}
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-blue-50 text-blue-800 border border-blue-200 hover:bg-blue-100">
+              Source: {SOURCE_META[source]?.label || source}
+              <X size={11} />
+            </button>
+          )}
+          {statusFilter !== 'All' && (
+            <button onClick={() => setStatusFilter('All')}
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-violet-50 text-violet-800 border border-violet-200 hover:bg-violet-100">
+              Status: {statusFilter}
+              <X size={11} />
+            </button>
+          )}
+          {searchTerm && (
+            <button onClick={() => setSearchTerm('')}
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200">
+              Search: "{searchTerm}"
+              <X size={11} />
+            </button>
+          )}
+          <button onClick={clearAllFilters}
+            className="text-xs text-gray-500 hover:text-gray-900 underline ml-1">
+            Clear all
+          </button>
+        </div>
+      )}
+
       {/* Source pills */}
       <div className="flex items-center gap-2 flex-wrap">
         {SOURCES.map(s => {
@@ -265,8 +328,24 @@ export default function Purchases() {
             <tbody className="divide-y divide-gray-100">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-12 text-center text-gray-400 text-sm">
-                    No purchases match the current filters.
+                  <td colSpan={9} className="px-4 py-12 text-center text-sm">
+                    {purchases.length === 0 ? (
+                      <div className="text-gray-400 space-y-3">
+                        <p>No purchases recorded {rangeKey ? <>in <span className="font-semibold text-gray-600">{RANGE_LABEL[rangeKey] || rangeKey}</span>.</> : 'yet.'}</p>
+                        {rangeKey && (
+                          <button onClick={clearDateRange} className="text-xs px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium">
+                            Show all time
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-gray-400 space-y-3">
+                        <p>{purchases.length} {purchases.length === 1 ? 'purchase' : 'purchases'} loaded, but none match the current filters.</p>
+                        <button onClick={clearAllFilters} className="text-xs px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium">
+                          Clear all filters
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ) : filtered.map(p => {
