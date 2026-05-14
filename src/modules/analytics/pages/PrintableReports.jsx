@@ -186,26 +186,31 @@ export default function PrintableReports() {
       </div>
 
       {/* Printable area */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8 print:shadow-none print:border-0 print:rounded-none print:p-0">
-        {loading ? (
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8 print:shadow-none print:border-0 print:rounded-none print:p-0 printable-area">
+        {loading || !data ? (
           <div className="text-center text-gray-400 py-12">Loading report…</div>
-        ) : reportType === 'production' && data ? (
+        ) : reportType === 'production' && data.summary && data.batches ? (
           <ProductionReportView data={data} companyName={companyName} range={range} preset={preset} />
-        ) : reportType === 'stock' && data ? (
+        ) : reportType === 'stock' && data.grand && data.rows ? (
           <StockReportView data={data} companyName={companyName} groupLabel={STOCK_GROUP_OPTIONS.find(o => o.key === stockGroupBy)?.label} />
         ) : (
           <div className="text-center text-gray-400 py-12">No data.</div>
         )}
       </div>
 
-      {/* Print-only style overrides */}
+      {/* Print-only style overrides — unlock the app's flex/overflow shell
+          so the whole report (not just the viewport slice) reaches paper. */}
       <style>{`
         @media print {
           @page { size: A4 portrait; margin: 12mm; }
-          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          html, body { height: auto !important; overflow: visible !important; background: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          #root, #root > div { display: block !important; height: auto !important; overflow: visible !important; }
           nav, aside, header, .layout-sidebar, .layout-topbar, .print\\:hidden { display: none !important; }
+          main, main.page-content { display: block !important; height: auto !important; max-height: none !important; overflow: visible !important; padding: 0 !important; }
+          .printable-area { box-shadow: none !important; border: 0 !important; border-radius: 0 !important; padding: 0 !important; }
           .print-report h2 { page-break-after: avoid; }
           .print-report tr { page-break-inside: avoid; }
+          .print-report table { page-break-inside: auto; }
         }
       `}</style>
     </div>
