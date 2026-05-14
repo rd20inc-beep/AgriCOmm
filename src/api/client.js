@@ -101,11 +101,26 @@ async function uploadFile(endpoint, formData) {
   return data;
 }
 
+// Strip null/undefined params before serialisation — URLSearchParams will
+// happily stringify `undefined` as the literal "undefined", which any
+// backend `if (x && x !== 'all')` then treats as a real filter and
+// produces silently-empty results. (Caught on /finance/purchases when
+// the "All" tab returned 0 rows because source: undefined → source=undefined.)
+function buildQuery(params) {
+  if (!params) return '';
+  const u = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v == null) continue;
+    u.append(k, v);
+  }
+  const s = u.toString();
+  return s ? '?' + s : '';
+}
+
 // Convenience methods
 const api = {
   get: (endpoint, params) => {
-    const query = params ? '?' + new URLSearchParams(params).toString() : '';
-    return request(`${endpoint}${query}`);
+    return request(`${endpoint}${buildQuery(params)}`);
   },
   post: (endpoint, body) => request(endpoint, { method: 'POST', body }),
   put: (endpoint, body) => request(endpoint, { method: 'PUT', body }),
