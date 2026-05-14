@@ -1119,7 +1119,7 @@ financeController.listPurchases = async (req, res) => {
           'eoc.currency',
           db.raw('NULL::text as supplier_name'),
           'eoc.category',
-          db.raw("'Pending'::text as payment_status"),
+          db.raw("COALESCE(eoc.payment_status, 'Pending') as payment_status"),
           'creator.full_name as created_by_name',
           db.raw('NULL::text as approved_by_name'),
           db.raw('NULL::text as approved_at'),
@@ -1179,6 +1179,125 @@ financeController.listPurchases = async (req, res) => {
   } catch (err) {
     console.error('Finance listPurchases error:', err);
     return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+};
+
+// ─── Unified "Mark Purchase Paid" ──────────────────────────────────────
+// /finance/purchases aggregates four source tables (inventory_lots,
+// mill_purchases, export_order_costs, business_expenses). Each has its
+// own payment columns; this endpoint exposes a single way to settle
+// any one of them from the dashboard. Optionally records which bank
+// account the money came out of, decrementing its balance.
+financeController.payPurchase = async (req, res) => {
+  try {
+    const { source, source_id, amount, bank_account_id, payment_method, payment_date, payment_reference, notes } = req.body;
+    if (!source || !source_id) {
+      return res.status(400).json({ success: false, message: 'source and source_id are required.' });
+    }
+    const id = parseInt(source_id, 10);
+    if (!id) return res.status(400).json({ success: false, message: 'source_id must be numeric.' });
+
+    const result = await db.transaction(async (trx) => {
+      let row;
+      let outstanding;
+      let amountPkr;
+
+      if (source === 'lot') {
+        row = await trx('inventory_lots').where({ id }).first();
+        if (!row) throw new Error('Inventory lot not found.');
+        const total = parseFloat(row.landed_cost_total) || 0;
+        const alreadyPaid = parseFloat(row.paid_amount) || 0;
+        outstanding = Math.max(0, total - alreadyPaid);
+      } else if (source === 'mill_store') {
+        row = await trx('mill_purchases').where({ id }).first();
+        if (!row) throw new Error('Mill store purchase not found.');
+        const total = parseFloat(row.total_amount) || 0;
+        const alreadyPaid = parseFloat(row.paid_amount) || 0;
+        outstanding = Math.max(0, total - alreadyPaid);
+      } else if (source === 'export_cost') {
+        row = await trx('export_order_costs').where({ id }).first();
+        if (!row) throw new Error('Export-order cost not found.');
+        const total = parseFloat(row.base_amount_pkr) || (parseFloat(row.amount) || 0) * (parseFloat(row.fx_rate) || 1);
+        const alreadyPaid = parseFloat(row.paid_amount) || 0;
+        outstanding = Math.max(0, total - alreadyPaid);
+      } else if (source === 'expense') {
+        row = await trx('business_expenses').where({ id }).first();
+        if (!row) throw new Error('Business expense not found.');
+        const total = parseFloat(row.amount_pkr) || 0;
+        const alreadyPaid = parseFloat(row.paid_amount) || 0;
+        outstanding = Math.max(0, total - alreadyPaid);
+      } else {
+        throw new Error(`Unknown source "${source}". Use lot | mill_store | export_cost | expense.`);
+      }
+
+      // Default to settling the whole outstanding amount when the caller
+      // didn't specify; clamp to outstanding so the column never goes
+      // negative (an "over-payment" would mean refund territory, not pay).
+      const payNum = amount == null ? outstanding : parseFloat(amount);
+      if (!payNum || payNum <= 0) throw new Error('Amount must be greater than zero.');
+      amountPkr = Math.min(payNum, outstanding);
+      const newPaid = (parseFloat(row.paid_amount) || 0) + amountPkr;
+      const fullyPaid = outstanding - amountPkr <= 0.01;
+      const paidAt = payment_date ? new Date(payment_date) : new Date();
+      const status = fullyPaid ? 'Paid' : 'Partial';
+
+      const commonUpdate = {
+        payment_status: status,
+        paid_amount: newPaid,
+        updated_at: trx.fn.now(),
+      };
+
+      if (source === 'lot') {
+        const total = parseFloat(row.landed_cost_total) || 0;
+        await trx('inventory_lots').where({ id }).update({
+          ...commonUpdate,
+          due_amount: Math.max(0, total - newPaid),
+        });
+      } else if (source === 'mill_store') {
+        await trx('mill_purchases').where({ id }).update(commonUpdate);
+      } else if (source === 'export_cost') {
+        await trx('export_order_costs').where({ id }).update({
+          ...commonUpdate,
+          paid_at: fullyPaid ? paidAt : null,
+          bank_account_id: bank_account_id || null,
+          payment_method: payment_method || null,
+          payment_reference: payment_reference || null,
+        });
+      } else if (source === 'expense') {
+        await trx('business_expenses').where({ id }).update({
+          ...commonUpdate,
+          paid_date: fullyPaid ? paidAt : null,
+          bank_account_id: bank_account_id || null,
+          payment_method: payment_method || null,
+          payment_reference: payment_reference || null,
+        });
+      }
+
+      // Decrement the bank account when the user specified one.
+      if (bank_account_id) {
+        await trx('bank_accounts').where({ id: bank_account_id }).decrement('current_balance', amountPkr);
+        const tableExists = await trx.schema.hasTable('bank_transactions');
+        if (tableExists) {
+          await trx('bank_transactions').insert({
+            bank_account_id,
+            type: 'debit',
+            amount: amountPkr,
+            transaction_date: paidAt,
+            reference: payment_reference || null,
+            counterparty: row.supplier_id ? null : (row.vendor_name || null),
+            description: `Payment for ${source} ${row.lot_no || row.purchase_no || row.expense_no || row.category || `#${id}`}${notes ? ' — ' + notes : ''}`,
+            created_by: req.user?.id || null,
+          });
+        }
+      }
+
+      return { source, source_id: id, amount_paid_pkr: amountPkr, status, fully_paid: fullyPaid };
+    });
+
+    return res.json({ success: true, data: result });
+  } catch (err) {
+    console.error('Pay purchase error:', err);
+    return res.status(400).json({ success: false, message: err.message || 'Failed to record purchase payment.' });
   }
 };
 

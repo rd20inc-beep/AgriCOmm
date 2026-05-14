@@ -20,6 +20,12 @@ router.post(
 );
 router.get('/payments', authorize('finance', 'view'), controller.listPayments);
 router.get('/purchases', authorize('finance', 'view'), controller.listPurchases);
+router.post(
+  '/purchases/pay',
+  authorize('finance', 'confirm_payment'),
+  auditAction('pay_purchase', 'finance', (req, data) => data?.data?.source_id || null),
+  controller.payPurchase
+);
 router.get('/bank-accounts', authorize('finance', 'view'), controller.getBankAccounts);
 router.get('/bank-transactions', authorize('finance', 'view'), controller.getBankTransactions);
 router.get('/internal-transfers', authorize('finance', 'view'), controller.getInternalTransfers);

@@ -502,6 +502,19 @@ export function useRecordPayment() {
   });
 }
 
+export function usePayPurchase() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => financeApi.payPurchase(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['purchases-feed'] });
+      qc.invalidateQueries({ queryKey: queryKeys.bankAccounts.all });
+      qc.invalidateQueries({ queryKey: queryKeys.financeOverview });
+      qc.invalidateQueries({ queryKey: ['finance-bank-transactions'] });
+    },
+  });
+}
+
 export function useBankAccounts(opts = {}) {
   return useQuery({
     queryKey: queryKeys.bankAccounts.all,

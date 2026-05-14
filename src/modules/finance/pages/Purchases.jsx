@@ -4,10 +4,11 @@ import {
   ShoppingCart, Package, Factory, Ship, Receipt,
   Search, Download, RefreshCw, CheckCircle, Clock, X, Plus, ChevronDown,
 } from 'lucide-react';
-import { usePurchases } from '../../../api/queries';
+import { usePurchases, usePayPurchase, useBankAccounts } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 import { downloadCSV } from '../../../utils/csvExport';
+import { useApp } from '../../../context/AppContext';
 
 function fmtPKR(n) {
   const v = Number(n) || 0;
@@ -56,6 +57,7 @@ const RANGE_LABEL = {
 
 export default function Purchases() {
   const navigate = useNavigate();
+  const { addToast } = useApp();
   const { queryParams: rangeParams, rangeKey } = useFinanceDateRange();
   const [source, setSource] = useState('all');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -63,6 +65,11 @@ export default function Purchases() {
   const [addOpen, setAddOpen] = useState(false);
   const addRef = useRef(null);
   const [, setUrlParams] = useSearchParams();
+
+  // Payment drawer state — opens when user clicks the status pill on a row.
+  const [payTarget, setPayTarget] = useState(null);
+  const { data: bankAccounts = [] } = useBankAccounts();
+  const payMut = usePayPurchase();
 
   function clearDateRange() {
     setUrlParams(prev => {
@@ -372,9 +379,19 @@ export default function Purchases() {
                       )}
                     </td>
                     <td className="px-4 py-2.5">
-                      <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border ${statusTone(p.paymentStatus)}`}>
-                        {String(p.paymentStatus || 'Pending')}
-                      </span>
+                      {String(p.paymentStatus || 'pending').toLowerCase() === 'paid' ? (
+                        <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border ${statusTone(p.paymentStatus)}`}>
+                          {String(p.paymentStatus)}
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => setPayTarget(p)}
+                          className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border hover:shadow-sm hover:scale-105 transition-transform cursor-pointer ${statusTone(p.paymentStatus)}`}
+                          title="Record payment"
+                        >
+                          {String(p.paymentStatus || 'Pending')} →
+                        </button>
+                      )}
                     </td>
                     <td className="px-4 py-2.5 text-gray-600 text-xs truncate max-w-[140px]">{p.createdByName || '—'}</td>
                     <td className="px-4 py-2.5 text-gray-600 text-xs truncate max-w-[140px]">
@@ -395,6 +412,171 @@ export default function Purchases() {
               })}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {payTarget && (
+        <PayPurchaseDrawer
+          purchase={payTarget}
+          bankAccounts={bankAccounts}
+          isPending={payMut.isPending}
+          onClose={() => setPayTarget(null)}
+          onSubmit={async (form) => {
+            try {
+              await payMut.mutateAsync({
+                source: payTarget.source,
+                source_id: payTarget.refId,
+                amount: form.amount,
+                bank_account_id: form.paymentMethod === 'cash' ? null : (form.bankAccountId || null),
+                payment_method: form.paymentMethod,
+                payment_date: form.paymentDate,
+                payment_reference: form.reference || null,
+                notes: form.notes || null,
+              });
+              addToast(`Payment of Rs ${Number(form.amount).toLocaleString()} recorded`, 'success');
+              setPayTarget(null);
+            } catch (err) {
+              addToast(err?.message || 'Failed to record payment', 'error');
+            }
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function PayPurchaseDrawer({ purchase, bankAccounts, isPending, onClose, onSubmit }) {
+  const outstanding = useMemo(() => {
+    // Best-effort outstanding — the listPurchases endpoint doesn't yet
+    // return paid_amount, so default to the full amount and let the user
+    // adjust. Partial payments are clamped server-side.
+    return parseFloat(purchase.amountPkr) || 0;
+  }, [purchase]);
+
+  const [amount, setAmount] = useState(String(Math.round(outstanding)));
+  const [paymentMethod, setPaymentMethod] = useState('bank');
+  const [bankAccountId, setBankAccountId] = useState(bankAccounts.find(a => (a.currency || 'PKR') === 'PKR')?.id || '');
+  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
+  const [reference, setReference] = useState('');
+  const [notes, setNotes] = useState('');
+
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  const sourceMeta = SOURCE_META[purchase.source] || { label: purchase.source };
+  const SrcIcon = sourceMeta.icon || Receipt;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/30 backdrop-blur-sm flex items-stretch justify-end" onClick={onClose}>
+      <div className="bg-white w-full max-w-md h-full shadow-xl flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-bold text-gray-900">Record Payment</h2>
+            <p className="text-xs text-gray-500 mt-0.5 inline-flex items-center gap-1">
+              <SrcIcon size={12} /> {sourceMeta.label} · {purchase.ref || '—'}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700">
+            <X size={18} />
+          </button>
+        </div>
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const n = parseFloat(amount);
+            if (!n || n <= 0) return;
+            onSubmit({ amount: n, paymentMethod, bankAccountId, paymentDate, reference, notes });
+          }}
+          className="flex-1 overflow-y-auto p-5 space-y-4"
+        >
+          <div className="bg-gray-50 rounded-lg p-3 text-xs space-y-1">
+            <div className="flex justify-between">
+              <span className="text-gray-500">Supplier</span>
+              <span className="font-medium text-gray-900">{purchase.supplierName || '—'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Total</span>
+              <span className="font-medium text-gray-900">Rs {Math.round(outstanding).toLocaleString()}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Current status</span>
+              <span className={`px-2 py-0.5 rounded-full border ${statusTone(purchase.paymentStatus)}`}>
+                {purchase.paymentStatus || 'Pending'}
+              </span>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-gray-600 block mb-1">Amount paying (PKR)</label>
+            <input
+              type="number" min="0" step="0.01" required
+              value={amount} onChange={e => setAmount(e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
+            />
+            <p className="text-[11px] text-gray-400 mt-1">Defaults to full amount. Lower it for partial payment.</p>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-gray-600 block mb-1">Paid from</label>
+            <div className="inline-flex bg-gray-100 rounded-lg p-0.5 mb-2">
+              {['bank', 'cash', 'cheque'].map(m => (
+                <button key={m} type="button" onClick={() => setPaymentMethod(m)}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${paymentMethod === m ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>
+                  {m.charAt(0).toUpperCase() + m.slice(1)}
+                </button>
+              ))}
+            </div>
+            {paymentMethod !== 'cash' && (
+              <select
+                value={bankAccountId} onChange={e => setBankAccountId(e.target.value)}
+                required
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
+              >
+                <option value="">Select a bank account…</option>
+                {bankAccounts.map(a => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} · {a.bankName || '—'} ({a.currency || 'PKR'} {Math.round(parseFloat(a.currentBalance) || 0).toLocaleString()})
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1">Payment date</label>
+              <input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1">Reference</label>
+              <input type="text" value={reference} onChange={e => setReference(e.target.value)}
+                placeholder="Cheque/TXN #" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-gray-600 block mb-1">Notes</label>
+            <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+          </div>
+        </form>
+
+        <div className="px-5 py-4 border-t border-gray-100 flex items-center justify-end gap-2">
+          <button onClick={onClose} disabled={isPending}
+            className="px-3 py-2 text-sm text-gray-700 hover:text-gray-900">Cancel</button>
+          <button onClick={(e) => {
+              const form = e.currentTarget.closest('.bg-white').querySelector('form');
+              form.requestSubmit();
+            }} disabled={isPending}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded-lg">
+            <CheckCircle size={14} />
+            {isPending ? 'Recording…' : 'Record payment'}
+          </button>
         </div>
       </div>
     </div>
