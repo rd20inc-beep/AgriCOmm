@@ -104,7 +104,54 @@ export default function PrintableReports() {
 
   useEffect(() => { loadReport(); }, [loadReport]);
 
-  const handlePrint = () => window.print();
+  // Pop the printable subtree into a fresh window with only the page
+  // styles we need. The main app's `flex h-screen overflow-hidden` shell
+  // and scrolling `<main>` keep stomping our `@media print` overrides —
+  // printing from a clean document avoids the fight entirely.
+  const handlePrint = () => {
+    const src = document.querySelector('.printable-area');
+    if (!src) return;
+    const win = window.open('', '_blank', 'width=900,height=1200');
+    if (!win) {
+      addToast('Pop-up blocked — please allow pop-ups to print.', 'error');
+      return;
+    }
+    // Copy the page's stylesheets so Tailwind utility classes resolve
+    // inside the new window. We pull <link rel="stylesheet"> hrefs and
+    // <style> blocks from the current document.
+    const styleTags = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
+      .map(n => n.outerHTML)
+      .join('\n');
+    win.document.open();
+    win.document.write(`<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>AgriCOmm Report</title>
+${styleTags}
+<style>
+  @page { size: A4 portrait; margin: 12mm; }
+  html, body { background: white; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111; }
+  .print-report h2 { page-break-after: avoid; }
+  .print-report tr { page-break-inside: avoid; }
+  .print-report table { page-break-inside: auto; width: 100%; border-collapse: collapse; }
+  .print-report th, .print-report td { padding: 6px 10px; }
+  .print-report thead { background: #f3f4f6; }
+</style>
+</head>
+<body>
+${src.outerHTML}
+<script>
+  window.onload = function () {
+    setTimeout(function () { window.focus(); window.print(); }, 250);
+    window.onafterprint = function () { window.close(); };
+  };
+</script>
+</body>
+</html>`);
+    win.document.close();
+  };
 
   const companyName = companyProfileData?.legalName || companyProfileData?.name || 'AGRI COMMODITIES';
 
@@ -198,38 +245,6 @@ export default function PrintableReports() {
         )}
       </div>
 
-      {/* Print-only style overrides. The app shell wraps everything in
-          `flex h-screen overflow-hidden` with a scrolling `<main>`, so
-          trying to "unlock" it doesn't reliably surface the full report
-          to the printer. The robust pattern: hide every element by
-          visibility, then re-show just the printable subtree, and let
-          it flow as a normal block on the page. */}
-      <style>{`
-        @media print {
-          @page { size: A4 portrait; margin: 12mm; }
-          html, body { height: auto !important; overflow: visible !important; background: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; margin: 0 !important; padding: 0 !important; }
-          body * { visibility: hidden !important; }
-          .printable-area, .printable-area * { visibility: visible !important; }
-          .printable-area {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 100% !important;
-            height: auto !important;
-            max-height: none !important;
-            overflow: visible !important;
-            box-shadow: none !important;
-            border: 0 !important;
-            border-radius: 0 !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            background: white !important;
-          }
-          .print-report h2 { page-break-after: avoid; }
-          .print-report tr { page-break-inside: avoid; }
-          .print-report table { page-break-inside: auto; }
-        }
-      `}</style>
     </div>
   );
 }
