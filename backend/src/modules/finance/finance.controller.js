@@ -1100,16 +1100,21 @@ financeController.listPurchases = async (req, res) => {
     }
 
     // ── Export-order operational costs (transport / loading / etc.) ──
+    // Filter amount > 0 so the placeholder rows seeded on order creation
+    // (every category pre-inserted at 0) don't clutter the list. Fall
+    // back to amount*fx_rate when base_amount_pkr is 0/NULL — older rows
+    // (and the addCost shortcut) leave base_amount_pkr unpopulated.
     if (!wantSource || wantSource === 'export_cost') {
       let q = db('export_order_costs as eoc')
         .leftJoin('export_orders as eo', 'eoc.order_id', 'eo.id')
         .leftJoin('users as creator', 'eoc.created_by', 'creator.id')
+        .where('eoc.amount', '>', 0)
         .select(
           db.raw("'export_cost' AS source"),
           'eoc.id as ref_id',
           'eo.order_no as ref',
           db.raw('eoc.created_at::date as date'),
-          db.raw('COALESCE(eoc.base_amount_pkr, eoc.amount * COALESCE(eoc.fx_rate, 1)) as amount_pkr'),
+          db.raw('CASE WHEN COALESCE(eoc.base_amount_pkr, 0) > 0 THEN eoc.base_amount_pkr ELSE COALESCE(eoc.amount, 0) * COALESCE(eoc.fx_rate, 1) END as amount_pkr'),
           'eoc.amount',
           'eoc.currency',
           db.raw('NULL::text as supplier_name'),

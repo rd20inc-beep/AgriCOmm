@@ -1266,19 +1266,31 @@ const exportOrderController = {
         .where({ order_id: id, category })
         .first();
 
+      // Export-order outflows are always paid in PKR — keep base_amount_pkr
+      // in lock-step with amount so the unified finance/purchases query and
+      // any PKR-based reporting see the same number.
+      const amtPkr = parseFloat(amount);
       let cost;
       if (existing) {
         [cost] = await db('export_order_costs')
           .where({ id: existing.id })
-          .update({ amount: parseFloat(amount), notes: notes || null, updated_at: db.fn.now() })
+          .update({
+            amount: amtPkr,
+            base_amount_pkr: amtPkr,
+            fx_rate: 1,
+            notes: notes || null,
+            updated_at: db.fn.now(),
+          })
           .returning('*');
       } else {
         [cost] = await db('export_order_costs')
           .insert({
             order_id: id,
             category,
-            amount: parseFloat(amount),
-            currency: 'PKR', // outflow payments on export orders are always PKR
+            amount: amtPkr,
+            currency: 'PKR',
+            base_amount_pkr: amtPkr,
+            fx_rate: 1,
             notes: notes || null,
             created_by: req.user?.id || null,
           })
