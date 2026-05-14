@@ -1095,6 +1095,39 @@ export function useDeleteProductCategory() {
   });
 }
 
+// ----- Roles & Permissions -----
+
+export function usePermissions() {
+  return useQuery({
+    queryKey: ['admin', 'permissions'],
+    queryFn: async () => {
+      const res = await adminApi.permissions();
+      return transformKeys(unwrap(res, 'permissions') || []);
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useRolesWithPermissions() {
+  return useQuery({
+    queryKey: ['admin', 'roles-with-permissions'],
+    queryFn: async () => {
+      const res = await adminApi.rolesWithPermissions();
+      return transformKeys(unwrap(res, 'roles') || []);
+    },
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useUpdateRolePermissions() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ roleId, permissionIds }) =>
+      adminApi.updateRolePermissions(roleId, { permission_ids: permissionIds }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'roles-with-permissions'] }),
+  });
+}
+
 // ===================== DASHBOARD =====================
 
 export function useDashboard() {

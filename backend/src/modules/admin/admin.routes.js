@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const controller = require('../../controllers/adminController');
 const authorize = require('../../middleware/rbac');
+const { authorizeRole } = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 
 // View-level access for admin panel
@@ -21,6 +22,16 @@ router.get('/document-templates', authorize('admin', 'view'), controller.listDoc
 router.get('/document-templates/:id', authorize('admin', 'view'), controller.getDocumentTemplate);
 router.get('/product-categories', authorize('admin', 'view'), controller.listProductCategories);
 router.get('/product-categories/:id', authorize('admin', 'view'), controller.getProductCategory);
+// Roles & Permissions — read is admin.view (so the page can render),
+// write is Super-Admin-only (changing permissions is irreducible authority).
+router.get('/permissions', authorize('admin', 'view'), controller.listPermissions);
+router.get('/roles-with-permissions', authorize('admin', 'view'), controller.listRolesWithPermissions);
+router.put(
+  '/roles/:id/permissions',
+  authorizeRole('Super Admin'),
+  auditAction('update_role_permissions', 'role', (req) => req.params.id),
+  controller.updateRolePermissions
+);
 router.get('/settings', authorize('admin', 'view'), controller.getSettings);
 
 // Master data management

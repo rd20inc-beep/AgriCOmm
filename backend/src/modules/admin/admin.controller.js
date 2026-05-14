@@ -194,6 +194,95 @@ const adminController = {
   updateProductCategory: productCategoriesCrud.update,
   deleteProductCategory: productCategoriesCrud.delete,
 
+  // ─── Roles & Permissions ──────────────────────────────────────────────
+  // The Permissions tab on the Admin page reads listPermissions (every
+  // permission row in the system) + listRolesWithPermissions (each role
+  // along with the permission_ids it's currently granted), and writes
+  // through updateRolePermissions (replace a role's permission set with
+  // the array sent in the body).
+  async listPermissions(req, res) {
+    try {
+      const rows = await db('permissions').orderBy('module', 'asc').orderBy('action', 'asc');
+      return res.json({ success: true, data: { permissions: rows } });
+    } catch (err) {
+      console.error('List permissions error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  async listRolesWithPermissions(req, res) {
+    try {
+      const roles = await db('roles').orderBy('id', 'asc');
+      const rolePerms = await db('role_permissions').select('role_id', 'permission_id');
+      const byRole = new Map(roles.map(r => [r.id, []]));
+      for (const rp of rolePerms) {
+        if (byRole.has(rp.role_id)) byRole.get(rp.role_id).push(rp.permission_id);
+      }
+      const userCounts = await db('users')
+        .select('role_id')
+        .count('id as user_count')
+        .groupBy('role_id');
+      const userCountByRole = Object.fromEntries(userCounts.map(r => [r.role_id, parseInt(r.user_count, 10)]));
+
+      const data = roles.map(r => ({
+        id: r.id,
+        name: r.name,
+        description: r.description,
+        permission_ids: byRole.get(r.id) || [],
+        user_count: userCountByRole[r.id] || 0,
+      }));
+      return res.json({ success: true, data: { roles: data } });
+    } catch (err) {
+      console.error('List roles+permissions error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  async updateRolePermissions(req, res) {
+    try {
+      const roleId = parseInt(req.params.id, 10);
+      const { permission_ids } = req.body;
+      if (!Array.isArray(permission_ids)) {
+        return res.status(400).json({ success: false, message: 'permission_ids array is required.' });
+      }
+      const role = await db('roles').where({ id: roleId }).first();
+      if (!role) return res.status(404).json({ success: false, message: 'Role not found.' });
+
+      // Super Admin's permission set is intentionally immutable — without
+      // an irreducible all-access role, an admin could lock themselves
+      // out by clearing every permission on the role they're using.
+      if (role.name === 'Super Admin') {
+        return res.status(400).json({
+          success: false,
+          message: 'Super Admin permissions cannot be edited (it is the irreducible all-access role).',
+        });
+      }
+
+      // Validate every permission_id actually exists, then replace.
+      const requested = [...new Set(permission_ids.map(n => parseInt(n, 10)).filter(Boolean))];
+      if (requested.length > 0) {
+        const valid = await db('permissions').whereIn('id', requested).select('id');
+        const validSet = new Set(valid.map(r => r.id));
+        const unknown = requested.filter(id => !validSet.has(id));
+        if (unknown.length > 0) {
+          return res.status(400).json({ success: false, message: `Unknown permission ids: ${unknown.join(', ')}` });
+        }
+      }
+
+      await db.transaction(async (trx) => {
+        await trx('role_permissions').where({ role_id: roleId }).del();
+        if (requested.length > 0) {
+          await trx('role_permissions').insert(requested.map(pid => ({ role_id: roleId, permission_id: pid })));
+        }
+      });
+
+      return res.json({ success: true, data: { role_id: roleId, permission_count: requested.length } });
+    } catch (err) {
+      console.error('Update role permissions error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
   // Settings
   async getSettings(req, res) {
     try {

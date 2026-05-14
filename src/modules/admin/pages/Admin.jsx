@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Users, Truck, Package, Warehouse, Settings, ShoppingBag, Landmark, Tags, Factory, Files, UsersRound, MessageSquare } from 'lucide-react';
+import { Users, Truck, Package, Warehouse, Settings, ShoppingBag, Landmark, Tags, Factory, Files, UsersRound, MessageSquare, Shield } from 'lucide-react';
 
 import CustomersTab from './admin/CustomersTab';
 import SuppliersTab from './admin/SuppliersTab';
@@ -13,6 +13,7 @@ import MillsTab from './admin/MillsTab';
 import DocTemplatesTab from './admin/DocTemplatesTab';
 import WhatsAppTemplatesTab from './admin/WhatsAppTemplatesTab';
 import UsersRolesTab from './admin/UsersRolesTab';
+import PermissionsTab from './admin/PermissionsTab';
 import SettingsTab from './admin/SettingsTab';
 
 const tabs = [
@@ -28,6 +29,7 @@ const tabs = [
   { key: 'docTemplates', label: 'Document Templates', icon: Files },
   { key: 'whatsapp', label: 'WhatsApp', icon: MessageSquare },
   { key: 'users', label: 'Users & Roles', icon: UsersRound },
+  { key: 'permissions', label: 'Permissions', icon: Shield },
   { key: 'settings', label: 'Settings', icon: Settings },
 ];
 
@@ -44,6 +46,7 @@ const tabComponents = {
   docTemplates: DocTemplatesTab,
   whatsapp: WhatsAppTemplatesTab,
   users: UsersRolesTab,
+  permissions: PermissionsTab,
   settings: SettingsTab,
 };
 
