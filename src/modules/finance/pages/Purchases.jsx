@@ -1,8 +1,8 @@
-import { useState, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useMemo, useEffect, useRef } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   ShoppingCart, Package, Factory, Ship, Receipt,
-  Search, Download, RefreshCw, CheckCircle, Clock, X,
+  Search, Download, RefreshCw, CheckCircle, Clock, X, Plus, ChevronDown,
 } from 'lucide-react';
 import { usePurchases } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
@@ -39,11 +39,33 @@ function statusTone(s) {
   return STATUS_TONE[k] || STATUS_TONE.pending;
 }
 
+const ADD_OPTIONS = [
+  { label: 'Raw / Stock Lot',     description: 'Paddy, finished rice, byproduct lots',  icon: Package,  to: '/lot-inventory?action=new' },
+  { label: 'Mill Store Purchase', description: 'Spare parts, packaging, fuel',          icon: Factory,  to: '/mill-store/purchases/new' },
+  { label: 'Export Cost',         description: 'Freight, commission, certificates — pick an order', icon: Ship, to: '/export' },
+  { label: 'Business Expense',    description: 'Utilities, salaries, admin',            icon: Receipt,  to: '/finance/expenses?action=new' },
+];
+
 export default function Purchases() {
+  const navigate = useNavigate();
   const { queryParams: rangeParams } = useFinanceDateRange();
   const [source, setSource] = useState('all');
   const [statusFilter, setStatusFilter] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
+  const [addOpen, setAddOpen] = useState(false);
+  const addRef = useRef(null);
+
+  useEffect(() => {
+    if (!addOpen) return;
+    function onClickAway(e) { if (addRef.current && !addRef.current.contains(e.target)) setAddOpen(false); }
+    function onEsc(e) { if (e.key === 'Escape') setAddOpen(false); }
+    document.addEventListener('mousedown', onClickAway);
+    document.addEventListener('keydown', onEsc);
+    return () => {
+      document.removeEventListener('mousedown', onClickAway);
+      document.removeEventListener('keydown', onEsc);
+    };
+  }, [addOpen]);
 
   const params = { ...rangeParams, source: source !== 'all' ? source : undefined, limit: 500 };
   const { data, isLoading, error, refetch } = usePurchases(params);
@@ -111,6 +133,47 @@ export default function Purchases() {
           <p className="text-sm text-gray-500 mt-0.5">Every purchase recorded across the company — raw paddy, mill store, export costs, and expenses.</p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Add purchase — opens a dropdown that routes to the right creator,
+              since each purchase type lives in a different module (lots,
+              mill store, export costs, expenses). */}
+          <div className="relative" ref={addRef}>
+            <button
+              onClick={() => setAddOpen(o => !o)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm"
+            >
+              <Plus size={14} /> Add Purchase
+              <ChevronDown size={13} className={`transition-transform ${addOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {addOpen && (
+              <div className="absolute right-0 mt-1.5 w-80 bg-white rounded-xl border border-gray-200 shadow-lg z-20 overflow-hidden">
+                <div className="px-3 py-2 border-b border-gray-100">
+                  <p className="text-xs font-semibold text-gray-700">What are you adding?</p>
+                  <p className="text-[11px] text-gray-500 mt-0.5">Each type is recorded in its own module; this jumps you straight there.</p>
+                </div>
+                <ul>
+                  {ADD_OPTIONS.map(opt => {
+                    const Icon = opt.icon;
+                    return (
+                      <li key={opt.label}>
+                        <button
+                          onClick={() => { setAddOpen(false); navigate(opt.to); }}
+                          className="w-full text-left flex items-start gap-3 px-3 py-2.5 hover:bg-gray-50 transition-colors"
+                        >
+                          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gray-100 text-gray-700 flex-shrink-0 mt-0.5">
+                            <Icon size={15} />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-gray-900">{opt.label}</p>
+                            <p className="text-[11px] text-gray-500">{opt.description}</p>
+                          </div>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+          </div>
           <button onClick={exportCsv} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700 bg-white hover:bg-gray-50 border border-gray-200 rounded-lg">
             <Download size={14} /> CSV
           </button>

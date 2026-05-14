@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Plus, DollarSign, Search, Check, Loader2, CreditCard, Download,
   Wallet, Building2, Zap, Truck, Receipt, Briefcase, Coins, Ship,
@@ -178,6 +179,19 @@ export default function Expenses() {
 
   // ─── Form ───
   const [showForm, setShowForm] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Allow ?action=new (used by the Finance Purchases "+Add Purchase"
+  // dropdown) to deep-link straight into the new-expense form.
+  useEffect(() => {
+    if (searchParams.get('action') === 'new') {
+      setShowForm(true);
+      const next = new URLSearchParams(searchParams);
+      next.delete('action');
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
   const initForm = {
     expense_type: 'general', category: 'utility_bill',
     amount: '', currency: 'PKR', vendor_name: '', supplier_id: '',

@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Package, Search, Plus, Warehouse, Truck, Eye, Filter,
   ArrowUpDown, RefreshCw, BarChart3, DollarSign, AlertTriangle,
@@ -31,6 +31,18 @@ export default function LotInventory() {
   const [searchTerm, setSearchTerm] = useState('');
   const [displayUnit, setDisplayUnit] = useState('katta');
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Allow ?action=new (used by the Finance Purchases "+Add Purchase"
+  // dropdown) to deep-link straight into the create modal.
+  useEffect(() => {
+    if (searchParams.get('action') === 'new') {
+      setShowPurchaseModal(true);
+      const next = new URLSearchParams(searchParams);
+      next.delete('action');
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const { data: lots = [], isLoading, error, refetch } = useLotInventory({
     ...(statusFilter !== 'All' && { status: statusFilter }),
