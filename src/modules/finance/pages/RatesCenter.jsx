@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { DollarSign, Package, Plus, RefreshCw, Check } from 'lucide-react';
+import { DollarSign, Package, Plus, RefreshCw, Check, Lock, AlertTriangle } from 'lucide-react';
 import { FinanceTable, FinanceKPI } from '../../../components/finance';
 import { useFxRates, useCommodityRates } from '../../../api/queries';
 import { financeApi } from '../../../api/services';
@@ -88,17 +88,54 @@ export default function RatesCenter() {
     { key: 'isLocked', label: 'Locked', render: (v) => v ? <Check size={14} className="text-emerald-500" /> : '—' },
   ];
 
+  const isFallback = latestFx.source === 'system_settings_fallback';
+  const heroGradient = isFallback
+    ? 'from-amber-600 via-amber-500 to-orange-500'
+    : 'from-violet-700 via-indigo-600 to-blue-600';
+
+  const lockedCount = useMemo(() => commodityRates.filter(c => c.isLocked).length, [commodityRates]);
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 pb-4">
+      {/* ─── HERO BAND ────────────────────────────────────────────── */}
+      <div className={`rounded-2xl bg-gradient-to-r ${heroGradient} p-5 sm:p-6 text-white shadow-sm relative overflow-hidden`}>
+        <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 80% 30%, white 0%, transparent 60%)' }} />
+        <div className="relative flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-xs uppercase tracking-wider opacity-80 mb-1">
+              <DollarSign size={14} /> Current USD / PKR
+            </div>
+            <div className="text-3xl sm:text-4xl font-bold leading-tight tabular-nums">
+              {latestFx.rate ? `Rs ${parseFloat(latestFx.rate).toFixed(2)}` : 'Not set'}
+            </div>
+            <div className="text-xs opacity-90 mt-1">
+              {latestFx.effectiveDate ? <>Effective {new Date(latestFx.effectiveDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</> : 'No FX history yet'}
+              {' · '}{fxRates.length} historical {fxRates.length === 1 ? 'entry' : 'entries'}
+              {' · '}{commodityRates.length} commodity {commodityRates.length === 1 ? 'rate' : 'rates'}
+            </div>
+          </div>
+          <div className="flex flex-col items-start sm:items-end gap-1.5 text-[11px]">
+            <span className={`inline-flex items-center gap-1.5 font-semibold uppercase tracking-wider px-3 py-1.5 rounded-full ${isFallback ? 'bg-white/15 ring-1 ring-white/30' : 'bg-emerald-500/20 ring-1 ring-emerald-300/30'}`}>
+              {isFallback ? <AlertTriangle size={12} /> : <Check size={12} />}
+              {isFallback ? 'Fallback rate — add proper FX' : `Source: ${latestFx.source || 'manual'}`}
+            </span>
+            <button onClick={handleRefreshFx}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/15 hover:bg-white/25 ring-1 ring-white/30 transition-colors">
+              <RefreshCw size={12} /> Refresh open orders
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* Sub-tabs */}
       <div className="flex items-center gap-3">
-        <div className="flex bg-gray-100 rounded-lg p-1">
+        <div className="inline-flex bg-white border border-gray-200 rounded-lg p-0.5 shadow-sm">
           {SUB_TABS.map(t => {
             const Icon = t.icon;
             return (
               <button key={t.key} onClick={() => setSubTab(t.key)}
                 className={`flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                  subTab === t.key ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                  subTab === t.key ? 'bg-gray-900 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'
                 }`}><Icon size={14} /> {t.label}</button>
             );
           })}
@@ -107,27 +144,11 @@ export default function RatesCenter() {
 
       {subTab === 'fx' && (
         <>
-          {/* FX KPIs */}
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-            <FinanceKPI icon={DollarSign} title="Current USD/PKR" value={latestFx.rate ? String(latestFx.rate) : '—'}
-              subtitle={latestFx.effectiveDate ? `Since ${new Date(latestFx.effectiveDate).toLocaleDateString()}` : '—'}
-              status="info" loading={fxLoading} />
-            <FinanceKPI icon={RefreshCw} title="Rate Source" value={latestFx.source || '—'}
-              subtitle={latestFx.source === 'system_settings_fallback' ? 'Using default — add a proper rate' : 'From fx_rates table'}
-              status={latestFx.source === 'system_settings_fallback' ? 'warning' : 'good'} loading={fxLoading} />
-            <FinanceKPI icon={DollarSign} title="Total Rates" value={String(fxRates.length)}
-              subtitle="Historical entries" status="neutral" loading={fxLoading} />
-          </div>
-
           {/* Actions */}
           <div className="flex gap-2">
             <button onClick={() => setShowFxForm(!showFxForm)}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
               <Plus size={14} /> Add FX Rate
-            </button>
-            <button onClick={handleRefreshFx}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50">
-              <RefreshCw size={14} /> Refresh Open Orders
             </button>
           </div>
 
@@ -169,6 +190,15 @@ export default function RatesCenter() {
 
       {subTab === 'commodity' && (
         <>
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+            <FinanceKPI icon={Package} title="Total Rates" value={String(commodityRates.length)}
+              subtitle="Across all products" status="neutral" loading={crLoading} />
+            <FinanceKPI icon={Lock} title="Locked Rates" value={String(lockedCount)}
+              subtitle={`${commodityRates.length - lockedCount} editable`} status={lockedCount > 0 ? 'info' : 'neutral'} loading={crLoading} />
+            <FinanceKPI icon={Package} title="Rate Types" value={String(new Set(commodityRates.map(c => c.rateType)).size)}
+              subtitle="Distinct categories" status="neutral" loading={crLoading} />
+          </div>
+
           <div className="flex gap-2">
             <button onClick={() => setShowCrForm(!showCrForm)}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">

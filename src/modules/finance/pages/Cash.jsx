@@ -1,12 +1,13 @@
 import { useMemo } from 'react';
-import { Landmark, ArrowDownLeft, ArrowUpRight, Wallet } from 'lucide-react';
+import { Landmark, Wallet, TrendingUp, TrendingDown, Activity } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart } from '../../../components/finance';
 import { useBankAccounts, useBankTransactions } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 
 function fmtPKR(n) {
   if (n == null || isNaN(n)) return 'Rs 0';
-  if (Math.abs(n) >= 1_000_000) return `Rs ${(n / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(n) >= 10_000_000) return `Rs ${(n / 10_000_000).toFixed(2)}Cr`;
+  if (Math.abs(n) >= 100_000) return `Rs ${(n / 100_000).toFixed(2)}L`;
   if (Math.abs(n) >= 1_000) return `Rs ${(n / 1_000).toFixed(0)}K`;
   return `Rs ${Math.round(n).toLocaleString()}`;
 }
@@ -78,8 +79,42 @@ export default function Cash() {
 
   const hasFlow = cashFlowData.some(b => b.In > 0 || b.Out > 0);
 
+  const netFlow30d = cashFlowData.reduce((s, b) => s + b.In - b.Out, 0);
+  const heroGradient = totalBalance > 0
+    ? 'from-blue-700 via-blue-600 to-cyan-500'
+    : 'from-slate-700 via-slate-600 to-slate-500';
+  const FlowIcon = netFlow30d >= 0 ? TrendingUp : TrendingDown;
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 pb-4">
+      {/* ─── HERO BAND ────────────────────────────────────────────── */}
+      <div className={`rounded-2xl bg-gradient-to-r ${heroGradient} p-5 sm:p-6 text-white shadow-sm relative overflow-hidden`}>
+        <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 70% 30%, white 0%, transparent 60%)' }} />
+        <div className="relative flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-xs uppercase tracking-wider opacity-80 mb-1">
+              <Landmark size={14} /> Cash on hand
+            </div>
+            <div className="text-3xl sm:text-4xl font-bold leading-tight tabular-nums">
+              {fmtPKR(totalBalance)}
+            </div>
+            <div className="text-xs opacity-90 mt-1">
+              {pkrAccounts.length > 0 && <>PKR {fmtPKR(pkrBalance)}</>}
+              {usdAccounts.length > 0 && <> · USD ${Math.round(usdBalance).toLocaleString()}</>}
+              {' · '}{accounts.length} {accounts.length === 1 ? 'account' : 'accounts'}
+            </div>
+          </div>
+          <div className="flex flex-col items-start sm:items-end gap-1.5 text-[11px]">
+            <span className="inline-flex items-center gap-1.5 font-semibold uppercase tracking-wider px-3 py-1.5 rounded-full bg-white/15 ring-1 ring-white/30">
+              <FlowIcon size={12} /> 30-day net {netFlow30d >= 0 ? '+' : ''}{fmtPKR(netFlow30d)}
+            </span>
+            <div className="opacity-80 text-right">
+              {hasFlow ? `${transactions.length} transactions` : 'No recent activity'}
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <FinanceKPI icon={Landmark} title="Total Cash" value={fmtPKR(totalBalance)}
           subtitle={`${accounts.length} accounts`} status={totalBalance > 0 ? 'good' : 'danger'} loading={loadingAccounts} />

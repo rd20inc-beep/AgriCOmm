@@ -1,12 +1,13 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { TrendingUp, DollarSign, Package, Factory, AlertTriangle, CheckCircle, RefreshCw } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Factory, AlertTriangle, CheckCircle, RefreshCw, Activity } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart } from '../../../components/finance';
 import { useProfitabilitySummary } from '../../../api/queries';
 
 function fmtPKR(n) {
   if (n == null || isNaN(n)) return 'Rs 0';
-  if (Math.abs(n) >= 1_000_000) return `Rs ${(n / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(n) >= 10_000_000) return `Rs ${(n / 10_000_000).toFixed(2)}Cr`;
+  if (Math.abs(n) >= 100_000) return `Rs ${(n / 100_000).toFixed(2)}L`;
   if (Math.abs(n) >= 1_000) return `Rs ${(n / 1_000).toFixed(0)}K`;
   return `Rs ${Math.round(n).toLocaleString()}`;
 }
@@ -112,12 +113,39 @@ export default function Profit() {
     }));
   }, [tab, exportRows, millRows]);
 
+  const heroGradient = consolidatedPkr >= 0
+    ? 'from-emerald-600 via-emerald-500 to-teal-500'
+    : 'from-red-600 via-red-500 to-rose-500';
+  const HeroIcon = consolidatedPkr >= 0 ? TrendingUp : TrendingDown;
+  const totalRevenue = (summary.export?.totalRevenuePkr ?? exportRows.reduce((a, r) => a + (parseFloat(r.revenuePkrBooked) || 0), 0))
+    + millRows.reduce((a, r) => a + (parseFloat(r.revenue) || 0), 0);
+  const overallMargin = totalRevenue > 0 ? (consolidatedPkr / totalRevenue) * 100 : null;
+
   return (
-    <div className="space-y-6">
-      {/* FX info bar */}
-      <div className="flex items-center gap-3 text-xs text-gray-400">
-        <span className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">Base: PKR</span>
-        <span>Current rate: 1 USD = {currentFxRate} PKR</span>
+    <div className="space-y-5 pb-4">
+      {/* ─── HERO BAND ────────────────────────────────────────────── */}
+      <div className={`rounded-2xl bg-gradient-to-r ${heroGradient} p-5 sm:p-6 text-white shadow-sm relative overflow-hidden`}>
+        <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 30% 20%, white 0%, transparent 60%)' }} />
+        <div className="relative flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-xs uppercase tracking-wider opacity-80 mb-1">
+              <HeroIcon size={14} /> Consolidated profit (Export + Mill)
+            </div>
+            <div className="text-3xl sm:text-4xl font-bold leading-tight tabular-nums">
+              {fmtPKR(consolidatedPkr)}
+            </div>
+            <div className="text-xs opacity-90 mt-1">
+              Export {fmtPKR(exportBookedProfitPkr)} · Mill {fmtPKR(millProfitPkr)}
+              {exportFxGainLoss !== 0 && <> · FX {exportFxGainLoss >= 0 ? '+' : ''}{fmtPKR(exportFxGainLoss)}</>}
+            </div>
+          </div>
+          <div className="flex flex-col items-start sm:items-end gap-1.5 text-[11px]">
+            <span className="inline-flex items-center gap-1.5 font-semibold uppercase tracking-wider px-3 py-1.5 rounded-full bg-white/15 ring-1 ring-white/30">
+              <Activity size={12} /> Margin {overallMargin == null ? '—' : `${overallMargin.toFixed(1)}%`}
+            </span>
+            <div className="opacity-80 text-right">Base PKR · 1 USD = {currentFxRate}</div>
+          </div>
+        </div>
       </div>
 
       {/* KPIs */}
@@ -132,13 +160,13 @@ export default function Profit() {
           subtitle="Export + Mill" status={consolidatedPkr >= 0 ? 'good' : 'danger'} loading={isLoading} />
       </div>
 
-      {/* Tab + view mode selectors */}
+      {/* View mode selector */}
       <div className="flex items-center gap-3">
-        <div className="flex bg-gray-100 rounded-lg p-1">
+        <div className="inline-flex bg-white border border-gray-200 rounded-lg p-0.5 shadow-sm">
           {TABS.map(t => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                tab === t ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                tab === t ? 'bg-gray-900 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'
               }`}>{t}</button>
           ))}
         </div>
