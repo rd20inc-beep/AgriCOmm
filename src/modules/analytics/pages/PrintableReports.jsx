@@ -198,16 +198,33 @@ export default function PrintableReports() {
         )}
       </div>
 
-      {/* Print-only style overrides — unlock the app's flex/overflow shell
-          so the whole report (not just the viewport slice) reaches paper. */}
+      {/* Print-only style overrides. The app shell wraps everything in
+          `flex h-screen overflow-hidden` with a scrolling `<main>`, so
+          trying to "unlock" it doesn't reliably surface the full report
+          to the printer. The robust pattern: hide every element by
+          visibility, then re-show just the printable subtree, and let
+          it flow as a normal block on the page. */}
       <style>{`
         @media print {
           @page { size: A4 portrait; margin: 12mm; }
-          html, body { height: auto !important; overflow: visible !important; background: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          #root, #root > div { display: block !important; height: auto !important; overflow: visible !important; }
-          nav, aside, header, .layout-sidebar, .layout-topbar, .print\\:hidden { display: none !important; }
-          main, main.page-content { display: block !important; height: auto !important; max-height: none !important; overflow: visible !important; padding: 0 !important; }
-          .printable-area { box-shadow: none !important; border: 0 !important; border-radius: 0 !important; padding: 0 !important; }
+          html, body { height: auto !important; overflow: visible !important; background: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; margin: 0 !important; padding: 0 !important; }
+          body * { visibility: hidden !important; }
+          .printable-area, .printable-area * { visibility: visible !important; }
+          .printable-area {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            height: auto !important;
+            max-height: none !important;
+            overflow: visible !important;
+            box-shadow: none !important;
+            border: 0 !important;
+            border-radius: 0 !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            background: white !important;
+          }
           .print-report h2 { page-break-after: avoid; }
           .print-report tr { page-break-inside: avoid; }
           .print-report table { page-break-inside: auto; }
