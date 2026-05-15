@@ -17,7 +17,14 @@
  *   F. Hot-path indexes for the new payment_status filters.
  */
 exports.up = async function (knex) {
-  // ─── A. Normalise existing data ────────────────────────────────────
+  // ─── A. Drop old CHECK constraints FIRST, so the data UPDATEs that
+  //        follow aren't blocked by the old vocabularies. ────────────
+  await knex.raw(`ALTER TABLE inventory_lots     DROP CONSTRAINT IF EXISTS chk_inventory_lots_payment_status_valid`);
+  await knex.raw(`ALTER TABLE business_expenses  DROP CONSTRAINT IF EXISTS business_expenses_payment_chk`);
+  await knex.raw(`ALTER TABLE mill_purchases     DROP CONSTRAINT IF EXISTS mill_purchases_payment_status_chk`);
+  await knex.raw(`ALTER TABLE local_sales        DROP CONSTRAINT IF EXISTS chk_local_sales_payment_status_valid`);
+
+  // ─── B. Normalise existing data to the new vocabulary. ─────────────
   // inventory_lots used lowercase. Title-case it and replace NULLs.
   await knex.raw(`
     UPDATE inventory_lots
@@ -26,7 +33,6 @@ exports.up = async function (knex) {
       WHEN LOWER(payment_status) = 'partial' THEN 'Partial'
       ELSE 'Pending'
     END
-    WHERE payment_status IS DISTINCT FROM NULL OR payment_status IS NULL
   `);
 
   // business_expenses + mill_purchases + local_sales used 'Unpaid' default.
@@ -34,13 +40,7 @@ exports.up = async function (knex) {
   await knex.raw(`UPDATE mill_purchases     SET payment_status = 'Pending' WHERE payment_status IN ('Unpaid', 'unpaid')`);
   await knex.raw(`UPDATE local_sales        SET payment_status = 'Pending' WHERE payment_status IN ('Unpaid', 'unpaid')`);
 
-  // ─── B. Drop old CHECK constraints in favour of the unified one. ───
-  await knex.raw(`ALTER TABLE inventory_lots     DROP CONSTRAINT IF EXISTS chk_inventory_lots_payment_status_valid`);
-  await knex.raw(`ALTER TABLE business_expenses  DROP CONSTRAINT IF EXISTS business_expenses_payment_chk`);
-  await knex.raw(`ALTER TABLE mill_purchases     DROP CONSTRAINT IF EXISTS mill_purchases_payment_status_chk`);
-  await knex.raw(`ALTER TABLE local_sales        DROP CONSTRAINT IF EXISTS chk_local_sales_payment_status_valid`);
-
-  // ─── B'. Re-add with the standardised vocabulary. ──────────────────
+  // ─── C. Re-add CHECK constraints with the standardised vocabulary. ─
   await knex.raw(`
     ALTER TABLE inventory_lots ADD CONSTRAINT chk_inventory_lots_payment_status_valid
       CHECK (payment_status IS NULL OR payment_status IN ('Pending', 'Partial', 'Paid'))
@@ -64,13 +64,13 @@ exports.up = async function (knex) {
       CHECK (payment_status IN ('Pending', 'Partial', 'Paid'))
   `);
 
-  // ─── B''. Defaults pointed at the new "Pending" baseline. ──────────
+  // ─── D. Defaults pointed at the new "Pending" baseline. ────────────
   await knex.raw(`ALTER TABLE inventory_lots     ALTER COLUMN payment_status SET DEFAULT 'Pending'`);
   await knex.raw(`ALTER TABLE business_expenses  ALTER COLUMN payment_status SET DEFAULT 'Pending'`);
   await knex.raw(`ALTER TABLE mill_purchases     ALTER COLUMN payment_status SET DEFAULT 'Pending'`);
   await knex.raw(`ALTER TABLE local_sales        ALTER COLUMN payment_status SET DEFAULT 'Pending'`);
 
-  // ─── C. Cleanup orphan export_order_costs placeholders. ────────────
+  // ─── E. Cleanup orphan export_order_costs placeholders. ────────────
   // The exportOrders create flow used to insert 10 zero rows per order
   // (raw_rice / milling / bags / ...). The controller change in this PR
   // stops that; here we delete the existing junk.
@@ -93,11 +93,11 @@ exports.up = async function (knex) {
       AND eoc.created_by IS NULL
   `);
 
-  // ─── C'. business_expenses.fx_rate: backfill + default. ────────────
+  // ─── F. business_expenses.fx_rate: backfill + default. ─────────────
   await knex.raw(`UPDATE business_expenses SET fx_rate = 1 WHERE fx_rate IS NULL`);
   await knex.raw(`ALTER TABLE business_expenses ALTER COLUMN fx_rate SET DEFAULT 1`);
 
-  // ─── D. export_order_items.product_id: RESTRICT → SET NULL. ────────
+  // ─── G. export_order_items.product_id: RESTRICT → SET NULL. ────────
   await knex.raw(`ALTER TABLE export_order_items ALTER COLUMN product_id DROP NOT NULL`);
   await knex.raw(`ALTER TABLE export_order_items DROP CONSTRAINT IF EXISTS export_order_items_product_id_foreign`);
   await knex.raw(`
@@ -106,7 +106,7 @@ exports.up = async function (knex) {
       FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
   `);
 
-  // ─── E. payables / receivables audit columns. ──────────────────────
+  // ─── H. payables / receivables audit columns. ──────────────────────
   const hasPayCreatedBy = await knex.schema.hasColumn('payables', 'created_by');
   if (!hasPayCreatedBy) {
     await knex.schema.alterTable('payables', (t) => {
@@ -120,7 +120,7 @@ exports.up = async function (knex) {
     });
   }
 
-  // ─── F. Hot-path indexes for the new payment_status filters. ───────
+  // ─── I. Hot-path indexes for the new payment_status filters. ───────
   await knex.raw(`CREATE INDEX IF NOT EXISTS idx_export_order_costs_payment_status ON export_order_costs (payment_status)`);
   await knex.raw(`CREATE INDEX IF NOT EXISTS idx_business_expenses_payment_status  ON business_expenses  (payment_status)`);
   await knex.raw(`CREATE INDEX IF NOT EXISTS idx_mill_purchases_payment_status     ON mill_purchases     (payment_status)`);
