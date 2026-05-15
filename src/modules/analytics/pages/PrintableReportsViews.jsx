@@ -23,7 +23,7 @@ function fmtDate(iso) {
 
 // ─── Production report view ────────────────────────────────────────────
 export function ProductionReportView({ data, companyName, range, preset }) {
-  const { summary, byMill, byProduct, batches } = data;
+  const { summary, byProduct, batches } = data;
   const periodLabel = preset === 'daily' ? 'Daily' : preset === 'weekly' ? 'Weekly' : preset === 'monthly' ? 'Monthly' : 'Custom Range';
 
   return (
@@ -38,14 +38,9 @@ export function ProductionReportView({ data, companyName, range, preset }) {
         { label: 'Avg Yield', value: fmtPct(summary.avgYieldPct) },
       ]} />
 
-      <Section title="By Mill">
-        <Table
-          head={['Mill', 'Batches', 'Raw MT', 'Finished MT', 'Yield %']}
-          align={['left', 'right', 'right', 'right', 'right']}
-          rows={byMill.map(r => [r.name, r.batchCount, fmtMt(r.rawMt), fmtMt(r.finishedMt), fmtPct(r.yieldPct)])}
-          empty="No production this period."
-        />
-      </Section>
+      {/* "By Mill" section + the Mill column on Batch Detail are dropped
+          since there is only one mill — the breakdown was always a
+          single row identical to the period totals. */}
 
       <Section title="By Product">
         <Table
@@ -58,10 +53,10 @@ export function ProductionReportView({ data, companyName, range, preset }) {
 
       <Section title="Batch Detail">
         <Table
-          head={['Batch No', 'Mill', 'Supplier', 'Product', 'Status', 'Raw MT', 'Finished MT', 'Yield %', 'Created']}
-          align={['left', 'left', 'left', 'left', 'left', 'right', 'right', 'right', 'left']}
+          head={['Batch No', 'Supplier', 'Product', 'Status', 'Raw MT', 'Finished MT', 'Yield %', 'Created']}
+          align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'left']}
           rows={batches.map(b => [
-            b.batchNo, b.millName || '—', b.supplierName || '—', b.productName || '—',
+            b.batchNo, b.supplierName || '—', b.productName || '—',
             b.status, fmtMt(b.rawMt), fmtMt(b.finishedMt), fmtPct(b.yieldPct), fmtDate(b.createdAt),
           ])}
           empty="No batches in this period."
