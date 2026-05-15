@@ -5,11 +5,17 @@ import { FinanceKPI } from '../../../components/finance';
 import { useJournalEntries } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 
-function fmtAmount(v, currency = 'PKR') {
+function fmtPkr(v) {
   if (!v || Number(v) === 0) return '—';
-  const n = Math.round(parseFloat(v)).toLocaleString();
-  const sym = currency === 'USD' ? '$' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : 'Rs';
-  return `${sym} ${n}`;
+  return `Rs ${Math.round(parseFloat(v)).toLocaleString()}`;
+}
+
+function fmtOriginal(v, currency) {
+  if (!v || Number(v) === 0) return null;
+  const cur = (currency || 'PKR').toUpperCase();
+  if (cur === 'PKR') return null;
+  const sym = cur === 'USD' ? '$' : cur === 'EUR' ? '€' : cur === 'GBP' ? '£' : cur + ' ';
+  return `${sym}${Math.round(parseFloat(v)).toLocaleString()}`;
 }
 
 function fmtPkrCompact(n) {
@@ -184,8 +190,18 @@ export default function Accounting() {
                       <td className="py-2.5 px-3 text-gray-700">
                         <span className="truncate max-w-[260px] block">{j.description || '—'}</span>
                       </td>
-                      <td className="py-2.5 px-3 text-right font-medium text-gray-900">{fmtAmount(j.totalDebit  || j.total_debit,  j.currency)}</td>
-                      <td className="py-2.5 px-3 text-right font-medium text-gray-900">{fmtAmount(j.totalCredit || j.total_credit, j.currency)}</td>
+                      <td className="py-2.5 px-3 text-right font-medium text-gray-900 whitespace-nowrap">
+                        {fmtPkr(toPkr(j, 'totalDebit'))}
+                        {fmtOriginal(j.totalDebit || j.total_debit, j.currency) && (
+                          <div className="text-[10px] text-gray-400 font-normal">{fmtOriginal(j.totalDebit || j.total_debit, j.currency)}</div>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-medium text-gray-900 whitespace-nowrap">
+                        {fmtPkr(toPkr(j, 'totalCredit'))}
+                        {fmtOriginal(j.totalCredit || j.total_credit, j.currency) && (
+                          <div className="text-[10px] text-gray-400 font-normal">{fmtOriginal(j.totalCredit || j.total_credit, j.currency)}</div>
+                        )}
+                      </td>
                       <td className="py-2.5 px-3">
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                           j.status === 'Posted' ? 'bg-emerald-50 text-emerald-700'
@@ -212,18 +228,39 @@ export default function Accounting() {
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-blue-100">
-                                {lines.map((l, i) => (
-                                  <tr key={l.id || i} className="text-gray-700">
-                                    <td className="py-1.5 pr-3 font-medium">{l.account || `#${l.account_id}`}</td>
-                                    <td className="py-1.5 pr-3 text-gray-500">{l.narration || '—'}</td>
-                                    <td className="py-1.5 pr-3 text-right">{l.debit > 0 ? fmtAmount(l.debit, j.currency) : '—'}</td>
-                                    <td className="py-1.5 text-right">{l.credit > 0 ? fmtAmount(l.credit, j.currency) : '—'}</td>
-                                  </tr>
-                                ))}
+                                {lines.map((l, i) => {
+                                  // Convert each line's debit/credit to PKR using the
+                                  // journal's stamped fx_rate so DR/CR totals (which
+                                  // are already in PKR) reconcile against line sums.
+                                  const fx = parseFloat(j.fxRate || j.fx_rate) || 1;
+                                  const cur = (j.currency || 'PKR').toUpperCase();
+                                  const dr = parseFloat(l.debit)  || 0;
+                                  const cr = parseFloat(l.credit) || 0;
+                                  const drPkr = cur === 'PKR' ? dr : dr * fx;
+                                  const crPkr = cur === 'PKR' ? cr : cr * fx;
+                                  return (
+                                    <tr key={l.id || i} className="text-gray-700">
+                                      <td className="py-1.5 pr-3 font-medium">{l.account || `#${l.account_id}`}</td>
+                                      <td className="py-1.5 pr-3 text-gray-500">{l.narration || '—'}</td>
+                                      <td className="py-1.5 pr-3 text-right whitespace-nowrap">
+                                        {dr > 0 ? fmtPkr(drPkr) : '—'}
+                                        {dr > 0 && fmtOriginal(dr, j.currency) && (
+                                          <div className="text-[10px] text-gray-400 font-normal">{fmtOriginal(dr, j.currency)}</div>
+                                        )}
+                                      </td>
+                                      <td className="py-1.5 text-right whitespace-nowrap">
+                                        {cr > 0 ? fmtPkr(crPkr) : '—'}
+                                        {cr > 0 && fmtOriginal(cr, j.currency) && (
+                                          <div className="text-[10px] text-gray-400 font-normal">{fmtOriginal(cr, j.currency)}</div>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
                                 <tr className="font-semibold border-t-2 border-blue-200">
                                   <td colSpan={2} className="pt-1.5 text-gray-500 uppercase text-[10px]">Totals</td>
-                                  <td className="pt-1.5 pr-3 text-right">{fmtAmount(lines.reduce((s, l) => s + (parseFloat(l.debit)  || 0), 0), j.currency)}</td>
-                                  <td className="pt-1.5 text-right">{fmtAmount(lines.reduce((s, l) => s + (parseFloat(l.credit) || 0), 0), j.currency)}</td>
+                                  <td className="pt-1.5 pr-3 text-right">{fmtPkr(toPkr(j, 'totalDebit'))}</td>
+                                  <td className="pt-1.5 text-right">{fmtPkr(toPkr(j, 'totalCredit'))}</td>
                                 </tr>
                               </tbody>
                             </table>
