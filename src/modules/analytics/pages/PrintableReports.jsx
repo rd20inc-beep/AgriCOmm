@@ -101,22 +101,20 @@ export default function PrintableReports() {
 
   useEffect(() => { loadReport(); }, [loadReport]);
 
-  // Open the standalone /print-report route in a new tab. That route is
-  // mounted OUTSIDE the main app shell (no sidebar, no flex h-screen
-  // overflow-hidden wrapper) so the browser prints the document as a
-  // normal page. Previous iframe/popup approaches kept fighting the
-  // app layout or the browser's resource-loading timing.
+  // Print in the current tab. The global @media print rule in index.css
+  // (gated on body.app-print-mask) hides everything except .print-report,
+  // so toggling that class around window.print() gives us a clean preview
+  // with no app chrome and no new browser window.
   const handlePrint = () => {
-    const params = new URLSearchParams({ type: reportType });
-    if (usesPeriod) {
-      params.set('from', range.from.toISOString());
-      params.set('to', range.to.toISOString());
-      params.set('preset', preset);
-    }
-    if (reportType === 'stock') {
-      params.set('group_by', stockGroupBy);
-    }
-    window.open(`/print-report?${params.toString()}`, '_blank', 'noopener');
+    document.body.classList.add('app-print-mask');
+    const cleanup = () => {
+      document.body.classList.remove('app-print-mask');
+      window.removeEventListener('afterprint', cleanup);
+    };
+    window.addEventListener('afterprint', cleanup);
+    // Safety net for browsers that don't fire afterprint reliably.
+    setTimeout(cleanup, 60_000);
+    window.print();
   };
 
   const companyName = companyProfileData?.legalName || companyProfileData?.name || 'AGRI COMMODITIES';
