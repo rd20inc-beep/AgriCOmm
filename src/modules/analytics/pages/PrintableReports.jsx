@@ -114,36 +114,38 @@ export default function PrintableReports() {
 
   useEffect(() => { loadReport(); }, [loadReport]);
 
-  // Render the printable subtree into a hidden iframe and trigger
-  // print from there. Same-origin so stylesheets just work, no popup
-  // blocker, no fight with the SPA's flex h-screen overflow-hidden shell.
-  const handlePrint = () => {
+  // Render the printable subtree into a hidden iframe with ALL CSS
+  // inlined as <style> blocks. Earlier attempts kept the stylesheets
+  // as <link> tags and depended on the iframe loading them in time —
+  // unreliable across browsers and produced blank previews. Fetching
+  // the CSS text up-front and embedding it removes that dependency.
+  const handlePrint = async () => {
     const src = document.querySelector('.printable-area');
     if (!src) return;
 
-    // Clean up any iframe left over from a previous run.
+    // 1. Collect every stylesheet currently affecting the page.
+    const links = Array.from(document.querySelectorAll('link[rel="stylesheet"]'));
+    const inlineStyles = Array.from(document.querySelectorAll('style')).map(s => s.textContent).join('\n');
+
+    let fetchedCss = '';
+    try {
+      const texts = await Promise.all(links.map(l => fetch(l.href).then(r => r.text()).catch(() => '')));
+      fetchedCss = texts.join('\n');
+    } catch (err) {
+      addToast('Could not load page styles for print: ' + err.message, 'warning');
+    }
+
+    // 2. Clean up any iframe left over from a previous click.
     const prior = document.getElementById('agri-print-iframe');
     if (prior) prior.remove();
 
     const iframe = document.createElement('iframe');
     iframe.id = 'agri-print-iframe';
-    // Real dimensions so the browser actually paints the document
-    // (Chrome won't print a 0×0 iframe), but positioned far off-screen
-    // and behind everything else so it's invisible to the user.
+    // Real dimensions so the browser paints the document (Chrome won't
+    // print a 0×0 iframe), positioned far off-screen.
     iframe.style.cssText = 'position:fixed;left:-99999px;top:-99999px;width:900px;height:1200px;border:0;';
     iframe.setAttribute('aria-hidden', 'true');
     document.body.appendChild(iframe);
-
-    const origin = window.location.origin;
-    const styleTags = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
-      .map(n => {
-        if (n.tagName === 'LINK') {
-          const href = n.href || n.getAttribute('href') || '';
-          return `<link rel="stylesheet" href="${href.startsWith('http') ? href : origin + href}">`;
-        }
-        return n.outerHTML;
-      })
-      .join('\n');
 
     const doc = iframe.contentDocument || iframe.contentWindow.document;
     doc.open();
@@ -151,9 +153,9 @@ export default function PrintableReports() {
 <html>
 <head>
 <meta charset="utf-8" />
-<base href="${origin}/" />
 <title>AgriCOmm Report</title>
-${styleTags}
+<style>${fetchedCss}</style>
+<style>${inlineStyles}</style>
 <style>
   @page { size: A4 portrait; margin: 12mm; }
   html, body { background: white; margin: 0; padding: 0; height: auto; overflow: visible; }
@@ -169,9 +171,6 @@ ${styleTags}
 </html>`);
     doc.close();
 
-    // Wait for the iframe's stylesheets to actually load before firing
-    // print. iframe.onload fires after the document AND its resources
-    // settle, so it's a more reliable hook than setTimeout.
     const fire = () => {
       try {
         iframe.contentWindow.focus();
@@ -179,15 +178,12 @@ ${styleTags}
       } catch (err) {
         addToast('Print failed: ' + (err?.message || err), 'error');
       }
-      // Remove the iframe after the dialog closes (best-effort delay).
       setTimeout(() => iframe.remove(), 1500);
     };
 
-    if (iframe.contentWindow.document.readyState === 'complete') {
-      setTimeout(fire, 50);
-    } else {
-      iframe.addEventListener('load', () => setTimeout(fire, 50), { once: true });
-    }
+    // All CSS is inline so we don't need to wait for network resources.
+    // One animation frame is enough for layout to settle.
+    requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(fire, 30)));
   };
 
   const companyName = companyProfileData?.legalName || companyProfileData?.name || 'AGRI COMMODITIES';
