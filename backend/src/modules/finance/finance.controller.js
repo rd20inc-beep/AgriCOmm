@@ -48,44 +48,69 @@ async function generatePaymentNo(trx) {
 const financeController = {
   async getReceivables(req, res) {
     try {
-      const { page = 1, limit = 20, status, customer_id, overdue, from_date, to_date } = req.query;
+      const { page = 1, limit = 200, status, customer_id, overdue, from_date, to_date } = req.query;
       const offset = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
 
-      let query = db('receivables as r')
+      // ── Export-side receivables (existing) ────────────────────────
+      let exportQ = db('receivables as r')
         .leftJoin('customers as c', 'r.customer_id', 'c.id')
         .select(
-          'r.*',
+          'r.id', 'r.recv_no', 'r.type', 'r.expected_amount', 'r.received_amount',
+          'r.outstanding', 'r.currency', 'r.fx_rate', 'r.base_amount_pkr',
+          'r.due_date', 'r.status', 'r.aging', 'r.order_id', 'r.customer_id',
+          'r.created_at',
           'c.name as customer_name'
         );
+      if (status)        exportQ = exportQ.where('r.status', status);
+      if (customer_id)   exportQ = exportQ.where('r.customer_id', customer_id);
+      if (overdue === 'true') exportQ = exportQ.where('r.due_date', '<', db.fn.now()).where('r.status', '!=', 'Paid');
+      if (from_date)     exportQ = exportQ.where('r.created_at', '>=', from_date);
+      if (to_date)       exportQ = exportQ.where('r.created_at', '<=', to_date);
 
-      if (status) {
-        query = query.where('r.status', status);
-      }
-      if (customer_id) {
-        query = query.where('r.customer_id', customer_id);
-      }
-      if (overdue === 'true') {
-        query = query.where('r.due_date', '<', db.fn.now()).where('r.status', '!=', 'Paid');
-      }
-      // Honour the global date-range filter from FinanceLayout. Filters
-      // on created_at — "this month" means receivables generated this
-      // month, not those falling due this month.
-      if (from_date) query = query.where('r.created_at', '>=', from_date);
-      if (to_date)   query = query.where('r.created_at', '<=', to_date);
+      // ── Local sales with outstanding balance (UNIONed in) ─────────
+      // Surfaces credit / partial / pending local sales in Money In so
+      // the user's true AR includes domestic sales, not just export
+      // advances + balances.
+      let localQ = db('local_sales as ls')
+        .leftJoin('customers as c', 'ls.customer_id', 'c.id')
+        .whereIn('ls.payment_status', ['Pending', 'Partial', 'Credit'])
+        .where('ls.due_amount', '>', 0)
+        .select(
+          'ls.id',
+          'ls.sale_no as recv_no',
+          db.raw(`'Local Sale'::text as type`),
+          'ls.total_amount as expected_amount',
+          'ls.paid_amount as received_amount',
+          'ls.due_amount as outstanding',
+          db.raw(`'PKR'::text as currency`),
+          db.raw(`1::numeric as fx_rate`),
+          'ls.total_amount as base_amount_pkr',
+          db.raw(`ls.sale_date::timestamptz as due_date`),
+          'ls.payment_status as status',
+          db.raw(`GREATEST(0, EXTRACT(DAY FROM (NOW() - ls.sale_date::timestamptz)))::int as aging`),
+          db.raw(`NULL::int as order_id`),
+          'ls.customer_id',
+          db.raw(`ls.sale_date::timestamptz as created_at`),
+          db.raw(`COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer_name`)
+        );
+      if (status)       localQ = localQ.where('ls.payment_status', status);
+      if (customer_id)  localQ = localQ.where('ls.customer_id', customer_id);
+      if (from_date)    localQ = localQ.where('ls.sale_date', '>=', from_date);
+      if (to_date)      localQ = localQ.where('ls.sale_date', '<=', to_date);
 
-      const countQuery = query.clone().clearSelect().clearOrder().count('r.id as total').first();
+      // Knex UNION with ORDER BY + LIMIT works by wrapping the union
+      // as a derived table.
+      const [exportRows, localRows] = await Promise.all([exportQ, localQ]);
+      const combined = [...exportRows, ...localRows]
+        .sort((a, b) => (a.due_date ? new Date(a.due_date).getTime() : 0) - (b.due_date ? new Date(b.due_date).getTime() : 0));
 
-      const [receivables, countResult] = await Promise.all([
-        query.orderBy('r.due_date', 'asc').limit(parseInt(limit)).offset(offset),
-        countQuery,
-      ]);
-
-      const total = parseInt(countResult.total);
+      const total = combined.length;
+      const sliced = combined.slice(offset, offset + parseInt(limit));
 
       return res.json({
         success: true,
         data: {
-          receivables,
+          receivables: sliced,
           pagination: {
             page: parseInt(page),
             limit: parseInt(limit),
