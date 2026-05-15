@@ -47,6 +47,10 @@ router.get('/inventory/stock-valuation', authorize('reports', 'view'), controlle
 // ═══════════════════════════════════════════════════════════════════
 router.get('/printable/production', authorize('reports', 'view'), controller.printableProduction);
 router.get('/printable/stock',      authorize('reports', 'view'), controller.printableStock);
+router.get('/printable/pnl',        authorize('reports', 'view'), controller.printablePnl);
+router.get('/printable/cashflow',   authorize('reports', 'view'), controller.printableCashflow);
+router.get('/printable/ar-aging',   authorize('reports', 'view'), controller.printableArAging);
+router.get('/printable/ap-aging',   authorize('reports', 'view'), controller.printableApAging);
 
 // ═══════════════════════════════════════════════════════════════════
 // Production

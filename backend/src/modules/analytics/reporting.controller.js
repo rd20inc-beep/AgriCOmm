@@ -561,6 +561,325 @@ const reportingController = {
     }
   },
 
+  // ──── Profit & Loss (printable) ─────────────────────────────────
+  // Period-bound revenue / cost / profit rollup, mirroring what the
+  // /finance/profit page shows but in a print-friendly format.
+  async printablePnl(req, res) {
+    try {
+      const db = require('../../config/database');
+      const { from, to } = req.query;
+      if (!from || !to) return res.status(400).json({ success: false, message: 'from and to dates are required.' });
+      const fromDate = new Date(from);
+      const toDate = new Date(to);
+      if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
+        return res.status(400).json({ success: false, message: 'Invalid from/to date.' });
+      }
+
+      // ─── Revenue ────────────────────────────────────────────────
+      // Export: shipped/closed orders booked in PKR at locked rate
+      const exportRevRow = await db('export_orders')
+        .whereIn('status', ['Shipped', 'Arrived', 'Closed'])
+        .whereBetween('updated_at', [fromDate, toDate])
+        .sum({ revenuePkr: 'contract_value_pkr_locked' })
+        .count({ cnt: 'id' })
+        .first();
+
+      // Local sales — completed sales in PKR
+      const localRevRow = await db('local_sales')
+        .where('status', 'Completed')
+        .whereBetween('sale_date', [fromDate, toDate])
+        .sum({ revenuePkr: 'total_amount' })
+        .sum({ cogsPkr:   'cogs_total_pkr' })
+        .count({ cnt: 'id' })
+        .first();
+
+      // Mill — completed/approved batches
+      const millRow = await db('milling_batches')
+        .whereIn('status', ['Completed', 'Approved'])
+        .whereBetween('completed_at', [fromDate, toDate])
+        .count({ cnt: 'id' })
+        .sum({ rawMt: 'raw_qty_mt' })
+        .sum({ finishedMt: 'actual_finished_mt' })
+        .first();
+
+      // ─── Costs ──────────────────────────────────────────────────
+      // Raw rice purchases landed (paid or not — inventory cost basis)
+      const lotCostRow = await db('inventory_lots')
+        .whereBetween('purchase_date', [fromDate, toDate])
+        .sum({ totalPkr: 'landed_cost_total' })
+        .count({ cnt: 'id' })
+        .first();
+
+      // Mill store consumable purchases
+      const millPurchRow = await db('mill_purchases')
+        .whereBetween('purchase_date', [fromDate, toDate])
+        .sum({ totalPkr: 'total_amount' })
+        .count({ cnt: 'id' })
+        .first();
+
+      // Operational export costs (transport / customs / commission / etc.)
+      const exportCostRow = await db('export_order_costs as eoc')
+        .leftJoin('export_orders as eo', 'eoc.order_id', 'eo.id')
+        .whereBetween('eoc.created_at', [fromDate, toDate])
+        .where('eoc.amount', '>', 0)
+        .sum({ totalPkr: db.raw('CASE WHEN COALESCE(eoc.base_amount_pkr,0) > 0 THEN eoc.base_amount_pkr ELSE COALESCE(eoc.amount,0)*COALESCE(eoc.fx_rate,1) END') })
+        .count({ cnt: 'eoc.id' })
+        .first();
+
+      // Business expenses (utilities, salaries, etc.)
+      const expenseRow = await db('business_expenses')
+        .whereBetween('expense_date', [fromDate, toDate])
+        .sum({ totalPkr: 'amount_pkr' })
+        .count({ cnt: 'id' })
+        .first();
+
+      const num = (v) => parseFloat(v) || 0;
+      const revenue = {
+        exportPkr: num(exportRevRow?.revenuePkr),
+        exportCount: parseInt(exportRevRow?.cnt, 10) || 0,
+        localPkr: num(localRevRow?.revenuePkr),
+        localCount: parseInt(localRevRow?.cnt, 10) || 0,
+        millFinishedMt: num(millRow?.finishedMt),
+        millBatchCount: parseInt(millRow?.cnt, 10) || 0,
+      };
+      revenue.totalPkr = revenue.exportPkr + revenue.localPkr;
+
+      const costs = {
+        rawRicePkr: num(lotCostRow?.totalPkr),
+        rawRiceCount: parseInt(lotCostRow?.cnt, 10) || 0,
+        millStorePkr: num(millPurchRow?.totalPkr),
+        millStoreCount: parseInt(millPurchRow?.cnt, 10) || 0,
+        exportOpCostsPkr: num(exportCostRow?.totalPkr),
+        exportOpCostsCount: parseInt(exportCostRow?.cnt, 10) || 0,
+        businessExpensesPkr: num(expenseRow?.totalPkr),
+        businessExpensesCount: parseInt(expenseRow?.cnt, 10) || 0,
+        localCogsPkr: num(localRevRow?.cogsPkr),
+      };
+      costs.totalPkr = costs.rawRicePkr + costs.millStorePkr + costs.exportOpCostsPkr + costs.businessExpensesPkr;
+
+      const netProfitPkr = revenue.totalPkr - costs.totalPkr;
+      const marginPct = revenue.totalPkr > 0 ? (netProfitPkr / revenue.totalPkr) * 100 : 0;
+
+      return res.json({
+        success: true,
+        data: {
+          range: { from: fromDate.toISOString(), to: toDate.toISOString() },
+          revenue,
+          costs,
+          netProfitPkr,
+          marginPct,
+        },
+      });
+    } catch (err) {
+      console.error('Printable P&L report error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  // ──── Cashflow (printable) ─────────────────────────────────────
+  // Money In / Money Out from the unified payments feed, plus daily
+  // buckets so the FE can render a sparkline / bar chart.
+  async printableCashflow(req, res) {
+    try {
+      const db = require('../../config/database');
+      const { from, to } = req.query;
+      if (!from || !to) return res.status(400).json({ success: false, message: 'from and to dates are required.' });
+      const fromDate = new Date(from);
+      const toDate = new Date(to);
+      if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
+        return res.status(400).json({ success: false, message: 'Invalid from/to date.' });
+      }
+
+      const totals = await db('payments')
+        .whereBetween('payment_date', [fromDate, toDate])
+        .select('type')
+        .sum({ totalPkr: 'base_amount_pkr' })
+        .count({ cnt: 'id' })
+        .groupBy('type');
+
+      const summary = { inPkr: 0, outPkr: 0, inCount: 0, outCount: 0 };
+      for (const t of totals) {
+        if (t.type === 'receipt') {
+          summary.inPkr = parseFloat(t.totalPkr) || 0;
+          summary.inCount = parseInt(t.cnt, 10) || 0;
+        } else if (t.type === 'payment') {
+          summary.outPkr = parseFloat(t.totalPkr) || 0;
+          summary.outCount = parseInt(t.cnt, 10) || 0;
+        }
+      }
+      summary.netPkr = summary.inPkr - summary.outPkr;
+
+      // Daily buckets — keep it client-friendly for charts.
+      const daily = await db('payments')
+        .whereBetween('payment_date', [fromDate, toDate])
+        .select(db.raw('payment_date::date as day'))
+        .select('type')
+        .sum({ amt: 'base_amount_pkr' })
+        .groupBy('day', 'type')
+        .orderBy('day', 'asc');
+
+      const byDay = new Map();
+      for (const r of daily) {
+        const key = (r.day instanceof Date ? r.day.toISOString().slice(0, 10) : String(r.day).slice(0, 10));
+        if (!byDay.has(key)) byDay.set(key, { day: key, In: 0, Out: 0 });
+        if (r.type === 'receipt') byDay.get(key).In += parseFloat(r.amt) || 0;
+        else if (r.type === 'payment') byDay.get(key).Out += parseFloat(r.amt) || 0;
+      }
+      const days = Array.from(byDay.values()).map((b) => ({ ...b, Net: b.In - b.Out }));
+
+      // Top 10 receipts + top 10 payments for the body of the report
+      const topReceipts = await db('payments as p')
+        .leftJoin('receivables as r', 'p.linked_receivable_id', 'r.id')
+        .leftJoin('customers as c',   'r.customer_id', 'c.id')
+        .where('p.type', 'receipt')
+        .whereBetween('p.payment_date', [fromDate, toDate])
+        .select('p.payment_no', 'p.payment_date', 'p.base_amount_pkr', 'p.payment_method')
+        .select(db.raw("COALESCE(c.name, 'Counterparty') as counterparty"))
+        .orderBy('p.base_amount_pkr', 'desc')
+        .limit(10);
+
+      const topPayments = await db('payments as p')
+        .leftJoin('payables as pay', 'p.linked_payable_id', 'pay.id')
+        .where('p.type', 'payment')
+        .whereBetween('p.payment_date', [fromDate, toDate])
+        .select('p.payment_no', 'p.payment_date', 'p.base_amount_pkr', 'p.payment_method')
+        .select(db.raw("COALESCE(pay.vendor_name, 'Vendor') as counterparty"))
+        .orderBy('p.base_amount_pkr', 'desc')
+        .limit(10);
+
+      return res.json({
+        success: true,
+        data: {
+          range: { from: fromDate.toISOString(), to: toDate.toISOString() },
+          summary,
+          daily: days,
+          topReceipts: topReceipts.map((r) => ({
+            paymentNo: r.payment_no,
+            date: r.payment_date,
+            counterparty: r.counterparty,
+            method: r.payment_method,
+            amountPkr: parseFloat(r.base_amount_pkr) || 0,
+          })),
+          topPayments: topPayments.map((r) => ({
+            paymentNo: r.payment_no,
+            date: r.payment_date,
+            counterparty: r.counterparty,
+            method: r.payment_method,
+            amountPkr: parseFloat(r.base_amount_pkr) || 0,
+          })),
+        },
+      });
+    } catch (err) {
+      console.error('Printable cashflow report error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  // ──── AR Aging (printable) ─────────────────────────────────────
+  // Open receivables bucketed by age (0-30 / 31-60 / 61-90 / 90+ days
+  // since due). Always reflects current state — no period filter.
+  async printableArAging(req, res) {
+    try {
+      const db = require('../../config/database');
+      const today = new Date();
+      const rows = await db('receivables as r')
+        .leftJoin('customers as c', 'r.customer_id', 'c.id')
+        .leftJoin('export_orders as eo', 'r.order_id', 'eo.id')
+        .whereNotIn('r.status', ['Paid', 'Written Off'])
+        .where('r.outstanding', '>', 0)
+        .select(
+          'r.id', 'r.recv_no', 'r.due_date', 'r.outstanding',
+          'r.currency', 'r.fx_rate', 'r.base_amount_pkr', 'r.type',
+          db.raw('COALESCE(c.name, eo.order_no) as counterparty'),
+          'eo.order_no'
+        )
+        .orderBy('r.due_date', 'asc');
+
+      const buckets = { '0-30': { count: 0, totalPkr: 0 }, '31-60': { count: 0, totalPkr: 0 }, '61-90': { count: 0, totalPkr: 0 }, '90+': { count: 0, totalPkr: 0 } };
+      let totalPkr = 0;
+      const detail = rows.map((r) => {
+        const due = r.due_date ? new Date(r.due_date) : null;
+        const days = due ? Math.floor((today - due) / (1000 * 60 * 60 * 24)) : 0;
+        const bucket = days <= 30 ? '0-30' : days <= 60 ? '31-60' : days <= 90 ? '61-90' : '90+';
+        const out = parseFloat(r.outstanding) || 0;
+        const cur = String(r.currency || 'PKR').toUpperCase();
+        const stamped = parseFloat(r.base_amount_pkr) || 0;
+        const fxRate = parseFloat(r.fx_rate) || 280;
+        const outPkr = cur === 'PKR' ? out : (stamped > 0 ? stamped * (out / parseFloat(r.outstanding || 1)) : out * fxRate);
+        buckets[bucket].count += 1;
+        buckets[bucket].totalPkr += outPkr;
+        totalPkr += outPkr;
+        return {
+          recvNo: r.recv_no, dueDate: r.due_date,
+          counterparty: r.counterparty || '—',
+          type: r.type, currency: cur,
+          outstanding: out, outstandingPkr: outPkr,
+          ageDays: days, bucket,
+        };
+      });
+
+      return res.json({
+        success: true,
+        data: {
+          asOf: today.toISOString(),
+          buckets, totalPkr,
+          rows: detail,
+        },
+      });
+    } catch (err) {
+      console.error('Printable AR aging report error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  // ──── AP Aging (printable) ─────────────────────────────────────
+  async printableApAging(req, res) {
+    try {
+      const db = require('../../config/database');
+      const today = new Date();
+      const rows = await db('payables as p')
+        .leftJoin('suppliers as s', 'p.supplier_id', 's.id')
+        .whereNotIn('p.status', ['Paid', 'Written Off'])
+        .where('p.outstanding', '>', 0)
+        .select(
+          'p.id', 'p.payable_no', 'p.due_date', 'p.outstanding', 'p.source_table', 'p.vendor_name',
+          db.raw('COALESCE(s.name, p.vendor_name) as counterparty')
+        )
+        .orderBy('p.due_date', 'asc');
+
+      const buckets = { '0-30': { count: 0, totalPkr: 0 }, '31-60': { count: 0, totalPkr: 0 }, '61-90': { count: 0, totalPkr: 0 }, '90+': { count: 0, totalPkr: 0 } };
+      let totalPkr = 0;
+      const detail = rows.map((r) => {
+        const due = r.due_date ? new Date(r.due_date) : null;
+        const days = due ? Math.floor((today - due) / (1000 * 60 * 60 * 24)) : 0;
+        const bucket = days <= 30 ? '0-30' : days <= 60 ? '31-60' : days <= 90 ? '61-90' : '90+';
+        const outPkr = parseFloat(r.outstanding) || 0;
+        buckets[bucket].count += 1;
+        buckets[bucket].totalPkr += outPkr;
+        totalPkr += outPkr;
+        return {
+          payableNo: r.payable_no, dueDate: r.due_date,
+          counterparty: r.counterparty || '—',
+          sourceTable: r.source_table,
+          outstandingPkr: outPkr,
+          ageDays: days, bucket,
+        };
+      });
+
+      return res.json({
+        success: true,
+        data: {
+          asOf: today.toISOString(),
+          buckets, totalPkr,
+          rows: detail,
+        },
+      });
+    } catch (err) {
+      console.error('Printable AP aging report error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
   // Stock as-of snapshot. Always reflects the current inventory_lots
   // state — no historical roll-back. Grouped per the requested key.
   async printableStock(req, res) {

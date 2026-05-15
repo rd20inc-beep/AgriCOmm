@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Printer, RefreshCw, Calendar, Factory, Boxes } from 'lucide-react';
+import { Printer, RefreshCw, Calendar, Factory, Boxes, TrendingUp, Wallet, ArrowDownLeft, ArrowUpRight } from 'lucide-react';
 import api from '../../../api/client';
 import { useApp } from '../../../context/AppContext';
 
@@ -62,13 +62,17 @@ const STOCK_GROUP_OPTIONS = [
 export default function PrintableReports() {
   const { addToast, companyProfileData } = useApp();
 
-  const [reportType, setReportType] = useState('production'); // 'production' | 'stock'
-  const [preset, setPreset] = useState('daily');
+  const [reportType, setReportType] = useState('production'); // 'production' | 'stock' | 'pnl' | 'cashflow' | 'ar_aging' | 'ap_aging'
+  const [preset, setPreset] = useState('monthly');
   const [stockGroupBy, setStockGroupBy] = useState('product');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  // Period-based reports use the period selector; snapshot reports
+  // (stock + AR/AP aging) ignore it.
+  const usesPeriod = reportType === 'production' || reportType === 'pnl' || reportType === 'cashflow';
 
   const range = useMemo(() => {
     if (preset === 'custom' && customFrom && customTo) {
@@ -85,16 +89,22 @@ export default function PrintableReports() {
     setLoading(true);
     setData(null);
     try {
+      let res;
+      const periodParams = { from: range.from.toISOString(), to: range.to.toISOString() };
       if (reportType === 'production') {
-        const res = await api.get('/api/reporting/printable/production', {
-          from: range.from.toISOString(),
-          to: range.to.toISOString(),
-        });
-        setData(res?.data || res);
+        res = await api.get('/api/reporting/printable/production', periodParams);
+      } else if (reportType === 'pnl') {
+        res = await api.get('/api/reporting/printable/pnl', periodParams);
+      } else if (reportType === 'cashflow') {
+        res = await api.get('/api/reporting/printable/cashflow', periodParams);
+      } else if (reportType === 'ar_aging') {
+        res = await api.get('/api/reporting/printable/ar-aging');
+      } else if (reportType === 'ap_aging') {
+        res = await api.get('/api/reporting/printable/ap-aging');
       } else {
-        const res = await api.get('/api/reporting/printable/stock', { group_by: stockGroupBy });
-        setData(res?.data || res);
+        res = await api.get('/api/reporting/printable/stock', { group_by: stockGroupBy });
       }
+      setData(res?.data || res);
     } catch (err) {
       addToast(err.message || 'Failed to load report', 'error');
     } finally {
@@ -160,22 +170,23 @@ ${src.outerHTML}
       {/* Toolbar — hidden when printing */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 print:hidden">
         <div className="flex flex-wrap items-center gap-3">
-          <div className="inline-flex rounded-lg overflow-hidden border border-gray-200">
-            <button
-              onClick={() => setReportType('production')}
-              className={`px-4 py-2 text-sm font-medium inline-flex items-center gap-2 ${reportType === 'production' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
-            >
-              <Factory className="w-4 h-4" /> Production
-            </button>
-            <button
-              onClick={() => setReportType('stock')}
-              className={`px-4 py-2 text-sm font-medium inline-flex items-center gap-2 ${reportType === 'stock' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
-            >
-              <Boxes className="w-4 h-4" /> Stock
-            </button>
+          <div className="inline-flex rounded-lg overflow-hidden border border-gray-200 flex-wrap">
+            {[
+              { k: 'production', l: 'Production', i: Factory },
+              { k: 'stock',      l: 'Stock',      i: Boxes },
+              { k: 'pnl',        l: 'P&L',        i: TrendingUp },
+              { k: 'cashflow',   l: 'Cashflow',   i: Wallet },
+              { k: 'ar_aging',   l: 'AR Aging',   i: ArrowDownLeft },
+              { k: 'ap_aging',   l: 'AP Aging',   i: ArrowUpRight },
+            ].map(({ k, l, i: Ic }) => (
+              <button key={k} onClick={() => setReportType(k)}
+                className={`px-3 py-2 text-sm font-medium inline-flex items-center gap-1.5 ${reportType === k ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}>
+                <Ic className="w-4 h-4" /> {l}
+              </button>
+            ))}
           </div>
 
-          {reportType === 'production' && (
+          {usesPeriod && (
             <div className="inline-flex rounded-lg overflow-hidden border border-gray-200">
               {[
                 { k: 'daily', l: 'Daily' },
@@ -194,7 +205,7 @@ ${src.outerHTML}
             </div>
           )}
 
-          {reportType === 'production' && preset === 'custom' && (
+          {usesPeriod && preset === 'custom' && (
             <div className="inline-flex items-center gap-2 text-sm">
               <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} className="border border-gray-300 rounded px-2 py-1.5" />
               <span className="text-gray-400">to</span>
@@ -240,6 +251,14 @@ ${src.outerHTML}
           <ProductionReportView data={data} companyName={companyName} range={range} preset={preset} />
         ) : reportType === 'stock' && data.grand && data.rows ? (
           <StockReportView data={data} companyName={companyName} groupLabel={STOCK_GROUP_OPTIONS.find(o => o.key === stockGroupBy)?.label} />
+        ) : reportType === 'pnl' && data.revenue && data.costs ? (
+          <PnlReportView data={data} companyName={companyName} range={range} preset={preset} />
+        ) : reportType === 'cashflow' && data.summary ? (
+          <CashflowReportView data={data} companyName={companyName} range={range} preset={preset} />
+        ) : reportType === 'ar_aging' && data.buckets ? (
+          <AgingReportView data={data} companyName={companyName} kind="receivable" />
+        ) : reportType === 'ap_aging' && data.buckets ? (
+          <AgingReportView data={data} companyName={companyName} kind="payable" />
         ) : (
           <div className="text-center text-gray-400 py-12">No data.</div>
         )}
@@ -328,6 +347,166 @@ function StockReportView({ data, companyName, groupLabel }) {
         />
       </Section>
 
+      <Footer />
+    </div>
+  );
+}
+
+// ─── Profit & Loss report view ─────────────────────────────────────────
+function PnlReportView({ data, companyName, range, preset }) {
+  const { revenue, costs, netProfitPkr, marginPct } = data;
+  const periodLabel = preset === 'daily' ? 'Daily' : preset === 'weekly' ? 'Weekly' : preset === 'monthly' ? 'Monthly' : 'Custom Range';
+  return (
+    <div className="print-report space-y-6 text-sm text-gray-900">
+      <Header companyName={companyName} title={`${periodLabel} P&L`} subtitle={`${fmtDate(range.from)} – ${fmtDate(range.to)}`} />
+      <SummaryRow items={[
+        { label: 'Revenue', value: fmtPkr(revenue.totalPkr) },
+        { label: 'Total Costs', value: fmtPkr(costs.totalPkr) },
+        { label: 'Net Profit', value: fmtPkr(netProfitPkr) },
+        { label: 'Margin', value: `${(marginPct || 0).toFixed(1)}%` },
+        { label: 'Mill Output', value: `${fmtMt(revenue.millFinishedMt)} MT` },
+      ]} />
+      <Section title="Revenue Breakdown">
+        <Table
+          head={['Stream', 'Count', 'Amount (PKR)']}
+          align={['left', 'right', 'right']}
+          rows={[
+            ['Export Orders (shipped/closed)', revenue.exportCount, fmtPkr(revenue.exportPkr)],
+            ['Local Sales (completed)',        revenue.localCount,  fmtPkr(revenue.localPkr)],
+            ['Mill batches completed',         revenue.millBatchCount, `${fmtMt(revenue.millFinishedMt)} MT`],
+          ]}
+          totalRow={['TOTAL', revenue.exportCount + revenue.localCount, fmtPkr(revenue.totalPkr)]}
+          empty="No revenue in this period."
+        />
+      </Section>
+      <Section title="Cost Breakdown">
+        <Table
+          head={['Category', 'Count', 'Amount (PKR)']}
+          align={['left', 'right', 'right']}
+          rows={[
+            ['Raw rice purchases (landed)', costs.rawRiceCount,           fmtPkr(costs.rawRicePkr)],
+            ['Mill store consumables',      costs.millStoreCount,          fmtPkr(costs.millStorePkr)],
+            ['Export operational costs',    costs.exportOpCostsCount,      fmtPkr(costs.exportOpCostsPkr)],
+            ['Business expenses',           costs.businessExpensesCount,   fmtPkr(costs.businessExpensesPkr)],
+          ]}
+          totalRow={['TOTAL', costs.rawRiceCount + costs.millStoreCount + costs.exportOpCostsCount + costs.businessExpensesCount, fmtPkr(costs.totalPkr)]}
+          empty="No costs in this period."
+        />
+      </Section>
+      <Section title="Bottom Line">
+        <Table
+          head={['Line', 'Amount (PKR)']}
+          align={['left', 'right']}
+          rows={[
+            ['Revenue',          fmtPkr(revenue.totalPkr)],
+            ['Less: Costs',      `(${fmtPkr(costs.totalPkr)})`],
+            ['Net Profit (PKR)', fmtPkr(netProfitPkr)],
+            ['Margin %',         `${(marginPct || 0).toFixed(1)}%`],
+          ]}
+          empty=""
+        />
+      </Section>
+      <Footer />
+    </div>
+  );
+}
+
+// ─── Cashflow report view ──────────────────────────────────────────────
+function CashflowReportView({ data, companyName, range, preset }) {
+  const { summary, daily, topReceipts, topPayments } = data;
+  const periodLabel = preset === 'daily' ? 'Daily' : preset === 'weekly' ? 'Weekly' : preset === 'monthly' ? 'Monthly' : 'Custom Range';
+  return (
+    <div className="print-report space-y-6 text-sm text-gray-900">
+      <Header companyName={companyName} title={`${periodLabel} Cashflow`} subtitle={`${fmtDate(range.from)} – ${fmtDate(range.to)}`} />
+      <SummaryRow items={[
+        { label: 'Money In', value: fmtPkr(summary.inPkr) },
+        { label: 'Money Out', value: fmtPkr(summary.outPkr) },
+        { label: 'Net Cashflow', value: fmtPkr(summary.netPkr) },
+        { label: 'Receipts', value: summary.inCount },
+        { label: 'Payments', value: summary.outCount },
+      ]} />
+      <Section title="Daily Movement">
+        <Table
+          head={['Date', 'In (PKR)', 'Out (PKR)', 'Net (PKR)']}
+          align={['left', 'right', 'right', 'right']}
+          rows={(daily || []).map(d => [d.day, fmtPkr(d.In), fmtPkr(d.Out), fmtPkr(d.Net)])}
+          empty="No payments recorded in this period."
+        />
+      </Section>
+      {(topReceipts || []).length > 0 && (
+        <Section title="Top Receipts">
+          <Table
+            head={['Payment', 'Date', 'Counterparty', 'Method', 'Amount (PKR)']}
+            align={['left', 'left', 'left', 'left', 'right']}
+            rows={topReceipts.map(r => [r.paymentNo, fmtDate(r.date), r.counterparty, r.method || '—', fmtPkr(r.amountPkr)])}
+            empty=""
+          />
+        </Section>
+      )}
+      {(topPayments || []).length > 0 && (
+        <Section title="Top Payments">
+          <Table
+            head={['Payment', 'Date', 'Counterparty', 'Method', 'Amount (PKR)']}
+            align={['left', 'left', 'left', 'left', 'right']}
+            rows={topPayments.map(r => [r.paymentNo, fmtDate(r.date), r.counterparty, r.method || '—', fmtPkr(r.amountPkr)])}
+            empty=""
+          />
+        </Section>
+      )}
+      <Footer />
+    </div>
+  );
+}
+
+// ─── Aging report view (AR or AP) ──────────────────────────────────────
+function AgingReportView({ data, companyName, kind }) {
+  const { asOf, buckets, totalPkr, rows } = data;
+  const isAR = kind === 'receivable';
+  const title = isAR ? 'Accounts Receivable Aging' : 'Accounts Payable Aging';
+  const BUCKETS = ['0-30', '31-60', '61-90', '90+'];
+  return (
+    <div className="print-report space-y-6 text-sm text-gray-900">
+      <Header companyName={companyName} title={title} subtitle={`As of ${new Date(asOf).toLocaleString()}`} />
+      <SummaryRow items={[
+        ...BUCKETS.map(b => ({ label: `${b} days`, value: fmtPkr(buckets[b]?.totalPkr || 0) })),
+        { label: 'Total Outstanding', value: fmtPkr(totalPkr) },
+      ]} />
+      <Section title="By Bucket">
+        <Table
+          head={['Bucket', 'Count', 'Outstanding (PKR)', '% of Total']}
+          align={['left', 'right', 'right', 'right']}
+          rows={BUCKETS.map(b => [
+            `${b} days`,
+            buckets[b]?.count || 0,
+            fmtPkr(buckets[b]?.totalPkr || 0),
+            totalPkr > 0 ? `${((buckets[b]?.totalPkr || 0) / totalPkr * 100).toFixed(1)}%` : '—',
+          ])}
+          totalRow={['TOTAL', rows.length, fmtPkr(totalPkr), '100%']}
+          empty="No open balances."
+        />
+      </Section>
+      <Section title={isAR ? 'Open Receivables (oldest first)' : 'Open Payables (oldest first)'}>
+        <Table
+          head={[
+            isAR ? 'Receivable' : 'Payable',
+            'Counterparty',
+            'Due',
+            'Days',
+            'Bucket',
+            'Outstanding (PKR)',
+          ]}
+          align={['left', 'left', 'left', 'right', 'left', 'right']}
+          rows={rows.map(r => [
+            isAR ? r.recvNo : r.payableNo,
+            r.counterparty,
+            r.dueDate ? fmtDate(r.dueDate) : '—',
+            r.ageDays,
+            r.bucket,
+            fmtPkr(r.outstandingPkr),
+          ])}
+          empty="No open balances."
+        />
+      </Section>
       <Footer />
     </div>
   );
