@@ -127,7 +127,10 @@ export default function PrintableReports() {
 
     const iframe = document.createElement('iframe');
     iframe.id = 'agri-print-iframe';
-    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none;';
+    // Real dimensions so the browser actually paints the document
+    // (Chrome won't print a 0×0 iframe), but positioned far off-screen
+    // and behind everything else so it's invisible to the user.
+    iframe.style.cssText = 'position:fixed;left:-99999px;top:-99999px;width:900px;height:1200px;border:0;';
     iframe.setAttribute('aria-hidden', 'true');
     document.body.appendChild(iframe);
 
