@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowDownLeft, DollarSign, AlertTriangle, CheckCircle, Clock, Eye, X } from 'lucide-react';
+import { ArrowDownLeft, DollarSign, AlertTriangle, CheckCircle, Clock, Eye, X, Printer } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart, FinanceFilterBar } from '../../../components/finance';
 import { useReceivables, useRecordPayment, useBankAccounts } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
@@ -9,6 +9,7 @@ import { useApp } from '../../../context/AppContext';
 import StatusBadge from '../../../components/StatusBadge';
 import { toPkr } from '../utils/fx';
 import { ageBucket } from '../utils/aging';
+import { shortenRef } from '../utils/refs';
 
 // Currency-aware formatter — picks $ / Rs / € / £ from the row's currency.
 function fmtCur(n, currency = 'USD') {
@@ -40,7 +41,7 @@ function pkrOf(row, key = 'outstanding') {
 function fmt(n) { return fmtCur(n, 'USD'); }
 
 export default function MoneyIn() {
-  const { addToast } = useApp();
+  const { addToast, companyProfileData } = useApp();
   const qc = useQueryClient();
   const { queryParams: rangeParams } = useFinanceDateRange();
   const { data: receivables = [], isLoading } = useReceivables(rangeParams);
@@ -48,6 +49,17 @@ export default function MoneyIn() {
   const [statusFilter, setStatusFilter] = useState('All');
   const [typeFilter, setTypeFilter] = useState('All');
   const [drawer, setDrawer] = useState(null);
+
+  function handlePrint() {
+    document.body.classList.add('app-print-mask');
+    const cleanup = () => {
+      document.body.classList.remove('app-print-mask');
+      window.removeEventListener('afterprint', cleanup);
+    };
+    window.addEventListener('afterprint', cleanup);
+    setTimeout(cleanup, 60_000);
+    window.print();
+  }
 
   // Status comparisons are case-insensitive — the CHECK constraint
   // forces capitalised values today, but Local Sales / future writers
@@ -87,9 +99,11 @@ export default function MoneyIn() {
   }, [receivables]);
 
   const columns = [
-    { key: 'recvNo', label: 'Ref', sortable: true, width: '120px', render: (v, row) => {
-      if (row.orderId) return <Link to={`/export/${row.orderId}`} className="text-blue-600 hover:text-blue-800 font-medium hover:underline" onClick={e => e.stopPropagation()}>{v}</Link>;
-      return v || '—';
+    { key: 'recvNo', label: 'Ref', sortable: true, width: '110px', render: (v, row) => {
+      const short = shortenRef(v);
+      const inner = <span title={v || ''}>{short || '—'}</span>;
+      if (row.orderId) return <Link to={`/export/${row.orderId}`} className="text-blue-600 hover:text-blue-800 font-medium hover:underline whitespace-nowrap" onClick={e => e.stopPropagation()}>{inner}</Link>;
+      return inner;
     }},
     { key: 'customerName', label: 'Customer', sortable: true, render: (v) => v || '—' },
     { key: 'type', label: 'Type', sortable: true, render: (v) => (
@@ -157,8 +171,35 @@ export default function MoneyIn() {
     }
   }
 
+  const companyName = companyProfileData?.legalName || companyProfileData?.name || 'AGRI COMMODITIES';
   return (
     <div className="space-y-6">
+      {/* Print button — toggles body.app-print-mask so the global print
+          rule unhides only .print-report below. */}
+      <div className="flex items-center justify-end -mb-2">
+        <button onClick={handlePrint}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm">
+          <Printer size={14} /> Print
+        </button>
+      </div>
+
+      <div className="print-report space-y-6">
+        {/* Print-only header */}
+        <div className="hidden print:block">
+          <div className="border-b-2 border-gray-900 pb-2 flex items-end justify-between mb-4">
+            <div>
+              <div className="text-base font-bold uppercase tracking-wider">{companyName}</div>
+              <div className="text-xs text-gray-500">Generated {new Date().toLocaleString()}</div>
+            </div>
+            <div className="text-right">
+              <div className="text-lg font-bold">Money In — Receivables</div>
+              <div className="text-xs text-gray-600">
+                {receivables.length} entries · Outstanding {fmtCur(totalOutstandingPkr, 'PKR')} · Overdue {fmtCur(overdueAmountPkr, 'PKR')}
+              </div>
+            </div>
+          </div>
+        </div>
+
       {/* Summary KPIs — totals in PKR; foreign equivalent shown when present */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <FinanceKPI icon={ArrowDownLeft} title="Total Receivables" value={fmtCur(totalOutstandingPkr, 'PKR')}
@@ -201,6 +242,7 @@ export default function MoneyIn() {
           </button>
         )}
       />
+      </div>{/* /.print-report */}
 
       {/* Detail Drawer */}
       {drawer && (
