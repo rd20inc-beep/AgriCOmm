@@ -231,10 +231,18 @@ export default function Accounting() {
                           {j.entity || 'general'}
                         </span>
                       </td>
-                      <td className="py-2.5 px-3 text-xs">
-                        {!refNo ? <span className="text-gray-400">—</span>
-                          : href ? <Link to={href} onClick={e => e.stopPropagation()} className="text-blue-600 hover:underline font-medium">{refNo}</Link>
-                          : <span className="text-gray-700">{refNo}</span>}
+                      <td className="py-2.5 px-3 text-xs whitespace-nowrap">
+                        {(() => {
+                          if (!refNo) return <span className="text-gray-400">—</span>;
+                          // LOT-YYYYMMDD-NNNN → LOT-NNNN (date is in the Date column already)
+                          const short = refNo.startsWith('LOT-')
+                            ? `LOT-${(refNo.split('-')[2] || '').replace(/^0+/, '') || '0'}`
+                            : refNo;
+                          const inner = <span title={refNo}>{short}</span>;
+                          return href
+                            ? <Link to={href} onClick={e => e.stopPropagation()} className="text-blue-600 hover:underline font-medium">{inner}</Link>
+                            : <span className="text-gray-700">{inner}</span>;
+                        })()}
                       </td>
                       <td className="py-2.5 px-3 text-gray-700" style={{ maxWidth: 280, width: 280 }}>
                         <span className="block truncate" title={j.description || ''}>{j.description || '—'}</span>
