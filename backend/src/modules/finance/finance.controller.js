@@ -1291,6 +1291,58 @@ financeController.payPurchase = async (req, res) => {
         }
       }
 
+      // ─── Journal entry — DR payable / expense, CR Cash & Bank ──────
+      // Match the convention used by recordPayment for Money In/Out so
+      // the Accounting page shows every settlement, not just the ones
+      // booked through Money Out's drawer. Skip silently if the GL
+      // accounts aren't seeded yet — the payment itself already
+      // succeeded and we don't want to roll it back over a bookkeeping
+      // miss.
+      try {
+        const refLabel = row.lot_no || row.purchase_no || row.expense_no
+          || (source === 'export_cost' ? `EXP-COST #${id}` : `#${id}`);
+        const refType =
+          source === 'lot'         ? 'Purchase Lot'
+          : source === 'mill_store' ? 'Mill Purchase'
+          : source === 'export_cost'? 'Export Order Cost'
+          :                           'Business Expense';
+        const entity = source === 'export_cost' ? 'export' : 'mill';
+
+        // Debit side: the payable/expense being settled.
+        //   lots & mill store & export costs → Supplier Payable (id=78)
+        //   business expenses → Accrued Expenses (id=81)
+        // Credit side: Cash & Bank umbrella (id=53) — bank-level detail
+        // already lives in bank_transactions written above.
+        const supplierPayable = await trx('chart_of_accounts').where({ code: '2010' }).first();
+        const accruedExpenses = await trx('chart_of_accounts').where({ code: '2110' }).first();
+        const cashAndBank     = await trx('chart_of_accounts').where({ code: '1000' }).first();
+
+        const debitAcc = source === 'expense' ? accruedExpenses : supplierPayable;
+        if (debitAcc && cashAndBank) {
+          await accountingService.createJournal(trx, {
+            date: paidAt.toISOString().slice(0, 10),
+            entity,
+            refType,
+            refNo: refLabel,
+            description: `Payment of Rs ${Math.round(amountPkr).toLocaleString()} for ${refType.toLowerCase()} ${refLabel}${notes ? ` — ${notes}` : ''}`,
+            currency: 'PKR',
+            fxRate: 1,
+            isAuto: true,
+            userId: req.user?.id || null,
+            lines: [
+              { account_id: debitAcc.id,    account: debitAcc.name,    debit: amountPkr, credit: 0,         narration: `DR ${debitAcc.code} ${debitAcc.name} — settled ${refLabel}` },
+              { account_id: cashAndBank.id, account: cashAndBank.name, debit: 0,         credit: amountPkr, narration: `CR ${cashAndBank.code} ${cashAndBank.name} — paid ${refLabel}` },
+            ],
+          }).then(async (journal) => {
+            if (journal?.id) await accountingService.postJournal(trx, journal.id);
+          });
+        } else {
+          console.warn(`Pay purchase: chart_of_accounts missing required codes (1000/2010/2110) — journal skipped for ${refType} ${refLabel}`);
+        }
+      } catch (jeErr) {
+        console.error('Pay purchase journal error (payment still recorded):', jeErr.message);
+      }
+
       return { source, source_id: id, amount_paid_pkr: amountPkr, status, fully_paid: fullyPaid };
     });
 
