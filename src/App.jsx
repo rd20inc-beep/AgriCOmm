@@ -38,6 +38,7 @@ const Inventory = lazy(() => import('./modules/inventory/pages/Inventory'));
 const Documents = lazy(() => import('./modules/documents/pages/Documents'));
 const Reports = lazy(() => import('./modules/analytics/pages/Reports'));
 const PrintableReports = lazy(() => import('./modules/analytics/pages/PrintableReports'));
+const StandalonePrintReport = lazy(() => import('./modules/analytics/pages/StandalonePrintReport'));
 const Approvals = lazy(() => import('./modules/admin/pages/Approvals'));
 const AuditLog = lazy(() => import('./modules/admin/pages/AuditLog'));
 const LotInventory = lazy(() => import('./modules/inventory/pages/LotInventory'));
@@ -192,6 +193,17 @@ function App() {
           <Suspense fallback={<LoadingSpinner message="Loading page..." />}>
             <Routes>
               <Route path="/login" element={<Login />} />
+              {/* Standalone print page — mounted OUTSIDE the app shell
+                  so the browser prints a clean document (no sidebar /
+                  header / scroll container fight). */}
+              <Route
+                path="/print-report"
+                element={
+                  <ProtectedRoute module="reports" action="view">
+                    <StandalonePrintReport />
+                  </ProtectedRoute>
+                }
+              />
               <Route
                 path="/*"
                 element={
