@@ -65,6 +65,7 @@ const FinanceTransfers = lazy(() => import('./modules/finance/pages/InternalTran
 const Reconciliation = lazy(() => import('./modules/finance/pages/Reconciliation'));
 const Expenses = lazy(() => import('./modules/finance/pages/Expenses'));
 const Purchases = lazy(() => import('./modules/finance/pages/Purchases'));
+const LocalSalesFinance = lazy(() => import('./modules/finance/pages/LocalSalesFinance'));
 
 function FinanceRoutes() {
   return (
@@ -76,6 +77,7 @@ function FinanceRoutes() {
         <Route path="money-in" element={<MoneyIn />} />
         <Route path="money-out" element={<MoneyOut />} />
         <Route path="purchases" element={<Purchases />} />
+        <Route path="local-sales" element={<LocalSalesFinance />} />
         <Route path="cash" element={<Cash />} />
         <Route path="profit" element={<Profit />} />
         <Route path="rates" element={<RatesCenter />} />

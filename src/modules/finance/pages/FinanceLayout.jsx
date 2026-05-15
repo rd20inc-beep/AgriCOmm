@@ -1,20 +1,21 @@
 import { NavLink, useSearchParams } from 'react-router-dom';
 import {
   LayoutDashboard, ArrowDownLeft, ArrowUpRight, DollarSign,
-  TrendingUp, Landmark, BookOpen, Bell, Clock, Settings, ShoppingCart,
+  TrendingUp, Landmark, BookOpen, Bell, Clock, Settings, ShoppingCart, Store,
 } from 'lucide-react';
 
 const tabs = [
-  { label: 'Overview',    path: '/finance',              icon: LayoutDashboard, end: true },
-  { label: 'Purchases',   path: '/finance/purchases',    icon: ShoppingCart },
-  { label: 'Expenses',    path: '/finance/expenses',     icon: DollarSign },
-  { label: 'Money In',    path: '/finance/money-in',     icon: ArrowDownLeft },
-  { label: 'Money Out',   path: '/finance/money-out',    icon: ArrowUpRight },
-  { label: 'Cash',        path: '/finance/cash',         icon: Landmark },
-  { label: 'Profit',      path: '/finance/profit',       icon: TrendingUp },
-  { label: 'Rates',       path: '/finance/rates',        icon: Settings },
-  { label: 'Accounting',  path: '/finance/accounting',   icon: BookOpen },
-  { label: 'Alerts',      path: '/finance/alerts',       icon: Bell },
+  { label: 'Overview',     path: '/finance',              icon: LayoutDashboard, end: true },
+  { label: 'Purchases',    path: '/finance/purchases',    icon: ShoppingCart },
+  { label: 'Expenses',     path: '/finance/expenses',     icon: DollarSign },
+  { label: 'Money In',     path: '/finance/money-in',     icon: ArrowDownLeft },
+  { label: 'Money Out',    path: '/finance/money-out',    icon: ArrowUpRight },
+  { label: 'Local Sales',  path: '/finance/local-sales',  icon: Store },
+  { label: 'Cash',         path: '/finance/cash',         icon: Landmark },
+  { label: 'Profit',       path: '/finance/profit',       icon: TrendingUp },
+  { label: 'Rates',        path: '/finance/rates',        icon: Settings },
+  { label: 'Accounting',   path: '/finance/accounting',   icon: BookOpen },
+  { label: 'Alerts',       path: '/finance/alerts',       icon: Bell },
 ];
 
 const DATE_PRESETS = [

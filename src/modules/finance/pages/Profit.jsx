@@ -1,8 +1,8 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { TrendingUp, TrendingDown, DollarSign, Factory, AlertTriangle, CheckCircle, RefreshCw, Activity } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Factory, Store, AlertTriangle, CheckCircle, RefreshCw, Activity } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart } from '../../../components/finance';
-import { useProfitabilitySummary } from '../../../api/queries';
+import { useProfitabilitySummary, useLocalSales, useLocalSalesSummary } from '../../../api/queries';
 
 function fmtPKR(n) {
   if (n == null || isNaN(n)) return 'Rs 0';
@@ -19,7 +19,7 @@ function fmtUSD(n) {
   return `$${Math.round(n).toLocaleString()}`;
 }
 
-const TABS = ['Export', 'Mill', 'Consolidated'];
+const TABS = ['Export', 'Mill', 'Local', 'Consolidated'];
 
 function AccuracyBadge({ status }) {
   if (status === 'exact') return <span className="inline-flex items-center gap-0.5 text-xs text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full"><CheckCircle size={10} /> Exact</span>;
@@ -31,6 +31,8 @@ function AccuracyBadge({ status }) {
 
 export default function Profit() {
   const { data: summary = {}, isLoading } = useProfitabilitySummary();
+  const { data: localSales = [], isLoading: localLoading } = useLocalSales();
+  const { data: localSummary = {} } = useLocalSalesSummary();
   const [tab, setTab] = useState('Export');
 
   const exportRows = summary.export?.rows || [];
@@ -41,7 +43,8 @@ export default function Profit() {
   const exportBookedProfitPkr = summary.export?.totalBookedProfitPkr || 0;
   const exportFxGainLoss = summary.export?.totalFxGainLossPkr || 0;
   const millProfitPkr = summary.mill?.totalProfitPkr || 0;
-  const consolidatedPkr = exportBookedProfitPkr + millProfitPkr;
+  const localProfitPkr = parseFloat(localSummary?.profit?.grossProfit) || 0;
+  const consolidatedPkr = exportBookedProfitPkr + millProfitPkr + localProfitPkr;
 
   const exportColumns = [
     { key: 'orderNo', label: 'Order', sortable: true, render: (v, row) => (
@@ -82,15 +85,23 @@ export default function Profit() {
     { key: 'calculationStatus', label: 'Accuracy', render: (v) => <AccuracyBadge status={v} /> },
   ];
 
-  // Chart data per tab. Consolidated rolls export + mill into one
-  // bar each so the user sees the totals side-by-side, instead of the
-  // previous behaviour where Consolidated silently showed the export
-  // chart only.
+  // Chart data per tab. Consolidated rolls every segment into one bar
+  // so the user sees totals side-by-side.
   const chartData = useMemo(() => {
     if (tab === 'Mill') {
       return millRows.filter(r => r.revenue > 0 || r.costs > 0).map(r => ({
         name: r.batchNo, Revenue: r.revenue, Cost: r.costs, Profit: r.grossProfit,
       }));
+    }
+    if (tab === 'Local') {
+      return (localSales || [])
+        .filter(s => parseFloat(s.totalAmount) > 0)
+        .map(s => ({
+          name: s.saleNo,
+          Revenue: parseFloat(s.totalAmount) || 0,
+          Cost:    parseFloat(s.cogsTotalPkr || s.landedCostTotal) || 0,
+          Profit:  parseFloat(s.grossProfit || s.grossProfitPkr) || 0,
+        }));
     }
     if (tab === 'Consolidated') {
       const exportTotals = exportRows.reduce((a, r) => ({
@@ -103,22 +114,47 @@ export default function Profit() {
         Cost:    a.Cost    + (parseFloat(r.costs)       || 0),
         Profit:  a.Profit  + (parseFloat(r.grossProfit) || 0),
       }), { Revenue: 0, Cost: 0, Profit: 0 });
+      const localTotals = (localSales || []).reduce((a, s) => ({
+        Revenue: a.Revenue + (parseFloat(s.totalAmount)                       || 0),
+        Cost:    a.Cost    + (parseFloat(s.cogsTotalPkr || s.landedCostTotal) || 0),
+        Profit:  a.Profit  + (parseFloat(s.grossProfit || s.grossProfitPkr)   || 0),
+      }), { Revenue: 0, Cost: 0, Profit: 0 });
       const data = [];
       if (exportTotals.Revenue || exportTotals.Cost) data.push({ name: 'Export', ...exportTotals });
       if (millTotals.Revenue   || millTotals.Cost)   data.push({ name: 'Mill',   ...millTotals });
+      if (localTotals.Revenue  || localTotals.Cost)  data.push({ name: 'Local',  ...localTotals });
       return data;
     }
     return exportRows.filter(r => r.revenuePkrBooked > 0).map(r => ({
       name: r.orderNo, Revenue: r.revenuePkrBooked, Cost: r.totalCostPkr, Profit: r.bookedProfitPkr,
     }));
-  }, [tab, exportRows, millRows]);
+  }, [tab, exportRows, millRows, localSales]);
+
+  const localColumns = [
+    { key: 'saleNo', label: 'Sale', sortable: true, render: (v, row) => (
+      <Link to={`/local-sales/${row.id}`} className="text-blue-600 hover:underline font-medium">{v}</Link>
+    )},
+    { key: 'saleDate', label: 'Date', sortable: true, render: (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '—' },
+    { key: 'buyerName', label: 'Buyer', sortable: true, render: (v) => v || '—' },
+    { key: 'itemName', label: 'Item', render: (v) => v || '—' },
+    { key: 'quantityKg', label: 'Qty (kg)', sortable: true, align: 'right', render: (v) => Math.round(parseFloat(v) || 0).toLocaleString() },
+    { key: 'totalAmount', label: 'Revenue', sortable: true, align: 'right', render: (v) => fmtPKR(v) },
+    { key: 'cogsTotalPkr', label: 'Cost', align: 'right', render: (v, row) => fmtPKR(v || row.landedCostTotal) },
+    { key: 'grossProfit', label: 'Profit', sortable: true, align: 'right', render: (v, row) => {
+      const n = parseFloat(v || row.grossProfitPkr) || 0;
+      return <span className={n >= 0 ? 'text-emerald-600 font-medium' : 'text-red-600 font-medium'}>{fmtPKR(n)}</span>;
+    }},
+    { key: 'marginPct', label: 'Margin', sortable: true, align: 'right', render: (v) => v == null || isNaN(parseFloat(v)) ? '—' : `${parseFloat(v).toFixed(1)}%` },
+    { key: 'paymentStatus', label: 'Status', render: (v) => <span className="text-xs px-2 py-0.5 rounded-full bg-gray-50 text-gray-700 border border-gray-200">{v || 'Pending'}</span> },
+  ];
 
   const heroGradient = consolidatedPkr >= 0
     ? 'from-emerald-600 via-emerald-500 to-teal-500'
     : 'from-red-600 via-red-500 to-rose-500';
   const HeroIcon = consolidatedPkr >= 0 ? TrendingUp : TrendingDown;
   const totalRevenue = (summary.export?.totalRevenuePkr ?? exportRows.reduce((a, r) => a + (parseFloat(r.revenuePkrBooked) || 0), 0))
-    + millRows.reduce((a, r) => a + (parseFloat(r.revenue) || 0), 0);
+    + millRows.reduce((a, r) => a + (parseFloat(r.revenue) || 0), 0)
+    + (parseFloat(localSummary?.profit?.revenue) || 0);
   const overallMargin = totalRevenue > 0 ? (consolidatedPkr / totalRevenue) * 100 : null;
 
   return (
@@ -129,13 +165,13 @@ export default function Profit() {
         <div className="relative flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-xs uppercase tracking-wider opacity-80 mb-1">
-              <HeroIcon size={14} /> Consolidated profit (Export + Mill)
+              <HeroIcon size={14} /> Consolidated profit (Export + Mill + Local)
             </div>
             <div className="text-3xl sm:text-4xl font-bold leading-tight tabular-nums">
               {fmtPKR(consolidatedPkr)}
             </div>
             <div className="text-xs opacity-90 mt-1">
-              Export {fmtPKR(exportBookedProfitPkr)} · Mill {fmtPKR(millProfitPkr)}
+              Export {fmtPKR(exportBookedProfitPkr)} · Mill {fmtPKR(millProfitPkr)} · Local {fmtPKR(localProfitPkr)}
               {exportFxGainLoss !== 0 && <> · FX {exportFxGainLoss >= 0 ? '+' : ''}{fmtPKR(exportFxGainLoss)}</>}
             </div>
           </div>
@@ -149,15 +185,17 @@ export default function Profit() {
       </div>
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <FinanceKPI icon={DollarSign} title="Export Booked Profit" value={fmtPKR(exportBookedProfitPkr)}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        <FinanceKPI icon={DollarSign} title="Export Profit" value={fmtPKR(exportBookedProfitPkr)}
           subtitle={`${exportRows.length} orders`} status={exportBookedProfitPkr >= 0 ? 'good' : 'danger'} loading={isLoading} />
         <FinanceKPI icon={RefreshCw} title="FX Gain/Loss" value={fmtPKR(exportFxGainLoss)}
           subtitle="Current vs locked rate" status={exportFxGainLoss >= 0 ? 'good' : 'warning'} loading={isLoading} />
         <FinanceKPI icon={Factory} title="Mill Profit" value={fmtPKR(millProfitPkr)}
           subtitle={`${millRows.length} batches (PKR)`} status={millProfitPkr >= 0 ? 'good' : 'danger'} loading={isLoading} />
+        <FinanceKPI icon={Store} title="Local Profit" value={fmtPKR(localProfitPkr)}
+          subtitle={`${localSales.length} sales`} status={localProfitPkr >= 0 ? 'good' : 'danger'} loading={localLoading} />
         <FinanceKPI icon={TrendingUp} title="Consolidated" value={fmtPKR(consolidatedPkr)}
-          subtitle="Export + Mill" status={consolidatedPkr >= 0 ? 'good' : 'danger'} loading={isLoading} />
+          subtitle="Export + Mill + Local" status={consolidatedPkr >= 0 ? 'good' : 'danger'} loading={isLoading} />
       </div>
 
       {/* View mode selector */}
@@ -190,6 +228,10 @@ export default function Profit() {
       {(tab === 'Mill' || tab === 'Consolidated') && (
         <FinanceTable title="Milling Batches — PKR" columns={millColumns} data={millRows}
           searchKeys={['batchNo']} exportFilename="mill-profitability-pkr" loading={isLoading} />
+      )}
+      {(tab === 'Local' || tab === 'Consolidated') && (
+        <FinanceTable title="Local Sales — PKR" columns={localColumns} data={localSales}
+          searchKeys={['saleNo', 'buyerName', 'itemName']} exportFilename="local-sales-profitability-pkr" loading={localLoading} />
       )}
     </div>
   );

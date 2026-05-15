@@ -221,7 +221,7 @@ export default function FinanceOverview() {
           profitLabel="Gross Profit"
           profit={fmtPKR(local.grossProfit || 0)}
           marginPct={local.marginPct}
-          onClick={() => navigate('/local-sales')}
+          onClick={() => navigate('/finance/local-sales')}
         />
       </div>
 
