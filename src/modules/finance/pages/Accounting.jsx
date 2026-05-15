@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { FileText, ChevronRight, ChevronDown, BookOpen, Scale, CheckCircle2, AlertTriangle, Layers } from 'lucide-react';
+import { FileText, ChevronRight, ChevronDown, BookOpen, Scale, CheckCircle2, AlertTriangle, Layers, Printer } from 'lucide-react';
 import { FinanceKPI } from '../../../components/finance';
 import { useJournalEntries } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
+import { useApp } from '../../../context/AppContext';
 
 function fmtPkr(v) {
   if (!v || Number(v) === 0) return '—';
@@ -33,8 +34,20 @@ const ENTITY_TONE = {
 
 export default function Accounting() {
   const { queryParams: rangeParams } = useFinanceDateRange();
+  const { companyProfileData } = useApp();
   const { data: journalData = [], isLoading } = useJournalEntries(rangeParams);
   const [expanded, setExpanded] = useState(() => new Set());
+
+  function handlePrint() {
+    document.body.classList.add('app-print-mask');
+    const cleanup = () => {
+      document.body.classList.remove('app-print-mask');
+      window.removeEventListener('afterprint', cleanup);
+    };
+    window.addEventListener('afterprint', cleanup);
+    setTimeout(cleanup, 60_000);
+    window.print();
+  }
 
   const toggle = (id) => setExpanded(prev => {
     const next = new Set(prev);
@@ -136,7 +149,35 @@ export default function Accounting() {
           <span className="font-semibold">Journal Entries</span>
           <span className="text-xs text-gray-400 hidden sm:inline">— click a row to see the DR/CR account split.</span>
         </div>
+        <button onClick={handlePrint}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm">
+          <Printer size={14} /> Print
+        </button>
       </div>
+
+      {/* .print-report — the global @media print rule (gated on
+          body.app-print-mask) un-hides this subtree when handlePrint
+          fires, so only the journal table reaches paper, not the hero
+          or KPI tiles. */}
+      <div className="print-report">
+        {/* Print-only header — visible only when printing. */}
+        <div className="hidden print:block mb-4">
+          <div className="border-b-2 border-gray-900 pb-2 flex items-end justify-between">
+            <div>
+              <div className="text-base font-bold uppercase tracking-wider">
+                {companyProfileData?.legalName || companyProfileData?.name || 'AGRI COMMODITIES'}
+              </div>
+              <div className="text-xs text-gray-500">Generated {new Date().toLocaleString()}</div>
+            </div>
+            <div className="text-right">
+              <div className="text-lg font-bold">Journal Entries</div>
+              <div className="text-xs text-gray-600">
+                {journalData.length} entries · Total DR {fmtPkrCompact(totalDebit)} · Total CR {fmtPkrCompact(totalCredit)}
+                {isBalanced ? ' · Balanced ✓' : ` · Imbalance ${fmtPkrCompact(imbalance)}`}
+              </div>
+            </div>
+          </div>
+        </div>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         {isLoading ? (
@@ -274,6 +315,7 @@ export default function Accounting() {
             </tbody>
           </table>
         )}
+      </div>
       </div>
     </div>
   );
