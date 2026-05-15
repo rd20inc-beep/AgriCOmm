@@ -308,7 +308,7 @@ export function transformSupplier(db) {
     phone: db.phone || '',
     country: db.country || '',
     address: db.address || '',
-    type: db.type || 'Paddy Supplier',
+    type: db.type || 'Rice Supplier',
     location: db.address || db.country || '',
   };
 }

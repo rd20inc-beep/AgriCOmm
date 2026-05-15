@@ -77,7 +77,7 @@ export default function Login() {
             <span className="text-blue-400">Unified.</span>
           </h1>
           <p className="text-slate-400 text-base max-w-md leading-relaxed">
-            Manage your entire rice supply chain — from paddy procurement and milling
+            Manage your entire rice supply chain — from rice procurement and milling
             to export documentation and shipment tracking — all in one platform.
           </p>
 

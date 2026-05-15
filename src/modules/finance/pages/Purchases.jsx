@@ -41,7 +41,7 @@ function statusTone(s) {
 }
 
 const ADD_OPTIONS = [
-  { label: 'Raw / Stock Lot',     description: 'Paddy, finished rice, byproduct lots',  icon: Package,  to: '/lot-inventory?action=new' },
+  { label: 'Raw / Stock Lot',     description: 'Raw rice, finished rice, byproduct lots', icon: Package, to: '/lot-inventory?action=new' },
   { label: 'Mill Store Purchase', description: 'Spare parts, packaging, fuel',          icon: Factory,  to: '/mill-store/purchases/new' },
   { label: 'Export Cost',         description: 'Freight, commission, certificates — pick an order', icon: Ship, to: '/export' },
   { label: 'Business Expense',    description: 'Utilities, salaries, admin',            icon: Receipt,  to: '/finance/expenses?action=new' },
@@ -160,7 +160,7 @@ export default function Purchases() {
             <ShoppingCart className="w-6 h-6 text-gray-700" />
             Purchases
           </h1>
-          <p className="text-sm text-gray-500 mt-0.5">Every purchase recorded across the company — raw paddy, mill store, export costs, and expenses.</p>
+          <p className="text-sm text-gray-500 mt-0.5">Every purchase recorded across the company — raw rice, mill store, export costs, and expenses.</p>
         </div>
         <div className="flex items-center gap-2">
           {/* Add purchase — opens a dropdown that routes to the right creator,

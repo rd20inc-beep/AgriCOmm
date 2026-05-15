@@ -189,7 +189,7 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
             <tbody>
               {/* Raw material row */}
               <tr className="bg-amber-50 border-b border-amber-100">
-                <td className="px-6 py-2 font-semibold text-amber-900">Raw Rice / Paddy Purchase</td>
+                <td className="px-6 py-2 font-semibold text-amber-900">Raw Rice Purchase</td>
                 <td className="px-6 py-2 text-right font-bold text-amber-900">{fmtPKR(effectiveRawRiceCost)}</td>
                 <td className="px-6 py-2 text-right text-amber-700">{rawQtyKG > 0 ? fmtPKR(effectiveRawRiceCost / rawQtyKG) : '—'}</td>
                 <td className="px-6 py-2 text-right text-amber-700">{totalBatchCost > 0 ? ((effectiveRawRiceCost / totalBatchCost) * 100).toFixed(1) : '—'}%</td>

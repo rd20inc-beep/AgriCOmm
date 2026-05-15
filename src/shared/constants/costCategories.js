@@ -17,7 +17,7 @@ export const EXPORT_COST_CATEGORIES = [
 ];
 
 export const MILLING_COST_CATEGORIES = [
-  { key: 'rawRice', label: 'Raw Rice / Paddy Purchase', section: 'material' },
+  { key: 'rawRice', label: 'Raw Rice Purchase', section: 'material' },
   { key: 'transport', label: 'Transport / Freight', section: 'process' },
   { key: 'unloading', label: 'Unloading', section: 'process' },
   { key: 'labor', label: 'Labor / Wages', section: 'process' },

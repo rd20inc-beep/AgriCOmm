@@ -75,7 +75,7 @@ export default function StoreRatios() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Consumption Ratios</h1>
-          <p className="text-sm text-gray-500 mt-0.5">How much of each item is consumed per MT of raw paddy</p>
+          <p className="text-sm text-gray-500 mt-0.5">How much of each item is consumed per MT of raw rice</p>
         </div>
         <button
           onClick={startNew}
@@ -106,7 +106,7 @@ export default function StoreRatios() {
               </select>
             </div>
             <div>
-              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Units per MT of raw paddy *</label>
+              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Units per MT of raw rice *</label>
               <input
                 type="number"
                 min="0"
@@ -193,7 +193,7 @@ export default function StoreRatios() {
       <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
         <p className="text-xs text-blue-800 font-medium mb-1">How ratios work</p>
         <p className="text-xs text-blue-700">
-          When recording consumption on a batch, the system multiplies each ratio's "per MT" value by the batch's raw paddy quantity
+          When recording consumption on a batch, the system multiplies each ratio's "per MT" value by the batch's raw rice quantity
           to suggest how much of each item to consume. For example: a 10 MT batch with a bag ratio of 13/MT suggests 130 bags.
           You can override the suggestion before confirming.
         </p>

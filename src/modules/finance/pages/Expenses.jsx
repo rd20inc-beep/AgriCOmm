@@ -59,11 +59,11 @@ function usePayExpense() {
 // ─── Category catalogue ─────────────────────────────────────────────
 // Each category declares the *kind* of vendor it usually has so the
 // form can show the right suggestions instead of always offering the
-// full suppliers list (which is meant for paddy/rice suppliers).
+// full suppliers list (which is meant for rice suppliers).
 //
 // vendorKind:
 //   'utility'  → utility companies (KE, SSGC, WAPDA, etc.)
-//   'supplier' → real rows from suppliersList (paddy, rice transport)
+//   'supplier' → real rows from suppliersList (rice transport vendors)
 //   'bank'     → bank accounts (charges, fees)
 //   'landlord' → free text (rent)
 //   'agent'    → free text (clearing agent, freight forwarder)
@@ -95,7 +95,7 @@ const CATEGORIES = {
     { value: 'maintenance',       label: 'Maintenance / Repair',                   icon: Briefcase,    vendorKind: 'free' },
     { value: 'labor',             label: 'Labor / Daily Wages',                    icon: User,         vendorKind: 'staff' },
     { value: 'salaries',          label: 'Salaries',                               icon: User,         vendorKind: 'staff' },
-    { value: 'transport',         label: 'Transport (Paddy / Rice)',               icon: Truck,        vendorKind: 'supplier' },
+    { value: 'transport',         label: 'Transport (Rice)',                       icon: Truck,        vendorKind: 'supplier' },
     { value: 'inspection',        label: 'Inspection / Testing',                   icon: FileText,     vendorKind: 'free' },
     { value: 'fumigation',        label: 'Fumigation',                             icon: FileText,     vendorKind: 'free' },
     { value: 'bags',              label: 'Bags / Packaging',                       icon: Receipt,      vendorKind: 'supplier' },
@@ -214,7 +214,7 @@ export default function Expenses() {
     }
     if (k === 'category') {
       // When the category changes, the vendor kind likely changed too —
-      // clear stale supplier_id so we don't carry over a paddy supplier
+      // clear stale supplier_id so we don't carry over a rice supplier
       // into a utility-bill row.
       u.supplier_id = '';
       u.vendor_name = '';

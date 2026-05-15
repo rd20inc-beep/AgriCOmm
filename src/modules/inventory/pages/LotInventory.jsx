@@ -148,7 +148,7 @@ export default function LotInventory() {
             {TYPE_TABS.map(tab => (
               <button key={tab} onClick={() => setTypeFilter(tab)}
                 className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors capitalize ${typeFilter === tab ? 'bg-white text-emerald-600 shadow-sm' : 'text-gray-600 hover:text-gray-800'}`}>
-                {tab === 'All' ? 'All Types' : tab === 'raw' ? 'Raw Paddy' : tab === 'finished' ? 'Finished Rice' : 'Byproducts'}
+                {tab === 'All' ? 'All Types' : tab === 'raw' ? 'Raw Rice' : tab === 'finished' ? 'Finished Rice' : 'Byproducts'}
               </button>
             ))}
           </div>
@@ -493,8 +493,8 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
 
     // Build item name from batch info
     const itemName = vehicle
-      ? `Raw Paddy (${vehicle.vehicle_no})`
-      : `Raw Paddy (${batch.batch_no})`;
+      ? `Raw Rice (${vehicle.vehicle_no})`
+      : `Raw Rice (${batch.batch_no})`;
 
     const kgFromSource = qtyMT > 0 ? Math.round(qtyMT * 1000) : 0;
     const bagsFromVehicle = vehicle?.total_bags ? parseInt(vehicle.total_bags, 10) : '';
@@ -819,7 +819,7 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
               {/* Item name */}
               <div className={fieldCls}>
                 <label className={labelCls}>Item Name <span className="text-red-400 normal-case">*</span></label>
-                <input value={form.item_name} onChange={e => set('item_name', e.target.value)} className={inputCls} placeholder="e.g. Raw Paddy, 1121 Basmati" />
+                <input value={form.item_name} onChange={e => set('item_name', e.target.value)} className={inputCls} placeholder="e.g. Raw Rice, 1121 Basmati" />
               </div>
 
               {/* Supplier with inline add */}

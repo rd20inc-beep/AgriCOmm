@@ -380,7 +380,7 @@ export default function MillingDashboard() {
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">Inventory Value (Working Capital)</h2>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-amber-50 rounded-lg p-4">
-              <p className="text-xs font-medium text-amber-600 uppercase">Raw Paddy</p>
+              <p className="text-xs font-medium text-amber-600 uppercase">Raw Rice</p>
               <p className="text-lg font-bold text-amber-900">{formatPKR(rawInventoryValue)}</p>
               <p className="text-xs text-amber-500">{rawRiceStock.toFixed(1)} MT in stock</p>
             </div>
@@ -450,7 +450,7 @@ export default function MillingDashboard() {
                   <p className="text-xs font-medium text-red-600 uppercase">Direct Costs</p>
                   <p className="text-lg font-bold text-red-900 mt-1">{formatPKR(totalRawCost + totalOtherBatchCosts)}</p>
                   <div className="mt-2 space-y-1 text-xs">
-                    <div className="flex justify-between"><span className="text-red-500">Raw paddy purchase</span><span className="font-medium">{formatPKR(totalRawCost)}</span></div>
+                    <div className="flex justify-between"><span className="text-red-500">Raw rice purchase</span><span className="font-medium">{formatPKR(totalRawCost)}</span></div>
                     <div className="flex justify-between"><span className="text-red-500">Processing costs</span><span className="font-medium">{formatPKR(totalOtherBatchCosts)}</span></div>
                   </div>
                 </div>
@@ -968,7 +968,7 @@ export default function MillingDashboard() {
               >
                 <Wheat className={`w-5 h-5 mx-auto mb-1 ${batchForm.millingType === 'own_stock' ? 'text-blue-600' : 'text-gray-400'}`} />
                 Own Stock
-                <p className="text-xs text-gray-400 mt-0.5">Mill buys paddy & processes</p>
+                <p className="text-xs text-gray-400 mt-0.5">Mill buys rice & processes</p>
               </button>
               <button
                 type="button"
@@ -981,7 +981,7 @@ export default function MillingDashboard() {
               >
                 <Package className={`w-5 h-5 mx-auto mb-1 ${batchForm.millingType === 'service_milling' ? 'text-amber-600' : 'text-gray-400'}`} />
                 Service Milling
-                <p className="text-xs text-gray-400 mt-0.5">Client provides paddy, you mill</p>
+                <p className="text-xs text-gray-400 mt-0.5">Client provides rice, you mill</p>
               </button>
             </div>
           </div>
@@ -1007,10 +1007,10 @@ export default function MillingDashboard() {
             </div>
           )}
 
-          {/* Supplier (paddy source) */}
+          {/* Supplier (rice source) */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              {batchForm.millingType === 'service_milling' ? 'Paddy Source (Client / Broker)' : 'Supplier'} *
+              {batchForm.millingType === 'service_milling' ? 'Rice Source (Client / Broker)' : 'Supplier'} *
             </label>
             <select value={batchForm.supplierId} onChange={e => setBF('supplierId', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none bg-white">
               <option value="">Select supplier...</option>
@@ -1078,7 +1078,7 @@ export default function MillingDashboard() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Milling Fee (PKR/KG)</label>
             <input type="number" value={batchForm.millingFeePerKg} onChange={e => setBF('millingFeePerKg', e.target.value)} placeholder="5" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
-            <p className="text-xs text-gray-400 mt-1">Cost charged per KG of raw paddy processed. Default: PKR 5/KG</p>
+            <p className="text-xs text-gray-400 mt-1">Cost charged per KG of raw rice processed. Default: PKR 5/KG</p>
           </div>
 
           {/* Notes */}

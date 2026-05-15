@@ -313,7 +313,7 @@ export default function MillHomeDashboard() {
         />
         <KPI
           icon={Wheat}
-          label="Raw Paddy Stock"
+          label="Raw Rice Stock"
           value={formatMT(data.rawStockMT)}
           sub={data.daysOfCover != null ? `${data.daysOfCover} days of cover` : 'no recent consumption'}
           accent={data.daysOfCover != null && data.daysOfCover < 3 ? 'red' : 'amber'}

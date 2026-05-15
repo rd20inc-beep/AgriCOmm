@@ -8,7 +8,7 @@ import Modal from '../../../../components/Modal';
 // We label it "Location" in the UI for our trade convention but post
 // it as `address` so the createCrud insert doesn't 500 on an unknown
 // column.
-const EMPTY = { name: '', type: 'Farmer Cooperative', address: '', contact_person: '' };
+const EMPTY = { name: '', type: 'Rice Supplier', address: '', contact_person: '' };
 
 export default function SuppliersTab() {
   const { suppliersList, addToast } = useApp();
@@ -26,7 +26,7 @@ export default function SuppliersTab() {
     setEditingId(s.id);
     setForm({
       name: s.name || '',
-      type: s.type || 'Farmer Cooperative',
+      type: s.type || 'Rice Supplier',
       address: s.address || s.location || '',
       contact_person: s.contact || s.contact_person || '',
     });
@@ -101,9 +101,9 @@ export default function SuppliersTab() {
                   <td className="px-4 py-3 font-medium text-gray-900">{s.name}</td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                      s.type === 'Farmer Cooperative' ? 'bg-green-100 text-green-700' :
-                      s.type === 'Paddy Supplier' ? 'bg-blue-100 text-blue-700' :
-                      'bg-purple-100 text-purple-700'
+                      s.type === 'Rice Supplier' ? 'bg-blue-100 text-blue-700' :
+                      s.type === 'Broker' ? 'bg-purple-100 text-purple-700' :
+                      'bg-gray-100 text-gray-700'
                     }`}>
                       {s.type}
                     </span>
@@ -141,9 +141,7 @@ export default function SuppliersTab() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
             <select value={form.type} onChange={(e) => set('type', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white">
-              <option value="Farmer Cooperative">Farmer Cooperative</option>
-              <option value="Paddy Supplier">Paddy Supplier</option>
-              <option value="External Mill">External Mill</option>
+              <option value="Rice Supplier">Rice Supplier</option>
               <option value="Broker">Broker</option>
             </select>
           </div>

@@ -536,7 +536,7 @@ export default function MillingBatchDetail() {
             {isOwnerOrAdmin && batch.status !== 'Completed' && (
               <button
                 onClick={async () => {
-                  if (!window.confirm(`Delete batch ${batch.id}? This will also remove its raw paddy receipts. This cannot be undone.`)) return;
+                  if (!window.confirm(`Delete batch ${batch.id}? This will also remove its raw rice receipts. This cannot be undone.`)) return;
                   try {
                     await deleteBatchMut.mutateAsync(batch.dbId || batch.id);
                     addToast('Batch deleted', 'success');
@@ -1196,7 +1196,7 @@ export default function MillingBatchDetail() {
                         }
                         return safeCosts[k] > 0;
                       });
-                      const LABEL_MAP = { raw_rice: 'Raw Rice / Paddy', packaging: 'Packaging', chemicals: 'Chemicals', diesel: 'Diesel / Fuel', maintenance: 'Maintenance', miscellaneous: 'Miscellaneous' };
+                      const LABEL_MAP = { raw_rice: 'Raw Rice', packaging: 'Packaging', chemicals: 'Chemicals', diesel: 'Diesel / Fuel', maintenance: 'Maintenance', miscellaneous: 'Miscellaneous' };
                       const allCats = [
                         ...millingCostCategories,
                         ...extraKeys.map(k => ({ key: k, label: LABEL_MAP[k] || k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) })),
@@ -1835,7 +1835,7 @@ export default function MillingBatchDetail() {
       <Modal isOpen={showSupplierModal} onClose={() => setShowSupplierModal(false)} title="Assign Supplier to Batch" size="md">
         <div className="space-y-4">
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
-            This batch was created without a supplier. Select the paddy supplier for this milling batch.
+            This batch was created without a supplier. Select the rice supplier for this milling batch.
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Supplier *</label>
@@ -1865,7 +1865,7 @@ export default function MillingBatchDetail() {
       {batch && !batch.supplierName && !batch.isServiceMilling && batch.status !== 'Completed' && batch.status !== 'Cancelled' && (
         <div className="fixed bottom-4 left-4 z-50 bg-amber-50 border-2 border-amber-400 rounded-xl p-4 shadow-lg max-w-sm">
           <p className="text-sm font-semibold text-amber-800">No Supplier Assigned</p>
-          <p className="text-xs text-amber-600 mt-1">Assign a paddy supplier before recording quality and yield.</p>
+          <p className="text-xs text-amber-600 mt-1">Assign a rice supplier before recording quality and yield.</p>
           <button onClick={() => setShowSupplierModal(true)} className="mt-2 px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-medium hover:bg-amber-700">Assign Supplier</button>
         </div>
       )}

@@ -164,7 +164,7 @@ export default function MillFinanceDashboard() {
         <div className="space-y-6">
           <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
             <KPICard icon={TrendingUp} title="Total Revenue" value={PKR(kpis.totalRev)} subtitle={`Finished: ${PKR(kpis.finishedRev)}`} color="blue" />
-            <KPICard icon={TrendingDown} title="Raw Material" value={PKR(kpis.totalRaw)} subtitle="Paddy purchase cost" color="red" />
+            <KPICard icon={TrendingDown} title="Raw Material" value={PKR(kpis.totalRaw)} subtitle="Rice purchase cost" color="red" />
             <KPICard icon={DollarSign} title="Operating Costs" value={PKR(kpis.totalOtherCosts + totalOverhead)} subtitle={`Batch: ${PKR(kpis.totalOtherCosts)} + OH: ${PKR(totalOverhead)}`} color="orange" />
             <KPICard icon={TrendingUp} title="Net Profit" value={PKR(kpis.netProfit)} subtitle={`Margin: ${margin}%`} color={kpis.netProfit >= 0 ? 'green' : 'red'} />
             <KPICard icon={DollarSign} title="Cost per KG" value={`Rs ${kpis.costPerKg.toFixed(2)}`} subtitle="All-in cost of finished rice" color="gray" />
@@ -172,7 +172,7 @@ export default function MillFinanceDashboard() {
           </div>
           {/* Inventory Value Breakdown */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <KPICard icon={Package} title="Raw Paddy" value={PKR(inventoryValue.raw)} subtitle={`${inventory.filter(i => i.type === 'raw').reduce((s, i) => s + pf(i.qty), 0).toFixed(1)} MT in stock`} color="amber" />
+            <KPICard icon={Package} title="Raw Rice" value={PKR(inventoryValue.raw)} subtitle={`${inventory.filter(i => i.type === 'raw').reduce((s, i) => s + pf(i.qty), 0).toFixed(1)} MT in stock`} color="amber" />
             <KPICard icon={Package} title="Finished Rice" value={PKR(inventoryValue.fin)} subtitle={`${inventory.filter(i => i.type === 'finished').reduce((s, i) => s + pf(i.availableQty), 0).toFixed(1)} MT available`} color="green" />
             <KPICard icon={Package} title="Byproducts" value={PKR(inventoryValue.bp)} subtitle={`${inventory.filter(i => i.type === 'byproduct').reduce((s, i) => s + pf(i.availableQty), 0).toFixed(1)} MT in stock`} color="purple" />
             <KPICard icon={DollarSign} title="Total Working Capital" value={PKR(inventoryValue.total)} subtitle="Capital locked in inventory" color="blue" />
