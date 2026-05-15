@@ -127,16 +127,25 @@ export default function PrintableReports() {
       return;
     }
     // Copy the page's stylesheets so Tailwind utility classes resolve
-    // inside the new window. We pull <link rel="stylesheet"> hrefs and
-    // <style> blocks from the current document.
+    // inside the new window. <link> hrefs are rewritten to absolute URLs
+    // because the popup loads at about:blank and would otherwise try to
+    // resolve "/assets/..." against about:blank (and 404).
+    const origin = window.location.origin;
     const styleTags = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
-      .map(n => n.outerHTML)
+      .map(n => {
+        if (n.tagName === 'LINK') {
+          const href = n.href || n.getAttribute('href') || '';
+          return `<link rel="stylesheet" href="${href.startsWith('http') ? href : origin + href}">`;
+        }
+        return n.outerHTML;
+      })
       .join('\n');
     win.document.open();
     win.document.write(`<!doctype html>
 <html>
 <head>
 <meta charset="utf-8" />
+<base href="${origin}/" />
 <title>AgriCOmm Report</title>
 ${styleTags}
 <style>
@@ -153,10 +162,24 @@ ${styleTags}
 <body>
 ${src.outerHTML}
 <script>
-  window.onload = function () {
-    setTimeout(function () { window.focus(); window.print(); }, 250);
-    window.onafterprint = function () { window.close(); };
-  };
+  // Wait for the linked stylesheets to actually finish loading before
+  // triggering print — otherwise Tailwind grid/flex utilities haven't
+  // applied yet and the print preview renders unstyled (looks blank).
+  function fireWhenReady() {
+    var links = Array.prototype.slice.call(document.querySelectorAll('link[rel="stylesheet"]'));
+    var pending = links.length;
+    if (!pending) { window.focus(); window.print(); return; }
+    var done = function () { pending--; if (pending <= 0) { setTimeout(function(){ window.focus(); window.print(); }, 80); } };
+    links.forEach(function (l) {
+      if (l.sheet) { done(); return; }
+      l.addEventListener('load',  done, { once: true });
+      l.addEventListener('error', done, { once: true });
+    });
+    setTimeout(function () { window.focus(); window.print(); }, 2500);
+  }
+  if (document.readyState === 'complete') fireWhenReady();
+  else window.addEventListener('load', fireWhenReady);
+  window.onafterprint = function () { window.close(); };
 </script>
 </body>
 </html>`);
