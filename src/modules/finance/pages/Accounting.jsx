@@ -38,15 +38,21 @@ export default function Accounting() {
   const { data: journalData = [], isLoading } = useJournalEntries(rangeParams);
   const [expanded, setExpanded] = useState(() => new Set());
 
+  const [forceExpandForPrint, setForceExpandForPrint] = useState(false);
+
   function handlePrint() {
     document.body.classList.add('app-print-mask');
+    setForceExpandForPrint(true);
     const cleanup = () => {
       document.body.classList.remove('app-print-mask');
+      setForceExpandForPrint(false);
       window.removeEventListener('afterprint', cleanup);
     };
     window.addEventListener('afterprint', cleanup);
     setTimeout(cleanup, 60_000);
-    window.print();
+    // Give React one paint cycle to commit the expanded state before
+    // the print dialog snapshots the page.
+    requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
   }
 
   const toggle = (id) => setExpanded(prev => {
@@ -201,7 +207,7 @@ export default function Accounting() {
             <tbody className="divide-y divide-gray-100">
               {journalData.map(j => {
                 const id = j.id || j.journalNo || j.journal_no;
-                const isOpen = expanded.has(id);
+                const isOpen = forceExpandForPrint || expanded.has(id);
                 const lines = j.lines || [];
                 const refNo = j.refNo || j.ref_no;
                 const href = refLink(refNo);
