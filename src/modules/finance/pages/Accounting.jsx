@@ -206,6 +206,13 @@ export default function Accounting() {
                 const lines = j.lines || [];
                 const refNo = j.refNo || j.ref_no;
                 const href = refLink(refNo);
+                // JE-YYYYMM-NNNN — keep only the sequence segment for
+                // display since the date column already carries the
+                // period. Full journal no is available on hover.
+                const fullJournalNo = j.journalNo || j.journal_no || '';
+                const shortJournalNo = fullJournalNo.startsWith('JE-')
+                  ? `JE-${(fullJournalNo.split('-')[2] || '').replace(/^0+/, '') || '0'}`
+                  : fullJournalNo;
                 return (
                   <>
                     <tr key={id}
@@ -214,7 +221,7 @@ export default function Accounting() {
                       <td className="py-2.5 px-2 text-gray-400">
                         {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                       </td>
-                      <td className="py-2.5 px-3 font-mono text-xs text-gray-700">{j.journalNo || j.journal_no}</td>
+                      <td className="py-2.5 px-3 font-mono text-xs text-gray-700 whitespace-nowrap" title={fullJournalNo}>{shortJournalNo}</td>
                       <td className="py-2.5 px-3 text-gray-600">
                         {j.date ? new Date(j.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
                       </td>
@@ -228,8 +235,8 @@ export default function Accounting() {
                           : href ? <Link to={href} onClick={e => e.stopPropagation()} className="text-blue-600 hover:underline font-medium">{refNo}</Link>
                           : <span className="text-gray-700">{refNo}</span>}
                       </td>
-                      <td className="py-2.5 px-3 text-gray-700">
-                        <span className="truncate max-w-[260px] block">{j.description || '—'}</span>
+                      <td className="py-2.5 px-3 text-gray-700" style={{ maxWidth: 280, width: 280 }}>
+                        <span className="block truncate" title={j.description || ''}>{j.description || '—'}</span>
                       </td>
                       <td className="py-2.5 px-3 text-right font-medium text-gray-900 whitespace-nowrap">
                         {fmtPkr(toPkr(j, 'totalDebit'))}
