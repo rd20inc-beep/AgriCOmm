@@ -222,8 +222,9 @@ export default function Accounting() {
                         {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                       </td>
                       <td className="py-2.5 px-3 font-mono text-xs text-gray-700 whitespace-nowrap" title={fullJournalNo}>{shortJournalNo}</td>
-                      <td className="py-2.5 px-3 text-gray-600">
-                        {j.date ? new Date(j.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+                      <td className="py-2.5 px-3 text-gray-600 whitespace-nowrap text-xs"
+                          title={j.date ? new Date(j.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : ''}>
+                        {j.date ? new Date(j.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '—'}
                       </td>
                       <td className="py-2.5 px-3">
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${ENTITY_TONE[j.entity] || 'bg-gray-100 text-gray-600'}`}>
