@@ -1332,6 +1332,31 @@ financeController.payPurchase = async (req, res) => {
         });
       }
 
+      // Mirror payment state to the linked payables row so /finance/money-out
+      // reflects the same paid_amount / outstanding / status. Pairs are keyed
+      // by (source_table, source_id) — see the addCost / createPurchaseLot
+      // controllers that create them. Resolved per source because the table
+      // names map differently (lots / mill_purchases / export_order_costs /
+      // business_expenses).
+      const sourceTable =
+        source === 'lot'         ? 'inventory_lots' :
+        source === 'mill_store'  ? 'mill_purchases' :
+        source === 'export_cost' ? 'export_order_costs' :
+                                   'business_expenses';
+      const linkedPayable = await trx('payables')
+        .where({ source_table: sourceTable, source_id: id })
+        .first();
+      if (linkedPayable) {
+        const newPayablePaid = (parseFloat(linkedPayable.paid_amount) || 0) + amountPkr;
+        const original = parseFloat(linkedPayable.original_amount) || 0;
+        await trx('payables').where({ id: linkedPayable.id }).update({
+          paid_amount: newPayablePaid,
+          outstanding: Math.max(0, original - newPayablePaid),
+          status: newPayablePaid >= original - 0.01 ? 'Paid' : 'Partial',
+          updated_at: trx.fn.now(),
+        });
+      }
+
       // Decrement the bank account when the user specified one.
       if (bank_account_id) {
         await trx('bank_accounts').where({ id: bank_account_id }).decrement('current_balance', amountPkr);

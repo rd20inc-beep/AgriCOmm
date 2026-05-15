@@ -1324,6 +1324,55 @@ const exportOrderController = {
           console.error('addCost journal error (cost still recorded):', jeErr.message);
         }
 
+        // ─── Mirror to payables ────────────────────────────────────
+        // Make every export-order cost show up on /finance/money-out by
+        // ensuring it has a 1:1 row in payables (source_table='export_order_costs',
+        // source_id=row.id). On edits, sync original_amount / outstanding
+        // to the new amount.
+        try {
+          const existingPayable = await trx('payables')
+            .where({ source_table: 'export_order_costs', source_id: row.id })
+            .first();
+          const paidAmt = parseFloat(row.paid_amount) || 0;
+          const status = paidAmt >= amtPkr - 0.01 ? 'Paid' : (paidAmt > 0 ? 'Partial' : 'Pending');
+          const refLabel = `${order.order_no} ${category}`;
+          if (existingPayable) {
+            await trx('payables')
+              .where({ id: existingPayable.id })
+              .update({
+                linked_ref: refLabel,
+                original_amount: amtPkr,
+                outstanding: Math.max(0, amtPkr - paidAmt),
+                status,
+                notes: notes || existingPayable.notes,
+                updated_at: trx.fn.now(),
+              });
+          } else {
+            const last = await trx('payables').where('pay_no', 'like', 'PAY-EOC%').orderBy('id', 'desc').first();
+            const nextSeq = last ? (parseInt(String(last.pay_no).replace(/^PAY-EOC/, ''), 10) || 0) + 1 : 1;
+            const payNo = `PAY-EOC${String(nextSeq).padStart(4, '0')}`;
+            await trx('payables').insert({
+              pay_no: payNo,
+              entity: 'export',
+              category: category || 'export_cost',
+              supplier_id: null,
+              linked_ref: refLabel,
+              original_amount: amtPkr,
+              paid_amount: paidAmt,
+              outstanding: Math.max(0, amtPkr - paidAmt),
+              currency: 'PKR',
+              due_date: new Date().toISOString().slice(0, 10),
+              status,
+              source_table: 'export_order_costs',
+              source_id: row.id,
+              payable_type: 'expense',
+              notes: notes || `Export order cost ${refLabel}`,
+            });
+          }
+        } catch (payErr) {
+          console.error('addCost payables sync error (cost still recorded):', payErr.message);
+        }
+
         return row;
       });
 
