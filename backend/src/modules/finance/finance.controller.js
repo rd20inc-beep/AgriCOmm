@@ -642,18 +642,46 @@ const financeController = {
           }
         }
 
-        // Create journal entry via accounting service
-        const isReceivable = type === 'receipt';
-        await accountingService.autoPost(trx, {
-          triggerEvent: isReceivable ? 'payment_receipt' : 'payment_made',
-          entity: isReceivable ? 'export' : 'mill',
-          amount: parseFloat(amount),
-          currency: currency || 'USD',
-          refType: 'Payment',
-          refNo: paymentNo,
-          description: `Payment recorded for ${entity_type} #${entity_id}`,
-          userId: req.user.id,
-        });
+        // ── Journal entry — direct post, not autoPost. ─────────────
+        // autoPost looks up posting_rules where trigger_event matches
+        // 'payment_receipt' / 'payment_made'; those rows don't exist,
+        // so every payment since day one quietly skipped the ledger.
+        // Mirror the pattern used by payPurchase: build the balanced
+        // entry inline using chart_of_accounts codes (1000 Cash & Bank,
+        // 1100 A/R, 2000 A/P). Bank-level detail still lives in
+        // bank_transactions, which is the sub-ledger for Cash & Bank.
+        try {
+          const isReceivable = type === 'receipt';
+          const stampedAmtPkr = Number(stampedPkr.toFixed(2));
+          const cashAndBank = await trx('chart_of_accounts').where({ code: '1000' }).first();
+          const accountsReceivable = await trx('chart_of_accounts').where({ code: '1100' }).first();
+          const accountsPayable    = await trx('chart_of_accounts').where({ code: '2000' }).first();
+          const counterAcc = isReceivable ? accountsReceivable : accountsPayable;
+          if (cashAndBank && counterAcc) {
+            const debitAcc  = isReceivable ? cashAndBank : counterAcc;
+            const creditAcc = isReceivable ? counterAcc : cashAndBank;
+            const journal = await accountingService.createJournal(trx, {
+              date: (payment_date ? new Date(payment_date) : new Date()).toISOString().slice(0, 10),
+              entity: isReceivable ? 'export' : 'mill',
+              refType: 'Payment',
+              refNo: paymentNo,
+              description: `Payment ${paymentNo} for ${entity_type} #${entity_id}`,
+              currency: cur,
+              fxRate: stampedFxRate,
+              isAuto: true,
+              userId: req.user.id,
+              lines: [
+                { account_id: debitAcc.id,  account: debitAcc.name,  debit: stampedAmtPkr, credit: 0,              narration: `DR ${debitAcc.code} ${debitAcc.name} — ${paymentNo}` },
+                { account_id: creditAcc.id, account: creditAcc.name, debit: 0,             credit: stampedAmtPkr,  narration: `CR ${creditAcc.code} ${creditAcc.name} — ${paymentNo}` },
+              ],
+            });
+            if (journal?.id) await accountingService.postJournal(trx, journal.id);
+          } else {
+            console.warn(`recordPayment: chart_of_accounts missing codes 1000/${isReceivable ? '1100' : '2000'} — journal skipped for ${paymentNo}`);
+          }
+        } catch (jeErr) {
+          console.error('recordPayment journal error (payment still recorded):', jeErr.message);
+        }
 
         return payment;
       });
