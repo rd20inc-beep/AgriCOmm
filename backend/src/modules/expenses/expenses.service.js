@@ -70,7 +70,7 @@ const expensesService = {
         notes: notes || null,
         batch_id: batch_id || null,
         order_id: order_id || null,
-        payment_status: pay_now ? 'Paid' : 'Unpaid',
+        payment_status: pay_now ? 'Paid' : 'Pending',
         bank_account_id: pay_now ? (bank_account_id || null) : null,
         paid_date: pay_now ? expense_date : null,
         payment_method: pay_now ? (payment_method || 'bank') : null,
@@ -267,7 +267,7 @@ const expensesService = {
         .orderBy(db.raw('SUM(amount_pkr)'), 'desc')
         .limit(10),
       db('business_expenses')
-        .where('payment_status', 'Unpaid')
+        .whereIn('payment_status', ['Pending', 'Partial'])
         .select(db.raw('COUNT(*) as count, COALESCE(SUM(amount_pkr),0) as total_pkr'))
         .first(),
     ]);

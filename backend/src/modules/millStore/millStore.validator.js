@@ -56,7 +56,7 @@ const createPurchaseSchema = Joi.object({
 });
 
 const updatePaymentSchema = Joi.object({
-  payment_status: Joi.string().valid('Unpaid', 'Partial', 'Paid').required(),
+  payment_status: Joi.string().valid('Pending', 'Partial', 'Paid').required(),
 });
 
 const ADJUSTMENT_TYPES = ['damage', 'correction', 'wastage', 'count'];

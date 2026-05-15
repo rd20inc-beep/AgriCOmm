@@ -692,30 +692,10 @@ const exportOrderController = {
           })
           .returning('*');
 
-        // Insert initial cost entries (all zero)
-        const costCategories = [
-          'raw_rice',
-          'milling',
-          'bags',
-          'transport',
-          'fumigation',
-          'inspection',
-          'loading',
-          'customs',
-          'commission',
-          'other',
-        ];
-
-        const costRows = costCategories.map((category) => ({
-          order_id: order.id,
-          category,
-          amount: 0,
-          currency: 'PKR', // outflow payments on export orders are always PKR
-          notes: null,
-          created_by: req.user?.id || null,
-        }));
-
-        await trx('export_order_costs').insert(costRows);
+        // Cost rows are inserted lazily — addCost upserts whatever category
+        // the user actually records. Pre-seeding every category at Rs 0
+        // produced 10 placeholder rows per order that polluted finance
+        // feeds and inflated the table forever.
 
         // Insert initial status history (log actual status, not always Draft)
         const initialStatus = effectiveStatus;

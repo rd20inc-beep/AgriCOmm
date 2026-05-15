@@ -302,7 +302,7 @@ export default function Purchases() {
           />
         </div>
         <div className="inline-flex bg-gray-100 rounded-lg p-0.5">
-          {['All', 'Paid', 'Partial', 'Pending', 'Unpaid'].map(s => (
+          {['All', 'Paid', 'Partial', 'Pending'].map(s => (
             <button
               key={s}
               onClick={() => setStatusFilter(s)}

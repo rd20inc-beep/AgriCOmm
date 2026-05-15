@@ -184,7 +184,7 @@ const createPurchaseLot = Joi.object({
   other_cost: Joi.number().min(0).default(0),
   total_bags: Joi.number().integer().min(0).allow(null),
   notes: Joi.string().allow(null, ''),
-  payment_status: Joi.string().valid('Unpaid', 'Partial', 'Paid').default('Unpaid'),
+  payment_status: Joi.string().valid('Pending', 'Partial', 'Paid').default('Pending'),
   paid_amount: Joi.number().min(0).allow(null),
 });
 

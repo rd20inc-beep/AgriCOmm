@@ -175,7 +175,7 @@ module.exports = {
         transport_cost = 0, labor_cost = 0, unloading_cost = 0,
         packing_cost = 0, other_cost = 0,
         total_bags: inputTotalBags,
-        notes, payment_status = 'Unpaid',
+        notes, payment_status = 'Pending',
       } = req.body;
 
       if (!item_name || !quantity_input || !rate_input) {
@@ -193,22 +193,20 @@ module.exports = {
       const totalBagCost = (bag_cost_included ? 0 : (parseFloat(bag_cost_per_bag) || 0) * totalBags);
       const landedCostTotal = uc.round2(purchaseAmount + directCosts + totalBagCost);
       const landedCostPerKg = netWeightKg > 0 ? uc.round4(landedCostTotal / netWeightKg) : 0;
-      const normalizedPaymentStatus = String(payment_status || 'Unpaid').toLowerCase();
+      // Post round 35 (migration 120) every payment_status column uses
+      // title case — drop the previous lowercase normalisation.
+      const normalizedPaymentStatus = String(payment_status || 'Pending');
       const landedPayableAmount = landedCostTotal;
-      const paidAmount = normalizedPaymentStatus === 'paid'
+      const paidAmount = normalizedPaymentStatus === 'Paid'
         ? landedPayableAmount
-        : normalizedPaymentStatus === 'partial'
+        : normalizedPaymentStatus === 'Partial'
           ? Math.max(0, Math.min(landedPayableAmount, parseFloat(req.body.paid_amount) || 0))
           : Math.max(0, parseFloat(req.body.paid_amount) || 0);
-      // Capitalised status values match the CHECK constraint on payables.status
-      // (Pending / Partial / Paid). Keep `payableStatusLower` for inventory_lots,
-      // which uses the lowercase form on its own column.
       const payableStatus = paidAmount >= landedPayableAmount - 0.01
         ? 'Paid'
         : paidAmount > 0
           ? 'Partial'
           : 'Pending';
-      const payableStatusLower = payableStatus.toLowerCase();
 
       const result = await db.transaction(async (trx) => {
         // Generate lot number
@@ -333,8 +331,8 @@ module.exports = {
           damaged_weight_kg: 0,
           cost_per_unit: landedCostPerKg * 1000, // per MT for legacy
           total_value: landedCostTotal,
-          // Payment (inventory_lots.payment_status is lowercase; payables.status is title-case)
-          payment_status: payableStatusLower,
+          // Payment — title case across the board post migration 120.
+          payment_status: payableStatus,
           paid_amount: paidAmount,
           due_amount: Math.max(0, landedPayableAmount - paidAmount),
           notes: notes || null,
