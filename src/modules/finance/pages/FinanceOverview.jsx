@@ -12,6 +12,10 @@ import {
   useFinanceOverviewSummary,
 } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
+import {
+  BUCKET_KEYS, BUCKET_COLORS, ageDays, ageBucket, bucketize, isOpenAR,
+} from '../utils/aging';
+import { useFxRate } from '../utils/fx';
 
 // ─── Formatting helpers ───────────────────────────────────────────────
 function fmtPKR(n) {
@@ -27,27 +31,9 @@ function fmtUSD(n) {
   if (Math.abs(n) >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
   return `$${Math.round(n).toLocaleString()}`;
 }
-function ageDays(dateStr) {
-  if (!dateStr) return null;
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return null;
-  const ms = Date.now() - d.getTime();
-  return Math.floor(ms / (1000 * 60 * 60 * 24));
-}
-function ageBucket(days) {
-  if (days == null || days < 0) return null; // future-dated → not yet due
-  if (days <= 30) return '0-30';
-  if (days <= 60) return '31-60';
-  if (days <= 90) return '61-90';
-  return '90+';
-}
-const BUCKET_KEYS = ['0-30', '31-60', '61-90', '90+'];
-const BUCKET_COLORS = {
-  '0-30':  { bar: 'bg-emerald-500', tag: 'bg-emerald-50 text-emerald-700' },
-  '31-60': { bar: 'bg-amber-500',   tag: 'bg-amber-50 text-amber-700' },
-  '61-90': { bar: 'bg-orange-500',  tag: 'bg-orange-50 text-orange-700' },
-  '90+':   { bar: 'bg-red-500',     tag: 'bg-red-50 text-red-700' },
-};
+// Aging helpers + bucket palette moved to ../utils/aging so MoneyIn and
+// any future caller render the same buckets. See useFxRate() too for
+// the FX fallback used by mixed-currency receivables.
 
 // ─── Page ─────────────────────────────────────────────────────────────
 export default function FinanceOverview() {
@@ -68,8 +54,8 @@ export default function FinanceOverview() {
   const consolidated = summary.consolidated || {};
 
   // ─── Aging analysis (FE-computed since backend hardcodes aging=0) ──
-  const recvAging = useMemo(() => bucketize(receivables), [receivables]);
-  const payAging  = useMemo(() => bucketize(payables, 'pkr'), [payables]);
+  const recvAging = useMemo(() => bucketize(receivables, { mode: 'mixed' }), [receivables]);
+  const payAging  = useMemo(() => bucketize(payables,    { mode: 'pkr' }),    [payables]);
 
   // ─── Top counterparties by outstanding ─────────────────────────────
   const topOverdueRecv = useMemo(() =>
@@ -619,31 +605,5 @@ function isOverdue(r) {
   return days != null && days > 0 && (parseFloat(r.outstanding) || 0) > 0;
 }
 
-// Group an array of receivables/payables into aging buckets. Returns
-// { '0-30': {count, totalPkr, totalForeign}, '31-60': {...}, ..., totalPkr, totalForeign }.
-function bucketize(rows, mode = 'mixed') {
-  const init = () => ({ count: 0, totalPkr: 0, totalForeign: 0 });
-  const result = {
-    '0-30': init(), '31-60': init(), '61-90': init(), '90+': init(),
-    totalPkr: 0, totalForeign: 0,
-  };
-  for (const r of (Array.isArray(rows) ? rows : [])) {
-    const out = parseFloat(r.outstanding) || 0;
-    if (out <= 0) continue;
-    const status = (r.status || '').toLowerCase();
-    if (status === 'paid' || status === 'void' || status === 'cancelled') continue;
-    const days = ageDays(r.dueDate || r.due_date);
-    const bucket = ageBucket(days);
-    if (!bucket) continue;
-    const isPkr = (r.currency || '').toUpperCase() === 'PKR' || mode === 'pkr';
-    const fxRate = parseFloat(r.fx_rate) || parseFloat(r.fxRate) || 280;
-    const pkr = isPkr ? out : out * fxRate;
-    const foreign = isPkr ? 0 : out;
-    result[bucket].count += 1;
-    result[bucket].totalPkr += pkr;
-    result[bucket].totalForeign += foreign;
-    result.totalPkr += pkr;
-    result.totalForeign += foreign;
-  }
-  return result;
-}
+// bucketize / ageDays / ageBucket / BUCKET_KEYS / BUCKET_COLORS now
+// live in ../utils/aging.js — shared with MoneyIn.

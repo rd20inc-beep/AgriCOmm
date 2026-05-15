@@ -15,8 +15,9 @@ import {
 } from 'lucide-react';
 import { useInternalTransfers } from '../../../api/queries';
 import StatusBadge from '../../../components/StatusBadge';
+import { DEFAULT_FX_RATE } from '../utils/fx';
 
-const PKR_RATE = 280;
+const PKR_RATE = DEFAULT_FX_RATE;
 
 function formatPKR(value) {
   return 'Rs ' + Math.round(value).toLocaleString('en-PK');

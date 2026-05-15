@@ -17,9 +17,11 @@ import {
 import { useApp } from '../../../context/AppContext';
 import { financeApi } from '../../../api/services';
 import StatusBadge from '../../../components/StatusBadge';
+import { DEFAULT_FX_RATE } from '../utils/fx';
 
-// PKR rate should come from settings — this is used only as page-level fallback
-const PKR_RATE_DEFAULT_DEFAULT = 280;
+// Page-level fallback — real rate comes from finance overview / fx_rates
+// elsewhere. Kept aliased so the rest of the file reads unchanged.
+const PKR_RATE_DEFAULT_DEFAULT = DEFAULT_FX_RATE;
 
 function formatPKR(value) {
   return 'Rs ' + Math.round(value).toLocaleString('en-PK');

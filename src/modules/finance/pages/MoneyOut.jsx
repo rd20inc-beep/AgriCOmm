@@ -6,6 +6,7 @@ import { usePayables, useRecordPayment, useBankAccounts, useReceivables } from '
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
 import StatusBadge from '../../../components/StatusBadge';
+import { toPkr } from '../utils/fx';
 
 // Currency-aware formatter — picks Rs / $ / € / £ / AED based on the row's currency
 function fmtCur(n, currency = 'PKR') {
@@ -31,9 +32,7 @@ function pkrOf(row, key = 'outstanding') {
   if ((row?.currency || 'PKR') === 'PKR') return amount;
   const base = parseFloat(row?.baseAmountPkr) || 0;
   if (base > 0 && key === 'originalAmount') return base;
-  const fx = parseFloat(row?.fxRate) || 0;
-  if (fx > 1) return amount * fx;
-  return amount * 280;
+  return toPkr(amount, row?.currency, row?.fxRate);
 }
 
 export default function MoneyOut() {

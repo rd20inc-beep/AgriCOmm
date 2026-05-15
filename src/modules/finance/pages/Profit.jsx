@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { TrendingUp, TrendingDown, DollarSign, Factory, Store, AlertTriangle, CheckCircle, RefreshCw, Activity } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart } from '../../../components/finance';
 import { useProfitabilitySummary, useLocalSales, useLocalSalesSummary } from '../../../api/queries';
+import { DEFAULT_FX_RATE } from '../utils/fx';
 
 function fmtPKR(n) {
   if (n == null || isNaN(n)) return 'Rs 0';
@@ -37,7 +38,7 @@ export default function Profit() {
 
   const exportRows = summary.export?.rows || [];
   const millRows = summary.mill?.rows || [];
-  const currentFxRate = summary.currentFxRate || 280;
+  const currentFxRate = summary.currentFxRate || DEFAULT_FX_RATE;
 
   // KPIs
   const exportBookedProfitPkr = summary.export?.totalBookedProfitPkr || 0;

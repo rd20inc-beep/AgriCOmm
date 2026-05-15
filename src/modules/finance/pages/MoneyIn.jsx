@@ -7,6 +7,8 @@ import { useReceivables, useRecordPayment, useBankAccounts } from '../../../api/
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
 import StatusBadge from '../../../components/StatusBadge';
+import { toPkr } from '../utils/fx';
+import { ageBucket } from '../utils/aging';
 
 // Currency-aware formatter — picks $ / Rs / € / £ from the row's currency.
 function fmtCur(n, currency = 'USD') {
@@ -22,17 +24,16 @@ function fmtCur(n, currency = 'USD') {
   return `${symbol}${Math.round(n).toLocaleString()}`;
 }
 // PKR equivalent of any row — prefers locked base_amount_pkr, falls back
-// to amount × fx_rate, finally amount as-is for PKR rows.
+// to amount × fx_rate, finally amount as-is for PKR rows. Falls back
+// to DEFAULT_FX_RATE only when neither a stamped base PKR nor a row
+// fx_rate is present.
 function pkrOf(row, key = 'outstanding') {
   const amount = parseFloat(row?.[key]) || 0;
   if (!amount) return 0;
   if ((row?.currency || 'USD') === 'PKR') return amount;
   const base = parseFloat(row?.baseAmountPkr) || 0;
   if (base > 0 && key === 'expectedAmount') return base;
-  const fx = parseFloat(row?.fxRate) || 0;
-  if (fx > 1) return amount * fx;
-  // Final fallback: 280 historical default for legacy USD rows
-  return amount * 280;
+  return toPkr(amount, row?.currency, row?.fxRate);
 }
 // Backwards-compat helper kept for existing call sites that don't yet
 // pass a currency (treats input as already-formatted number in PKR).
@@ -74,15 +75,13 @@ export default function MoneyIn() {
     .filter(r => !eqStatus(r.status, 'Paid') && (r.currency || 'USD') !== 'PKR')
     .reduce((s, r) => s + (parseFloat(r.outstanding) || 0), 0);
 
-  // Aging data
+  // Aging data — bucket edges live in ../utils/aging so they can't
+  // drift away from the Overview's aging chart.
   const agingData = useMemo(() => {
     const buckets = { '0-30': 0, '31-60': 0, '61-90': 0, '90+': 0 };
     receivables.filter(r => r.status !== 'Paid').forEach(r => {
-      const days = r.aging || 0;
-      if (days <= 30) buckets['0-30'] += parseFloat(r.outstanding) || 0;
-      else if (days <= 60) buckets['31-60'] += parseFloat(r.outstanding) || 0;
-      else if (days <= 90) buckets['61-90'] += parseFloat(r.outstanding) || 0;
-      else buckets['90+'] += parseFloat(r.outstanding) || 0;
+      const b = ageBucket(r.aging || 0) || '90+';
+      buckets[b] += parseFloat(r.outstanding) || 0;
     });
     return Object.entries(buckets).map(([name, value]) => ({ name, value: Math.round(value) }));
   }, [receivables]);
