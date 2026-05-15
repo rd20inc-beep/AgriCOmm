@@ -68,12 +68,26 @@ export default function StandalonePrintReport() {
     return () => { cancelled = true; };
   }, [type, from, to, stockGroupBy]);
 
-  // Trigger native print once data is rendered.
+  // Trigger native print once data has rendered. Use double rAF to make
+  // sure the browser has committed at least one paint frame containing
+  // the report before window.print() captures the page state — fixed
+  // setTimeouts could fire before React painted, producing blank output.
+  const [hasPrinted, setHasPrinted] = useState(false);
   useEffect(() => {
-    if (!data || loading) return;
-    const t = setTimeout(() => window.print(), 300);
-    return () => clearTimeout(t);
-  }, [data, loading]);
+    if (!data || loading || hasPrinted) return;
+    let cancelled = false;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (cancelled) return;
+        setTimeout(() => {
+          if (cancelled) return;
+          setHasPrinted(true);
+          window.print();
+        }, 500);
+      });
+    });
+    return () => { cancelled = true; };
+  }, [data, loading, hasPrinted]);
 
   const companyName = companyProfileData?.legalName || companyProfileData?.name || 'AGRI COMMODITIES';
   const range = from && to ? { from: new Date(from), to: new Date(to) } : null;
@@ -83,9 +97,24 @@ export default function StandalonePrintReport() {
       <style>{`
         @media print {
           @page { size: A4 portrait; margin: 12mm; }
-          body { background: white !important; margin: 0 !important; }
+          html, body { background: white !important; margin: 0 !important; padding: 0 !important; }
+          .no-print { display: none !important; }
         }
       `}</style>
+
+      {/* Manual print + close, hidden from the print output via .no-print. */}
+      {data && !loading && !error && (
+        <div className="no-print" style={{ position: 'fixed', top: 12, right: 12, zIndex: 50, display: 'flex', gap: 8 }}>
+          <button onClick={() => window.print()}
+            style={{ background: '#2563eb', color: 'white', padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 500, border: 0, cursor: 'pointer' }}>
+            Print
+          </button>
+          <button onClick={() => window.close()}
+            style={{ background: 'white', color: '#374151', padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 500, border: '1px solid #e5e7eb', cursor: 'pointer' }}>
+            Close
+          </button>
+        </div>
+      )}
 
       {loading && (
         <div style={{ textAlign: 'center', padding: 40, color: '#9ca3af', fontSize: 14 }}>
