@@ -114,22 +114,23 @@ export default function PrintableReports() {
 
   useEffect(() => { loadReport(); }, [loadReport]);
 
-  // Pop the printable subtree into a fresh window with only the page
-  // styles we need. The main app's `flex h-screen overflow-hidden` shell
-  // and scrolling `<main>` keep stomping our `@media print` overrides —
-  // printing from a clean document avoids the fight entirely.
+  // Render the printable subtree into a hidden iframe and trigger
+  // print from there. Same-origin so stylesheets just work, no popup
+  // blocker, no fight with the SPA's flex h-screen overflow-hidden shell.
   const handlePrint = () => {
     const src = document.querySelector('.printable-area');
     if (!src) return;
-    const win = window.open('', '_blank', 'width=900,height=1200');
-    if (!win) {
-      addToast('Pop-up blocked — please allow pop-ups to print.', 'error');
-      return;
-    }
-    // Copy the page's stylesheets so Tailwind utility classes resolve
-    // inside the new window. <link> hrefs are rewritten to absolute URLs
-    // because the popup loads at about:blank and would otherwise try to
-    // resolve "/assets/..." against about:blank (and 404).
+
+    // Clean up any iframe left over from a previous run.
+    const prior = document.getElementById('agri-print-iframe');
+    if (prior) prior.remove();
+
+    const iframe = document.createElement('iframe');
+    iframe.id = 'agri-print-iframe';
+    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none;';
+    iframe.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(iframe);
+
     const origin = window.location.origin;
     const styleTags = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
       .map(n => {
@@ -140,8 +141,10 @@ export default function PrintableReports() {
         return n.outerHTML;
       })
       .join('\n');
-    win.document.open();
-    win.document.write(`<!doctype html>
+
+    const doc = iframe.contentDocument || iframe.contentWindow.document;
+    doc.open();
+    doc.write(`<!doctype html>
 <html>
 <head>
 <meta charset="utf-8" />
@@ -150,7 +153,7 @@ export default function PrintableReports() {
 ${styleTags}
 <style>
   @page { size: A4 portrait; margin: 12mm; }
-  html, body { background: white; margin: 0; padding: 0; }
+  html, body { background: white; margin: 0; padding: 0; height: auto; overflow: visible; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111; }
   .print-report h2 { page-break-after: avoid; }
   .print-report tr { page-break-inside: avoid; }
@@ -159,31 +162,29 @@ ${styleTags}
   .print-report thead { background: #f3f4f6; }
 </style>
 </head>
-<body>
-${src.outerHTML}
-<script>
-  // Wait for the linked stylesheets to actually finish loading before
-  // triggering print — otherwise Tailwind grid/flex utilities haven't
-  // applied yet and the print preview renders unstyled (looks blank).
-  function fireWhenReady() {
-    var links = Array.prototype.slice.call(document.querySelectorAll('link[rel="stylesheet"]'));
-    var pending = links.length;
-    if (!pending) { window.focus(); window.print(); return; }
-    var done = function () { pending--; if (pending <= 0) { setTimeout(function(){ window.focus(); window.print(); }, 80); } };
-    links.forEach(function (l) {
-      if (l.sheet) { done(); return; }
-      l.addEventListener('load',  done, { once: true });
-      l.addEventListener('error', done, { once: true });
-    });
-    setTimeout(function () { window.focus(); window.print(); }, 2500);
-  }
-  if (document.readyState === 'complete') fireWhenReady();
-  else window.addEventListener('load', fireWhenReady);
-  window.onafterprint = function () { window.close(); };
-</script>
-</body>
+<body>${src.outerHTML}</body>
 </html>`);
-    win.document.close();
+    doc.close();
+
+    // Wait for the iframe's stylesheets to actually load before firing
+    // print. iframe.onload fires after the document AND its resources
+    // settle, so it's a more reliable hook than setTimeout.
+    const fire = () => {
+      try {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+      } catch (err) {
+        addToast('Print failed: ' + (err?.message || err), 'error');
+      }
+      // Remove the iframe after the dialog closes (best-effort delay).
+      setTimeout(() => iframe.remove(), 1500);
+    };
+
+    if (iframe.contentWindow.document.readyState === 'complete') {
+      setTimeout(fire, 50);
+    } else {
+      iframe.addEventListener('load', () => setTimeout(fire, 50), { once: true });
+    }
   };
 
   const companyName = companyProfileData?.legalName || companyProfileData?.name || 'AGRI COMMODITIES';
