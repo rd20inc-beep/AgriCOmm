@@ -172,7 +172,7 @@ export default function Accounting() {
             <div className="text-right">
               <div className="text-lg font-bold">Journal Entries</div>
               <div className="text-xs text-gray-600">
-                {journalData.length} entries · Total DR {fmtPkrCompact(totalDebit)} · Total CR {fmtPkrCompact(totalCredit)}
+                {journalData.length} entries · Total {fmtPkrCompact(totalDebit)}
                 {isBalanced ? ' · Balanced ✓' : ` · Imbalance ${fmtPkrCompact(imbalance)}`}
               </div>
             </div>
@@ -194,8 +194,7 @@ export default function Accounting() {
                 <th className="text-left py-2.5 px-3 font-semibold">Entity</th>
                 <th className="text-left py-2.5 px-3 font-semibold">Reference</th>
                 <th className="text-left py-2.5 px-3 font-semibold">Description</th>
-                <th className="text-right py-2.5 px-3 font-semibold">Debit</th>
-                <th className="text-right py-2.5 px-3 font-semibold">Credit</th>
+                <th className="text-right py-2.5 px-3 font-semibold">Amount</th>
                 <th className="text-left py-2.5 px-3 font-semibold">Status</th>
               </tr>
             </thead>
@@ -247,18 +246,25 @@ export default function Accounting() {
                       <td className="py-2.5 px-3 text-gray-700" style={{ maxWidth: 280, width: 280 }}>
                         <span className="block truncate" title={j.description || ''}>{j.description || '—'}</span>
                       </td>
-                      <td className="py-2.5 px-3 text-right font-medium text-gray-900 whitespace-nowrap">
-                        {fmtPkr(toPkr(j, 'totalDebit'))}
-                        {fmtOriginal(j.totalDebit || j.total_debit, j.currency) && (
-                          <div className="text-[10px] text-gray-400 font-normal">{fmtOriginal(j.totalDebit || j.total_debit, j.currency)}</div>
-                        )}
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-medium text-gray-900 whitespace-nowrap">
-                        {fmtPkr(toPkr(j, 'totalCredit'))}
-                        {fmtOriginal(j.totalCredit || j.total_credit, j.currency) && (
-                          <div className="text-[10px] text-gray-400 font-normal">{fmtOriginal(j.totalCredit || j.total_credit, j.currency)}</div>
-                        )}
-                      </td>
+                      {(() => {
+                        // DR and CR are always equal for a balanced journal,
+                        // so collapse them into one Amount column. If they
+                        // ever drift (corrupt data), flag the row with a
+                        // tooltip showing the actual DR / CR split.
+                        const drPkr = toPkr(j, 'totalDebit');
+                        const crPkr = toPkr(j, 'totalCredit');
+                        const drift = Math.abs(drPkr - crPkr);
+                        const balanced = drift < 1;
+                        const orig = fmtOriginal(j.totalDebit || j.total_debit, j.currency);
+                        return (
+                          <td className={`py-2.5 px-3 text-right font-medium whitespace-nowrap ${balanced ? 'text-gray-900' : 'text-rose-700'}`}
+                              title={balanced ? '' : `Imbalanced — DR ${fmtPkr(drPkr)} · CR ${fmtPkr(crPkr)}`}>
+                            {fmtPkr(drPkr)}
+                            {!balanced && <span className="ml-1 text-[10px]">⚠</span>}
+                            {orig && <div className="text-[10px] text-gray-400 font-normal">{orig}</div>}
+                          </td>
+                        );
+                      })()}
                       <td className="py-2.5 px-3">
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                           j.status === 'Posted' ? 'bg-emerald-50 text-emerald-700'
