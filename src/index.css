@@ -452,12 +452,23 @@ input, select, textarea { font-size: 14px; }
   animation: slide-in 0.3s ease-out;
 }
 
-/* ===== PRINT ===== */
+/* ===== PRINT =====
+   The visibility-mask trick is needed when printing a sub-tree of the
+   live app (LotCostSheet, MillingCostSheet, etc.) — it hides the app
+   chrome and re-shows just the printable subtree. But it MUST NOT
+   apply on standalone print routes (/print-report) that render only
+   the report — there the body itself is the report and there's no
+   chrome to hide. Guard with body.app-print-mask so callers opt in. */
 @media print {
-  body * { visibility: hidden; }
-  .printable, .printable * { visibility: visible; }
-  .printable { position: absolute; left: 0; top: 0; width: 100%; }
-  .sidebar, header { display: none !important; }
+  body.app-print-mask * { visibility: hidden; }
+  body.app-print-mask .printable,
+  body.app-print-mask .printable *,
+  body.app-print-mask .print-report,
+  body.app-print-mask .print-report * { visibility: visible; }
+  body.app-print-mask .printable,
+  body.app-print-mask .print-report { position: absolute; left: 0; top: 0; width: 100%; }
+  body.app-print-mask .sidebar,
+  body.app-print-mask header { display: none !important; }
 }
 
 /* ===== FOCUS VISIBLE ===== */
