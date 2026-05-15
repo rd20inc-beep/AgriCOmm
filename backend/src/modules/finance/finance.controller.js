@@ -660,14 +660,20 @@ const financeController = {
           if (cashAndBank && counterAcc) {
             const debitAcc  = isReceivable ? cashAndBank : counterAcc;
             const creditAcc = isReceivable ? counterAcc : cashAndBank;
+            // The journal is always posted in PKR (the company's base
+            // currency). Line amounts above are already PKR-equivalents,
+            // so currency='PKR' / fxRate=1 keeps the FE conversion math
+            // a no-op. The original foreign amount is captured in the
+            // description for traceability.
+            const noteOriginal = cur !== 'PKR' ? ` (orig ${cur} ${amtNum.toLocaleString()} @ ${stampedFxRate})` : '';
             const journal = await accountingService.createJournal(trx, {
               date: (payment_date ? new Date(payment_date) : new Date()).toISOString().slice(0, 10),
               entity: isReceivable ? 'export' : 'mill',
               refType: 'Payment',
               refNo: paymentNo,
-              description: `Payment ${paymentNo} for ${entity_type} #${entity_id}`,
-              currency: cur,
-              fxRate: stampedFxRate,
+              description: `Payment ${paymentNo} for ${entity_type} #${entity_id}${noteOriginal}`,
+              currency: 'PKR',
+              fxRate: 1,
               isAuto: true,
               userId: req.user.id,
               lines: [

@@ -1241,41 +1241,91 @@ const exportOrderController = {
         return res.status(404).json({ success: false, message: 'Export order not found.' });
       }
 
-      // Upsert: update if category exists, otherwise insert
-      const existing = await db('export_order_costs')
-        .where({ order_id: id, category })
-        .first();
-
       // Export-order outflows are always paid in PKR — keep base_amount_pkr
       // in lock-step with amount so the unified finance/purchases query and
       // any PKR-based reporting see the same number.
       const amtPkr = parseFloat(amount);
-      let cost;
-      if (existing) {
-        [cost] = await db('export_order_costs')
-          .where({ id: existing.id })
-          .update({
-            amount: amtPkr,
-            base_amount_pkr: amtPkr,
-            fx_rate: 1,
-            notes: notes || null,
-            updated_at: db.fn.now(),
-          })
-          .returning('*');
-      } else {
-        [cost] = await db('export_order_costs')
-          .insert({
-            order_id: id,
-            category,
-            amount: amtPkr,
-            currency: 'PKR',
-            base_amount_pkr: amtPkr,
-            fx_rate: 1,
-            notes: notes || null,
-            created_by: req.user?.id || null,
-          })
-          .returning('*');
-      }
+
+      const cost = await db.transaction(async (trx) => {
+        const existing = await trx('export_order_costs')
+          .where({ order_id: id, category })
+          .first();
+
+        let row;
+        let priorAmtPkr = 0;
+        if (existing) {
+          priorAmtPkr = parseFloat(existing.base_amount_pkr) || (parseFloat(existing.amount) || 0) * (parseFloat(existing.fx_rate) || 1);
+          [row] = await trx('export_order_costs')
+            .where({ id: existing.id })
+            .update({
+              amount: amtPkr,
+              base_amount_pkr: amtPkr,
+              fx_rate: 1,
+              notes: notes || null,
+              updated_at: trx.fn.now(),
+            })
+            .returning('*');
+        } else {
+          [row] = await trx('export_order_costs')
+            .insert({
+              order_id: id,
+              category,
+              amount: amtPkr,
+              currency: 'PKR',
+              base_amount_pkr: amtPkr,
+              fx_rate: 1,
+              notes: notes || null,
+              created_by: req.user?.id || null,
+            })
+            .returning('*');
+        }
+
+        // ─── Cost-recognition journal ───────────────────────────
+        // Recording a cost creates an obligation: DR Operating Expenses,
+        // CR Supplier Payable. The matching payment journal (DR
+        // Supplier Payable, CR Cash & Bank) is posted later by
+        // payPurchase. If the user edits an existing cost, post the
+        // *delta* so we don't double-count. Skipped silently if the
+        // GL chart isn't seeded yet.
+        try {
+          const delta = amtPkr - priorAmtPkr;
+          if (Math.abs(delta) > 0.01) {
+            const opExp = await trx('chart_of_accounts').where({ code: '6000' }).first();
+            const supplierPayable = await trx('chart_of_accounts').where({ code: '2010' }).first();
+            if (opExp && supplierPayable) {
+              const sign = delta > 0 ? 1 : -1;
+              const absDelta = Math.abs(delta);
+              const debitAcc  = sign > 0 ? opExp           : supplierPayable;
+              const creditAcc = sign > 0 ? supplierPayable : opExp;
+              const refLabel = `${order.order_no} ${category}`;
+              const journal = await accountingService.createJournal(trx, {
+                date: new Date().toISOString().slice(0, 10),
+                entity: 'export',
+                refType: 'Export Order Cost',
+                refNo: refLabel,
+                description: existing
+                  ? `Cost adjustment Rs ${Math.round(absDelta).toLocaleString()} for ${refLabel}${delta < 0 ? ' (reduced)' : ''}`
+                  : `Cost recorded Rs ${Math.round(absDelta).toLocaleString()} for ${refLabel}`,
+                currency: 'PKR',
+                fxRate: 1,
+                isAuto: true,
+                userId: req.user?.id || null,
+                lines: [
+                  { account_id: debitAcc.id,  account: debitAcc.name,  debit: absDelta, credit: 0,        narration: `DR ${debitAcc.code} ${debitAcc.name} — ${refLabel}` },
+                  { account_id: creditAcc.id, account: creditAcc.name, debit: 0,        credit: absDelta, narration: `CR ${creditAcc.code} ${creditAcc.name} — ${refLabel}` },
+                ],
+              });
+              if (journal?.id) await accountingService.postJournal(trx, journal.id);
+            } else {
+              console.warn(`addCost: chart_of_accounts missing 6000/2010 — journal skipped for ${order.order_no} ${category}`);
+            }
+          }
+        } catch (jeErr) {
+          console.error('addCost journal error (cost still recorded):', jeErr.message);
+        }
+
+        return row;
+      });
 
       emitExportOrderUpdate(order.id, 'cost_updated', { category });
       return res.json({

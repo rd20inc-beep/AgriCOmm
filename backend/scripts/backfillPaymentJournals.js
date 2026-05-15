@@ -56,14 +56,21 @@ async function main() {
 
     try {
       await db.transaction(async (trx) => {
+        // Post in PKR — amtPkr is already PKR-equivalent. Original
+        // foreign amount + rate are captured in the description so
+        // anyone reading the journal can still see where it came from.
+        const cur = (p.currency || 'PKR').toUpperCase();
+        const origAmt = parseFloat(p.amount) || 0;
+        const fx = parseFloat(p.fx_rate) || 1;
+        const noteOriginal = cur !== 'PKR' ? ` (orig ${cur} ${origAmt.toLocaleString()} @ ${fx})` : '';
         const journal = await accountingService.createJournal(trx, {
           date: journalDate,
           entity,
           refType: 'Payment',
           refNo: p.payment_no,
-          description: `Payment ${p.payment_no} (backfilled)`,
-          currency: p.currency || 'PKR',
-          fxRate: parseFloat(p.fx_rate) || 1,
+          description: `Payment ${p.payment_no} (backfilled)${noteOriginal}`,
+          currency: 'PKR',
+          fxRate: 1,
           isAuto: true,
           userId: p.created_by || null,
           lines: [
