@@ -162,6 +162,14 @@ function StandardRoutes() {
         <Route path="/local-sales" element={<ProtectedRoute module="inventory" action="view"><LocalSales /></ProtectedRoute>} />
         <Route path="/lot-inventory/:id" element={<ProtectedRoute module="inventory" action="view"><LotDetail /></ProtectedRoute>} />
         <Route path="/documents" element={<ProtectedRoute module="documents" action="view"><Documents /></ProtectedRoute>} />
+        {/* Mill Store — was previously only in MillRoutes, so non-Mill-Manager
+            roles (Super Admin / Owner) couldn't reach the New Purchase form
+            and got bounced to the dashboard by the catch-all. */}
+        <Route path="/mill-store"               element={<ProtectedRoute module="mill_store" action="view"><StoreOverview /></ProtectedRoute>} />
+        <Route path="/mill-store/purchases/new" element={<ProtectedRoute module="mill_store" action="create_purchase"><NewPurchase /></ProtectedRoute>} />
+        <Route path="/mill-store/alerts"        element={<ProtectedRoute module="mill_store" action="view"><StoreAlerts /></ProtectedRoute>} />
+        <Route path="/mill-store/adjustments"   element={<ProtectedRoute module="mill_store" action="view"><StoreAdjustments /></ProtectedRoute>} />
+        <Route path="/mill-store/ratios"        element={<ProtectedRoute module="mill_store" action="view"><StoreRatios /></ProtectedRoute>} />
         <Route path="/reports" element={<ProtectedRoute module="reports" action="view"><Reports /></ProtectedRoute>} />
         <Route path="/reports/print" element={<ProtectedRoute module="reports" action="view"><PrintableReports /></ProtectedRoute>} />
         <Route path="/exceptions" element={<ProtectedRoute module="admin" action="view"><ExceptionDashboard /></ProtectedRoute>} />
