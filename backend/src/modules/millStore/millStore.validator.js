@@ -48,7 +48,7 @@ const purchaseLineSchema = Joi.object({
 });
 
 const createPurchaseSchema = Joi.object({
-  supplier_id: Joi.number().integer().required(),
+  supplier_id: Joi.number().integer().allow(null).optional(),
   invoice_number: Joi.string().max(100).allow(null, '').optional(),
   purchase_date: Joi.date().required(),
   notes: Joi.string().allow(null, '').optional(),
