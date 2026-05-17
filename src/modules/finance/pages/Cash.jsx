@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
-import { Landmark, Wallet, TrendingUp, TrendingDown, Activity } from 'lucide-react';
+import { Landmark, Wallet, TrendingUp, TrendingDown, Activity, Printer } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart } from '../../../components/finance';
 import { useBankAccounts, useBankTransactions } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
+import { useApp } from '../../../context/AppContext';
+import { shortenRef } from '../utils/refs';
 
 function fmtPKR(n) {
   if (n == null || isNaN(n)) return 'Rs 0';
@@ -13,11 +15,23 @@ function fmtPKR(n) {
 }
 
 export default function Cash() {
+  const { companyProfileData } = useApp();
   const { queryParams: rangeParams } = useFinanceDateRange();
   const { data: accounts = [], isLoading: loadingAccounts } = useBankAccounts();
   const { data: txData, isLoading: loadingTx } = useBankTransactions(rangeParams);
   const allTransactions = txData?.transactions || txData || [];
   const [accountFilter, setAccountFilter] = useState('all');
+
+  function handlePrint() {
+    document.body.classList.add('app-print-mask');
+    const cleanup = () => {
+      document.body.classList.remove('app-print-mask');
+      window.removeEventListener('afterprint', cleanup);
+    };
+    window.addEventListener('afterprint', cleanup);
+    setTimeout(cleanup, 60_000);
+    window.print();
+  }
   const transactions = useMemo(() => {
     if (accountFilter === 'all') return allTransactions;
     const id = String(accountFilter);
@@ -53,7 +67,9 @@ export default function Cash() {
       <span className={row.type === 'credit' ? 'text-emerald-600' : 'text-red-600'}>{fmtPKR(Math.abs(v))}</span>
     )},
     { key: 'accountName', label: 'Account' },
-    { key: 'reference', label: 'Reference', render: (v) => v || '—' },
+    { key: 'reference', label: 'Reference', render: (v) => (
+      <span title={v || ''}>{shortenRef(v) || '—'}</span>
+    )},
     { key: 'counterparty', label: 'Counterparty', render: (v) => v || '—' },
   ];
 
@@ -91,8 +107,36 @@ export default function Cash() {
     : 'from-slate-700 via-slate-600 to-slate-500';
   const FlowIcon = netFlow30d >= 0 ? TrendingUp : TrendingDown;
 
+  const companyName = companyProfileData?.legalName || companyProfileData?.name || 'AGRI COMMODITIES';
   return (
     <div className="space-y-5 pb-4">
+      {/* Print button — toggles body.app-print-mask so the global rule
+          un-hides only .print-report below. */}
+      <div className="flex items-center justify-end -mb-2 no-print">
+        <button onClick={handlePrint}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm">
+          <Printer size={14} /> Print
+        </button>
+      </div>
+
+      <div className="print-report space-y-5">
+        {/* Print-only header */}
+        <div className="hidden print:block">
+          <div className="border-b-2 border-gray-900 pb-2 flex items-end justify-between mb-4">
+            <div>
+              <div className="text-base font-bold uppercase tracking-wider">{companyName}</div>
+              <div className="text-xs text-gray-500">Generated {new Date().toLocaleString()}</div>
+            </div>
+            <div className="text-right">
+              <div className="text-lg font-bold">Cash Position</div>
+              <div className="text-xs text-gray-600">
+                {accounts.length} accounts · Total {fmtPKR(totalBalance)}
+                {usdAccounts.length > 0 && <> · USD ${Math.round(usdBalance).toLocaleString()}</>}
+              </div>
+            </div>
+          </div>
+        </div>
+
       {/* ─── HERO BAND ────────────────────────────────────────────── */}
       <div className={`rounded-2xl bg-gradient-to-r ${heroGradient} p-5 sm:p-6 text-white shadow-sm relative overflow-hidden`}>
         <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 70% 30%, white 0%, transparent 60%)' }} />
@@ -179,6 +223,7 @@ export default function Cash() {
             searchKeys={['reference', 'counterparty', 'accountName']} exportFilename="bank-transactions" loading={loadingTx} />
         </div>
       )}
+      </div>{/* /.print-report */}
     </div>
   );
 }

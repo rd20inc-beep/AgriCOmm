@@ -2,13 +2,14 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ShoppingCart, Package, Factory, Ship, Receipt,
-  Search, Download, RefreshCw, CheckCircle, Clock, X, Plus, ChevronDown,
+  Search, Download, RefreshCw, CheckCircle, Clock, X, Plus, ChevronDown, Printer,
 } from 'lucide-react';
 import { usePurchases, usePayPurchase, useBankAccounts } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 import { downloadCSV } from '../../../utils/csvExport';
 import { useApp } from '../../../context/AppContext';
+import { shortenRef } from '../utils/refs';
 
 function fmtPKR(n) {
   const v = Number(n) || 0;
@@ -57,7 +58,7 @@ const RANGE_LABEL = {
 
 export default function Purchases() {
   const navigate = useNavigate();
-  const { addToast } = useApp();
+  const { addToast, companyProfileData } = useApp();
   const { queryParams: rangeParams, rangeKey } = useFinanceDateRange();
   const [source, setSource] = useState('all');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -65,6 +66,17 @@ export default function Purchases() {
   const [addOpen, setAddOpen] = useState(false);
   const addRef = useRef(null);
   const [, setUrlParams] = useSearchParams();
+
+  function handlePrint() {
+    document.body.classList.add('app-print-mask');
+    const cleanup = () => {
+      document.body.classList.remove('app-print-mask');
+      window.removeEventListener('afterprint', cleanup);
+    };
+    window.addEventListener('afterprint', cleanup);
+    setTimeout(cleanup, 60_000);
+    window.print();
+  }
 
   // Payment drawer state — opens when user clicks the status pill on a row.
   const [payTarget, setPayTarget] = useState(null);
@@ -204,6 +216,9 @@ export default function Purchases() {
               </div>
             )}
           </div>
+          <button onClick={handlePrint} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700 bg-white hover:bg-gray-50 border border-gray-200 rounded-lg">
+            <Printer size={14} /> Print
+          </button>
           <button onClick={exportCsv} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700 bg-white hover:bg-gray-50 border border-gray-200 rounded-lg">
             <Download size={14} /> CSV
           </button>
@@ -212,6 +227,25 @@ export default function Purchases() {
           </button>
         </div>
       </div>
+
+      <div className="print-report">
+        {/* Print-only header */}
+        <div className="hidden print:block mb-4">
+          <div className="border-b-2 border-gray-900 pb-2 flex items-end justify-between">
+            <div>
+              <div className="text-base font-bold uppercase tracking-wider">
+                {companyProfileData?.legalName || companyProfileData?.name || 'AGRI COMMODITIES'}
+              </div>
+              <div className="text-xs text-gray-500">Generated {new Date().toLocaleString()}</div>
+            </div>
+            <div className="text-right">
+              <div className="text-lg font-bold">Purchases</div>
+              <div className="text-xs text-gray-600">
+                {filteredTotals.count} purchases · Total {fmtPKR(filteredTotals.totalPkr)} · Paid {fmtPKR(filteredTotals.paidPkr)} · Open {fmtPKR(filteredTotals.openPkr)}
+              </div>
+            </div>
+          </div>
+        </div>
 
       {/* KPIs — recompute from filtered */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -414,6 +448,7 @@ export default function Purchases() {
           </table>
         </div>
       </div>
+      </div>{/* /.print-report */}
 
       {payTarget && (
         <PayPurchaseDrawer
@@ -584,13 +619,14 @@ function PayPurchaseDrawer({ purchase, bankAccounts, isPending, onClose, onSubmi
 }
 
 function RefLink({ p }) {
+  const short = shortenRef(p.ref) || p.ref || '—';
   if (p.source === 'lot') {
-    return <Link to={`/lot-inventory/${p.ref}`} className="text-blue-600 hover:underline">{p.ref}</Link>;
+    return <Link to={`/lot-inventory/${p.ref}`} title={p.ref || ''} className="text-blue-600 hover:underline whitespace-nowrap">{short}</Link>;
   }
   if (p.source === 'export_cost') {
-    return <Link to={`/export/${p.ref}`} className="text-blue-600 hover:underline">{p.ref}</Link>;
+    return <Link to={`/export/${p.ref}`} title={p.ref || ''} className="text-blue-600 hover:underline whitespace-nowrap">{short}</Link>;
   }
-  return <span>{p.ref || '—'}</span>;
+  return <span title={p.ref || ''} className="whitespace-nowrap">{short}</span>;
 }
 
 function KpiTile({ label, primary, secondary, tone = 'gray' }) {

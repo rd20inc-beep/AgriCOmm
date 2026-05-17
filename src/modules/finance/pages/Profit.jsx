@@ -1,9 +1,10 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { TrendingUp, TrendingDown, DollarSign, Factory, Store, AlertTriangle, CheckCircle, RefreshCw, Activity } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Factory, Store, AlertTriangle, CheckCircle, RefreshCw, Activity, Printer } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart } from '../../../components/finance';
 import { useProfitabilitySummary, useLocalSales, useLocalSalesSummary } from '../../../api/queries';
 import { DEFAULT_FX_RATE } from '../utils/fx';
+import { useApp } from '../../../context/AppContext';
 
 function fmtPKR(n) {
   if (n == null || isNaN(n)) return 'Rs 0';
@@ -31,10 +32,22 @@ function AccuracyBadge({ status }) {
 }
 
 export default function Profit() {
+  const { companyProfileData } = useApp();
   const { data: summary = {}, isLoading } = useProfitabilitySummary();
   const { data: localSales = [], isLoading: localLoading } = useLocalSales();
   const { data: localSummary = {} } = useLocalSalesSummary();
   const [tab, setTab] = useState('Export');
+
+  function handlePrint() {
+    document.body.classList.add('app-print-mask');
+    const cleanup = () => {
+      document.body.classList.remove('app-print-mask');
+      window.removeEventListener('afterprint', cleanup);
+    };
+    window.addEventListener('afterprint', cleanup);
+    setTimeout(cleanup, 60_000);
+    window.print();
+  }
 
   const exportRows = summary.export?.rows || [];
   const millRows = summary.mill?.rows || [];
@@ -158,8 +171,33 @@ export default function Profit() {
     + (parseFloat(localSummary?.profit?.revenue) || 0);
   const overallMargin = totalRevenue > 0 ? (consolidatedPkr / totalRevenue) * 100 : null;
 
+  const companyName = companyProfileData?.legalName || companyProfileData?.name || 'AGRI COMMODITIES';
   return (
     <div className="space-y-5 pb-4">
+      <div className="flex items-center justify-end -mb-2 no-print">
+        <button onClick={handlePrint}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm">
+          <Printer size={14} /> Print
+        </button>
+      </div>
+
+      <div className="print-report space-y-5">
+        {/* Print-only header */}
+        <div className="hidden print:block">
+          <div className="border-b-2 border-gray-900 pb-2 flex items-end justify-between mb-4">
+            <div>
+              <div className="text-base font-bold uppercase tracking-wider">{companyName}</div>
+              <div className="text-xs text-gray-500">Generated {new Date().toLocaleString()}</div>
+            </div>
+            <div className="text-right">
+              <div className="text-lg font-bold">Profitability — {tab}</div>
+              <div className="text-xs text-gray-600">
+                Consolidated {fmtPKR(consolidatedPkr)} · Margin {overallMargin == null ? '—' : `${overallMargin.toFixed(1)}%`} · 1 USD = {currentFxRate}
+              </div>
+            </div>
+          </div>
+        </div>
+
       {/* ─── HERO BAND ────────────────────────────────────────────── */}
       <div className={`rounded-2xl bg-gradient-to-r ${heroGradient} p-5 sm:p-6 text-white shadow-sm relative overflow-hidden`}>
         <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 30% 20%, white 0%, transparent 60%)' }} />
@@ -234,6 +272,7 @@ export default function Profit() {
         <FinanceTable title="Local Sales — PKR" columns={localColumns} data={localSales}
           searchKeys={['saleNo', 'buyerName', 'itemName']} exportFilename="local-sales-profitability-pkr" loading={localLoading} />
       )}
+      </div>{/* /.print-report */}
     </div>
   );
 }
