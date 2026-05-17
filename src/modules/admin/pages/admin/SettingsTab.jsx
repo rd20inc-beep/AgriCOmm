@@ -1,13 +1,23 @@
 import { useState } from 'react';
-import { Settings, Server, Shield, Mail, FileText, Eye, Edit3 } from 'lucide-react';
+import { Settings, Server, Shield, Mail, FileText, Eye, Edit3, Building2 } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
 
 export default function SettingsTab() {
   const {
     settings, updateSettings,
     emailSettings, updateEmailSettings,
+    companyProfileData,
     addToast,
   } = useApp();
+
+  // Company profile editable state (seeded from resolved profile data)
+  const [companyName, setCompanyName] = useState(companyProfileData?.name || '');
+  const [companyTagline, setCompanyTagline] = useState(companyProfileData?.tagline || '');
+  const [companyAddress, setCompanyAddress] = useState(companyProfileData?.address || '');
+  const [companyPhone, setCompanyPhone] = useState(companyProfileData?.phone || '');
+  const [companyEmail, setCompanyEmail] = useState(companyProfileData?.email || '');
+  const [companyWebsite, setCompanyWebsite] = useState(companyProfileData?.website || '');
+  const [companyNtn, setCompanyNtn] = useState(companyProfileData?.ntn || '');
 
   // Settings controlled state
   const [qualityThreshold, setQualityThreshold] = useState(settings.qualityThreshold);
@@ -40,8 +50,86 @@ export default function SettingsTab() {
     addToast('Settings saved successfully', 'success');
   };
 
+  const handleSaveCompanyProfile = () => {
+    updateSettings({
+      companyProfile: {
+        name:     companyName.trim(),
+        tagline:  companyTagline.trim(),
+        address:  companyAddress.trim(),
+        phone:    companyPhone.trim(),
+        email:    companyEmail.trim(),
+        website:  companyWebsite.trim(),
+        ntn:      companyNtn.trim(),
+      },
+    });
+    addToast('Company profile saved — printed sheets and hero bands will use this on next refresh', 'success');
+  };
+
   return (
     <div className="space-y-6">
+      {/* ─── Company Profile ───────────────────────────────────── */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2 mb-1">
+          <Building2 className="w-5 h-5 text-gray-600" />
+          Company Profile
+        </h2>
+        <p className="text-xs text-gray-500 mb-5">
+          Appears on every printed sheet (Money In, Money Out, Accounting, P&L, etc.) and on order documents.
+        </p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="sm:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Legal / Display Name</label>
+            <input type="text" value={companyName} onChange={(e) => setCompanyName(e.target.value)}
+              placeholder="e.g. AGRI COMMODITIES (Pvt) Ltd"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Tagline</label>
+            <input type="text" value={companyTagline} onChange={(e) => setCompanyTagline(e.target.value)}
+              placeholder="Serving Natural Nutrition"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+            <input type="text" value={companyAddress} onChange={(e) => setCompanyAddress(e.target.value)}
+              placeholder="Suite, building, street, city"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+            <input type="text" value={companyPhone} onChange={(e) => setCompanyPhone(e.target.value)}
+              placeholder="+92 21 0000000"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <input type="email" value={companyEmail} onChange={(e) => setCompanyEmail(e.target.value)}
+              placeholder="info@yourcompany.com"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Website</label>
+            <input type="text" value={companyWebsite} onChange={(e) => setCompanyWebsite(e.target.value)}
+              placeholder="www.yourcompany.com"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">NTN / Tax ID</label>
+            <input type="text" value={companyNtn} onChange={(e) => setCompanyNtn(e.target.value)}
+              placeholder="0000000-0"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          </div>
+        </div>
+
+        <div className="pt-5">
+          <button onClick={handleSaveCompanyProfile}
+            className="inline-flex items-center gap-2 bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm">
+            Save Company Profile
+          </button>
+        </div>
+      </div>
+
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2 mb-6">
           <Settings className="w-5 h-5 text-gray-600" />

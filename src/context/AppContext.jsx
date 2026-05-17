@@ -5,11 +5,12 @@ import { useAuth } from './AuthContext';
 import {
   useExportOrders, useMillingBatches, useCustomers, useSuppliers,
   useProducts, useWarehouses, useBagTypes, useBankAccounts,
-  useInventory, useSettings as useSettingsQuery,
+  useInventory, useSettings as useSettingsQuery, useUpdateSettings,
 } from '../api/queries';
 
-// Company profile — static config, not from API
-import companyProfileData from '../data/companyProfile.json';
+// Company profile — static defaults; any field can be overridden by
+// the companyProfile object saved in system_settings.
+import companyProfileDefaults from '../data/companyProfile.json';
 
 const AppContext = createContext();
 
@@ -63,6 +64,17 @@ export function AppProvider({ children }) {
   const [emailSettings, setEmailSettings] = useState(defaultEmailSettings);
 
   const settings = { ...resolvedSettings, ...localSettings };
+
+  // Merge any companyProfile overrides saved in system_settings on top
+  // of the static JSON defaults. So a Super Admin can change "AGRI
+  // COMMODITIES" → their actual legal name, and every printed sheet +
+  // hero band immediately reflects it.
+  const companyProfileData = {
+    ...companyProfileDefaults,
+    ...(settings.companyProfile || {}),
+  };
+
+  const updateSettingsMut = useUpdateSettings();
 
   // Dynamic cost categories (user can add more — local state for now)
   const [exportCostCategories, setExportCostCategories] = useState([
@@ -121,7 +133,14 @@ export function AppProvider({ children }) {
 
   const updateSettings = useCallback((newSettings) => {
     setLocalSettings(prev => ({ ...prev, ...newSettings }));
-  }, []);
+    // Persist to /api/admin/settings so the change survives reload and
+    // applies for every other user. Stored as nested JSON values per key.
+    if (isLoggedIn) {
+      updateSettingsMut.mutate(newSettings, {
+        onError: (err) => console.warn('updateSettings persist failed:', err.message),
+      });
+    }
+  }, [isLoggedIn, updateSettingsMut]);
 
   const updateEmailSettings = useCallback((newEmailSettings) => {
     setEmailSettings(prev => ({ ...prev, ...newEmailSettings }));
