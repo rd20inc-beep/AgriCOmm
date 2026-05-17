@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Landmark, Wallet, TrendingUp, TrendingDown, Activity } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart } from '../../../components/finance';
 import { useBankAccounts, useBankTransactions } from '../../../api/queries';
@@ -16,7 +16,13 @@ export default function Cash() {
   const { queryParams: rangeParams } = useFinanceDateRange();
   const { data: accounts = [], isLoading: loadingAccounts } = useBankAccounts();
   const { data: txData, isLoading: loadingTx } = useBankTransactions(rangeParams);
-  const transactions = txData?.transactions || txData || [];
+  const allTransactions = txData?.transactions || txData || [];
+  const [accountFilter, setAccountFilter] = useState('all');
+  const transactions = useMemo(() => {
+    if (accountFilter === 'all') return allTransactions;
+    const id = String(accountFilter);
+    return allTransactions.filter(t => String(t.bankAccountId || t.bank_account_id) === id);
+  }, [allTransactions, accountFilter]);
 
   const totalBalance = accounts.reduce((s, a) => s + (parseFloat(a.currentBalance) || 0), 0);
   const pkrAccounts = accounts.filter(a => (a.currency || 'PKR') === 'PKR');
@@ -149,9 +155,29 @@ export default function Cash() {
       <FinanceTable title="Bank Accounts" columns={accountColumns} data={accounts}
         searchKeys={['name', 'bankName', 'accountNumber']} exportFilename="bank-accounts" loading={loadingAccounts} />
 
-      {Array.isArray(transactions) && transactions.length > 0 && (
-        <FinanceTable title="Recent Transactions" columns={txColumns} data={transactions}
-          searchKeys={['reference', 'counterparty', 'accountName']} exportFilename="bank-transactions" loading={loadingTx} />
+      {Array.isArray(allTransactions) && allTransactions.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Account:</span>
+            <button onClick={() => setAccountFilter('all')}
+              className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${accountFilter === 'all' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'}`}>
+              All <span className="opacity-60 ml-1">({allTransactions.length})</span>
+            </button>
+            {accounts.map(a => {
+              const n = allTransactions.filter(t => String(t.bankAccountId || t.bank_account_id) === String(a.id)).length;
+              if (n === 0) return null;
+              const active = String(accountFilter) === String(a.id);
+              return (
+                <button key={a.id} onClick={() => setAccountFilter(String(a.id))}
+                  className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${active ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'}`}>
+                  {a.name} <span className="opacity-60 ml-1">({n})</span>
+                </button>
+              );
+            })}
+          </div>
+          <FinanceTable title="Recent Transactions" columns={txColumns} data={transactions}
+            searchKeys={['reference', 'counterparty', 'accountName']} exportFilename="bank-transactions" loading={loadingTx} />
+        </div>
       )}
     </div>
   );
