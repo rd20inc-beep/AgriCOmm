@@ -84,21 +84,35 @@ export default function LotInventory() {
   if (error) return <ErrorState message={error.message} onRetry={refetch} />;
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="page-header">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <Package className="w-6 h-6 text-blue-600" />
-            Lot Inventory
-          </h1>
-          <p className="text-sm text-gray-500 mt-0.5">Lot-based stock tracking with full traceability</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setShowPurchaseModal(true)} className="btn btn-primary">
-            <Plus className="w-4 h-4" /> New Purchase Lot
-          </button>
-          <button onClick={() => refetch()} className="btn btn-secondary"><RefreshCw className="w-4 h-4" /></button>
+    <div className="space-y-5 pb-4">
+      {/* ─── HERO BAND ────────────────────────────────────────────── */}
+      <div className="rounded-2xl bg-gradient-to-r from-blue-700 via-blue-600 to-cyan-500 p-5 sm:p-6 text-white shadow-sm relative overflow-hidden">
+        <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 30% 20%, white 0%, transparent 60%)' }} />
+        <div className="relative flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-xs uppercase tracking-wider opacity-80 mb-1">
+              <Package size={14} /> Lot inventory · Capital locked
+            </div>
+            <div className="text-3xl sm:text-4xl font-bold leading-tight tabular-nums">
+              {fmtPKR(kpis.totalValue)}
+            </div>
+            <div className="text-xs opacity-90 mt-1">
+              {kpis.totalLots} lots · {(kpis.totalKg / 1000).toFixed(1)} MT total
+              {kpis.availKg    > 0 && <> · Available {(kpis.availKg    / 1000).toFixed(1)} MT</>}
+              {kpis.reservedKg > 0 && <> · Reserved {(kpis.reservedKg / 1000).toFixed(1)} MT</>}
+              {kpis.soldKg     > 0 && <> · Sold {(kpis.soldKg     / 1000).toFixed(1)} MT</>}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setShowPurchaseModal(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-white text-blue-700 hover:bg-blue-50 transition-colors shadow-sm">
+              <Plus size={13} /> New Purchase Lot
+            </button>
+            <button onClick={() => refetch()}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-white/15 hover:bg-white/25 ring-1 ring-white/30 transition-colors">
+              <RefreshCw size={13} /> Refresh
+            </button>
+          </div>
         </div>
       </div>
 
