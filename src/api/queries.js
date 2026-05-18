@@ -1639,6 +1639,30 @@ export function useStockReport(params = {}) {
 
 // ===================== LOCAL SALES =====================
 
+export function useLocalSale(id) {
+  return useQuery({
+    queryKey: ['local-sales', 'detail', id],
+    queryFn: async () => {
+      const res = await localSalesApi.get(id);
+      return transformKeys(unwrap(res, 'sale') || null);
+    },
+    enabled: !!id,
+    staleTime: 10 * 1000,
+  });
+}
+
+export function useLocalSalePayments(id) {
+  return useQuery({
+    queryKey: ['local-sales', 'payments', id],
+    queryFn: async () => {
+      const res = await localSalesApi.getPayments(id);
+      return transformKeys(unwrap(res, 'payments') || []);
+    },
+    enabled: !!id,
+    staleTime: 10 * 1000,
+  });
+}
+
 export function useLocalSales(params = {}) {
   return useQuery({
     queryKey: ['local-sales', 'list', params],

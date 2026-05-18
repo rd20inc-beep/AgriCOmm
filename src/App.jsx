@@ -26,6 +26,7 @@ const MillingDashboard = lazy(() => import('./modules/milling/pages/MillingDashb
 const MillHomeDashboard = lazy(() => import('./modules/milling/pages/MillHomeDashboard'));
 const StoreOverview = lazy(() => import('./modules/millStore/pages/StoreOverview'));
 const NewPurchase = lazy(() => import('./modules/millStore/pages/NewPurchase'));
+const LocalSaleDetail = lazy(() => import('./modules/localSales/pages/LocalSaleDetail'));
 const StoreAlerts = lazy(() => import('./modules/millStore/pages/StoreAlerts'));
 const StoreAdjustments = lazy(() => import('./modules/millStore/pages/StoreAdjustments'));
 const StoreRatios = lazy(() => import('./modules/millStore/pages/StoreRatios'));
@@ -134,6 +135,7 @@ function MillRoutes() {
         <Route path="/lot-inventory" element={<LotInventory />} />
         <Route path="/lot-inventory/:id" element={<LotDetail />} />
         <Route path="/local-sales" element={<LocalSales />} />
+        <Route path="/local-sales/:id" element={<LocalSaleDetail />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
@@ -160,6 +162,7 @@ function StandardRoutes() {
         <Route path="/inventory" element={<ProtectedRoute module="inventory" action="view"><Inventory /></ProtectedRoute>} />
         <Route path="/lot-inventory" element={<ProtectedRoute module="inventory" action="view"><LotInventory /></ProtectedRoute>} />
         <Route path="/local-sales" element={<ProtectedRoute module="inventory" action="view"><LocalSales /></ProtectedRoute>} />
+        <Route path="/local-sales/:id" element={<ProtectedRoute module="inventory" action="view"><LocalSaleDetail /></ProtectedRoute>} />
         <Route path="/lot-inventory/:id" element={<ProtectedRoute module="inventory" action="view"><LotDetail /></ProtectedRoute>} />
         <Route path="/documents" element={<ProtectedRoute module="documents" action="view"><Documents /></ProtectedRoute>} />
         {/* Mill Store — was previously only in MillRoutes, so non-Mill-Manager
