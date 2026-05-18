@@ -295,27 +295,30 @@ input, select, textarea { font-size: 14px; }
 }
 
 /* ===== FORM INPUTS =====
-   Padding is split into individual sides instead of the `padding`
-   shorthand so callers can override one side via Tailwind utilities
-   (e.g. pl-9 to leave room for a leading icon) without the shorthand
-   clobbering them. */
-.form-input {
-  width: 100%;
-  padding-top: 0.625rem;
-  padding-bottom: 0.625rem;
-  padding-left: 0.875rem;
-  padding-right: 0.875rem;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  font-size: 0.875rem;
-  color: var(--color-text-primary);
-  background: var(--color-surface);
-  outline: none;
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
-}
-.form-input:focus {
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+   Wrapped in @layer components so Tailwind utility classes (pl-9,
+   pr-10, etc.) always win the cascade regardless of declaration order.
+   Without the layer, our custom rules came after Tailwind in the
+   bundle and clobbered `pl-9` on inputs that have a leading icon —
+   the header search icon was overlapping the placeholder. */
+@layer components {
+  .form-input {
+    width: 100%;
+    padding-top: 0.625rem;
+    padding-bottom: 0.625rem;
+    padding-left: 0.875rem;
+    padding-right: 0.875rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: 0.875rem;
+    color: var(--color-text-primary);
+    background: var(--color-surface);
+    outline: none;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  }
+  .form-input:focus {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+  }
 }
 .form-input.error {
   border-color: #ef4444;
