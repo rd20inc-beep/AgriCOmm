@@ -528,6 +528,12 @@ const inventoryService = {
     rawCostComponent,
     millingCostComponent,
     byproductCosts, // { broken: costPerKg, bran: costPerKg, husk: costPerKg }
+    // Optional per-grade split of brokenMT. When supplied, recordMillingOutput
+    // creates one byproduct lot per non-zero grade (B1, B2, B3, CSR, Short
+    // Grain) instead of collapsing them into a single "Broken Rice" lot.
+    // Each lot is stamped with the grade on inventory_lots.grade + variety
+    // for downstream traceability.
+    brokenGrades,
     userId,
     // Optional enrichment from batch/quality
     supplierInfo,
@@ -574,17 +580,22 @@ const inventoryService = {
     }
     // Resolve byproduct products by item_name — these are seeded with stable
     // PROD-* codes (round 075). Code-first lookup, then name fallback.
+    // For graded broken-rice lots ("Broken Rice - B1", "Broken Rice - CSR")
+    // we still want the parent "Broken Rice" product since the catalog
+    // doesn't carry a separate product per grade — the grade is stamped
+    // on the inventory_lots row instead.
     const byproductProductLookup = async (itemName) => {
+      const baseName = itemName.startsWith('Broken Rice') ? 'Broken Rice' : itemName;
       const byCode = {
         'Broken Rice': ['PROD-BROKEN-RICE', 'BROKEN-RICE'],
         'Rice Bran':   ['PROD-RICE-BRAN',   'RICE-BRAN'],
         'Rice Husk':   ['PROD-RICE-HUSK',   'RICE-HUSK'],
-      }[itemName] || [];
+      }[baseName] || [];
       for (const code of byCode) {
         const p = await trx('products').where({ code }).first('id');
         if (p) return p.id;
       }
-      const named = await trx('products').whereILike('name', itemName).first('id');
+      const named = await trx('products').whereILike('name', baseName).first('id');
       return named ? named.id : null;
     };
 
@@ -668,12 +679,37 @@ const inventoryService = {
       results.movements.push(movement);
     }
 
-    // --- By-products: broken, bran, husk — with ALLOCATED costs ---
+    // --- By-products: broken (per grade), bran, husk — with ALLOCATED costs ---
+    // brokenGrades, when present, splits broken into B1/B2/B3/CSR/Short
+    // Grain — each becomes its own lot stamped with the grade so the
+    // user can sell each tier at its own rate from inventory views.
     const bpCosts = byproductCosts || {};
+    const grades = brokenGrades || {};
+    const gradeNames = [
+      { key: 'b1',         label: 'B1' },
+      { key: 'b2',         label: 'B2' },
+      { key: 'b3',         label: 'B3' },
+      { key: 'csr',        label: 'CSR' },
+      { key: 'shortGrain', label: 'Short Grain' },
+    ];
+    const hasAnyGrade = gradeNames.some(g => (parseFloat(grades[g.key]) || 0) > 0);
+    const brokenItems = hasAnyGrade
+      ? gradeNames
+          .map(g => ({
+            name: `Broken Rice - ${g.label}`,
+            key: 'broken',
+            grade: g.label,
+            qty: parseFloat(grades[g.key]) || 0,
+          }))
+          .filter(x => x.qty > 0)
+      : ((parseFloat(brokenMT) || 0) > 0
+          ? [{ name: 'Broken Rice', key: 'broken', grade: null, qty: parseFloat(brokenMT) }]
+          : []);
+
     const byproducts = [
-      { name: 'Broken Rice', key: 'broken', qty: parseFloat(brokenMT) || 0 },
-      { name: 'Rice Bran', key: 'bran', qty: parseFloat(branMT) || 0 },
-      { name: 'Rice Husk', key: 'husk', qty: parseFloat(huskMT) || 0 },
+      ...brokenItems,
+      { name: 'Rice Bran', key: 'bran', grade: null, qty: parseFloat(branMT) || 0 },
+      { name: 'Rice Husk', key: 'husk', grade: null, qty: parseFloat(huskMT) || 0 },
     ];
 
     for (const bp of byproducts) {
@@ -706,6 +742,8 @@ const inventoryService = {
           landed_cost_per_kg: bpCostPerKg,
           raw_cost_component: bpCostPerKg,
           cost_incomplete: bpCostPerKg === 0,
+          grade: bp.grade || null,
+          variety: bp.grade ? `Broken ${bp.grade}` : null,
           status: 'Available',
           created_by: userId || null,
         })

@@ -749,6 +749,17 @@ const millingController = {
             bran: allocations.bran.costPerKg,
             husk: allocations.husk.costPerKg,
           },
+          // Split broken into its grades (B1, B2, B3, CSR, Short Grain) so
+          // each tier becomes its own inventory lot and can be sold at its
+          // own price. Falls back to the aggregate brokenMT when no grade
+          // values are present on the batch.
+          brokenGrades: {
+            b1:         parseFloat(batch.b1_mt) || 0,
+            b2:         parseFloat(batch.b2_mt) || 0,
+            b3:         parseFloat(batch.b3_mt) || 0,
+            csr:        parseFloat(batch.csr_mt) || 0,
+            shortGrain: parseFloat(batch.short_grain_mt) || 0,
+          },
           userId: req.user?.id,
           supplierInfo: { supplierId: batch.supplier_id },
           qualityInfo: arrivalQuality ? {
