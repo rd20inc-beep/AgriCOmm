@@ -832,4 +832,93 @@ module.exports = {
       return res.status(500).json({ success: false, message: err.message });
     }
   },
+
+  // ─── Allocate a raw lot into an existing milling batch ────────────
+  // Lets the user feed a Purchase Lot (created via /lot-inventory →
+  // New Purchase Lot) into a batch's raw input. Decrements the lot's
+  // available_qty, increments batch.raw_qty_mt, and writes a vehicle
+  // arrival row so the batch traces back to the source lot.
+  async allocateLotToBatch(req, res) {
+    try {
+      const lotId = parseInt(req.params.id, 10);
+      const { batch_id, weight_mt, notes } = req.body || {};
+      const weightMt = parseFloat(weight_mt);
+      const batchId  = parseInt(batch_id, 10);
+
+      if (!lotId)               return res.status(400).json({ success: false, message: 'Invalid lot id.' });
+      if (!batchId)             return res.status(400).json({ success: false, message: 'batch_id is required.' });
+      if (!weightMt || weightMt <= 0) return res.status(400).json({ success: false, message: 'weight_mt must be positive.' });
+
+      const result = await db.transaction(async (trx) => {
+        const lot = await trx('inventory_lots').where({ id: lotId }).first();
+        if (!lot)                throw new Error('Lot not found.');
+        if (lot.type !== 'raw')  throw new Error(`Lot is type "${lot.type}" — only raw lots can be allocated to a milling batch.`);
+        const available = parseFloat(lot.available_qty) || 0;
+        if (weightMt > available + 0.0001) {
+          throw new Error(`Lot has only ${available} MT available, can't allocate ${weightMt} MT.`);
+        }
+
+        const batch = await trx('milling_batches').where({ id: batchId }).first();
+        if (!batch)              throw new Error('Milling batch not found.');
+        const lockedStatuses = ['Completed', 'Cancelled', 'Rejected'];
+        if (lockedStatuses.includes(batch.status)) {
+          throw new Error(`Batch is ${batch.status} — can't add raw material.`);
+        }
+
+        // 1. Reduce the source lot's available qty. If we fully consume
+        //    it, mark milling_status = 'Consumed' so it drops off raw
+        //    stock filters.
+        const newAvailable = parseFloat((available - weightMt).toFixed(4));
+        const fullyConsumed = newAvailable <= 0.0001;
+        await trx('inventory_lots').where({ id: lotId }).update({
+          available_qty: Math.max(0, newAvailable),
+          milling_status: fullyConsumed ? 'Consumed' : (lot.milling_status || 'Partial'),
+          updated_at: trx.fn.now(),
+        });
+
+        // 2. Vehicle-arrival row so the batch shows where its raw came
+        //    from. Uses the lot's lot_no as the vehicle identifier so
+        //    the audit trail reads "received from LOT-XXX".
+        const [arrival] = await trx('milling_vehicle_arrivals')
+          .insert({
+            batch_id: batchId,
+            vehicle_no: lot.lot_no,
+            driver_name: null,
+            weight_mt: weightMt,
+            bag_size_kg: lot.bag_weight_kg || null,
+            total_bags: lot.total_bags || null,
+            arrival_date: trx.fn.now(),
+            notes: notes || `Allocated from purchase lot ${lot.lot_no}`,
+            created_by: req.user?.id || null,
+          })
+          .returning('*');
+
+        // 3. Refresh the batch's raw_qty_mt to the sum of every arrival
+        //    so it reflects what physically arrived (matches addVehicle
+        //    behaviour).
+        const totalArrivals = await trx('milling_vehicle_arrivals')
+          .where({ batch_id: batchId })
+          .sum('weight_mt as total').first();
+        const newRawQty = parseFloat(totalArrivals?.total) || 0;
+        await trx('milling_batches').where({ id: batchId }).update({
+          raw_qty_mt: newRawQty,
+          updated_at: trx.fn.now(),
+        });
+
+        return {
+          lot_id: lotId,
+          batch_id: batchId,
+          weight_mt: weightMt,
+          lot_remaining_mt: Math.max(0, newAvailable),
+          batch_raw_qty_mt: newRawQty,
+          fully_consumed: fullyConsumed,
+        };
+      });
+
+      return res.json({ success: true, data: result });
+    } catch (err) {
+      console.error('allocateLotToBatch error:', err);
+      return res.status(400).json({ success: false, message: err.message || 'Failed to allocate lot.' });
+    }
+  },
 };

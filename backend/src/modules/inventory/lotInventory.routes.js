@@ -64,6 +64,14 @@ router.put(
   controller.updateLotCosts
 );
 
+// Allocate a raw lot into an existing milling batch
+router.post(
+  '/lots/:id/allocate-to-batch',
+  authorize('milling', 'edit'),
+  auditAction('allocate_lot_to_batch', 'inventory_lot', (req) => req.params.id),
+  controller.allocateLotToBatch
+);
+
 // Reports
 router.get('/reports/stock', authorize('inventory', 'view'), controller.getStockReport);
 

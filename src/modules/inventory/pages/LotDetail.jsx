@@ -3,9 +3,12 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft, Package, Truck, DollarSign, FileText, BarChart3,
   Plus, Save, Edit3, AlertTriangle, Warehouse, ShoppingBag, Scale,
-  Activity, ChevronRight, TrendingUp, Clock,
+  Activity, ChevronRight, TrendingUp, Clock, Factory,
 } from 'lucide-react';
-import { useLotDetail, useRecordLotTransaction, useLocalSalesByLot } from '../../../api/queries';
+import {
+  useLotDetail, useRecordLotTransaction, useLocalSalesByLot,
+  useMillingBatches, useAllocateLotToBatch,
+} from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 import StatusBadge from '../../../components/StatusBadge';
@@ -52,6 +55,7 @@ export default function LotDetail() {
   const [showTxnModal, setShowTxnModal] = useState(false);
   const [showCostModal, setShowCostModal] = useState(false);
   const [showCostSheet, setShowCostSheet] = useState(false);
+  const [showAllocateModal, setShowAllocateModal] = useState(false);
   const [linkedBatch, setLinkedBatch] = useState(null);
   // lotSales provided by hook below
 
@@ -143,6 +147,12 @@ export default function LotDetail() {
         <button onClick={() => setShowCostSheet(true)} className="btn btn-primary btn-sm">
           <FileText className="w-4 h-4" /> Costing Sheet
         </button>
+        {/* Only raw lots with available stock can be fed into a milling batch */}
+        {lot.type === 'raw' && (parseFloat(lot.availableQty) > 0) && (
+          <button onClick={() => setShowAllocateModal(true)} className="btn btn-sm btn-secondary">
+            <Factory className="w-4 h-4" /> Use in Batch
+          </button>
+        )}
         <div className="flex bg-gray-100 rounded-lg p-0.5">
           {UNITS.map(u => (
             <button key={u} onClick={() => setDisplayUnit(u)}
@@ -747,6 +757,7 @@ export default function LotDetail() {
       {/* ─── Modals ─── */}
       <TransactionModal isOpen={showTxnModal} onClose={() => setShowTxnModal(false)} lotId={lot.id} lotNo={lot.lotNo} availableKg={availKg} bagWeightKg={bw} warehouses={warehousesList} addToast={addToast} refetch={refetch} mutation={txnMutation} />
       <CostEditModal isOpen={showCostModal} onClose={() => setShowCostModal(false)} lot={lot} addToast={addToast} refetch={refetch} />
+      <AllocateToBatchModal isOpen={showAllocateModal} onClose={() => setShowAllocateModal(false)} lot={lot} addToast={addToast} refetch={refetch} />
 
       {/* Costing Sheet Modal */}
       <Modal isOpen={showCostSheet} onClose={() => setShowCostSheet(false)} title={`Costing Sheet — ${lot.lotNo}`} size="xl">
@@ -922,5 +933,104 @@ function LotLineage({ lotId, lotNo }) {
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Allocate to batch modal ──────────────────────────────────────────
+// Lets the user feed part / all of a raw Purchase Lot into an existing
+// open milling batch. Calls /api/lot-inventory/lots/:id/allocate-to-batch
+// which decrements the lot's available_qty, increments batch.raw_qty_mt,
+// and writes a milling_vehicle_arrivals row so the batch traces back.
+function AllocateToBatchModal({ isOpen, onClose, lot, addToast, refetch }) {
+  const availableMt = parseFloat(lot?.availableQty) || 0;
+  const [batchId, setBatchId] = useState('');
+  const [weightMt, setWeightMt] = useState(String(availableMt));
+  const [notes, setNotes] = useState('');
+  const { data: batches = [] } = useMillingBatches({ limit: 200 });
+  const allocateMut = useAllocateLotToBatch();
+
+  // Reset whenever the modal opens against a different lot.
+  useEffect(() => {
+    if (isOpen) {
+      setBatchId('');
+      setWeightMt(String(availableMt));
+      setNotes('');
+    }
+  }, [isOpen, availableMt]);
+
+  const openBatches = (batches || []).filter(b => !['Completed', 'Cancelled', 'Rejected'].includes(b.status));
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!batchId)                       return addToast('Pick a milling batch', 'error');
+    const w = parseFloat(weightMt);
+    if (!w || w <= 0)                    return addToast('Weight must be greater than 0', 'error');
+    if (w > availableMt + 0.0001)        return addToast(`Lot only has ${availableMt} MT available`, 'error');
+    try {
+      const res = await allocateMut.mutateAsync({ lotId: lot.id, batchId: parseInt(batchId, 10), weightMt: w, notes });
+      const data = res?.data || res;
+      addToast(
+        data?.fully_consumed
+          ? `Lot fully consumed by batch ${batches.find(b => String(b.id) === String(batchId))?.batchNo || ''}`
+          : `${w} MT allocated — ${data?.lot_remaining_mt ?? '?'} MT still in lot`,
+        'success'
+      );
+      onClose();
+      if (refetch) refetch();
+    } catch (err) {
+      addToast(err?.response?.data?.message || err.message || 'Allocation failed', 'error');
+    }
+  }
+
+  if (!isOpen) return null;
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title={`Use ${lot.lotNo} in a milling batch`} size="md">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
+          <p><strong>{lot.itemName}</strong>{lot.variety ? ` — ${lot.variety}` : ''}</p>
+          <p>Available: <strong>{availableMt} MT</strong></p>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Milling batch *</label>
+          <select value={batchId} onChange={e => setBatchId(e.target.value)} required
+            className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm">
+            <option value="">Select an open batch…</option>
+            {openBatches.map(b => (
+              <option key={b.id} value={b.id}>
+                {b.batchNo} — {b.supplierName || '—'} · {b.status} ({parseFloat(b.rawQtyMT) || 0} MT raw)
+              </option>
+            ))}
+          </select>
+          {openBatches.length === 0 && (
+            <p className="text-xs text-amber-600 mt-1">No open milling batches. Create one in Mill operations first.</p>
+          )}
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Weight to allocate (MT) *</label>
+          <input type="number" step="0.01" min="0.01" max={availableMt} required
+            value={weightMt} onChange={e => setWeightMt(e.target.value)}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm" />
+          <p className="text-xs text-gray-400 mt-1">Defaults to the full lot. Reduce to allocate a portion.</p>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+          <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
+            placeholder={`Allocated from ${lot.lotNo}`}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm" />
+        </div>
+
+        <div className="flex justify-end gap-2 pt-2 border-t">
+          <button type="button" onClick={onClose} className="btn btn-secondary">Cancel</button>
+          <button type="submit" disabled={allocateMut.isPending || openBatches.length === 0}
+            className="btn btn-primary disabled:opacity-50">
+            {allocateMut.isPending ? 'Allocating…' : 'Allocate to Batch'}
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
