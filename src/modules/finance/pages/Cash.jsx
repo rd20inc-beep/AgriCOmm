@@ -110,15 +110,6 @@ export default function Cash() {
   const companyName = companyProfileData?.legalName || companyProfileData?.name || 'AGRI COMMODITIES';
   return (
     <div className="space-y-5 pb-4">
-      {/* Print button — toggles body.app-print-mask so the global rule
-          un-hides only .print-report below. */}
-      <div className="flex items-center justify-end -mb-2 no-print">
-        <button onClick={handlePrint}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm">
-          <Printer size={14} /> Print
-        </button>
-      </div>
-
       <div className="print-report space-y-5">
         {/* Print-only header */}
         <div className="hidden print:block">

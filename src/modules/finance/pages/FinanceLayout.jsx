@@ -1,7 +1,7 @@
 import { NavLink, useSearchParams } from 'react-router-dom';
 import {
   LayoutDashboard, ArrowDownLeft, ArrowUpRight, DollarSign,
-  TrendingUp, Landmark, BookOpen, Bell, Clock, Settings, ShoppingCart, Store,
+  TrendingUp, Landmark, BookOpen, Bell, Clock, Settings, ShoppingCart, Store, Printer,
 } from 'lucide-react';
 
 const tabs = [
@@ -37,13 +37,28 @@ export default function FinanceLayout({ children }) {
     setParams(next, { replace: true });
   }
 
+  function handlePrint() {
+    // Same mechanism the per-page Print buttons use: toggle the global
+    // app-print-mask body class so the @media print rule un-hides
+    // only .print-report (which every finance page wraps its content
+    // in), then call window.print().
+    document.body.classList.add('app-print-mask');
+    const cleanup = () => {
+      document.body.classList.remove('app-print-mask');
+      window.removeEventListener('afterprint', cleanup);
+    };
+    window.addEventListener('afterprint', cleanup);
+    setTimeout(cleanup, 60_000);
+    window.print();
+  }
+
   return (
     <div className="flex flex-col h-full -mt-4 sm:-mt-6 -mx-4 sm:-mx-5 lg:-mx-8">
       {/* Header bar with title + global controls */}
       <div className="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-sm">
         <div className="flex items-center justify-between px-4 sm:px-6 pt-3 pb-0">
           <h1 className="text-lg font-bold text-gray-900">Finance Dashboard</h1>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 no-print">
             {/* Date range selector */}
             <div className="flex items-center gap-1.5 bg-gray-50 rounded-lg px-2 py-1 border border-gray-200">
               <Clock size={13} className="text-gray-400" />
@@ -57,6 +72,14 @@ export default function FinanceLayout({ children }) {
                 ))}
               </select>
             </div>
+            {/* Global Print — fires window.print() on whichever finance tab
+                is active. Every finance page wraps its content in
+                .print-report, so the global @media print rule hides app
+                chrome and prints only the relevant sheet. */}
+            <button onClick={handlePrint}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm">
+              <Printer size={12} /> Print
+            </button>
           </div>
         </div>
 
