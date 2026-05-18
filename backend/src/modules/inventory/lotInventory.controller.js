@@ -15,9 +15,15 @@ async function generateTxnNo(trx) {
 }
 
 async function generatePayNo(trx) {
+  // Only consider the bare PAY-NNN namespace used by lot payables.
+  // Other sequences (PAY-EXP*, PAY-MS*, PAY-EOC*) live in payables too
+  // but mustn't bump this counter — that's what was producing collisions:
+  // last.pay_no = 'PAY-EXP0003' → parseInt('EXP0003') = NaN → seq reset
+  // to 1 → conflict with the long-existing PAY-001 row.
   const last = await trx('payables')
+    .whereRaw("pay_no ~ '^PAY-[0-9]+$'")
     .select('pay_no')
-    .orderBy('id', 'desc')
+    .orderByRaw("CAST(SUBSTRING(pay_no FROM 5) AS INTEGER) DESC")
     .first();
 
   if (!last || !last.pay_no) {
