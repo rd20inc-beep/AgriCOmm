@@ -821,13 +821,19 @@ const inventoryService = {
       userId,
     });
 
-    // Find or create Export Dispatch warehouse
+    // Find or create Export Dispatch warehouse. The warehouses.type
+    // CHECK only allows raw/finished/byproduct/wip/transit — "dispatch"
+    // wasn't valid (caused a 23514 here on the first transfer attempt).
+    // Use 'transit' since stock is moving from mill to its export
+    // counterpart and not yet shipped. Fall back to either dispatch
+    // (legacy rows) or transit lookups to handle pre-existing setups.
     let exportWarehouse = await trx('warehouses')
-      .where({ entity: 'export', type: 'dispatch' })
+      .where({ entity: 'export' })
+      .whereIn('type', ['transit', 'dispatch'])
       .first();
     if (!exportWarehouse) {
       [exportWarehouse] = await trx('warehouses')
-        .insert({ name: 'Export Dispatch', entity: 'export', type: 'dispatch' })
+        .insert({ name: 'Export Dispatch', entity: 'export', type: 'transit' })
         .returning('*');
     }
 

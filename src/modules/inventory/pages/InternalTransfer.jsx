@@ -11,7 +11,13 @@ export default function InternalTransfer() {
   const { data: transfers = [], isLoading: loading } = useInternalTransfers();
   const createTransferMut = useCreateTransfer();
 
-  const completedBatches = millingBatches.filter(b => b.status === 'Completed');
+  // Any batch with finished output is a candidate — not only batches in
+  // the literal "Completed" status. "Pending Approval" or "Approved"
+  // batches frequently have output rice ready to dispatch.
+  const completedBatches = millingBatches.filter(b => {
+    const finished = parseFloat(b.actualFinishedMT ?? b.actual_finished_mt) || 0;
+    return finished > 0 && !['Cancelled', 'Rejected'].includes(b.status);
+  });
   const activeExportOrders = exportOrders.filter(o =>
     !['Closed', 'Cancelled', 'Draft'].includes(o.status)
   );

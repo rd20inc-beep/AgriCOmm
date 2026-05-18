@@ -875,10 +875,14 @@ const financeController = {
           })
           .returning('*');
 
-        // Post inventory movements
+        // Post inventory movements. Use available_qty (not qty) so a lot
+        // that has already been partially transferred or reserved isn't
+        // double-counted. Pick the smallest lot that can satisfy the
+        // requested MT to keep stock fragmented as little as possible.
         const millingLot = await trx('inventory_lots')
           .where({ entity: 'mill', type: 'finished' })
-          .where('qty', '>=', t.qty_mt)
+          .where('available_qty', '>=', t.qty_mt)
+          .orderBy('available_qty', 'asc')
           .first();
 
         if (millingLot) {
