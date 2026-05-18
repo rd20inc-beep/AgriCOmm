@@ -294,10 +294,17 @@ input, select, textarea { font-size: 14px; }
   }
 }
 
-/* ===== FORM INPUTS ===== */
+/* ===== FORM INPUTS =====
+   Padding is split into individual sides instead of the `padding`
+   shorthand so callers can override one side via Tailwind utilities
+   (e.g. pl-9 to leave room for a leading icon) without the shorthand
+   clobbering them. */
 .form-input {
   width: 100%;
-  padding: 0.625rem 0.875rem;
+  padding-top: 0.625rem;
+  padding-bottom: 0.625rem;
+  padding-left: 0.875rem;
+  padding-right: 0.875rem;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   font-size: 0.875rem;
