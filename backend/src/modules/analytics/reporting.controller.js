@@ -740,10 +740,11 @@ const reportingController = {
 
       const topPayments = await db('payments as p')
         .leftJoin('payables as pay', 'p.linked_payable_id', 'pay.id')
+        .leftJoin('suppliers as s',  'pay.supplier_id', 's.id')
         .where('p.type', 'payment')
         .whereBetween('p.payment_date', [fromDate, toDate])
         .select('p.payment_no', 'p.payment_date', 'p.base_amount_pkr', 'p.payment_method')
-        .select(db.raw("COALESCE(pay.vendor_name, 'Vendor') as counterparty"))
+        .select(db.raw("COALESCE(s.name, pay.linked_ref, 'Vendor') as counterparty"))
         .orderBy('p.base_amount_pkr', 'desc')
         .limit(10);
 
@@ -842,8 +843,8 @@ const reportingController = {
         .whereNotIn('p.status', ['Paid', 'Written Off'])
         .where('p.outstanding', '>', 0)
         .select(
-          'p.id', 'p.payable_no', 'p.due_date', 'p.outstanding', 'p.source_table', 'p.vendor_name',
-          db.raw('COALESCE(s.name, p.vendor_name) as counterparty')
+          'p.id', 'p.pay_no', 'p.due_date', 'p.outstanding', 'p.source_table',
+          db.raw("COALESCE(s.name, p.linked_ref, 'Vendor') as counterparty")
         )
         .orderBy('p.due_date', 'asc');
 
@@ -858,7 +859,7 @@ const reportingController = {
         buckets[bucket].totalPkr += outPkr;
         totalPkr += outPkr;
         return {
-          payableNo: r.payable_no, dueDate: r.due_date,
+          payableNo: r.pay_no, dueDate: r.due_date,
           counterparty: r.counterparty || '—',
           sourceTable: r.source_table,
           outstandingPkr: outPkr,
