@@ -191,7 +191,8 @@ export default function Accounting() {
         ) : journalData.length === 0 ? (
           <div className="p-10 text-center text-sm text-gray-400">No journal entries posted in this date range.</div>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[760px]">
             <thead>
               <tr className="border-b border-gray-200 bg-gray-50 text-xs uppercase text-gray-500">
                 <th className="text-left py-2.5 px-2 w-8"></th>
@@ -342,6 +343,7 @@ export default function Accounting() {
               })}
             </tbody>
           </table>
+          </div>
         )}
       </div>
       </div>

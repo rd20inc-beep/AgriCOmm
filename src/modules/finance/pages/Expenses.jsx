@@ -754,7 +754,8 @@ function ExpenseTable({ loading, rows, onPay }) {
   }
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-      <table className="w-full text-sm">
+      <div className="overflow-x-auto">
+      <table className="w-full text-sm min-w-[760px]">
         <thead>
           <tr className="border-b border-gray-200 bg-gray-50">
             <th className="text-left py-2.5 px-4 font-semibold text-gray-600">Ref / Type</th>
@@ -811,6 +812,7 @@ function ExpenseTable({ loading, rows, onPay }) {
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }
