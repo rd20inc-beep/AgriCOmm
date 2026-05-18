@@ -409,20 +409,21 @@ const inventoryService = {
 
       const lotNo = await inventoryService.generateLotNo(trx);
 
-      // Resolve product_id for raw-paddy lots. inventory_lots.product_id is
+      // Resolve product_id for raw-rice lots. inventory_lots.product_id is
       // NOT NULL since migration 067 — every lot must point at a real
-      // product. The "Raw Paddy" product is seeded by migration 075; if
-      // a fresh install is missing it, look up by name as a soft fallback.
-      let rawPaddyProduct = await trx('products').where({ code: 'RAW-PADDY' }).first('id');
-      if (!rawPaddyProduct) {
-        rawPaddyProduct = await trx('products').whereILike('name', '%paddy%').first('id');
-      }
-      const rawPaddyProductId = rawPaddyProduct ? rawPaddyProduct.id : null;
+      // product. The product was renamed Paddy → Rice in migration 119
+      // (code RAW-RICE). Fall back through the old code and then a
+      // generic name search so we don't fail on stale installs.
+      let rawProduct = await trx('products').where({ code: 'RAW-RICE' }).first('id');
+      if (!rawProduct) rawProduct = await trx('products').where({ code: 'RAW-PADDY' }).first('id');
+      if (!rawProduct) rawProduct = await trx('products').whereILike('name', 'raw rice').first('id');
+      if (!rawProduct) rawProduct = await trx('products').whereILike('name', '%paddy%').first('id');
+      const rawPaddyProductId = rawProduct ? rawProduct.id : null;
 
       [lot] = await trx('inventory_lots')
         .insert({
           lot_no: lotNo,
-          item_name: 'Raw Paddy',
+          item_name: 'Raw Rice',
           type: 'raw',
           entity: 'mill',
           warehouse_id: warehouse.id,
