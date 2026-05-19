@@ -22,11 +22,11 @@
 require('dotenv').config();
 const db = require('../src/config/database');
 
-async function generateTxnNo() {
+async function generateTxnNo(trx) {
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const last = await db('lot_transactions')
+  const last = await trx('lot_transactions')
     .where('transaction_no', 'like', `TXN-${today}-%`)
-    .orderBy('id', 'desc')
+    .orderByRaw("CAST(SPLIT_PART(transaction_no, '-', 3) AS INTEGER) DESC")
     .first('transaction_no');
   const next = last
     ? (parseInt(String(last.transaction_no).split('-').pop(), 10) || 0) + 1
@@ -66,7 +66,7 @@ async function main() {
   let fixed = 0;
   await db.transaction(async (trx) => {
     for (const c of candidates) {
-      const txnNo = await generateTxnNo();
+      const txnNo = await generateTxnNo(trx);
       await trx('lot_transactions').insert({
         transaction_no: txnNo,
         transaction_date: new Date().toISOString().slice(0, 10),
