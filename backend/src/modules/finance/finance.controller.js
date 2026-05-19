@@ -892,6 +892,8 @@ const financeController = {
             qtyMT: t.qty_mt,
             productName: t.product_name,
             orderId: t.export_order_id,
+            transferPricePerMT: parseFloat(t.transfer_price_pkr) || 0,
+            totalValuePkr: parseFloat(t.total_value_pkr) || 0,
             userId: req.user?.id,
           });
         }

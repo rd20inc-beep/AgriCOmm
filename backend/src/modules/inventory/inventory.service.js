@@ -795,10 +795,14 @@ const inventoryService = {
   // =========================================================================
   // Transfer from mill to export
   // =========================================================================
-  async transferToExport(trx, { transferId, lotId, qtyMT, productName, orderId, userId }) {
+  async transferToExport(trx, { transferId, lotId, qtyMT, productName, orderId, transferPricePerMT, totalValuePkr, userId }) {
     if (!trx) throw new Error('transferToExport requires a transaction');
 
     const parsedQty = parseFloat(qtyMT);
+    const pricePerMT = parseFloat(transferPricePerMT) || 0;
+    const totalValue = parseFloat(totalValuePkr) || (pricePerMT * parsedQty);
+    const ratePerKg = pricePerMT / 1000;
+    const netKg = parsedQty * 1000;
 
     // Source lot
     const sourceLot = await trx('inventory_lots').where('id', lotId).first();
@@ -852,13 +856,26 @@ const inventoryService = {
         qty: 0,
         unit: sourceLot.unit || 'MT',
         batch_ref: sourceLot.batch_ref || null,
-        cost_per_unit: 0,
+        cost_per_unit: pricePerMT,
         cost_currency: sourceLot.cost_currency || 'PKR',
-        total_value: 0,
+        total_value: totalValue,
         reserved_qty: 0,
         available_qty: 0,
         status: 'Available',
         created_by: userId || null,
+        // Enrichment carried over from source mill lot so the export-side
+        // grid shows supplier / variety / quality instead of blanks.
+        supplier_id: sourceLot.supplier_id || null,
+        variety: sourceLot.variety || null,
+        grade: sourceLot.grade || null,
+        moisture_pct: sourceLot.moisture_pct || null,
+        broken_pct: sourceLot.broken_pct || null,
+        net_weight_kg: 0,
+        gross_weight_kg: 0,
+        rate_per_kg: ratePerKg,
+        purchase_amount: 0,
+        landed_cost_total: totalValue,
+        landed_cost_per_kg: ratePerKg,
       })
       .returning('*');
 
