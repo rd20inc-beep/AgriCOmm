@@ -7,7 +7,7 @@ import {
 import { useApp } from '../../../context/AppContext';
 import {
   useMillExpenses, useCreateMillExpense, useMillWorkers, useCreateMillWorker,
-  usePayrollSummary, useRecordAttendance, useInventory,
+  usePayrollSummary, useRecordAttendance, useInventory, useExpenseVendors,
 } from '../../../api/queries';
 import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import SlideDrawer from '../../../components/SlideDrawer';
@@ -27,105 +27,9 @@ const EXPENSE_CATS = [
   'commission', 'miscellaneous',
 ];
 const WORKER_ROLES = ['operator', 'laborer', 'supervisor', 'driver', 'guard', 'cleaner'];
-
-// Common Pakistani providers per category. When a category appears here the
-// expense drawer renders a Provider/Vendor dropdown of these options +
-// "Other (specify)"; otherwise a free-text vendor input is shown.
-const VENDOR_OPTIONS = {
-  utilities: [
-    'K-Electric',
-    'WAPDA / LESCO',
-    'IESCO',
-    'PESCO',
-    'GEPCO',
-    'HESCO',
-    'MEPCO',
-    'SSGC (Sui Southern Gas)',
-    'SNGPL (Sui Northern Gas)',
-    'PTCL',
-    'Karachi Water Board',
-    'WASA',
-  ],
-  fuel: [
-    'PSO',
-    'Shell',
-    'Hascol',
-    'Total PARCO',
-    'GO Petroleum',
-    'Attock Petroleum',
-  ],
-  insurance: [
-    'EFU General',
-    'Adamjee Insurance',
-    'Jubilee Insurance',
-    'TPL Insurance',
-    'UBL Insurers',
-    'State Life',
-  ],
-  transport: [
-    'NLC',
-    'TCS Logistics',
-    'Daewoo Logistics',
-    'M&P (Muller & Phipps)',
-    'Local Transporter',
-  ],
-  maintenance: [
-    'Hexa Engineering',
-    'Buhler Pakistan',
-    'Satake (Rice Machinery)',
-    'AGI Industries',
-    'Pak Service Center',
-    'Local Workshop / Mechanic',
-    'Local Electrician',
-    'Spare Parts Supplier',
-  ],
-  packaging: [
-    'Forsa Bags',
-    'Lucky Plastic',
-    'Treet PP Bags',
-    'Hi-Tech Packaging',
-    'Packages Limited',
-    'Premier Industries',
-    'Jute Bag Supplier',
-    'Master Bag Printer',
-  ],
-  rent: [
-    'Mill Property Landlord',
-    'Warehouse Landlord',
-    'Office Landlord',
-    'Land Lease',
-  ],
-  inspection: [
-    'SGS Pakistan',
-    'Bureau Veritas',
-    'Intertek',
-    'Cotecna',
-    'TUV Austria Pakistan',
-    'PSQCA (Pak Standards & Quality Control)',
-    'DPP (Department of Plant Protection)',
-    'Pakistan Customs',
-  ],
-  freight: [
-    'Maersk Line',
-    'MSC',
-    'Hapag-Lloyd',
-    'CMA CGM',
-    'COSCO Shipping',
-    'Evergreen',
-    'ONE (Ocean Network Express)',
-    'Hyundai Merchant Marine',
-    'NLC (National Logistics)',
-    'Local Freight Forwarder',
-  ],
-  commission: [
-    'Sales Agent',
-    "Buyer's Agent (Foreign)",
-    'Export Broker',
-    'Customs Clearing Agent',
-    'Shipping Agent',
-    'Marketing Consultant',
-  ],
-};
+// VENDOR_OPTIONS used to be a hardcoded map here. It now lives in the
+// `expense_vendors` table and is managed via Admin → Expense Vendors.
+// The component fetches it through useExpenseVendors() below.
 
 const tabs = [
   { key: 'overview',   label: 'Overview',     icon: DollarSign },
@@ -190,6 +94,17 @@ export default function MillFinanceDashboard() {
     }
     return { raw, fin, bp, total: raw + fin + bp };
   }, [inventory]);
+
+  const { data: vendorData } = useExpenseVendors();
+  // category → [{ id, name, ... }] for the Provider dropdown
+  const VENDOR_OPTIONS = useMemo(() => {
+    const map = {};
+    const byCat = vendorData?.byCategory || {};
+    for (const cat of Object.keys(byCat)) {
+      map[cat] = (byCat[cat] || []).map((v) => v.name);
+    }
+    return map;
+  }, [vendorData]);
 
   const { data: expData } = useMillExpenses();
   const createExpMut = useCreateMillExpense();

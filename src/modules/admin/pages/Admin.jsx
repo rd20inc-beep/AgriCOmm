@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Users, Truck, Package, Warehouse, Settings, ShoppingBag, Landmark, Tags, Factory, Files, UsersRound, MessageSquare, Shield } from 'lucide-react';
+import { Users, Truck, Package, Warehouse, Settings, ShoppingBag, Landmark, Tags, Factory, Files, UsersRound, MessageSquare, Shield, Building2 } from 'lucide-react';
 
 import CustomersTab from './admin/CustomersTab';
 import SuppliersTab from './admin/SuppliersTab';
@@ -9,6 +9,7 @@ import BagTypesTab from './admin/BagTypesTab';
 import WarehousesTab from './admin/WarehousesTab';
 import BankAccountsTab from './admin/BankAccountsTab';
 import CostCategoriesTab from './admin/CostCategoriesTab';
+import ExpenseVendorsTab from './admin/ExpenseVendorsTab';
 import MillsTab from './admin/MillsTab';
 import DocTemplatesTab from './admin/DocTemplatesTab';
 import WhatsAppTemplatesTab from './admin/WhatsAppTemplatesTab';
@@ -25,6 +26,7 @@ const tabs = [
   { key: 'warehouses', label: 'Warehouses', icon: Warehouse },
   { key: 'bankAccounts', label: 'Bank Accounts', icon: Landmark },
   { key: 'costCategories', label: 'Cost Categories', icon: Tags },
+  { key: 'expenseVendors', label: 'Expense Vendors', icon: Building2 },
   { key: 'mills', label: 'Mills', icon: Factory },
   { key: 'docTemplates', label: 'Document Templates', icon: Files },
   { key: 'whatsapp', label: 'WhatsApp', icon: MessageSquare },
@@ -42,6 +44,7 @@ const tabComponents = {
   warehouses: WarehousesTab,
   bankAccounts: BankAccountsTab,
   costCategories: CostCategoriesTab,
+  expenseVendors: ExpenseVendorsTab,
   mills: MillsTab,
   docTemplates: DocTemplatesTab,
   whatsapp: WhatsAppTemplatesTab,

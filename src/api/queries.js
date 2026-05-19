@@ -693,6 +693,51 @@ export function useBagTypes(opts = {}) {
   });
 }
 
+// ===================== EXPENSE VENDORS (provider presets) =============
+// Backs the dynamic Provider dropdown in the Add Expense drawer and
+// the Admin → Expense Vendors tab. The list endpoint returns both a
+// flat `vendors` array and a `byCategory` map so the drawer can grab
+// the right list with no client-side regrouping.
+
+export function useExpenseVendors({ includeInactive = false } = {}) {
+  return useQuery({
+    queryKey: ['expense-vendors', { includeInactive }],
+    queryFn: async () => {
+      const res = await api.get('/api/expense-vendors', includeInactive ? { include_inactive: '1' } : {});
+      const data = res?.data || res || {};
+      return {
+        vendors: Array.isArray(data.vendors) ? data.vendors : [],
+        byCategory: data.byCategory && typeof data.byCategory === 'object' ? data.byCategory : {},
+      };
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useCreateExpenseVendor() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => api.post('/api/expense-vendors', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['expense-vendors'] }),
+  });
+}
+
+export function useUpdateExpenseVendor() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => api.put(`/api/expense-vendors/${id}`, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['expense-vendors'] }),
+  });
+}
+
+export function useDeleteExpenseVendor() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => api.delete(`/api/expense-vendors/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['expense-vendors'] }),
+  });
+}
+
 // ===================== MASTER DATA MUTATIONS =====================
 
 export function useCreateCustomer() {

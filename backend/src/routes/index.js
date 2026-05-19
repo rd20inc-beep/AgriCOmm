@@ -20,6 +20,7 @@ router.use('/lot-inventory', authenticate, require('./lotInventory'));
 router.use('/local-sales', authenticate, require('./localSales'));
 router.use('/finance', authenticate, require('./finance'));
 router.use('/expenses', authenticate, require('./expenses'));
+router.use('/expense-vendors', authenticate, require('../modules/expenseVendors/expenseVendors.routes'));
 router.use('/advances', authenticate, require('./advances'));
 router.use('/procurement', authenticate, require('./procurement'));
 router.use('/admin', authenticate, require('./admin'));
