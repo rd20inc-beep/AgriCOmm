@@ -31,7 +31,7 @@ router.get('/bank-transactions', authorize('finance', 'view'), controller.getBan
 router.get('/internal-transfers', authorize('finance', 'view'), controller.getInternalTransfers);
 router.post(
   '/internal-transfers',
-  authorize('finance', 'confirm_payment'),
+  authorize('inventory', 'transfer'),
   validate(schemas.createInternalTransfer),
   auditAction('create_internal_transfer', 'finance', (req, data) => data.data && data.data.id ? data.data.id : null),
   controller.createInternalTransfer
