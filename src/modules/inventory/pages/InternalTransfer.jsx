@@ -321,14 +321,14 @@ export default function InternalTransfer() {
               ) : (
                 transfers.map(t => (
                   <tr key={t.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3 font-medium text-blue-600">{t.transfer_no}</td>
-                    <td className="px-4 py-3 text-gray-900">{t.batch_no || `B-${t.batch_id}`}</td>
-                    <td className="px-4 py-3 text-gray-900">{t.export_order_no || `#${t.export_order_id}`}</td>
-                    <td className="px-4 py-3 text-gray-600">{t.product_name}</td>
-                    <td className="px-4 py-3 text-right text-gray-900 font-medium">{parseFloat(t.qty_mt).toFixed(1)}</td>
-                    <td className="px-4 py-3 text-right text-gray-900">{formatPKR(t.transfer_price_pkr)}</td>
-                    <td className="px-4 py-3 text-right text-gray-900 font-medium">{formatPKR(t.total_value_pkr)}</td>
-                    <td className="px-4 py-3 text-gray-600">{t.dispatch_date}</td>
+                    <td className="px-4 py-3 font-medium text-blue-600">{t.transferNo}</td>
+                    <td className="px-4 py-3 text-gray-900">{t.batchNo || `B-${t.batchId}`}</td>
+                    <td className="px-4 py-3 text-gray-900">{t.exportOrderNo || `#${t.exportOrderId}`}</td>
+                    <td className="px-4 py-3 text-gray-600">{t.productName}</td>
+                    <td className="px-4 py-3 text-right text-gray-900 font-medium">{(parseFloat(t.qtyMt) || 0).toFixed(1)}</td>
+                    <td className="px-4 py-3 text-right text-gray-900">{formatPKR(t.transferPricePkr)}</td>
+                    <td className="px-4 py-3 text-right text-gray-900 font-medium">{formatPKR(t.totalValuePkr)}</td>
+                    <td className="px-4 py-3 text-gray-600">{t.dispatchDate}</td>
                     <td className="px-4 py-3 text-center">
                       <StatusBadge status={t.status} />
                     </td>
