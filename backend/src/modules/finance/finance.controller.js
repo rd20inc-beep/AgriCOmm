@@ -840,7 +840,11 @@ const financeController = {
       const countQuery = query.clone().clearSelect().clearOrder().count('bt.id as total').first();
 
       const [transactions, countResult] = await Promise.all([
-        query.orderBy('bt.transaction_date', 'desc').limit(parseInt(limit)).offset(offset),
+        query
+          .orderBy('bt.transaction_date', 'desc')
+          .orderBy('bt.created_at', 'desc')
+          .orderBy('bt.id', 'desc')
+          .limit(parseInt(limit)).offset(offset),
         countQuery,
       ]);
 

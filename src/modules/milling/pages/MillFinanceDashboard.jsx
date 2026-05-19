@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   DollarSign, Users, Zap, Shield, TrendingUp, TrendingDown, AlertTriangle,
-  Plus, UserPlus, Package, Factory, Wallet, ArrowUpRight, ArrowDownRight,
+  Plus, UserPlus, Package, Factory, Wallet, ArrowUpRight, ArrowDownRight, Printer,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import {
@@ -231,8 +231,21 @@ export default function MillFinanceDashboard() {
     }
   }
 
+  function handlePrint() {
+    // Same mask pattern as FinanceLayout — toggle body.app-print-mask
+    // so the global @media print rule unhides only .print-report.
+    document.body.classList.add('app-print-mask');
+    const cleanup = () => {
+      document.body.classList.remove('app-print-mask');
+      window.removeEventListener('afterprint', cleanup);
+    };
+    window.addEventListener('afterprint', cleanup);
+    setTimeout(cleanup, 60_000);
+    window.print();
+  }
+
   return (
-    <div className="space-y-5 pb-4">
+    <div className="space-y-5 pb-4 print-report">
       {/* ─── HERO BAND ─────────────────────────────────────────────── */}
       <div className="rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-900 to-blue-700 p-5 sm:p-6 text-white shadow-sm relative overflow-hidden">
         <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 30% 20%, white 0%, transparent 60%)' }} />
@@ -257,7 +270,14 @@ export default function MillFinanceDashboard() {
               <span>Cost {COMPACT_PKR(kpis.totalCost)}</span>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 no-print">
+            <button
+              onClick={handlePrint}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-white/15 hover:bg-white/25 ring-1 ring-white/30 transition-colors"
+              title="Print this dashboard"
+            >
+              <Printer size={13} /> Print
+            </button>
             <button
               onClick={() => openExpDrawer()}
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-white/15 hover:bg-white/25 ring-1 ring-white/30 transition-colors"
