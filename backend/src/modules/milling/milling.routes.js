@@ -310,14 +310,40 @@ router.put('/batches/:id/prices', authorize('milling', 'edit'),
 // Mill Expenses (Overheads: salaries, rent, utilities, etc.)
 // =============================================================================
 
+// Mill expenses are stored in the unified `business_expenses` table with
+// expense_type='mill', so they also create payables + journal entries via
+// expensesService.create — visible on the main Finance dashboard, Money
+// Out tab, and Accounting ledger. The legacy `mill_expenses` table is
+// no longer written to. (mill_expenses was empty at the time of the cut-over.)
+const expensesService = require('../expenses/expenses.service');
+
 router.get('/expenses', authorize('milling', 'view'), async (req, res) => {
   try {
     const { limit = 100, period } = req.query;
-    let query = db('mill_expenses').orderBy('expense_date', 'desc').limit(parseInt(limit));
-    if (period) query = query.where('period', period);
+    let query = db('business_expenses as e')
+      .where('e.expense_type', 'mill')
+      .leftJoin('suppliers as s', 's.id', 'e.supplier_id')
+      .select(
+        'e.id', 'e.expense_no', 'e.category', 'e.subcategory', 'e.description',
+        db.raw('e.amount_pkr as amount'),
+        'e.expense_date',
+        'e.invoice_reference as reference',
+        'e.payment_method',
+        'e.payment_status',
+        'e.notes', 'e.created_at', 'e.created_by',
+        db.raw("TO_CHAR(e.expense_date, 'YYYY-MM') as period"),
+        's.name as supplier_name'
+      )
+      .orderBy('e.expense_date', 'desc')
+      .limit(parseInt(limit));
+    if (period) query = query.whereRaw("TO_CHAR(e.expense_date, 'YYYY-MM') = ?", [period]);
     const expenses = await query;
-    const summary = await db('mill_expenses').select('category')
-      .sum('amount as total').groupBy('category').orderBy('total', 'desc');
+    const summary = await db('business_expenses')
+      .where('expense_type', 'mill')
+      .select('category')
+      .sum('amount_pkr as total')
+      .groupBy('category')
+      .orderBy('total', 'desc');
     return res.json({ success: true, data: { expenses, summary } });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
@@ -328,24 +354,29 @@ router.post('/expenses', authorize('milling', 'create'),
   auditAction('create', 'mill_expense', (req, data) => data.data?.expense?.id),
   async (req, res) => {
     try {
-      const { category, description, amount, expense_date, period, payment_method, reference, notes, mill_id } = req.body;
+      const { category, description, amount, expense_date, payment_method, reference, notes, supplier_id, vendor_name, pay_now, bank_account_id } = req.body;
       if (!category || !amount || !expense_date) {
         return res.status(400).json({ success: false, message: 'category, amount, and expense_date are required.' });
       }
-      const [expense] = await db('mill_expenses').insert({
-        mill_id: mill_id || null,
+      const expense = await expensesService.create({
+        expense_type: 'mill',
         category,
-        description: description || null,
         amount: parseFloat(amount),
+        currency: 'PKR',
         expense_date,
-        period: period || expense_date.substring(0, 7),
-        payment_method: payment_method || null,
-        reference: reference || null,
+        description: description || null,
         notes: notes || null,
-        created_by: req.user?.id,
-      }).returning('*');
+        invoice_reference: reference || null,
+        supplier_id: supplier_id || null,
+        vendor_name: vendor_name || null,
+        pay_now: !!pay_now,
+        bank_account_id: bank_account_id || null,
+        payment_method: payment_method || null,
+        payment_reference: reference || null,
+      }, req.user?.id);
       return res.json({ success: true, data: { expense } });
     } catch (err) {
+      console.error('Mill expense create error:', err);
       return res.status(500).json({ success: false, message: err.message });
     }
   }

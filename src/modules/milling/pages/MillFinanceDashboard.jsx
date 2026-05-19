@@ -1,49 +1,85 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { DollarSign, Users, Zap, Shield, TrendingUp, TrendingDown, AlertTriangle, Plus, UserPlus, Package } from 'lucide-react';
+import {
+  DollarSign, Users, Zap, Shield, TrendingUp, TrendingDown, AlertTriangle,
+  Plus, UserPlus, Package, Factory, Wallet, ArrowUpRight, ArrowDownRight,
+} from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
-import { useMillExpenses, useCreateMillExpense, useMillWorkers, useCreateMillWorker, usePayrollSummary, useRecordAttendance, useInventory } from '../../../api/queries';
+import {
+  useMillExpenses, useCreateMillExpense, useMillWorkers, useCreateMillWorker,
+  usePayrollSummary, useRecordAttendance, useInventory,
+} from '../../../api/queries';
 import { useCommodityPrices } from '../hooks/useCommodityPrices';
-import KPICard from '../../../components/KPICard';
-import Modal from '../../../components/Modal';
+import SlideDrawer from '../../../components/SlideDrawer';
 
 const PKR = (v) => 'Rs ' + Math.round(v || 0).toLocaleString('en-PK');
-// REMOVED: hardcoded DEFAULT_PRICES — now uses useCommodityPrices() hook
-const EXPENSE_CATS = ['salaries', 'utilities', 'rent', 'maintenance', 'insurance', 'transport', 'fuel', 'packaging', 'misc'];
+const COMPACT_PKR = (v) => {
+  const n = Math.round(v || 0);
+  if (Math.abs(n) >= 10000000) return `Rs ${(n / 10000000).toFixed(2)}Cr`;
+  if (Math.abs(n) >= 100000) return `Rs ${(n / 100000).toFixed(2)}L`;
+  if (Math.abs(n) >= 1000) return `Rs ${(n / 1000).toFixed(1)}k`;
+  return `Rs ${n.toLocaleString('en-PK')}`;
+};
+
+const EXPENSE_CATS = ['salaries', 'utilities', 'rent', 'maintenance', 'insurance', 'transport', 'fuel', 'packaging', 'miscellaneous'];
 const WORKER_ROLES = ['operator', 'laborer', 'supervisor', 'driver', 'guard', 'cleaner'];
 
 const tabs = [
-  { key: 'overview', label: 'Overview', icon: DollarSign },
-  { key: 'expenses', label: 'Expenses', icon: TrendingDown },
-  { key: 'efficiency', label: 'Efficiency', icon: TrendingUp },
-  { key: 'loss', label: 'Loss & Theft', icon: Shield },
-  { key: 'payroll', label: 'Payroll', icon: Users },
-  { key: 'utilities', label: 'Utilities', icon: Zap },
+  { key: 'overview',   label: 'Overview',     icon: DollarSign },
+  { key: 'expenses',   label: 'Expenses',     icon: TrendingDown },
+  { key: 'efficiency', label: 'Efficiency',   icon: TrendingUp },
+  { key: 'loss',       label: 'Loss & Theft', icon: Shield },
+  { key: 'payroll',    label: 'Payroll',      icon: Users },
+  { key: 'utilities',  label: 'Utilities',    icon: Zap },
 ];
+
+function Stat({ label, value, sub, tone = 'slate', icon: Icon }) {
+  const tones = {
+    slate:  'bg-white border-gray-100',
+    blue:   'bg-blue-50/40 border-blue-100',
+    green:  'bg-emerald-50/40 border-emerald-100',
+    red:    'bg-red-50/40 border-red-100',
+    amber:  'bg-amber-50/40 border-amber-100',
+    purple: 'bg-purple-50/40 border-purple-100',
+  };
+  const iconTones = {
+    slate:  'text-gray-400',
+    blue:   'text-blue-500',
+    green:  'text-emerald-500',
+    red:    'text-red-500',
+    amber:  'text-amber-500',
+    purple: 'text-purple-500',
+  };
+  return (
+    <div className={`rounded-xl border p-4 ${tones[tone]}`}>
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">{label}</p>
+        {Icon && <Icon size={14} className={iconTones[tone]} />}
+      </div>
+      <p className="text-xl font-semibold text-gray-900 mt-1.5 tabular-nums">{value}</p>
+      {sub && <p className="text-[11px] text-gray-500 mt-1 truncate">{sub}</p>}
+    </div>
+  );
+}
 
 export default function MillFinanceDashboard() {
   const { millingBatches, addToast } = useApp();
   const cp = useCommodityPrices();
   const DEFAULT_PRICES = { finished: cp.finished, broken: cp.broken, bran: cp.bran, husk: cp.husk };
   const batchPrice = (b, product) => b[`${product}PricePerMT`] || DEFAULT_PRICES[product];
-  // Fetch inventory directly — AppContext inventory may be empty due to timing
   const { data: directInventory = [] } = useInventory({});
   const inventory = Array.isArray(directInventory) ? directInventory : [];
   const pf = (v) => parseFloat(v) || 0;
 
-  // Inventory value — simple calculation with defaults
   const inventoryValue = useMemo(() => {
     let raw = 0, fin = 0, bp = 0;
     for (const lot of inventory) {
       const qty = pf(lot.availableQty || lot.qty);
       const netKg = pf(lot.netWeightKg) || qty * 1000;
       const costKg = pf(lot.landedCostPerKg) || pf(lot.ratePerKg);
-
-      if (lot.type === 'raw') {
-        raw += (costKg || 150) * netKg;
-      } else if (lot.type === 'finished') {
-        fin += (costKg || 190) * qty * 1000;
-      } else if (lot.type === 'byproduct') {
+      if (lot.type === 'raw')       raw += (costKg || 150) * netKg;
+      else if (lot.type === 'finished')  fin += (costKg || 190) * qty * 1000;
+      else if (lot.type === 'byproduct') {
         const name = (lot.itemName || '').toLowerCase();
         const rate = name.includes('broken') ? 38 : name.includes('bran') ? 28 : 8.4;
         bp += (costKg || rate) * qty * 1000;
@@ -51,6 +87,7 @@ export default function MillFinanceDashboard() {
     }
     return { raw, fin, bp, total: raw + fin + bp };
   }, [inventory]);
+
   const { data: expData } = useMillExpenses();
   const createExpMut = useCreateMillExpense();
   const { data: workers = [] } = useMillWorkers();
@@ -66,14 +103,13 @@ export default function MillFinanceDashboard() {
   const payrollTotal = payrollData?.grandTotal || 0;
 
   const [activeTab, setActiveTab] = useState('overview');
-  const [showExpModal, setShowExpModal] = useState(false);
-  const [showWorkerModal, setShowWorkerModal] = useState(false);
-  const [expForm, setExpForm] = useState({ category: 'salaries', description: '', amount: '', expense_date: new Date().toISOString().split('T')[0], notes: '' });
+  const [showExpDrawer, setShowExpDrawer] = useState(false);
+  const [showWorkerDrawer, setShowWorkerDrawer] = useState(false);
+  const [expForm, setExpForm] = useState({ category: 'salaries', description: '', amount: '', expense_date: new Date().toISOString().split('T')[0], reference: '', notes: '' });
   const [workerForm, setWorkerForm] = useState({ name: '', role: 'laborer', daily_wage: '', phone: '' });
 
   const completed = useMemo(() => millingBatches.filter(b => b.status === 'Completed'), [millingBatches]);
 
-  // Financial KPIs
   const RAW_KEYS = new Set(['rawRice', 'raw_rice', 'rawrice']);
   const getRawCost = (costs) => {
     if (!costs) return 0;
@@ -98,7 +134,6 @@ export default function MillFinanceDashboard() {
     return { totalRev, totalRaw, totalOtherCosts, totalCost, netProfit: totalRev - totalCost, costPerKg, finishedRev, byproductRev };
   }, [completed, totalOverhead]);
 
-  // Efficiency
   const efficiency = useMemo(() => {
     if (completed.length === 0) return { avgYield: 0, avgWastage: 0, costPerKg: 0 };
     const totalRaw = completed.reduce((s, b) => s + b.rawQtyMT, 0);
@@ -112,7 +147,6 @@ export default function MillFinanceDashboard() {
     };
   }, [completed, kpis]);
 
-  // Loss & Theft
   const lossData = useMemo(() => {
     return completed.map(b => {
       const expected = b.plannedFinishedMT || b.rawQtyMT * 0.65;
@@ -124,212 +158,383 @@ export default function MillFinanceDashboard() {
     }).sort((a, b) => a.variancePct - b.variancePct);
   }, [completed]);
 
+  const margin = kpis.totalRev > 0 ? (kpis.netProfit / kpis.totalRev * 100).toFixed(1) : 0;
+
+  function openExpDrawer(prefill) {
+    setExpForm({
+      category: prefill?.category || 'salaries',
+      description: prefill?.description || '',
+      amount: prefill?.amount != null ? String(prefill.amount) : '',
+      expense_date: new Date().toISOString().split('T')[0],
+      reference: '',
+      notes: '',
+    });
+    setShowExpDrawer(true);
+  }
+
   async function handleAddExpense() {
     if (!expForm.amount) { addToast('Amount required', 'error'); return; }
-    try { await createExpMut.mutateAsync(expForm); addToast('Expense recorded'); setShowExpModal(false); } catch (e) { addToast(e.message, 'error'); }
+    try {
+      await createExpMut.mutateAsync(expForm);
+      addToast('Expense recorded — also visible on Finance dashboard', 'success');
+      setShowExpDrawer(false);
+    } catch (e) {
+      addToast(e.message, 'error');
+    }
   }
 
   async function handleAddWorker() {
-    if (!workerForm.name || !workerForm.daily_wage) { addToast('Name and wage required', 'error'); return; }
-    try { await createWorkerMut.mutateAsync(workerForm); addToast('Worker added'); setShowWorkerModal(false); setWorkerForm({ name: '', role: 'laborer', daily_wage: '', phone: '' }); } catch (e) { addToast(e.message, 'error'); }
+    if (!workerForm.name || !workerForm.daily_wage) {
+      addToast('Name and wage required', 'error');
+      return;
+    }
+    try {
+      await createWorkerMut.mutateAsync(workerForm);
+      addToast('Worker added', 'success');
+      setShowWorkerDrawer(false);
+      setWorkerForm({ name: '', role: 'laborer', daily_wage: '', phone: '' });
+    } catch (e) {
+      addToast(e.message, 'error');
+    }
   }
 
-  const margin = kpis.totalRev > 0 ? (kpis.netProfit / kpis.totalRev * 100).toFixed(1) : 0;
-
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Mill Finance</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Financial management, expenses, payroll, and efficiency</p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={() => setShowExpModal(true)} className="btn btn-sm bg-red-50 text-red-700 border border-red-200 hover:bg-red-100"><Plus className="w-3.5 h-3.5" /> Add Expense</button>
-          <button onClick={() => setShowWorkerModal(true)} className="btn btn-sm bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"><UserPlus className="w-3.5 h-3.5" /> Add Worker</button>
+    <div className="space-y-5 pb-4">
+      {/* ─── HERO BAND ─────────────────────────────────────────────── */}
+      <div className="rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-900 to-blue-700 p-5 sm:p-6 text-white shadow-sm relative overflow-hidden">
+        <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 30% 20%, white 0%, transparent 60%)' }} />
+        <div className="relative flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider opacity-80 mb-1">
+              <Factory size={13} /> Mill finance · {curMonth}
+            </div>
+            <div className="text-3xl sm:text-4xl font-bold leading-tight tabular-nums">
+              {COMPACT_PKR(kpis.netProfit)}
+            </div>
+            <div className="text-xs opacity-90 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="inline-flex items-center gap-1">
+                {kpis.netProfit >= 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
+                Net profit · margin {margin}%
+              </span>
+              <span className="opacity-70">·</span>
+              <span>{completed.length} completed batches</span>
+              <span className="opacity-70">·</span>
+              <span>Revenue {COMPACT_PKR(kpis.totalRev)}</span>
+              <span className="opacity-70">·</span>
+              <span>Cost {COMPACT_PKR(kpis.totalCost)}</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => openExpDrawer()}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-white/15 hover:bg-white/25 ring-1 ring-white/30 transition-colors"
+            >
+              <Plus size={13} /> Add Expense
+            </button>
+            <button
+              onClick={() => setShowWorkerDrawer(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-white/15 hover:bg-white/25 ring-1 ring-white/30 transition-colors"
+            >
+              <UserPlus size={13} /> Add Worker
+            </button>
+            <Link
+              to="/finance"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-white text-slate-900 hover:bg-slate-100 transition-colors"
+            >
+              <Wallet size={13} /> Finance Dashboard
+            </Link>
+          </div>
         </div>
       </div>
 
-      {/* Tabs */}
+      {/* ─── TABS ──────────────────────────────────────────────────── */}
       <div className="flex items-center gap-1 border-b border-gray-200 overflow-x-auto">
         {tabs.map(t => (
-          <button key={t.key} onClick={() => setActiveTab(t.key)}
-            className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors flex items-center gap-1.5 ${activeTab === t.key ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+          <button
+            key={t.key}
+            onClick={() => setActiveTab(t.key)}
+            className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors flex items-center gap-1.5 ${
+              activeTab === t.key
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
             <t.icon className="w-4 h-4" /> {t.label}
           </button>
         ))}
       </div>
 
-      {/* === OVERVIEW === */}
+      {/* ─── OVERVIEW ──────────────────────────────────────────────── */}
       {activeTab === 'overview' && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
-            <KPICard icon={TrendingUp} title="Total Revenue" value={PKR(kpis.totalRev)} subtitle={`Finished: ${PKR(kpis.finishedRev)}`} color="blue" />
-            <KPICard icon={TrendingDown} title="Raw Material" value={PKR(kpis.totalRaw)} subtitle="Rice purchase cost" color="red" />
-            <KPICard icon={DollarSign} title="Operating Costs" value={PKR(kpis.totalOtherCosts + totalOverhead)} subtitle={`Batch: ${PKR(kpis.totalOtherCosts)} + OH: ${PKR(totalOverhead)}`} color="orange" />
-            <KPICard icon={TrendingUp} title="Net Profit" value={PKR(kpis.netProfit)} subtitle={`Margin: ${margin}%`} color={kpis.netProfit >= 0 ? 'green' : 'red'} />
-            <KPICard icon={DollarSign} title="Cost per KG" value={`Rs ${kpis.costPerKg.toFixed(2)}`} subtitle="All-in cost of finished rice" color="gray" />
-            <KPICard icon={Package} title="Inventory Value" value={PKR(inventoryValue.total)} subtitle={`Raw: ${PKR(inventoryValue.raw)} | Fin: ${PKR(inventoryValue.fin)}`} color="purple" />
+        <div className="space-y-5">
+          {/* Top KPI row */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <Stat tone="blue"   icon={TrendingUp}   label="Revenue"        value={PKR(kpis.totalRev)}   sub={`Finished ${COMPACT_PKR(kpis.finishedRev)}`} />
+            <Stat tone="red"    icon={TrendingDown} label="Raw Material"   value={PKR(kpis.totalRaw)}   sub="Rice purchase" />
+            <Stat tone="amber"  icon={DollarSign}   label="Operating"      value={PKR(kpis.totalOtherCosts + totalOverhead)} sub={`Batch ${COMPACT_PKR(kpis.totalOtherCosts)} · OH ${COMPACT_PKR(totalOverhead)}`} />
+            <Stat tone={kpis.netProfit >= 0 ? 'green' : 'red'} icon={TrendingUp} label="Net Profit" value={PKR(kpis.netProfit)} sub={`Margin ${margin}%`} />
+            <Stat tone="slate"  icon={DollarSign}   label="Cost/kg"        value={`Rs ${kpis.costPerKg.toFixed(2)}`} sub="All-in" />
+            <Stat tone="purple" icon={Package}      label="Inventory"      value={PKR(inventoryValue.total)} sub={`Raw ${COMPACT_PKR(inventoryValue.raw)}`} />
           </div>
-          {/* Inventory Value Breakdown */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <KPICard icon={Package} title="Raw Rice" value={PKR(inventoryValue.raw)} subtitle={`${inventory.filter(i => i.type === 'raw').reduce((s, i) => s + pf(i.qty), 0).toFixed(1)} MT in stock`} color="amber" />
-            <KPICard icon={Package} title="Finished Rice" value={PKR(inventoryValue.fin)} subtitle={`${inventory.filter(i => i.type === 'finished').reduce((s, i) => s + pf(i.availableQty), 0).toFixed(1)} MT available`} color="green" />
-            <KPICard icon={Package} title="Byproducts" value={PKR(inventoryValue.bp)} subtitle={`${inventory.filter(i => i.type === 'byproduct').reduce((s, i) => s + pf(i.availableQty), 0).toFixed(1)} MT in stock`} color="purple" />
-            <KPICard icon={DollarSign} title="Total Working Capital" value={PKR(inventoryValue.total)} subtitle="Capital locked in inventory" color="blue" />
+
+          {/* Inventory breakdown */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <Stat tone="amber"  label="Raw Rice"      value={PKR(inventoryValue.raw)} sub={`${inventory.filter(i => i.type === 'raw').reduce((s, i) => s + pf(i.qty), 0).toFixed(1)} MT`} />
+            <Stat tone="green"  label="Finished Rice" value={PKR(inventoryValue.fin)} sub={`${inventory.filter(i => i.type === 'finished').reduce((s, i) => s + pf(i.availableQty), 0).toFixed(1)} MT`} />
+            <Stat tone="purple" label="Byproducts"    value={PKR(inventoryValue.bp)}  sub={`${inventory.filter(i => i.type === 'byproduct').reduce((s, i) => s + pf(i.availableQty), 0).toFixed(1)} MT`} />
+            <Stat tone="blue"   label="Working Cap."  value={PKR(inventoryValue.total)} sub="Locked in stock" />
           </div>
+
+          {/* Expense breakdown + Payroll summary */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="bg-white rounded-xl border border-gray-200 p-5">
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">Expense Breakdown</h3>
+            <div className="bg-white rounded-xl border border-gray-100 p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-gray-800">Expense Breakdown</h3>
+                <span className="text-xs text-gray-400">Total {COMPACT_PKR(totalOverhead)}</span>
+              </div>
               <div className="space-y-2">
-                {expSummary.map(e => (
-                  <div key={e.category} className="flex items-center justify-between text-sm">
-                    <span className="capitalize text-gray-600">{e.category}</span>
-                    <span className="font-medium">{PKR(parseFloat(e.total))}</span>
-                  </div>
-                ))}
-                {expSummary.length === 0 && <p className="text-sm text-gray-400">No expenses recorded yet. Click "Add Expense" to start.</p>}
+                {expSummary.length === 0 ? (
+                  <p className="text-sm text-gray-400">No expenses recorded yet. Click <span className="font-medium text-gray-600">Add Expense</span> on the header.</p>
+                ) : (
+                  expSummary.map(e => {
+                    const pct = totalOverhead > 0 ? (parseFloat(e.total) / totalOverhead * 100) : 0;
+                    return (
+                      <div key={e.category}>
+                        <div className="flex items-center justify-between text-sm mb-0.5">
+                          <span className="capitalize text-gray-700">{e.category}</span>
+                          <span className="font-medium text-gray-900 tabular-nums">{PKR(parseFloat(e.total))}</span>
+                        </div>
+                        <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                          <div className="h-full bg-gradient-to-r from-blue-500 to-indigo-500" style={{ width: `${pct.toFixed(1)}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </div>
-            <div className="bg-white rounded-xl border border-gray-200 p-5">
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">Payroll Summary ({curMonth})</h3>
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm"><span className="text-gray-600">Active workers</span><span className="font-bold">{payrollSummary.length}</span></div>
-                <div className="flex justify-between text-sm"><span className="text-gray-600">Total payroll</span><span className="font-bold">{PKR(payrollTotal)}</span></div>
-                {payrollSummary.slice(0, 5).map(w => (
-                  <div key={w.id} className="flex justify-between text-xs text-gray-500">
-                    <span>{w.name} ({w.effectiveDays}d)</span><span>{PKR(w.totalPay)}</span>
-                  </div>
-                ))}
-                {payrollSummary.length === 0 && <p className="text-xs text-gray-400">No workers added yet.</p>}
+
+            <div className="bg-white rounded-xl border border-gray-100 p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-gray-800">Payroll · {curMonth}</h3>
+                <span className="text-xs text-gray-400">{payrollSummary.length} workers</span>
               </div>
+              {payrollSummary.length === 0 ? (
+                <p className="text-sm text-gray-400">No workers added yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm pb-2 border-b border-gray-100">
+                    <span className="text-gray-600">Monthly total</span>
+                    <span className="font-semibold text-gray-900">{PKR(payrollTotal)}</span>
+                  </div>
+                  {payrollSummary.slice(0, 5).map(w => (
+                    <div key={w.id} className="flex justify-between text-xs text-gray-500">
+                      <span>{w.name} <span className="text-gray-400">({w.effectiveDays}d)</span></span>
+                      <span className="tabular-nums">{PKR(w.totalPay)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {/* === EXPENSES === */}
+      {/* ─── EXPENSES ──────────────────────────────────────────────── */}
       {activeTab === 'expenses' && (
         <div className="space-y-4">
-          <div className="flex justify-end">
-            <button onClick={() => setShowExpModal(true)} className="btn btn-primary btn-sm"><Plus className="w-3.5 h-3.5" /> Add Expense</button>
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-gray-500">
+              All mill expenses flow into the main Finance dashboard, Money Out, and GL.
+            </p>
+            <button onClick={() => openExpDrawer()} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-700">
+              <Plus className="w-3.5 h-3.5" /> Add Expense
+            </button>
           </div>
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
             <table className="w-full text-sm">
-              <thead><tr className="bg-gray-50 border-b"><th className="text-left px-4 py-3">Date</th><th className="text-left px-4 py-3">Category</th><th className="text-left px-4 py-3">Description</th><th className="text-left px-4 py-3">Reference</th><th className="text-right px-4 py-3">Amount</th></tr></thead>
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-600 uppercase tracking-wide">
+                  <th className="text-left px-4 py-3 font-medium">Date</th>
+                  <th className="text-left px-4 py-3 font-medium">Category</th>
+                  <th className="text-left px-4 py-3 font-medium">Description</th>
+                  <th className="text-left px-4 py-3 font-medium">Reference</th>
+                  <th className="text-left px-4 py-3 font-medium">Status</th>
+                  <th className="text-right px-4 py-3 font-medium">Amount</th>
+                </tr>
+              </thead>
               <tbody className="divide-y divide-gray-100">
                 {expenses.map(e => (
                   <tr key={e.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3">{e.expenseDate}</td>
+                    <td className="px-4 py-3 text-gray-600">{e.expenseDate}</td>
                     <td className="px-4 py-3 capitalize">{e.category}</td>
                     <td className="px-4 py-3 text-gray-600">{e.description || '—'}</td>
-                    <td className="px-4 py-3 text-gray-500 text-xs">{e.reference || '—'}</td>
-                    <td className="px-4 py-3 text-right font-medium">{PKR(parseFloat(e.amount))}</td>
+                    <td className="px-4 py-3 text-gray-500 text-xs">{e.reference || e.invoiceReference || '—'}</td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${(e.paymentStatus === 'Paid') ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                        {e.paymentStatus || 'Pending'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right font-medium tabular-nums">{PKR(parseFloat(e.amount))}</td>
                   </tr>
                 ))}
-                {expenses.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">No expenses recorded yet</td></tr>}
+                {expenses.length === 0 && (
+                  <tr><td colSpan={6} className="px-4 py-10 text-center text-gray-400">No expenses recorded yet</td></tr>
+                )}
               </tbody>
             </table>
           </div>
         </div>
       )}
 
-      {/* === EFFICIENCY === */}
+      {/* ─── EFFICIENCY ────────────────────────────────────────────── */}
       {activeTab === 'efficiency' && (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <KPICard icon={TrendingUp} title="Avg Recovery" value={`${efficiency.avgYield}%`} subtitle="Finished / Raw" color="green" />
-            <KPICard icon={AlertTriangle} title="Avg Wastage" value={`${efficiency.avgWastage}%`} subtitle="Waste / Raw" color="red" />
-            <KPICard icon={DollarSign} title="Cost per KG" value={`Rs ${efficiency.costPerKg}`} subtitle="All-in finished cost" color="blue" />
-            <KPICard icon={TrendingUp} title="Batches" value={completed.length} subtitle={`${efficiency.totalRaw?.toFixed(0) || 0} MT processed`} color="gray" />
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Stat tone="green" icon={TrendingUp}    label="Avg Recovery"  value={`${efficiency.avgYield}%`}    sub="Finished / Raw" />
+            <Stat tone="red"   icon={AlertTriangle} label="Avg Wastage"   value={`${efficiency.avgWastage}%`}  sub="Waste / Raw" />
+            <Stat tone="blue"  icon={DollarSign}    label="Cost per KG"   value={`Rs ${efficiency.costPerKg}`} sub="All-in finished" />
+            <Stat tone="slate" icon={Factory}       label="Batches"       value={completed.length}             sub={`${efficiency.totalRaw?.toFixed(0) || 0} MT processed`} />
           </div>
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
             <table className="w-full text-sm">
-              <thead><tr className="bg-gray-50 border-b"><th className="text-left px-4 py-3">Batch</th><th className="text-right px-4 py-3">Raw MT</th><th className="text-right px-4 py-3">Finished MT</th><th className="text-right px-4 py-3">Yield %</th><th className="text-right px-4 py-3">Wastage %</th><th className="text-right px-4 py-3">Cost/KG</th></tr></thead>
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-600 uppercase tracking-wide">
+                  <th className="text-left px-4 py-3 font-medium">Batch</th>
+                  <th className="text-right px-4 py-3 font-medium">Raw MT</th>
+                  <th className="text-right px-4 py-3 font-medium">Finished MT</th>
+                  <th className="text-right px-4 py-3 font-medium">Yield %</th>
+                  <th className="text-right px-4 py-3 font-medium">Wastage %</th>
+                  <th className="text-right px-4 py-3 font-medium">Cost/KG</th>
+                </tr>
+              </thead>
               <tbody className="divide-y divide-gray-100">
                 {completed.map(b => {
                   const totalCost = Object.values(b.costs || {}).reduce((s, c) => s + (parseFloat(c) || 0), 0);
                   const costKg = b.actualFinishedMT > 0 ? totalCost / (b.actualFinishedMT * 1000) : 0;
                   const wastePct = b.rawQtyMT > 0 ? ((b.wastageMT || 0) / b.rawQtyMT * 100).toFixed(1) : 0;
                   return (
-                    <tr key={b.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => window.location.href = `/milling/${b.id}`}>
-                      <td className="px-4 py-3 font-medium text-blue-600">{b.id}</td>
-                      <td className="px-4 py-3 text-right">{b.rawQtyMT}</td>
-                      <td className="px-4 py-3 text-right">{b.actualFinishedMT}</td>
-                      <td className="px-4 py-3 text-right font-medium">{b.yieldPct}%</td>
-                      <td className="px-4 py-3 text-right text-red-600">{wastePct}%</td>
-                      <td className="px-4 py-3 text-right">Rs {costKg.toFixed(2)}</td>
+                    <tr key={b.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 font-medium"><Link to={`/milling/${b.id}`} className="text-blue-600">{b.id}</Link></td>
+                      <td className="px-4 py-3 text-right tabular-nums">{b.rawQtyMT}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">{b.actualFinishedMT}</td>
+                      <td className="px-4 py-3 text-right font-medium tabular-nums">{b.yieldPct}%</td>
+                      <td className="px-4 py-3 text-right text-red-600 tabular-nums">{wastePct}%</td>
+                      <td className="px-4 py-3 text-right tabular-nums">Rs {costKg.toFixed(2)}</td>
                     </tr>
                   );
                 })}
+                {completed.length === 0 && (
+                  <tr><td colSpan={6} className="px-4 py-10 text-center text-gray-400">No completed batches yet</td></tr>
+                )}
               </tbody>
             </table>
           </div>
         </div>
       )}
 
-      {/* === LOSS & THEFT === */}
+      {/* ─── LOSS & THEFT ──────────────────────────────────────────── */}
       {activeTab === 'loss' && (
         <div className="space-y-4">
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
-            <Shield className="w-4 h-4 inline mr-2" />
-            Batches flagged when actual output is more than 3% below expected. This may indicate loss, theft, or measurement errors.
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800 flex items-start gap-2">
+            <Shield className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            <span>Batches flagged when actual output is more than 3% below expected. May indicate loss, theft, or measurement errors.</span>
           </div>
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
             <table className="w-full text-sm">
-              <thead><tr className="bg-gray-50 border-b"><th className="text-left px-4 py-3">Batch</th><th className="text-right px-4 py-3">Raw MT</th><th className="text-right px-4 py-3">Expected</th><th className="text-right px-4 py-3">Actual</th><th className="text-right px-4 py-3">Variance MT</th><th className="text-right px-4 py-3">Variance %</th><th className="text-center px-4 py-3">Status</th></tr></thead>
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-600 uppercase tracking-wide">
+                  <th className="text-left px-4 py-3 font-medium">Batch</th>
+                  <th className="text-right px-4 py-3 font-medium">Raw MT</th>
+                  <th className="text-right px-4 py-3 font-medium">Expected</th>
+                  <th className="text-right px-4 py-3 font-medium">Actual</th>
+                  <th className="text-right px-4 py-3 font-medium">Var MT</th>
+                  <th className="text-right px-4 py-3 font-medium">Var %</th>
+                  <th className="text-center px-4 py-3 font-medium">Status</th>
+                </tr>
+              </thead>
               <tbody className="divide-y divide-gray-100">
                 {lossData.map(b => (
-                  <tr key={b.id} className={`hover:bg-gray-50 ${b.flagged ? 'bg-red-50' : ''}`}>
-                    <td className="px-4 py-3 font-medium text-blue-600"><Link to={`/milling/${b.id}`}>{b.id}</Link></td>
-                    <td className="px-4 py-3 text-right">{b.rawQtyMT}</td>
-                    <td className="px-4 py-3 text-right">{b.expected.toFixed(2)}</td>
-                    <td className="px-4 py-3 text-right">{b.actualFinishedMT}</td>
-                    <td className={`px-4 py-3 text-right font-medium ${b.variance < 0 ? 'text-red-600' : 'text-green-600'}`}>{b.variance > 0 ? '+' : ''}{b.variance.toFixed(2)}</td>
-                    <td className={`px-4 py-3 text-right font-medium ${parseFloat(b.variancePct) < -3 ? 'text-red-600' : 'text-gray-600'}`}>{b.variancePct}%</td>
+                  <tr key={b.id} className={`hover:bg-gray-50 ${b.flagged ? 'bg-red-50/50' : ''}`}>
+                    <td className="px-4 py-3 font-medium"><Link to={`/milling/${b.id}`} className="text-blue-600">{b.id}</Link></td>
+                    <td className="px-4 py-3 text-right tabular-nums">{b.rawQtyMT}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{b.expected.toFixed(2)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{b.actualFinishedMT}</td>
+                    <td className={`px-4 py-3 text-right font-medium tabular-nums ${b.variance < 0 ? 'text-red-600' : 'text-emerald-600'}`}>{b.variance > 0 ? '+' : ''}{b.variance.toFixed(2)}</td>
+                    <td className={`px-4 py-3 text-right font-medium tabular-nums ${parseFloat(b.variancePct) < -3 ? 'text-red-600' : 'text-gray-600'}`}>{b.variancePct}%</td>
                     <td className="px-4 py-3 text-center">
-                      {b.flagged ? <span className="px-2 py-1 bg-red-100 text-red-700 rounded-full text-xs font-medium">Investigate</span> : <span className="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">Normal</span>}
+                      {b.flagged
+                        ? <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-[11px] font-medium">Investigate</span>
+                        : <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full text-[11px] font-medium">Normal</span>}
                     </td>
                   </tr>
                 ))}
+                {lossData.length === 0 && (
+                  <tr><td colSpan={7} className="px-4 py-10 text-center text-gray-400">No completed batches yet</td></tr>
+                )}
               </tbody>
             </table>
           </div>
         </div>
       )}
 
-      {/* === PAYROLL === */}
+      {/* ─── PAYROLL ───────────────────────────────────────────────── */}
       {activeTab === 'payroll' && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-gray-700">Workers & Payroll — {curMonth}</h3>
-            <button onClick={() => setShowWorkerModal(true)} className="btn btn-primary btn-sm"><UserPlus className="w-3.5 h-3.5" /> Add Worker</button>
+            <p className="text-xs text-gray-500">Workers, attendance, and monthly payroll runs.</p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => openExpDrawer({ category: 'salaries', amount: Math.round(payrollTotal || 0), description: `Mill payroll for ${curMonth}` })}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40"
+                disabled={!payrollTotal}
+              >
+                <Wallet className="w-3.5 h-3.5" /> Post Payroll Run
+              </button>
+              <button onClick={() => setShowWorkerDrawer(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-700">
+                <UserPlus className="w-3.5 h-3.5" /> Add Worker
+              </button>
+            </div>
           </div>
-          <div className="grid grid-cols-3 gap-4">
-            <KPICard icon={Users} title="Active Workers" value={payrollSummary.length} subtitle="On payroll" color="blue" />
-            <KPICard icon={DollarSign} title="Monthly Payroll" value={PKR(payrollTotal)} subtitle={curMonth} color="red" />
-            <KPICard icon={DollarSign} title="Avg Daily Wage" value={PKR(payrollSummary.length > 0 ? payrollSummary.reduce((s, w) => s + parseFloat(w.dailyWage || 0), 0) / payrollSummary.length : 0)} subtitle="Per worker" color="gray" />
+          <div className="grid grid-cols-3 gap-3">
+            <Stat tone="blue"  icon={Users}      label="Active Workers" value={payrollSummary.length} sub="On payroll" />
+            <Stat tone="red"   icon={DollarSign} label="Monthly Payroll" value={PKR(payrollTotal)} sub={curMonth} />
+            <Stat tone="slate" icon={DollarSign} label="Avg Daily Wage"  value={PKR(payrollSummary.length > 0 ? payrollSummary.reduce((s, w) => s + parseFloat(w.dailyWage || 0), 0) / payrollSummary.length : 0)} sub="Per worker" />
           </div>
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
             <table className="w-full text-sm">
-              <thead><tr className="bg-gray-50 border-b"><th className="text-left px-4 py-3">Name</th><th className="text-left px-4 py-3">Role</th><th className="text-right px-4 py-3">Daily Wage</th><th className="text-right px-4 py-3">Days</th><th className="text-right px-4 py-3">OT Hours</th><th className="text-right px-4 py-3">Basic Pay</th><th className="text-right px-4 py-3">OT Pay</th><th className="text-right px-4 py-3">Total</th></tr></thead>
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-600 uppercase tracking-wide">
+                  <th className="text-left px-4 py-3 font-medium">Name</th>
+                  <th className="text-left px-4 py-3 font-medium">Role</th>
+                  <th className="text-right px-4 py-3 font-medium">Daily Wage</th>
+                  <th className="text-right px-4 py-3 font-medium">Days</th>
+                  <th className="text-right px-4 py-3 font-medium">OT Hours</th>
+                  <th className="text-right px-4 py-3 font-medium">Basic</th>
+                  <th className="text-right px-4 py-3 font-medium">OT Pay</th>
+                  <th className="text-right px-4 py-3 font-medium">Total</th>
+                </tr>
+              </thead>
               <tbody className="divide-y divide-gray-100">
                 {payrollSummary.map(w => (
                   <tr key={w.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-medium">{w.name}</td>
+                    <td className="px-4 py-3 font-medium text-gray-900">{w.name}</td>
                     <td className="px-4 py-3 capitalize text-gray-600">{w.role}</td>
-                    <td className="px-4 py-3 text-right">{PKR(parseFloat(w.dailyWage))}</td>
-                    <td className="px-4 py-3 text-right">{w.effectiveDays}</td>
-                    <td className="px-4 py-3 text-right">{w.totalOT || 0}</td>
-                    <td className="px-4 py-3 text-right">{PKR(w.basicPay)}</td>
-                    <td className="px-4 py-3 text-right">{PKR(w.otPay)}</td>
-                    <td className="px-4 py-3 text-right font-bold">{PKR(w.totalPay)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{PKR(parseFloat(w.dailyWage))}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{w.effectiveDays}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{w.totalOT || 0}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{PKR(w.basicPay)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{PKR(w.otPay)}</td>
+                    <td className="px-4 py-3 text-right font-semibold tabular-nums">{PKR(w.totalPay)}</td>
                   </tr>
                 ))}
-                {payrollSummary.length === 0 && <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No workers added yet. Click "Add Worker" to start.</td></tr>}
+                {payrollSummary.length === 0 && (
+                  <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-400">No workers added yet</td></tr>
+                )}
                 {payrollSummary.length > 0 && (
-                  <tr className="bg-gray-50 font-bold">
+                  <tr className="bg-gray-50 font-semibold">
                     <td colSpan={7} className="px-4 py-3 text-right">Grand Total</td>
-                    <td className="px-4 py-3 text-right">{PKR(payrollTotal)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{PKR(payrollTotal)}</td>
                   </tr>
                 )}
               </tbody>
@@ -338,33 +543,40 @@ export default function MillFinanceDashboard() {
         </div>
       )}
 
-      {/* === UTILITIES === */}
+      {/* ─── UTILITIES ─────────────────────────────────────────────── */}
       {activeTab === 'utilities' && (
         <div className="space-y-4">
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800">
-            <Zap className="w-4 h-4 inline mr-2" />
-            Track electricity, water, gas, and diesel consumption. Record readings via the Expenses tab (category: Utilities) or batch-level utility tracking.
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800 flex items-start gap-2">
+            <Zap className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            <span>Track electricity, water, gas, and diesel via the <span className="font-medium">Add Expense</span> action.</span>
           </div>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {['utilities', 'fuel', 'maintenance', 'rent'].map(cat => {
               const catTotal = expenses.filter(e => e.category === cat).reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
-              return <KPICard key={cat} icon={Zap} title={cat.charAt(0).toUpperCase() + cat.slice(1)} value={PKR(catTotal)} subtitle="Total recorded" color="cyan" />;
+              return <Stat key={cat} tone="blue" icon={Zap} label={cat.charAt(0).toUpperCase() + cat.slice(1)} value={PKR(catTotal)} sub="Total recorded" />;
             })}
           </div>
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
             <table className="w-full text-sm">
-              <thead><tr className="bg-gray-50 border-b"><th className="text-left px-4 py-3">Date</th><th className="text-left px-4 py-3">Category</th><th className="text-left px-4 py-3">Description</th><th className="text-right px-4 py-3">Amount</th></tr></thead>
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-600 uppercase tracking-wide">
+                  <th className="text-left px-4 py-3 font-medium">Date</th>
+                  <th className="text-left px-4 py-3 font-medium">Category</th>
+                  <th className="text-left px-4 py-3 font-medium">Description</th>
+                  <th className="text-right px-4 py-3 font-medium">Amount</th>
+                </tr>
+              </thead>
               <tbody className="divide-y divide-gray-100">
                 {expenses.filter(e => ['utilities', 'fuel', 'maintenance', 'rent'].includes(e.category)).map(e => (
                   <tr key={e.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3">{e.expenseDate}</td>
+                    <td className="px-4 py-3 text-gray-600">{e.expenseDate}</td>
                     <td className="px-4 py-3 capitalize">{e.category}</td>
                     <td className="px-4 py-3 text-gray-600">{e.description || '—'}</td>
-                    <td className="px-4 py-3 text-right font-medium">{PKR(parseFloat(e.amount))}</td>
+                    <td className="px-4 py-3 text-right font-medium tabular-nums">{PKR(parseFloat(e.amount))}</td>
                   </tr>
                 ))}
                 {expenses.filter(e => ['utilities', 'fuel', 'maintenance', 'rent'].includes(e.category)).length === 0 && (
-                  <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400">No utility expenses recorded. Add via "Add Expense" button.</td></tr>
+                  <tr><td colSpan={4} className="px-4 py-10 text-center text-gray-400">No utility expenses recorded</td></tr>
                 )}
               </tbody>
             </table>
@@ -372,46 +584,158 @@ export default function MillFinanceDashboard() {
         </div>
       )}
 
-      {/* Add Expense Modal */}
-      <Modal isOpen={showExpModal} onClose={() => setShowExpModal(false)} title="Add Mill Expense" size="md">
+      {/* ─── ADD EXPENSE DRAWER ────────────────────────────────────── */}
+      <SlideDrawer
+        open={showExpDrawer}
+        onClose={() => setShowExpDrawer(false)}
+        title="Add Mill Expense"
+        subtitle="Flows into Finance Dashboard, Money Out, and GL"
+        icon={TrendingDown}
+        footer={
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setShowExpDrawer(false)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+            <button
+              onClick={handleAddExpense}
+              disabled={createExpMut.isPending}
+              className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-60"
+            >
+              {createExpMut.isPending ? 'Saving…' : 'Save Expense'}
+            </button>
+          </div>
+        }
+      >
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
-              <select value={expForm.category} onChange={e => setExpForm(p => ({ ...p, category: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none bg-white">
+              <label className="block text-xs font-medium text-gray-600 mb-1">Category *</label>
+              <select
+                value={expForm.category}
+                onChange={e => setExpForm(p => ({ ...p, category: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900 bg-white"
+              >
                 {EXPENSE_CATS.map(c => <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>)}
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Amount (PKR) *</label>
-              <input type="number" value={expForm.amount} onChange={e => setExpForm(p => ({ ...p, amount: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
+              <label className="block text-xs font-medium text-gray-600 mb-1">Amount (PKR) *</label>
+              <input
+                type="number" min="0" step="0.01"
+                value={expForm.amount}
+                onChange={e => setExpForm(p => ({ ...p, amount: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900 tabular-nums"
+              />
             </div>
           </div>
-          <div><label className="block text-sm font-medium text-gray-700 mb-1">Description</label><input type="text" value={expForm.description} onChange={e => setExpForm(p => ({ ...p, description: e.target.value }))} placeholder="e.g. March electricity bill" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" /></div>
-          <div><label className="block text-sm font-medium text-gray-700 mb-1">Date</label><input type="date" value={expForm.expense_date} onChange={e => setExpForm(p => ({ ...p, expense_date: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" /></div>
-          <div className="flex justify-end gap-2 pt-2 border-t"><button onClick={() => setShowExpModal(false)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button><button onClick={handleAddExpense} className="px-4 py-2 text-sm text-white bg-red-600 rounded-lg hover:bg-red-700">Save Expense</button></div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Description</label>
+            <input
+              type="text"
+              value={expForm.description}
+              onChange={e => setExpForm(p => ({ ...p, description: e.target.value }))}
+              placeholder="e.g. March electricity bill"
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Date</label>
+              <input
+                type="date"
+                value={expForm.expense_date}
+                onChange={e => setExpForm(p => ({ ...p, expense_date: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Reference</label>
+              <input
+                type="text"
+                value={expForm.reference}
+                onChange={e => setExpForm(p => ({ ...p, reference: e.target.value }))}
+                placeholder="Invoice or bill #"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Notes</label>
+            <textarea
+              rows={2}
+              value={expForm.notes}
+              onChange={e => setExpForm(p => ({ ...p, notes: e.target.value }))}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
+            />
+          </div>
+          <div className="bg-blue-50/50 border border-blue-100 rounded-lg p-3 text-xs text-blue-800">
+            Saving creates a <span className="font-medium">business_expense</span> + <span className="font-medium">payable</span> + journal entry. The expense becomes payable on Money Out.
+          </div>
         </div>
-      </Modal>
+      </SlideDrawer>
 
-      {/* Add Worker Modal */}
-      <Modal isOpen={showWorkerModal} onClose={() => setShowWorkerModal(false)} title="Add Mill Worker" size="md">
+      {/* ─── ADD WORKER DRAWER ─────────────────────────────────────── */}
+      <SlideDrawer
+        open={showWorkerDrawer}
+        onClose={() => setShowWorkerDrawer(false)}
+        title="Add Mill Worker"
+        subtitle="Used for daily attendance and monthly payroll"
+        icon={UserPlus}
+        footer={
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setShowWorkerDrawer(false)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+            <button
+              onClick={handleAddWorker}
+              disabled={createWorkerMut.isPending}
+              className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-60"
+            >
+              {createWorkerMut.isPending ? 'Saving…' : 'Add Worker'}
+            </button>
+          </div>
+        }
+      >
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
-            <div><label className="block text-sm font-medium text-gray-700 mb-1">Name *</label><input type="text" value={workerForm.name} onChange={e => setWorkerForm(p => ({ ...p, name: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" /></div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
-              <select value={workerForm.role} onChange={e => setWorkerForm(p => ({ ...p, role: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none bg-white">
+              <label className="block text-xs font-medium text-gray-600 mb-1">Name *</label>
+              <input
+                type="text"
+                value={workerForm.name}
+                onChange={e => setWorkerForm(p => ({ ...p, name: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Role</label>
+              <select
+                value={workerForm.role}
+                onChange={e => setWorkerForm(p => ({ ...p, role: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900 bg-white"
+              >
                 {WORKER_ROLES.map(r => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
               </select>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <div><label className="block text-sm font-medium text-gray-700 mb-1">Daily Wage (PKR) *</label><input type="number" value={workerForm.daily_wage} onChange={e => setWorkerForm(p => ({ ...p, daily_wage: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" /></div>
-            <div><label className="block text-sm font-medium text-gray-700 mb-1">Phone</label><input type="text" value={workerForm.phone} onChange={e => setWorkerForm(p => ({ ...p, phone: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" /></div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Daily Wage (PKR) *</label>
+              <input
+                type="number" min="0"
+                value={workerForm.daily_wage}
+                onChange={e => setWorkerForm(p => ({ ...p, daily_wage: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900 tabular-nums"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Phone</label>
+              <input
+                type="text"
+                value={workerForm.phone}
+                onChange={e => setWorkerForm(p => ({ ...p, phone: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
+              />
+            </div>
           </div>
-          <div className="flex justify-end gap-2 pt-2 border-t"><button onClick={() => setShowWorkerModal(false)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button><button onClick={handleAddWorker} className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700">Add Worker</button></div>
         </div>
-      </Modal>
+      </SlideDrawer>
     </div>
   );
 }
