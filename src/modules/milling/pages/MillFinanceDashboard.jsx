@@ -24,6 +24,49 @@ const COMPACT_PKR = (v) => {
 const EXPENSE_CATS = ['salaries', 'utilities', 'rent', 'maintenance', 'insurance', 'transport', 'fuel', 'packaging', 'miscellaneous'];
 const WORKER_ROLES = ['operator', 'laborer', 'supervisor', 'driver', 'guard', 'cleaner'];
 
+// Common Pakistani providers per category. When a category appears here the
+// expense drawer renders a Provider/Vendor dropdown of these options +
+// "Other (specify)"; otherwise a free-text vendor input is shown.
+const VENDOR_OPTIONS = {
+  utilities: [
+    'K-Electric',
+    'WAPDA / LESCO',
+    'IESCO',
+    'PESCO',
+    'GEPCO',
+    'HESCO',
+    'MEPCO',
+    'SSGC (Sui Southern Gas)',
+    'SNGPL (Sui Northern Gas)',
+    'PTCL',
+    'Karachi Water Board',
+    'WASA',
+  ],
+  fuel: [
+    'PSO',
+    'Shell',
+    'Hascol',
+    'Total PARCO',
+    'GO Petroleum',
+    'Attock Petroleum',
+  ],
+  insurance: [
+    'EFU General',
+    'Adamjee Insurance',
+    'Jubilee Insurance',
+    'TPL Insurance',
+    'UBL Insurers',
+    'State Life',
+  ],
+  transport: [
+    'NLC',
+    'TCS Logistics',
+    'Daewoo Logistics',
+    'M&P (Muller & Phipps)',
+    'Local Transporter',
+  ],
+};
+
 const tabs = [
   { key: 'overview',   label: 'Overview',     icon: DollarSign },
   { key: 'expenses',   label: 'Expenses',     icon: TrendingDown },
@@ -105,7 +148,7 @@ export default function MillFinanceDashboard() {
   const [activeTab, setActiveTab] = useState('overview');
   const [showExpDrawer, setShowExpDrawer] = useState(false);
   const [showWorkerDrawer, setShowWorkerDrawer] = useState(false);
-  const [expForm, setExpForm] = useState({ category: 'salaries', description: '', amount: '', expense_date: new Date().toISOString().split('T')[0], reference: '', notes: '' });
+  const [expForm, setExpForm] = useState({ category: 'salaries', vendor_preset: '', vendor_name: '', description: '', amount: '', expense_date: new Date().toISOString().split('T')[0], reference: '', notes: '' });
   const [workerForm, setWorkerForm] = useState({ name: '', role: 'laborer', daily_wage: '', phone: '' });
 
   const completed = useMemo(() => millingBatches.filter(b => b.status === 'Completed'), [millingBatches]);
@@ -163,6 +206,8 @@ export default function MillFinanceDashboard() {
   function openExpDrawer(prefill) {
     setExpForm({
       category: prefill?.category || 'salaries',
+      vendor_preset: '',
+      vendor_name: '',
       description: prefill?.description || '',
       amount: prefill?.amount != null ? String(prefill.amount) : '',
       expense_date: new Date().toISOString().split('T')[0],
@@ -174,8 +219,21 @@ export default function MillFinanceDashboard() {
 
   async function handleAddExpense() {
     if (!expForm.amount) { addToast('Amount required', 'error'); return; }
+    // Resolve the vendor: preset wins unless "Other" is picked or the
+    // category has no presets, in which case fall back to free-text.
+    const vendorName = (expForm.vendor_preset && expForm.vendor_preset !== '__other')
+      ? expForm.vendor_preset
+      : (expForm.vendor_name || null);
     try {
-      await createExpMut.mutateAsync(expForm);
+      await createExpMut.mutateAsync({
+        category: expForm.category,
+        description: expForm.description,
+        amount: expForm.amount,
+        expense_date: expForm.expense_date,
+        reference: expForm.reference,
+        notes: expForm.notes,
+        vendor_name: vendorName,
+      });
       addToast('Expense recorded — also visible on Finance dashboard', 'success');
       setShowExpDrawer(false);
     } catch (e) {
@@ -610,7 +668,7 @@ export default function MillFinanceDashboard() {
               <label className="block text-xs font-medium text-gray-600 mb-1">Category *</label>
               <select
                 value={expForm.category}
-                onChange={e => setExpForm(p => ({ ...p, category: e.target.value }))}
+                onChange={e => setExpForm(p => ({ ...p, category: e.target.value, vendor_preset: '', vendor_name: '' }))}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900 bg-white"
               >
                 {EXPENSE_CATS.map(c => <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>)}
@@ -626,6 +684,48 @@ export default function MillFinanceDashboard() {
               />
             </div>
           </div>
+
+          {/* ─── Provider / Vendor — dynamic per category ───────── */}
+          {VENDOR_OPTIONS[expForm.category] ? (
+            <div className="space-y-2">
+              <label className="block text-xs font-medium text-gray-600">
+                Provider <span className="text-gray-400 font-normal">· choose from common {expForm.category} providers</span>
+              </label>
+              <select
+                value={expForm.vendor_preset}
+                onChange={e => setExpForm(p => ({ ...p, vendor_preset: e.target.value, vendor_name: '' }))}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900 bg-white"
+              >
+                <option value="">Select a provider…</option>
+                {VENDOR_OPTIONS[expForm.category].map(v => (
+                  <option key={v} value={v}>{v}</option>
+                ))}
+                <option value="__other">Other (specify below)</option>
+              </select>
+              {expForm.vendor_preset === '__other' && (
+                <input
+                  type="text"
+                  value={expForm.vendor_name}
+                  onChange={e => setExpForm(p => ({ ...p, vendor_name: e.target.value }))}
+                  placeholder="Enter provider name"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
+                  autoFocus
+                />
+              )}
+            </div>
+          ) : (
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Vendor / Payee <span className="text-gray-400 font-normal">· optional</span></label>
+              <input
+                type="text"
+                value={expForm.vendor_name}
+                onChange={e => setExpForm(p => ({ ...p, vendor_name: e.target.value }))}
+                placeholder={expForm.category === 'salaries' ? 'e.g. May payroll batch' : 'Who is being paid?'}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
+              />
+            </div>
+          )}
+
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Description</label>
             <input
