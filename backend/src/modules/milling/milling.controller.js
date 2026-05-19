@@ -65,23 +65,33 @@ const millingController = {
 
       const total = parseInt(countResult.total);
 
-      // Attach costs to each batch (from milling_costs table)
+      // Attach costs / vehicle arrivals / arrival analysis to each batch
+      // so the dashboard board can compute "Pending QC" (arrivals with no
+      // arrival analysis) without needing a per-batch detail fetch.
       const batchIds = batches.map(b => b.id);
-      const allCosts = batchIds.length > 0
-        ? await db('milling_costs').whereIn('batch_id', batchIds)
-        : [];
+      const [allCosts, allArrivals, allArrivalSamples] = batchIds.length > 0
+        ? await Promise.all([
+            db('milling_costs').whereIn('batch_id', batchIds),
+            db('milling_vehicle_arrivals').whereIn('batch_id', batchIds),
+            db('milling_quality_samples')
+              .whereIn('batch_id', batchIds)
+              .where({ analysis_type: 'arrival' }),
+          ])
+        : [[], [], []];
 
-      const batchesWithCosts = batches.map(b => {
+      const batchesEnriched = batches.map(b => {
         const batchCosts = allCosts.filter(c => c.batch_id === b.id);
         const costs = {};
         batchCosts.forEach(c => { costs[c.category] = parseFloat(c.amount) || 0; });
-        return { ...b, costs };
+        const vehicleArrivals = allArrivals.filter(a => a.batch_id === b.id);
+        const arrivalSample = allArrivalSamples.find(q => q.batch_id === b.id) || null;
+        return { ...b, costs, vehicleArrivals, arrivalAnalysis: arrivalSample };
       });
 
       return res.json({
         success: true,
         data: {
-          batches: batchesWithCosts,
+          batches: batchesEnriched,
           pagination: {
             page: parseInt(page),
             limit: parseInt(limit),
