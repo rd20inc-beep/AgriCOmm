@@ -358,7 +358,12 @@ export function useInventory(params = {}, opts = {}) {
     queryKey: queryKeys.inventory.list(params),
     queryFn: async () => {
       const res = await inventoryApi.list({ limit: 500, ...params });
-      return transformKeys(unwrap(res, 'inventory') || unwrap(res, 'lots') || []);
+      // Don't use `unwrap(res, 'inventory') || unwrap(res, 'lots')` — when
+      // the first key is missing, unwrap falls back to the whole data
+      // object (truthy), short-circuiting `||` before we ever read `lots`.
+      // The /api/inventory endpoint always returns data.lots[].
+      const lots = res?.data?.lots ?? res?.data?.inventory ?? [];
+      return transformKeys(Array.isArray(lots) ? lots : []);
     },
     ...opts,
   });
