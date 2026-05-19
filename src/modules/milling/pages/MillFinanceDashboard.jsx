@@ -21,7 +21,11 @@ const COMPACT_PKR = (v) => {
   return `Rs ${n.toLocaleString('en-PK')}`;
 };
 
-const EXPENSE_CATS = ['salaries', 'utilities', 'rent', 'maintenance', 'insurance', 'transport', 'fuel', 'packaging', 'miscellaneous'];
+const EXPENSE_CATS = [
+  'salaries', 'utilities', 'rent', 'maintenance', 'insurance',
+  'transport', 'fuel', 'packaging', 'inspection', 'freight',
+  'commission', 'miscellaneous',
+];
 const WORKER_ROLES = ['operator', 'laborer', 'supervisor', 'driver', 'guard', 'cleaner'];
 
 // Common Pakistani providers per category. When a category appears here the
@@ -64,6 +68,62 @@ const VENDOR_OPTIONS = {
     'Daewoo Logistics',
     'M&P (Muller & Phipps)',
     'Local Transporter',
+  ],
+  maintenance: [
+    'Hexa Engineering',
+    'Buhler Pakistan',
+    'Satake (Rice Machinery)',
+    'AGI Industries',
+    'Pak Service Center',
+    'Local Workshop / Mechanic',
+    'Local Electrician',
+    'Spare Parts Supplier',
+  ],
+  packaging: [
+    'Forsa Bags',
+    'Lucky Plastic',
+    'Treet PP Bags',
+    'Hi-Tech Packaging',
+    'Packages Limited',
+    'Premier Industries',
+    'Jute Bag Supplier',
+    'Master Bag Printer',
+  ],
+  rent: [
+    'Mill Property Landlord',
+    'Warehouse Landlord',
+    'Office Landlord',
+    'Land Lease',
+  ],
+  inspection: [
+    'SGS Pakistan',
+    'Bureau Veritas',
+    'Intertek',
+    'Cotecna',
+    'TUV Austria Pakistan',
+    'PSQCA (Pak Standards & Quality Control)',
+    'DPP (Department of Plant Protection)',
+    'Pakistan Customs',
+  ],
+  freight: [
+    'Maersk Line',
+    'MSC',
+    'Hapag-Lloyd',
+    'CMA CGM',
+    'COSCO Shipping',
+    'Evergreen',
+    'ONE (Ocean Network Express)',
+    'Hyundai Merchant Marine',
+    'NLC (National Logistics)',
+    'Local Freight Forwarder',
+  ],
+  commission: [
+    'Sales Agent',
+    "Buyer's Agent (Foreign)",
+    'Export Broker',
+    'Customs Clearing Agent',
+    'Shipping Agent',
+    'Marketing Consultant',
   ],
 };
 
