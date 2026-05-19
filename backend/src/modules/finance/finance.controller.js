@@ -1368,7 +1368,16 @@ financeController.payPurchase = async (req, res) => {
         await trx('bank_accounts').where({ id: bank_account_id }).decrement('current_balance', amountPkr);
         const tableExists = await trx.schema.hasTable('bank_transactions');
         if (tableExists) {
+          // transaction_no is NOT NULL + unique. Generate as BT-NNNN.
+          const lastBt = await trx('bank_transactions')
+            .where('transaction_no', 'like', 'BT-%')
+            .orderBy('id', 'desc').first('transaction_no');
+          const seq = lastBt
+            ? (parseInt(String(lastBt.transaction_no).replace(/^BT-/, ''), 10) || 0) + 1
+            : 1;
+          const txnNo = `BT-${String(seq).padStart(4, '0')}`;
           await trx('bank_transactions').insert({
+            transaction_no: txnNo,
             bank_account_id,
             type: 'debit',
             amount: amountPkr,
@@ -1376,6 +1385,7 @@ financeController.payPurchase = async (req, res) => {
             reference: payment_reference || null,
             counterparty: row.supplier_id ? null : (row.vendor_name || null),
             notes: `Payment for ${source} ${row.lot_no || row.purchase_no || row.expense_no || row.category || `#${id}`}${notes ? ' — ' + notes : ''}`,
+            source: 'pay_purchase',
             created_by: req.user?.id || null,
           });
         }
