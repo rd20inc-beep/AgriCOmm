@@ -9,6 +9,7 @@ import { downloadCSV } from '../../../utils/csvExport';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useApp } from '../../../context/AppContext';
 import api from '../../../api/client';
+import { useExpenseVendors } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 
 // ─── Formatting ──────────────────────────────────────────────────────
@@ -76,42 +77,46 @@ const TYPES = [
   { value: 'personal', label: 'Personal / Owner', icon: User },
 ];
 
+// apiCategory: when set, the Provider input fetches the dropdown
+// options from the DB-backed expense_vendors table (managed in Admin →
+// Expense Vendors) instead of the hardcoded vendorKind suggestions.
+// Anything else falls through to the legacy vendorKind path below.
 const CATEGORIES = {
   general: [
-    { value: 'utility_bill',      label: 'Utility Bill (Electricity, Gas, Water)', icon: Zap,         vendorKind: 'utility' },
-    { value: 'rent',              label: 'Office / Warehouse Rent',                icon: Building2,    vendorKind: 'landlord' },
-    { value: 'insurance',         label: 'Insurance',                              icon: FileText,     vendorKind: 'free' },
+    { value: 'utility_bill',      label: 'Utility Bill (Electricity, Gas, Water)', icon: Zap,         vendorKind: 'utility',  apiCategory: 'utilities' },
+    { value: 'rent',              label: 'Office / Warehouse Rent',                icon: Building2,    vendorKind: 'landlord', apiCategory: 'rent' },
+    { value: 'insurance',         label: 'Insurance',                              icon: FileText,     vendorKind: 'free',     apiCategory: 'insurance' },
     { value: 'license',           label: 'License / Permit',                       icon: FileText,     vendorKind: 'free' },
     { value: 'professional_fees', label: 'Professional Fees (Audit, Legal, Tax)',  icon: Briefcase,    vendorKind: 'free' },
     { value: 'office_supplies',   label: 'Office Supplies',                        icon: Receipt,      vendorKind: 'free' },
     { value: 'bank_charges',      label: 'Bank Charges',                           icon: Coins,        vendorKind: 'bank' },
-    { value: 'inspection',        label: 'Inspection Fee',                         icon: FileText,     vendorKind: 'free' },
-    { value: 'transport',         label: 'Transport / Delivery',                   icon: Truck,        vendorKind: 'supplier' },
+    { value: 'inspection',        label: 'Inspection Fee',                         icon: FileText,     vendorKind: 'free',     apiCategory: 'inspection' },
+    { value: 'transport',         label: 'Transport / Delivery',                   icon: Truck,        vendorKind: 'supplier', apiCategory: 'transport' },
     { value: 'miscellaneous',     label: 'Other / Miscellaneous',                  icon: Receipt,      vendorKind: 'free' },
   ],
   mill: [
-    { value: 'electricity',       label: 'Electricity',                            icon: Zap,          vendorKind: 'utility' },
-    { value: 'diesel',            label: 'Diesel / Fuel',                          icon: Truck,        vendorKind: 'free' },
-    { value: 'maintenance',       label: 'Maintenance / Repair',                   icon: Briefcase,    vendorKind: 'free' },
+    { value: 'electricity',       label: 'Electricity',                            icon: Zap,          vendorKind: 'utility',  apiCategory: 'utilities' },
+    { value: 'diesel',            label: 'Diesel / Fuel',                          icon: Truck,        vendorKind: 'free',     apiCategory: 'fuel' },
+    { value: 'maintenance',       label: 'Maintenance / Repair',                   icon: Briefcase,    vendorKind: 'free',     apiCategory: 'maintenance' },
     { value: 'labor',             label: 'Labor / Daily Wages',                    icon: User,         vendorKind: 'staff' },
     { value: 'salaries',          label: 'Salaries',                               icon: User,         vendorKind: 'staff' },
-    { value: 'transport',         label: 'Transport (Rice)',                       icon: Truck,        vendorKind: 'supplier' },
-    { value: 'inspection',        label: 'Inspection / Testing',                   icon: FileText,     vendorKind: 'free' },
+    { value: 'transport',         label: 'Transport (Rice)',                       icon: Truck,        vendorKind: 'supplier', apiCategory: 'transport' },
+    { value: 'inspection',        label: 'Inspection / Testing',                   icon: FileText,     vendorKind: 'free',     apiCategory: 'inspection' },
     { value: 'fumigation',        label: 'Fumigation',                             icon: FileText,     vendorKind: 'free' },
-    { value: 'bags',              label: 'Bags / Packaging',                       icon: Receipt,      vendorKind: 'supplier' },
-    { value: 'rent',              label: 'Mill Rent',                              icon: Building2,    vendorKind: 'landlord' },
-    { value: 'insurance',         label: 'Mill Insurance',                         icon: FileText,     vendorKind: 'free' },
+    { value: 'bags',              label: 'Bags / Packaging',                       icon: Receipt,      vendorKind: 'supplier', apiCategory: 'packaging' },
+    { value: 'rent',              label: 'Mill Rent',                              icon: Building2,    vendorKind: 'landlord', apiCategory: 'rent' },
+    { value: 'insurance',         label: 'Mill Insurance',                         icon: FileText,     vendorKind: 'free',     apiCategory: 'insurance' },
     { value: 'miscellaneous',     label: 'Other Mill Expense',                     icon: Receipt,      vendorKind: 'free' },
   ],
   export: [
-    { value: 'clearing',          label: 'Clearing / Customs',                     icon: Ship,         vendorKind: 'agent' },
-    { value: 'freight',           label: 'Freight / Shipping',                     icon: Ship,         vendorKind: 'agent' },
-    { value: 'transport',         label: 'Transport (Port / Inland)',              icon: Truck,        vendorKind: 'supplier' },
-    { value: 'inspection',        label: 'Inspection (SGS, etc.)',                 icon: FileText,     vendorKind: 'agent' },
-    { value: 'insurance',         label: 'Cargo Insurance',                        icon: FileText,     vendorKind: 'free' },
-    { value: 'commission',        label: 'Agent Commission',                       icon: Briefcase,    vendorKind: 'agent' },
+    { value: 'clearing',          label: 'Clearing / Customs',                     icon: Ship,         vendorKind: 'agent',    apiCategory: 'inspection' },
+    { value: 'freight',           label: 'Freight / Shipping',                     icon: Ship,         vendorKind: 'agent',    apiCategory: 'freight' },
+    { value: 'transport',         label: 'Transport (Port / Inland)',              icon: Truck,        vendorKind: 'supplier', apiCategory: 'transport' },
+    { value: 'inspection',        label: 'Inspection (SGS, etc.)',                 icon: FileText,     vendorKind: 'agent',    apiCategory: 'inspection' },
+    { value: 'insurance',         label: 'Cargo Insurance',                        icon: FileText,     vendorKind: 'free',     apiCategory: 'insurance' },
+    { value: 'commission',        label: 'Agent Commission',                       icon: Briefcase,    vendorKind: 'agent',    apiCategory: 'commission' },
     { value: 'documentation',     label: 'Documentation Fees',                     icon: FileText,     vendorKind: 'agent' },
-    { value: 'bags',              label: 'Bags / Special Packing',                 icon: Receipt,      vendorKind: 'supplier' },
+    { value: 'bags',              label: 'Bags / Special Packing',                 icon: Receipt,      vendorKind: 'supplier', apiCategory: 'packaging' },
     { value: 'miscellaneous',     label: 'Other Export Cost',                      icon: Receipt,      vendorKind: 'free' },
   ],
   personal: [
@@ -225,6 +230,16 @@ export default function Expenses() {
   const cats = CATEGORIES[form.expense_type] || CATEGORIES.general;
   const currentCat = cats.find(c => c.value === form.category) || cats[0];
   const vendorKind = currentCat.vendorKind;
+
+  // Pull the DB-backed vendor presets so the Provider field reflects
+  // whatever is managed in Admin → Expense Vendors.
+  const { data: vendorData } = useExpenseVendors();
+  const apiCategory = currentCat.apiCategory;
+  const apiVendors = useMemo(() => {
+    if (!apiCategory) return null;
+    const list = vendorData?.byCategory?.[apiCategory] || [];
+    return list.map(v => v.name);
+  }, [apiCategory, vendorData]);
   const showBatchPicker = form.expense_type === 'mill';
   const showOrderPicker = form.expense_type === 'export';
   const showOwnerField = form.expense_type === 'personal';
@@ -369,6 +384,8 @@ export default function Expenses() {
           cats={cats}
           currentCat={currentCat}
           vendorKind={vendorKind}
+          apiVendors={apiVendors}
+          apiCategory={apiCategory}
           suppliersList={suppliersList || []}
           bankAccountsList={bankAccountsList || []}
           safeBatches={safeBatches}
@@ -432,7 +449,7 @@ function FilterPills({ options, value, onChange }) {
 }
 
 function ExpenseForm({
-  form, setF, cats, currentCat, vendorKind,
+  form, setF, cats, currentCat, vendorKind, apiVendors, apiCategory,
   suppliersList, bankAccountsList, safeBatches, safeOrders,
   showBatchPicker, showOrderPicker, showOwnerField,
   createMut, handleCreate, onCancel,
@@ -520,6 +537,8 @@ function ExpenseForm({
       {!showOwnerField && (
         <VendorSection
           vendorKind={vendorKind}
+          apiVendors={apiVendors}
+          apiCategory={apiCategory}
           form={form}
           setF={setF}
           suppliersList={suppliersList}
@@ -633,9 +652,23 @@ function ExpenseForm({
   );
 }
 
-function VendorSection({ vendorKind, form, setF, suppliersList, bankAccountsList }) {
+function VendorSection({ vendorKind, apiVendors, apiCategory, form, setF, suppliersList, bankAccountsList }) {
+  // DB-backed apiVendors wins when the current category is mapped to
+  // an expense_vendors row (Admin → Expense Vendors). Falls back to
+  // the legacy vendorKind suggestions when no mapping exists.
+  const useApi = Array.isArray(apiVendors) && apiVendors.length > 0;
+
   // Build the suggestion list and helper text per vendorKind.
   const config = useMemo(() => {
+    if (useApi) {
+      return {
+        title: 'Provider',
+        help: `Pick from ${apiCategory} providers (manage in Admin → Expense Vendors), or type a custom one.`,
+        listId: `expense-api-${apiCategory}`,
+        options: apiVendors,
+        placeholder: `Select a ${apiCategory} provider…`,
+      };
+    }
     switch (vendorKind) {
       case 'utility':
         return {
@@ -696,7 +729,7 @@ function VendorSection({ vendorKind, form, setF, suppliersList, bankAccountsList
           placeholder: 'Vendor name',
         };
     }
-  }, [vendorKind, bankAccountsList]);
+  }, [vendorKind, bankAccountsList, useApi, apiVendors, apiCategory]);
 
   return (
     <div>

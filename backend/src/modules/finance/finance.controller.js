@@ -629,6 +629,29 @@ const financeController = {
             await trx('bank_accounts')
               .where({ id: bank_account_id })
               .increment('current_balance', parseFloat(amount));
+            // Audit-trail row in the Cash & Bank sub-ledger so the Cash
+            // tab can attribute the inflow. Pattern mirrors payPurchase.
+            const tableExists = await trx.schema.hasTable('bank_transactions');
+            if (tableExists) {
+              const lastBt = await trx('bank_transactions')
+                .where('transaction_no', 'like', 'BT-%')
+                .orderBy('id', 'desc').first('transaction_no');
+              const seq = lastBt
+                ? (parseInt(String(lastBt.transaction_no).replace(/^BT-/, ''), 10) || 0) + 1
+                : 1;
+              await trx('bank_transactions').insert({
+                transaction_no: `BT-${String(seq).padStart(4, '0')}`,
+                bank_account_id,
+                type: 'credit',
+                amount: stampedPkr,
+                transaction_date: payment_date || new Date(),
+                reference: bank_reference || paymentNo,
+                counterparty: null,
+                notes: `Receipt ${paymentNo} for receivable #${entity_id}`,
+                source: 'record_payment',
+                created_by: req.user?.id || null,
+              });
+            }
           }
         } else if (type === 'payment' && linked_payable_id) {
           const payable = await trx('payables').where({ id: linked_payable_id }).first();
@@ -673,6 +696,27 @@ const financeController = {
             await trx('bank_accounts')
               .where({ id: bank_account_id })
               .increment('current_balance', parseFloat(amount) * -1);
+            const tableExists = await trx.schema.hasTable('bank_transactions');
+            if (tableExists) {
+              const lastBt = await trx('bank_transactions')
+                .where('transaction_no', 'like', 'BT-%')
+                .orderBy('id', 'desc').first('transaction_no');
+              const seq = lastBt
+                ? (parseInt(String(lastBt.transaction_no).replace(/^BT-/, ''), 10) || 0) + 1
+                : 1;
+              await trx('bank_transactions').insert({
+                transaction_no: `BT-${String(seq).padStart(4, '0')}`,
+                bank_account_id,
+                type: 'debit',
+                amount: stampedPkr,
+                transaction_date: payment_date || new Date(),
+                reference: bank_reference || paymentNo,
+                counterparty: null,
+                notes: `Payment ${paymentNo} for payable #${entity_id}`,
+                source: 'record_payment',
+                created_by: req.user?.id || null,
+              });
+            }
           }
         }
 
@@ -688,9 +732,28 @@ const financeController = {
           const isReceivable = type === 'receipt';
           const stampedAmtPkr = Number(stampedPkr.toFixed(2));
           const cashAndBank = await trx('chart_of_accounts').where({ code: '1000' }).first();
-          const accountsReceivable = await trx('chart_of_accounts').where({ code: '1100' }).first();
-          const accountsPayable    = await trx('chart_of_accounts').where({ code: '2000' }).first();
-          const counterAcc = isReceivable ? accountsReceivable : accountsPayable;
+
+          // Determine the correct counter account based on the source row.
+          //   AR accounts in use (per posting_rules):
+          //     1110 Export AR (USD)        ← export sales, balance receipts
+          //     1120 Local AR (PKR)         ← local sales
+          //     1310 Customer Advances      ← advance receipts
+          //   AP accounts in use:
+          //     2010 Supplier Payable       ← all expense_recorded /
+          //         purchase_invoice / store_purchase rules
+          // Previously the code used 1100 / 2000, which no posting rule
+          // touches, so the original liability/receivable never cleared.
+          let counterCode = isReceivable ? '1100' : '2010';
+          let counterEntity = 'export';
+          if (isReceivable && linked_receivable_id) {
+            const r = await trx('receivables').where({ id: linked_receivable_id }).first();
+            if (r) {
+              if (r.local_sale_id) { counterCode = '1120'; counterEntity = 'mill'; }
+              else if (String(r.type || '').toLowerCase() === 'advance') { counterCode = '1310'; counterEntity = 'export'; }
+              else counterCode = '1110'; // Export balance
+            }
+          }
+          const counterAcc = await trx('chart_of_accounts').where({ code: counterCode }).first();
           if (cashAndBank && counterAcc) {
             const debitAcc  = isReceivable ? cashAndBank : counterAcc;
             const creditAcc = isReceivable ? counterAcc : cashAndBank;
@@ -702,7 +765,7 @@ const financeController = {
             const noteOriginal = cur !== 'PKR' ? ` (orig ${cur} ${amtNum.toLocaleString()} @ ${stampedFxRate})` : '';
             const journal = await accountingService.createJournal(trx, {
               date: (payment_date ? new Date(payment_date) : new Date()).toISOString().slice(0, 10),
-              entity: isReceivable ? 'export' : 'mill',
+              entity: isReceivable ? counterEntity : 'mill',
               refType: 'Payment',
               refNo: paymentNo,
               description: `Payment ${paymentNo} for ${entity_type} #${entity_id}${noteOriginal}`,
@@ -717,7 +780,7 @@ const financeController = {
             });
             if (journal?.id) await accountingService.postJournal(trx, journal.id);
           } else {
-            console.warn(`recordPayment: chart_of_accounts missing codes 1000/${isReceivable ? '1100' : '2000'} — journal skipped for ${paymentNo}`);
+            console.warn(`recordPayment: chart_of_accounts missing codes 1000/${counterCode} — journal skipped for ${paymentNo}`);
           }
         } catch (jeErr) {
           console.error('recordPayment journal error (payment still recorded):', jeErr.message);

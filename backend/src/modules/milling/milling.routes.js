@@ -362,6 +362,28 @@ router.post('/expenses', authorize('milling', 'create'),
       if (!category || !amount || !expense_date) {
         return res.status(400).json({ success: false, message: 'category, amount, and expense_date are required.' });
       }
+
+      // Payroll-run idempotency: when the Mill Finance "Post Payroll Run"
+      // action fires, it pre-fills description='Mill payroll for YYYY-MM'.
+      // Block a second post for the same month to avoid double-counting
+      // salaries. User can override by editing the description.
+      const payrollMatch = category === 'salaries' && /^Mill payroll for (\d{4}-\d{2})/.test(description || '');
+      if (payrollMatch) {
+        const m = description.match(/^Mill payroll for (\d{4}-\d{2})/);
+        const month = m[1];
+        const dup = await db('business_expenses')
+          .where('expense_type', 'mill')
+          .where('category', 'salaries')
+          .where('description', 'like', `Mill payroll for ${month}%`)
+          .first('expense_no');
+        if (dup) {
+          return res.status(409).json({
+            success: false,
+            message: `Mill payroll for ${month} has already been posted as ${dup.expense_no}. Edit the description (e.g. "Mill payroll for ${month} — correction") if you need to post an additional run.`,
+          });
+        }
+      }
+
       const expense = await expensesService.create({
         expense_type: 'mill',
         category,
