@@ -1375,7 +1375,7 @@ financeController.payPurchase = async (req, res) => {
             transaction_date: paidAt,
             reference: payment_reference || null,
             counterparty: row.supplier_id ? null : (row.vendor_name || null),
-            description: `Payment for ${source} ${row.lot_no || row.purchase_no || row.expense_no || row.category || `#${id}`}${notes ? ' — ' + notes : ''}`,
+            notes: `Payment for ${source} ${row.lot_no || row.purchase_no || row.expense_no || row.category || `#${id}`}${notes ? ' — ' + notes : ''}`,
             created_by: req.user?.id || null,
           });
         }
