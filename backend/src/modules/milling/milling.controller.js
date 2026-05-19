@@ -619,8 +619,11 @@ const millingController = {
         updateData.raw_qty_mt = actualRawQty;
       }
 
-      // Auto-complete if output recorded (from Pending or In Progress)
-      if (totalOutput > 0 && ['Pending', 'In Progress'].includes(batch.status)) {
+      // Auto-complete if any output recorded. Operators commonly leave
+      // batches in Queued or Pending Approval and skip the In Progress
+      // step entirely, so recording yield should advance status from
+      // any pre-completion state.
+      if (totalOutput > 0 && ['Queued', 'Pending', 'In Progress', 'Pending Approval'].includes(batch.status)) {
         updateData.status = 'Completed';
         updateData.completed_at = db.fn.now();
       }
