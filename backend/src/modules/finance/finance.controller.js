@@ -1408,16 +1408,19 @@ financeController.payPurchase = async (req, res) => {
           :                           'Business Expense';
         const entity = source === 'export_cost' ? 'export' : 'mill';
 
-        // Debit side: the payable/expense being settled.
-        //   lots & mill store & export costs → Supplier Payable (id=78)
-        //   business expenses → Accrued Expenses (id=81)
-        // Credit side: Cash & Bank umbrella (id=53) — bank-level detail
+        // Debit side: clear the same payable that was credited at expense /
+        // purchase recording. The `expense_recorded` posting rule credits
+        // 2010 Supplier Payable (verified on prod), and lot/mill/export
+        // cost flows do the same, so DR 2010 for every source — otherwise
+        // 2010 keeps a phantom credit balance and 2110 grows a phantom
+        // debit balance, which is what the earlier `source==='expense'`
+        // branch produced before this fix.
+        // Credit side: Cash & Bank umbrella (1000) — bank-level detail
         // already lives in bank_transactions written above.
         const supplierPayable = await trx('chart_of_accounts').where({ code: '2010' }).first();
-        const accruedExpenses = await trx('chart_of_accounts').where({ code: '2110' }).first();
         const cashAndBank     = await trx('chart_of_accounts').where({ code: '1000' }).first();
 
-        const debitAcc = source === 'expense' ? accruedExpenses : supplierPayable;
+        const debitAcc = supplierPayable;
         if (debitAcc && cashAndBank) {
           await accountingService.createJournal(trx, {
             date: paidAt.toISOString().slice(0, 10),
