@@ -334,7 +334,11 @@ router.get('/expenses', authorize('milling', 'view'), async (req, res) => {
         db.raw("TO_CHAR(e.expense_date, 'YYYY-MM') as period"),
         's.name as supplier_name'
       )
+      // Newest first; created_at tie-breaks rows on the same date so the
+      // most recently-saved bill is always at the top.
       .orderBy('e.expense_date', 'desc')
+      .orderBy('e.created_at', 'desc')
+      .orderBy('e.id', 'desc')
       .limit(parseInt(limit));
     if (period) query = query.whereRaw("TO_CHAR(e.expense_date, 'YYYY-MM') = ?", [period]);
     const expenses = await query;

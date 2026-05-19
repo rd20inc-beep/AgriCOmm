@@ -163,7 +163,9 @@ const financeController = {
 
         const countQuery = query.clone().clearSelect().clearOrder().count('p.id as total').first();
         const [payables, countResult] = await Promise.all([
-          query.orderBy('p.due_date', 'asc').limit(parseInt(limit)).offset(offset),
+          // Newest payable first; tie-break on id so within the same
+          // millisecond the higher id (later insert) wins.
+          query.orderBy('p.created_at', 'desc').orderBy('p.id', 'desc').limit(parseInt(limit)).offset(offset),
           countQuery,
         ]);
 
@@ -490,7 +492,11 @@ const financeController = {
       if (type) q = q.where('p.type', type);
       if (from_date) q = q.where('p.payment_date', '>=', from_date);
       if (to_date)   q = q.where('p.payment_date', '<=', to_date);
-      const rows = await q.orderBy('p.payment_date', 'desc').limit(parseInt(limit));
+      const rows = await q
+        .orderBy('p.payment_date', 'desc')
+        .orderBy('p.created_at', 'desc')
+        .orderBy('p.id', 'desc')
+        .limit(parseInt(limit));
 
       // Compose a single counterparty + source label per row so the FE
       // doesn't have to do the joining gymnastics.
@@ -1223,8 +1229,13 @@ financeController.listPurchases = async (req, res) => {
       all.push(...await q);
     }
 
-    // Sort newest-first by date, then by ref desc
+    // Sort newest-first by created_at (timestamp) so same-date rows
+    // appear in actual insertion order. Fall back to `date` (which may
+    // be a DATE-only column on some sources) and finally to ref desc.
     all.sort((a, b) => {
+      const ta = new Date(a.created_at || a.date).getTime();
+      const tb = new Date(b.created_at || b.date).getTime();
+      if (ta !== tb) return tb - ta;
       const da = new Date(a.date || a.created_at).getTime();
       const dbt = new Date(b.date || b.created_at).getTime();
       if (da !== dbt) return dbt - da;
