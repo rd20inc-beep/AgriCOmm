@@ -32,16 +32,19 @@ async function generateTransferNo(trx) {
 }
 
 async function generatePaymentNo(trx) {
+  // Scope the lookup to the PAY-NNN namespace only. Other payment_no
+  // shapes can exist alongside (e.g. PAY-MS001, PAY-EOC0001) and
+  // sorting by created_at picked them up — parseInt returned NaN and
+  // the generator fell back to PAY-001, which already exists. Regex-
+  // scope so we only see this generator's own sequence.
   const last = await (trx || db)('payments')
-    .select('payment_no')
-    .orderBy('created_at', 'desc')
-    .first();
+    .whereRaw("payment_no ~ '^PAY-[0-9]+$'")
+    .orderByRaw("CAST(REPLACE(payment_no, 'PAY-', '') AS INTEGER) DESC")
+    .first('payment_no');
 
-  if (!last || !last.payment_no) {
-    return 'PAY-001';
-  }
-
-  const num = parseInt(last.payment_no.replace('PAY-', ''), 10) || 0;
+  const num = last?.payment_no
+    ? (parseInt(last.payment_no.replace('PAY-', ''), 10) || 0)
+    : 0;
   return `PAY-${String(num + 1).padStart(3, '0')}`;
 }
 
