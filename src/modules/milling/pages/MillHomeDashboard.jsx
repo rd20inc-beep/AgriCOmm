@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   Factory, Wheat, FlaskConical, Gauge, Clock, AlertTriangle,
   Plus, ArrowRight, CheckCircle2, TrendingUp, Truck, Activity,
+  Package, Boxes, PackageX,
 } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -10,6 +11,7 @@ import {
 } from 'recharts';
 import { useMillSummary } from '../hooks/useMillSummary';
 import { useInventory } from '../../../api/queries';
+import { useMillStoreSummary, useMillStoreAlerts } from '../../millStore/api/queries';
 
 function formatMT(n) {
   return `${(Number(n) || 0).toFixed(1)} MT`;
@@ -111,6 +113,8 @@ export default function MillHomeDashboard() {
   const navigate = useNavigate();
   const { summary, isLoading, batches: rawBatches } = useMillSummary();
   const { data: rawInventory } = useInventory({});
+  const { data: storeSummary } = useMillStoreSummary();
+  const { data: storeAlerts = [] } = useMillStoreAlerts();
 
   const data = useMemo(() => {
     const batches = Array.isArray(rawBatches) ? rawBatches : [];
@@ -349,6 +353,103 @@ export default function MillHomeDashboard() {
           <BatchColumn title="Pending Yield" batches={data.board.pendingYield} accent="amber" onBatchClick={(id) => navigate(`/milling/${id}`)} />
           <BatchColumn title="Completed Today" batches={data.board.completedToday} accent="green" onBatchClick={(id) => navigate(`/milling/${id}`)} />
         </div>
+      </div>
+
+      {/* ─── Mill Store ────────────────────────────────────────────── */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Boxes size={18} className="text-amber-600" />
+            <h2 className="text-base font-semibold text-gray-900">Mill Store</h2>
+            <span className="text-xs text-gray-400">consumables · spares · packaging</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Link to="/mill-store/purchases/new" className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg bg-gray-900 text-white hover:bg-gray-700">
+              <Plus size={12} /> New Purchase
+            </Link>
+            <Link to="/mill-store" className="text-xs text-blue-600 hover:underline">Open Mill Store →</Link>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+          <div className="rounded-lg border border-amber-100 bg-amber-50/40 p-3">
+            <p className="text-[11px] uppercase tracking-wide text-amber-700 font-medium">Stock Value</p>
+            <p className="text-lg font-bold text-gray-900 mt-0.5">Rs {Math.round(Number(storeSummary?.stock_value || 0)).toLocaleString('en-PK')}</p>
+            <p className="text-[11px] text-gray-500 mt-0.5">across {storeSummary?.total_items || 0} items</p>
+          </div>
+          <div className={`rounded-lg border p-3 ${(storeSummary?.low_stock_items || 0) > 0 ? 'border-red-200 bg-red-50/40' : 'border-emerald-100 bg-emerald-50/40'}`}>
+            <p className={`text-[11px] uppercase tracking-wide font-medium ${(storeSummary?.low_stock_items || 0) > 0 ? 'text-red-700' : 'text-emerald-700'}`}>Low Stock</p>
+            <p className="text-lg font-bold text-gray-900 mt-0.5">{storeSummary?.low_stock_items || 0}</p>
+            <p className="text-[11px] text-gray-500 mt-0.5">{(storeSummary?.low_stock_items || 0) > 0 ? 'need reordering' : 'all above reorder level'}</p>
+          </div>
+          <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-3">
+            <p className="text-[11px] uppercase tracking-wide text-blue-700 font-medium">Recent Purchases</p>
+            <p className="text-lg font-bold text-gray-900 mt-0.5">{(storeSummary?.recent_purchases || []).length}</p>
+            <p className="text-[11px] text-gray-500 mt-0.5">last 5 invoices</p>
+          </div>
+          <div className="rounded-lg border border-purple-100 bg-purple-50/40 p-3">
+            <p className="text-[11px] uppercase tracking-wide text-purple-700 font-medium">Recent Consumption</p>
+            <p className="text-lg font-bold text-gray-900 mt-0.5">{(storeSummary?.recent_consumption || []).length}</p>
+            <p className="text-[11px] text-gray-500 mt-0.5">batch issuances logged</p>
+          </div>
+        </div>
+
+        {storeAlerts.length > 0 && (
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold text-red-700 uppercase tracking-wide flex items-center gap-1.5">
+                <PackageX size={14} /> Items below reorder level
+              </p>
+              <Link to="/mill-store/alerts" className="text-xs text-blue-600 hover:underline">All alerts →</Link>
+            </div>
+            <div className="space-y-1.5">
+              {storeAlerts.slice(0, 5).map(a => {
+                const have = Number(a.totalAvailable || a.total_available || 0);
+                const need = Number(a.reorderLevel || a.reorder_level || 0);
+                const pct = need > 0 ? Math.max(0, Math.min(100, (have / need) * 100)) : 0;
+                return (
+                  <div key={a.itemId || a.item_id} className="flex items-center gap-3 p-2.5 bg-red-50/40 border border-red-100 rounded-lg">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{a.itemName || a.item_name}</p>
+                      <p className="text-[11px] text-gray-500 capitalize">{a.category} · {a.itemCode || a.item_code}</p>
+                    </div>
+                    <div className="flex-1 min-w-0 max-w-[180px]">
+                      <div className="flex items-center justify-between text-[11px] mb-0.5">
+                        <span className="text-gray-600 tabular-nums">{have} / {need} {a.unit}</span>
+                      </div>
+                      <div className="h-1.5 bg-red-100 rounded-full overflow-hidden">
+                        <div className="h-full bg-gradient-to-r from-red-500 to-amber-500" style={{ width: `${pct.toFixed(0)}%` }} />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {storeAlerts.length > 5 && (
+                <p className="text-[11px] text-gray-500 text-center pt-1">+{storeAlerts.length - 5} more items</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {(storeSummary?.recent_consumption || []).length > 0 && (
+          <div className="mt-4 pt-4 border-t border-gray-100">
+            <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+              <Package size={14} /> Latest consumption events
+            </p>
+            <div className="space-y-1">
+              {(storeSummary.recent_consumption || []).slice(0, 5).map(c => (
+                <div key={c.id} className="flex items-center justify-between text-xs py-1">
+                  <span className="text-gray-700">
+                    Batch #{c.reference_id || c.referenceId} · {Math.abs(Number(c.quantity || 0))} units
+                  </span>
+                  <span className="text-gray-500 tabular-nums">
+                    Rs {Math.round(Number(c.total_cost || c.totalCost || 0)).toLocaleString('en-PK')}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Trends */}

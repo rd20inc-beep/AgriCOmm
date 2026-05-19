@@ -1,4 +1,5 @@
 const db = require('../../config/database');
+const accountingService = require('../accounting/accounting.service');
 const { NotFoundError, ValidationError } = require('../../shared/errors');
 
 const CATEGORY_MAP = {
@@ -217,10 +218,48 @@ const consumptionService = {
         });
       }
 
+      // ── GL entry: move mill-store inventory → operating expense ──
+      // store_purchase booked DR 1250 Bags & Packaging / CR 2010 Supplier
+      // Payable on receipt. Consumption clears the inventory asset and
+      // recognizes the cost on the P&L:
+      //   DR 6000 Operating Expenses
+      //   CR 1250 Bags & Packaging
+      // Wrapped in try/catch so a missing chart-of-accounts seed never
+      // blocks the consumption itself.
+      const totalConsumed = Object.values(costByCategory).reduce((s, v) => s + v, 0);
+      if (totalConsumed > 0) {
+        try {
+          const opEx     = await trx('chart_of_accounts').where({ code: '6000' }).first();
+          const storeInv = await trx('chart_of_accounts').where({ code: '1250' }).first();
+          if (opEx && storeInv) {
+            const journal = await accountingService.createJournal(trx, {
+              date: new Date().toISOString().slice(0, 10),
+              entity: 'mill',
+              refType: 'Mill Store Consumption',
+              refNo: batch.batch_no || `BATCH-${batchId}`,
+              description: `Mill store consumption for batch ${batch.batch_no || batchId} — ${logs.length} item${logs.length === 1 ? '' : 's'}, Rs ${Math.round(totalConsumed).toLocaleString('en-PK')}`,
+              currency: 'PKR',
+              fxRate: 1,
+              isAuto: true,
+              userId,
+              lines: [
+                { account_id: opEx.id,     account: opEx.name,     debit: totalConsumed, credit: 0,             narration: `DR 6000 Operating Expenses — ${batch.batch_no || batchId} consumption` },
+                { account_id: storeInv.id, account: storeInv.name, debit: 0,             credit: totalConsumed, narration: `CR 1250 Bags & Packaging — stock issued to ${batch.batch_no || batchId}` },
+              ],
+            });
+            if (journal?.id) await accountingService.postJournal(trx, journal.id);
+          } else {
+            console.warn(`Consumption: chart_of_accounts missing 6000/1250 — journal skipped for batch ${batchId}`);
+          }
+        } catch (jeErr) {
+          console.error('Consumption journal post failed (consumption still recorded):', jeErr.message);
+        }
+      }
+
       return {
         batch_id: batchId,
         lines_consumed: logs.length,
-        total_cost: Object.values(costByCategory).reduce((s, v) => s + v, 0),
+        total_cost: totalConsumed,
         cost_by_category: costByCategory,
         logs,
       };
