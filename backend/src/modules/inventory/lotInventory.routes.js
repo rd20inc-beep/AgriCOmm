@@ -72,6 +72,31 @@ router.post(
   controller.allocateLotToBatch
 );
 
+// ─── Lot-level vehicles + Start Milling ───
+router.get(
+  '/lots/:id/vehicles',
+  authorize('inventory', 'view'),
+  controller.listLotVehicles
+);
+router.post(
+  '/lots/:id/vehicles',
+  authorize('milling', 'add_vehicle'),
+  auditAction('add_lot_vehicle', 'inventory_lot', (req) => req.params.id),
+  controller.addLotVehicle
+);
+router.delete(
+  '/lots/:id/vehicles/:vehicleId',
+  authorize('milling', 'edit'),
+  auditAction('delete_lot_vehicle', 'inventory_lot', (req) => req.params.id),
+  controller.deleteLotVehicle
+);
+router.post(
+  '/lots/:id/start-milling',
+  authorize('milling', 'create'),
+  auditAction('start_milling_from_lot', 'inventory_lot', (req) => req.params.id),
+  controller.startMillingForLot
+);
+
 // Reports
 router.get('/reports/stock', authorize('inventory', 'view'), controller.getStockReport);
 

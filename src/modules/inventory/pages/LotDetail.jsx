@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft, Package, Truck, DollarSign, FileText, BarChart3,
   Plus, Save, Edit3, AlertTriangle, Warehouse, ShoppingBag, Scale,
-  Activity, ChevronRight, TrendingUp, Clock, Factory,
+  Activity, ChevronRight, TrendingUp, Clock, Factory, Play, Trash2, Loader2,
 } from 'lucide-react';
 import {
   useLotDetail, useRecordLotTransaction, useLocalSalesByLot,
@@ -56,7 +56,10 @@ export default function LotDetail() {
   const [showCostModal, setShowCostModal] = useState(false);
   const [showCostSheet, setShowCostSheet] = useState(false);
   const [showAllocateModal, setShowAllocateModal] = useState(false);
+  const [showStartMilling, setShowStartMilling] = useState(false);
+  const [showAddVehicle, setShowAddVehicle] = useState(false);
   const [linkedBatch, setLinkedBatch] = useState(null);
+  const [lotVehicles, setLotVehicles] = useState([]);
   // lotSales provided by hook below
 
   const { data, isLoading, error, refetch } = useLotDetail(id);
@@ -96,6 +99,21 @@ export default function LotDetail() {
   }, [lot.batchRef, lot.id]);
 
   const txnMutation = useRecordLotTransaction();
+
+  // Load vehicles attached to this lot (independent of batch context).
+  // Re-fetches when the modal closes so a fresh add shows immediately.
+  async function loadLotVehicles() {
+    if (!lot.id) return;
+    try {
+      const res = await lotInventoryApi.listLotVehicles(lot.id);
+      const rows = res?.data?.vehicles || res?.vehicles || [];
+      setLotVehicles(rows);
+    } catch { /* non-critical */ }
+  }
+  useEffect(() => {
+    if (lot.id) loadLotVehicles();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lot.id]);
 
   if (isLoading) return <LoadingSpinner message="Loading lot details..." />;
   if (error) return <ErrorState message={error.message} onRetry={refetch} />;
@@ -147,7 +165,19 @@ export default function LotDetail() {
         <button onClick={() => setShowCostSheet(true)} className="btn btn-primary btn-sm">
           <FileText className="w-4 h-4" /> Costing Sheet
         </button>
-        {/* Only raw lots with available stock can be fed into a milling batch */}
+        {/* Start Milling — mill RAW lots (first pass) or FINISHED lots
+            (re-mill / next pass). milling_status='Consumed' means the
+            lot is already fully spent and can't be milled again. */}
+        {(lot.type === 'raw' || lot.type === 'finished')
+          && lot.entity === 'mill'
+          && (parseFloat(lot.availableQty) > 0)
+          && lot.millingStatus !== 'Consumed' && (
+          <button onClick={() => setShowStartMilling(true)} className="btn btn-sm bg-emerald-600 text-white hover:bg-emerald-700">
+            <Play className="w-4 h-4" /> Start Milling
+          </button>
+        )}
+        {/* Allocate to an existing batch — kept for raw lots that the
+            operator wants to merge into a batch already in progress. */}
         {lot.type === 'raw' && (parseFloat(lot.availableQty) > 0) && (
           <button onClick={() => setShowAllocateModal(true)} className="btn btn-sm btn-secondary">
             <Factory className="w-4 h-4" /> Use in Batch
@@ -368,6 +398,19 @@ export default function LotDetail() {
               )}
             </div>
           )}
+
+          {/* Vehicles — spans both columns. Allows operators to attach
+              vehicle/driver/weight to the lot before any batch exists,
+              and surfaces vehicles inherited by a batch (read-only). */}
+          <div className="lg:col-span-2">
+            <LotVehiclesPanel
+              lot={lot}
+              vehicles={lotVehicles}
+              onAdd={() => setShowAddVehicle(true)}
+              onRefresh={loadLotVehicles}
+              addToast={addToast}
+            />
+          </div>
         </div>
       )}
 
@@ -758,6 +801,23 @@ export default function LotDetail() {
       <TransactionModal isOpen={showTxnModal} onClose={() => setShowTxnModal(false)} lotId={lot.id} lotNo={lot.lotNo} availableKg={availKg} bagWeightKg={bw} warehouses={warehousesList} addToast={addToast} refetch={refetch} mutation={txnMutation} />
       <CostEditModal isOpen={showCostModal} onClose={() => setShowCostModal(false)} lot={lot} addToast={addToast} refetch={refetch} />
       <AllocateToBatchModal isOpen={showAllocateModal} onClose={() => setShowAllocateModal(false)} lot={lot} addToast={addToast} refetch={refetch} />
+      <AddLotVehicleModal
+        isOpen={showAddVehicle}
+        onClose={() => setShowAddVehicle(false)}
+        lot={lot}
+        addToast={addToast}
+        onSaved={() => { loadLotVehicles(); }}
+      />
+      <StartMillingModal
+        isOpen={showStartMilling}
+        onClose={() => setShowStartMilling(false)}
+        lot={lot}
+        addToast={addToast}
+        onStarted={(batch) => {
+          if (batch?.batch_no) navigate(`/milling/${batch.batch_no}`);
+          else refetch();
+        }}
+      />
 
       {/* Costing Sheet Modal */}
       <Modal isOpen={showCostSheet} onClose={() => setShowCostSheet(false)} title={`Costing Sheet — ${lot.lotNo}`} size="xl">
@@ -1028,6 +1088,317 @@ function AllocateToBatchModal({ isOpen, onClose, lot, addToast, refetch }) {
           <button type="submit" disabled={allocateMut.isPending || openBatches.length === 0}
             className="btn btn-primary disabled:opacity-50">
             {allocateMut.isPending ? 'Allocating…' : 'Allocate to Batch'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+// ─── Lot Vehicles Panel ───
+function LotVehiclesPanel({ lot, vehicles, onAdd, onRefresh, addToast }) {
+  const safe = Array.isArray(vehicles) ? vehicles : [];
+  async function handleDelete(v) {
+    if (!confirm(`Delete vehicle ${v.vehicle_no || ''}?`)) return;
+    try {
+      await lotInventoryApi.deleteLotVehicle(lot.id, v.id);
+      addToast?.('Vehicle removed', 'success');
+      onRefresh?.();
+    } catch (err) {
+      addToast?.(err?.response?.data?.message || err.message || 'Failed to remove vehicle', 'error');
+    }
+  }
+  const totalMT = safe.reduce((s, v) => s + (parseFloat(v.weight_mt) || 0), 0);
+  return (
+    <div className="bg-white rounded-xl border border-gray-100 p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider flex items-center gap-2">
+          <Truck className="w-4 h-4 text-blue-600" />
+          Vehicles ({safe.length})
+          {totalMT > 0 && <span className="text-xs font-normal text-gray-500 normal-case">— {totalMT.toFixed(2)} MT total</span>}
+        </h3>
+        <button onClick={onAdd} className="btn btn-sm btn-secondary">
+          <Plus className="w-3.5 h-3.5" /> Add Vehicle
+        </button>
+      </div>
+      {safe.length === 0 ? (
+        <div className="text-sm text-gray-500 text-center py-6 border border-dashed border-gray-200 rounded-lg">
+          No vehicles recorded for this lot yet.
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="border-b border-gray-200">
+              <tr className="text-left text-[11px] font-semibold text-gray-500 uppercase">
+                <th className="py-2">Vehicle</th>
+                <th className="py-2">Driver</th>
+                <th className="py-2 text-right">Weight (MT)</th>
+                <th className="py-2 text-right">Bags</th>
+                <th className="py-2">Date</th>
+                <th className="py-2 text-center">Status</th>
+                <th className="py-2 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {safe.map(v => (
+                <tr key={v.id} className="hover:bg-gray-50">
+                  <td className="py-2 font-mono font-medium text-gray-900">{v.vehicle_no || '—'}</td>
+                  <td className="py-2 text-gray-700">
+                    {v.driver_name || '—'}
+                    {v.driver_phone && <span className="text-xs text-gray-400 ml-1">· {v.driver_phone}</span>}
+                  </td>
+                  <td className="py-2 text-right tabular-nums font-medium">{parseFloat(v.weight_mt || 0).toFixed(2)}</td>
+                  <td className="py-2 text-right tabular-nums">{v.total_bags || '—'}</td>
+                  <td className="py-2 text-gray-600">{fmtDate(v.arrival_date)}</td>
+                  <td className="py-2 text-center">
+                    {v.batch_id ? (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700">In Batch</span>
+                    ) : (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700">Pre-batch</span>
+                    )}
+                  </td>
+                  <td className="py-2 text-right">
+                    {!v.batch_id && (
+                      <button onClick={() => handleDelete(v)} className="text-red-600 hover:text-red-700" title="Remove">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Add Lot Vehicle Modal ───
+function AddLotVehicleModal({ isOpen, onClose, lot, addToast, onSaved }) {
+  const [form, setForm] = useState({
+    vehicle_no: '', driver_name: '', driver_phone: '',
+    weight_kg: '', total_bags: '',
+    arrival_date: new Date().toISOString().slice(0, 10), notes: '',
+  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setForm({
+        vehicle_no: '', driver_name: '', driver_phone: '',
+        weight_kg: '', total_bags: '',
+        arrival_date: new Date().toISOString().slice(0, 10), notes: '',
+      });
+    }
+  }, [isOpen]);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!form.vehicle_no.trim()) {
+      addToast?.('Vehicle number is required', 'error');
+      return;
+    }
+    setSaving(true);
+    try {
+      await lotInventoryApi.addLotVehicle(lot.id, {
+        vehicle_no: form.vehicle_no.trim(),
+        driver_name: form.driver_name.trim() || null,
+        driver_phone: form.driver_phone.trim() || null,
+        weight_kg: form.weight_kg ? parseFloat(form.weight_kg) : null,
+        total_bags: form.total_bags ? parseInt(form.total_bags, 10) : null,
+        arrival_date: form.arrival_date || null,
+        notes: form.notes.trim() || null,
+      });
+      addToast?.(`Vehicle ${form.vehicle_no} added`, 'success');
+      onSaved?.();
+      onClose();
+    } catch (err) {
+      addToast?.(err?.response?.data?.message || err.message || 'Failed to add vehicle', 'error');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title={`Add vehicle to ${lot.lotNo || 'lot'}`} size="md">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle / Truck Number *</label>
+            <input type="text" required value={form.vehicle_no}
+              onChange={(e) => setForm(p => ({ ...p, vehicle_no: e.target.value }))}
+              placeholder="e.g. ABC-1234"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Arrival Date</label>
+            <input type="date" value={form.arrival_date}
+              onChange={(e) => setForm(p => ({ ...p, arrival_date: e.target.value }))}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Driver Name</label>
+            <input type="text" value={form.driver_name}
+              onChange={(e) => setForm(p => ({ ...p, driver_name: e.target.value }))}
+              placeholder="e.g. Muhammad Ali"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Driver Phone</label>
+            <input type="text" value={form.driver_phone}
+              onChange={(e) => setForm(p => ({ ...p, driver_phone: e.target.value }))}
+              placeholder="e.g. 0300-1234567"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Weight (KG)</label>
+            <input type="number" step="1" min="0" value={form.weight_kg}
+              onChange={(e) => setForm(p => ({ ...p, weight_kg: e.target.value }))}
+              placeholder="e.g. 30000"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+            {form.weight_kg && (
+              <p className="text-[11px] text-gray-400 mt-0.5">{(parseFloat(form.weight_kg) / 1000).toFixed(2)} MT</p>
+            )}
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Number of Bags</label>
+            <input type="number" step="1" min="0" value={form.total_bags}
+              onChange={(e) => setForm(p => ({ ...p, total_bags: e.target.value }))}
+              placeholder="e.g. 600"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+          </div>
+          <div className="col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+            <input type="text" value={form.notes}
+              onChange={(e) => setForm(p => ({ ...p, notes: e.target.value }))}
+              placeholder="e.g. Weigh bridge slip #123"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 pt-2 border-t">
+          <button type="button" onClick={onClose} className="btn btn-secondary">Cancel</button>
+          <button type="submit" disabled={saving} className="btn btn-primary disabled:opacity-50">
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+            Add Vehicle
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+// ─── Start Milling Modal ───
+function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
+  const isReMill = lot?.type === 'finished';
+  const [form, setForm] = useState({ mill_id: '', machine_line: '', shift: 'Day', milling_fee_per_kg: '', notes: '' });
+  const [mills, setMills] = useState([]);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setForm({ mill_id: '', machine_line: '', shift: 'Day', milling_fee_per_kg: '', notes: '' });
+    // Load mills lazily so the page open isn't blocked
+    api.get('/api/milling/mills').then(res => {
+      setMills(res?.data?.mills || res?.mills || []);
+    }).catch(() => { /* non-critical */ });
+  }, [isOpen]);
+
+  const availableMT = parseFloat(lot?.availableQty) || 0;
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (availableMT <= 0) {
+      addToast?.('This lot has no available stock to mill.', 'error');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await lotInventoryApi.startMillingForLot(lot.id, {
+        mill_id: form.mill_id ? parseInt(form.mill_id, 10) : null,
+        machine_line: form.machine_line.trim() || null,
+        shift: form.shift || 'Day',
+        milling_fee_per_kg: form.milling_fee_per_kg ? parseFloat(form.milling_fee_per_kg) : null,
+        notes: form.notes.trim() || null,
+      });
+      const data = res?.data || res;
+      addToast?.(
+        `Milling batch ${data?.batch?.batch_no || ''} created (pass ${data?.passNumber || 1})`,
+        'success'
+      );
+      onStarted?.(data?.batch);
+      onClose();
+    } catch (err) {
+      addToast?.(err?.response?.data?.message || err.message || 'Failed to start milling', 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title={`Start milling ${lot.lotNo || ''}`} size="md">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className={`rounded-lg p-3 text-sm ${isReMill ? 'bg-violet-50 border border-violet-200 text-violet-800' : 'bg-emerald-50 border border-emerald-200 text-emerald-800'}`}>
+          {isReMill ? (
+            <>
+              <strong>Re-milling pass.</strong> {lot.itemName}{lot.variety ? ` (${lot.variety})` : ''} —
+              the new batch will reference {lot.lotNo} as its source and become the next pass.
+            </>
+          ) : (
+            <>
+              <strong>First pass.</strong> {lot.itemName}{lot.variety ? ` (${lot.variety})` : ''} —
+              {' '}<span className="font-medium">{availableMT.toFixed(2)} MT available</span>.
+              Any vehicles attached to this lot will move into the new batch.
+            </>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Mill</label>
+            <select value={form.mill_id} onChange={(e) => setForm(p => ({ ...p, mill_id: e.target.value }))}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+              <option value="">Default mill</option>
+              {mills.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Shift</label>
+            <select value={form.shift} onChange={(e) => setForm(p => ({ ...p, shift: e.target.value }))}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+              <option value="Day">Day</option>
+              <option value="Night">Night</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Machine line</label>
+            <input type="text" value={form.machine_line}
+              onChange={(e) => setForm(p => ({ ...p, machine_line: e.target.value }))}
+              placeholder="e.g. Line A"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Milling fee (Rs/kg)</label>
+            <input type="number" step="0.01" min="0" value={form.milling_fee_per_kg}
+              onChange={(e) => setForm(p => ({ ...p, milling_fee_per_kg: e.target.value }))}
+              placeholder="Default 5"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+          </div>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+          <input type="text" value={form.notes}
+            onChange={(e) => setForm(p => ({ ...p, notes: e.target.value }))}
+            placeholder={isReMill ? 'e.g. Buyer-spec polish, target broken < 5%' : 'e.g. Standard run'}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+        </div>
+
+        <div className="flex justify-end gap-2 pt-2 border-t">
+          <button type="button" onClick={onClose} className="btn btn-secondary">Cancel</button>
+          <button type="submit" disabled={submitting || availableMT <= 0}
+            className="btn btn-primary disabled:opacity-50 inline-flex items-center gap-1.5">
+            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+            {isReMill ? 'Start Re-Milling' : 'Start Milling'}
           </button>
         </div>
       </form>

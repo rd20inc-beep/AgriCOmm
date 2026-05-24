@@ -991,4 +991,212 @@ module.exports = {
       return res.status(400).json({ success: false, message: err.message || 'Failed to allocate lot.' });
     }
   },
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Lot-level vehicles + Start Milling
+  // ═══════════════════════════════════════════════════════════════════
+
+  async listLotVehicles(req, res) {
+    try {
+      const lotId = parseInt(req.params.id, 10);
+      if (!lotId) return res.status(400).json({ success: false, message: 'Invalid lot id.' });
+      const rows = await db('milling_vehicle_arrivals')
+        .where(function () { this.where('lot_id', lotId); })
+        .orWhereExists(function () {
+          // Also surface vehicles that were originally added to the lot
+          // and later inherited by a batch — match by lot_id OR by the
+          // batch_id that the lot ended up routed into.
+          this.select(db.raw('1'))
+            .from('batch_source_lots as bsl')
+            .whereRaw('bsl.lot_id = ?', [lotId])
+            .andWhereRaw('milling_vehicle_arrivals.batch_id = bsl.batch_id');
+        })
+        .orderBy('arrival_date', 'desc')
+        .orderBy('id', 'desc');
+      return res.json({ success: true, data: { vehicles: rows } });
+    } catch (err) {
+      console.error('listLotVehicles error:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
+  async addLotVehicle(req, res) {
+    try {
+      const lotId = parseInt(req.params.id, 10);
+      if (!lotId) return res.status(400).json({ success: false, message: 'Invalid lot id.' });
+      const lot = await db('inventory_lots').where({ id: lotId }).first();
+      if (!lot) return res.status(404).json({ success: false, message: 'Lot not found.' });
+
+      const {
+        vehicle_no, driver_name, driver_phone,
+        weight_kg, weight_mt, total_bags, bag_size_kg,
+        arrival_date, notes,
+      } = req.body || {};
+
+      // Canonicalise weight to MT
+      let weightMT = null;
+      if (weight_kg != null && weight_kg !== '') weightMT = parseFloat(weight_kg) / 1000;
+      else if (weight_mt != null && weight_mt !== '') weightMT = parseFloat(weight_mt);
+
+      const parsedTotalBags = total_bags != null && total_bags !== '' ? parseInt(total_bags, 10) : null;
+      let parsedBagSize = bag_size_kg != null && bag_size_kg !== '' ? parseFloat(bag_size_kg) : null;
+      if (!parsedBagSize && weightMT && parsedTotalBags && parsedTotalBags > 0) {
+        parsedBagSize = (weightMT * 1000) / parsedTotalBags;
+      }
+
+      // If the lot has already been routed into a batch, link the vehicle
+      // straight to that batch so it shows up on the batch detail page too.
+      const sourceLink = await db('batch_source_lots').where({ lot_id: lotId }).first('batch_id');
+
+      const [vehicle] = await db('milling_vehicle_arrivals').insert({
+        lot_id: lotId,
+        batch_id: sourceLink?.batch_id || null,
+        vehicle_no: vehicle_no || null,
+        driver_name: driver_name || null,
+        driver_phone: driver_phone || null,
+        weight_mt: weightMT,
+        bag_size_kg: parsedBagSize,
+        total_bags: parsedTotalBags,
+        arrival_date: arrival_date || db.fn.now(),
+        notes: notes || null,
+        created_by: req.user?.id || null,
+      }).returning('*');
+
+      return res.status(201).json({ success: true, data: { vehicle } });
+    } catch (err) {
+      console.error('addLotVehicle error:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
+  async deleteLotVehicle(req, res) {
+    try {
+      const lotId = parseInt(req.params.id, 10);
+      const vehicleId = parseInt(req.params.vehicleId, 10);
+      if (!lotId || !vehicleId) return res.status(400).json({ success: false, message: 'Invalid id.' });
+
+      const v = await db('milling_vehicle_arrivals')
+        .where({ id: vehicleId, lot_id: lotId })
+        .first();
+      if (!v) return res.status(404).json({ success: false, message: 'Vehicle not found on this lot.' });
+      if (v.batch_id) {
+        // Once a batch has picked the vehicle up, deletion has to go
+        // through the batch flow so the inventory ledger stays clean.
+        return res.status(409).json({
+          success: false,
+          message: 'This vehicle is already attached to a milling batch — delete it from the batch page instead.',
+        });
+      }
+
+      await db('milling_vehicle_arrivals').where({ id: vehicleId }).delete();
+      return res.json({ success: true });
+    } catch (err) {
+      console.error('deleteLotVehicle error:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
+  /**
+   * Start a milling batch for this lot. The lot becomes the batch's
+   * source. Any lot-attached vehicles (lot_id set, batch_id null) get
+   * back-filled with the new batch_id so they show on the batch page.
+   *
+   * Multi-pass: if the source lot was itself produced by an earlier
+   * batch (i.e. a finished/byproduct lot whose batch_ref points at a
+   * milling batch), the new batch records parent_batch_id and
+   * pass_number = parent.pass_number + 1.
+   */
+  async startMillingForLot(req, res) {
+    try {
+      const lotId = parseInt(req.params.id, 10);
+      if (!lotId) return res.status(400).json({ success: false, message: 'Invalid lot id.' });
+
+      const { mill_id, machine_line, shift, milling_fee_per_kg, raw_qty_mt: overrideQty, notes } = req.body || {};
+
+      const result = await db.transaction(async (trx) => {
+        const lot = await trx('inventory_lots').where({ id: lotId }).first();
+        if (!lot) {
+          const err = new Error('Lot not found.'); err.statusCode = 404; throw err;
+        }
+        const availableMT = parseFloat(lot.available_qty) || 0;
+        if (availableMT <= 0) {
+          const err = new Error(`Lot ${lot.lot_no} has no available stock to mill.`);
+          err.statusCode = 400; throw err;
+        }
+
+        // Look up parent batch if the lot was produced by milling
+        // (batch_ref like "batch-123"). If found, this is pass N+1.
+        let parentBatchId = null;
+        let passNumber = 1;
+        if (lot.batch_ref && /^batch-\d+$/.test(lot.batch_ref)) {
+          const parentId = parseInt(lot.batch_ref.replace('batch-', ''), 10);
+          const parent = await trx('milling_batches').where({ id: parentId }).first('id', 'pass_number');
+          if (parent) {
+            parentBatchId = parent.id;
+            passNumber = (parseInt(parent.pass_number) || 1) + 1;
+          }
+        }
+
+        // Generate batch number — match the M-NNN convention used in
+        // milling.controller.js. Done locally to avoid pulling in the
+        // whole milling controller just for this helper.
+        const last = await trx('milling_batches').select('batch_no').orderBy('created_at', 'desc').first();
+        let nextNum = 1;
+        if (last && last.batch_no) {
+          const n = parseInt(String(last.batch_no).replace('M-', ''), 10);
+          if (!Number.isNaN(n)) nextNum = n + 1;
+        }
+        const batchNo = `M-${String(nextNum).padStart(3, '0')}`;
+
+        const rawQtyMT = overrideQty != null && overrideQty !== '' ? parseFloat(overrideQty) : availableMT;
+
+        const [batch] = await trx('milling_batches').insert({
+          batch_no: batchNo,
+          supplier_id: lot.supplier_id || null,
+          supplier_name: null,
+          product_id: lot.product_id || null,
+          mill_id: mill_id || null,
+          machine_line: machine_line || null,
+          shift: shift || 'Day',
+          milling_fee_per_kg: milling_fee_per_kg ? parseFloat(milling_fee_per_kg) : 5,
+          raw_qty_mt: rawQtyMT,
+          status: 'Queued',
+          notes: notes || null,
+          parent_batch_id: parentBatchId,
+          pass_number: passNumber,
+          created_by: req.user?.id || null,
+        }).returning('*');
+
+        // Link the lot as a source. Existing column set per migration 011.
+        await trx('batch_source_lots').insert({
+          batch_id: batch.id,
+          lot_id: lot.id,
+          qty_mt: rawQtyMT,
+          notes: notes || null,
+        });
+
+        // Mark the source lot as "In Milling" so it doesn't get double-
+        // booked. consumeForMilling will flip it to "Consumed" on yield.
+        await trx('inventory_lots').where({ id: lot.id }).update({
+          milling_status: 'In Milling',
+          updated_at: trx.fn.now(),
+        });
+
+        // Back-fill batch_id on any lot-attached vehicles so the batch
+        // page picks them up automatically.
+        await trx('milling_vehicle_arrivals')
+          .where({ lot_id: lot.id })
+          .whereNull('batch_id')
+          .update({ batch_id: batch.id });
+
+        return { batch, lot, passNumber, parentBatchId };
+      });
+
+      return res.status(201).json({ success: true, data: result });
+    } catch (err) {
+      const status = err.statusCode || 500;
+      if (status === 500) console.error('startMillingForLot error:', err);
+      return res.status(status).json({ success: false, message: err.message });
+    }
+  },
 };
