@@ -66,6 +66,7 @@ export default function LotDetail() {
   const lot = data?.lot || {};
   const transactions = data?.transactions || [];
   const reservations = data?.reservations || [];
+  const millingBatches = data?.millingBatches || [];
   const { data: lotSales = [] } = useLocalSalesByLot(lot.id);
 
   // Fetch linked milling batch for vehicles and quality
@@ -165,20 +166,45 @@ export default function LotDetail() {
         <button onClick={() => setShowCostSheet(true)} className="btn btn-primary btn-sm">
           <FileText className="w-4 h-4" /> Costing Sheet
         </button>
-        {/* Start Milling — mill RAW lots (first pass) or FINISHED lots
-            (re-mill / next pass). milling_status='Consumed' means the
-            lot is already fully spent and can't be milled again. */}
-        {(lot.type === 'raw' || lot.type === 'finished')
+        {/* Milling state: once a batch is created from this lot, hide
+            Start Milling and surface the batch link(s) instead. This
+            also covers multi-pass — show every batch this lot fed. */}
+        {millingBatches.length > 0 ? (
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-gray-500 uppercase tracking-wide font-medium">
+              {millingBatches.length > 1 ? 'Milling Batches' : 'Milling Batch'}
+            </span>
+            {millingBatches.map(b => (
+              <Link
+                key={b.id}
+                to={`/milling/${b.batchNo || b.id}`}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-sm font-medium border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+                title={`Pass ${b.passNumber || 1} · ${b.status}`}
+              >
+                <Factory className="w-3.5 h-3.5" />
+                {b.batchNo}
+                <span className="text-[10px] text-emerald-600 ml-0.5">· {b.status}</span>
+              </Link>
+            ))}
+          </div>
+        ) : (
+          (lot.type === 'raw' || lot.type === 'finished')
           && lot.entity === 'mill'
           && (parseFloat(lot.availableQty) > 0)
-          && lot.millingStatus !== 'Consumed' && (
-          <button onClick={() => setShowStartMilling(true)} className="btn btn-sm bg-emerald-600 text-white hover:bg-emerald-700">
-            <Play className="w-4 h-4" /> Start Milling
-          </button>
+          && lot.millingStatus !== 'Consumed'
+          && lot.millingStatus !== 'In Milling' && (
+            <button onClick={() => setShowStartMilling(true)} className="btn btn-sm bg-emerald-600 text-white hover:bg-emerald-700">
+              <Play className="w-4 h-4" /> Start Milling
+            </button>
+          )
         )}
         {/* Allocate to an existing batch — kept for raw lots that the
-            operator wants to merge into a batch already in progress. */}
-        {lot.type === 'raw' && (parseFloat(lot.availableQty) > 0) && (
+            operator wants to merge into a batch already in progress.
+            Hidden once the lot is already routed into a batch to keep
+            the header focused. */}
+        {millingBatches.length === 0
+          && lot.type === 'raw'
+          && (parseFloat(lot.availableQty) > 0) && (
           <button onClick={() => setShowAllocateModal(true)} className="btn btn-sm btn-secondary">
             <Factory className="w-4 h-4" /> Use in Batch
           </button>

@@ -191,9 +191,25 @@ module.exports = {
         .select('r.*', 'eo.order_no')
         .where({ 'r.lot_id': lot.id });
 
+      // Milling batches consuming this lot — surfaced via
+      // batch_source_lots. Used by the UI to replace the Start Milling
+      // button with a link to the running batch, and to list passes for
+      // multi-pass workflows.
+      const millingBatches = await db('batch_source_lots as bsl')
+        .join('milling_batches as mb', 'bsl.batch_id', 'mb.id')
+        .where('bsl.lot_id', lot.id)
+        .select(
+          'mb.id', 'mb.batch_no', 'mb.status', 'mb.pass_number',
+          'mb.parent_batch_id', 'mb.raw_qty_mt', 'mb.actual_finished_mt',
+          'mb.yield_pct', 'mb.created_at', 'mb.completed_at',
+          'bsl.qty_mt as source_qty_mt'
+        )
+        .orderBy('mb.pass_number', 'asc')
+        .orderBy('mb.created_at', 'asc');
+
       return res.json({
         success: true,
-        data: { lot: enrichLot(lot), transactions, reservations },
+        data: { lot: enrichLot(lot), transactions, reservations, millingBatches },
       });
     } catch (err) {
       console.error('getLotDetail error:', err);

@@ -1612,6 +1612,7 @@ export function useLotDetail(id) {
         lot: transformKeys(data.lot || {}),
         transactions: (data.transactions || []).map(transformKeys),
         reservations: (data.reservations || []).map(transformKeys),
+        millingBatches: (data.millingBatches || []).map(transformKeys),
       };
     },
     enabled: isAuthenticated() && !!id,
