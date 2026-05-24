@@ -1124,6 +1124,21 @@ module.exports = {
           err.statusCode = 400; throw err;
         }
 
+        // mill_id is NOT NULL on milling_batches. Resolve a default
+        // when the operator didn't pick one: lowest-id active mill,
+        // falling back to any mill. Block with a clear error if there
+        // are zero mills configured.
+        let resolvedMillId = mill_id ? parseInt(mill_id, 10) : null;
+        if (!resolvedMillId) {
+          let m = await trx('mills').where({ is_active: true }).orderBy('id').first('id');
+          if (!m) m = await trx('mills').orderBy('id').first('id');
+          if (!m) {
+            const err = new Error('No mill configured. Add one in Admin → Mills before starting milling.');
+            err.statusCode = 400; throw err;
+          }
+          resolvedMillId = m.id;
+        }
+
         // Look up parent batch if the lot was produced by milling
         // (batch_ref like "batch-123"). If found, this is pass N+1.
         let parentBatchId = null;
@@ -1155,7 +1170,7 @@ module.exports = {
           supplier_id: lot.supplier_id || null,
           supplier_name: null,
           product_id: lot.product_id || null,
-          mill_id: mill_id || null,
+          mill_id: resolvedMillId,
           machine_line: machine_line || null,
           shift: shift || 'Day',
           milling_fee_per_kg: milling_fee_per_kg ? parseFloat(milling_fee_per_kg) : 5,
