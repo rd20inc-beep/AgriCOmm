@@ -123,7 +123,10 @@ export default function MillingBatchDetail() {
   const [showPriceModal, setShowPriceModal] = useState(false);
   const [showSupplierModal, setShowSupplierModal] = useState(false);
   const [selectedSupplier, setSelectedSupplier] = useState('');
-  const [priceForm, setPriceForm] = useState({ finished: '', broken: '', sortex: '', bran: '', husk: '' });
+  const [priceForm, setPriceForm] = useState({
+    finished: '', broken: '', sortex: '', bran: '', husk: '',
+    b1: '', b2: '', b3: '', csr: '', shortGrain: '',
+  });
   const [priceLoading, setPriceLoading] = useState(false);
   const [vehicleForm, setVehicleForm] = useState({
     vehicleNo: '', driverName: '', driverPhone: '',
@@ -369,6 +372,11 @@ export default function MillingBatchDetail() {
             sortex: String(lp.sortex || commodityPrices.sortex),
             bran: String(lp.bran || commodityPrices.bran),
             husk: String(lp.husk || commodityPrices.husk),
+            b1: String(lp.b1 || lp.broken || commodityPrices.broken),
+            b2: String(lp.b2 || lp.broken || commodityPrices.broken),
+            b3: String(lp.b3 || lp.broken || commodityPrices.broken),
+            csr: String(lp.csr || lp.broken || commodityPrices.broken),
+            shortGrain: String(lp.short_grain || lp.broken || commodityPrices.broken),
           });
         } catch { /* use defaults */ }
         setPriceLoading(false);
@@ -1936,12 +1944,30 @@ export default function MillingBatchDetail() {
             const sortexMT = parseFloat(batch?.sortexRejectsMT || batch?.sortex_rejects_mt) || 0;
             const branMT  = parseFloat(batch?.branMT) || 0;
             const huskMT  = parseFloat(batch?.huskMT) || 0;
+            // Per-grade broken quantities — when any have value, we ask
+            // for per-grade prices instead of a single aggregate broken
+            // price (each grade lot will carry its own market value).
+            const b1MT = parseFloat(batch?.b1MT) || 0;
+            const b2MT = parseFloat(batch?.b2MT) || 0;
+            const b3MT = parseFloat(batch?.b3MT) || 0;
+            const csrMT = parseFloat(batch?.csrMT) || 0;
+            const sgMT = parseFloat(batch?.shortGrainMT) || 0;
+            const gradeTotal = b1MT + b2MT + b3MT + csrMT + sgMT;
+            const usePerGrade = gradeTotal > 0;
             // Only render price inputs for outputs the batch actually has.
             // Bran/Husk get a slot only if the batch carries a non-zero
             // legacy quantity, so new batches see a clean form.
             const fields = [
               { key: 'finished', label: 'Finished Rice (PKR/MT)', qty: parseFloat(batch?.actualFinishedMT) || 0, required: true },
-              { key: 'broken',   label: 'Broken Rice (PKR/MT)',   qty: parseFloat(batch?.brokenMT) || 0 },
+              ...(usePerGrade ? [
+                { key: 'b1',         label: 'Broken B1 (PKR/MT)',         qty: b1MT },
+                { key: 'b2',         label: 'Broken B2 (PKR/MT)',         qty: b2MT },
+                { key: 'b3',         label: 'Broken B3 (PKR/MT)',         qty: b3MT },
+                { key: 'csr',        label: 'Broken CSR (PKR/MT)',        qty: csrMT },
+                { key: 'shortGrain', label: 'Broken Short Grain (PKR/MT)', qty: sgMT },
+              ] : [
+                { key: 'broken', label: 'Broken Rice (PKR/MT)', qty: parseFloat(batch?.brokenMT) || 0 },
+              ]),
               { key: 'sortex',   label: 'Sortex Rejects (PKR/MT)', qty: sortexMT },
               ...(branMT > 0 ? [{ key: 'bran', label: 'Rice Bran (legacy, PKR/MT)', qty: branMT }] : []),
               ...(huskMT > 0 ? [{ key: 'husk', label: 'Rice Husk (legacy, PKR/MT)', qty: huskMT }] : []),
@@ -1994,6 +2020,11 @@ export default function MillingBatchDetail() {
                   bran_price_per_mt: parseFloat(priceForm.bran) || 0,
                   husk_price_per_mt: parseFloat(priceForm.husk) || 0,
                   sortex_rejects_price_per_mt: parseFloat(priceForm.sortex) || 0,
+                  b1_price_per_mt: parseFloat(priceForm.b1) || 0,
+                  b2_price_per_mt: parseFloat(priceForm.b2) || 0,
+                  b3_price_per_mt: parseFloat(priceForm.b3) || 0,
+                  csr_price_per_mt: parseFloat(priceForm.csr) || 0,
+                  short_grain_price_per_mt: parseFloat(priceForm.shortGrain) || 0,
                 });
                 addToast('Product prices confirmed for costing sheet');
                 invalidateBatch();

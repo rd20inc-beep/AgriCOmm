@@ -730,11 +730,31 @@ const millingController = {
         const branPrice = parseFloat(batch.bran_price_per_mt) || 0;
         const huskPrice = parseFloat(batch.husk_price_per_mt) || 0;
         const sortexPrice = parseFloat(batch.sortex_rejects_price_per_mt) || 0;
+        // Per-grade broken prices — fall back to the aggregate broken
+        // price when a grade-specific price hasn't been set yet.
+        const b1Price = parseFloat(batch.b1_price_per_mt) || brokenPrice;
+        const b2Price = parseFloat(batch.b2_price_per_mt) || brokenPrice;
+        const b3Price = parseFloat(batch.b3_price_per_mt) || brokenPrice;
+        const csrPrice = parseFloat(batch.csr_price_per_mt) || brokenPrice;
+        const sgPrice = parseFloat(batch.short_grain_price_per_mt) || brokenPrice;
 
-        // 3. Compute market values for each saleable output
+        // 3. Compute market values for each saleable output. Per-grade
+        // broken entries replace the aggregate "broken" line whenever
+        // any grade has qty > 0 — that way each grade gets its own
+        // share of the joint cost based on its own market value.
+        const gradeTotal = b1 + b2 + b3 + csr + shortGrain;
+        const hasPerGradeBroken = gradeTotal > 0;
         const outputValues = {
           finished: { qty: finished, price: finishedPrice, marketValue: finished * finishedPrice },
-          broken:   { qty: broken,  price: brokenPrice,  marketValue: broken * brokenPrice },
+          ...(hasPerGradeBroken ? {
+            b1:          { qty: b1,         price: b1Price,  marketValue: b1 * b1Price },
+            b2:          { qty: b2,         price: b2Price,  marketValue: b2 * b2Price },
+            b3:          { qty: b3,         price: b3Price,  marketValue: b3 * b3Price },
+            csr:         { qty: csr,        price: csrPrice, marketValue: csr * csrPrice },
+            short_grain: { qty: shortGrain, price: sgPrice,  marketValue: shortGrain * sgPrice },
+          } : {
+            broken:    { qty: broken,  price: brokenPrice,  marketValue: broken * brokenPrice },
+          }),
           bran:     { qty: bran,    price: branPrice,    marketValue: bran * branPrice },
           husk:     { qty: husk,    price: huskPrice,    marketValue: husk * huskPrice },
           sortex:   { qty: sortex,  price: sortexPrice,  marketValue: sortex * sortexPrice },
@@ -804,12 +824,20 @@ const millingController = {
           costPerMT: finAlloc.costPerMT,
           rawCostComponent: finAlloc.qty > 0 ? rawCostTotal / (finAlloc.qty * 1000) : 0,
           millingCostComponent: finAlloc.qty > 0 ? (processingCosts + millingFeeTotal) / (finAlloc.qty * 1000) : 0,
-          // Pass per-output allocated costs for byproducts
+          // Pass per-output allocated costs for byproducts. When the
+          // batch has per-grade broken outputs, each grade carries its
+          // own cost (derived from its own market value share);
+          // otherwise the aggregate broken cost falls through.
           byproductCosts: {
-            broken: allocations.broken.costPerKg,
-            bran: allocations.bran.costPerKg,
-            husk: allocations.husk.costPerKg,
-            sortex: allocations.sortex.costPerKg,
+            broken:      allocations.broken?.costPerKg      || 0,
+            b1:          allocations.b1?.costPerKg          || 0,
+            b2:          allocations.b2?.costPerKg          || 0,
+            b3:          allocations.b3?.costPerKg          || 0,
+            csr:         allocations.csr?.costPerKg         || 0,
+            short_grain: allocations.short_grain?.costPerKg || 0,
+            bran:        allocations.bran?.costPerKg        || 0,
+            husk:        allocations.husk?.costPerKg        || 0,
+            sortex:      allocations.sortex?.costPerKg      || 0,
           },
           // Split broken into its grades (B1, B2, B3, CSR, Short Grain) so
           // each tier becomes its own inventory lot and can be sold at its

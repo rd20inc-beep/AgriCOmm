@@ -351,23 +351,35 @@ router.get('/last-prices', authorize('milling', 'view'), async (req, res) => {
         'finished_price_per_mt', 'broken_price_per_mt',
         'bran_price_per_mt', 'husk_price_per_mt',
         'sortex_rejects_price_per_mt',
+        'b1_price_per_mt', 'b2_price_per_mt', 'b3_price_per_mt',
+        'csr_price_per_mt', 'short_grain_price_per_mt',
         'batch_no', 'completed_at'
       )
       .first();
 
+    const brokenDefault = parseFloat(last?.broken_price_per_mt) || 38000;
     return res.json({
       success: true,
       data: {
         lastPrices: last ? {
-          finished: parseFloat(last.finished_price_per_mt) || 72800,
-          broken: parseFloat(last.broken_price_per_mt) || 38000,
-          bran: parseFloat(last.bran_price_per_mt) || 28000,
-          husk: parseFloat(last.husk_price_per_mt) || 8400,
-          sortex: parseFloat(last.sortex_rejects_price_per_mt) || 35000,
-          fromBatch: last.batch_no,
-          date: last.completed_at,
+          finished:    parseFloat(last.finished_price_per_mt) || 72800,
+          broken:      brokenDefault,
+          bran:        parseFloat(last.bran_price_per_mt) || 28000,
+          husk:        parseFloat(last.husk_price_per_mt) || 8400,
+          sortex:      parseFloat(last.sortex_rejects_price_per_mt) || 35000,
+          // Per-grade broken prices — fall back to the aggregate broken
+          // price so old batches give the operator a sensible starting
+          // value until they set grade-specific rates.
+          b1:          parseFloat(last.b1_price_per_mt) || brokenDefault,
+          b2:          parseFloat(last.b2_price_per_mt) || brokenDefault,
+          b3:          parseFloat(last.b3_price_per_mt) || brokenDefault,
+          csr:         parseFloat(last.csr_price_per_mt) || brokenDefault,
+          short_grain: parseFloat(last.short_grain_price_per_mt) || brokenDefault,
+          fromBatch:   last.batch_no,
+          date:        last.completed_at,
         } : {
           finished: 72800, broken: 38000, bran: 28000, husk: 8400, sortex: 35000,
+          b1: 38000, b2: 38000, b3: 38000, csr: 38000, short_grain: 38000,
           fromBatch: null, date: null,
         },
       },
@@ -386,6 +398,8 @@ router.put('/batches/:id/prices', authorize('milling', 'edit'),
         finished_price_per_mt, broken_price_per_mt,
         bran_price_per_mt, husk_price_per_mt,
         sortex_rejects_price_per_mt,
+        b1_price_per_mt, b2_price_per_mt, b3_price_per_mt,
+        csr_price_per_mt, short_grain_price_per_mt,
       } = req.body;
 
       const [updated] = await db('milling_batches').where({ id }).update({
@@ -394,6 +408,11 @@ router.put('/batches/:id/prices', authorize('milling', 'edit'),
         bran_price_per_mt: parseFloat(bran_price_per_mt) || null,
         husk_price_per_mt: parseFloat(husk_price_per_mt) || null,
         sortex_rejects_price_per_mt: parseFloat(sortex_rejects_price_per_mt) || null,
+        b1_price_per_mt: parseFloat(b1_price_per_mt) || null,
+        b2_price_per_mt: parseFloat(b2_price_per_mt) || null,
+        b3_price_per_mt: parseFloat(b3_price_per_mt) || null,
+        csr_price_per_mt: parseFloat(csr_price_per_mt) || null,
+        short_grain_price_per_mt: parseFloat(short_grain_price_per_mt) || null,
         prices_confirmed: true,
         updated_at: db.fn.now(),
       }).returning('*');

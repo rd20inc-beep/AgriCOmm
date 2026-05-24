@@ -840,11 +840,20 @@ const inventoryService = {
       { key: 'shortGrain', label: 'Short Grain' },
     ];
     const hasAnyGrade = gradeNames.some(g => (parseFloat(grades[g.key]) || 0) > 0);
+    // Map UI-side camelCase grade keys (shortGrain) to the snake_case
+    // keys used in the byproductCosts payload (short_grain). When a
+    // per-grade cost is available (the new pricing flow), each broken
+    // lot uses its own cost instead of the aggregate broken cost.
+    const COST_KEY_BY_GRADE = {
+      b1: 'b1', b2: 'b2', b3: 'b3', csr: 'csr', shortGrain: 'short_grain',
+    };
     const brokenItems = hasAnyGrade
       ? gradeNames
           .map(g => ({
             name: `Broken Rice - ${g.label}`,
-            key: 'broken',
+            // Prefer the per-grade cost if the caller provided one;
+            // fall back to the aggregate "broken" cost otherwise.
+            key: bpCosts[COST_KEY_BY_GRADE[g.key]] != null ? COST_KEY_BY_GRADE[g.key] : 'broken',
             grade: g.label,
             qty: parseFloat(grades[g.key]) || 0,
           }))
