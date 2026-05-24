@@ -41,13 +41,21 @@ import ConsumptionPanel from '../../millStore/components/ConsumptionPanel';
 // in snake_case (b1_pct / b2_pct / cobba_pct / csr_pct / nb_pct / ov_pct);
 // FE uses camelCase via the standard transformKeys pipeline.
 const qualityParams = [
-  { key: 'moisture', label: 'Moisture %', unit: '%', backendKey: 'moisture' },
-  { key: 'b1Pct', label: 'B-1', unit: '%', backendKey: 'b1_pct' },
-  { key: 'b2Pct', label: 'B-2', unit: '%', backendKey: 'b2_pct' },
-  { key: 'cobbaPct', label: 'Cobba', unit: '%', backendKey: 'cobba_pct' },
-  { key: 'csrPct', label: 'C.S', unit: '%', backendKey: 'csr_pct' },
-  { key: 'nbPct', label: 'N.B', unit: '%', backendKey: 'nb_pct' },
-  { key: 'ovPct', label: 'O.V', unit: '%', backendKey: 'ov_pct' },
+  // Aggregate metrics
+  { key: 'moisture',       label: 'Moisture %',       unit: '%', backendKey: 'moisture' },
+  { key: 'broken',         label: 'Broken %',         unit: '%', backendKey: 'broken' },
+  { key: 'foreignMatter',  label: 'Foreign matter %', unit: '%', backendKey: 'foreign_matter' },
+  { key: 'chalky',         label: 'Chalky %',         unit: '%', backendKey: 'chalky' },
+  { key: 'purity',         label: 'Purity %',         unit: '%', backendKey: 'purity' },
+  // Pakistani broken-grade breakdown
+  { key: 'b1Pct',          label: 'B-1',              unit: '%', backendKey: 'b1_pct' },
+  { key: 'b2Pct',          label: 'B-2',              unit: '%', backendKey: 'b2_pct' },
+  { key: 'b3Pct',          label: 'B-3',              unit: '%', backendKey: 'b3_pct' },
+  { key: 'csrPct',         label: 'C.S',              unit: '%', backendKey: 'csr_pct' },
+  { key: 'shortGrainPct',  label: 'Short Grain',      unit: '%', backendKey: 'short_grain_pct' },
+  { key: 'cobbaPct',       label: 'Cobba',            unit: '%', backendKey: 'cobba_pct' },
+  { key: 'nbPct',          label: 'N.B',              unit: '%', backendKey: 'nb_pct' },
+  { key: 'ovPct',          label: 'O.V',              unit: '%', backendKey: 'ov_pct' },
 ];
 
 const tabs = [
@@ -845,8 +853,18 @@ export default function MillingBatchDetail() {
                   </button>
                 </div>
               </div>
-              {safeSample && safeArrival ? (
+              {safeSample || safeArrival ? (
                 <div className="overflow-x-auto">
+                  {!safeSample && safeArrival && (
+                    <div className="mb-3 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
+                      Arrival analysis was prefilled from the source lot. Add a separate <strong>Sample Analysis</strong> to enable side-by-side variance comparison.
+                    </div>
+                  )}
+                  {safeSample && !safeArrival && (
+                    <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+                      Sample analysis recorded. Add <strong>Arrival Analysis</strong> to enable variance comparison.
+                    </div>
+                  )}
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-gray-100">
@@ -861,6 +879,8 @@ export default function MillingBatchDetail() {
                       {qualityParams.map((param) => {
                         const sampleVal = safeSample?.[param.key];
                         const arrivalVal = safeArrival?.[param.key];
+                        const hasAny = sampleVal != null || arrivalVal != null;
+                        if (!hasAny) return null;
                         const hasBoth = sampleVal != null && arrivalVal != null;
                         const variance = hasBoth ? Math.abs(arrivalVal - sampleVal).toFixed(2) : null;
                         const isHigh = variance !== null && parseFloat(variance) > 1.0;
