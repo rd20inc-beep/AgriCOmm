@@ -1198,6 +1198,55 @@ module.exports = {
           updated_at: trx.fn.now(),
         });
 
+        // Prefill batch arrival quality from the lot. The operator
+        // already entered moisture/broken/B1-OV/price/etc. when they
+        // created the lot — surface it on the batch's Quality tab so
+        // they don't have to retype. Skipped silently if the lot has
+        // no usable quality data, or if the batch already has an
+        // arrival sample (idempotent — start-milling can be retried).
+        const lotQ = lot.quality_json || {};
+        // Coerce helper: null/undef → null, numeric → number, else null.
+        const num = (v) => {
+          if (v == null || v === '') return null;
+          const n = parseFloat(v);
+          return Number.isNaN(n) ? null : n;
+        };
+        const lotRateKg = num(lot.rate_per_kg);
+        const arrivalRow = {
+          batch_id: batch.id,
+          analysis_type: 'arrival',
+          moisture:        num(lotQ.moisture)       ?? num(lot.moisture_pct),
+          broken:          num(lotQ.broken)         ?? num(lot.broken_pct),
+          foreign_matter:  num(lotQ.foreign_matter),
+          chalky:          num(lotQ.chalky),
+          discoloration:   num(lotQ.discoloration),
+          purity:          num(lotQ.purity),
+          grain_size:      num(lotQ.grain_size),
+          b1_pct:          num(lotQ.b1),
+          b2_pct:          num(lotQ.b2),
+          b3_pct:          num(lotQ.b3),
+          csr_pct:         num(lotQ.csr),
+          short_grain_pct: num(lotQ.short_grain),
+          cobba_pct:       num(lotQ.cobba),
+          nb_pct:          num(lotQ.nb),
+          ov_pct:          num(lotQ.ov),
+          price_per_mt:    num(lotQ.price_per_mt) ?? (lotRateKg ? lotRateKg * 1000 : null),
+          price_per_kg:    num(lotQ.price_per_kg) ?? lotRateKg,
+          created_by:      req.user?.id || null,
+        };
+        const hasAnyValue = Object.entries(arrivalRow).some(
+          ([k, v]) => !['batch_id', 'analysis_type', 'created_by'].includes(k) && v != null
+        );
+        if (hasAnyValue) {
+          // Unique constraint on (batch_id, analysis_type) from migration
+          // 080. Use onConflict so re-running start-milling refreshes the
+          // row instead of throwing.
+          await trx('milling_quality_samples')
+            .insert(arrivalRow)
+            .onConflict(['batch_id', 'analysis_type'])
+            .merge();
+        }
+
         // Back-fill batch_id on any lot-attached vehicles so the batch
         // page picks them up automatically. Capture the row count so
         // the UI can confirm to the operator how many trucks were
