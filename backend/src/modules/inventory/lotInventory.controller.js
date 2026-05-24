@@ -1130,7 +1130,8 @@ module.exports = {
         // are zero mills configured.
         let resolvedMillId = mill_id ? parseInt(mill_id, 10) : null;
         if (!resolvedMillId) {
-          let m = await trx('mills').where({ is_active: true }).orderBy('id').first('id');
+          // mills.status enum: 'Active' / 'Maintenance' / 'Inactive'
+          let m = await trx('mills').where({ status: 'Active' }).orderBy('id').first('id');
           if (!m) m = await trx('mills').orderBy('id').first('id');
           if (!m) {
             const err = new Error('No mill configured. Add one in Admin → Mills before starting milling.');
