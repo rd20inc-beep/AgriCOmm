@@ -302,6 +302,7 @@ export function transformCustomer(db) {
     phone: db.phone || '',
     country: db.country || '',
     address: db.address || '',
+    isFavorite: !!db.is_favorite,
   };
 }
 
@@ -317,6 +318,7 @@ export function transformSupplier(db) {
     address: db.address || '',
     type: db.type || 'Rice Supplier',
     location: db.address || db.country || '',
+    isFavorite: !!db.is_favorite,
   };
 }
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Search, Plus, Truck, Package, DollarSign, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
+import { Search, Plus, Truck, Package, DollarSign, CheckCircle2, AlertCircle, Loader2, Star } from 'lucide-react';
 import Drawer from '../../../components/Drawer';
 import { lotInventoryApi } from '../api/services';
 import { useCreatePurchaseLot } from '../../../api/queries';
@@ -108,6 +108,15 @@ export default function PurchaseLotDrawer({
       if (s.is_active === false || s.isActive === false) continue;
       out.push(s);
     }
+    // Favorites first, then alphabetical — most operators work with a
+    // small repeat set of suppliers; pinning them to the top saves
+    // searching through a long catalog every time.
+    out.sort((a, b) => {
+      const af = !!(a.isFavorite || a.is_favorite);
+      const bf = !!(b.isFavorite || b.is_favorite);
+      if (af !== bf) return af ? -1 : 1;
+      return (a.name || '').localeCompare(b.name || '');
+    });
     return out;
   }, [suppliers, localSuppliers]);
 
@@ -125,6 +134,15 @@ export default function PurchaseLotDrawer({
       if ((p.code || '').toUpperCase() === 'RAW-PADDY') continue;
       out.push(p);
     }
+    // Favorites first, then alphabetical. Products don't have an
+    // is_favorite column today; included here for parity if it's
+    // added later (the field is just ignored when missing).
+    out.sort((a, b) => {
+      const af = !!(a.isFavorite || a.is_favorite);
+      const bf = !!(b.isFavorite || b.is_favorite);
+      if (af !== bf) return af ? -1 : 1;
+      return (a.name || '').localeCompare(b.name || '');
+    });
     return out;
   }, [products, localProducts]);
 
@@ -374,8 +392,13 @@ export default function PurchaseLotDrawer({
             items={filteredSuppliers}
             placeholder="Search supplier name…"
             renderItem={(s) => (
-              <div className="flex items-center justify-between">
-                <span className="truncate">{s.name}</span>
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate flex items-center gap-1.5">
+                  {(s.isFavorite || s.is_favorite) && (
+                    <Star className="w-3 h-3 fill-amber-400 text-amber-500 flex-shrink-0" />
+                  )}
+                  {s.name}
+                </span>
                 {s.approval_status === 'pending' && <PendingBadge />}
               </div>
             )}

@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Truck, Plus, MapPin, Pencil, Trash2 } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Truck, Plus, MapPin, Pencil, Trash2, Star } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
 import { useCreateSupplier, useUpdateSupplier, useDeleteSupplier } from '../../../../api/queries';
 import Modal from '../../../../components/Modal';
@@ -56,6 +56,24 @@ export default function SuppliersTab() {
     }
   };
 
+  // Toggle the favorite flag — fire-and-forget update, list refreshes
+  // via the mutation's invalidation.
+  const toggleFavorite = async (s) => {
+    try {
+      await updateMut.mutateAsync({ id: s.id, data: { is_favorite: !s.isFavorite } });
+    } catch (err) {
+      addToast(err.message || 'Failed to update favorite', 'error');
+    }
+  };
+
+  // Favorites at the top, then alphabetical.
+  const sortedSuppliers = useMemo(() => {
+    return [...(suppliersList || [])].sort((a, b) => {
+      if (!!a.isFavorite !== !!b.isFavorite) return a.isFavorite ? -1 : 1;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+  }, [suppliersList]);
+
   const handleDelete = async (s) => {
     if (!window.confirm(`Delete supplier "${s.name}"? This cannot be undone.`)) return;
     try {
@@ -86,6 +104,7 @@ export default function SuppliersTab() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
+                <th className="text-center px-2 py-3 font-semibold text-gray-600 w-10" title="Favorite"><Star className="w-3.5 h-3.5 inline text-gray-400" /></th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">ID</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">Name</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">Type</th>
@@ -95,8 +114,17 @@ export default function SuppliersTab() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {suppliersList.map(s => (
+              {sortedSuppliers.map(s => (
                 <tr key={s.id} className="hover:bg-gray-50 transition-colors">
+                  <td className="text-center px-2 py-3">
+                    <button
+                      onClick={() => toggleFavorite(s)}
+                      title={s.isFavorite ? 'Remove from favorites' : 'Mark as favorite'}
+                      className="p-1 rounded hover:bg-amber-50 transition-colors"
+                    >
+                      <Star className={`w-4 h-4 ${s.isFavorite ? 'fill-amber-400 text-amber-500' : 'text-gray-300'}`} />
+                    </button>
+                  </td>
                   <td className="px-4 py-3 text-gray-500 font-mono text-xs">{s.id}</td>
                   <td className="px-4 py-3 font-medium text-gray-900">{s.name}</td>
                   <td className="px-4 py-3">

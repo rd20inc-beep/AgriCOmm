@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Users, Plus, Globe, Mail, Phone, Pencil, Trash2 } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Users, Plus, Globe, Mail, Phone, Pencil, Trash2, Star } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
 import { useCreateCustomer, useUpdateCustomer, useDeleteCustomer } from '../../../../api/queries';
 import Modal from '../../../../components/Modal';
@@ -54,6 +54,21 @@ export default function CustomersTab() {
     }
   };
 
+  const toggleFavorite = async (c) => {
+    try {
+      await updateMut.mutateAsync({ id: c.id, data: { is_favorite: !c.isFavorite } });
+    } catch (err) {
+      addToast(err.message || 'Failed to update favorite', 'error');
+    }
+  };
+
+  const sortedCustomers = useMemo(() => {
+    return [...(customersList || [])].sort((a, b) => {
+      if (!!a.isFavorite !== !!b.isFavorite) return a.isFavorite ? -1 : 1;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+  }, [customersList]);
+
   const handleDelete = async (c) => {
     if (!window.confirm(`Delete customer "${c.name}"? This cannot be undone.`)) return;
     try {
@@ -84,6 +99,7 @@ export default function CustomersTab() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
+                <th className="text-center px-2 py-3 font-semibold text-gray-600 w-10" title="Favorite"><Star className="w-3.5 h-3.5 inline text-gray-400" /></th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">ID</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">Name</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">Country</th>
@@ -94,8 +110,17 @@ export default function CustomersTab() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {customersList.map(c => (
+              {sortedCustomers.map(c => (
                 <tr key={c.id} className="hover:bg-gray-50 transition-colors">
+                  <td className="text-center px-2 py-3">
+                    <button
+                      onClick={() => toggleFavorite(c)}
+                      title={c.isFavorite ? 'Remove from favorites' : 'Mark as favorite'}
+                      className="p-1 rounded hover:bg-amber-50 transition-colors"
+                    >
+                      <Star className={`w-4 h-4 ${c.isFavorite ? 'fill-amber-400 text-amber-500' : 'text-gray-300'}`} />
+                    </button>
+                  </td>
                   <td className="px-4 py-3 text-gray-500 font-mono text-xs">{c.id}</td>
                   <td className="px-4 py-3 font-medium text-gray-900">{c.name}</td>
                   <td className="px-4 py-3 text-gray-600">
