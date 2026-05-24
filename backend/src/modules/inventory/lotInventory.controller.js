@@ -94,6 +94,7 @@ module.exports = {
           'l.*',
           'w.name as warehouse_name',
           'p.name as product_name',
+          'p.code as product_code',
           's.name as supplier_name'
         );
 
@@ -108,6 +109,9 @@ module.exports = {
           this.where('l.lot_no', 'ilike', `%${search}%`)
             .orWhere('l.item_name', 'ilike', `%${search}%`)
             .orWhere('l.variety', 'ilike', `%${search}%`)
+            .orWhere('l.grade', 'ilike', `%${search}%`)
+            .orWhere('p.code', 'ilike', `%${search}%`)
+            .orWhere('p.name', 'ilike', `%${search}%`)
             .orWhere('s.name', 'ilike', `%${search}%`);
         });
       }
@@ -139,7 +143,7 @@ module.exports = {
         .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
         .leftJoin('products as p', 'l.product_id', 'p.id')
         .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
-        .select('l.*', 'w.name as warehouse_name', 'p.name as product_name', 's.name as supplier_name')
+        .select('l.*', 'w.name as warehouse_name', 'p.name as product_name', 'p.code as product_code', 's.name as supplier_name')
         .where(where).first();
 
       if (!lot) return res.status(404).json({ success: false, message: 'Lot not found.' });

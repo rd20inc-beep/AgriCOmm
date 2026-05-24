@@ -508,15 +508,32 @@ const inventoryService = {
       // fall back to the generic RAW-RICE product if none was specified.
       // (RAW-PADDY / "paddy" fallbacks kept for legacy installs only.)
       let resolvedProductId = productId || null;
-      if (!resolvedProductId) {
-        let riceProduct = await trx('products').where({ code: 'RAW-RICE' }).first('id');
-        if (!riceProduct) riceProduct = await trx('products').whereILike('name', 'raw rice').first('id');
+      let resolvedProductRow = null;
+      if (resolvedProductId) {
+        resolvedProductRow = await trx('products').where({ id: resolvedProductId }).first('id', 'code', 'name', 'grade');
+      }
+      if (!resolvedProductRow) {
+        resolvedProductRow = await trx('products').where({ code: 'RAW-RICE' }).first('id', 'code', 'name', 'grade');
+        if (!resolvedProductRow) resolvedProductRow = await trx('products').whereILike('name', 'raw rice').first('id', 'code', 'name', 'grade');
         // Legacy fallbacks for old installs that still have a Paddy product:
-        if (!riceProduct) riceProduct = await trx('products').where({ code: 'RAW-PADDY' }).first('id');
-        if (!riceProduct) riceProduct = await trx('products').whereILike('name', '%paddy%').first('id');
-        resolvedProductId = riceProduct ? riceProduct.id : null;
+        if (!resolvedProductRow) resolvedProductRow = await trx('products').where({ code: 'RAW-PADDY' }).first('id', 'code', 'name', 'grade');
+        if (!resolvedProductRow) resolvedProductRow = await trx('products').whereILike('name', '%paddy%').first('id', 'code', 'name', 'grade');
+        if (resolvedProductRow) resolvedProductId = resolvedProductRow.id;
       }
       const riceProductId = resolvedProductId;
+      // Stamp the variety (and grade) directly on the lot row so the Lot
+      // Inventory list shows the rice type (D98, Basmati 386, …) without
+      // having to expand the row or re-join products downstream.
+      const lotVariety = resolvedProductRow
+        ? (resolvedProductRow.name || resolvedProductRow.code || null)
+        : null;
+      const lotGrade = resolvedProductRow && resolvedProductRow.grade
+        ? resolvedProductRow.grade : null;
+      // Use the product name as the item name when available so the row
+      // says e.g. "D98 Rice" instead of the generic "Rice" — keeps the
+      // table scannable.
+      const lotItemName = resolvedProductRow && resolvedProductRow.name
+        ? resolvedProductRow.name : 'Rice';
 
       const lotNo = await inventoryService.generateRiceLotNo(trx, {
         supplierId,
@@ -526,7 +543,7 @@ const inventoryService = {
       [lot] = await trx('inventory_lots')
         .insert({
           lot_no: lotNo,
-          item_name: 'Rice',
+          item_name: lotItemName,
           type: 'raw',
           entity: 'mill',
           warehouse_id: warehouse.id,
@@ -545,6 +562,8 @@ const inventoryService = {
           created_by: userId || null,
           // Enrichment
           supplier_id: supplierId || null,
+          variety: lotVariety,
+          grade: lotGrade,
           rate_per_kg: 0,
           purchase_amount: 0,
           landed_cost_total: 0,

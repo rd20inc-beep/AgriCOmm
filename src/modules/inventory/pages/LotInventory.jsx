@@ -313,7 +313,24 @@ export default function LotInventory() {
                       </td>
                       <td>
                         <div className="text-gray-900 font-medium">{lot.itemName}</div>
-                        {lot.variety && <div className="text-xs text-gray-400">{lot.variety}{lot.grade ? ` (${lot.grade})` : ''}</div>}
+                        {(() => {
+                          // Variety stamped on the lot wins; otherwise fall
+                          // back to the joined product code/name so the
+                          // rice type (D98, Basmati 386, …) always shows.
+                          const variety = lot.variety || lot.productCode || lot.productName || null;
+                          const grade = lot.grade;
+                          if (!variety && !grade) return null;
+                          return (
+                            <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
+                              {variety && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700">
+                                  {variety}
+                                </span>
+                              )}
+                              {grade && <span className="text-gray-400">({grade})</span>}
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td className="text-gray-600">{lot.supplierName || '—'}</td>
                       <td className="text-gray-600 text-xs">{lot.warehouseName || '—'}</td>
