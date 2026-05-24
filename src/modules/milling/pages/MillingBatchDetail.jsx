@@ -34,7 +34,7 @@ import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import SearchSelect from '../../../components/SearchSelect';
 import Modal from '../../../components/Modal';
 import StatusBadge from '../../../components/StatusBadge';
-import MillingCostSheet from '../../../components/MillingCostSheet';
+import MillingCostSheet from '../components/MillingCostSheet';
 import ConsumptionPanel from '../../millStore/components/ConsumptionPanel';
 
 // Pakistani-rice per-grade quality split. Stored on milling_quality_samples
