@@ -306,11 +306,26 @@ export default function LotInventory() {
                   // product.name when the SKU code is auto-generated, so
                   // showing both is pure noise. Compare case-insensitively
                   // and treat equal-or-contained strings as redundant.
+                  // Also drop strings that look like auto-generated SKUs
+                  // (PRD-DATETIME-..., PROD-SOMETHING, anything with a
+                  // long run of digits) — these were stored on legacy
+                  // lots before the drawer's variety fallback was fixed.
                   const variety = lot.variety || lot.productCode || lot.productName || null;
                   const grade = lot.grade;
                   const itemLower = (lot.itemName || '').toLowerCase();
                   const varLower = (variety || '').toLowerCase();
-                  const varIsRedundant = !variety || varLower === itemLower
+                  const looksLikeAutoSku = (s) => {
+                    if (!s) return false;
+                    const upper = s.toUpperCase();
+                    if (/^PRD[-_]\d{6,}/.test(upper)) return true;   // PRD-20251230-…
+                    if (/^PROD[-_]/.test(upper)) return true;        // PROD-BROKEN-RICE
+                    if (/\d{8,}/.test(upper)) return true;           // any 8+ consecutive digits
+                    if (upper.length > 18) return true;              // generic ID-shaped
+                    return false;
+                  };
+                  const varIsRedundant = !variety
+                    || looksLikeAutoSku(variety)
+                    || varLower === itemLower
                     || itemLower.includes(varLower) || varLower.includes(itemLower);
                   return (
                     <tr key={lot.id} className="cursor-pointer hover:bg-gray-50 group" onClick={() => navigate(`/lot-inventory/${lot.lotNo || lot.id}`)}>
