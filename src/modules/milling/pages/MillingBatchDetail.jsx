@@ -319,12 +319,16 @@ export default function MillingBatchDetail() {
     }
 
     const finished = parseFloat(yieldForm.actualFinishedMT) || 0;
-    const broken = parseFloat(yieldForm.brokenMT) || 0;
     const b1 = parseFloat(yieldForm.b1MT) || 0;
     const b2 = parseFloat(yieldForm.b2MT) || 0;
     const b3 = parseFloat(yieldForm.b3MT) || 0;
     const csr = parseFloat(yieldForm.csrMT) || 0;
     const shortGrain = parseFloat(yieldForm.shortGrainMT) || 0;
+    // Broken total is derived from the per-grade inputs — no separate
+    // aggregate field; legacy yieldForm.brokenMT honored only if no
+    // grades were entered.
+    const gradeSum = b1 + b2 + b3 + csr + shortGrain;
+    const broken = gradeSum > 0 ? gradeSum : (parseFloat(yieldForm.brokenMT) || 0);
     const bran = parseFloat(yieldForm.branMT) || 0;     // legacy, hidden in UI
     const husk = parseFloat(yieldForm.huskMT) || 0;     // legacy, hidden in UI
     const sortex = parseFloat(yieldForm.sortexMT) || 0;
@@ -1486,62 +1490,63 @@ export default function MillingBatchDetail() {
             <span className="font-semibold">Planned Finished:</span> {batch.plannedFinishedMT} MT
           </div>
 
-          {/* Main outputs */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Finished Rice (MT) *</label>
-              <input type="number" step="0.01" min="0" required value={yieldForm.actualFinishedMT}
-                onChange={(e) => setYieldForm(prev => ({ ...prev, actualFinishedMT: e.target.value }))}
-                placeholder="e.g. 49.2"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Total Broken Rice (MT)</label>
-              <input type="number" step="0.01" min="0" value={yieldForm.brokenMT}
-                onChange={(e) => setYieldForm(prev => ({ ...prev, brokenMT: e.target.value }))}
-                placeholder="Total broken (sum of grades below)"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
-            </div>
+          {/* Finished rice */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Finished Rice (MT) *</label>
+            <input type="number" step="0.01" min="0" required value={yieldForm.actualFinishedMT}
+              onChange={(e) => setYieldForm(prev => ({ ...prev, actualFinishedMT: e.target.value }))}
+              placeholder="e.g. 49.2"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
           </div>
 
-          {/* Broken grade breakdown */}
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-            <p className="text-xs font-semibold text-amber-800 uppercase tracking-wide mb-2">Broken Grade Breakdown (optional)</p>
+          {/* Broken — per-grade inputs are now first-class. Total broken
+              is computed from the sum and displayed live. */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-sm font-medium text-gray-700">Broken Rice (MT)</label>
+              {(() => {
+                const total = ['b1MT','b2MT','b3MT','csrMT','shortGrainMT']
+                  .reduce((s, k) => s + (parseFloat(yieldForm[k]) || 0), 0);
+                return total > 0 ? (
+                  <span className="text-xs font-medium text-amber-700">Total: {total.toFixed(2)} MT</span>
+                ) : null;
+              })()}
+            </div>
             <div className="grid grid-cols-5 gap-2">
               <div>
                 <label className="block text-[11px] font-medium text-gray-600 mb-1">B1 (MT)</label>
                 <input type="number" step="0.01" min="0" value={yieldForm.b1MT}
                   onChange={(e) => setYieldForm(prev => ({ ...prev, b1MT: e.target.value }))}
                   placeholder="0"
-                  className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-1 focus:ring-amber-500" />
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
               </div>
               <div>
                 <label className="block text-[11px] font-medium text-gray-600 mb-1">B2 (MT)</label>
                 <input type="number" step="0.01" min="0" value={yieldForm.b2MT}
                   onChange={(e) => setYieldForm(prev => ({ ...prev, b2MT: e.target.value }))}
                   placeholder="0"
-                  className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-1 focus:ring-amber-500" />
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
               </div>
               <div>
                 <label className="block text-[11px] font-medium text-gray-600 mb-1">B3 (MT)</label>
                 <input type="number" step="0.01" min="0" value={yieldForm.b3MT}
                   onChange={(e) => setYieldForm(prev => ({ ...prev, b3MT: e.target.value }))}
                   placeholder="0"
-                  className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-1 focus:ring-amber-500" />
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
               </div>
               <div>
                 <label className="block text-[11px] font-medium text-gray-600 mb-1">CSR (MT)</label>
                 <input type="number" step="0.01" min="0" value={yieldForm.csrMT}
                   onChange={(e) => setYieldForm(prev => ({ ...prev, csrMT: e.target.value }))}
                   placeholder="0"
-                  className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-1 focus:ring-amber-500" />
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
               </div>
               <div>
-                <label className="block text-[11px] font-medium text-gray-600 mb-1">Short Grain</label>
+                <label className="block text-[11px] font-medium text-gray-600 mb-1">Short Grain (MT)</label>
                 <input type="number" step="0.01" min="0" value={yieldForm.shortGrainMT}
                   onChange={(e) => setYieldForm(prev => ({ ...prev, shortGrainMT: e.target.value }))}
                   placeholder="0"
-                  className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-1 focus:ring-amber-500" />
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
               </div>
             </div>
           </div>
@@ -1574,7 +1579,6 @@ export default function MillingBatchDetail() {
           {/* Live calculation preview */}
           {(() => {
             const f = parseFloat(yieldForm.actualFinishedMT) || 0;
-            const b = parseFloat(yieldForm.brokenMT) || 0;
             const b1 = parseFloat(yieldForm.b1MT) || 0;
             const b2 = parseFloat(yieldForm.b2MT) || 0;
             const b3 = parseFloat(yieldForm.b3MT) || 0;
@@ -1585,6 +1589,10 @@ export default function MillingBatchDetail() {
             const sx = parseFloat(yieldForm.sortexMT) || 0;
             const w = parseFloat(yieldForm.wastageMT) || 0;
             const gradeTotal = b1 + b2 + b3 + csr + sg;
+            // Broken total derives from the per-grade inputs (gradeTotal)
+            // — falls back to legacy yieldForm.brokenMT only for batches
+            // saved before this change.
+            const b = gradeTotal > 0 ? gradeTotal : (parseFloat(yieldForm.brokenMT) || 0);
             const total = f + b + br + h + sx + w;
             const rawQty = batch.rawQtyMT || 0;
             const yieldPct = rawQty > 0 ? ((f / rawQty) * 100).toFixed(1) : '0.0';
@@ -1592,15 +1600,13 @@ export default function MillingBatchDetail() {
 
             const rows = [
               { label: 'Finished Rice', value: f, bold: true, color: 'text-blue-700' },
-              { label: 'Broken Rice (total)', value: b, color: 'text-amber-700' },
             ];
-            if (gradeTotal > 0) {
-              if (b1) rows.push({ label: '  B1', value: b1, indent: true });
-              if (b2) rows.push({ label: '  B2', value: b2, indent: true });
-              if (b3) rows.push({ label: '  B3', value: b3, indent: true });
-              if (csr) rows.push({ label: '  CSR', value: csr, indent: true });
-              if (sg) rows.push({ label: '  Short Grain', value: sg, indent: true });
-            }
+            if (b > 0) rows.push({ label: 'Broken Rice (total)', value: b, color: 'text-amber-700' });
+            if (b1) rows.push({ label: '  B1', value: b1, indent: true });
+            if (b2) rows.push({ label: '  B2', value: b2, indent: true });
+            if (b3) rows.push({ label: '  B3', value: b3, indent: true });
+            if (csr) rows.push({ label: '  CSR', value: csr, indent: true });
+            if (sg) rows.push({ label: '  Short Grain', value: sg, indent: true });
             rows.push(
               { label: 'Sortex Rejects', value: sx, color: 'text-orange-700' },
               { label: 'Wastage', value: w, color: 'text-red-600' },
