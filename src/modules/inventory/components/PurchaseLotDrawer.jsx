@@ -178,7 +178,13 @@ export default function PurchaseLotDrawer({
     try {
       const product = selectedProduct;
       const itemName = product?.name || 'Rice';
-      const variety = product?.code || product?.name || null;
+      // Variety stamped on the lot should be human-readable. The
+      // products catalog is mostly seeded with auto-generated SKUs
+      // like "PRD-20251230-180141-c94bbd82" — prefer name in that
+      // case so the lot doesn't end up displaying garbage.
+      const code = product?.code || '';
+      const isAutoSku = /^PRD[-_]\d{6,}/i.test(code) || /\d{8,}/.test(code) || code.length > 12;
+      const variety = (!isAutoSku && code) ? code : (product?.name || null);
       // Build the quality payload — strip empty strings, parse numbers.
       const quality = {};
       for (const f of QUALITY_FIELDS) {

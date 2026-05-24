@@ -270,13 +270,69 @@ export default function LotDetail() {
                 ['Rice Type', lot.itemName],
                 ['Variety', lot.variety],
                 ['Grade', lot.grade],
-                ['Moisture', lot.moisturePct ? `${lot.moisturePct}%` : null],
-                ['Broken', lot.brokenPct ? `${lot.brokenPct}%` : null],
                 ['Sortex Status', lot.sortexStatus],
                 ['Whiteness', lot.whiteness],
               ].map(([l, v]) => v ? <div key={l} className="flex justify-between text-sm"><span className="text-gray-500">{l}</span><span className="font-medium text-gray-900">{v}</span></div> : null)}
-              {lot.qualityNotes && <div className="mt-2 pt-2 border-t"><p className="text-xs text-gray-500"><span className="font-medium">Notes:</span> {lot.qualityNotes}</p></div>}
             </div>
+
+            {/* Extended quality from quality_json + the dedicated
+                moisture_pct / broken_pct columns. Renders only the
+                non-null values so the panel stays compact for lots
+                that captured a partial sheet. */}
+            {(() => {
+              const qj = lot.qualityJson || {};
+              const pct = (v) => (v == null || v === '') ? null : `${Number(v).toFixed(2)}%`;
+              const aggregate = [
+                ['Moisture',       pct(qj.moisture ?? lot.moisturePct)],
+                ['Broken',         pct(qj.broken   ?? lot.brokenPct)],
+                ['Foreign matter', pct(qj.foreign_matter)],
+                ['Chalky',         pct(qj.chalky)],
+                ['Purity',         pct(qj.purity)],
+              ].filter(([, v]) => v);
+              const grades = [
+                ['B1',          pct(qj.b1)],
+                ['B2',          pct(qj.b2)],
+                ['B3',          pct(qj.b3)],
+                ['CSR',         pct(qj.csr)],
+                ['Short Grain', pct(qj.short_grain)],
+                ['Cobba',       pct(qj.cobba)],
+                ['N.B',         pct(qj.nb)],
+                ['O.V',         pct(qj.ov)],
+              ].filter(([, v]) => v);
+              if (aggregate.length === 0 && grades.length === 0) return null;
+              return (
+                <div className="mt-3 pt-3 border-t border-gray-100 space-y-3">
+                  {aggregate.length > 0 && (
+                    <div>
+                      <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Sample Analysis</p>
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                        {aggregate.map(([l, v]) => (
+                          <div key={l} className="flex justify-between text-sm">
+                            <span className="text-gray-500">{l}</span>
+                            <span className="font-medium text-gray-900 tabular-nums">{v}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {grades.length > 0 && (
+                    <div>
+                      <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Broken-grade breakdown</p>
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                        {grades.map(([l, v]) => (
+                          <div key={l} className="flex justify-between text-sm">
+                            <span className="text-gray-500">{l}</span>
+                            <span className="font-medium text-amber-700 tabular-nums">{v}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {lot.qualityNotes && <div className="mt-3 pt-3 border-t"><p className="text-xs text-gray-500"><span className="font-medium">Notes:</span> {lot.qualityNotes}</p></div>}
           </div>
 
           {/* Bag Details */}
