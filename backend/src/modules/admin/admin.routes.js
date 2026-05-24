@@ -1,9 +1,44 @@
 const express = require('express');
 const router = express.Router();
 const controller = require('../../controllers/adminController');
+const approvalsCtrl = require('./approvals.controller');
 const authorize = require('../../middleware/rbac');
 const { authorizeRole } = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
+
+// ─────────── Master-data approvals (quick-add + admin review) ───────────
+// Quick-add: any user with inventory.create can register a new supplier
+// or rice type on-the-go from the Purchase Lot drawer. Entry is created
+// immediately but flagged 'pending' unless the caller has
+// master_data.approve (Super Admin / Owner by default).
+router.post(
+  '/suppliers/quick-add',
+  authorize('inventory', 'create'),
+  auditAction('quick_add', 'supplier', (req, data) => data?.data?.supplier?.id),
+  approvalsCtrl.quickAddSupplier
+);
+router.post(
+  '/products/quick-add',
+  authorize('inventory', 'create'),
+  auditAction('quick_add', 'product', (req, data) => data?.data?.product?.id),
+  approvalsCtrl.quickAddProduct
+);
+
+// Admin review queue
+router.get('/approvals',       authorize('admin', 'view'), approvalsCtrl.listApprovals);
+router.get('/approvals/count', authorize('admin', 'view'), approvalsCtrl.approvalsCount);
+router.post(
+  '/approvals/:type/:id/approve',
+  authorize('master_data', 'approve'),
+  auditAction('approve', 'master_data', (req) => `${req.params.type}:${req.params.id}`),
+  approvalsCtrl.approve
+);
+router.post(
+  '/approvals/:type/:id/reject',
+  authorize('master_data', 'approve'),
+  auditAction('reject', 'master_data', (req) => `${req.params.type}:${req.params.id}`),
+  approvalsCtrl.reject
+);
 
 // View-level access for admin panel
 router.get('/customers', authorize('admin', 'view'), controller.listCustomers);

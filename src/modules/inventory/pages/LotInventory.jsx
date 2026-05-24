@@ -14,6 +14,7 @@ import { useApp } from '../../../context/AppContext';
 import { LoadingSpinner, ErrorState, EmptyState } from '../../../components/LoadingState';
 import StatusBadge from '../../../components/StatusBadge';
 import Modal from '../../../components/Modal';
+import PurchaseLotDrawer from '../components/PurchaseLotDrawer';
 import { fromKg, rateFromPerKg, allEquivalents, allRateEquivalents, toKg, rateToPerKg, UNITS, formatQty, formatRate } from '../../../utils/unitConversion';
 
 const STATUS_TABS = ['All', 'Available', 'Reserved', 'Closed'];
@@ -360,15 +361,15 @@ export default function LotInventory() {
         </div>
       )}
 
-      {/* Purchase Lot Modal */}
-      <PurchaseLotModal
+      {/* Purchase Lot Drawer (modern slide-from-right UX) */}
+      <PurchaseLotDrawer
         isOpen={showPurchaseModal}
         onClose={() => setShowPurchaseModal(false)}
         suppliers={suppliersList}
         warehouses={warehousesList}
         products={productsList}
         addToast={addToast}
-        refetch={refetch}
+        onSuccess={refetch}
       />
     </div>
   );

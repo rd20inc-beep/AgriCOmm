@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Users, Truck, Package, Warehouse, Settings, ShoppingBag, Landmark, Tags, Factory, Files, UsersRound, MessageSquare, Shield, Building2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Users, Truck, Package, Warehouse, Settings, ShoppingBag, Landmark, Tags, Factory, Files, UsersRound, MessageSquare, Shield, Building2, Inbox } from 'lucide-react';
 
 import CustomersTab from './admin/CustomersTab';
 import SuppliersTab from './admin/SuppliersTab';
@@ -16,8 +16,11 @@ import WhatsAppTemplatesTab from './admin/WhatsAppTemplatesTab';
 import UsersRolesTab from './admin/UsersRolesTab';
 import PermissionsTab from './admin/PermissionsTab';
 import SettingsTab from './admin/SettingsTab';
+import MasterDataApprovalsTab from './admin/MasterDataApprovalsTab';
+import { adminApi } from '../api/services';
 
 const tabs = [
+  { key: 'approvals', label: 'Approvals', icon: Inbox, badge: 'pendingApprovalsCount' },
   { key: 'customers', label: 'Customers', icon: Users },
   { key: 'suppliers', label: 'Suppliers', icon: Truck },
   { key: 'products', label: 'Products', icon: Package },
@@ -36,6 +39,7 @@ const tabs = [
 ];
 
 const tabComponents = {
+  approvals: MasterDataApprovalsTab,
   customers: CustomersTab,
   suppliers: SuppliersTab,
   products: ProductsTab,
@@ -54,7 +58,24 @@ const tabComponents = {
 };
 
 export default function Admin() {
-  const [activeTab, setActiveTab] = useState('customers');
+  const [activeTab, setActiveTab] = useState('approvals');
+  const [pendingCount, setPendingCount] = useState(0);
+
+  // Poll the approvals count so the badge stays fresh while admins are
+  // on other tabs. 30s is plenty — these submissions are infrequent.
+  useEffect(() => {
+    let alive = true;
+    async function refresh() {
+      try {
+        const res = await adminApi.approvalsCount();
+        const total = res?.data?.total ?? res?.total ?? 0;
+        if (alive) setPendingCount(total);
+      } catch { /* non-critical */ }
+    }
+    refresh();
+    const t = setInterval(refresh, 30000);
+    return () => { alive = false; clearInterval(t); };
+  }, [activeTab]); // re-fetch when leaving/returning to the tab too
 
   const ActiveComponent = tabComponents[activeTab];
 
@@ -69,6 +90,7 @@ export default function Admin() {
       <div className="flex items-center gap-1 border-b border-gray-200 overflow-x-auto whitespace-nowrap">
         {tabs.map(tab => {
           const TabIcon = tab.icon;
+          const showBadge = tab.key === 'approvals' && pendingCount > 0;
           return (
             <button
               key={tab.key}
@@ -81,6 +103,11 @@ export default function Admin() {
             >
               <TabIcon className="w-4 h-4" />
               {tab.label}
+              {showBadge && (
+                <span className="ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-amber-500 text-white text-[10px] font-bold">
+                  {pendingCount > 99 ? '99+' : pendingCount}
+                </span>
+              )}
             </button>
           );
         })}

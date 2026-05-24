@@ -39,6 +39,11 @@ export const adminApi = {
   settings: () => api.get('/api/admin/settings'),
   updateSettings: (data) => api.put('/api/admin/settings', data),
   auditLogs: (params) => api.get('/api/admin/audit-logs', params),
+  // Master-data approvals (quick-add review queue)
+  approvalsList:  (params) => api.get('/api/admin/approvals', params),
+  approvalsCount: () => api.get('/api/admin/approvals/count'),
+  approvalApprove: (type, id) => api.post(`/api/admin/approvals/${type}/${id}/approve`),
+  approvalReject:  (type, id, data) => api.post(`/api/admin/approvals/${type}/${id}/reject`, data),
 };
 export const customersApi = {
   list: (params) => api.get('/api/customers', params),

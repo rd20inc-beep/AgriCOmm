@@ -34,6 +34,9 @@ export const lotInventoryApi = {
   getDataProblems: () => api.get('/api/lot-inventory/data-problems'),
   repairLotCost: (id, data) => api.post(`/api/lot-inventory/repair-lot-cost/${id}`, data),
   getRepairLog: () => api.get('/api/lot-inventory/repair-log'),
+  // Quick-add (pending approval unless user has master_data.approve)
+  quickAddSupplier: (data) => api.post('/api/admin/suppliers/quick-add', data),
+  quickAddProduct:  (data) => api.post('/api/admin/products/quick-add', data),
   // Saved supplier templates (owner-private)
   listTemplates: () => api.get('/api/lot-inventory/templates'),
   createTemplate: (data) => api.post('/api/lot-inventory/templates', data),
