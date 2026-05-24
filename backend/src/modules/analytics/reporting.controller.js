@@ -889,10 +889,29 @@ const reportingController = {
       const { group_by = 'product', status = 'Available' } = req.query;
 
       let groupCol, nameCol;
+      // "Subtype" mirrors the UI's lotSubtype() classification — splits
+      // broken lots by grade and surfaces Sortex Rejects / Rice Bran /
+      // Husk as their own categories, so a single Stock report can
+      // answer "how much B1 do I have, how much B2, how much sortex".
+      const SUBTYPE_EXPR = `
+        CASE
+          WHEN l.type = 'finished' THEN 'Finished Rice'
+          WHEN l.type = 'raw'      THEN 'Incoming Rice'
+          WHEN l.item_name ILIKE '%sortex%' THEN 'Sortex Rejects'
+          WHEN l.item_name ILIKE '%bran%'   THEN 'Rice Bran'
+          WHEN l.item_name ILIKE '%husk%'   THEN 'Rice Husk'
+          WHEN l.item_name ILIKE 'broken%' AND l.grade IN ('B1','B2','B3','CSR','Short Grain')
+            THEN 'Broken ' || l.grade
+          WHEN l.item_name ILIKE 'broken%'  THEN 'Broken (ungraded)'
+          ELSE COALESCE(p.name, l.item_name, '—')
+        END
+      `;
       if (group_by === 'supplier')   { groupCol = 'l.supplier_id';  nameCol = 's.name'; }
       else if (group_by === 'warehouse') { groupCol = 'l.warehouse_id'; nameCol = 'w.name'; }
       else if (group_by === 'variety') { groupCol = 'l.variety';      nameCol = 'l.variety'; }
       else if (group_by === 'type')    { groupCol = 'l.type';         nameCol = 'l.type'; }
+      else if (group_by === 'grade')   { groupCol = 'l.grade';        nameCol = 'l.grade'; }
+      else if (group_by === 'subtype') { groupCol = db.raw(SUBTYPE_EXPR); nameCol = SUBTYPE_EXPR; }
       else                              { groupCol = 'l.product_id';  nameCol = 'p.name'; }
 
       let q = db('inventory_lots as l')

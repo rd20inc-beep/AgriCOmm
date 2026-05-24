@@ -39,11 +39,13 @@ function presetRange(preset) {
 
 
 const STOCK_GROUP_OPTIONS = [
+  { key: 'subtype',   label: 'By Byproduct (B1/B2/Sortex/...)' },
   { key: 'product',   label: 'By Product' },
   { key: 'supplier',  label: 'By Supplier' },
   { key: 'warehouse', label: 'By Warehouse' },
   { key: 'variety',   label: 'By Variety' },
-  { key: 'type',      label: 'By Type' },
+  { key: 'grade',     label: 'By Grade (B1/B2/CSR/...)' },
+  { key: 'type',      label: 'By Type (raw/finished/byproduct)' },
 ];
 
 export default function PrintableReports() {

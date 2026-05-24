@@ -5,7 +5,7 @@ import {
   BarChart3, Search, Bell, ChevronDown,
   User, Settings, X, LogOut, AlertTriangle, AlertCircle, Info,
   FlaskConical, Menu, ArrowRightLeft, ShoppingCart, ClipboardEdit, Gauge,
-  ChevronsLeft, ChevronsRight, Sun, Moon, Truck,
+  ChevronsLeft, ChevronsRight, Sun, Moon, Truck, Printer,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
@@ -30,7 +30,8 @@ const millNav = [
   { section: 'Finance' },
   { label: 'Mill Finance', icon: DollarSign, to: '/milling/finance' },
   { section: 'Reports' },
-  { label: 'Reports', icon: BarChart3, to: '/reports' },
+  { label: 'Dashboards', icon: BarChart3, to: '/reports' },
+  { label: 'Print Reports', icon: Printer, to: '/reports/print' },
 ];
 
 function SidebarLink({ to, icon: Icon, label, collapsed, onNavigate }) {
