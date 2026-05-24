@@ -165,6 +165,10 @@ const createPurchaseLot = Joi.object({
   sortex_status: Joi.string().allow(null, ''),
   whiteness: Joi.string().allow(null, ''),
   quality_notes: Joi.string().allow(null, ''),
+  // Extended quality (B1/B2/B3/Cobba/CSR/NB/OV/chalky/purity/etc.).
+  // Free-form object — sanitizeLotQuality whitelists keys server-side.
+  quality_json: Joi.object().unknown(true).allow(null),
+  quality: Joi.object().unknown(true).allow(null),
   bag_type: Joi.string().allow(null, ''),
   bag_quality: Joi.string().allow(null, ''),
   bag_size_kg: Joi.number().positive().allow(null),
