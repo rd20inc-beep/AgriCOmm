@@ -80,16 +80,42 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
   const sortexMT = pf(batch.sortexRejectsMT || batch.sortex_rejects_mt);
   const branMTval = pf(batch.branMT);
   const huskMTval = pf(batch.huskMT);
+  // Per-grade broken quantities. When any of these is set the cost sheet
+  // shows one row per grade (each with its own price); otherwise it
+  // shows a single aggregate Broken Rice row.
+  const b1MT  = pf(batch.b1MT);
+  const b2MT  = pf(batch.b2MT);
+  const b3MT  = pf(batch.b3MT);
+  const csrMT = pf(batch.csrMT);
+  const sgMT  = pf(batch.shortGrainMT);
+  const usePerGradeBroken = (b1MT + b2MT + b3MT + csrMT + sgMT) > 0;
+  // Fallback when a per-grade price isn't set on the batch: aggregate
+  // broken price → commodity-rate prop → built-in default.
+  const fallbackBrokenRate = rate(batch.brokenPricePerMT, byproductRates.broken);
+  const brokenRows = usePerGradeBroken ? [
+    { type: 'Broken Rice — B1',          key: 'b1',  qty: b1MT,  rate: rate(batch.b1PricePerMT,         fallbackBrokenRate), color: 'bg-amber-500' },
+    { type: 'Broken Rice — B2',          key: 'b2',  qty: b2MT,  rate: rate(batch.b2PricePerMT,         fallbackBrokenRate), color: 'bg-amber-400' },
+    { type: 'Broken Rice — B3',          key: 'b3',  qty: b3MT,  rate: rate(batch.b3PricePerMT,         fallbackBrokenRate), color: 'bg-amber-300' },
+    { type: 'Broken Rice — CSR',         key: 'csr', qty: csrMT, rate: rate(batch.csrPricePerMT,        fallbackBrokenRate), color: 'bg-yellow-500' },
+    { type: 'Broken Rice — Short Grain', key: 'sg',  qty: sgMT,  rate: rate(batch.shortGrainPricePerMT, fallbackBrokenRate), color: 'bg-yellow-400' },
+  ] : [
+    { type: 'Broken Rice', key: 'broken', qty: pf(batch.brokenMT), rate: fallbackBrokenRate, color: 'bg-amber-500' },
+  ];
   const allByproducts = [
-    { type: 'Broken Rice',         key: 'broken', qty: pf(batch.brokenMT), rate: rate(batch.brokenPricePerMT,                                       byproductRates.broken), color: 'bg-amber-500' },
+    ...brokenRows,
     { type: 'Sortex Rejects',      key: 'sortex', qty: sortexMT,           rate: rate(batch.sortexRejectsPricePerMT || batch.sortex_rejects_price_per_mt, byproductRates.sortex), color: 'bg-orange-500' },
     { type: 'Rice Bran (legacy)',  key: 'bran',   qty: branMTval,          rate: rate(batch.branPricePerMT,                                         byproductRates.bran),   color: 'bg-green-500',  legacy: true },
     { type: 'Rice Husk (legacy)',  key: 'husk',   qty: huskMTval,          rate: rate(batch.huskPricePerMT,                                         byproductRates.husk),   color: 'bg-purple-500', legacy: true },
   ];
   const byProducts = allByproducts
-    // Always keep broken + sortex slots so the operator sees the modern
-    // output line-up; drop legacy bran/husk if they're zero on this batch.
-    .filter(bp => !bp.legacy || bp.qty > 0)
+    // Drop legacy bran/husk if they're zero on this batch. Drop per-grade
+    // broken rows that are zero (keeps the sheet tight). Always keep the
+    // aggregate row in non-per-grade mode and always keep Sortex.
+    .filter(bp => {
+      if (bp.legacy) return bp.qty > 0;
+      if (usePerGradeBroken && ['b1','b2','b3','csr','sg'].includes(bp.key)) return bp.qty > 0;
+      return true;
+    })
     .map(bp => ({
       ...bp,
       qtyKG: bp.qty * 1000,

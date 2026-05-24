@@ -265,6 +265,13 @@ export function transformBatch(dbBatch) {
     brokenPricePerMT: parseFloat(dbBatch.broken_price_per_mt) || 0,
     branPricePerMT: parseFloat(dbBatch.bran_price_per_mt) || 0,
     huskPricePerMT: parseFloat(dbBatch.husk_price_per_mt) || 0,
+    sortexRejectsPricePerMT: parseFloat(dbBatch.sortex_rejects_price_per_mt) || 0,
+    // Per-grade broken prices (added in migration 130)
+    b1PricePerMT: parseFloat(dbBatch.b1_price_per_mt) || 0,
+    b2PricePerMT: parseFloat(dbBatch.b2_price_per_mt) || 0,
+    b3PricePerMT: parseFloat(dbBatch.b3_price_per_mt) || 0,
+    csrPricePerMT: parseFloat(dbBatch.csr_price_per_mt) || 0,
+    shortGrainPricePerMT: parseFloat(dbBatch.short_grain_price_per_mt) || 0,
     pricesConfirmed: !!dbBatch.prices_confirmed,
     rawCostTotal: parseFloat(dbBatch.raw_cost_total) || 0,
     rawCostPerKgFinished: parseFloat(dbBatch.raw_cost_per_kg_finished) || 0,
