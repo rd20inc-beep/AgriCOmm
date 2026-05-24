@@ -7,6 +7,9 @@
 const db = require('../../config/database');
 const uc = require('../../services/unitConversion');
 const accountingService = require('../../services/accountingService');
+// Shared lot-number generators — keeps the Purchase Lot drawer and the
+// Add Vehicle flow on the same SUP-VARIETY-YYMMDD-SEQ format.
+const inventoryService = require('./inventory.service');
 
 async function generateTxnNo(trx) {
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -225,8 +228,21 @@ module.exports = {
       // arbitrary payload into the jsonb column.
       const cleanQuality = sanitizeLotQuality(quality_json || quality);
 
-      if (!item_name || !quantity_input || !rate_input) {
-        return res.status(400).json({ success: false, message: 'item_name, quantity_input, and rate_input are required.' });
+      // Field-by-field validation so the operator sees what's missing.
+      const missing = [];
+      if (!item_name)               missing.push('rice type');
+      if (quantity_input == null || quantity_input === '' || !(parseFloat(quantity_input) > 0)) missing.push('weight');
+      if (rate_input == null || rate_input === '' || !(parseFloat(rate_input) > 0))             missing.push('price');
+      // Rice purchase lots must record who they came from — otherwise the
+      // ledger and supplier payables can't reconcile.
+      if (type === 'raw' && entity === 'mill' && !supplier_id) missing.push('supplier');
+      if (type === 'raw' && entity === 'mill' && !product_id)  missing.push('rice type (product)');
+      if (missing.length) {
+        return res.status(400).json({
+          success: false,
+          message: `Please fill in: ${missing.join(', ')}.`,
+          missing,
+        });
       }
 
       const bagWt = parseFloat(bag_weight_kg) || 50;
@@ -256,10 +272,20 @@ module.exports = {
           : 'Pending';
 
       const result = await db.transaction(async (trx) => {
-        // Generate lot number
-        const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-        const cnt = await trx('inventory_lots').count('id as c').first();
-        const lotNo = `LOT-${today}-${String((cnt?.c || 0) + 1).padStart(4, '0')}`;
+        // Generate lot number. Rice lots received at the mill get the
+        // SUP-VARIETY-YYMMDD-SEQ format (matches receiveRice); everything
+        // else falls back to the legacy LOT-YYYYMMDD-XXXX so old
+        // workflows (finished goods, byproducts) stay consistent.
+        let lotNo;
+        if (type === 'raw' && entity === 'mill' && supplier_id && product_id) {
+          lotNo = await inventoryService.generateRiceLotNo(trx, {
+            supplierId: parseInt(supplier_id, 10),
+            productId: parseInt(product_id, 10),
+            date: purchase_date,
+          });
+        } else {
+          lotNo = await inventoryService.generateLotNo(trx);
+        }
 
         // warehouse_id is NOT NULL on inventory_lots — resolve a sensible
         // default based on type/entity if the wizard didn't supply one.

@@ -189,6 +189,8 @@ export default function PurchaseLotDrawer({
       }
       const moisturePct = quality.moisture ?? null;
       const brokenPct = quality.broken ?? null;
+      // Backend createPurchaseLot expects quantity_input + quantity_unit
+      // and rate_input + rate_unit. We work in kg + per-kg internally.
       await createMut.mutateAsync({
         item_name: itemName,
         type: 'raw',
@@ -205,10 +207,13 @@ export default function PurchaseLotDrawer({
         sortex_status: null,
         // Everything else (B1/B2/B3/Cobba/CSR/NB/OV/chalky/purity/...) lands in jsonb
         quality_json: Object.keys(quality).length ? quality : null,
-        weight_kg: weightKg,
+        // Quantity in kilograms
+        quantity_input: weightKg,
+        quantity_unit: 'kg',
+        bag_weight_kg: avgBagKg > 0 ? avgBagKg : (bags > 0 ? weightKg / bags : 50),
         total_bags: bags || null,
-        bag_weight_kg: avgBagKg > 0 ? avgBagKg : null,
-        rate_input: String(ratePerKg),
+        // Rate per kilogram
+        rate_input: ratePerKg,
         rate_unit: 'kg',
         notes: form.notes || null,
       });
