@@ -275,7 +275,7 @@ export default function LotInventory() {
         <EmptyState icon={Package} title="No lots found" description="Create a purchase lot to get started." />
       ) : (
         <div className="table-container">
-          <div className="table-scroll">
+          <div className="table-scroll relative">
             <table className="w-full">
               <thead>
                 <tr>
@@ -286,12 +286,13 @@ export default function LotInventory() {
                   <th className="text-left">Warehouse</th>
                   <th className="text-right">Stock ({getUnitLabel()})</th>
                   <th className="text-right">Available</th>
-                  <th className="text-right">Rate/KG</th>
                   <th className="text-right">Landed/KG</th>
                   <th className="text-right">Value</th>
                   <th className="text-center">Quality</th>
                   <th className="text-center">Status</th>
-                  <th className="text-center">Actions</th>
+                  {/* Actions sticks to the right edge so the Eye icon
+                      is always visible without horizontal scrolling. */}
+                  <th className="text-center sticky right-0 bg-white shadow-[inset_1px_0_0_rgba(0,0,0,0.06)] z-10">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -299,55 +300,58 @@ export default function LotInventory() {
                   const netKg = parseFloat(lot.netWeightKg) || parseFloat(lot.qty) * 1000 || 0;
                   const availKg = (parseFloat(lot.availableQty) || 0) * 1000;
                   const bw = parseFloat(lot.bagWeightKg) || 50;
+                  // Variety / grade row beneath the item name — but only
+                  // when it adds new info. The recent rice-purchase flow
+                  // sets itemName = product.name AND variety =
+                  // product.name when the SKU code is auto-generated, so
+                  // showing both is pure noise. Compare case-insensitively
+                  // and treat equal-or-contained strings as redundant.
+                  const variety = lot.variety || lot.productCode || lot.productName || null;
+                  const grade = lot.grade;
+                  const itemLower = (lot.itemName || '').toLowerCase();
+                  const varLower = (variety || '').toLowerCase();
+                  const varIsRedundant = !variety || varLower === itemLower
+                    || itemLower.includes(varLower) || varLower.includes(itemLower);
                   return (
-                    <tr key={lot.id} className="cursor-pointer" onClick={() => navigate(`/lot-inventory/${lot.lotNo || lot.id}`)}>
-                      <td className="font-medium text-blue-600">{lot.lotNo}</td>
+                    <tr key={lot.id} className="cursor-pointer hover:bg-gray-50 group" onClick={() => navigate(`/lot-inventory/${lot.lotNo || lot.id}`)}>
+                      <td className="font-medium text-blue-600 whitespace-nowrap">{lot.lotNo}</td>
                       <td>
                         {(() => {
                           const s = lotSubtype(lot);
                           return (
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ${subtypeBadgeClass(s)}`}>
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium whitespace-nowrap ${subtypeBadgeClass(s)}`}>
                               {subtypeLabel(s)}
                             </span>
                           );
                         })()}
                       </td>
-                      <td>
-                        <div className="text-gray-900 font-medium">{lot.itemName}</div>
-                        {(() => {
-                          // Variety stamped on the lot wins; otherwise fall
-                          // back to the joined product code/name so the
-                          // rice type (D98, Basmati 386, …) always shows.
-                          const variety = lot.variety || lot.productCode || lot.productName || null;
-                          const grade = lot.grade;
-                          if (!variety && !grade) return null;
-                          return (
-                            <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
-                              {variety && (
-                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700">
-                                  {variety}
-                                </span>
-                              )}
-                              {grade && <span className="text-gray-400">({grade})</span>}
-                            </div>
-                          );
-                        })()}
+                      <td className="max-w-[16rem]">
+                        <div className="text-gray-900 font-medium truncate" title={lot.itemName}>{lot.itemName}</div>
+                        {(!varIsRedundant || grade) && (
+                          <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
+                            {!varIsRedundant && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 truncate max-w-[10rem]" title={variety}>
+                                {variety}
+                              </span>
+                            )}
+                            {grade && <span className="text-gray-400">({grade})</span>}
+                          </div>
+                        )}
                       </td>
-                      <td className="text-gray-600">{lot.supplierName || '—'}</td>
-                      <td className="text-gray-600 text-xs">{lot.warehouseName || '—'}</td>
+                      <td className="text-gray-600 max-w-[10rem] truncate" title={lot.supplierName || ''}>{lot.supplierName || '—'}</td>
+                      <td className="text-gray-600 text-xs max-w-[8rem] truncate" title={lot.warehouseName || ''}>{lot.warehouseName || '—'}</td>
                       <td className="text-right font-medium tabular-nums">{fromKg(netKg, displayUnit, bw).toLocaleString()}</td>
                       <td className="text-right tabular-nums text-emerald-600 font-medium">{fromKg(availKg, displayUnit, bw).toLocaleString()}</td>
-                      <td className="text-right tabular-nums text-xs">{fmtPKR(lot.ratePerKg)}</td>
                       <td className="text-right tabular-nums text-xs font-medium">{fmtPKR(lot.landedCostPerKg)}</td>
                       <td className="text-right tabular-nums font-medium">{fmtPKR(lot.landedCostTotal)}</td>
                       <td className="text-center">
-                        <div className="flex items-center justify-center gap-1 text-xs">
+                        <div className="flex items-center justify-center gap-1 text-xs whitespace-nowrap">
                           {lot.moisturePct && <span className="text-blue-600" title="Moisture">{lot.moisturePct}%M</span>}
                           {lot.brokenPct && <span className="text-amber-600" title="Broken">{lot.brokenPct}%B</span>}
                         </div>
                       </td>
                       <td className="text-center"><StatusBadge status={lot.status} /></td>
-                      <td className="text-center">
+                      <td className="text-center sticky right-0 bg-white group-hover:bg-gray-50 shadow-[inset_1px_0_0_rgba(0,0,0,0.06)] z-10">
                         <button onClick={e => { e.stopPropagation(); navigate(`/lot-inventory/${lot.lotNo || lot.id}`); }} className="btn btn-ghost btn-sm">
                           <Eye className="w-4 h-4" />
                         </button>
