@@ -1183,13 +1183,34 @@ module.exports = {
         });
 
         // Back-fill batch_id on any lot-attached vehicles so the batch
-        // page picks them up automatically.
-        await trx('milling_vehicle_arrivals')
+        // page picks them up automatically. Capture the row count so
+        // the UI can confirm to the operator how many trucks were
+        // carried over.
+        const inheritedRows = await trx('milling_vehicle_arrivals')
           .where({ lot_id: lot.id })
           .whereNull('batch_id')
-          .update({ batch_id: batch.id });
+          .update({ batch_id: batch.id })
+          .returning('id');
+        const inheritedVehicles = Array.isArray(inheritedRows) ? inheritedRows.length : 0;
 
-        return { batch, lot, passNumber, parentBatchId };
+        // Roll the lot's total received weight up to the batch — same
+        // truth-from-the-scale rule we use in receiveRice. Skip if the
+        // operator already supplied an override.
+        if (!overrideQty) {
+          const totals = await trx('milling_vehicle_arrivals')
+            .where({ batch_id: batch.id })
+            .sum('weight_mt as total').first();
+          const actualReceived = parseFloat(totals?.total) || 0;
+          if (actualReceived > 0 && actualReceived !== rawQtyMT) {
+            await trx('milling_batches').where({ id: batch.id }).update({
+              raw_qty_mt: actualReceived,
+              updated_at: trx.fn.now(),
+            });
+            batch.raw_qty_mt = actualReceived;
+          }
+        }
+
+        return { batch, lot, passNumber, parentBatchId, inheritedVehicles };
       });
 
       return res.status(201).json({ success: true, data: result });

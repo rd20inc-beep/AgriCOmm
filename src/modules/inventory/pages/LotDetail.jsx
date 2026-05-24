@@ -1293,18 +1293,29 @@ function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
   const isReMill = lot?.type === 'finished';
   const [form, setForm] = useState({ mill_id: '', machine_line: '', shift: 'Day', milling_fee_per_kg: '', notes: '' });
   const [mills, setMills] = useState([]);
+  const [vehicles, setVehicles] = useState([]);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
     setForm({ mill_id: '', machine_line: '', shift: 'Day', milling_fee_per_kg: '', notes: '' });
-    // Load mills lazily so the page open isn't blocked
+    setVehicles([]);
+    // Load mills + vehicles lazily so the page open isn't blocked
     api.get('/api/milling/mills').then(res => {
       setMills(res?.data?.mills || res?.mills || []);
     }).catch(() => { /* non-critical */ });
-  }, [isOpen]);
+    if (lot?.id) {
+      lotInventoryApi.listLotVehicles(lot.id)
+        .then(res => setVehicles(res?.data?.vehicles || res?.vehicles || []))
+        .catch(() => { /* non-critical */ });
+    }
+  }, [isOpen, lot?.id]);
 
   const availableMT = parseFloat(lot?.availableQty) || 0;
+  // Vehicles that will be carried into the new batch — i.e. attached to
+  // the lot but not yet routed into any other batch.
+  const inheritableVehicles = vehicles.filter(v => !v.batch_id);
+  const inheritedMT = inheritableVehicles.reduce((s, v) => s + (parseFloat(v.weight_mt) || 0), 0);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -1322,8 +1333,12 @@ function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
         notes: form.notes.trim() || null,
       });
       const data = res?.data || res;
+      const inherited = data?.inheritedVehicles || 0;
+      const vehicleNote = inherited > 0
+        ? ` · ${inherited} vehicle${inherited === 1 ? '' : 's'} attached`
+        : '';
       addToast?.(
-        `Milling batch ${data?.batch?.batch_no || ''} created (pass ${data?.passNumber || 1})`,
+        `Milling batch ${data?.batch?.batch_no || ''} created (pass ${data?.passNumber || 1})${vehicleNote}`,
         'success'
       );
       onStarted?.(data?.batch);
@@ -1348,8 +1363,44 @@ function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
             <>
               <strong>First pass.</strong> {lot.itemName}{lot.variety ? ` (${lot.variety})` : ''} —
               {' '}<span className="font-medium">{availableMT.toFixed(2)} MT available</span>.
-              Any vehicles attached to this lot will move into the new batch.
             </>
+          )}
+        </div>
+
+        {/* Vehicles preview — shows exactly what will be carried into
+            the new batch. inheritableVehicles = lot vehicles not yet
+            attached to any other batch. */}
+        <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-xs font-semibold uppercase tracking-wide text-gray-600 flex items-center gap-1.5">
+              <Truck className="w-3.5 h-3.5" />
+              Vehicles to attach ({inheritableVehicles.length})
+            </span>
+            {inheritedMT > 0 && (
+              <span className="text-[11px] text-gray-500">{inheritedMT.toFixed(2)} MT total</span>
+            )}
+          </div>
+          {inheritableVehicles.length === 0 ? (
+            <p className="text-xs text-gray-500">
+              No vehicles attached to this lot yet — add them on the Lot Detail page if you want them on the batch sheet.
+            </p>
+          ) : (
+            <ul className="text-xs text-gray-700 space-y-0.5">
+              {inheritableVehicles.slice(0, 6).map(v => (
+                <li key={v.id} className="flex items-center justify-between">
+                  <span className="font-mono">
+                    {v.vehicle_no || '—'}
+                    {v.driver_name && <span className="text-gray-500 ml-1.5">· {v.driver_name}</span>}
+                  </span>
+                  <span className="text-gray-500 tabular-nums">
+                    {parseFloat(v.weight_mt || 0).toFixed(2)} MT
+                  </span>
+                </li>
+              ))}
+              {inheritableVehicles.length > 6 && (
+                <li className="text-gray-400 italic">+ {inheritableVehicles.length - 6} more</li>
+              )}
+            </ul>
           )}
         </div>
 
