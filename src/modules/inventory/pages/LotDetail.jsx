@@ -901,11 +901,8 @@ export default function LotDetail() {
         }}
       />
 
-      {/* Costing Sheet Modal */}
+      {/* Costing Sheet Modal — Print button lives inside LotCostSheet */}
       <Modal isOpen={showCostSheet} onClose={() => setShowCostSheet(false)} title={`Costing Sheet — ${lot.lotNo}`} size="xl">
-        <div className="flex justify-end mb-3">
-          <button onClick={() => window.print()} className="btn btn-sm btn-secondary"><FileText className="w-3.5 h-3.5" /> Print</button>
-        </div>
         <LotCostSheet lot={lot} companyProfile={companyProfileData} linkedBatch={linkedBatch} transactions={transactions} sales={lotSales} />
       </Modal>
     </div>

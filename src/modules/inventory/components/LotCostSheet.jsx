@@ -28,6 +28,23 @@ ${headHtml}
     font-family: Inter, system-ui, sans-serif;
     -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .lot-cost-sheet { width: 100%; }
+  /* Keep each major panel and each table intact across page boundaries
+     where the page is tall enough. Browsers honour this as a hint —
+     they'll still split when a single block exceeds one page. */
+  .lot-cost-sheet > div,
+  .lot-cost-sheet table,
+  .lot-cost-sheet tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  /* When a table does split, repeat its header on the next page */
+  .lot-cost-sheet thead { display: table-header-group; }
+  .lot-cost-sheet tfoot { display: table-footer-group; }
+  /* Don't strand a heading at the bottom of a page */
+  .lot-cost-sheet h1, .lot-cost-sheet h2, .lot-cost-sheet h3 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
 </style>
 </head><body>${node.outerHTML}</body></html>`);
   win.document.close();

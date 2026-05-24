@@ -43,6 +43,23 @@ ${headHtml}
   html, body { margin: 0; padding: 0; background: white;
     font-family: Inter, system-ui, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .cost-sheet { width: 100%; }
+  /* Keep each major panel and each table intact across page boundaries
+     where the page is tall enough. Browsers honour this as a hint —
+     they'll still split when a single block exceeds one page. */
+  .cost-sheet > div,
+  .cost-sheet table,
+  .cost-sheet tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  /* When a table does split, repeat its header on the next page */
+  .cost-sheet thead { display: table-header-group; }
+  .cost-sheet tfoot { display: table-footer-group; }
+  /* Don't strand a heading at the bottom of a page */
+  .cost-sheet h1, .cost-sheet h2, .cost-sheet h3 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
 </style>
 </head>
 <body>${node.outerHTML}</body>
