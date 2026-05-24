@@ -21,6 +21,28 @@ import { useCreatePurchaseLot } from '../../../api/queries';
  * the user has master_data.approve) and remain usable immediately.
  */
 
+// Grade percentages mirroring the milling quality sample sheet. Keep in
+// one list so the form, payload, and total all stay in sync.
+const QUALITY_FIELDS = [
+  // Aggregate breakdown (always shown)
+  { key: 'moisture',       label: 'Moisture %',       group: 'aggregate' },
+  { key: 'broken',         label: 'Broken %',         group: 'aggregate' },
+  { key: 'foreign_matter', label: 'Foreign matter %', group: 'aggregate' },
+  { key: 'chalky',         label: 'Chalky %',         group: 'aggregate' },
+  { key: 'purity',         label: 'Purity %',         group: 'aggregate' },
+  // Pakistani grade breakdown
+  { key: 'b1',             label: 'B1 %',             group: 'grade' },
+  { key: 'b2',             label: 'B2 %',             group: 'grade' },
+  { key: 'b3',             label: 'B3 %',             group: 'grade' },
+  { key: 'csr',            label: 'CSR %',            group: 'grade' },
+  { key: 'short_grain',    label: 'Short Grain %',    group: 'grade' },
+  { key: 'cobba',          label: 'Cobba %',          group: 'grade' },
+  { key: 'nb',             label: 'N.B %',            group: 'grade' },
+  { key: 'ov',             label: 'O.V %',            group: 'grade' },
+];
+
+const emptyQuality = () => QUALITY_FIELDS.reduce((acc, f) => ({ ...acc, [f.key]: '' }), {});
+
 const defaultForm = () => ({
   supplier_id: '',
   product_id: '',
@@ -29,10 +51,8 @@ const defaultForm = () => ({
   price_per_mt: '',
   purchase_date: new Date().toISOString().slice(0, 10),
   warehouse_id: '',
-  moisture_pct: '',
-  broken_pct: '',
-  foreign_matter_pct: '',
   notes: '',
+  quality: emptyQuality(),
 });
 
 export default function PurchaseLotDrawer({
@@ -159,6 +179,16 @@ export default function PurchaseLotDrawer({
       const product = selectedProduct;
       const itemName = product?.name || 'Rice';
       const variety = product?.code || product?.name || null;
+      // Build the quality payload — strip empty strings, parse numbers.
+      const quality = {};
+      for (const f of QUALITY_FIELDS) {
+        const v = form.quality?.[f.key];
+        if (v !== '' && v != null && !Number.isNaN(parseFloat(v))) {
+          quality[f.key] = parseFloat(v);
+        }
+      }
+      const moisturePct = quality.moisture ?? null;
+      const brokenPct = quality.broken ?? null;
       await createMut.mutateAsync({
         item_name: itemName,
         type: 'raw',
@@ -169,9 +199,12 @@ export default function PurchaseLotDrawer({
         purchase_date: form.purchase_date,
         variety,
         grade: product?.grade || null,
-        moisture_pct: form.moisture_pct ? parseFloat(form.moisture_pct) : null,
-        broken_pct: form.broken_pct ? parseFloat(form.broken_pct) : null,
+        // Authoritative shortlist still goes on the dedicated columns
+        moisture_pct: moisturePct,
+        broken_pct: brokenPct,
         sortex_status: null,
+        // Everything else (B1/B2/B3/Cobba/CSR/NB/OV/chalky/purity/...) lands in jsonb
+        quality_json: Object.keys(quality).length ? quality : null,
         weight_kg: weightKg,
         total_bags: bags || null,
         bag_weight_kg: avgBagKg > 0 ? avgBagKg : null,
@@ -491,21 +524,13 @@ export default function PurchaseLotDrawer({
             <span className="text-xs text-gray-400 font-normal">— quality, warehouse, notes</span>
           </button>
           {showMore && (
-            <div className="mt-3 space-y-3">
-              <div className="grid grid-cols-3 gap-3">
-                <Input label="Moisture %" type="number" step="0.01" min="0" max="100"
-                  value={form.moisture_pct}
-                  onChange={(v) => setForm(prev => ({ ...prev, moisture_pct: v }))}
-                  placeholder="e.g. 12.5" />
-                <Input label="Broken %" type="number" step="0.01" min="0" max="100"
-                  value={form.broken_pct}
-                  onChange={(v) => setForm(prev => ({ ...prev, broken_pct: v }))}
-                  placeholder="e.g. 3.2" />
-                <Input label="Foreign matter %" type="number" step="0.01" min="0" max="100"
-                  value={form.foreign_matter_pct}
-                  onChange={(v) => setForm(prev => ({ ...prev, foreign_matter_pct: v }))}
-                  placeholder="e.g. 0.5" />
-              </div>
+            <div className="mt-3 space-y-4">
+              <QualityPanel
+                form={form}
+                onChange={(key, value) =>
+                  setForm(prev => ({ ...prev, quality: { ...prev.quality, [key]: value } }))
+                }
+              />
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Warehouse</label>
@@ -536,6 +561,75 @@ export default function PurchaseLotDrawer({
 }
 
 // ─────────── Small helpers ───────────
+
+/**
+ * Quality panel — matches the milling quality sample sheet:
+ *   - Aggregate: moisture, broken, chalky, foreign matter, purity
+ *   - Pakistani grade: B1, B2, B3, CSR, Short Grain, Cobba, N.B, O.V
+ * Live total of the grade % so the operator sees if breakdown sums to broken%.
+ */
+function QualityPanel({ form, onChange }) {
+  const q = form.quality || {};
+  const aggregate = QUALITY_FIELDS.filter(f => f.group === 'aggregate');
+  const grades    = QUALITY_FIELDS.filter(f => f.group === 'grade');
+  const gradeTotal = grades.reduce((s, f) => s + (parseFloat(q[f.key]) || 0), 0);
+  const brokenPct  = parseFloat(q.broken) || 0;
+  const sumMatch = brokenPct > 0 && gradeTotal > 0
+    ? Math.abs(gradeTotal - brokenPct) < 0.1
+    : null;
+  return (
+    <div className="space-y-3">
+      <div>
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Quality</p>
+        <div className="grid grid-cols-5 gap-2">
+          {aggregate.map(f => (
+            <PctInput key={f.key} label={f.label}
+              value={q[f.key] ?? ''}
+              onChange={(v) => onChange(f.key, v)} />
+          ))}
+        </div>
+      </div>
+      <div>
+        <div className="flex items-center justify-between mb-1.5">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Broken-grade breakdown</p>
+          {gradeTotal > 0 && (
+            <span className={`text-[10px] font-medium ${
+              sumMatch === true ? 'text-emerald-700' :
+              sumMatch === false ? 'text-amber-700' : 'text-gray-500'
+            }`}>
+              Σ = {gradeTotal.toFixed(2)}%
+              {sumMatch === false && brokenPct > 0 && (
+                <span className="ml-1">(broken total: {brokenPct.toFixed(2)}%)</span>
+              )}
+            </span>
+          )}
+        </div>
+        <div className="grid grid-cols-4 gap-2">
+          {grades.map(f => (
+            <PctInput key={f.key} label={f.label}
+              value={q[f.key] ?? ''}
+              onChange={(v) => onChange(f.key, v)} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PctInput({ label, value, onChange }) {
+  return (
+    <div>
+      <label className="block text-[11px] font-medium text-gray-600 mb-0.5">{label}</label>
+      <input
+        type="number" step="0.01" min="0" max="100"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="0"
+        className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+      />
+    </div>
+  );
+}
 
 function Input({ label, value, onChange, hint, type = 'text', autoFocus, ...rest }) {
   return (

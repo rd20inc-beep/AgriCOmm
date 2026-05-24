@@ -14,6 +14,36 @@ async function generateTxnNo(trx) {
   return `TXN-${today}-${String((count?.c || 0) + 1).padStart(4, '0')}`;
 }
 
+// Whitelist + coerce the extended quality payload for inventory_lots.quality_json.
+// Numeric percentages are clamped to 0–100 implicitly by parseFloat; keys are
+// fixed so the jsonb column can't be polluted with arbitrary data.
+const LOT_QUALITY_KEYS = [
+  // Percentages from the milling quality sample sheet
+  'moisture', 'broken', 'chalky', 'foreign_matter', 'discoloration',
+  'purity', 'grain_size', 'whiteness',
+  // Pakistani grade breakdown
+  'b1', 'b2', 'b3', 'csr', 'short_grain', 'cobba', 'nb', 'ov',
+  // Price (optional — for arrival pricing override)
+  'price_per_mt', 'price_per_kg',
+  // Free text
+  'notes',
+];
+function sanitizeLotQuality(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const out = {};
+  for (const k of LOT_QUALITY_KEYS) {
+    const v = raw[k];
+    if (v == null || v === '') continue;
+    if (k === 'notes') {
+      out[k] = String(v).slice(0, 500);
+    } else {
+      const n = parseFloat(v);
+      if (!Number.isNaN(n)) out[k] = n;
+    }
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 async function generatePayNo(trx) {
   // Only consider the bare PAY-NNN namespace used by lot payables.
   // Other sequences (PAY-EXP*, PAY-MS*, PAY-EOC*) live in payables too
@@ -175,6 +205,9 @@ module.exports = {
         item_name, type = 'raw', entity = 'mill', warehouse_id, product_id,
         supplier_id, broker_id, purchase_date, crop_year,
         variety, grade, moisture_pct, broken_pct, sortex_status, whiteness, quality_notes,
+        // Extended quality (B1/B2/B3/Cobba/CSR/NB/OV percentages, etc.).
+        // Stored as jsonb so we can add fields without further migrations.
+        quality, quality_json,
         bag_type, bag_quality, bag_size_kg, bag_weight_gm, bag_color,
         bag_cost_per_bag, bag_cost_included,
         // Quantity — user enters in chosen unit
@@ -187,6 +220,10 @@ module.exports = {
         total_bags: inputTotalBags,
         notes, payment_status = 'Pending',
       } = req.body;
+
+      // Whitelist + coerce extended quality keys so callers can't shove
+      // arbitrary payload into the jsonb column.
+      const cleanQuality = sanitizeLotQuality(quality_json || quality);
 
       if (!item_name || !quantity_input || !rate_input) {
         return res.status(400).json({ success: false, message: 'item_name, quantity_input, and rate_input are required.' });
@@ -308,6 +345,7 @@ module.exports = {
           sortex_status: sortex_status || null,
           whiteness: whiteness || null,
           quality_notes: quality_notes || null,
+          quality_json: cleanQuality,
           // Bags
           bag_type: bag_type || null,
           bag_quality: bag_quality || null,

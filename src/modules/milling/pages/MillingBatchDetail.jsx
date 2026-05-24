@@ -121,8 +121,10 @@ export default function MillingBatchDetail() {
     vehicleNo: '', driverName: '', driverPhone: '',
     weightKg: '', totalBags: '',
     arrivalDate: new Date().toISOString().split('T')[0], notes: '',
-    // Per-truck quality (optional)
-    moisture: '', broken: '', foreignMatter: '', pricePerMT: '',
+    // Per-truck quality (optional) — full Pakistani grade sheet
+    moisture: '', broken: '', foreignMatter: '', chalky: '', purity: '',
+    b1: '', b2: '', b3: '', csr: '', shortGrain: '', cobba: '', nb: '', ov: '',
+    pricePerMT: '',
   });
   const [showVehicleQuality, setShowVehicleQuality] = useState(false);
 
@@ -376,10 +378,19 @@ export default function MillingBatchDetail() {
       const kg = parseFloat(vehicleForm.weightKg) || 0;
       const bags = parseInt(vehicleForm.totalBags, 10) || 0;
       const quality = {};
-      if (vehicleForm.moisture !== '') quality.moisture = parseFloat(vehicleForm.moisture);
-      if (vehicleForm.broken !== '') quality.broken = parseFloat(vehicleForm.broken);
-      if (vehicleForm.foreignMatter !== '') quality.foreign_matter = parseFloat(vehicleForm.foreignMatter);
-      if (vehicleForm.pricePerMT !== '') quality.price_per_mt = parseFloat(vehicleForm.pricePerMT);
+      const QMAP = {
+        moisture: 'moisture', broken: 'broken', foreignMatter: 'foreign_matter',
+        chalky: 'chalky', purity: 'purity',
+        b1: 'b1', b2: 'b2', b3: 'b3', csr: 'csr', shortGrain: 'short_grain',
+        cobba: 'cobba', nb: 'nb', ov: 'ov',
+        pricePerMT: 'price_per_mt',
+      };
+      for (const [src, dst] of Object.entries(QMAP)) {
+        const v = vehicleForm[src];
+        if (v !== '' && v != null && !Number.isNaN(parseFloat(v))) {
+          quality[dst] = parseFloat(v);
+        }
+      }
       await addVehicleMut.mutateAsync({
         id: batchId,
         data: {
@@ -401,7 +412,9 @@ export default function MillingBatchDetail() {
     setVehicleForm({
       vehicleNo: '', driverName: '', driverPhone: '', weightKg: '', totalBags: '',
       arrivalDate: new Date().toISOString().split('T')[0], notes: '',
-      moisture: '', broken: '', foreignMatter: '', pricePerMT: '',
+      moisture: '', broken: '', foreignMatter: '', chalky: '', purity: '',
+      b1: '', b2: '', b3: '', csr: '', shortGrain: '', cobba: '', nb: '', ov: '',
+      pricePerMT: '',
     });
     setShowVehicleQuality(false);
     setShowVehicleModal(false);
@@ -1790,50 +1803,82 @@ export default function MillingBatchDetail() {
               Quality (this truck)
               <span className="text-xs text-gray-400 font-normal">— optional, overrides batch arrival price for this lot</span>
             </button>
-            {showVehicleQuality && (
-              <div className="grid grid-cols-2 gap-4 mt-3">
+            {showVehicleQuality && (() => {
+              const setQ = (key) => (e) => setVehicleForm(prev => ({ ...prev, [key]: e.target.value }));
+              const pctInput = (key, label) => (
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Moisture %</label>
+                  <label className="block text-[11px] font-medium text-gray-600 mb-0.5">{label}</label>
                   <input
                     type="number" step="0.01" min="0" max="100"
-                    value={vehicleForm.moisture}
-                    onChange={(e) => setVehicleForm(prev => ({ ...prev, moisture: e.target.value }))}
-                    placeholder="e.g. 12.5"
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    value={vehicleForm[key]}
+                    onChange={setQ(key)}
+                    placeholder="0"
+                    className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Broken %</label>
-                  <input
-                    type="number" step="0.01" min="0" max="100"
-                    value={vehicleForm.broken}
-                    onChange={(e) => setVehicleForm(prev => ({ ...prev, broken: e.target.value }))}
-                    placeholder="e.g. 3.2"
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
+              );
+              const gradeTotal =
+                (parseFloat(vehicleForm.b1) || 0) + (parseFloat(vehicleForm.b2) || 0) +
+                (parseFloat(vehicleForm.b3) || 0) + (parseFloat(vehicleForm.csr) || 0) +
+                (parseFloat(vehicleForm.shortGrain) || 0) + (parseFloat(vehicleForm.cobba) || 0) +
+                (parseFloat(vehicleForm.nb) || 0) + (parseFloat(vehicleForm.ov) || 0);
+              const brokenPct = parseFloat(vehicleForm.broken) || 0;
+              const sumMatch = brokenPct > 0 && gradeTotal > 0
+                ? Math.abs(gradeTotal - brokenPct) < 0.1
+                : null;
+              return (
+                <div className="space-y-3 mt-3">
+                  <div>
+                    <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Aggregate</p>
+                    <div className="grid grid-cols-5 gap-2">
+                      {pctInput('moisture',      'Moisture %')}
+                      {pctInput('broken',        'Broken %')}
+                      {pctInput('foreignMatter', 'Foreign matter %')}
+                      {pctInput('chalky',        'Chalky %')}
+                      {pctInput('purity',        'Purity %')}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Broken-grade breakdown</p>
+                      {gradeTotal > 0 && (
+                        <span className={`text-[10px] font-medium ${
+                          sumMatch === true ? 'text-emerald-700' :
+                          sumMatch === false ? 'text-amber-700' : 'text-gray-500'
+                        }`}>
+                          Σ = {gradeTotal.toFixed(2)}%
+                          {sumMatch === false && brokenPct > 0 && (
+                            <span className="ml-1">(broken: {brokenPct.toFixed(2)}%)</span>
+                          )}
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-4 gap-2">
+                      {pctInput('b1',         'B1 %')}
+                      {pctInput('b2',         'B2 %')}
+                      {pctInput('b3',         'B3 %')}
+                      {pctInput('csr',        'CSR %')}
+                      {pctInput('shortGrain', 'Short Grain %')}
+                      {pctInput('cobba',      'Cobba %')}
+                      {pctInput('nb',         'N.B %')}
+                      {pctInput('ov',         'O.V %')}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 pt-1 border-t border-gray-200">
+                    <div>
+                      <label className="block text-[11px] font-medium text-gray-600 mb-0.5">Price / MT (PKR)</label>
+                      <input
+                        type="number" step="1" min="0"
+                        value={vehicleForm.pricePerMT}
+                        onChange={setQ('pricePerMT')}
+                        placeholder="e.g. 95000"
+                        className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                      />
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Foreign Matter %</label>
-                  <input
-                    type="number" step="0.01" min="0" max="100"
-                    value={vehicleForm.foreignMatter}
-                    onChange={(e) => setVehicleForm(prev => ({ ...prev, foreignMatter: e.target.value }))}
-                    placeholder="e.g. 0.5"
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Price / MT (PKR)</label>
-                  <input
-                    type="number" step="1" min="0"
-                    value={vehicleForm.pricePerMT}
-                    onChange={(e) => setVehicleForm(prev => ({ ...prev, pricePerMT: e.target.value }))}
-                    placeholder="e.g. 95000"
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
 
           <div className="flex justify-end gap-3 pt-2">
