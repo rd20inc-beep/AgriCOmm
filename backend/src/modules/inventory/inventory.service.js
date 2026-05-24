@@ -99,11 +99,51 @@ function resolveReferenceModule({ orderId, batchId, transferId, sourceEntity }) 
   return sourceEntity || null;
 }
 
+// Pull the first run of [A-Z0-9] from a string, uppercased. e.g.
+// "Ahmed Traders Ltd." -> "AHMEDTRADERSLTD". Caller slices to length.
+function alnumUpper(s) {
+  return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+// Build a 3-4 char code from a supplier name, growing to 6 chars on
+// collision with another supplier that shares the same prefix.
+async function deriveSupplierCode(q, table, id, fallback) {
+  if (!id) return fallback;
+  const row = await q(table).where({ id }).first('name');
+  const base = alnumUpper(row && row.name);
+  if (!base) return fallback;
+  // Start at 3 chars, grow if another supplier with a different id maps
+  // to the same prefix.
+  for (let len = 3; len <= 6; len++) {
+    const candidate = base.slice(0, len);
+    const dup = await q(table)
+      .whereRaw('UPPER(REGEXP_REPLACE(name, ?, ?, ?)) LIKE ?', ['[^A-Za-z0-9]', '', 'g', `${candidate}%`])
+      .andWhereNot({ id })
+      .first('id');
+    if (!dup) return candidate;
+  }
+  return base.slice(0, 6);
+}
+
+// Variety code = products.code if set, else first 3-6 alnum chars of name.
+async function deriveProductCode(q, productId) {
+  if (!productId) return 'RAW';
+  const p = await q('products').where({ id: productId }).first('code', 'name');
+  if (p && p.code) {
+    const c = alnumUpper(p.code);
+    if (c) return c.slice(0, 8);
+  }
+  const fromName = alnumUpper(p && p.name);
+  return fromName.slice(0, 6) || 'RAW';
+}
+
 const inventoryService = {
   MOVEMENT_TYPES,
 
   /**
    * Generate a unique lot number: LOT-YYYYMMDD-XXXX
+   * Legacy format — used for non-rice lots (finished output, byproducts, etc.).
+   * Rice purchase lots use generateRiceLotNo() instead.
    */
   async generateLotNo(trx) {
     const today = new Date();
@@ -130,6 +170,52 @@ const inventoryService = {
     }
 
     return `${prefix}${String(seq).padStart(4, '0')}`;
+  },
+
+  /**
+   * Generate a rice purchase lot number: SUP-VARIETY-YYMMDD-SEQ
+   * e.g. AHM-D98-260524-01
+   *
+   * The mill receives already-milled (finished) rice and treats it as
+   * raw material for its own processing/grading. The lot number is
+   * keyed on supplier + variety + date so multiple trucks of the same
+   * rice on the same day share one lot.
+   *
+   * SUP     = first 3-4 alphanumeric chars of supplier name, uppercased.
+   *           If two suppliers collapse to the same code, the longer prefix
+   *           is used (up to 6 chars) to disambiguate.
+   * VARIETY = product.code if present, else first 3-6 alphanumeric chars
+   *           of product.name, uppercased.
+   * YYMMDD  = date (today).
+   * SEQ     = 2-digit sequence per (supplier+variety+date), starts at 01.
+   */
+  async generateRiceLotNo(trx, { supplierId, productId, date }) {
+    const q = trx || db;
+    const today = date ? new Date(date) : new Date();
+    const yy = String(today.getFullYear()).slice(-2);
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    const dateStr = `${yy}${mm}${dd}`;
+
+    const supCode = await deriveSupplierCode(q, 'suppliers', supplierId, 'SUP');
+    const varCode = await deriveProductCode(q, productId);
+
+    const prefix = `${supCode}-${varCode}-${dateStr}-`;
+
+    const last = await q('inventory_lots')
+      .where('lot_no', 'like', `${prefix}%`)
+      .orderBy('lot_no', 'desc')
+      .select('lot_no')
+      .first();
+
+    let seq = 1;
+    if (last && last.lot_no) {
+      const tail = last.lot_no.slice(prefix.length);
+      const n = parseInt(tail, 10);
+      if (!Number.isNaN(n)) seq = n + 1;
+    }
+
+    return `${prefix}${String(seq).padStart(2, '0')}`;
   },
 
   // =========================================================================
@@ -353,23 +439,32 @@ const inventoryService = {
   },
 
   // =========================================================================
-  // Receive raw paddy (from vehicle arrival / purchase)
+  // Receive rice (from vehicle arrival / purchase)
+  //
+  // The mill buys already-milled finished rice from upstream suppliers
+  // and treats it as raw material for its own processing/grading. The
+  // lot type stays 'raw' (raw from the MILL's perspective) but the
+  // item is rice, not paddy.
   // =========================================================================
-  async receiveRawPaddy(trx, {
+  async receiveRice(trx, {
     batchId,
     weightMT,
     costPerMT,
     currency,
     supplierId,
+    productId,
     vehicleNo,
     userId,
   }) {
-    if (!trx) throw new Error('receiveRawPaddy requires a transaction');
+    if (!trx) throw new Error('receiveRice requires a transaction');
 
     const parsedWeight = parseFloat(weightMT);
     const parsedCost = parseFloat(costPerMT) || 0;
 
-    // Look for an existing raw paddy lot for this batch in Mill Raw Stock
+    // Look for an existing rice lot for this batch in Mill Raw Stock.
+    // Vehicles auto-attach to today's open batch (see receiveRice controller),
+    // so one batch_ref naturally collects all trucks for the same
+    // supplier+variety+date.
     let lot = await trx('inventory_lots')
       .where({ batch_ref: `batch-${batchId}`, type: 'raw', entity: 'mill' })
       .first();
@@ -385,7 +480,7 @@ const inventoryService = {
         toWarehouseId: lot.warehouse_id,
         destEntity: 'mill',
         linkedRef: vehicleNo ? `vehicle-${vehicleNo}` : null,
-        notes: `Raw paddy receipt for batch ${batchId}${vehicleNo ? `, vehicle ${vehicleNo}` : ''}`,
+        notes: `Rice receipt for batch ${batchId}${vehicleNo ? `, vehicle ${vehicleNo}` : ''}`,
         costPerUnit: parsedCost,
         currency: currency || 'PKR',
         batchId,
@@ -407,27 +502,35 @@ const inventoryService = {
           .returning('*');
       }
 
-      const lotNo = await inventoryService.generateLotNo(trx);
-
-      // Resolve product_id for raw-rice lots. inventory_lots.product_id is
+      // Resolve product_id for rice lots. inventory_lots.product_id is
       // NOT NULL since migration 067 — every lot must point at a real
-      // product. The product was renamed Paddy → Rice in migration 119
-      // (code RAW-RICE). Fall back through the old code and then a
-      // generic name search so we don't fail on stale installs.
-      let rawProduct = await trx('products').where({ code: 'RAW-RICE' }).first('id');
-      if (!rawProduct) rawProduct = await trx('products').where({ code: 'RAW-PADDY' }).first('id');
-      if (!rawProduct) rawProduct = await trx('products').whereILike('name', 'raw rice').first('id');
-      if (!rawProduct) rawProduct = await trx('products').whereILike('name', '%paddy%').first('id');
-      const rawPaddyProductId = rawProduct ? rawProduct.id : null;
+      // product. Prefer the variety the batch was created with; only
+      // fall back to the generic RAW-RICE product if none was specified.
+      // (RAW-PADDY / "paddy" fallbacks kept for legacy installs only.)
+      let resolvedProductId = productId || null;
+      if (!resolvedProductId) {
+        let riceProduct = await trx('products').where({ code: 'RAW-RICE' }).first('id');
+        if (!riceProduct) riceProduct = await trx('products').whereILike('name', 'raw rice').first('id');
+        // Legacy fallbacks for old installs that still have a Paddy product:
+        if (!riceProduct) riceProduct = await trx('products').where({ code: 'RAW-PADDY' }).first('id');
+        if (!riceProduct) riceProduct = await trx('products').whereILike('name', '%paddy%').first('id');
+        resolvedProductId = riceProduct ? riceProduct.id : null;
+      }
+      const riceProductId = resolvedProductId;
+
+      const lotNo = await inventoryService.generateRiceLotNo(trx, {
+        supplierId,
+        productId: resolvedProductId,
+      });
 
       [lot] = await trx('inventory_lots')
         .insert({
           lot_no: lotNo,
-          item_name: 'Raw Rice',
+          item_name: 'Rice',
           type: 'raw',
           entity: 'mill',
           warehouse_id: warehouse.id,
-          product_id: rawPaddyProductId,
+          product_id: riceProductId,
           qty: 0,
           unit: 'MT',
           batch_ref: `batch-${batchId}`,
@@ -456,7 +559,7 @@ const inventoryService = {
         toWarehouseId: warehouse.id,
         destEntity: 'mill',
         linkedRef: vehicleNo ? `vehicle-${vehicleNo}` : null,
-        notes: `Raw paddy receipt for batch ${batchId}${vehicleNo ? `, vehicle ${vehicleNo}` : ''}`,
+        notes: `Rice receipt for batch ${batchId}${vehicleNo ? `, vehicle ${vehicleNo}` : ''}`,
         costPerUnit: parsedCost,
         currency: currency || 'PKR',
         batchId,
@@ -477,13 +580,13 @@ const inventoryService = {
 
     const parsedQty = parseFloat(qtyMT);
 
-    // Find raw paddy lot for this batch
+    // Find rice lot for this batch
     const lot = await trx('inventory_lots')
       .where({ batch_ref: `batch-${batchId}`, type: 'raw', entity: 'mill' })
       .first();
 
     if (!lot) {
-      throw new Error(`No raw paddy lot found for batch ${batchId}`);
+      throw new Error(`No rice lot found for batch ${batchId}`);
     }
 
     // Consume available qty — may be less than declared raw_qty_mt if
@@ -504,7 +607,7 @@ const inventoryService = {
       fromWarehouseId: lot.warehouse_id,
       sourceEntity: 'mill',
       linkedRef: `batch-${batchId}`,
-      notes: `Raw paddy consumed for milling batch ${batchId}`,
+      notes: `Rice consumed for milling batch ${batchId}`,
       costPerUnit: parseFloat(lot.cost_per_unit) || 0,
       currency: lot.cost_currency || 'PKR',
       batchId,
@@ -523,11 +626,12 @@ const inventoryService = {
     brokenMT,
     branMT,
     huskMT,
+    sortexMT,
     productName,
     costPerMT,
     rawCostComponent,
     millingCostComponent,
-    byproductCosts, // { broken: costPerKg, bran: costPerKg, husk: costPerKg }
+    byproductCosts, // { broken, bran, husk, sortex } cost per kg
     // Optional per-grade split of brokenMT. When supplied, recordMillingOutput
     // creates one byproduct lot per non-zero grade (B1, B2, B3, CSR, Short
     // Grain) instead of collapsing them into a single "Broken Rice" lot.
@@ -564,12 +668,13 @@ const inventoryService = {
       if (fallback) finishedProductId = fallback.id;
     }
     if (!finishedProductId) {
-      // Last-resort fallback: any non-byproduct, non-Raw-Paddy product.
+      // Last-resort fallback: any non-byproduct, non-raw-input product.
       // Better to record the lot under a defaulted product_id than to 500 the
-      // entire yield transaction.
+      // entire yield transaction. Excludes RAW-RICE and the legacy
+      // RAW-PADDY code so we don't accidentally tag output as input.
       const any = await trx('products')
         .where({ is_byproduct: false })
-        .whereNot('code', 'RAW-PADDY')
+        .whereNotIn('code', ['RAW-RICE', 'RAW-PADDY'])
         .first('id');
       if (any) finishedProductId = any.id;
     }
@@ -587,9 +692,10 @@ const inventoryService = {
     const byproductProductLookup = async (itemName) => {
       const baseName = itemName.startsWith('Broken Rice') ? 'Broken Rice' : itemName;
       const byCode = {
-        'Broken Rice': ['PROD-BROKEN-RICE', 'BROKEN-RICE'],
-        'Rice Bran':   ['PROD-RICE-BRAN',   'RICE-BRAN'],
-        'Rice Husk':   ['PROD-RICE-HUSK',   'RICE-HUSK'],
+        'Broken Rice':    ['PROD-BROKEN-RICE',    'BROKEN-RICE'],
+        'Rice Bran':      ['PROD-RICE-BRAN',      'RICE-BRAN'],
+        'Rice Husk':      ['PROD-RICE-HUSK',      'RICE-HUSK'],
+        'Sortex Rejects': ['PROD-SORTEX-REJECTS', 'SORTEX-REJECTS'],
       }[baseName] || [];
       for (const code of byCode) {
         const p = await trx('products').where({ code }).first('id');
@@ -708,8 +814,9 @@ const inventoryService = {
 
     const byproducts = [
       ...brokenItems,
-      { name: 'Rice Bran', key: 'bran', grade: null, qty: parseFloat(branMT) || 0 },
-      { name: 'Rice Husk', key: 'husk', grade: null, qty: parseFloat(huskMT) || 0 },
+      { name: 'Rice Bran',      key: 'bran',   grade: null, qty: parseFloat(branMT) || 0 },
+      { name: 'Rice Husk',      key: 'husk',   grade: null, qty: parseFloat(huskMT) || 0 },
+      { name: 'Sortex Rejects', key: 'sortex', grade: null, qty: parseFloat(sortexMT) || 0 },
     ];
 
     for (const bp of byproducts) {

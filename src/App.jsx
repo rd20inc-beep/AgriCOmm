@@ -32,6 +32,7 @@ const StoreAdjustments = lazy(() => import('./modules/millStore/pages/StoreAdjus
 const StoreRatios = lazy(() => import('./modules/millStore/pages/StoreRatios'));
 const MillingBatchDetail = lazy(() => import('./modules/milling/pages/MillingBatchDetail'));
 const MillFinanceDashboard = lazy(() => import('./modules/milling/pages/MillFinanceDashboard'));
+const RicePurchasesLedger = lazy(() => import('./modules/milling/pages/RicePurchasesLedger'));
 const QualityComparison = lazy(() => import('./modules/milling/pages/QualityComparison'));
 const StockAdjustments = lazy(() => import('./modules/inventory/pages/StockAdjustments'));
 const InternalTransfer = lazy(() => import('./modules/inventory/pages/InternalTransfer'));
@@ -123,6 +124,7 @@ function MillRoutes() {
         <Route path="/" element={<MillHomeDashboard />} />
         <Route path="/milling" element={<MillingDashboard />} />
         <Route path="/milling/finance" element={<MillFinanceDashboard />} />
+        <Route path="/milling/rice-purchases" element={<RicePurchasesLedger />} />
         <Route path="/milling/:id" element={<MillingBatchDetail />} />
         <Route path="/quality" element={<QualityComparison />} />
         <Route path="/mill-store" element={<StoreOverview />} />
@@ -155,6 +157,7 @@ function StandardRoutes() {
         <Route path="/finance/*" element={<ProtectedRoute module="finance" action="view"><FinanceRoutes /></ProtectedRoute>} />
         <Route path="/milling" element={<ProtectedRoute module="milling" action="view"><MillingDashboard /></ProtectedRoute>} />
         <Route path="/milling/finance" element={<ProtectedRoute module="milling" action="view"><MillFinanceDashboard /></ProtectedRoute>} />
+        <Route path="/milling/rice-purchases" element={<ProtectedRoute module="milling" action="view"><RicePurchasesLedger /></ProtectedRoute>} />
         <Route path="/stock-adjustments" element={<ProtectedRoute module="inventory" action="view"><StockAdjustments /></ProtectedRoute>} />
         <Route path="/milling/:id" element={<ProtectedRoute module="milling" action="view"><MillingBatchDetail /></ProtectedRoute>} />
         <Route path="/quality" element={<ProtectedRoute module="milling" action="view"><QualityComparison /></ProtectedRoute>} />

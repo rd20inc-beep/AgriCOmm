@@ -23,7 +23,7 @@ const createSupplierSchema = Joi.object({
   phone: Joi.string().allow(null, '').optional(),
   address: Joi.string().allow(null, '').optional(),
   country: Joi.string().allow(null, '').optional(),
-  type: Joi.string().default('Paddy Supplier'),
+  type: Joi.string().default('Rice Supplier'),
 });
 
 const createProductSchema = Joi.object({

@@ -30,6 +30,7 @@ function numberToWords(num) {
 // Default by-product market rates (PKR per MT) — editable via props
 const DEFAULT_BYPRODUCT_RATES = {
   broken: 42000,
+  sortex: 35000,
   bran: 22400,
   husk: 8400,
 };
@@ -69,16 +70,32 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
   const finishedYieldPct = rawQtyMT > 0 ? (finishedMT / rawQtyMT * 100).toFixed(1) : '0.0';
 
   // ═══ SECTION E: By-Products ═══
-  const byProducts = [
-    { type: 'Broken Rice', key: 'broken', qty: pf(batch.brokenMT), rate: pf(byproductRates.broken) },
-    { type: 'Rice Bran / Polish', key: 'bran', qty: pf(batch.branMT), rate: pf(byproductRates.bran) },
-    { type: 'Rice Husk / Bhusa', key: 'husk', qty: pf(batch.huskMT), rate: pf(byproductRates.husk) },
-  ].map(bp => ({
-    ...bp,
-    qtyKG: bp.qty * 1000,
-    value: bp.qty * bp.rate,
-    yieldPct: rawQtyMT > 0 ? (bp.qty / rawQtyMT * 100).toFixed(1) : '0.0',
-  }));
+  // Sortex Rejects is the current byproduct stream; Bran/Husk render only
+  // when a legacy batch carries non-zero values so old batches stay
+  // accurate while new ones show only the relevant outputs.
+  // Pricing precedence: batch-confirmed price → caller-supplied commodity
+  // rate → built-in default. This way, once an operator runs the price
+  // confirmation modal the sheet reflects what they actually entered.
+  const rate = (batchVal, fallback) => pf(batchVal) > 0 ? pf(batchVal) : pf(fallback);
+  const sortexMT = pf(batch.sortexRejectsMT || batch.sortex_rejects_mt);
+  const branMTval = pf(batch.branMT);
+  const huskMTval = pf(batch.huskMT);
+  const allByproducts = [
+    { type: 'Broken Rice',         key: 'broken', qty: pf(batch.brokenMT), rate: rate(batch.brokenPricePerMT,                                       byproductRates.broken), color: 'bg-amber-500' },
+    { type: 'Sortex Rejects',      key: 'sortex', qty: sortexMT,           rate: rate(batch.sortexRejectsPricePerMT || batch.sortex_rejects_price_per_mt, byproductRates.sortex), color: 'bg-orange-500' },
+    { type: 'Rice Bran (legacy)',  key: 'bran',   qty: branMTval,          rate: rate(batch.branPricePerMT,                                         byproductRates.bran),   color: 'bg-green-500',  legacy: true },
+    { type: 'Rice Husk (legacy)',  key: 'husk',   qty: huskMTval,          rate: rate(batch.huskPricePerMT,                                         byproductRates.husk),   color: 'bg-purple-500', legacy: true },
+  ];
+  const byProducts = allByproducts
+    // Always keep broken + sortex slots so the operator sees the modern
+    // output line-up; drop legacy bran/husk if they're zero on this batch.
+    .filter(bp => !bp.legacy || bp.qty > 0)
+    .map(bp => ({
+      ...bp,
+      qtyKG: bp.qty * 1000,
+      value: bp.qty * bp.rate,
+      yieldPct: rawQtyMT > 0 ? (bp.qty / rawQtyMT * 100).toFixed(1) : '0.0',
+    }));
   const wastageMT = pf(batch.wastageMT);
   const totalByproductValue = byProducts.reduce((s, bp) => s + bp.value, 0);
   const totalOutputMT = finishedMT + byProducts.reduce((s, bp) => s + bp.qty, 0) + wastageMT;
@@ -238,7 +255,7 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
           {/* Yield breakdown bar */}
           <div className="flex rounded overflow-hidden h-5 mb-2">
             {finishedMT > 0 && <div className="bg-blue-500 flex items-center justify-center text-white text-[9px] font-bold" style={{ width: `${(finishedMT / rawQtyMT) * 100}%` }}>Rice {finishedYieldPct}%</div>}
-            {byProducts.map(bp => bp.qty > 0 && <div key={bp.key} className={`flex items-center justify-center text-white text-[9px] font-bold ${bp.key === 'broken' ? 'bg-amber-500' : bp.key === 'bran' ? 'bg-green-500' : 'bg-purple-500'}`} style={{ width: `${(bp.qty / rawQtyMT) * 100}%` }}>{bp.yieldPct}%</div>)}
+            {byProducts.map(bp => bp.qty > 0 && <div key={bp.key} className={`flex items-center justify-center text-white text-[9px] font-bold ${bp.color || 'bg-gray-400'}`} style={{ width: `${(bp.qty / rawQtyMT) * 100}%` }} title={`${bp.type}: ${bp.qty.toFixed(2)} MT`}>{bp.yieldPct}%</div>)}
             {wastageMT > 0 && <div className="bg-red-400 flex items-center justify-center text-white text-[9px] font-bold" style={{ width: `${(wastageMT / rawQtyMT) * 100}%` }}>W</div>}
           </div>
         </div>

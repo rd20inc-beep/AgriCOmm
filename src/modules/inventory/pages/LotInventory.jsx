@@ -20,6 +20,58 @@ const STATUS_TABS = ['All', 'Available', 'Reserved', 'Closed'];
 const TYPE_TABS = ['All', 'raw', 'finished', 'byproduct'];
 const ENTITY_TABS = ['All', 'mill', 'export'];
 
+// Subtype = what the byproduct actually is. Derived from item_name (and
+// grade for broken). Lets the user filter byproducts to just "Sortex
+// Rejects" or "Broken B2" instead of the whole bucket.
+const SUBTYPE_OPTIONS = [
+  { value: 'All',           label: 'All' },
+  { value: 'finished',      label: 'Finished Rice' },
+  { value: 'rice-in',       label: 'Incoming Rice' },
+  { value: 'broken',        label: 'Broken (all grades)' },
+  { value: 'broken-b1',     label: '  Broken B1' },
+  { value: 'broken-b2',     label: '  Broken B2' },
+  { value: 'broken-b3',     label: '  Broken B3' },
+  { value: 'broken-csr',    label: '  Broken CSR' },
+  { value: 'broken-sg',     label: '  Broken Short Grain' },
+  { value: 'sortex',        label: 'Sortex Rejects' },
+  { value: 'bran',          label: 'Rice Bran (legacy)' },
+  { value: 'husk',          label: 'Rice Husk (legacy)' },
+];
+
+function lotSubtype(l) {
+  const name = (l.itemName || '').toLowerCase();
+  const grade = (l.grade || '').toLowerCase();
+  if (l.type === 'finished') return 'finished';
+  if (l.type === 'raw') return 'rice-in';
+  if (name.includes('broken')) {
+    if (grade === 'b1') return 'broken-b1';
+    if (grade === 'b2') return 'broken-b2';
+    if (grade === 'b3') return 'broken-b3';
+    if (grade === 'csr') return 'broken-csr';
+    if (grade === 'short grain' || grade === 'sg') return 'broken-sg';
+    return 'broken';
+  }
+  if (name.includes('sortex')) return 'sortex';
+  if (name.includes('bran')) return 'bran';
+  if (name.includes('husk')) return 'husk';
+  return 'other';
+}
+
+function subtypeBadgeClass(s) {
+  if (s === 'finished')        return 'bg-blue-50 text-blue-700';
+  if (s === 'rice-in')         return 'bg-slate-50 text-slate-700';
+  if (s && s.startsWith('broken')) return 'bg-amber-50 text-amber-700';
+  if (s === 'sortex')          return 'bg-orange-50 text-orange-700';
+  if (s === 'bran')            return 'bg-green-50 text-green-700';
+  if (s === 'husk')            return 'bg-purple-50 text-purple-700';
+  return 'bg-gray-50 text-gray-600';
+}
+
+function subtypeLabel(s) {
+  const opt = SUBTYPE_OPTIONS.find(o => o.value === s);
+  return opt ? opt.label.trim() : s;
+}
+
 function fmtPKR(v) { return 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString(); }
 
 export default function LotInventory() {
@@ -27,6 +79,7 @@ export default function LotInventory() {
   const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState('Available');
   const [typeFilter, setTypeFilter] = useState('All');
+  const [subtypeFilter, setSubtypeFilter] = useState('All');
   const [entityFilter, setEntityFilter] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
   const [displayUnit, setDisplayUnit] = useState('katta');
@@ -52,19 +105,30 @@ export default function LotInventory() {
     return lots.filter(l => {
       if (typeFilter !== 'All' && l.type !== typeFilter) return false;
       if (entityFilter !== 'All' && l.entity !== entityFilter) return false;
+      if (subtypeFilter !== 'All') {
+        const s = lotSubtype(l);
+        // "broken" matches any broken-* subtype (parent rollup).
+        if (subtypeFilter === 'broken') {
+          if (!s.startsWith('broken')) return false;
+        } else if (s !== subtypeFilter) {
+          return false;
+        }
+      }
       if (searchTerm) {
         const t = searchTerm.toLowerCase();
         if (!(
           (l.lotNo || '').toLowerCase().includes(t) ||
           (l.itemName || '').toLowerCase().includes(t) ||
           (l.variety || '').toLowerCase().includes(t) ||
+          (l.grade || '').toLowerCase().includes(t) ||
           (l.supplierName || '').toLowerCase().includes(t) ||
-          (l.warehouseName || '').toLowerCase().includes(t)
+          (l.warehouseName || '').toLowerCase().includes(t) ||
+          (l.batchRef || '').toLowerCase().includes(t)
         )) return false;
       }
       return true;
     });
-  }, [lots, searchTerm, typeFilter, entityFilter]);
+  }, [lots, searchTerm, typeFilter, subtypeFilter, entityFilter]);
 
   // Summary KPIs
   const kpis = useMemo(() => {
@@ -166,6 +230,16 @@ export default function LotInventory() {
               </button>
             ))}
           </div>
+          {/* Subtype (more granular than Type — drills into broken grades, sortex, etc.) */}
+          <select
+            value={subtypeFilter}
+            onChange={(e) => setSubtypeFilter(e.target.value)}
+            className="px-3 py-1.5 text-sm font-medium rounded-md border border-gray-200 bg-white text-gray-700 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+          >
+            {SUBTYPE_OPTIONS.map(o => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
           {/* Entity/Location */}
           <div className="flex bg-gray-100 rounded-lg p-0.5">
             {ENTITY_TABS.map(tab => (
@@ -205,6 +279,7 @@ export default function LotInventory() {
               <thead>
                 <tr>
                   <th className="text-left">Lot No</th>
+                  <th className="text-left">Subtype</th>
                   <th className="text-left">Item / Variety</th>
                   <th className="text-left">Supplier</th>
                   <th className="text-left">Warehouse</th>
@@ -226,6 +301,16 @@ export default function LotInventory() {
                   return (
                     <tr key={lot.id} className="cursor-pointer" onClick={() => navigate(`/lot-inventory/${lot.lotNo || lot.id}`)}>
                       <td className="font-medium text-blue-600">{lot.lotNo}</td>
+                      <td>
+                        {(() => {
+                          const s = lotSubtype(lot);
+                          return (
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ${subtypeBadgeClass(s)}`}>
+                              {subtypeLabel(s)}
+                            </span>
+                          );
+                        })()}
+                      </td>
                       <td>
                         <div className="text-gray-900 font-medium">{lot.itemName}</div>
                         {lot.variety && <div className="text-xs text-gray-400">{lot.variety}{lot.grade ? ` (${lot.grade})` : ''}</div>}

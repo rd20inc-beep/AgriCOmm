@@ -12,6 +12,7 @@ const FALLBACK = {
   broken_rice: 42000,
   bran: 22400,
   husk: 8400,
+  sortex_rejects: 35000,
 };
 
 function getRate(rates, type, fallback) {
@@ -28,6 +29,7 @@ export function useCommodityPrices() {
     broken: getRate(rates, 'broken_rice', FALLBACK.broken_rice),
     bran: getRate(rates, 'bran', FALLBACK.bran),
     husk: getRate(rates, 'husk', FALLBACK.husk),
+    sortex: getRate(rates, 'sortex_rejects', FALLBACK.sortex_rejects),
     source: Array.isArray(rates) && rates.length > 0 ? 'live' : 'fallback',
   }), [rates]);
 }

@@ -249,16 +249,18 @@ module.exports = {
 
         // product_id is NOT NULL on inventory_lots since round 067 —
         // resolve a fallback when the wizard didn't pick one.
-        // Type-aware: raw → RAW-PADDY, finished → FINISHED-RICE,
-        // byproduct → first byproduct product. Always succeeds (last
-        // resort: any non-Raw-Paddy product) so the insert can proceed.
+        // Type-aware: raw → RAW-RICE (legacy: RAW-PADDY), finished →
+        // FINISHED-RICE, byproduct → first byproduct product. Always
+        // succeeds (last resort: any non-raw-input product) so the
+        // insert can proceed.
         let resolvedProductId = product_id || null;
         if (!resolvedProductId) {
-          const fallbackCode = type === 'finished' ? 'FINISHED-RICE'
-            : type === 'raw' ? 'RAW-PADDY'
-            : null;
-          if (fallbackCode) {
-            const p = await trx('products').where({ code: fallbackCode }).first('id');
+          if (type === 'finished') {
+            const p = await trx('products').where({ code: 'FINISHED-RICE' }).first('id');
+            if (p) resolvedProductId = p.id;
+          } else if (type === 'raw') {
+            let p = await trx('products').where({ code: 'RAW-RICE' }).first('id');
+            if (!p) p = await trx('products').where({ code: 'RAW-PADDY' }).first('id');
             if (p) resolvedProductId = p.id;
           }
           if (!resolvedProductId && type === 'byproduct') {
@@ -268,7 +270,7 @@ module.exports = {
           if (!resolvedProductId) {
             const p = await trx('products')
               .where({ is_byproduct: false })
-              .whereNot('code', 'RAW-PADDY')
+              .whereNotIn('code', ['RAW-RICE', 'RAW-PADDY'])
               .orderBy('id').first('id');
             if (p) resolvedProductId = p.id;
           }

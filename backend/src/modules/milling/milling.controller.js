@@ -26,6 +26,47 @@ async function generateBatchNo(trx) {
   return `M-${String(num + 1).padStart(3, '0')}`;
 }
 
+// Whitelist + coerce the per-vehicle quality payload so we don't store
+// arbitrary keys in the JSONB column. Returns null when nothing usable.
+const VEHICLE_QUALITY_KEYS = [
+  'moisture', 'broken', 'foreign_matter', 'chalky', 'discoloration',
+  'purity', 'grain_size', 'price_per_mt', 'price_per_kg', 'notes',
+];
+function sanitizeVehicleQuality(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const out = {};
+  for (const k of VEHICLE_QUALITY_KEYS) {
+    const v = raw[k];
+    if (v == null || v === '') continue;
+    if (k === 'notes') {
+      out[k] = String(v).slice(0, 500);
+    } else {
+      const n = parseFloat(v);
+      if (!Number.isNaN(n)) out[k] = n;
+    }
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+// Find today's open batch (Queued / Pending Approval) for the given
+// supplier + variety so a new truck can attach to it instead of
+// spawning a new lot. Returns null if none — caller will create a fresh
+// batch.
+async function findOpenBatchForToday(trx, { supplierId, productId }) {
+  if (!supplierId) return null;
+  const rowQuery = trx('milling_batches')
+    .where('supplier_id', supplierId)
+    .whereIn('status', ['Queued', 'Pending Approval'])
+    .whereRaw("DATE(created_at) = CURRENT_DATE")
+    .orderBy('id', 'desc');
+  if (productId) {
+    rowQuery.andWhere(function () {
+      this.where('product_id', productId).orWhereNull('product_id');
+    });
+  }
+  return rowQuery.first();
+}
+
 const millingController = {
   async list(req, res) {
     try {
@@ -530,6 +571,7 @@ const millingController = {
         broken_mt, b1_mt, b2_mt, b3_mt, csr_mt, short_grain_mt,
         bran_mt,
         husk_mt,
+        sortex_rejects_mt,
         wastage_mt,
       } = req.body;
 
@@ -548,8 +590,9 @@ const millingController = {
       const broken = (b1 + b2 + b3 + csr + shortGrain) || parseFloat(broken_mt) || 0;
       const bran = parseFloat(bran_mt) || 0;
       const husk = parseFloat(husk_mt) || 0;
+      const sortex = parseFloat(sortex_rejects_mt) || 0;
       const wastage = parseFloat(wastage_mt) || 0;
-      const totalOutput = finished + broken + bran + husk + wastage;
+      const totalOutput = finished + broken + bran + husk + sortex + wastage;
 
       // Use actual received weight (from raw lot) if it differs from declared raw_qty_mt
       const rawLot = await db('inventory_lots')
@@ -588,7 +631,7 @@ const millingController = {
         await db('milling_batches').where({ id }).update({
           actual_finished_mt: finished,
           broken_mt: broken, b1_mt: b1, b2_mt: b2, b3_mt: b3, csr_mt: csr, short_grain_mt: shortGrain,
-          bran_mt: bran, husk_mt: husk, wastage_mt: wastage,
+          bran_mt: bran, husk_mt: husk, sortex_rejects_mt: sortex, wastage_mt: wastage,
           yield_pct: yieldPct, updated_at: db.fn.now(),
         });
         return res.json({
@@ -609,6 +652,7 @@ const millingController = {
         short_grain_mt: shortGrain,
         bran_mt: bran,
         husk_mt: husk,
+        sortex_rejects_mt: sortex,
         wastage_mt: wastage,
         yield_pct: yieldPct,
         updated_at: db.fn.now(),
@@ -685,6 +729,7 @@ const millingController = {
         const brokenPrice = parseFloat(batch.broken_price_per_mt) || 0;
         const branPrice = parseFloat(batch.bran_price_per_mt) || 0;
         const huskPrice = parseFloat(batch.husk_price_per_mt) || 0;
+        const sortexPrice = parseFloat(batch.sortex_rejects_price_per_mt) || 0;
 
         // 3. Compute market values for each saleable output
         const outputValues = {
@@ -692,6 +737,7 @@ const millingController = {
           broken:   { qty: broken,  price: brokenPrice,  marketValue: broken * brokenPrice },
           bran:     { qty: bran,    price: branPrice,    marketValue: bran * branPrice },
           husk:     { qty: husk,    price: huskPrice,    marketValue: husk * huskPrice },
+          sortex:   { qty: sortex,  price: sortexPrice,  marketValue: sortex * sortexPrice },
         };
         const totalOutputMarketValue = Object.values(outputValues).reduce((s, o) => s + o.marketValue, 0);
 
@@ -736,6 +782,7 @@ const millingController = {
           notes: JSON.stringify({
             totalBatchCost: totalBatchCostPool,
             totalMarketValue: totalOutputMarketValue,
+            sortexPricePerMT: sortexPrice,
             allocations,
           }),
         });
@@ -752,6 +799,7 @@ const millingController = {
           brokenMT: parseFloat(broken),
           branMT: parseFloat(bran),
           huskMT: parseFloat(husk),
+          sortexMT: parseFloat(sortex),
           productName: linkedOrder?.product_name || 'Finished Rice',
           costPerMT: finAlloc.costPerMT,
           rawCostComponent: finAlloc.qty > 0 ? rawCostTotal / (finAlloc.qty * 1000) : 0,
@@ -761,6 +809,7 @@ const millingController = {
             broken: allocations.broken.costPerKg,
             bran: allocations.bran.costPerKg,
             husk: allocations.husk.costPerKg,
+            sortex: allocations.sortex.costPerKg,
           },
           // Split broken into its grades (B1, B2, B3, CSR, Short Grain) so
           // each tier becomes its own inventory lot and can be sold at its
@@ -784,7 +833,7 @@ const millingController = {
         });
 
         // Auto-post accounting journal for milling completion
-        // Calculate cost from batch raw paddy value
+        // Calculate cost from batch raw rice value
         const millingCosts = await trx('milling_costs')
           .where({ batch_id: batch.id })
           .sum('amount as total')
@@ -927,6 +976,7 @@ const millingController = {
         total_bags,
         arrival_date,
         notes,
+        quality, // optional per-vehicle quality { moisture, broken, foreign_matter, price_per_mt, ... }
       } = req.body;
 
       const batch = await db('milling_batches').where({ id: batchId }).first();
@@ -954,6 +1004,8 @@ const millingController = {
             ? Math.ceil((parsedWeight * 1000) / parsedBagSize)
             : null);
 
+        const cleanQuality = sanitizeVehicleQuality(quality);
+
         const [v] = await trx('milling_vehicle_arrivals')
           .insert({
             batch_id: batchId,
@@ -965,22 +1017,30 @@ const millingController = {
             total_bags: totalBags,
             arrival_date: arrival_date || trx.fn.now(),
             notes: notes || null,
+            quality_json: cleanQuality,
             created_by: req.user?.id || null,
           })
           .returning('*');
 
-        // Post inventory: raw paddy received
+        // Post inventory: rice received
         if (v.weight_mt > 0) {
-          const arrivalQuality = await trx('milling_quality_samples')
-            .where({ batch_id: batchId, analysis_type: 'arrival' }).first();
-          const costPerMT = arrivalQuality?.price_per_mt || 0;
+          // Per-vehicle price wins; fall back to the batch-level arrival sample.
+          let costPerMT = cleanQuality && cleanQuality.price_per_mt
+            ? parseFloat(cleanQuality.price_per_mt)
+            : 0;
+          if (!costPerMT) {
+            const arrivalQuality = await trx('milling_quality_samples')
+              .where({ batch_id: batchId, analysis_type: 'arrival' }).first();
+            costPerMT = arrivalQuality?.price_per_mt || 0;
+          }
 
-          await inventoryService.receiveRawPaddy(trx, {
+          await inventoryService.receiveRice(trx, {
             batchId: batch.id,
             weightMT: parseFloat(v.weight_mt),
             costPerMT,
             currency: 'PKR',
             supplierId: batch.supplier_id,
+            productId: batch.product_id,
             vehicleNo: v.vehicle_no,
             userId: req.user?.id,
           });
@@ -1009,6 +1069,158 @@ const millingController = {
     } catch (err) {
       console.error('Milling addVehicle error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  // Receive a rice purchase truck — auto-attaches to today's open batch
+  // for (supplier, variety) or creates a fresh one. Five trucks of the
+  // same D98 from the same supplier on the same day land in one batch
+  // and one inventory lot, with five vehicle rows for traceability.
+  async receiveRice(req, res) {
+    try {
+      const {
+        supplier_id,
+        product_id,
+        vehicle_no,
+        driver_name,
+        driver_phone,
+        weight_mt,
+        weight_kg,
+        bag_size_kg,
+        total_bags,
+        arrival_date,
+        notes,
+        quality,
+        // Optional batch hints (used only when a new batch must be created)
+        mill_id,
+        machine_line,
+        shift,
+        milling_fee_per_kg,
+      } = req.body;
+
+      if (!supplier_id) {
+        return res.status(400).json({ success: false, message: 'supplier_id is required.' });
+      }
+
+      const result = await db.transaction(async (trx) => {
+        // 1. Find or create today's open batch for this supplier+variety.
+        let batch = await findOpenBatchForToday(trx, {
+          supplierId: supplier_id,
+          productId: product_id || null,
+        });
+        let createdBatch = false;
+        if (!batch) {
+          const supplier = await trx('suppliers').where({ id: supplier_id }).first('name');
+          const batchNo = await generateBatchNo(trx);
+          [batch] = await trx('milling_batches')
+            .insert({
+              batch_no: batchNo,
+              supplier_id,
+              supplier_name: supplier?.name || null,
+              product_id: product_id || null,
+              mill_id: mill_id || null,
+              machine_line: machine_line || null,
+              shift: shift || 'Day',
+              milling_fee_per_kg: milling_fee_per_kg ? parseFloat(milling_fee_per_kg) : 5,
+              raw_qty_mt: 0,
+              status: 'Queued',
+              notes: notes || null,
+              created_by: req.user?.id || null,
+            })
+            .returning('*');
+          createdBatch = true;
+        } else if (product_id && !batch.product_id) {
+          // First truck didn't know the variety; this one does — fill it in.
+          await trx('milling_batches').where({ id: batch.id }).update({
+            product_id,
+            updated_at: trx.fn.now(),
+          });
+          batch.product_id = product_id;
+        }
+
+        // 2. Parse weight (canonical: kg → MT)
+        let parsedWeight = null;
+        if (weight_kg != null && weight_kg !== '') {
+          parsedWeight = parseFloat(weight_kg) / 1000;
+        } else if (weight_mt != null && weight_mt !== '') {
+          parsedWeight = parseFloat(weight_mt);
+        }
+
+        const parsedTotalBags = total_bags != null && total_bags !== '' ? parseInt(total_bags, 10) : null;
+        let parsedBagSize = bag_size_kg != null && bag_size_kg !== '' ? parseFloat(bag_size_kg) : null;
+        if (!parsedBagSize && parsedWeight && parsedTotalBags && parsedTotalBags > 0) {
+          parsedBagSize = (parsedWeight * 1000) / parsedTotalBags;
+        }
+        const totalBagsResolved = parsedTotalBags
+          || (parsedWeight && parsedBagSize && parsedBagSize > 0
+            ? Math.ceil((parsedWeight * 1000) / parsedBagSize)
+            : null);
+
+        const cleanQuality = sanitizeVehicleQuality(quality);
+
+        // 3. Insert the vehicle row
+        const [v] = await trx('milling_vehicle_arrivals')
+          .insert({
+            batch_id: batch.id,
+            vehicle_no: vehicle_no || null,
+            driver_name: driver_name || null,
+            driver_phone: driver_phone || null,
+            weight_mt: parsedWeight,
+            bag_size_kg: parsedBagSize,
+            total_bags: totalBagsResolved,
+            arrival_date: arrival_date || trx.fn.now(),
+            notes: notes || null,
+            quality_json: cleanQuality,
+            created_by: req.user?.id || null,
+          })
+          .returning('*');
+
+        // 4. Post the inventory receipt (same lot for all trucks on this batch)
+        let lot = null;
+        let movement = null;
+        if (parsedWeight && parsedWeight > 0) {
+          let costPerMT = cleanQuality && cleanQuality.price_per_mt
+            ? parseFloat(cleanQuality.price_per_mt)
+            : 0;
+          if (!costPerMT) {
+            const arrivalQuality = await trx('milling_quality_samples')
+              .where({ batch_id: batch.id, analysis_type: 'arrival' }).first();
+            costPerMT = arrivalQuality?.price_per_mt || 0;
+          }
+          const receipt = await inventoryService.receiveRice(trx, {
+            batchId: batch.id,
+            weightMT: parsedWeight,
+            costPerMT,
+            currency: 'PKR',
+            supplierId: batch.supplier_id,
+            productId: batch.product_id,
+            vehicleNo: v.vehicle_no,
+            userId: req.user?.id,
+          });
+          lot = receipt.lot;
+          movement = receipt.movement;
+
+          // 5. Sync batch.raw_qty_mt to the sum of arrivals (truth = scale).
+          const totals = await trx('milling_vehicle_arrivals')
+            .where({ batch_id: batch.id })
+            .sum('weight_mt as total').first();
+          const actualReceived = parseFloat(totals?.total) || 0;
+          if (actualReceived > 0) {
+            await trx('milling_batches').where({ id: batch.id }).update({
+              raw_qty_mt: actualReceived,
+              updated_at: trx.fn.now(),
+            });
+            batch.raw_qty_mt = actualReceived;
+          }
+        }
+
+        return { batch, vehicle: v, lot, movement, createdBatch };
+      });
+
+      return res.status(201).json({ success: true, data: result });
+    } catch (err) {
+      console.error('Milling receiveRice error:', err);
+      return res.status(500).json({ success: false, message: err.message || 'Internal server error.' });
     }
   },
 
@@ -1069,7 +1281,7 @@ const millingController = {
     }
   },
 
-  // Delete an entire batch (admin/manager only). Reverses raw paddy lot if not consumed.
+  // Delete an entire batch (admin/manager only). Reverses raw rice lot if not consumed.
   async deleteBatch(req, res) {
     try {
       const batchId = await resolveBatchId(req.params.id);
@@ -1099,7 +1311,7 @@ const millingController = {
             .whereIn('movement_type', ['production_issue', 'adjustment_minus'])
             .count('* as n').first();
           if (parseInt(consumed.n, 10) > 0) {
-            const err = new Error('Raw paddy from this batch has already been consumed/adjusted; cannot delete.');
+            const err = new Error('Raw rice from this batch has already been consumed/adjusted; cannot delete.');
             err.statusCode = 400;
             throw err;
           }

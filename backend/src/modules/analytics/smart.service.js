@@ -73,7 +73,7 @@ const smartService = {
 
       // Map categories
       let bucket = null;
-      if (category.includes('raw') || category.includes('paddy') || category.includes('material')) bucket = 'raw_material';
+      if (category.includes('raw') || category.includes('rice') || category.includes('paddy') || category.includes('material')) bucket = 'raw_material';
       else if (category.includes('freight') || category.includes('shipping') || category.includes('transport')) bucket = 'freight';
       else if (category.includes('clear') || category.includes('customs') || category.includes('port')) bucket = 'clearing';
       else if (category.includes('bag') || category.includes('pack')) bucket = 'bags';
@@ -1399,7 +1399,7 @@ const smartService = {
             .select(db.raw('AVG(yield_pct) as avg'))
             .first();
           if (supplierAvg && parseFloat(supplierAvg.avg) < avgYield - stddev) {
-            likelyCause = `Supplier (${batch.supplier_name}) consistently delivers lower-yielding paddy`;
+            likelyCause = `Supplier (${batch.supplier_name}) consistently delivers lower-yielding rice`;
           } else {
             likelyCause = 'Batch-specific quality issue — check moisture and broken content';
           }

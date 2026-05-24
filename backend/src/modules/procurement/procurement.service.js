@@ -309,9 +309,9 @@ const procurementService = {
       });
     }
 
-    // Post inventory: receive raw paddy
+    // Post inventory: receive rice
     if (acceptedQty > 0 && batchId) {
-      await inventoryService.receiveRawPaddy(trx, {
+      await inventoryService.receiveRice(trx, {
         batchId,
         weightMT: acceptedQty,
         costPerMT: pricePerMt,
@@ -434,7 +434,7 @@ const procurementService = {
       }
 
       if (grn.batch_id && parseFloat(grn.accepted_qty_mt) > 0) {
-        await inventoryService.receiveRawPaddy(trx, {
+        await inventoryService.receiveRice(trx, {
           batchId: grn.batch_id,
           weightMT: parseFloat(grn.accepted_qty_mt),
           costPerMT: parseFloat(grn.price_per_mt) || 0,

@@ -80,6 +80,94 @@ router.post(
   auditAction('add_vehicle', 'milling_batch', (req) => req.params.id),
   controller.addVehicle
 );
+
+// High-level rice purchase entry: auto-finds/creates today's open batch
+// for (supplier, variety) so multiple trucks land in ONE batch + ONE lot.
+router.post(
+  '/rice-receipts',
+  authorize('milling', 'add_vehicle'),
+  auditAction('receive_rice', 'milling_vehicle_arrival', (req, data) => data.data?.vehicle?.id),
+  controller.receiveRice
+);
+
+// Rice Purchases ledger — one row per vehicle arrival, joined to
+// supplier, batch, variety, lot. Filters: from_date, to_date,
+// supplier_id, product_id.
+router.get('/rice-purchases', authorize('milling', 'view'), async (req, res) => {
+  try {
+    const { from_date, to_date, supplier_id, product_id, limit = 500 } = req.query;
+    let q = db('milling_vehicle_arrivals as va')
+      .leftJoin('milling_batches as mb', 'va.batch_id', 'mb.id')
+      .leftJoin('suppliers as s', 'mb.supplier_id', 's.id')
+      .leftJoin('products as p', 'mb.product_id', 'p.id')
+      // The raw rice lot for this batch (one per batch with our new
+      // merge logic) — picked deterministically.
+      .leftJoin(
+        db('inventory_lots')
+          .select('lot_no', 'batch_ref', 'id as lot_id')
+          .where({ type: 'raw', entity: 'mill' })
+          .as('lot'),
+        'lot.batch_ref', db.raw("'batch-' || mb.id")
+      )
+      .select(
+        'va.id',
+        'va.vehicle_no',
+        'va.driver_name',
+        'va.driver_phone',
+        'va.weight_mt',
+        'va.bag_size_kg',
+        'va.total_bags',
+        'va.arrival_date',
+        'va.quality_json',
+        'va.notes',
+        'va.created_at',
+        'mb.id as batch_id',
+        'mb.batch_no',
+        'mb.status as batch_status',
+        's.id as supplier_id',
+        's.name as supplier_name',
+        'p.id as product_id',
+        'p.code as product_code',
+        'p.name as product_name',
+        'lot.lot_no',
+        'lot.lot_id'
+      )
+      .orderBy('va.arrival_date', 'desc')
+      .orderBy('va.created_at', 'desc')
+      .limit(Math.min(parseInt(limit, 10) || 500, 2000));
+
+    if (from_date) q = q.where('va.arrival_date', '>=', from_date);
+    if (to_date) q = q.where('va.arrival_date', '<=', to_date);
+    if (supplier_id) q = q.where('mb.supplier_id', supplier_id);
+    if (product_id) q = q.where('mb.product_id', product_id);
+
+    const rows = await q;
+
+    // Summary totals
+    const totalWeight = rows.reduce((s, r) => s + (parseFloat(r.weight_mt) || 0), 0);
+    const totalValue = rows.reduce((s, r) => {
+      const w = parseFloat(r.weight_mt) || 0;
+      const p = r.quality_json && r.quality_json.price_per_mt
+        ? parseFloat(r.quality_json.price_per_mt) : 0;
+      return s + (w * p);
+    }, 0);
+
+    return res.json({
+      success: true,
+      data: {
+        purchases: rows,
+        summary: {
+          count: rows.length,
+          totalWeightMT: totalWeight,
+          totalValuePKR: totalValue,
+        },
+      },
+    });
+  } catch (err) {
+    console.error('Rice purchases ledger error:', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
 router.delete(
   '/batches/:id/vehicles/:vehicleId',
   authorize('milling', 'edit'),
@@ -259,7 +347,12 @@ router.get('/last-prices', authorize('milling', 'view'), async (req, res) => {
       .whereNotNull('finished_price_per_mt')
       .where('prices_confirmed', true)
       .orderBy('completed_at', 'desc')
-      .select('finished_price_per_mt', 'broken_price_per_mt', 'bran_price_per_mt', 'husk_price_per_mt', 'batch_no', 'completed_at')
+      .select(
+        'finished_price_per_mt', 'broken_price_per_mt',
+        'bran_price_per_mt', 'husk_price_per_mt',
+        'sortex_rejects_price_per_mt',
+        'batch_no', 'completed_at'
+      )
       .first();
 
     return res.json({
@@ -270,10 +363,11 @@ router.get('/last-prices', authorize('milling', 'view'), async (req, res) => {
           broken: parseFloat(last.broken_price_per_mt) || 38000,
           bran: parseFloat(last.bran_price_per_mt) || 28000,
           husk: parseFloat(last.husk_price_per_mt) || 8400,
+          sortex: parseFloat(last.sortex_rejects_price_per_mt) || 35000,
           fromBatch: last.batch_no,
           date: last.completed_at,
         } : {
-          finished: 72800, broken: 38000, bran: 28000, husk: 8400,
+          finished: 72800, broken: 38000, bran: 28000, husk: 8400, sortex: 35000,
           fromBatch: null, date: null,
         },
       },
@@ -288,13 +382,18 @@ router.put('/batches/:id/prices', authorize('milling', 'edit'),
   async (req, res) => {
     try {
       const id = await controller.resolveBatchId ? await controller.resolveBatchId(req.params.id) : parseInt(req.params.id);
-      const { finished_price_per_mt, broken_price_per_mt, bran_price_per_mt, husk_price_per_mt } = req.body;
+      const {
+        finished_price_per_mt, broken_price_per_mt,
+        bran_price_per_mt, husk_price_per_mt,
+        sortex_rejects_price_per_mt,
+      } = req.body;
 
       const [updated] = await db('milling_batches').where({ id }).update({
         finished_price_per_mt: parseFloat(finished_price_per_mt) || null,
         broken_price_per_mt: parseFloat(broken_price_per_mt) || null,
         bran_price_per_mt: parseFloat(bran_price_per_mt) || null,
         husk_price_per_mt: parseFloat(husk_price_per_mt) || null,
+        sortex_rejects_price_per_mt: parseFloat(sortex_rejects_price_per_mt) || null,
         prices_confirmed: true,
         updated_at: db.fn.now(),
       }).returning('*');
