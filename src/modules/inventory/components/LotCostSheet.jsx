@@ -1,7 +1,40 @@
-import { allEquivalents, allRateEquivalents } from '../utils/unitConversion';
+import { useRef } from 'react';
+import { Printer } from 'lucide-react';
+import { allEquivalents, allRateEquivalents } from '../../../utils/unitConversion';
 
 function fmtPKR(v) { return 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString('en-PK'); }
 function fmtDate(d) { return d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'; }
+
+/**
+ * Print the cost sheet in a clean popup window. Copies Tailwind +
+ * inline styles across so the rendered output matches what the
+ * operator sees on screen. Avoids the in-place visibility:hidden
+ * strategy that leaves a blank top half of page 1 in Chromium.
+ */
+function printLotCostSheet(node, title) {
+  if (!node) { window.print(); return; }
+  const win = window.open('', '_blank', 'width=900,height=1100');
+  if (!win) { window.print(); return; }
+  const headHtml = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
+    .map((el) => el.outerHTML)
+    .join('\n');
+  win.document.open();
+  win.document.write(`<!doctype html>
+<html><head><meta charset="utf-8"><title>${title || 'Lot Costing Sheet'}</title>
+${headHtml}
+<style>
+  @page { size: A4; margin: 10mm; }
+  html, body { margin: 0; padding: 0; background: white;
+    font-family: Inter, system-ui, sans-serif;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .lot-cost-sheet { width: 100%; }
+</style>
+</head><body>${node.outerHTML}</body></html>`);
+  win.document.close();
+  const trigger = () => { try { win.focus(); win.print(); } catch { /* user cancelled */ } setTimeout(() => win.close(), 500); };
+  if (win.document.readyState === 'complete') setTimeout(trigger, 250);
+  else win.addEventListener('load', trigger);
+}
 
 function numberToWords(num) {
   if (num === 0) return 'Zero';
@@ -48,11 +81,24 @@ export default function LotCostSheet({ lot, companyProfile, linkedBatch, transac
 
   const vehicles = linkedBatch?.vehicles || [];
 
+  const sheetRef = useRef(null);
+
   return (
     <>
-      <style>{`@page { size: A4; margin: 12mm; } @media print { body * { visibility: hidden; } .lot-cost-sheet, .lot-cost-sheet * { visibility: visible; } .lot-cost-sheet { position: absolute; left: 0; top: 0; width: 100%; } }`}</style>
+      {/* Print toolbar — never makes it onto paper because we clone
+          only sheetRef into the popup window. */}
+      <div className="mb-3 flex items-center justify-end gap-2">
+        <button
+          type="button"
+          onClick={() => printLotCostSheet(sheetRef.current, `Lot Costing Sheet — ${lot.lotNo || ''}`)}
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-sm"
+          title="Print or save as PDF"
+        >
+          <Printer size={16} /> Print
+        </button>
+      </div>
 
-      <div className="lot-cost-sheet text-sm" style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
+      <div ref={sheetRef} className="lot-cost-sheet text-sm" style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
 
         {/* ===== HEADER ===== */}
         <div className="rounded-t-xl px-8 py-5 flex items-center justify-between" style={{ backgroundColor: '#1e3a5f' }}>

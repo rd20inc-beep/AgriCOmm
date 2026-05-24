@@ -14,7 +14,7 @@ import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 import StatusBadge from '../../../components/StatusBadge';
 import Modal from '../../../components/Modal';
 import { fromKg, allEquivalents, allRateEquivalents, toKg, UNITS } from '../../../utils/unitConversion';
-import LotCostSheet from '../../../components/LotCostSheet';
+import LotCostSheet from '../components/LotCostSheet';
 import api from '../../../api/client';
 import { lotInventoryApi } from '../../../api/services';
 
