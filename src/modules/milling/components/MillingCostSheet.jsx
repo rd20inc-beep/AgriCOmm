@@ -10,7 +10,49 @@
  * F: Final costing summary (net cost after by-product recovery)
  * G: Vehicle arrivals
  */
+import { useRef } from 'react';
 import { Printer } from 'lucide-react';
+
+/**
+ * Open the cost sheet in a clean popup, copy parent stylesheets across
+ * so Tailwind classes still apply, then trigger print. Avoids the
+ * brittle "visibility:hidden everywhere" CSS strategy that left blank
+ * pages depending on browser + modal stacking.
+ */
+function printCostSheet(node, title) {
+  if (!node) { window.print(); return; }
+  const win = window.open('', '_blank', 'width=900,height=1100');
+  if (!win) {
+    // Popup blocked — fall back to in-place print
+    window.print();
+    return;
+  }
+  // Copy stylesheets + inline <style> blocks from parent
+  const headHtml = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
+    .map((el) => el.outerHTML)
+    .join('\n');
+  win.document.open();
+  win.document.write(`<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>${title || 'Costing Sheet'}</title>
+${headHtml}
+<style>
+  @page { size: A4; margin: 10mm; }
+  html, body { margin: 0; padding: 0; background: white;
+    font-family: Inter, system-ui, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .cost-sheet { width: 100%; }
+</style>
+</head>
+<body>${node.outerHTML}</body>
+</html>`);
+  win.document.close();
+  // Give stylesheets a moment to load
+  const trigger = () => { try { win.focus(); win.print(); } catch { /* user cancelled */ } setTimeout(() => win.close(), 500); };
+  if (win.document.readyState === 'complete') setTimeout(trigger, 250);
+  else win.addEventListener('load', trigger);
+}
 
 function fmtPKR(v) { return 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString('en-PK'); }
 function fmtDate(d) { return d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'; }
@@ -139,32 +181,24 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
   const H = '#1e3a5f'; // header color
   const G = '#d4a853'; // gold accent
 
+  const sheetRef = useRef(null);
+
   return (
     <>
-      <style>{`
-        @media print {
-          @page { size: A4; margin: 12mm; }
-          body * { visibility: hidden; }
-          .cost-sheet, .cost-sheet * { visibility: visible; }
-          .cost-sheet { position: absolute; left: 0; top: 0; width: 100%; }
-          /* Toolbar above the sheet must stay out of the printout */
-          .no-print, .no-print * { visibility: hidden !important; display: none !important; }
-        }
-      `}</style>
-
-      {/* Print toolbar — hidden on paper via .no-print */}
-      <div className="no-print mb-3 flex items-center justify-end gap-2">
+      {/* Print toolbar — never printed because it lives outside the
+          cloned node passed to the popup print window. */}
+      <div className="mb-3 flex items-center justify-end gap-2">
         <button
           type="button"
-          onClick={() => window.print()}
+          onClick={() => printCostSheet(sheetRef.current, `Costing Sheet — ${batch.id || ''}`)}
           className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-sm"
-          title="Print or save as PDF (Ctrl+P)"
+          title="Print or save as PDF"
         >
           <Printer size={16} /> Print
         </button>
       </div>
 
-      <div className="cost-sheet text-sm" style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
+      <div ref={sheetRef} className="cost-sheet text-sm" style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
 
         {/* ===== HEADER ===== */}
         <div className="rounded-t-xl px-8 py-5 flex items-center justify-between" style={{ backgroundColor: H }}>
