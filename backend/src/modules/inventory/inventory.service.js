@@ -211,6 +211,53 @@ const inventoryService = {
    * YYMMDD  = date (today).
    * SEQ     = 2-digit sequence per (supplier+variety+date), starts at 01.
    */
+  /**
+   * Generate a milling-output lot number: {BATCH_NO}-{TYPE}-{SEQ}
+   * e.g. M-027-FIN-01, M-027-B1-01, M-027-SORTEX-01.
+   *
+   * The lot number itself tells the operator which batch produced the
+   * lot and what kind of output it is — replaces the opaque
+   * LOT-YYYYMMDD-XXXX format that used to be applied to every output.
+   *
+   * `type` examples: 'finished', 'broken', 'sortex', 'bran', 'husk'.
+   * `grade` (optional) is the broken sub-grade label: 'B1', 'B2',
+   * 'B3', 'CSR', 'Short Grain'. When provided, replaces type as the
+   * middle token so each broken-grade lot is identifiable at a glance.
+   */
+  async generateOutputLotNo(trx, { batchNo, type, grade }) {
+    const q = trx || db;
+    const TYPE_CODES = {
+      finished: 'FIN',
+      broken:   'BRK',
+      sortex:   'SORTEX',
+      bran:     'BRAN',
+      husk:     'HUSK',
+    };
+    const GRADE_CODES = {
+      'B1': 'B1', 'B2': 'B2', 'B3': 'B3', 'CSR': 'CSR', 'Short Grain': 'SG',
+    };
+    const middle = grade && GRADE_CODES[grade]
+      ? GRADE_CODES[grade]
+      : (TYPE_CODES[type] || (type ? type.toUpperCase().slice(0, 6) : 'OUT'));
+    // Use the batch number as-is (e.g. "M-027"). Fall back to OUT-YYMMDD
+    // when no batch context — shouldn't happen in practice.
+    const base = batchNo
+      ? `${String(batchNo).toUpperCase()}-${middle}`
+      : `OUT-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${middle}`;
+    // Find the next sequence within this prefix
+    const last = await q('inventory_lots')
+      .where('lot_no', 'like', `${base}-%`)
+      .orderBy('lot_no', 'desc')
+      .first('lot_no');
+    let seq = 1;
+    if (last && last.lot_no) {
+      const tail = last.lot_no.slice(base.length + 1);
+      const n = parseInt(tail, 10);
+      if (!Number.isNaN(n)) seq = n + 1;
+    }
+    return `${base}-${String(seq).padStart(2, '0')}`;
+  },
+
   async generateRiceLotNo(trx, { supplierId, productId, date }) {
     const q = trx || db;
     const today = date ? new Date(date) : new Date();
@@ -771,7 +818,10 @@ const inventoryService = {
     // --- Finished rice ---
     const finishedQty = parseFloat(finishedMT) || 0;
     if (finishedQty > 0) {
-      const lotNo = await inventoryService.generateLotNo(trx);
+      const lotNo = await inventoryService.generateOutputLotNo(trx, {
+        batchNo: batchRow && batchRow.batch_no,
+        type: 'finished',
+      });
       const [lot] = await trx('inventory_lots')
         .insert({
           lot_no: lotNo,
@@ -875,7 +925,17 @@ const inventoryService = {
       const bpCostPerKg = parseFloat(bpCosts[bp.key]) || 0;
       const bpCostPerMT = bpCostPerKg * 1000;
 
-      const lotNo = await inventoryService.generateLotNo(trx);
+      // Output lot number is keyed on batch + type/grade so the lot
+      // ID itself tells the operator what it is.
+      // Examples: M-027-B1-01, M-027-SORTEX-01, M-027-BRAN-01.
+      const lotNo = await inventoryService.generateOutputLotNo(trx, {
+        batchNo: batchRow && batchRow.batch_no,
+        type: bp.key === 'b1' || bp.key === 'b2' || bp.key === 'b3'
+              || bp.key === 'csr' || bp.key === 'short_grain'
+              || bp.key === 'broken' ? 'broken'
+              : bp.key, // sortex/bran/husk
+        grade: bp.grade, // B1/B2/B3/CSR/Short Grain — null for sortex/bran/husk
+      });
       const bpProductId = await byproductProductLookup(bp.name);
       const [lot] = await trx('inventory_lots')
         .insert({

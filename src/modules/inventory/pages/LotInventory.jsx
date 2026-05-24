@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Package, Search, Plus, Warehouse, Truck, Eye, Filter,
@@ -75,6 +75,84 @@ function subtypeLabel(s) {
 
 function fmtPKR(v) { return 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString(); }
 
+// Heuristic mirroring the backend deriveProductCode — strings that
+// look like auto-generated SKUs (PRD-DATETIME-…, PROD-…, long-digit
+// IDs, or anything longer than 18 chars) are hidden from the variety
+// badge so old data doesn't clutter the table.
+function looksLikeAutoSku(s) {
+  if (!s) return false;
+  const u = s.toUpperCase();
+  if (/^PRD[-_]\d{6,}/.test(u)) return true;
+  if (/^PROD[-_]/.test(u)) return true;
+  if (/\d{8,}/.test(u)) return true;
+  if (u.length > 18) return true;
+  return false;
+}
+
+/**
+ * Single-lot row renderer — used by both flat view and the expanded
+ * children inside grouped view (with a slight indent in the latter).
+ */
+function renderLotRow(lot, displayUnit, navigate, indented) {
+  const netKg = parseFloat(lot.netWeightKg) || parseFloat(lot.qty) * 1000 || 0;
+  const availKg = (parseFloat(lot.availableQty) || 0) * 1000;
+  const bw = parseFloat(lot.bagWeightKg) || 50;
+  const variety = lot.variety || lot.productCode || lot.productName || null;
+  const grade = lot.grade;
+  const itemLower = (lot.itemName || '').toLowerCase();
+  const varLower = (variety || '').toLowerCase();
+  const varIsRedundant = !variety
+    || looksLikeAutoSku(variety)
+    || varLower === itemLower
+    || itemLower.includes(varLower) || varLower.includes(itemLower);
+  const s = lotSubtype(lot);
+  return (
+    <tr
+      key={lot.id}
+      className={`cursor-pointer hover:bg-gray-50 group ${indented ? 'bg-slate-50/40' : ''}`}
+      onClick={() => navigate(`/lot-inventory/${lot.lotNo || lot.id}`)}
+    >
+      <td className={`font-medium text-blue-600 whitespace-nowrap ${indented ? 'pl-8' : ''}`}>{lot.lotNo}</td>
+      <td>
+        <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium whitespace-nowrap ${subtypeBadgeClass(s)}`}>
+          {subtypeLabel(s)}
+        </span>
+      </td>
+      <td className="max-w-[16rem]">
+        <div className="text-gray-900 font-medium truncate" title={lot.itemName}>{lot.itemName}</div>
+        {(!varIsRedundant || grade) && (
+          <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
+            {!varIsRedundant && (
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 truncate max-w-[10rem]" title={variety}>
+                {variety}
+              </span>
+            )}
+            {grade && <span className="text-gray-400">({grade})</span>}
+          </div>
+        )}
+      </td>
+      <td className="text-gray-600 max-w-[10rem] truncate" title={lot.supplierName || ''}>{lot.supplierName || '—'}</td>
+      <td className="text-gray-600 text-xs max-w-[8rem] truncate" title={lot.warehouseName || ''}>{lot.warehouseName || '—'}</td>
+      <td className="text-right font-medium tabular-nums">{fromKg(netKg, displayUnit, bw).toLocaleString()}</td>
+      <td className="text-right tabular-nums text-emerald-600 font-medium">{fromKg(availKg, displayUnit, bw).toLocaleString()}</td>
+      <td className="text-right tabular-nums text-xs font-medium">{fmtPKR(lot.landedCostPerKg)}</td>
+      <td className="text-right tabular-nums font-medium">{fmtPKR(lot.landedCostTotal)}</td>
+      <td className="text-center">
+        <div className="flex items-center justify-center gap-1 text-xs whitespace-nowrap">
+          {lot.moisturePct && <span className="text-blue-600" title="Moisture">{lot.moisturePct}%M</span>}
+          {lot.brokenPct && <span className="text-amber-600" title="Broken">{lot.brokenPct}%B</span>}
+        </div>
+      </td>
+      <td className="text-center"><StatusBadge status={lot.status} /></td>
+      <td className={`text-center sticky right-0 group-hover:bg-gray-50 shadow-[inset_1px_0_0_rgba(0,0,0,0.06)] z-10 ${indented ? 'bg-slate-50/40' : 'bg-white'}`}>
+        <button onClick={e => { e.stopPropagation(); navigate(`/lot-inventory/${lot.lotNo || lot.id}`); }} className="btn btn-ghost btn-sm">
+          <Eye className="w-4 h-4" />
+        </button>
+      </td>
+    </tr>
+  );
+}
+
 export default function LotInventory() {
   const { addToast, suppliersList, warehousesList, productsList } = useApp();
   const navigate = useNavigate();
@@ -83,6 +161,12 @@ export default function LotInventory() {
   const [subtypeFilter, setSubtypeFilter] = useState('All');
   const [entityFilter, setEntityFilter] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
+  // Grouped vs flat view. Grouped collapses output lots (finished /
+  // broken grades / sortex / bran / husk) into one summary row per
+  // (subtype, variety) — raw rice lots stay as individual rows because
+  // each is a distinct purchase.
+  const [viewMode, setViewMode] = useState('grouped');
+  const [expandedGroups, setExpandedGroups] = useState(() => new Set());
   const [displayUnit, setDisplayUnit] = useState('katta');
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -101,6 +185,14 @@ export default function LotInventory() {
   const { data: lots = [], isLoading, error, refetch } = useLotInventory({
     ...(statusFilter !== 'All' && { status: statusFilter }),
   });
+
+  function toggleGroup(key) {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
 
   const filtered = useMemo(() => {
     return lots.filter(l => {
@@ -144,6 +236,49 @@ export default function LotInventory() {
 
   function getDisplayQty(kg) { return fromKg(kg, displayUnit); }
   function getUnitLabel() { return displayUnit === 'katta' ? 'Katta' : displayUnit === 'maund' ? 'Maund' : displayUnit === 'ton' ? 'Ton' : 'KG'; }
+
+  // Group output lots (finished / broken grades / sortex / bran / husk)
+  // by (subtype, variety) so the operator sees one row per byproduct
+  // type instead of dozens of individual lots. Raw rice purchases stay
+  // as standalone rows — each purchase is a distinct receipt.
+  const visualGroups = useMemo(() => {
+    if (viewMode !== 'grouped') return { groups: [], standalone: filtered };
+    const map = new Map();
+    const standalone = [];
+    for (const lot of filtered) {
+      const s = lotSubtype(lot);
+      if (s === 'rice-in' || s === 'other') { standalone.push(lot); continue; }
+      const variety = lot.variety || lot.productCode || lot.productName || '—';
+      const key = `${s}|${variety}`;
+      if (!map.has(key)) map.set(key, { key, subtype: s, variety, lots: [] });
+      map.get(key).lots.push(lot);
+    }
+    const groups = Array.from(map.values()).map((g) => {
+      const totalKg = g.lots.reduce((s, l) => s + (parseFloat(l.netWeightKg) || 0), 0);
+      const availKg = g.lots.reduce((s, l) => s + ((parseFloat(l.availableQty) || 0) * 1000), 0);
+      const totalValue = g.lots.reduce((s, l) => s + (parseFloat(l.landedCostTotal) || 0), 0);
+      const weightedLanded = totalKg > 0
+        ? g.lots.reduce((s, l) => s + ((parseFloat(l.landedCostPerKg) || 0) * (parseFloat(l.netWeightKg) || 0)), 0) / totalKg
+        : 0;
+      const batchRefSet = new Set();
+      for (const l of g.lots) {
+        const m = (l.batchRef || '').match(/batch-(\d+)/);
+        if (m) batchRefSet.add(parseInt(m[1], 10));
+      }
+      return {
+        ...g,
+        totalKg,
+        availKg,
+        totalValue,
+        weightedLanded,
+        lotCount: g.lots.length,
+        batchIds: Array.from(batchRefSet).sort((a, b) => a - b),
+      };
+    });
+    // Sort groups: lots-out-of-stock at the bottom, otherwise by total qty desc
+    groups.sort((a, b) => (b.availKg + b.totalKg / 1000) - (a.availKg + a.totalKg / 1000));
+    return { groups, standalone };
+  }, [filtered, viewMode]);
 
   if (isLoading) return <LoadingSpinner message="Loading lot inventory..." />;
   if (error) return <ErrorState message={error.message} onRetry={refetch} />;
@@ -258,6 +393,21 @@ export default function LotInventory() {
               placeholder="Search lots, supplier, variety, warehouse..." className="form-input pl-9 py-1.5 text-sm w-full" />
           </div>
           <span className="text-xs text-gray-400">{filtered.length} of {lots.length} lots</span>
+          {/* View mode: grouped collapses output lots (B1, B2, sortex…)
+              into one row per subtype + variety, with the underlying
+              source batches expandable. Raw rice lots always render as
+              individual rows because each is a distinct purchase. */}
+          <div className="flex bg-gray-100 rounded-lg p-0.5">
+            {[
+              { v: 'grouped', l: 'Grouped' },
+              { v: 'flat',    l: 'All lots' },
+            ].map(o => (
+              <button key={o.v} onClick={() => setViewMode(o.v)}
+                className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${viewMode === o.v ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}>
+                {o.l}
+              </button>
+            ))}
+          </div>
           {/* Unit toggle */}
           <div className="flex bg-gray-100 rounded-lg p-0.5 ml-auto">
             {UNITS.map(u => (
@@ -296,84 +446,61 @@ export default function LotInventory() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(lot => {
-                  const netKg = parseFloat(lot.netWeightKg) || parseFloat(lot.qty) * 1000 || 0;
-                  const availKg = (parseFloat(lot.availableQty) || 0) * 1000;
-                  const bw = parseFloat(lot.bagWeightKg) || 50;
-                  // Variety / grade row beneath the item name — but only
-                  // when it adds new info. The recent rice-purchase flow
-                  // sets itemName = product.name AND variety =
-                  // product.name when the SKU code is auto-generated, so
-                  // showing both is pure noise. Compare case-insensitively
-                  // and treat equal-or-contained strings as redundant.
-                  // Also drop strings that look like auto-generated SKUs
-                  // (PRD-DATETIME-..., PROD-SOMETHING, anything with a
-                  // long run of digits) — these were stored on legacy
-                  // lots before the drawer's variety fallback was fixed.
-                  const variety = lot.variety || lot.productCode || lot.productName || null;
-                  const grade = lot.grade;
-                  const itemLower = (lot.itemName || '').toLowerCase();
-                  const varLower = (variety || '').toLowerCase();
-                  const looksLikeAutoSku = (s) => {
-                    if (!s) return false;
-                    const upper = s.toUpperCase();
-                    if (/^PRD[-_]\d{6,}/.test(upper)) return true;   // PRD-20251230-…
-                    if (/^PROD[-_]/.test(upper)) return true;        // PROD-BROKEN-RICE
-                    if (/\d{8,}/.test(upper)) return true;           // any 8+ consecutive digits
-                    if (upper.length > 18) return true;              // generic ID-shaped
-                    return false;
-                  };
-                  const varIsRedundant = !variety
-                    || looksLikeAutoSku(variety)
-                    || varLower === itemLower
-                    || itemLower.includes(varLower) || varLower.includes(itemLower);
-                  return (
-                    <tr key={lot.id} className="cursor-pointer hover:bg-gray-50 group" onClick={() => navigate(`/lot-inventory/${lot.lotNo || lot.id}`)}>
-                      <td className="font-medium text-blue-600 whitespace-nowrap">{lot.lotNo}</td>
-                      <td>
-                        {(() => {
-                          const s = lotSubtype(lot);
-                          return (
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium whitespace-nowrap ${subtypeBadgeClass(s)}`}>
-                              {subtypeLabel(s)}
-                            </span>
-                          );
-                        })()}
-                      </td>
-                      <td className="max-w-[16rem]">
-                        <div className="text-gray-900 font-medium truncate" title={lot.itemName}>{lot.itemName}</div>
-                        {(!varIsRedundant || grade) && (
-                          <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
-                            {!varIsRedundant && (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 truncate max-w-[10rem]" title={variety}>
-                                {variety}
-                              </span>
-                            )}
-                            {grade && <span className="text-gray-400">({grade})</span>}
-                          </div>
-                        )}
-                      </td>
-                      <td className="text-gray-600 max-w-[10rem] truncate" title={lot.supplierName || ''}>{lot.supplierName || '—'}</td>
-                      <td className="text-gray-600 text-xs max-w-[8rem] truncate" title={lot.warehouseName || ''}>{lot.warehouseName || '—'}</td>
-                      <td className="text-right font-medium tabular-nums">{fromKg(netKg, displayUnit, bw).toLocaleString()}</td>
-                      <td className="text-right tabular-nums text-emerald-600 font-medium">{fromKg(availKg, displayUnit, bw).toLocaleString()}</td>
-                      <td className="text-right tabular-nums text-xs font-medium">{fmtPKR(lot.landedCostPerKg)}</td>
-                      <td className="text-right tabular-nums font-medium">{fmtPKR(lot.landedCostTotal)}</td>
-                      <td className="text-center">
-                        <div className="flex items-center justify-center gap-1 text-xs whitespace-nowrap">
-                          {lot.moisturePct && <span className="text-blue-600" title="Moisture">{lot.moisturePct}%M</span>}
-                          {lot.brokenPct && <span className="text-amber-600" title="Broken">{lot.brokenPct}%B</span>}
-                        </div>
-                      </td>
-                      <td className="text-center"><StatusBadge status={lot.status} /></td>
-                      <td className="text-center sticky right-0 bg-white group-hover:bg-gray-50 shadow-[inset_1px_0_0_rgba(0,0,0,0.06)] z-10">
-                        <button onClick={e => { e.stopPropagation(); navigate(`/lot-inventory/${lot.lotNo || lot.id}`); }} className="btn btn-ghost btn-sm">
-                          <Eye className="w-4 h-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {viewMode === 'flat'
+                  ? filtered.map((lot) => renderLotRow(lot, displayUnit, navigate, false))
+                  : (
+                    <>
+                      {/* Standalone lots (raw rice purchases) — each one
+                          is a distinct receipt, never grouped. */}
+                      {visualGroups.standalone.map((lot) => renderLotRow(lot, displayUnit, navigate, false))}
+                      {/* One summary row per (subtype, variety) group;
+                          click to expand the individual lots beneath. */}
+                      {visualGroups.groups.map((g) => {
+                        const open = expandedGroups.has(g.key);
+                        const bw = 50;
+                        return (
+                          <React.Fragment key={g.key}>
+                            <tr
+                              className={`cursor-pointer hover:bg-blue-50 group bg-gradient-to-r from-slate-50 to-white border-l-4 ${open ? 'border-blue-500' : 'border-transparent'}`}
+                              onClick={() => toggleGroup(g.key)}
+                            >
+                              <td className="font-medium text-slate-700 whitespace-nowrap">
+                                <span className="inline-flex items-center gap-1">
+                                  <span className="text-gray-400">{open ? '▾' : '▸'}</span>
+                                  {g.lotCount} {g.lotCount === 1 ? 'lot' : 'lots'}
+                                </span>
+                              </td>
+                              <td>
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold whitespace-nowrap ${subtypeBadgeClass(g.subtype)}`}>
+                                  {subtypeLabel(g.subtype)}
+                                </span>
+                              </td>
+                              <td className="max-w-[16rem]">
+                                <div className="text-gray-900 font-semibold truncate" title={g.variety}>{g.variety}</div>
+                                {g.batchIds.length > 0 && (
+                                  <div className="text-[11px] text-gray-500 mt-0.5 truncate" title={`From batches: ${g.batchIds.join(', ')}`}>
+                                    from {g.batchIds.length} batch{g.batchIds.length === 1 ? '' : 'es'}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="text-gray-400 text-xs">—</td>
+                              <td className="text-gray-400 text-xs">—</td>
+                              <td className="text-right font-semibold tabular-nums">{fromKg(g.totalKg, displayUnit, bw).toLocaleString()}</td>
+                              <td className="text-right tabular-nums text-emerald-700 font-semibold">{fromKg(g.availKg, displayUnit, bw).toLocaleString()}</td>
+                              <td className="text-right tabular-nums text-xs">{g.weightedLanded ? fmtPKR(g.weightedLanded) : '—'}</td>
+                              <td className="text-right tabular-nums font-semibold">{fmtPKR(g.totalValue)}</td>
+                              <td className="text-center text-xs text-gray-400">—</td>
+                              <td className="text-center text-[11px] text-gray-500">{open ? 'expanded' : 'click to expand'}</td>
+                              <td className="text-center sticky right-0 bg-gradient-to-r from-slate-50 to-white group-hover:bg-blue-50 shadow-[inset_1px_0_0_rgba(0,0,0,0.06)] z-10">
+                                <span className="text-gray-400 text-xs">{open ? '▾' : '▸'}</span>
+                              </td>
+                            </tr>
+                            {open && g.lots.map((lot) => renderLotRow(lot, displayUnit, navigate, true))}
+                          </React.Fragment>
+                        );
+                      })}
+                    </>
+                  )}
               </tbody>
             </table>
           </div>
