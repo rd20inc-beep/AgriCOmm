@@ -498,6 +498,8 @@ module.exports = {
             refNo: lotNo,
             description: `Purchase lot ${lotNo} for ${item_name}`,
             userId: req.user?.id || null,
+            partyType: supplier_id ? 'supplier' : null,
+            partyId: supplier_id || null,
           });
         }
 

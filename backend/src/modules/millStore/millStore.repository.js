@@ -234,6 +234,8 @@ const millStoreRepo = {
             ? `Mill store purchase ${purchase.purchase_no} (Invoice ${header.invoice_number})`
             : `Mill store purchase ${purchase.purchase_no}`,
           userId: header.created_by,
+          partyType: 'supplier',
+          partyId: purchase.supplier_id,
         });
       } catch (e) {
         console.warn('Mill purchase journal post failed:', e.message);

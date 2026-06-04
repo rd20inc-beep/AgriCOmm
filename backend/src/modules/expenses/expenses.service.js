@@ -169,6 +169,8 @@ const expensesService = {
           refNo: expenseNo,
           description: `${vendorLabel}: ${(category || 'expense').replace(/_/g, ' ')} — ${description || 'no description'}`.slice(0, 240),
           userId,
+          partyType: supplier_id ? 'supplier' : null,
+          partyId: supplier_id || null,
         });
       } catch (e) {
         console.warn('Expense journal post failed:', e.message);
