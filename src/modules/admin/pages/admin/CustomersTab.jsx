@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import PartyLink from '../../../../shared/components/PartyLink';
 import { Users, Plus, Globe, Mail, Phone, Pencil, Trash2, Star, BookOpen } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
 import { useCreateCustomer, useUpdateCustomer, useDeleteCustomer } from '../../../../api/queries';
@@ -124,7 +125,7 @@ export default function CustomersTab() {
                     </button>
                   </td>
                   <td className="px-4 py-3 text-gray-500 font-mono text-xs">{c.id}</td>
-                  <td className="px-4 py-3 font-medium text-gray-900">{c.name}</td>
+                  <td className="px-4 py-3 font-medium"><PartyLink type="customer" id={c.id} name={c.name} /></td>
                   <td className="px-4 py-3 text-gray-600">
                     <span className="inline-flex items-center gap-1">
                       <Globe className="w-3.5 h-3.5 text-gray-400" />

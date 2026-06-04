@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useApp } from '../../../context/AppContext';
 import StatusBadge from '../../../components/StatusBadge';
+import PartyLink from '../../../shared/components/PartyLink';
 import { Plus, Search, Eye, ArrowUpDown, Ship, FileText, DollarSign, Package, Clock, Filter, FileDown, Mail, Download } from 'lucide-react';
 import { downloadCSV } from '../../../utils/csvExport';
 import Modal from '../../../components/Modal';
@@ -208,7 +209,7 @@ export default function ExportOrders() {
                     className="hover:bg-gray-50 cursor-pointer transition-colors"
                   >
                     <td className="px-4 py-3 font-medium text-blue-600">{order.id}</td>
-                    <td className="px-4 py-3 text-gray-900">{order.customerName}</td>
+                    <td className="px-4 py-3 text-gray-900"><PartyLink type="customer" id={order.customerId} name={order.customerName} /></td>
                     <td className="px-4 py-3 text-gray-600">{order.country}</td>
                     <td className="px-4 py-3 text-gray-600">{order.productName}</td>
                     <td className="px-4 py-3 text-right text-gray-900 font-medium">{order.qtyMT}</td>

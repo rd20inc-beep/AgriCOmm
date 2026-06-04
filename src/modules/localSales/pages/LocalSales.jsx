@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
+import PartyLink from '../../../shared/components/PartyLink';
 import {
   ShoppingCart, Plus, Search, DollarSign, Package, Truck,
   CreditCard, X, Clock, CheckCircle, RefreshCw, Download,
@@ -168,7 +169,7 @@ export default function LocalSales() {
                 <tr key={s.id} onClick={() => openSaleDetail(s)} className="hover:bg-gray-50 cursor-pointer">
                   <td className="py-2.5 px-4 font-medium text-blue-600">{s.saleNo}</td>
                   <td className="py-2.5 px-4 text-gray-600 text-xs">{s.saleDate ? new Date(s.saleDate).toLocaleDateString('en-GB', { day:'2-digit', month:'short' }) : '—'}</td>
-                  <td className="py-2.5 px-4 text-gray-900">{s.customerName || s.buyerName || '—'}</td>
+                  <td className="py-2.5 px-4 text-gray-900"><PartyLink type="customer" id={s.customerId} name={s.customerName || s.buyerName} /></td>
                   <td className="py-2.5 px-4 text-gray-700">{s.itemName}</td>
                   <td className="py-2.5 px-4 text-right font-medium tabular-nums">
                     {fromKg(parseFloat(s.quantityKg) || 0, displayUnit).toLocaleString()}

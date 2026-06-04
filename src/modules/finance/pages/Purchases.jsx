@@ -10,6 +10,7 @@ import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 import { downloadCSV } from '../../../utils/csvExport';
 import { useApp } from '../../../context/AppContext';
 import { shortenRef } from '../utils/refs';
+import PartyLink from '../../../shared/components/PartyLink';
 
 function fmtPKR(n) {
   const v = Number(n) || 0;
@@ -404,7 +405,7 @@ export default function Purchases() {
                         {meta?.label || p.source}
                       </span>
                     </td>
-                    <td className="px-4 py-2.5 text-gray-700 truncate max-w-[180px]">{p.supplierName || '—'}</td>
+                    <td className="px-4 py-2.5 text-gray-700 truncate max-w-[180px]"><PartyLink type="supplier" id={p.supplierId} name={p.supplierName} /></td>
                     <td className="px-4 py-2.5 text-gray-600 capitalize text-xs">{p.category ? String(p.category).replace(/_/g, ' ') : '—'}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums">
                       <span className="font-medium text-gray-900">{fmtFull(p.amountPkr)}</span>
@@ -531,7 +532,7 @@ function PayPurchaseDrawer({ purchase, bankAccounts, isPending, onClose, onSubmi
           <div className="bg-gray-50 rounded-lg p-3 text-xs space-y-1">
             <div className="flex justify-between">
               <span className="text-gray-500">Supplier</span>
-              <span className="font-medium text-gray-900">{purchase.supplierName || '—'}</span>
+              <span className="font-medium"><PartyLink type="supplier" id={purchase.supplierId} name={purchase.supplierName} /></span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-500">Total</span>
