@@ -1,6 +1,38 @@
 const db = require('../../config/database');
 
 /**
+ * Decide the display currency for a party statement from its matching journal
+ * lines. Journals are stored in their transaction currency (export AR is USD
+ * with an fx_rate stamped, mill flows are PKR). If every matching line shares
+ * one currency, the statement is shown natively in it; if a party mixes
+ * currencies, it falls back to PKR base (native × fx_rate) so the running
+ * balance stays a single valid number.
+ *
+ * Returns:
+ *  - statementCurrency: the chosen display currency
+ *  - factorSql: SQL expression converting a native amount to that currency
+ *    (used inside the opening-balance SUM). The string is constant (no user
+ *    input), so it's safe to inline.
+ *  - conv(amount, currency, fxRate): JS equivalent for per-line amounts.
+ *
+ * `lineBase` is the same query-builder factory the caller uses for the
+ * statement, so currency detection sees exactly the lines that will be summed.
+ */
+async function currencyMode(lineBase) {
+  const curRows = await lineBase().distinct('je.currency as currency');
+  const all = [...new Set(curRows.map((r) => r.currency || 'PKR'))];
+  const statementCurrency = all.length === 1 ? all[0] : 'PKR';
+  const toPkr = statementCurrency === 'PKR';
+  const factorSql = toPkr
+    ? "CASE WHEN COALESCE(je.currency,'PKR')='PKR' THEN 1 ELSE COALESCE(je.fx_rate,1) END"
+    : '1';
+  const conv = (amt, cur, fx) => (toPkr
+    ? amt * ((cur || 'PKR') === 'PKR' ? 1 : (parseFloat(fx) || 1))
+    : amt);
+  return { factorSql, conv, statementCurrency };
+}
+
+/**
  * Accounting Engine — Core double-entry bookkeeping service
  * All monetary operations produce balanced journal entries.
  */
@@ -947,14 +979,19 @@ const accountingService = {
         }
       });
 
-    // Opening balance is strictly what accumulated BEFORE dateFrom. With no
-    // dateFrom the whole history is "within period", so opening is 0 — guard
-    // against summing every line here and again as a transaction (double count).
+    // Display currency: journals are stored in their transaction currency
+    // (export AR is USD, fx_rate stamped), not PKR. If every matching journal
+    // shares one currency, present the ledger in it (so a USD customer sees
+    // USD). If a party mixes currencies, fall back to PKR base (native ×
+    // fx_rate) so the running balance stays a single valid number.
+    const { factorSql, conv, statementCurrency } = await currencyMode(lineBase);
+
+    // Opening balance (before dateFrom), in the display currency.
     let openingBalance = 0;
     if (dateFrom) {
       const openingResult = await lineBase()
         .where('je.date', '<', dateFrom)
-        .select(db.raw('COALESCE(SUM(jl.debit - jl.credit), 0)::numeric as balance'))
+        .select(db.raw(`COALESCE(SUM((jl.debit - jl.credit) * (${factorSql})), 0)::numeric as balance`))
         .first();
       openingBalance = parseFloat(openingResult.balance);
     }
@@ -975,26 +1012,35 @@ const accountingService = {
         'coa.code as account_code',
         'coa.name as account_name',
         'jl.debit',
-        'jl.credit'
+        'jl.credit',
+        'je.currency',
+        'je.fx_rate'
       )
       .orderBy(['je.date', 'je.id']);
 
     // Closing balance
     let runningBalance = openingBalance;
     const formattedTxns = transactions.map((t) => {
-      const debit = parseFloat(t.debit);
-      const credit = parseFloat(t.credit);
+      const debit = conv(parseFloat(t.debit), t.currency, t.fx_rate);
+      const credit = conv(parseFloat(t.credit), t.currency, t.fx_rate);
       runningBalance += (debit - credit);
       return {
-        ...t,
-        debit,
-        credit,
+        date: t.date,
+        journal_no: t.journal_no,
+        ref_no: t.ref_no,
+        description: t.description,
+        account_code: t.account_code,
+        account_name: t.account_name,
+        debit: parseFloat(debit.toFixed(2)),
+        credit: parseFloat(credit.toFixed(2)),
+        currency: statementCurrency,
         running_balance: parseFloat(runningBalance.toFixed(2)),
       };
     });
 
     return {
-      customer_id: parseInt(customerId),
+      customer_id: cid,
+      currency: statementCurrency,
       opening_balance: parseFloat(openingBalance.toFixed(2)),
       transactions: formattedTxns,
       closing_balance: parseFloat(runningBalance.toFixed(2)),
@@ -1047,14 +1093,17 @@ const accountingService = {
         }
       });
 
-    // Opening balance is strictly what accumulated BEFORE dateFrom. With no
-    // dateFrom the whole history is "within period", so opening is 0 — guard
-    // against summing every line here and again as a transaction (double count).
+    // Display currency — show the supplier ledger in its native currency when
+    // single-currency, else PKR base. See currencyMode + the customer
+    // statement note above.
+    const { factorSql, conv, statementCurrency } = await currencyMode(lineBase);
+
+    // Opening balance (before dateFrom), in the display currency.
     let openingBalance = 0;
     if (dateFrom) {
       const openingResult = await lineBase()
         .where('je.date', '<', dateFrom)
-        .select(db.raw('COALESCE(SUM(jl.credit - jl.debit), 0)::numeric as balance'))
+        .select(db.raw(`COALESCE(SUM((jl.credit - jl.debit) * (${factorSql})), 0)::numeric as balance`))
         .first();
       openingBalance = parseFloat(openingResult.balance);
     }
@@ -1075,25 +1124,34 @@ const accountingService = {
         'coa.code as account_code',
         'coa.name as account_name',
         'jl.debit',
-        'jl.credit'
+        'jl.credit',
+        'je.currency',
+        'je.fx_rate'
       )
       .orderBy(['je.date', 'je.id']);
 
     let runningBalance = openingBalance;
     const formattedTxns = transactions.map((t) => {
-      const debit = parseFloat(t.debit);
-      const credit = parseFloat(t.credit);
+      const debit = conv(parseFloat(t.debit), t.currency, t.fx_rate);
+      const credit = conv(parseFloat(t.credit), t.currency, t.fx_rate);
       runningBalance += (credit - debit);
       return {
-        ...t,
-        debit,
-        credit,
+        date: t.date,
+        journal_no: t.journal_no,
+        ref_no: t.ref_no,
+        description: t.description,
+        account_code: t.account_code,
+        account_name: t.account_name,
+        debit: parseFloat(debit.toFixed(2)),
+        credit: parseFloat(credit.toFixed(2)),
+        currency: statementCurrency,
         running_balance: parseFloat(runningBalance.toFixed(2)),
       };
     });
 
     return {
-      supplier_id: parseInt(supplierId),
+      supplier_id: sid,
+      currency: statementCurrency,
       opening_balance: parseFloat(openingBalance.toFixed(2)),
       transactions: formattedTxns,
       closing_balance: parseFloat(runningBalance.toFixed(2)),
