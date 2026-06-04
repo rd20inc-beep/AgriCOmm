@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Users, Truck, BookUser, Scale, ArrowDownLeft, ArrowUpRight, Printer, FileText } from 'lucide-react';
 import { FinanceKPI } from '../../../components/finance';
+import SearchSelect from '../../../shared/components/SearchSelect';
 import { accountingApi } from '../../accounting/api/services';
 import { useCustomers, useSuppliers } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
@@ -59,6 +60,12 @@ export default function PartyLedger() {
   const parties = mode === 'customer' ? customers : suppliers;
   const partiesLoading = mode === 'customer' ? custLoading : suppLoading;
   const selectedParty = parties.find((p) => String(p.id) === String(partyId));
+  // Options for the searchable picker — country/location shown as the sub-label
+  // so it's searchable too.
+  const partyOptions = useMemo(
+    () => parties.map((p) => ({ value: p.id, label: p.name, sub: p.country || p.location || '' })),
+    [parties],
+  );
 
   // date_from / date_to come from the shared finance date-range selector
   const stmtParams = useMemo(() => {
@@ -126,20 +133,17 @@ export default function PartyLedger() {
           </button>
         </div>
 
-        {/* Party picker */}
+        {/* Party picker — searchable (53 customers / 170+ suppliers) */}
         <div className="flex-1 min-w-0 max-w-sm">
           <label className="text-xs text-gray-500 block mb-1">
             Select {mode === 'customer' ? 'customer' : 'supplier'}
           </label>
-          <select
+          <SearchSelect
             value={partyId}
-            onChange={(e) => updateParams({ id: e.target.value })}
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-            <option value="">{partiesLoading ? 'Loading…' : `Choose a ${mode}…`}</option>
-            {parties.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
+            onChange={(v) => updateParams({ id: v })}
+            options={partyOptions}
+            placeholder={partiesLoading ? 'Loading…' : `Search ${mode}…`}
+          />
         </div>
 
         {partyId && (

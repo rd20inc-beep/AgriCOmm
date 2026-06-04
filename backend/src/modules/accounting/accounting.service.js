@@ -29,6 +29,10 @@ const accountingService = {
   async createJournal(trx, {
     date, entity, refType, refNo, description, lines,
     currency = 'PKR', fxRate, isAuto = false, postingRuleId, userId,
+    // Party stamping — let statements filter journals by the customer/supplier
+    // they belong to instead of fragile ref_no string matching. Both optional;
+    // partyType is 'customer' | 'supplier'.
+    partyType = null, partyId = null,
   }) {
     // Wrap in a transaction if one was not provided, to ensure
     // journal_entries + journal_lines are inserted atomically.
@@ -104,6 +108,8 @@ const accountingService = {
           total_debit: totalDebit,
           total_credit: totalCredit,
           created_by: userId || null,
+          party_type: partyType || null,
+          party_id: partyId || null,
         })
         .returning('*');
 
@@ -202,6 +208,9 @@ const accountingService = {
         fxRate: original.fx_rate,
         isAuto: false,
         userId,
+        // Carry the party over so a reversal shows in the same ledger.
+        partyType: original.party_type,
+        partyId: original.party_id,
       });
 
       // Link reversal
@@ -236,6 +245,10 @@ const accountingService = {
   async autoPost(trx, {
     triggerEvent, entity, amount, currency = 'PKR',
     refType, refNo, description, userId,
+    // Party stamping — passed straight through to createJournal so
+    // posting-rule-driven journals (receipts, bills, expenses) carry the
+    // customer/supplier they belong to.
+    partyType = null, partyId = null,
   }) {
     // Wrap in a transaction if one was not provided, to ensure
     // posting rule lookup + journal creation + posting are atomic.
@@ -299,6 +312,8 @@ const accountingService = {
         isAuto: true,
         postingRuleId: rule.id,
         userId,
+        partyType,
+        partyId,
       });
 
       // Auto-post immediately
@@ -883,18 +898,18 @@ const accountingService = {
    * Customer statement: opening balance + transactions + closing balance.
    */
   async getCustomerStatement(customerId, { dateFrom, dateTo }) {
-    // A customer's journals are referenced by several ref_no conventions:
-    //   • export order numbers (EX-…) — invoice / revenue journals
-    //   • receivable numbers (RCV-…)  — some invoice journals
-    //   • payment numbers (PAY-…)     — receipt journals (recordPayment
-    //                                   stamps refNo = paymentNo)
-    // Gather all three, otherwise settlements never appear and the running
-    // balance only reflects invoices.
+    const cid = parseInt(customerId);
+    // Journals are matched to a customer in two ways:
+    //   1. Authoritatively, via party_type/party_id stamped at post time.
+    //   2. For older / unstamped journals, by the legacy ref_no heuristic —
+    //      export order numbers, receivable numbers, and the payment numbers
+    //      of receipts against this customer's receivables.
+    // The ref set below feeds the fallback only; stamped journals win.
     const orders = await db('export_orders')
-      .where({ customer_id: customerId })
+      .where({ customer_id: cid })
       .select('order_no');
     const receivables = await db('receivables')
-      .where({ customer_id: customerId })
+      .where({ customer_id: cid })
       .select('id', 'recv_no');
     const recvIds = receivables.map((r) => r.id);
     const payments = recvIds.length
@@ -907,10 +922,6 @@ const accountingService = {
       ...payments.map((p) => p.payment_no),
     ].filter(Boolean))];
 
-    if (refNos.length === 0) {
-      return { customer_id: parseInt(customerId), opening_balance: 0, transactions: [], closing_balance: 0 };
-    }
-
     // Receivable + customer-advance accounts (debit-normal). BOTH the
     // opening balance and the in-period lines are scoped to these account
     // ids so each journal contributes only its AR leg — without this scope
@@ -921,11 +932,20 @@ const accountingService = {
       .select('id');
     const arIds = arAccounts.map((a) => a.id);
 
+    // A line counts if its journal is stamped to this customer, OR (for
+    // unstamped legacy journals) its ref_no matches the heuristic set. The
+    // party stamp is authoritative, so a journal stamped to another party is
+    // never pulled in by a coincidental ref match.
     const lineBase = () => db('journal_lines as jl')
       .join('journal_entries as je', 'jl.journal_id', 'je.id')
       .where('je.status', 'Posted')
       .whereIn('jl.account_id', arIds)
-      .whereIn('je.ref_no', refNos);
+      .where((qb) => {
+        qb.where((q) => q.where('je.party_type', 'customer').where('je.party_id', cid));
+        if (refNos.length) {
+          qb.orWhere((q) => q.whereNull('je.party_id').whereIn('je.ref_no', refNos));
+        }
+      });
 
     // Opening balance is strictly what accumulated BEFORE dateFrom. With no
     // dateFrom the whole history is "within period", so opening is 0 — guard
@@ -985,14 +1005,15 @@ const accountingService = {
    * Supplier statement: opening balance + transactions + closing balance.
    */
   async getSupplierStatement(supplierId, { dateFrom, dateTo }) {
-    // A supplier's journals are referenced by several ref_no conventions:
-    //   • payable linked refs (lot/batch/order/expense labels) — bills
-    //   • payable numbers (pay_no, e.g. MC-/EC-/ME-…)             — bills
-    //   • payment numbers (PAY-…) — settlement journals (recordPayment
-    //                               stamps refNo = paymentNo)
-    // Gather all three so payments appear alongside the original bills.
+    const sid = parseInt(supplierId);
+    // Journals are matched to a supplier in two ways:
+    //   1. Authoritatively, via party_type/party_id stamped at post time.
+    //   2. For older / unstamped journals, by the legacy ref_no heuristic —
+    //      payable linked_ref / pay_no and the payment numbers of settlements
+    //      against this supplier's payables.
+    // The ref set below feeds the fallback only; stamped journals win.
     const payables = await db('payables')
-      .where({ supplier_id: supplierId })
+      .where({ supplier_id: sid })
       .select('id', 'pay_no', 'linked_ref');
     const payableIds = payables.map((p) => p.id);
     const payments = payableIds.length
@@ -1005,10 +1026,6 @@ const accountingService = {
       ...payments.map((p) => p.payment_no),
     ].filter(Boolean))];
 
-    if (refNos.length === 0) {
-      return { supplier_id: parseInt(supplierId), opening_balance: 0, transactions: [], closing_balance: 0 };
-    }
-
     // Payable + accrual accounts (credit-normal). Scoped on BOTH the
     // opening balance and the in-period lines so each journal contributes
     // only its AP leg (see the customer statement note above).
@@ -1017,11 +1034,18 @@ const accountingService = {
       .select('id');
     const apIds = apAccounts.map((a) => a.id);
 
+    // Stamped-to-this-supplier OR (unstamped legacy journal whose ref_no
+    // matches the heuristic set). Party stamp is authoritative.
     const lineBase = () => db('journal_lines as jl')
       .join('journal_entries as je', 'jl.journal_id', 'je.id')
       .where('je.status', 'Posted')
       .whereIn('jl.account_id', apIds)
-      .whereIn('je.ref_no', refNos);
+      .where((qb) => {
+        qb.where((q) => q.where('je.party_type', 'supplier').where('je.party_id', sid));
+        if (refNos.length) {
+          qb.orWhere((q) => q.whereNull('je.party_id').whereIn('je.ref_no', refNos));
+        }
+      });
 
     // Opening balance is strictly what accumulated BEFORE dateFrom. With no
     // dateFrom the whole history is "within period", so opening is 0 — guard

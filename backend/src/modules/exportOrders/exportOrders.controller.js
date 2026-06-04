@@ -1610,6 +1610,7 @@ const exportOrderController = {
         return {
           orderId: order.id,
           orderNo: order.order_no,
+          customerId: order.customer_id,
           currency: order.currency || 'USD',
           fxRate: effectiveFxRate,
           advancePkr,
@@ -1630,6 +1631,8 @@ const exportOrderController = {
             ? `Adv rcpt ${paymentContext.orderNo}`
             : `Adv rcpt ${paymentContext.orderNo} (${paymentContext.currency} ${confirmedAmount.toLocaleString()} @ ${paymentContext.fxRate})`,
           userId: req.user?.id,
+          partyType: paymentContext.customerId ? 'customer' : null,
+          partyId: paymentContext.customerId || null,
         });
       } catch (e) { console.warn('Advance journal failed:', e.message); }
       try {
@@ -1774,6 +1777,7 @@ const exportOrderController = {
         return {
           orderId: order.id,
           orderNo: order.order_no,
+          customerId: order.customer_id,
           currency: balanceCurrency,
           fxRate: effectiveBalanceFxRate,
           balancePkr,
@@ -1792,6 +1796,8 @@ const exportOrderController = {
             ? `Bal rcpt ${paymentContext.orderNo}`
             : `Bal rcpt ${paymentContext.orderNo} (${paymentContext.currency} ${confirmedAmount.toLocaleString()} @ ${paymentContext.fxRate})`,
           userId: req.user?.id,
+          partyType: paymentContext.customerId ? 'customer' : null,
+          partyId: paymentContext.customerId || null,
         });
       } catch (e) { console.warn('Balance journal failed:', e.message); }
       try {

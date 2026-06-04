@@ -745,13 +745,19 @@ const financeController = {
           // touches, so the original liability/receivable never cleared.
           let counterCode = isReceivable ? '1100' : '2010';
           let counterEntity = 'export';
+          // Stamp the party so this settlement lands in the right ledger.
+          let partyType = null, partyId = null;
           if (isReceivable && linked_receivable_id) {
             const r = await trx('receivables').where({ id: linked_receivable_id }).first();
             if (r) {
               if (r.local_sale_id) { counterCode = '1120'; counterEntity = 'mill'; }
               else if (String(r.type || '').toLowerCase() === 'advance') { counterCode = '1310'; counterEntity = 'export'; }
               else counterCode = '1110'; // Export balance
+              if (r.customer_id) { partyType = 'customer'; partyId = r.customer_id; }
             }
+          } else if (!isReceivable && linked_payable_id) {
+            const pa = await trx('payables').where({ id: linked_payable_id }).first();
+            if (pa?.supplier_id) { partyType = 'supplier'; partyId = pa.supplier_id; }
           }
           const counterAcc = await trx('chart_of_accounts').where({ code: counterCode }).first();
           if (cashAndBank && counterAcc) {
@@ -773,6 +779,8 @@ const financeController = {
               fxRate: 1,
               isAuto: true,
               userId: req.user.id,
+              partyType,
+              partyId,
               lines: [
                 { account_id: debitAcc.id,  account: debitAcc.name,  debit: stampedAmtPkr, credit: 0,              narration: `DR ${debitAcc.code} ${debitAcc.name} — ${paymentNo}` },
                 { account_id: creditAcc.id, account: creditAcc.name, debit: 0,             credit: stampedAmtPkr,  narration: `CR ${creditAcc.code} ${creditAcc.name} — ${paymentNo}` },
@@ -1502,6 +1510,10 @@ financeController.payPurchase = async (req, res) => {
         const cashAndBank     = await trx('chart_of_accounts').where({ code: '1000' }).first();
 
         const debitAcc = supplierPayable;
+        // Stamp the supplier (from the source row or its mirrored payable) so
+        // this settlement appears on the supplier's ledger even when refLabel
+        // is a lot/purchase/expense label that doesn't match payables.linked_ref.
+        const paySupplierId = row.supplier_id || linkedPayable?.supplier_id || null;
         if (debitAcc && cashAndBank) {
           await accountingService.createJournal(trx, {
             date: paidAt.toISOString().slice(0, 10),
@@ -1513,6 +1525,8 @@ financeController.payPurchase = async (req, res) => {
             fxRate: 1,
             isAuto: true,
             userId: req.user?.id || null,
+            partyType: paySupplierId ? 'supplier' : null,
+            partyId: paySupplierId,
             lines: [
               { account_id: debitAcc.id,    account: debitAcc.name,    debit: amountPkr, credit: 0,         narration: `DR ${debitAcc.code} ${debitAcc.name} — settled ${refLabel}` },
               { account_id: cashAndBank.id, account: cashAndBank.name, debit: 0,         credit: amountPkr, narration: `CR ${cashAndBank.code} ${cashAndBank.name} — paid ${refLabel}` },

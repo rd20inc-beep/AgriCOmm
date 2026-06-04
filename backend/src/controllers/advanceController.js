@@ -119,6 +119,8 @@ const advanceController = {
           refNo: result.advance_no,
           description: `Unallocated advance from customer #${customer_id}`,
           userId: req.user.id,
+          partyType: customer_id ? 'customer' : null,
+          partyId: customer_id || null,
         });
       } catch (e) {
         console.warn('Advance journal failed:', e.message);

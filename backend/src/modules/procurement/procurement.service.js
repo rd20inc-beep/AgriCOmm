@@ -527,6 +527,8 @@ const procurementService = {
         refNo: data.invoice_no,
         description: `Purchase invoice ${data.invoice_no} for supplier #${data.supplier_id}`,
         userId: data.created_by || null,
+        partyType: data.supplier_id ? 'supplier' : null,
+        partyId: data.supplier_id || null,
       });
     }
 
