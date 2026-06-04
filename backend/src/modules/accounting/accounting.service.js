@@ -883,46 +883,65 @@ const accountingService = {
    * Customer statement: opening balance + transactions + closing balance.
    */
   async getCustomerStatement(customerId, { dateFrom, dateTo }) {
-    // Get all export orders for this customer
+    // A customer's journals are referenced by several ref_no conventions:
+    //   • export order numbers (EX-…) — invoice / revenue journals
+    //   • receivable numbers (RCV-…)  — some invoice journals
+    //   • payment numbers (PAY-…)     — receipt journals (recordPayment
+    //                                   stamps refNo = paymentNo)
+    // Gather all three, otherwise settlements never appear and the running
+    // balance only reflects invoices.
     const orders = await db('export_orders')
       .where({ customer_id: customerId })
-      .select('id', 'order_no');
+      .select('order_no');
+    const receivables = await db('receivables')
+      .where({ customer_id: customerId })
+      .select('id', 'recv_no');
+    const recvIds = receivables.map((r) => r.id);
+    const payments = recvIds.length
+      ? await db('payments').whereIn('linked_receivable_id', recvIds).select('payment_no')
+      : [];
 
-    const orderNos = orders.map((o) => o.order_no);
+    const refNos = [...new Set([
+      ...orders.map((o) => o.order_no),
+      ...receivables.map((r) => r.recv_no),
+      ...payments.map((p) => p.payment_no),
+    ].filter(Boolean))];
 
-    if (orderNos.length === 0) {
-      return { customer_id: customerId, opening_balance: 0, transactions: [], closing_balance: 0 };
+    if (refNos.length === 0) {
+      return { customer_id: parseInt(customerId), opening_balance: 0, transactions: [], closing_balance: 0 };
     }
 
-    // Opening balance: sum of all journal lines for receivable accounts linked to customer orders before dateFrom
+    // Receivable + customer-advance accounts (debit-normal). BOTH the
+    // opening balance and the in-period lines are scoped to these account
+    // ids so each journal contributes only its AR leg — without this scope
+    // a balanced entry (DR AR / CR Revenue) nets to zero and the running
+    // balance never moves.
     const arAccounts = await db('chart_of_accounts')
-      .where('code', '>=', '1100')
-      .where('code', '<=', '1130')
+      .whereIn('code', ['1100', '1110', '1120', '1130', '1310'])
       .select('id');
     const arIds = arAccounts.map((a) => a.id);
 
-    let openingQuery = db('journal_lines as jl')
+    const lineBase = () => db('journal_lines as jl')
       .join('journal_entries as je', 'jl.journal_id', 'je.id')
       .where('je.status', 'Posted')
       .whereIn('jl.account_id', arIds)
-      .whereIn('je.ref_no', orderNos);
+      .whereIn('je.ref_no', refNos);
 
+    // Opening balance is strictly what accumulated BEFORE dateFrom. With no
+    // dateFrom the whole history is "within period", so opening is 0 — guard
+    // against summing every line here and again as a transaction (double count).
+    let openingBalance = 0;
     if (dateFrom) {
-      openingQuery = openingQuery.where('je.date', '<', dateFrom);
+      const openingResult = await lineBase()
+        .where('je.date', '<', dateFrom)
+        .select(db.raw('COALESCE(SUM(jl.debit - jl.credit), 0)::numeric as balance'))
+        .first();
+      openingBalance = parseFloat(openingResult.balance);
     }
 
-    const openingResult = await openingQuery
-      .select(db.raw('COALESCE(SUM(jl.debit - jl.credit), 0)::numeric as balance'))
-      .first();
-
-    const openingBalance = parseFloat(openingResult.balance);
-
     // Transactions within period
-    let txnQuery = db('journal_lines as jl')
-      .join('journal_entries as je', 'jl.journal_id', 'je.id')
-      .join('chart_of_accounts as coa', 'jl.account_id', 'coa.id')
-      .where('je.status', 'Posted')
-      .whereIn('je.ref_no', orderNos);
+    let txnQuery = lineBase()
+      .join('chart_of_accounts as coa', 'jl.account_id', 'coa.id');
 
     if (dateFrom) txnQuery = txnQuery.where('je.date', '>=', dateFrom);
     if (dateTo) txnQuery = txnQuery.where('je.date', '<=', dateTo);
@@ -938,7 +957,7 @@ const accountingService = {
         'jl.debit',
         'jl.credit'
       )
-      .orderBy('je.date');
+      .orderBy(['je.date', 'je.id']);
 
     // Closing balance
     let runningBalance = openingBalance;
@@ -966,49 +985,59 @@ const accountingService = {
    * Supplier statement: opening balance + transactions + closing balance.
    */
   async getSupplierStatement(supplierId, { dateFrom, dateTo }) {
-    // Get payables linked to this supplier
+    // A supplier's journals are referenced by several ref_no conventions:
+    //   • payable linked refs (lot/batch/order/expense labels) — bills
+    //   • payable numbers (pay_no, e.g. MC-/EC-/ME-…)             — bills
+    //   • payment numbers (PAY-…) — settlement journals (recordPayment
+    //                               stamps refNo = paymentNo)
+    // Gather all three so payments appear alongside the original bills.
     const payables = await db('payables')
       .where({ supplier_id: supplierId })
       .select('id', 'pay_no', 'linked_ref');
+    const payableIds = payables.map((p) => p.id);
+    const payments = payableIds.length
+      ? await db('payments').whereIn('linked_payable_id', payableIds).select('payment_no')
+      : [];
 
-    const linkedRefs = payables.map((p) => p.linked_ref).filter(Boolean);
+    const refNos = [...new Set([
+      ...payables.map((p) => p.linked_ref),
+      ...payables.map((p) => p.pay_no),
+      ...payments.map((p) => p.payment_no),
+    ].filter(Boolean))];
 
-    // Payable accounts
-    const apAccounts = await db('chart_of_accounts')
-      .where('code', '>=', '2000')
-      .where('code', '<=', '2030')
-      .select('id');
-    const apIds = apAccounts.map((a) => a.id);
-
-    // Opening balance
-    let openingQuery = db('journal_lines as jl')
-      .join('journal_entries as je', 'jl.journal_id', 'je.id')
-      .where('je.status', 'Posted')
-      .whereIn('jl.account_id', apIds);
-
-    if (linkedRefs.length > 0) {
-      openingQuery = openingQuery.whereIn('je.ref_no', linkedRefs);
-    } else {
-      // No linked refs — return empty
+    if (refNos.length === 0) {
       return { supplier_id: parseInt(supplierId), opening_balance: 0, transactions: [], closing_balance: 0 };
     }
 
+    // Payable + accrual accounts (credit-normal). Scoped on BOTH the
+    // opening balance and the in-period lines so each journal contributes
+    // only its AP leg (see the customer statement note above).
+    const apAccounts = await db('chart_of_accounts')
+      .whereIn('code', ['2000', '2010', '2020', '2030', '2110'])
+      .select('id');
+    const apIds = apAccounts.map((a) => a.id);
+
+    const lineBase = () => db('journal_lines as jl')
+      .join('journal_entries as je', 'jl.journal_id', 'je.id')
+      .where('je.status', 'Posted')
+      .whereIn('jl.account_id', apIds)
+      .whereIn('je.ref_no', refNos);
+
+    // Opening balance is strictly what accumulated BEFORE dateFrom. With no
+    // dateFrom the whole history is "within period", so opening is 0 — guard
+    // against summing every line here and again as a transaction (double count).
+    let openingBalance = 0;
     if (dateFrom) {
-      openingQuery = openingQuery.where('je.date', '<', dateFrom);
+      const openingResult = await lineBase()
+        .where('je.date', '<', dateFrom)
+        .select(db.raw('COALESCE(SUM(jl.credit - jl.debit), 0)::numeric as balance'))
+        .first();
+      openingBalance = parseFloat(openingResult.balance);
     }
 
-    const openingResult = await openingQuery
-      .select(db.raw('COALESCE(SUM(jl.credit - jl.debit), 0)::numeric as balance'))
-      .first();
-
-    const openingBalance = parseFloat(openingResult.balance);
-
     // Transactions within period
-    let txnQuery = db('journal_lines as jl')
-      .join('journal_entries as je', 'jl.journal_id', 'je.id')
-      .join('chart_of_accounts as coa', 'jl.account_id', 'coa.id')
-      .where('je.status', 'Posted')
-      .whereIn('je.ref_no', linkedRefs);
+    let txnQuery = lineBase()
+      .join('chart_of_accounts as coa', 'jl.account_id', 'coa.id');
 
     if (dateFrom) txnQuery = txnQuery.where('je.date', '>=', dateFrom);
     if (dateTo) txnQuery = txnQuery.where('je.date', '<=', dateTo);
@@ -1024,7 +1053,7 @@ const accountingService = {
         'jl.debit',
         'jl.credit'
       )
-      .orderBy('je.date');
+      .orderBy(['je.date', 'je.id']);
 
     let runningBalance = openingBalance;
     const formattedTxns = transactions.map((t) => {

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Users, Plus, Globe, Mail, Phone, Pencil, Trash2, Star } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Users, Plus, Globe, Mail, Phone, Pencil, Trash2, Star, BookOpen } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
 import { useCreateCustomer, useUpdateCustomer, useDeleteCustomer } from '../../../../api/queries';
 import Modal from '../../../../components/Modal';
@@ -8,6 +9,7 @@ const EMPTY = { name: '', country: '', contact_person: '', email: '', phone: '' 
 
 export default function CustomersTab() {
   const { customersList, addToast } = useApp();
+  const navigate = useNavigate();
   const createMut = useCreateCustomer();
   const updateMut = useUpdateCustomer();
   const deleteMut = useDeleteCustomer();
@@ -144,6 +146,13 @@ export default function CustomersTab() {
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="inline-flex gap-1">
+                      <button
+                        onClick={() => navigate(`/finance/statements?type=customer&id=${c.id}`)}
+                        className="p-1.5 rounded hover:bg-emerald-50 text-emerald-600"
+                        title="View ledger"
+                      >
+                        <BookOpen className="w-4 h-4" />
+                      </button>
                       <button
                         onClick={() => openEdit(c)}
                         className="p-1.5 rounded hover:bg-blue-50 text-blue-600"

@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
-import { Users, Plus, Search, Globe, Mail, Phone, Edit2, Trash2, DollarSign, CreditCard, Building2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Users, Plus, Search, Globe, Mail, Phone, Edit2, Trash2, DollarSign, CreditCard, Building2, BookOpen } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useBuyers, useSaveBuyer, useDeleteBuyer } from '../../../api/queries';
 import Modal from '../../../components/Modal';
@@ -16,6 +17,7 @@ const emptyForm = {
 
 export default function Buyers() {
   const { addToast } = useApp();
+  const navigate = useNavigate();
   const { data: buyers = [], isLoading: loading } = useBuyers();
   const saveBuyerMut = useSaveBuyer();
   const deleteBuyerMut = useDeleteBuyer();
@@ -187,6 +189,9 @@ export default function Buyers() {
                   </td>
                   <td className="px-4 py-3 text-center">
                     <div className="flex items-center justify-center gap-1">
+                      <button onClick={() => navigate(`/finance/statements?type=customer&id=${b.id}`)} className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" title="View ledger">
+                        <BookOpen className="w-4 h-4" />
+                      </button>
                       <button onClick={() => openEdit(b)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Edit">
                         <Edit2 className="w-4 h-4" />
                       </button>
