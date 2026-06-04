@@ -9,22 +9,34 @@ import { useCustomers, useSuppliers } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
 
-// Statements are journal-derived and always in PKR base.
-function fmtPkr(v) {
-  const n = parseFloat(v) || 0;
-  return `Rs ${Math.round(n).toLocaleString()}`;
+// Statements are shown in the party's transaction currency (export parties are
+// USD; mill/local are PKR), as returned by the backend's `currency` field.
+function curSymbol(cur) {
+  const c = (cur || 'PKR').toUpperCase();
+  return c === 'PKR' ? 'Rs ' : c === 'USD' ? '$' : c === 'EUR' ? '€' : c === 'GBP' ? '£' : c === 'AED' ? 'AED ' : `${c} `;
 }
-function fmtPkrSigned(v) {
+function fmtCur(v, cur) {
+  const n = parseFloat(v) || 0;
+  return `${curSymbol(cur)}${Math.round(n).toLocaleString()}`;
+}
+function fmtCurSigned(v, cur) {
   const n = parseFloat(v) || 0;
   const sign = n < 0 ? '-' : '';
-  return `${sign}Rs ${Math.round(Math.abs(n)).toLocaleString()}`;
+  return `${sign}${curSymbol(cur)}${Math.round(Math.abs(n)).toLocaleString()}`;
 }
-function fmtPkrCompact(v) {
+function fmtCurCompact(v, cur) {
   const n = parseFloat(v) || 0;
-  if (Math.abs(n) >= 10_000_000) return `Rs ${(n / 10_000_000).toFixed(2)}Cr`;
-  if (Math.abs(n) >= 100_000) return `Rs ${(n / 100_000).toFixed(2)}L`;
-  if (Math.abs(n) >= 1_000) return `Rs ${(n / 1_000).toFixed(0)}K`;
-  return `Rs ${Math.round(n).toLocaleString()}`;
+  const s = curSymbol(cur);
+  if ((cur || 'PKR').toUpperCase() === 'PKR') {
+    // Pakistani Crore / Lakh shorthand for the base currency.
+    if (Math.abs(n) >= 10_000_000) return `${s}${(n / 10_000_000).toFixed(2)}Cr`;
+    if (Math.abs(n) >= 100_000) return `${s}${(n / 100_000).toFixed(2)}L`;
+    if (Math.abs(n) >= 1_000) return `${s}${(n / 1_000).toFixed(0)}K`;
+    return `${s}${Math.round(n).toLocaleString()}`;
+  }
+  if (Math.abs(n) >= 1_000_000) return `${s}${(n / 1_000_000).toFixed(2)}M`;
+  if (Math.abs(n) >= 1_000) return `${s}${(n / 1_000).toFixed(1)}K`;
+  return `${s}${Math.round(n).toLocaleString()}`;
 }
 
 const refLink = (refNo) => {
@@ -86,6 +98,7 @@ export default function PartyLedger() {
   });
 
   const transactions = statement?.transactions || [];
+  const cur = statement?.currency || 'PKR';
   const opening = parseFloat(statement?.opening_balance) || 0;
   const closing = parseFloat(statement?.closing_balance) || 0;
   // For a customer (receivable) a positive balance means they owe us; for a
@@ -177,7 +190,7 @@ export default function PartyLedger() {
               <div className="text-right">
                 <div className="text-lg font-bold">{mode === 'customer' ? 'Customer' : 'Supplier'} Statement</div>
                 <div className="text-xs text-gray-600">
-                  {selectedParty?.name || '—'} · Closing {fmtPkr(closing)}
+                  {selectedParty?.name || '—'} · Closing {fmtCur(closing, cur)}
                 </div>
               </div>
             </div>
@@ -198,20 +211,20 @@ export default function PartyLedger() {
               </div>
               <div className="flex flex-col items-start sm:items-end gap-1">
                 <span className="text-[11px] uppercase tracking-wider opacity-80">{balanceLabel} (closing)</span>
-                <span className="text-2xl font-bold tabular-nums">{fmtPkrSigned(closing)}</span>
+                <span className="text-2xl font-bold tabular-nums">{fmtCurSigned(closing, cur)}</span>
               </div>
             </div>
           </div>
 
           {/* KPI tiles */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <FinanceKPI icon={Scale} title="Opening Balance" value={fmtPkrCompact(opening)}
+            <FinanceKPI icon={Scale} title="Opening Balance" value={fmtCurCompact(opening, cur)}
               subtitle="Before this period" status="neutral" loading={stmtLoading} />
-            <FinanceKPI icon={ArrowDownLeft} title="Total Debit" value={fmtPkrCompact(totalDebit)}
+            <FinanceKPI icon={ArrowDownLeft} title="Total Debit" value={fmtCurCompact(totalDebit, cur)}
               subtitle={mode === 'customer' ? 'Invoiced / charged' : 'Paid / settled'} status="info" loading={stmtLoading} />
-            <FinanceKPI icon={ArrowUpRight} title="Total Credit" value={fmtPkrCompact(totalCredit)}
+            <FinanceKPI icon={ArrowUpRight} title="Total Credit" value={fmtCurCompact(totalCredit, cur)}
               subtitle={mode === 'customer' ? 'Received' : 'Billed to us'} status="info" loading={stmtLoading} />
-            <FinanceKPI icon={Scale} title="Closing Balance" value={fmtPkrCompact(closing)}
+            <FinanceKPI icon={Scale} title="Closing Balance" value={fmtCurCompact(closing, cur)}
               subtitle={balanceLabel} status={closing > 0 ? 'warning' : 'good'} loading={stmtLoading} />
           </div>
 
@@ -248,7 +261,7 @@ export default function PartyLedger() {
                     {/* Opening balance row */}
                     <tr className="bg-gray-50/60 text-gray-500">
                       <td className="py-2 px-3 text-xs" colSpan={6}>Opening balance</td>
-                      <td className="py-2 px-3 text-right font-medium tabular-nums">{fmtPkrSigned(opening)}</td>
+                      <td className="py-2 px-3 text-right font-medium tabular-nums">{fmtCurSigned(opening, cur)}</td>
                     </tr>
                     {transactions.length === 0 ? (
                       <tr>
@@ -278,9 +291,9 @@ export default function PartyLedger() {
                               <span className="block truncate" title={t.description || ''}>{t.description || '—'}</span>
                               {t.account_name && <span className="block text-[10px] text-gray-400">{t.account_code} · {t.account_name}</span>}
                             </td>
-                            <td className="py-2.5 px-3 text-right tabular-nums whitespace-nowrap">{dr > 0 ? fmtPkr(dr) : '—'}</td>
-                            <td className="py-2.5 px-3 text-right tabular-nums whitespace-nowrap">{cr > 0 ? fmtPkr(cr) : '—'}</td>
-                            <td className="py-2.5 px-3 text-right font-medium tabular-nums whitespace-nowrap">{fmtPkrSigned(t.running_balance)}</td>
+                            <td className="py-2.5 px-3 text-right tabular-nums whitespace-nowrap">{dr > 0 ? fmtCur(dr, cur) : '—'}</td>
+                            <td className="py-2.5 px-3 text-right tabular-nums whitespace-nowrap">{cr > 0 ? fmtCur(cr, cur) : '—'}</td>
+                            <td className="py-2.5 px-3 text-right font-medium tabular-nums whitespace-nowrap">{fmtCurSigned(t.running_balance, cur)}</td>
                           </tr>
                         );
                       })
@@ -288,9 +301,9 @@ export default function PartyLedger() {
                     {/* Closing balance row */}
                     <tr className="bg-gray-50 font-semibold border-t-2 border-gray-200">
                       <td className="py-2.5 px-3 text-gray-600 uppercase text-[11px]" colSpan={4}>Closing balance</td>
-                      <td className="py-2.5 px-3 text-right tabular-nums">{fmtPkr(totalDebit)}</td>
-                      <td className="py-2.5 px-3 text-right tabular-nums">{fmtPkr(totalCredit)}</td>
-                      <td className="py-2.5 px-3 text-right tabular-nums">{fmtPkrSigned(closing)}</td>
+                      <td className="py-2.5 px-3 text-right tabular-nums">{fmtCur(totalDebit, cur)}</td>
+                      <td className="py-2.5 px-3 text-right tabular-nums">{fmtCur(totalCredit, cur)}</td>
+                      <td className="py-2.5 px-3 text-right tabular-nums">{fmtCurSigned(closing, cur)}</td>
                     </tr>
                   </tbody>
                 </table>
