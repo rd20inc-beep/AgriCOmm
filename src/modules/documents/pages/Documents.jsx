@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { FileText, Search, Filter, Eye, CheckCircle, RotateCcw, FileCheck } from 'lucide-react';
+import PartyLink from '../../../shared/components/PartyLink';
 import { useApp } from '../../../context/AppContext';
 import { queryKeys } from '../../../api/queryClient';
 import { exportOrdersApi } from '../../../api/services';
@@ -42,6 +43,7 @@ export default function Documents() {
         if (!doc) return;
         docs.push({
           orderId: order.id,
+          customerId: order.customerId,
           customerName: order.customerName,
           docKey: key,
           docType: docTypeLabels[key],
@@ -199,7 +201,7 @@ export default function Documents() {
               {filteredDocuments.map((doc, idx) => (
                 <tr key={`${doc.orderId}-${doc.docKey}-${idx}`} className="hover:bg-gray-50 transition-colors">
                   <td className="px-4 py-3 font-medium text-blue-600">{doc.orderId}</td>
-                  <td className="px-4 py-3 text-gray-900">{doc.customerName}</td>
+                  <td className="px-4 py-3"><PartyLink type="customer" id={doc.customerId} name={doc.customerName} /></td>
                   <td className="px-4 py-3 text-gray-900">{doc.docType}</td>
                   <td className="px-4 py-3 text-center">
                     <StatusBadge status={doc.status} />

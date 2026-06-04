@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { Printer } from 'lucide-react';
 import { allEquivalents, allRateEquivalents } from '../../../utils/unitConversion';
+import PartyLink from '../../../shared/components/PartyLink';
 
 function fmtPKR(v) { return 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString('en-PK'); }
 function fmtDate(d) { return d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'; }
@@ -143,7 +144,7 @@ export default function LotCostSheet({ lot, companyProfile, linkedBatch, transac
         <div className="border-x border-gray-200 px-6 py-4 grid grid-cols-4 gap-4 bg-gray-50">
           <div><p className="text-[10px] font-semibold text-gray-500 uppercase">Item / Rice Type</p><p className="font-semibold text-gray-900">{lot.itemName || '—'}</p></div>
           <div><p className="text-[10px] font-semibold text-gray-500 uppercase">Variety / Grade</p><p className="font-semibold text-gray-900">{lot.variety || '—'}{lot.grade ? ` (${lot.grade})` : ''}</p></div>
-          <div><p className="text-[10px] font-semibold text-gray-500 uppercase">Supplier</p><p className="font-semibold text-gray-900">{lot.supplierName || '—'}</p></div>
+          <div><p className="text-[10px] font-semibold text-gray-500 uppercase">Supplier</p><p className="font-semibold"><PartyLink type="supplier" id={lot.supplierId} name={lot.supplierName} className="font-semibold" /></p></div>
           <div><p className="text-[10px] font-semibold text-gray-500 uppercase">Warehouse</p><p className="font-semibold text-gray-900">{lot.warehouseName || '—'}</p></div>
           <div><p className="text-[10px] font-semibold text-gray-500 uppercase">Purchase Date</p><p className="font-semibold text-gray-900">{fmtDate(lot.purchaseDate)}</p></div>
           <div><p className="text-[10px] font-semibold text-gray-500 uppercase">Crop Year</p><p className="font-semibold text-gray-900">{lot.cropYear || '—'}</p></div>

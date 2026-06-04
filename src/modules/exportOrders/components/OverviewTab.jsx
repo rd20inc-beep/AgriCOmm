@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ExternalLink, Pencil, Save, X } from 'lucide-react';
+import PartyLink from '../../../shared/components/PartyLink';
 import { useUpdateOrder } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
 import { INCOTERMS, incotermHint } from '../../../shared/constants/incoterms';
@@ -149,7 +150,7 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
           <div className="space-y-3">
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">Customer</span>
-              <span className="font-medium text-gray-900">{order.customerName}</span>
+              <span className="font-medium text-gray-900"><PartyLink type="customer" id={order.customerId} name={order.customerName} /></span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">Product</span>

@@ -203,7 +203,7 @@ export default function LocalSales() {
             </div>
 
             <div className="grid grid-cols-2 gap-3 text-sm">
-              <div><span className="text-gray-500">Buyer:</span> <span className="font-medium">{selectedSale.customerName || selectedSale.buyerName || '—'}</span></div>
+              <div><span className="text-gray-500">Buyer:</span> <span className="font-medium"><PartyLink type="customer" id={selectedSale.customerId} name={selectedSale.customerName || selectedSale.buyerName} /></span></div>
               <div><span className="text-gray-500">Item:</span> <span className="font-medium">{selectedSale.itemName}</span></div>
               <div><span className="text-gray-500">Qty:</span> <span className="font-medium">{Math.round(parseFloat(selectedSale.quantityKg) || 0).toLocaleString()} KG</span></div>
               <div><span className="text-gray-500">Rate:</span> <span className="font-medium">{fmtPKR(selectedSale.ratePerKg)}/KG</span></div>

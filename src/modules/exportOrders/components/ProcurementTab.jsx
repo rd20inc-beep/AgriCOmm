@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import StatusBadge from '../../../components/StatusBadge';
+import PartyLink from '../../../shared/components/PartyLink';
 import api from '../../../api/client';
 import { exportOrdersApi, financeApi } from '../../../api/services';
 import { useApp } from '../../../context/AppContext';
@@ -571,7 +572,7 @@ function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
               </div>
               <div>
                 <span className="text-xs text-gray-500">Supplier</span>
-                <p className="font-bold text-gray-900">{linkedBatch.supplierName || '—'}</p>
+                <p className="font-bold"><PartyLink type="supplier" id={linkedBatch.supplierId} name={linkedBatch.supplierName} className="font-bold" /></p>
               </div>
             </div>
             {linkedBatch.totalCostPerKgFinished > 0 && (

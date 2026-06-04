@@ -578,7 +578,7 @@ export default function MillingDashboard() {
                         </Link>
                       </td>
                       <td className="py-2 px-3 text-gray-700">{lot.itemName || lot.productName || '—'}</td>
-                      <td className="py-2 px-3 text-gray-600">{lot.supplierName || '—'}</td>
+                      <td className="py-2 px-3 text-gray-600"><PartyLink type="supplier" id={lot.supplierId} name={lot.supplierName} /></td>
                       <td className="py-2 px-3 text-right font-medium">{parseFloat(lot.qty)?.toFixed(2)} MT</td>
                       <td className="py-2 px-3 text-right">
                         {!isAtExport ? <span className="text-emerald-700 font-medium">{avail.toFixed(2)} MT</span> : <span className="text-gray-400">—</span>}
@@ -672,7 +672,7 @@ export default function MillingDashboard() {
                   <tr key={batch.id} className="border-b border-gray-50 hover:bg-gray-50">
                     <td className="py-2.5 px-2 font-medium text-gray-900">{batch.id}</td>
                     <td className="py-2.5 px-2 text-gray-600 font-mono text-xs">{`TRK-${batch.id.replace('M-','')}`}</td>
-                    <td className="py-2.5 px-2 text-gray-600">{batch.supplierName}</td>
+                    <td className="py-2.5 px-2 text-gray-600"><PartyLink type="supplier" id={batch.supplierId} name={batch.supplierName} /></td>
                     <td className="py-2.5 px-2">
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
                         Approved
