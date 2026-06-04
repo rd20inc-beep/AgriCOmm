@@ -1,28 +1,26 @@
 const db = require('../../config/database');
 
 /**
- * Decide the display currency for a party statement from its matching journal
- * lines. Journals are stored in their transaction currency (export AR is USD
- * with an fx_rate stamped, mill flows are PKR). If every matching line shares
- * one currency, the statement is shown natively in it; if a party mixes
- * currencies, it falls back to PKR base (native × fx_rate) so the running
- * balance stays a single valid number.
+ * Currency conversion helpers for party statements. Journals are stored in
+ * their transaction currency (export AR is USD with an fx_rate stamped, mill
+ * flows are PKR), but ledgers are presented in PKR base so every party reads
+ * consistently regardless of how each journal was denominated.
  *
  * Returns:
- *  - statementCurrency: the chosen display currency
- *  - factorSql: SQL expression converting a native amount to that currency
- *    (used inside the opening-balance SUM). The string is constant (no user
- *    input), so it's safe to inline.
- *  - conv(amount, currency, fxRate): JS equivalent for per-line amounts.
- *
- * `lineBase` is the same query-builder factory the caller uses for the
- * statement, so currency detection sees exactly the lines that will be summed.
+ *  - statementCurrency: always 'PKR'.
+ *  - factorSql: SQL expression converting a native amount to PKR (native ×
+ *    fx_rate; ×1 for PKR journals). Constant string, safe to inline in a SUM.
+ *  - conv / convPkr(amount, currency, fxRate): JS equivalents per line.
  */
-async function currencyMode(lineBase) {
-  const curRows = await lineBase().distinct('je.currency as currency');
-  const all = [...new Set(curRows.map((r) => r.currency || 'PKR'))];
-  const statementCurrency = all.length === 1 ? all[0] : 'PKR';
-  const toPkr = statementCurrency === 'PKR';
+async function currencyMode() {
+  // Party ledgers are presented in PKR base — every line converted via its
+  // journal's fx_rate — so they read consistently regardless of how each
+  // journal was denominated (some advances were posted native-USD, others
+  // PKR). The original transaction currency stays visible in the journal
+  // description. PartyLedger hides the redundant PKR sub-line since the
+  // primary is already PKR.
+  const statementCurrency = 'PKR';
+  const toPkr = true;
   // PKR-base factor: native amount × fx_rate (×1 for PKR journals). Always valid.
   const pkrFactorSql = "CASE WHEN COALESCE(je.currency,'PKR')='PKR' THEN 1 ELSE COALESCE(je.fx_rate,1) END";
   // Display factor: native when the statement is shown in a single foreign
@@ -986,7 +984,7 @@ const accountingService = {
     // shares one currency, present the ledger in it (so a USD customer sees
     // USD). If a party mixes currencies, fall back to PKR base (native ×
     // fx_rate) so the running balance stays a single valid number.
-    const { factorSql, pkrFactorSql, conv, convPkr, statementCurrency } = await currencyMode(lineBase);
+    const { factorSql, pkrFactorSql, conv, convPkr, statementCurrency } = await currencyMode();
 
     // Opening balance (before dateFrom), in both the display currency and PKR.
     let openingBalance = 0, openingBalancePkr = 0;
@@ -1112,7 +1110,7 @@ const accountingService = {
     // Display currency — show the supplier ledger in its native currency when
     // single-currency, else PKR base. See currencyMode + the customer
     // statement note above.
-    const { factorSql, pkrFactorSql, conv, convPkr, statementCurrency } = await currencyMode(lineBase);
+    const { factorSql, pkrFactorSql, conv, convPkr, statementCurrency } = await currencyMode();
 
     // Opening balance (before dateFrom), in both the display currency and PKR.
     let openingBalance = 0, openingBalancePkr = 0;
