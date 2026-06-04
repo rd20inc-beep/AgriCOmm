@@ -1,6 +1,7 @@
 const documentService = require('../documents/documents.service');
 const inventoryService = require('../inventory/inventory.service');
 const automationService = require('../admin/automation.service');
+const accountingService = require('../accounting/accounting.service');
 
 const STATUS_TRANSITIONS = {
   'Draft': ['Awaiting Advance', 'Advance Received'],
@@ -111,6 +112,66 @@ async function runTransitionSideEffects(trx, order, toStatus, userId) {
     await inventoryService.lockOrderCOGS(trx, order.id, 280);
   } catch (e) {
     console.warn('COGS lock failed (non-blocking):', e.message);
+  }
+
+  // Recognize revenue + matching COGS at shipment (control transfer).
+  // Posting rules export_revenue (DR 1110 Export AR / CR 4010 Sales) and
+  // export_shipment (DR 5020 COGS / CR 1230 Finished Rice) exist but were
+  // never fired — so AR only ever saw receipt credits and customer ledgers
+  // ran negative. Guarded by revenue_posted so a re-driven Shipped
+  // transition can't double-post. Wrapped in a SAVEPOINT (nested trx) so a
+  // posting failure or a closed-period rejection rolls back ONLY the
+  // journals, never the shipment itself (matches the non-blocking accounting
+  // pattern used by advance/balance receipts).
+  if (!order.revenue_posted) {
+    try {
+      await trx.transaction(async (sp) => {
+        // Re-read for the COGS just locked above and the booked-rate value.
+        const o = await sp('export_orders').where({ id: order.id }).first();
+        if (!o || o.revenue_posted) return;
+
+        // Revenue is the contract value in PKR at the booked (locked) rate.
+        // Any difference vs the actual receipt-date rates is a legitimate FX
+        // gain/loss that surfaces as a residual on the customer ledger.
+        const contractVal = parseFloat(o.contract_value) || 0;
+        const bookedRate = parseFloat(o.booked_fx_rate) || 0;
+        const revenuePkr = parseFloat(o.contract_value_pkr_locked)
+          || (bookedRate ? contractVal * bookedRate : 0)
+          || contractVal;
+        const foreign = (o.currency || 'PKR') !== 'PKR';
+
+        if (revenuePkr > 0) {
+          await accountingService.autoPost(sp, {
+            triggerEvent: 'export_revenue', entity: 'export',
+            amount: revenuePkr, currency: 'PKR',
+            refType: 'Export Order', refNo: o.order_no,
+            description: foreign
+              ? `Revenue ${o.order_no} (${o.currency} ${contractVal.toLocaleString()} @ ${bookedRate || '—'})`
+              : `Revenue ${o.order_no}`,
+            userId,
+            partyType: o.customer_id ? 'customer' : null,
+            partyId: o.customer_id || null,
+          });
+        }
+
+        const cogsPkr = parseFloat(o.inventory_cogs_total_pkr) || 0;
+        if (cogsPkr > 0) {
+          await accountingService.autoPost(sp, {
+            triggerEvent: 'export_shipment', entity: 'export',
+            amount: cogsPkr, currency: 'PKR',
+            refType: 'Export Order', refNo: o.order_no,
+            description: `COGS ${o.order_no}`,
+            userId,
+            partyType: o.customer_id ? 'customer' : null,
+            partyId: o.customer_id || null,
+          });
+        }
+
+        await sp('export_orders').where({ id: o.id }).update({ revenue_posted: true });
+      });
+    } catch (e) {
+      console.warn(`Revenue recognition failed for order ${order.order_no} (non-blocking):`, e.message);
+    }
   }
 
   await automationService.onShipmentDeparted(trx, {
