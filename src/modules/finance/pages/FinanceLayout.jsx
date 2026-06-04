@@ -1,7 +1,7 @@
 import { NavLink, useSearchParams } from 'react-router-dom';
 import {
   LayoutDashboard, ArrowDownLeft, ArrowUpRight, DollarSign,
-  TrendingUp, Landmark, BookOpen, Bell, Clock, Settings, ShoppingCart, Store, Printer,
+  TrendingUp, Landmark, BookOpen, BookUser, Bell, Clock, Settings, ShoppingCart, Store, Printer,
 } from 'lucide-react';
 
 const tabs = [
@@ -15,6 +15,7 @@ const tabs = [
   { label: 'Profit',       path: '/finance/profit',       icon: TrendingUp },
   { label: 'Rates',        path: '/finance/rates',        icon: Settings },
   { label: 'Accounting',   path: '/finance/accounting',   icon: BookOpen },
+  { label: 'Statements',   path: '/finance/statements',   icon: BookUser },
   { label: 'Alerts',       path: '/finance/alerts',       icon: Bell },
 ];
 

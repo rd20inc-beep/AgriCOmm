@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Truck, Plus, MapPin, Pencil, Trash2, Star } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Truck, Plus, MapPin, Pencil, Trash2, Star, BookOpen } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
 import { useCreateSupplier, useUpdateSupplier, useDeleteSupplier } from '../../../../api/queries';
 import Modal from '../../../../components/Modal';
@@ -12,6 +13,7 @@ const EMPTY = { name: '', type: 'Rice Supplier', address: '', contact_person: ''
 
 export default function SuppliersTab() {
   const { suppliersList, addToast } = useApp();
+  const navigate = useNavigate();
   const createMut = useCreateSupplier();
   const updateMut = useUpdateSupplier();
   const deleteMut = useDeleteSupplier();
@@ -145,6 +147,9 @@ export default function SuppliersTab() {
                   <td className="px-4 py-3 text-gray-900">{s.contact}</td>
                   <td className="px-4 py-3 text-right">
                     <div className="inline-flex gap-1">
+                      <button onClick={() => navigate(`/finance/statements?type=supplier&id=${s.id}`)} className="p-1.5 rounded hover:bg-emerald-50 text-emerald-600" title="View ledger">
+                        <BookOpen className="w-4 h-4" />
+                      </button>
                       <button onClick={() => openEdit(s)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit">
                         <Pencil className="w-4 h-4" />
                       </button>
