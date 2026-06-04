@@ -12,6 +12,7 @@
  */
 import { useRef } from 'react';
 import { Printer } from 'lucide-react';
+import PartyLink from '../../../shared/components/PartyLink';
 
 /**
  * Open the cost sheet in a clean popup, copy parent stylesheets across
@@ -243,7 +244,7 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
         <div className="border-x border-gray-200 px-6 py-4 bg-gray-50">
           <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3">Section A — Source Raw Material</p>
           <div className="grid grid-cols-4 gap-4">
-            <div><p className="text-[10px] text-gray-500">Supplier</p><p className="font-semibold text-gray-900">{batch.supplierName || '—'}</p></div>
+            <div><p className="text-[10px] text-gray-500">Supplier</p><p className="font-semibold"><PartyLink type="supplier" id={batch.supplierId} name={batch.supplierName} className="font-semibold" /></p></div>
             <div><p className="text-[10px] text-gray-500">Linked Export Order</p><p className="font-semibold text-gray-900">{batch.linkedExportOrder || 'Local / Unlinked'}</p></div>
             <div><p className="text-[10px] text-gray-500">Batch Status</p><p className="font-semibold text-gray-900">{batch.status}</p></div>
             <div><p className="text-[10px] text-gray-500">Date</p><p className="font-semibold text-gray-900">{fmtDate(batch.createdAt)}</p></div>

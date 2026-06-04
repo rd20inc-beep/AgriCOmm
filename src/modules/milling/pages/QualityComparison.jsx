@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import PartyLink from '../../../shared/components/PartyLink';
 import {
   AlertTriangle, CheckCircle, PauseCircle, XCircle, MessageSquare,
   Filter, FlaskConical, Search, ExternalLink, RefreshCw,
@@ -232,7 +233,7 @@ export default function QualityComparison() {
                 ) : filteredBatches.map(batch => (
                   <tr key={batch.id} className={`cursor-pointer hover:bg-gray-50 ${batch.qualityVariance > 1.0 ? 'bg-red-50/50' : ''}`} onClick={() => openDetail(batch)}>
                     <td className="font-semibold text-gray-900">{batch.id}</td>
-                    <td className="text-gray-600">{batch.supplierName}</td>
+                    <td className="text-gray-600"><PartyLink type="supplier" id={batch.supplierId} name={batch.supplierName} /></td>
                     <td className="text-gray-600">{batch.linkedExportOrder || '—'}</td>
                     <td className="text-right text-gray-600">{batch.rawQtyMT} MT</td>
                     <td className="text-center">
@@ -277,7 +278,7 @@ export default function QualityComparison() {
           <div className="space-y-4">
             <div className="bg-gray-50 rounded-lg p-3">
               <div className="grid grid-cols-3 gap-3 text-sm">
-                <div><span className="text-gray-500">Supplier:</span> <span className="font-medium">{selectedBatch.supplierName}</span></div>
+                <div><span className="text-gray-500">Supplier:</span> <span className="font-medium"><PartyLink type="supplier" id={selectedBatch.supplierId} name={selectedBatch.supplierName} /></span></div>
                 <div><span className="text-gray-500">Raw Qty:</span> <span className="font-medium">{selectedBatch.rawQtyMT} MT</span></div>
                 <div><span className="text-gray-500">Variance:</span> <span className={`font-semibold ${selectedBatch.qualityVariance > 1.0 ? 'text-red-600' : 'text-green-600'}`}>{selectedBatch.qualityVariance != null ? `${selectedBatch.qualityVariance}%` : '—'}</span></div>
               </div>

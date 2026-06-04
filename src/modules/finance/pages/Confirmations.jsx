@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
+import PartyLink from '../../../shared/components/PartyLink';
 import {
   DollarSign,
   Clock,
@@ -244,7 +245,7 @@ export default function FinanceConfirmations() {
             <div className="flex items-center gap-2">
               <Link to={`/export/${order.id}`} className="text-sm font-semibold text-blue-600 hover:text-blue-800">{order.id}</Link>
               <span className="text-xs text-gray-400">|</span>
-              <span className="text-sm text-gray-600 truncate">{order.customerName}</span>
+              <span className="text-sm text-gray-600 truncate"><PartyLink type="customer" id={order.customerId} name={order.customerName} /></span>
               <span className="text-xs text-gray-400">|</span>
               <span className="text-xs text-gray-500">{order.country}</span>
             </div>
@@ -471,7 +472,7 @@ export default function FinanceConfirmations() {
                       <td className="py-2.5 px-3">
                         <Link to={`/export/${o.id}`} className="font-semibold text-blue-600 hover:text-blue-800">{o.id}</Link>
                       </td>
-                      <td className="py-2.5 px-3 text-gray-600 truncate max-w-[150px]">{o.customerName}</td>
+                      <td className="py-2.5 px-3 text-gray-600 truncate max-w-[150px]"><PartyLink type="customer" id={o.customerId} name={o.customerName} /></td>
                       <td className="py-2.5 px-3 text-right text-gray-700">{formatCurrency(o.advanceExpected)}</td>
                       <td className={`py-2.5 px-3 text-right font-medium ${o.advanceReceived >= o.advanceExpected ? 'text-green-600' : 'text-amber-600'}`}>
                         {formatCurrency(o.advanceReceived)}
@@ -536,7 +537,7 @@ export default function FinanceConfirmations() {
                       <td className="py-2 px-3">
                         <Link to={`/export/${o.id}`} className="font-semibold text-blue-600 hover:text-blue-800">{o.id}</Link>
                       </td>
-                      <td className="py-2 px-3 text-gray-600 truncate max-w-[150px]">{o.customerName}</td>
+                      <td className="py-2 px-3 text-gray-600 truncate max-w-[150px]"><PartyLink type="customer" id={o.customerId} name={o.customerName} /></td>
                       <td className="py-2 px-3 text-right text-gray-700">{formatCurrency(o.contractValue)}</td>
                       <td className="py-2 px-3 text-right text-green-600 font-medium">{formatCurrency(totalReceived)}</td>
                       <td className={`py-2 px-3 text-right font-bold ${outstanding > 0 ? 'text-red-600' : 'text-green-600'}`}>
@@ -602,7 +603,7 @@ export default function FinanceConfirmations() {
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div>
                   <span className="text-gray-500">Customer:</span>{' '}
-                  <span className="font-medium text-gray-900">{selectedOrder.customerName}</span>
+                  <span className="font-medium text-gray-900"><PartyLink type="customer" id={selectedOrder.customerId} name={selectedOrder.customerName} /></span>
                 </div>
                 <div>
                   <span className="text-gray-500">Contract:</span>{' '}

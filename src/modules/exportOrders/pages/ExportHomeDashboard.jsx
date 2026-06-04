@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import PartyLink from '../../../shared/components/PartyLink';
 import {
   Ship, AlertTriangle, Clock, FileText, CreditCard,
   TrendingUp, Users, Package, ArrowRight, Plus, CheckCircle2,
@@ -282,7 +283,7 @@ export default function ExportHomeDashboard() {
                   className="flex items-center justify-between py-3 hover:bg-gray-50 -mx-2 px-2 rounded transition-colors"
                 >
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">{o.id} · {o.customerName}</p>
+                    <p className="text-sm font-medium text-gray-900 truncate">{o.id} · <PartyLink type="customer" id={o.customerId} name={o.customerName} /></p>
                     <p className="text-xs text-gray-500 truncate">
                       {o.productName} · {o.qtyMT} MT · {o.destinationPort || o.country}
                     </p>
@@ -313,7 +314,7 @@ export default function ExportHomeDashboard() {
                   className="block p-2 rounded hover:bg-gray-50 transition-colors"
                 >
                   <p className="text-sm font-medium text-gray-900 truncate">{o.id}</p>
-                  <p className="text-xs text-gray-500 truncate">{o.customerName} · {o.status}</p>
+                  <p className="text-xs text-gray-500 truncate"><PartyLink type="customer" id={o.customerId} name={o.customerName} /> · {o.status}</p>
                 </Link>
               ))}
             </div>

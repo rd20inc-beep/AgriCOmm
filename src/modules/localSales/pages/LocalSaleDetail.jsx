@@ -1,4 +1,5 @@
 import { Link, useParams, useNavigate } from 'react-router-dom';
+import PartyLink from '../../../shared/components/PartyLink';
 import {
   ArrowLeft, Store, Package, Truck, CreditCard, CheckCircle, Clock,
   AlertCircle, Receipt, User, Phone, FileText, Calendar,
@@ -86,7 +87,7 @@ export default function LocalSaleDetail() {
           sub={sale.lotNo
             ? <Link to={`/lot-inventory/${sale.lotNo}`} className="text-blue-600 hover:underline">{sale.lotNo}</Link>
             : null} />
-        <Card icon={User} label="Buyer" value={sale.buyerName || sale.customerName || 'Walk-in'}
+        <Card icon={User} label="Buyer" value={<PartyLink type="customer" id={sale.customerId} name={sale.buyerName || sale.customerName} fallback="Walk-in" />}
           sub={sale.buyerPhone ? <span className="inline-flex items-center gap-1"><Phone size={11} />{sale.buyerPhone}</span> : null} />
         <Card icon={CreditCard} label="Payment mode" value={(sale.paymentMode || '—').toString().replace(/_/g, ' ')} />
         <Card icon={Receipt} label="Collected" value={fmtPkr(sale.paidAmount)}

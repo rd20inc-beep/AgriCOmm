@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import PartyLink from '../../../shared/components/PartyLink';
 import {
   Ship, Factory, DollarSign, AlertTriangle, Clock,
   CheckCircle2, ArrowRight, TrendingUp, CreditCard,
@@ -211,7 +212,7 @@ export default function Dashboard() {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-gray-900">{b.id}</p>
                     <p className="text-xs text-gray-600">
-                      {b.supplierName || 'No supplier'} · {Number(b.rawQtyMT || 0).toFixed(1)} MT
+                      <PartyLink type="supplier" id={b.supplierId} name={b.supplierName} fallback="No supplier" /> · {Number(b.rawQtyMT || 0).toFixed(1)} MT
                       {b.linkedExportOrder && <span> · Order: {b.linkedExportOrder}</span>}
                     </p>
                   </div>
@@ -402,7 +403,7 @@ export default function Dashboard() {
                         <Ship size={14} className="text-cyan-500" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">{o.id} · {o.customerName}</p>
+                        <p className="text-sm font-medium text-gray-900 truncate">{o.id} · <PartyLink type="customer" id={o.customerId} name={o.customerName} /></p>
                         <p className="text-[11px] text-gray-500 truncate">
                           {o.qtyMT} MT to {o.country}{o.vesselName ? ` · ${o.vesselName}` : ''}
                         </p>
