@@ -4,6 +4,7 @@ import { Package, Wheat, FlaskConical, Box, Truck, Search, Filter, Eye, RefreshC
 import { useLotInventory, useStockReport } from '../../../api/queries';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 import StatusBadge from '../../../components/StatusBadge';
+import PartyLink from '../../../shared/components/PartyLink';
 import { fromKg, UNITS } from '../../../utils/unitConversion';
 
 const tabs = [
@@ -233,7 +234,7 @@ export default function Inventory() {
                       {lot.variety && <div className="text-xs text-gray-400">{lot.variety}{lot.grade ? ` (${lot.grade})` : ''}</div>}
                       {lot.categoryName && <div className="text-[10px] text-emerald-600 font-medium uppercase tracking-wide">{lot.categoryName}</div>}
                     </td>
-                    <td className="text-gray-600 text-xs">{lot.supplierName || '—'}</td>
+                    <td className="text-gray-600 text-xs"><PartyLink type="supplier" id={lot.supplierId} name={lot.supplierName} /></td>
                     <td className="text-gray-600 text-xs">{lot.warehouseName || '—'}</td>
                     <td className="text-center">
                       <span className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold ${lot.entity === 'mill' ? 'bg-orange-50 text-orange-700' : 'bg-blue-50 text-blue-700'}`}>

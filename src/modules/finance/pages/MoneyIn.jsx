@@ -7,6 +7,7 @@ import { useReceivables, useRecordPayment, useBankAccounts } from '../../../api/
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
 import StatusBadge from '../../../components/StatusBadge';
+import PartyLink from '../../../shared/components/PartyLink';
 import { toPkr } from '../utils/fx';
 import { ageBucket } from '../utils/aging';
 import { shortenRef } from '../utils/refs';
@@ -105,7 +106,7 @@ export default function MoneyIn() {
       if (row.orderId) return <Link to={`/export/${row.orderId}`} className="text-blue-600 hover:text-blue-800 font-medium hover:underline whitespace-nowrap" onClick={e => e.stopPropagation()}>{inner}</Link>;
       return inner;
     }},
-    { key: 'customerName', label: 'Customer', sortable: true, render: (v) => v || '—' },
+    { key: 'customerName', label: 'Customer', sortable: true, render: (v, row) => <PartyLink type="customer" id={row.customerId} name={v} /> },
     { key: 'type', label: 'Type', sortable: true, render: (v) => (
       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${v === 'Advance' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>{v}</span>
     )},
@@ -243,7 +244,7 @@ export default function MoneyIn() {
             <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">{drawer.recvNo}</h2>
-                <p className="text-sm text-gray-500">{drawer.customerName || '—'} &middot; <StatusBadge status={drawer.status} /></p>
+                <p className="text-sm text-gray-500"><PartyLink type="customer" id={drawer.customerId} name={drawer.customerName} /> &middot; <StatusBadge status={drawer.status} /></p>
               </div>
               <button onClick={() => setDrawer(null)} className="p-2 rounded-md hover:bg-gray-200"><X size={18} /></button>
             </div>

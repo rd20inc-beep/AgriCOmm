@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import PartyLink from '../../../shared/components/PartyLink';
 import {
   ArrowLeft, Package, Truck, DollarSign, FileText, BarChart3,
   Plus, Save, Edit3, AlertTriangle, Warehouse, ShoppingBag, Scale,
@@ -426,7 +427,7 @@ export default function LotDetail() {
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
                 <div><p className="text-xs text-gray-500">Batch No</p><Link to={`/milling/${linkedBatch.batchNo}`} className="text-sm font-bold text-blue-600 hover:text-blue-800">{linkedBatch.batchNo}</Link></div>
                 <div><p className="text-xs text-gray-500">Status</p><StatusBadge status={linkedBatch.status} /></div>
-                <div><p className="text-xs text-gray-500">Supplier</p><p className="text-sm font-medium text-gray-900">{linkedBatch.supplierName || '—'}</p></div>
+                <div><p className="text-xs text-gray-500">Supplier</p><p className="text-sm font-medium"><PartyLink type="supplier" id={linkedBatch.supplierId} name={linkedBatch.supplierName} /></p></div>
                 {linkedBatch.arrivalAnalysis?.pricePerMT && (
                   <div><p className="text-xs text-gray-500">Agreed Price</p><p className="text-sm font-bold text-gray-900">Rs {Math.round(linkedBatch.arrivalAnalysis.pricePerMT).toLocaleString()} /MT</p></div>
                 )}

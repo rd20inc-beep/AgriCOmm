@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
+import PartyLink from '../../../shared/components/PartyLink';
 import {
   ArrowLeft,
   Package,
@@ -537,7 +538,7 @@ export default function MillingBatchDetail() {
                 </span>
               )}
               {batch.supplierName ? (
-                <span>Supplier: {batch.supplierName}</span>
+                <span>Supplier: <PartyLink type="supplier" id={batch.supplierId} name={batch.supplierName} /></span>
               ) : (
                 <span className="text-amber-600 font-medium">No supplier assigned</span>
               )}

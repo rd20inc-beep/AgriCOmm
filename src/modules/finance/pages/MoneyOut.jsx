@@ -6,6 +6,7 @@ import { usePayables, useRecordPayment, useBankAccounts, useReceivables } from '
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
 import StatusBadge from '../../../components/StatusBadge';
+import PartyLink from '../../../shared/components/PartyLink';
 import { toPkr } from '../utils/fx';
 import { shortenRef } from '../utils/refs';
 
@@ -130,7 +131,7 @@ export default function MoneyOut() {
       </span>
     )},
     { key: 'category', label: 'Category', sortable: true },
-    { key: 'supplierName', label: 'Supplier', sortable: true, render: (v) => v || '—' },
+    { key: 'supplierName', label: 'Supplier', sortable: true, render: (v, row) => <PartyLink type="supplier" id={row.supplierId} name={v} /> },
     { key: 'linkedRef', label: 'Linked To', sortable: true, render: (v) => {
       if (!v) return '—';
       const href = v.startsWith('EX-') ? `/export/${v}` : v.startsWith('M-') ? `/milling/${v}` : null;
@@ -287,7 +288,7 @@ export default function MoneyOut() {
 
               {/* Details */}
               <div className="grid grid-cols-2 gap-3 text-sm">
-                <div><p className="text-xs text-gray-500">Supplier</p><p>{drawer.supplierName || '—'}</p></div>
+                <div><p className="text-xs text-gray-500">Supplier</p><p><PartyLink type="supplier" id={drawer.supplierId} name={drawer.supplierName} /></p></div>
                 <div><p className="text-xs text-gray-500">Linked To</p>{drawer.linkedRef ? (
                   <Link to={drawer.linkedRef.startsWith('EX-') ? `/export/${drawer.linkedRef}` : drawer.linkedRef.startsWith('M-') ? `/milling/${drawer.linkedRef}` : '#'}
                     className="text-blue-600 hover:underline font-medium">{drawer.linkedRef} →</Link>

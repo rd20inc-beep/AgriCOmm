@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import PartyLink from '../../../shared/components/PartyLink';
 import {
   Wheat,
   Package,
@@ -358,7 +359,7 @@ export default function MillingDashboard() {
                     <Link to={`/milling/${batch.id}`} className="font-medium text-blue-600 hover:text-blue-800">{batch.id}</Link>
                     {batch.linkedExportOrder && <p className="text-[10px] text-gray-400">→ {batch.linkedExportOrder}</p>}
                   </td>
-                  <td className="py-2.5 px-2 text-gray-600">{batch.supplierName || '—'}</td>
+                  <td className="py-2.5 px-2 text-gray-600"><PartyLink type="supplier" id={batch.supplierId} name={batch.supplierName} /></td>
                   <td className="py-2.5 px-2 text-right">{batch.rawQtyMT}</td>
                   <td className="py-2.5 px-2 text-right">{batch.actualFinishedMT || '—'}</td>
                   <td className={`py-2.5 px-2 text-right font-medium ${batch.yieldPct >= 60 ? 'text-green-600' : batch.yieldPct > 0 ? 'text-amber-600' : 'text-gray-400'}`}>

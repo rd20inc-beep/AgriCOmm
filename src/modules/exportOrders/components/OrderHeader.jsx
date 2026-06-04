@@ -1,5 +1,6 @@
 import React from 'react';
 import StatusBadge from '../../../components/StatusBadge';
+import PartyLink from '../../../shared/components/PartyLink';
 import {
   ArrowLeft, ChevronDown, FileText, DollarSign,
   Package, User, Globe, Mail, Copy,
@@ -41,7 +42,7 @@ export default function OrderHeader({
             <StatusBadge status={order.status} />
           </div>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 text-sm text-gray-500">
-            <span className="flex items-center gap-1"><User className="w-3.5 h-3.5" />{order.customerName}</span>
+            <span className="flex items-center gap-1"><User className="w-3.5 h-3.5" /><PartyLink type="customer" id={order.customerId} name={order.customerName} /></span>
             <span className="flex items-center gap-1"><Package className="w-3.5 h-3.5" />{order.qtyMT} MT</span>
             <span className="flex items-center gap-1"><Globe className="w-3.5 h-3.5" />{order.country}</span>
             <span className="flex items-center gap-1"><DollarSign className="w-3.5 h-3.5" />{formatCurrency(order.contractValue)}</span>

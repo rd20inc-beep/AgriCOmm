@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import PartyLink from '../../../shared/components/PartyLink';
 import { Users, Plus, Search, Globe, Mail, Phone, Edit2, Trash2, DollarSign, CreditCard, Building2, BookOpen } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useBuyers, useSaveBuyer, useDeleteBuyer } from '../../../api/queries';
@@ -166,7 +167,7 @@ export default function Buyers() {
               ) : filtered.map(b => (
                 <tr key={b.id} className="hover:bg-gray-50 transition-colors">
                   <td className="px-4 py-3">
-                    <div className="font-medium text-gray-900">{b.name}</div>
+                    <div className="font-medium"><PartyLink type="customer" id={b.id} name={b.name} /></div>
                     {b.email && <div className="text-xs text-gray-500 flex items-center gap-1 mt-0.5"><Mail className="w-3 h-3" />{b.email}</div>}
                   </td>
                   <td className="px-4 py-3">

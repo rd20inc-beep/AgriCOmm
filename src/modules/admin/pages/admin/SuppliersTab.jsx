@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import PartyLink from '../../../../shared/components/PartyLink';
 import { Truck, Plus, MapPin, Pencil, Trash2, Star, BookOpen } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
 import { useCreateSupplier, useUpdateSupplier, useDeleteSupplier } from '../../../../api/queries';
@@ -128,7 +129,7 @@ export default function SuppliersTab() {
                     </button>
                   </td>
                   <td className="px-4 py-3 text-gray-500 font-mono text-xs">{s.id}</td>
-                  <td className="px-4 py-3 font-medium text-gray-900">{s.name}</td>
+                  <td className="px-4 py-3 font-medium"><PartyLink type="supplier" id={s.id} name={s.name} /></td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                       s.type === 'Rice Supplier' ? 'bg-blue-100 text-blue-700' :

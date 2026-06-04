@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import PartyLink from '../../../shared/components/PartyLink';
 import {
   Package, Search, Plus, Warehouse, Truck, Eye, Filter,
   ArrowUpDown, RefreshCw, BarChart3, DollarSign, AlertTriangle,
@@ -131,7 +132,7 @@ function renderLotRow(lot, displayUnit, navigate, indented) {
           </div>
         )}
       </td>
-      <td className="text-gray-600 max-w-[10rem] truncate" title={lot.supplierName || ''}>{lot.supplierName || '—'}</td>
+      <td className="text-gray-600 max-w-[10rem] truncate" title={lot.supplierName || ''}><PartyLink type="supplier" id={lot.supplierId} name={lot.supplierName} /></td>
       <td className="text-gray-600 text-xs max-w-[8rem] truncate" title={lot.warehouseName || ''}>{lot.warehouseName || '—'}</td>
       <td className="text-right font-medium tabular-nums">{fromKg(netKg, displayUnit, bw).toLocaleString()}</td>
       <td className="text-right tabular-nums text-emerald-600 font-medium">{fromKg(availKg, displayUnit, bw).toLocaleString()}</td>
