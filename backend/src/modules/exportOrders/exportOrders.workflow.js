@@ -151,6 +151,8 @@ async function runTransitionSideEffects(trx, order, toStatus, userId) {
             userId,
             partyType: o.customer_id ? 'customer' : null,
             partyId: o.customer_id || null,
+            origCurrency: foreign ? o.currency : null,
+            origFxRate: foreign ? bookedRate : null,
           });
         }
 

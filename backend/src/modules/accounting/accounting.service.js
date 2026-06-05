@@ -66,6 +66,10 @@ const accountingService = {
     // they belong to instead of fragile ref_no string matching. Both optional;
     // partyType is 'customer' | 'supplier'.
     partyType = null, partyId = null,
+    // Original-currency metadata. Lines are ALWAYS PKR (GL is PKR-base); these
+    // record the foreign currency + rate of the transaction so statements can
+    // show an exact USD equivalent. Optional.
+    origCurrency = null, origFxRate = null,
   }) {
     // Wrap in a transaction if one was not provided, to ensure
     // journal_entries + journal_lines are inserted atomically.
@@ -143,6 +147,8 @@ const accountingService = {
           created_by: userId || null,
           party_type: partyType || null,
           party_id: partyId || null,
+          orig_currency: origCurrency || null,
+          orig_fx_rate: origFxRate || null,
         })
         .returning('*');
 
@@ -282,6 +288,8 @@ const accountingService = {
     // posting-rule-driven journals (receipts, bills, expenses) carry the
     // customer/supplier they belong to.
     partyType = null, partyId = null,
+    // Original-currency metadata, passed through to createJournal.
+    origCurrency = null, origFxRate = null,
   }) {
     // Wrap in a transaction if one was not provided, to ensure
     // posting rule lookup + journal creation + posting are atomic.
@@ -347,6 +355,8 @@ const accountingService = {
         userId,
         partyType,
         partyId,
+        origCurrency,
+        origFxRate,
       });
 
       // Auto-post immediately
@@ -981,15 +991,18 @@ const accountingService = {
       });
 
     // Ledgers are presented in PKR base (primary), with a USD equivalent shown
-    // as a sub-line on every amount. usdOf gives the exact native USD for
-    // USD-denominated journals, and converts PKR-denominated ones at the
-    // current USD→PKR rate (the original USD was lost on those at posting time).
+    // as a sub-line on every amount. usdOf is EXACT when the journal carries its
+    // original currency: a natively-USD line is itself the USD, and a PKR line
+    // with orig metadata divides by its original rate. Only journals with no
+    // original-currency info fall back to the current USD→PKR rate.
     const { factorSql, conv, statementCurrency } = await currencyMode();
     const usdRate = (await fxRateService.getLatestRate('USD')).rate || 280;
-    const usdOf = (native, cur, fx) => {
+    const usdOf = (native, cur, fx, origRate, origCur) => {
       const c = (cur || 'PKR').toUpperCase();
       if (c === 'USD') return native;
       const pkr = native * (c === 'PKR' ? 1 : (parseFloat(fx) || 1));
+      const oRate = parseFloat(origRate) || 0;
+      if (oRate > 0 && (origCur || '').toUpperCase() === 'USD') return pkr / oRate;
       return usdRate ? pkr / usdRate : 0;
     };
 
@@ -1022,7 +1035,9 @@ const accountingService = {
         'jl.debit',
         'jl.credit',
         'je.currency',
-        'je.fx_rate'
+        'je.fx_rate',
+        'je.orig_currency',
+        'je.orig_fx_rate'
       )
       .orderBy(['je.date', 'je.id']);
 
@@ -1033,8 +1048,8 @@ const accountingService = {
       const nd = parseFloat(t.debit), nc = parseFloat(t.credit);
       const debit = conv(nd, t.currency, t.fx_rate);
       const credit = conv(nc, t.currency, t.fx_rate);
-      const debitUsd = usdOf(nd, t.currency, t.fx_rate);
-      const creditUsd = usdOf(nc, t.currency, t.fx_rate);
+      const debitUsd = usdOf(nd, t.currency, t.fx_rate, t.orig_fx_rate, t.orig_currency);
+      const creditUsd = usdOf(nc, t.currency, t.fx_rate, t.orig_fx_rate, t.orig_currency);
       runningBalance += (debit - credit);
       runningBalanceUsd += (debitUsd - creditUsd);
       return {
@@ -1112,15 +1127,16 @@ const accountingService = {
         }
       });
 
-    // PKR base (primary) with a USD sub-line on every amount. See the customer
-    // statement note above; usdOf gives exact native USD for USD journals and
-    // converts PKR-denominated ones at the current rate.
+    // PKR base (primary) with a USD sub-line on every amount. usdOf is exact
+    // from the journal's original-currency metadata; see the customer note.
     const { factorSql, conv, statementCurrency } = await currencyMode();
     const usdRate = (await fxRateService.getLatestRate('USD')).rate || 280;
-    const usdOf = (native, cur, fx) => {
+    const usdOf = (native, cur, fx, origRate, origCur) => {
       const c = (cur || 'PKR').toUpperCase();
       if (c === 'USD') return native;
       const pkr = native * (c === 'PKR' ? 1 : (parseFloat(fx) || 1));
+      const oRate = parseFloat(origRate) || 0;
+      if (oRate > 0 && (origCur || '').toUpperCase() === 'USD') return pkr / oRate;
       return usdRate ? pkr / usdRate : 0;
     };
 
@@ -1153,7 +1169,9 @@ const accountingService = {
         'jl.debit',
         'jl.credit',
         'je.currency',
-        'je.fx_rate'
+        'je.fx_rate',
+        'je.orig_currency',
+        'je.orig_fx_rate'
       )
       .orderBy(['je.date', 'je.id']);
 
@@ -1163,8 +1181,8 @@ const accountingService = {
       const nd = parseFloat(t.debit), nc = parseFloat(t.credit);
       const debit = conv(nd, t.currency, t.fx_rate);
       const credit = conv(nc, t.currency, t.fx_rate);
-      const debitUsd = usdOf(nd, t.currency, t.fx_rate);
-      const creditUsd = usdOf(nc, t.currency, t.fx_rate);
+      const debitUsd = usdOf(nd, t.currency, t.fx_rate, t.orig_fx_rate, t.orig_currency);
+      const creditUsd = usdOf(nc, t.currency, t.fx_rate, t.orig_fx_rate, t.orig_currency);
       runningBalance += (credit - debit);
       runningBalanceUsd += (creditUsd - debitUsd);
       return {
