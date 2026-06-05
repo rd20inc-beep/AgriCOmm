@@ -29,7 +29,7 @@ import {
 } from 'recharts';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
-import { useCreateMillingBatch, useMills, useMillExpenses, useCreateMillExpense, useInventory } from '../../../api/queries';
+import { useCreateMillingBatch, useMills, useMillExpenses, useCreateMillExpense, useInventory, useProducts } from '../../../api/queries';
 import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import KPICard from '../../../components/KPICard';
 import StatusBadge from '../../../components/StatusBadge';
@@ -84,14 +84,58 @@ export default function MillingDashboard() {
     clientName: '', clientContact: '', millingFeePerMT: '',
   });
   const setBF = (k, v) => setBatchForm(p => ({ ...p, [k]: v }));
-  const resetBatchForm = () => setBatchForm({
-    millingType: 'own_stock', supplierId: '', rawQtyKg: '', totalBags: '', plannedFinishedKg: '',
-    millingFeePerKg: '5',
-    millId: '', shift: 'Day', notes: '', clientName: '', clientContact: '', millingFeePerMT: '',
-  });
+  // Blend: consume partial quantities from multiple stock lots (mixed
+  // varieties / leftover finished rice) into one batch.
+  const [useBlend, setUseBlend] = useState(false);
+  const [blendProductId, setBlendProductId] = useState('');
+  const [blendRows, setBlendRows] = useState([{ lotId: '', qtyMt: '' }]);
+  const { data: products = [] } = useProducts();
+  // Available mill lots that can be fed to a batch (raw paddy + leftover
+  // finished rice), excluding ones already committed to milling.
+  const blendableLots = useMemo(() => (directInv || []).filter(l =>
+    l.entity === 'mill'
+    && ['raw', 'finished'].includes(l.type)
+    && parseFloat(l.availableQty) > 0
+    && !['In Milling', 'Consumed'].includes(l.millingStatus)
+  ), [directInv]);
+  const blendTotals = useMemo(() => {
+    let mt = 0, cost = 0;
+    for (const r of blendRows) {
+      const lot = blendableLots.find(l => String(l.id) === String(r.lotId));
+      const q = parseFloat(r.qtyMt) || 0;
+      if (!lot || q <= 0) continue;
+      mt += q;
+      cost += (parseFloat(lot.landedCostPerKg) || parseFloat(lot.ratePerKg) || 0) * q * 1000;
+    }
+    return { mt, cost };
+  }, [blendRows, blendableLots]);
+  const resetBatchForm = () => {
+    setBatchForm({
+      millingType: 'own_stock', supplierId: '', rawQtyKg: '', totalBags: '', plannedFinishedKg: '',
+      millingFeePerKg: '5',
+      millId: '', shift: 'Day', notes: '', clientName: '', clientContact: '', millingFeePerMT: '',
+    });
+    setUseBlend(false); setBlendProductId(''); setBlendRows([{ lotId: '', qtyMt: '' }]);
+  };
 
   async function handleCreateBatch() {
-    if (!batchForm.supplierId || !batchForm.rawQtyKg) {
+    // Blend mode: validate the source-lot lines instead of supplier + qty.
+    const blendLots = useBlend
+      ? blendRows
+          .filter(r => r.lotId && parseFloat(r.qtyMt) > 0)
+          .map(r => ({ lot_id: parseInt(r.lotId), qty_mt: parseFloat(r.qtyMt) }))
+      : [];
+    if (useBlend) {
+      if (blendLots.length === 0) { addToast('Add at least one source lot with a quantity', 'error'); return; }
+      // Don't let a row request more than the lot has available.
+      for (const r of blendRows) {
+        const lot = blendableLots.find(l => String(l.id) === String(r.lotId));
+        if (lot && parseFloat(r.qtyMt) > parseFloat(lot.availableQty) + 1e-6) {
+          addToast(`${lot.lotNo || lot.itemName}: only ${lot.availableQty} MT available`, 'error');
+          return;
+        }
+      }
+    } else if (!batchForm.supplierId || !batchForm.rawQtyKg) {
       addToast('Supplier and raw quantity are required', 'error');
       return;
     }
@@ -99,22 +143,24 @@ export default function MillingDashboard() {
       addToast('Client name is required for service milling', 'error');
       return;
     }
-    const rawKg = parseFloat(batchForm.rawQtyKg);
+    const rawKg = parseFloat(batchForm.rawQtyKg) || 0;
     const rawQty = rawKg / 1000; // backend stores MT
-    const plannedKg = parseFloat(batchForm.plannedFinishedKg) || Math.round(rawKg * 0.65);
+    const plannedKg = parseFloat(batchForm.plannedFinishedKg)
+      || Math.round((useBlend ? blendTotals.mt * 1000 : rawKg) * 0.65);
     const planned = plannedKg / 1000;
 
     try {
       const payload = {
-        supplier_id: parseInt(batchForm.supplierId),
-        raw_qty_mt: rawQty,
-        planned_finished_mt: planned,
         milling_fee_per_kg: parseFloat(batchForm.millingFeePerKg) || 5,
         mill_id: batchForm.millId ? parseInt(batchForm.millId) : null,
         shift: batchForm.shift,
+        planned_finished_mt: planned,
         notes: batchForm.millingType === 'service_milling'
           ? `[SERVICE MILLING] Client: ${batchForm.clientName}${batchForm.clientContact ? ` | Contact: ${batchForm.clientContact}` : ''}${batchForm.millingFeePerMT ? ` | Fee: PKR ${batchForm.millingFeePerMT}/MT` : ''}${batchForm.notes ? ` | ${batchForm.notes}` : ''}`
           : batchForm.notes || null,
+        ...(useBlend
+          ? { source_lots: blendLots, product_id: blendProductId ? parseInt(blendProductId) : null }
+          : { supplier_id: parseInt(batchForm.supplierId), raw_qty_mt: rawQty }),
       };
       const res = await createBatchMut.mutateAsync(payload);
       const batchNo = res?.data?.batch?.batch_no || res?.data?.batch?.id;
@@ -1008,7 +1054,64 @@ export default function MillingDashboard() {
             </div>
           )}
 
+          {/* Blend from stock lots (own-stock only) */}
+          {batchForm.millingType !== 'service_milling' && (
+            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+              <input type="checkbox" checked={useBlend} onChange={e => setUseBlend(e.target.checked)} className="w-4 h-4" />
+              <span className="font-medium">Blend from stock lots</span>
+              <span className="text-xs text-gray-400">— partial qty from multiple lots, mixed varieties, or leftover finished rice</span>
+            </label>
+          )}
+
+          {/* Blend source-lot picker */}
+          {useBlend && batchForm.millingType !== 'service_milling' && (
+            <div className="space-y-3 rounded-lg border border-blue-200 bg-blue-50/40 p-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Output Product</label>
+                <select value={blendProductId} onChange={e => setBlendProductId(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none bg-white">
+                  <option value="">Select milled output product…</option>
+                  {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-sm font-medium text-gray-700">Source Lots</label>
+                  <span className="text-xs text-gray-400">{blendableLots.length} available</span>
+                </div>
+                {blendRows.map((row, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <select value={row.lotId}
+                      onChange={e => setBlendRows(rs => rs.map((r, j) => j === i ? { ...r, lotId: e.target.value } : r))}
+                      className="flex-1 min-w-0 border border-gray-300 rounded-lg px-2 py-2 text-sm outline-none bg-white">
+                      <option value="">Select lot…</option>
+                      {blendableLots.map(l => (
+                        <option key={l.id} value={l.id}>
+                          {(l.lotNo || l.itemName)} · {l.type === 'finished' ? 'Finished' : (l.variety || 'Raw')} · {parseFloat(l.availableQty).toFixed(1)}MT · Rs{Math.round(parseFloat(l.landedCostPerKg) || parseFloat(l.ratePerKg) || 0)}/kg
+                        </option>
+                      ))}
+                    </select>
+                    <input type="number" value={row.qtyMt} placeholder="MT" min="0"
+                      onChange={e => setBlendRows(rs => rs.map((r, j) => j === i ? { ...r, qtyMt: e.target.value } : r))}
+                      className="w-20 border border-gray-300 rounded-lg px-2 py-2 text-sm outline-none" />
+                    <button type="button" title="Remove"
+                      onClick={() => setBlendRows(rs => rs.length > 1 ? rs.filter((_, j) => j !== i) : [{ lotId: '', qtyMt: '' }])}
+                      className="p-1.5 text-gray-400 hover:text-red-600">✕</button>
+                  </div>
+                ))}
+                <button type="button" onClick={() => setBlendRows(rs => [...rs, { lotId: '', qtyMt: '' }])}
+                  className="text-xs font-medium text-blue-600 hover:text-blue-800">+ Add lot</button>
+              </div>
+              {blendTotals.mt > 0 && (
+                <div className="flex justify-between text-sm border-t border-blue-200 pt-2">
+                  <span className="text-gray-600">Blend total</span>
+                  <span className="font-semibold">{blendTotals.mt.toFixed(2)} MT · Rs {Math.round(blendTotals.cost).toLocaleString()} <span className="text-gray-400 font-normal">(≈Rs {Math.round(blendTotals.cost / (blendTotals.mt * 1000))}/kg)</span></span>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Supplier (rice source) */}
+          {!useBlend && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               {batchForm.millingType === 'service_milling' ? 'Rice Source (Client / Broker)' : 'Supplier'} *
@@ -1018,8 +1121,10 @@ export default function MillingDashboard() {
               {(suppliersList || []).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </div>
+          )}
 
           {/* Quantities */}
+          {!useBlend && (
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Raw Qty (KG) *</label>
@@ -1051,6 +1156,7 @@ export default function MillingDashboard() {
               )}
             </div>
           </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Expected Finished (KG)</label>
             <input type="number" value={batchForm.plannedFinishedKg} onChange={e => setBF('plannedFinishedKg', e.target.value)} placeholder="Auto: ~65% of raw" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
