@@ -1633,6 +1633,10 @@ const exportOrderController = {
           userId: req.user?.id,
           partyType: paymentContext.customerId ? 'customer' : null,
           partyId: paymentContext.customerId || null,
+          // Record the original foreign currency + rate so the ledger can show
+          // an exact USD figure (PKR lines keep the GL consistent).
+          origCurrency: paymentContext.currency !== 'PKR' ? paymentContext.currency : null,
+          origFxRate: paymentContext.currency !== 'PKR' ? paymentContext.fxRate : null,
         });
       } catch (e) { console.warn('Advance journal failed:', e.message); }
       try {
@@ -1798,6 +1802,8 @@ const exportOrderController = {
           userId: req.user?.id,
           partyType: paymentContext.customerId ? 'customer' : null,
           partyId: paymentContext.customerId || null,
+          origCurrency: paymentContext.currency !== 'PKR' ? paymentContext.currency : null,
+          origFxRate: paymentContext.currency !== 'PKR' ? paymentContext.fxRate : null,
         });
       } catch (e) { console.warn('Balance journal failed:', e.message); }
       try {
