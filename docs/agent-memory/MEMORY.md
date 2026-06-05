@@ -1,0 +1,5 @@
+- [Export Document Types](project_export_documents.md) — 15 doc types, backend + frontend renderers complete
+- [Frontend + Backend Modularization](project_modularization.md) — all pages under src/modules/*, src/pages deleted
+- [Production Server](reference_server.md) — 69.197.139.11, snap Docker, deploy path workarounds
+- [Party Ledger feature](project_party_ledger.md) — Finance>Statements, party stamping, revenue recognition, PKR-base GL + exact USD; don't post non-PKR journal lines
+- [Ledger verification screenshots](reference_ledger_verification_screenshots.md) — saved frames in memory/verification-screenshots/
