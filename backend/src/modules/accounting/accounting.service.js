@@ -1,4 +1,5 @@
 const db = require('../../config/database');
+const fxRateService = require('../finance/fxRate.service');
 
 /**
  * Currency conversion helpers for party statements. Journals are stored in
@@ -979,26 +980,29 @@ const accountingService = {
         }
       });
 
-    // Display currency: journals are stored in their transaction currency
-    // (export AR is USD, fx_rate stamped), not PKR. If every matching journal
-    // shares one currency, present the ledger in it (so a USD customer sees
-    // USD). If a party mixes currencies, fall back to PKR base (native ×
-    // fx_rate) so the running balance stays a single valid number.
-    const { factorSql, pkrFactorSql, conv, convPkr, statementCurrency } = await currencyMode();
+    // Ledgers are presented in PKR base (primary), with a USD equivalent shown
+    // as a sub-line on every amount. usdOf gives the exact native USD for
+    // USD-denominated journals, and converts PKR-denominated ones at the
+    // current USD→PKR rate (the original USD was lost on those at posting time).
+    const { factorSql, conv, statementCurrency } = await currencyMode();
+    const usdRate = (await fxRateService.getLatestRate('USD')).rate || 280;
+    const usdOf = (native, cur, fx) => {
+      const c = (cur || 'PKR').toUpperCase();
+      if (c === 'USD') return native;
+      const pkr = native * (c === 'PKR' ? 1 : (parseFloat(fx) || 1));
+      return usdRate ? pkr / usdRate : 0;
+    };
 
-    // Opening balance (before dateFrom), in both the display currency and PKR.
-    let openingBalance = 0, openingBalancePkr = 0;
+    // Opening balance (before dateFrom), in PKR with a USD approximation.
+    let openingBalance = 0;
     if (dateFrom) {
       const openingResult = await lineBase()
         .where('je.date', '<', dateFrom)
-        .select(
-          db.raw(`COALESCE(SUM((jl.debit - jl.credit) * (${factorSql})), 0)::numeric as balance`),
-          db.raw(`COALESCE(SUM((jl.debit - jl.credit) * (${pkrFactorSql})), 0)::numeric as balance_pkr`)
-        )
+        .select(db.raw(`COALESCE(SUM((jl.debit - jl.credit) * (${factorSql})), 0)::numeric as balance`))
         .first();
       openingBalance = parseFloat(openingResult.balance);
-      openingBalancePkr = parseFloat(openingResult.balance_pkr);
     }
+    const openingBalanceUsd = usdRate ? openingBalance / usdRate : 0;
 
     // Transactions within period
     let txnQuery = lineBase()
@@ -1024,15 +1028,15 @@ const accountingService = {
 
     // Closing balance
     let runningBalance = openingBalance;
-    let runningBalancePkr = openingBalancePkr;
+    let runningBalanceUsd = openingBalanceUsd;
     const formattedTxns = transactions.map((t) => {
       const nd = parseFloat(t.debit), nc = parseFloat(t.credit);
       const debit = conv(nd, t.currency, t.fx_rate);
       const credit = conv(nc, t.currency, t.fx_rate);
-      const debitPkr = convPkr(nd, t.currency, t.fx_rate);
-      const creditPkr = convPkr(nc, t.currency, t.fx_rate);
+      const debitUsd = usdOf(nd, t.currency, t.fx_rate);
+      const creditUsd = usdOf(nc, t.currency, t.fx_rate);
       runningBalance += (debit - credit);
-      runningBalancePkr += (debitPkr - creditPkr);
+      runningBalanceUsd += (debitUsd - creditUsd);
       return {
         date: t.date,
         journal_no: t.journal_no,
@@ -1042,22 +1046,23 @@ const accountingService = {
         account_name: t.account_name,
         debit: parseFloat(debit.toFixed(2)),
         credit: parseFloat(credit.toFixed(2)),
-        debit_pkr: parseFloat(debitPkr.toFixed(2)),
-        credit_pkr: parseFloat(creditPkr.toFixed(2)),
+        debit_usd: parseFloat(debitUsd.toFixed(2)),
+        credit_usd: parseFloat(creditUsd.toFixed(2)),
         currency: statementCurrency,
         running_balance: parseFloat(runningBalance.toFixed(2)),
-        running_balance_pkr: parseFloat(runningBalancePkr.toFixed(2)),
+        running_balance_usd: parseFloat(runningBalanceUsd.toFixed(2)),
       };
     });
 
     return {
       customer_id: cid,
       currency: statementCurrency,
+      usd_rate: usdRate,
       opening_balance: parseFloat(openingBalance.toFixed(2)),
-      opening_balance_pkr: parseFloat(openingBalancePkr.toFixed(2)),
+      opening_balance_usd: parseFloat(openingBalanceUsd.toFixed(2)),
       transactions: formattedTxns,
       closing_balance: parseFloat(runningBalance.toFixed(2)),
-      closing_balance_pkr: parseFloat(runningBalancePkr.toFixed(2)),
+      closing_balance_usd: parseFloat(runningBalanceUsd.toFixed(2)),
     };
   },
 
@@ -1107,24 +1112,28 @@ const accountingService = {
         }
       });
 
-    // Display currency — show the supplier ledger in its native currency when
-    // single-currency, else PKR base. See currencyMode + the customer
-    // statement note above.
-    const { factorSql, pkrFactorSql, conv, convPkr, statementCurrency } = await currencyMode();
+    // PKR base (primary) with a USD sub-line on every amount. See the customer
+    // statement note above; usdOf gives exact native USD for USD journals and
+    // converts PKR-denominated ones at the current rate.
+    const { factorSql, conv, statementCurrency } = await currencyMode();
+    const usdRate = (await fxRateService.getLatestRate('USD')).rate || 280;
+    const usdOf = (native, cur, fx) => {
+      const c = (cur || 'PKR').toUpperCase();
+      if (c === 'USD') return native;
+      const pkr = native * (c === 'PKR' ? 1 : (parseFloat(fx) || 1));
+      return usdRate ? pkr / usdRate : 0;
+    };
 
-    // Opening balance (before dateFrom), in both the display currency and PKR.
-    let openingBalance = 0, openingBalancePkr = 0;
+    // Opening balance (before dateFrom), in PKR with a USD approximation.
+    let openingBalance = 0;
     if (dateFrom) {
       const openingResult = await lineBase()
         .where('je.date', '<', dateFrom)
-        .select(
-          db.raw(`COALESCE(SUM((jl.credit - jl.debit) * (${factorSql})), 0)::numeric as balance`),
-          db.raw(`COALESCE(SUM((jl.credit - jl.debit) * (${pkrFactorSql})), 0)::numeric as balance_pkr`)
-        )
+        .select(db.raw(`COALESCE(SUM((jl.credit - jl.debit) * (${factorSql})), 0)::numeric as balance`))
         .first();
       openingBalance = parseFloat(openingResult.balance);
-      openingBalancePkr = parseFloat(openingResult.balance_pkr);
     }
+    const openingBalanceUsd = usdRate ? openingBalance / usdRate : 0;
 
     // Transactions within period
     let txnQuery = lineBase()
@@ -1149,15 +1158,15 @@ const accountingService = {
       .orderBy(['je.date', 'je.id']);
 
     let runningBalance = openingBalance;
-    let runningBalancePkr = openingBalancePkr;
+    let runningBalanceUsd = openingBalanceUsd;
     const formattedTxns = transactions.map((t) => {
       const nd = parseFloat(t.debit), nc = parseFloat(t.credit);
       const debit = conv(nd, t.currency, t.fx_rate);
       const credit = conv(nc, t.currency, t.fx_rate);
-      const debitPkr = convPkr(nd, t.currency, t.fx_rate);
-      const creditPkr = convPkr(nc, t.currency, t.fx_rate);
+      const debitUsd = usdOf(nd, t.currency, t.fx_rate);
+      const creditUsd = usdOf(nc, t.currency, t.fx_rate);
       runningBalance += (credit - debit);
-      runningBalancePkr += (creditPkr - debitPkr);
+      runningBalanceUsd += (creditUsd - debitUsd);
       return {
         date: t.date,
         journal_no: t.journal_no,
@@ -1167,22 +1176,23 @@ const accountingService = {
         account_name: t.account_name,
         debit: parseFloat(debit.toFixed(2)),
         credit: parseFloat(credit.toFixed(2)),
-        debit_pkr: parseFloat(debitPkr.toFixed(2)),
-        credit_pkr: parseFloat(creditPkr.toFixed(2)),
+        debit_usd: parseFloat(debitUsd.toFixed(2)),
+        credit_usd: parseFloat(creditUsd.toFixed(2)),
         currency: statementCurrency,
         running_balance: parseFloat(runningBalance.toFixed(2)),
-        running_balance_pkr: parseFloat(runningBalancePkr.toFixed(2)),
+        running_balance_usd: parseFloat(runningBalanceUsd.toFixed(2)),
       };
     });
 
     return {
       supplier_id: sid,
       currency: statementCurrency,
+      usd_rate: usdRate,
       opening_balance: parseFloat(openingBalance.toFixed(2)),
-      opening_balance_pkr: parseFloat(openingBalancePkr.toFixed(2)),
+      opening_balance_usd: parseFloat(openingBalanceUsd.toFixed(2)),
       transactions: formattedTxns,
       closing_balance: parseFloat(runningBalance.toFixed(2)),
-      closing_balance_pkr: parseFloat(runningBalancePkr.toFixed(2)),
+      closing_balance_usd: parseFloat(runningBalanceUsd.toFixed(2)),
     };
   },
 

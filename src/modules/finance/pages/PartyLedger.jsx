@@ -99,19 +99,20 @@ export default function PartyLedger() {
 
   const transactions = statement?.transactions || [];
   const cur = statement?.currency || 'PKR';
-  // When the ledger is shown in a foreign currency, also surface the PKR
-  // equivalent as a sub-line; for a PKR ledger the two are identical so we hide it.
-  const showPkr = cur !== 'PKR';
+  // Ledger is shown in PKR base (primary) with the USD equivalent on a
+  // sub-line under every amount. usdRate is the rate used for PKR→USD.
+  const usdRate = parseFloat(statement?.usd_rate) || 0;
+  const showUsd = usdRate > 0;
   const opening = parseFloat(statement?.opening_balance) || 0;
   const closing = parseFloat(statement?.closing_balance) || 0;
-  const closingPkr = parseFloat(statement?.closing_balance_pkr) || 0;
-  const openingPkr = parseFloat(statement?.opening_balance_pkr) || 0;
+  const closingUsd = parseFloat(statement?.closing_balance_usd) || 0;
+  const openingUsd = parseFloat(statement?.opening_balance_usd) || 0;
   // For a customer (receivable) a positive balance means they owe us; for a
   // supplier (payable) a positive balance means we owe them.
   const totalDebit = transactions.reduce((s, t) => s + (parseFloat(t.debit) || 0), 0);
   const totalCredit = transactions.reduce((s, t) => s + (parseFloat(t.credit) || 0), 0);
-  const totalDebitPkr = transactions.reduce((s, t) => s + (parseFloat(t.debit_pkr) || 0), 0);
-  const totalCreditPkr = transactions.reduce((s, t) => s + (parseFloat(t.credit_pkr) || 0), 0);
+  const totalDebitUsd = transactions.reduce((s, t) => s + (parseFloat(t.debit_usd) || 0), 0);
+  const totalCreditUsd = transactions.reduce((s, t) => s + (parseFloat(t.credit_usd) || 0), 0);
   const balanceLabel = mode === 'customer' ? 'They owe' : 'We owe';
 
   function switchMode(next) {
@@ -219,7 +220,7 @@ export default function PartyLedger() {
               <div className="flex flex-col items-start sm:items-end gap-1">
                 <span className="text-[11px] uppercase tracking-wider opacity-80">{balanceLabel} (closing)</span>
                 <span className="text-2xl font-bold tabular-nums">{fmtCurSigned(closing, cur)}</span>
-                {showPkr && <span className="text-xs opacity-70 tabular-nums">≈ {fmtCurSigned(closingPkr, 'PKR')}</span>}
+                {showUsd && <span className="text-xs opacity-70 tabular-nums">≈ {fmtCurSigned(closingUsd, 'USD')}</span>}
               </div>
             </div>
           </div>
@@ -227,13 +228,13 @@ export default function PartyLedger() {
           {/* KPI tiles */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <FinanceKPI icon={Scale} title="Opening Balance" value={fmtCurCompact(opening, cur)}
-              subtitle={showPkr ? `≈ ${fmtCurCompact(openingPkr, 'PKR')}` : 'Before this period'} status="neutral" loading={stmtLoading} />
+              subtitle={showUsd ? `≈ ${fmtCurCompact(openingUsd, 'USD')}` : 'Before this period'} status="neutral" loading={stmtLoading} />
             <FinanceKPI icon={ArrowDownLeft} title="Total Debit" value={fmtCurCompact(totalDebit, cur)}
-              subtitle={showPkr ? `≈ ${fmtCurCompact(totalDebitPkr, 'PKR')}` : (mode === 'customer' ? 'Invoiced / charged' : 'Paid / settled')} status="info" loading={stmtLoading} />
+              subtitle={showUsd ? `≈ ${fmtCurCompact(totalDebitUsd, 'USD')}` : (mode === 'customer' ? 'Invoiced / charged' : 'Paid / settled')} status="info" loading={stmtLoading} />
             <FinanceKPI icon={ArrowUpRight} title="Total Credit" value={fmtCurCompact(totalCredit, cur)}
-              subtitle={showPkr ? `≈ ${fmtCurCompact(totalCreditPkr, 'PKR')}` : (mode === 'customer' ? 'Received' : 'Billed to us')} status="info" loading={stmtLoading} />
+              subtitle={showUsd ? `≈ ${fmtCurCompact(totalCreditUsd, 'USD')}` : (mode === 'customer' ? 'Received' : 'Billed to us')} status="info" loading={stmtLoading} />
             <FinanceKPI icon={Scale} title="Closing Balance" value={fmtCurCompact(closing, cur)}
-              subtitle={showPkr ? `${balanceLabel} · ≈ ${fmtCurCompact(closingPkr, 'PKR')}` : balanceLabel} status={closing > 0 ? 'warning' : 'good'} loading={stmtLoading} />
+              subtitle={showUsd ? `${balanceLabel} · ≈ ${fmtCurCompact(closingUsd, 'USD')}` : balanceLabel} status={closing > 0 ? 'warning' : 'good'} loading={stmtLoading} />
           </div>
 
           {/* Section heading */}
@@ -271,7 +272,7 @@ export default function PartyLedger() {
                       <td className="py-2 px-3 text-xs" colSpan={6}>Opening balance</td>
                       <td className="py-2 px-3 text-right font-medium tabular-nums">
                         {fmtCurSigned(opening, cur)}
-                        {showPkr && <span className="block text-[10px] text-gray-400 font-normal">≈ {fmtCurSigned(openingPkr, 'PKR')}</span>}
+                        {showUsd && <span className="block text-[10px] text-gray-400 font-normal">≈ {fmtCurSigned(openingUsd, 'USD')}</span>}
                       </td>
                     </tr>
                     {transactions.length === 0 ? (
@@ -304,15 +305,15 @@ export default function PartyLedger() {
                             </td>
                             <td className="py-2.5 px-3 text-right tabular-nums whitespace-nowrap">
                               {dr > 0 ? fmtCur(dr, cur) : '—'}
-                              {showPkr && dr > 0 && <span className="block text-[10px] text-gray-400">{fmtCur(t.debit_pkr, 'PKR')}</span>}
+                              {showUsd && dr > 0 && <span className="block text-[10px] text-gray-400">{fmtCur(t.debit_usd, 'USD')}</span>}
                             </td>
                             <td className="py-2.5 px-3 text-right tabular-nums whitespace-nowrap">
                               {cr > 0 ? fmtCur(cr, cur) : '—'}
-                              {showPkr && cr > 0 && <span className="block text-[10px] text-gray-400">{fmtCur(t.credit_pkr, 'PKR')}</span>}
+                              {showUsd && cr > 0 && <span className="block text-[10px] text-gray-400">{fmtCur(t.credit_usd, 'USD')}</span>}
                             </td>
                             <td className="py-2.5 px-3 text-right font-medium tabular-nums whitespace-nowrap">
                               {fmtCurSigned(t.running_balance, cur)}
-                              {showPkr && <span className="block text-[10px] text-gray-400 font-normal">≈ {fmtCurSigned(t.running_balance_pkr, 'PKR')}</span>}
+                              {showUsd && <span className="block text-[10px] text-gray-400 font-normal">≈ {fmtCurSigned(t.running_balance_usd, 'USD')}</span>}
                             </td>
                           </tr>
                         );
@@ -323,15 +324,15 @@ export default function PartyLedger() {
                       <td className="py-2.5 px-3 text-gray-600 uppercase text-[11px]" colSpan={4}>Closing balance</td>
                       <td className="py-2.5 px-3 text-right tabular-nums">
                         {fmtCur(totalDebit, cur)}
-                        {showPkr && <span className="block text-[10px] text-gray-400 font-normal">{fmtCur(totalDebitPkr, 'PKR')}</span>}
+                        {showUsd && <span className="block text-[10px] text-gray-400 font-normal">{fmtCur(totalDebitUsd, 'USD')}</span>}
                       </td>
                       <td className="py-2.5 px-3 text-right tabular-nums">
                         {fmtCur(totalCredit, cur)}
-                        {showPkr && <span className="block text-[10px] text-gray-400 font-normal">{fmtCur(totalCreditPkr, 'PKR')}</span>}
+                        {showUsd && <span className="block text-[10px] text-gray-400 font-normal">{fmtCur(totalCreditUsd, 'USD')}</span>}
                       </td>
                       <td className="py-2.5 px-3 text-right tabular-nums">
                         {fmtCurSigned(closing, cur)}
-                        {showPkr && <span className="block text-[10px] text-gray-400 font-normal">≈ {fmtCurSigned(closingPkr, 'PKR')}</span>}
+                        {showUsd && <span className="block text-[10px] text-gray-400 font-normal">≈ {fmtCurSigned(closingUsd, 'USD')}</span>}
                       </td>
                     </tr>
                   </tbody>
