@@ -666,6 +666,43 @@ const inventoryService = {
   async consumeForMilling(trx, { batchId, qtyMT, userId }) {
     if (!trx) throw new Error('consumeForMilling requires a transaction');
 
+    // Blended batch: draw down the committed partial qty from EACH source lot
+    // (raw paddy and/or re-milled finished rice). One movement per lot so each
+    // lot's stock and cost are tracked separately. Idempotent — a fully
+    // consumed source lot is skipped.
+    const sources = await trx('batch_source_lots').where({ batch_id: batchId });
+    if (sources.length > 0) {
+      const movements = [];
+      for (const s of sources) {
+        const lot = await trx('inventory_lots').where({ id: s.lot_id }).first();
+        if (!lot) continue;
+        const avail = parseFloat(lot.available_qty) || 0;
+        const consume = Math.min(parseFloat(s.qty_mt) || 0, avail);
+        if (consume <= 0) continue;
+        const m = await inventoryService.postMovement(trx, {
+          movementType: MOVEMENT_TYPES.PRODUCTION_ISSUE,
+          lotId: lot.id,
+          qty: consume,
+          fromWarehouseId: lot.warehouse_id,
+          sourceEntity: 'mill',
+          linkedRef: `batch-${batchId}`,
+          notes: `${lot.type === 'finished' ? 'Finished rice re-milled' : 'Rice consumed'} for milling batch ${batchId} (lot ${lot.lot_no || lot.id})`,
+          costPerUnit: parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.cost_per_unit) || 0,
+          currency: lot.cost_currency || 'PKR',
+          batchId,
+          userId,
+        });
+        movements.push(m);
+        const remaining = avail - consume;
+        await trx('inventory_lots').where({ id: lot.id }).update({
+          milling_status: remaining <= 1e-6 ? 'Consumed' : 'In Milling',
+          updated_at: trx.fn.now(),
+        });
+      }
+      return movements;
+    }
+
+    // ── Legacy single-lot path (procurement/GRN-fed batches) ──
     const parsedQty = parseFloat(qtyMT);
 
     // Find rice lot for this batch

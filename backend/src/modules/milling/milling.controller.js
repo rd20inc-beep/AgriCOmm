@@ -209,12 +209,20 @@ const millingController = {
         machine_line,
         shift,
         notes,
+        // Blend input: partial quantities from multiple existing lots (raw
+        // and/or leftover finished rice, mixed varieties). [{ lot_id, qty_mt }].
+        // When given, raw_qty_mt + the weighted raw cost are derived from it.
+        source_lots,
       } = req.body;
 
-      if (!raw_qty_mt) {
+      const blendLots = Array.isArray(source_lots)
+        ? source_lots.filter((s) => s && s.lot_id && parseFloat(s.qty_mt) > 0)
+        : [];
+
+      if (!raw_qty_mt && blendLots.length === 0) {
         return res.status(400).json({
           success: false,
-          message: 'raw_qty_mt is required.',
+          message: 'raw_qty_mt or source_lots is required.',
         });
       }
 
@@ -268,13 +276,41 @@ const millingController = {
 
         const batchNo = await generateBatchNo(trx);
 
+        // ── Blend: validate + price each source lot before inserting ──
+        // Partial quantities from multiple lots (raw or leftover finished),
+        // each priced at its landed cost/kg. raw_qty_mt + the raw cost pool
+        // are the weighted sum, so COGS reflects the actual blend.
+        let resolvedRawQty = raw_qty_mt ? parseFloat(raw_qty_mt) : 0;
+        let resolvedSupplierId = supplier_id || null;
+        const blendRows = [];
+        let blendRawCostTotal = 0;
+        if (blendLots.length > 0) {
+          let sumQty = 0;
+          for (const s of blendLots) {
+            const lot = await trx('inventory_lots').where({ id: parseInt(s.lot_id) }).first();
+            if (!lot) { const e = new Error(`Source lot ${s.lot_id} not found.`); e.statusCode = 400; throw e; }
+            if (lot.entity !== 'mill') { const e = new Error(`Lot ${lot.lot_no || s.lot_id} is not a mill lot.`); e.statusCode = 400; throw e; }
+            if (!['raw', 'finished'].includes(lot.type)) { const e = new Error(`Lot ${lot.lot_no || s.lot_id} (type ${lot.type}) can't be milled.`); e.statusCode = 400; throw e; }
+            const qty = parseFloat(s.qty_mt);
+            const avail = parseFloat(lot.available_qty) || 0;
+            if (qty > avail + 1e-6) { const e = new Error(`Lot ${lot.lot_no || s.lot_id}: only ${avail} MT available, requested ${qty}.`); e.statusCode = 400; throw e; }
+            const costKg = parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.rate_per_kg) || 0;
+            const costTotal = Math.round(costKg * qty * 1000 * 100) / 100;
+            sumQty += qty;
+            blendRawCostTotal += costTotal;
+            blendRows.push({ lot, qty, lot_type: lot.type, unit_cost_pkr: costKg, cost_total_pkr: costTotal });
+            if (!resolvedSupplierId && lot.supplier_id) resolvedSupplierId = lot.supplier_id;
+          }
+          resolvedRawQty = Math.round(sumQty * 100) / 100;
+        }
+
         const [batch] = await trx('milling_batches')
           .insert({
             batch_no: batchNo,
-            supplier_id,
+            supplier_id: resolvedSupplierId,
             mill_id: resolvedMillId,
             linked_export_order_id: linked_export_order_id || null,
-            raw_qty_mt: parseFloat(raw_qty_mt),
+            raw_qty_mt: resolvedRawQty,
             planned_finished_mt: planned_finished_mt ? parseFloat(planned_finished_mt) : null,
             milling_fee_per_kg: milling_fee_per_kg ? parseFloat(milling_fee_per_kg) : 5,
             transport_mode: transport_mode || 'with',
@@ -287,6 +323,34 @@ const millingController = {
             created_by: req.user.id,
           })
           .returning('*');
+
+        // ── Persist the blend: source-lot links, raw-cost pool, reservations ──
+        if (blendRows.length > 0) {
+          for (const b of blendRows) {
+            await trx('batch_source_lots').insert({
+              batch_id: batch.id,
+              lot_id: b.lot.id,
+              qty_mt: b.qty,
+              lot_type: b.lot_type,
+              unit_cost_pkr: b.unit_cost_pkr,
+              cost_total_pkr: b.cost_total_pkr,
+              notes: b.lot_type === 'finished' ? 'Re-milled finished rice' : null,
+            });
+            // Mark the lot In Milling so it isn't double-booked; consumed at yield.
+            await trx('inventory_lots').where({ id: b.lot.id }).update({
+              milling_status: 'In Milling', updated_at: trx.fn.now(),
+            });
+          }
+          // Feed the weighted raw cost into the batch cost pool (category
+          // raw_rice) — recordYield's joint-cost allocation reads this.
+          await trx('milling_costs').insert({
+            batch_id: batch.id,
+            category: 'raw_rice',
+            amount: Math.round(blendRawCostTotal * 100) / 100,
+            notes: `Blended ${blendRows.length} lot(s): ${blendRows.map((b) => `${b.lot.lot_no || b.lot.id}×${b.qty}MT`).join(', ')}`,
+            created_by: req.user.id,
+          });
+        }
 
         let updatedOrder = null;
         if (linkedOrder) {
