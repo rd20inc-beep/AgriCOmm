@@ -1,8 +1,9 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Users, Truck, BookUser, Scale, ArrowDownLeft, ArrowUpRight, Printer, FileText } from 'lucide-react';
+import { Users, Truck, BookUser, Scale, ArrowDownLeft, ArrowUpRight, Printer, FileText, Wallet, HandCoins } from 'lucide-react';
 import { FinanceKPI } from '../../../components/finance';
+import StatementPayDrawer from '../components/StatementPayDrawer';
 import SearchSelect from '../../../shared/components/SearchSelect';
 import { accountingApi } from '../../accounting/api/services';
 import { useCustomers, useSuppliers } from '../../../api/queries';
@@ -54,6 +55,7 @@ export default function PartyLedger() {
   const [searchParams, setSearchParams] = useSearchParams();
   const mode = searchParams.get('type') === 'supplier' ? 'supplier' : 'customer';
   const partyId = searchParams.get('id') || '';
+  const [payOpen, setPayOpen] = useState(false);
 
   // Merge a patch into the query string, preserving unrelated params
   // (e.g. FinanceLayout's ?range=). Null/'' values delete the key.
@@ -168,10 +170,17 @@ export default function PartyLedger() {
         </div>
 
         {partyId && (
-          <button onClick={handlePrint}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm">
-            <Printer size={14} /> Print
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setPayOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm">
+              {mode === 'customer' ? <Wallet size={14} /> : <HandCoins size={14} />}
+              {mode === 'customer' ? 'Record Receipt' : 'Record Payment'}
+            </button>
+            <button onClick={handlePrint}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm">
+              <Printer size={14} /> Print
+            </button>
+          </div>
         )}
       </div>
 
@@ -341,6 +350,15 @@ export default function PartyLedger() {
             )}
           </div>
         </div>
+      )}
+
+      {/* Slide-over to settle the party's balance straight from the statement */}
+      {payOpen && selectedParty && (
+        <StatementPayDrawer
+          mode={mode}
+          party={{ id: selectedParty.id, name: selectedParty.name }}
+          onClose={() => setPayOpen(false)}
+        />
       )}
     </div>
   );
