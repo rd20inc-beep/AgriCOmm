@@ -1094,7 +1094,8 @@ const accountingService = {
     // The ref set below feeds the fallback only; stamped journals win.
     const payables = await db('payables')
       .where({ supplier_id: sid })
-      .select('id', 'pay_no', 'linked_ref');
+      .select('id', 'pay_no', 'linked_ref', 'original_amount', 'paid_amount',
+        'currency', 'due_date', 'created_at', 'category', 'source_table');
     const payableIds = payables.map((p) => p.id);
     const payments = payableIds.length
       ? await db('payments').whereIn('linked_payable_id', payableIds).select('payment_no')
@@ -1140,7 +1141,48 @@ const accountingService = {
       return usdRate ? pkr / usdRate : 0;
     };
 
-    // Opening balance (before dateFrom), in PKR with a USD approximation.
+    // ── Payable-derived lines for payables with NO GL representation ──
+    // Mill paddy purchases (source milling_costs) create a payable but never
+    // post a party-stamped AP journal, so they would be invisible in a purely
+    // GL-based statement (the directory shows them, the ledger didn't). We
+    // synthesize ledger lines for those payables only: a payable already
+    // represented by a posted AP journal (its pay_no/linked_ref appears on a
+    // matched line) is skipped, so nothing is double-counted. Additive — a
+    // supplier whose payables are all properly posted is unchanged.
+    const glRefRows = await lineBase().distinct('je.ref_no');
+    const glRefs = new Set(glRefRows.map((r) => r.ref_no).filter(Boolean));
+    const dayOf = (d) => (d ? new Date(d).toISOString().slice(0, 10) : null);
+    const synthetic = [];
+    for (const p of payables) {
+      const covered = (p.pay_no && glRefs.has(p.pay_no)) || (p.linked_ref && glRefs.has(p.linked_ref));
+      if (covered) continue;
+      const cur = p.currency || 'PKR';
+      const billed = parseFloat(p.original_amount) || 0;
+      const paid = parseFloat(p.paid_amount) || 0;
+      const date = dayOf(p.due_date) || dayOf(p.created_at);
+      const refNo = p.pay_no || p.linked_ref || null;
+      const label = `Payable ${refNo || ''}`.trim()
+        + (p.category ? ` · ${p.category}` : '')
+        + (p.source_table ? ` (${p.source_table})` : '');
+      const base = { date, journal_no: null, ref_no: refNo, account_code: '2000',
+        account_name: 'Accounts Payable', currency: cur, fx_rate: 1, orig_currency: cur, orig_fx_rate: 0 };
+      if (billed) synthetic.push({ ...base, description: label, debit: 0, credit: billed });
+      if (paid) synthetic.push({ ...base, description: `Payment against ${refNo || 'payable'}`, debit: paid, credit: 0 });
+    }
+
+    // Normalize one raw line (GL or synthetic) into PKR/USD figures.
+    const normalize = (t) => {
+      const nd = parseFloat(t.debit) || 0, nc = parseFloat(t.credit) || 0;
+      return {
+        date: t.date, journal_no: t.journal_no, ref_no: t.ref_no, description: t.description,
+        account_code: t.account_code, account_name: t.account_name,
+        debit: conv(nd, t.currency, t.fx_rate), credit: conv(nc, t.currency, t.fx_rate),
+        debit_usd: usdOf(nd, t.currency, t.fx_rate, t.orig_fx_rate, t.orig_currency),
+        credit_usd: usdOf(nc, t.currency, t.fx_rate, t.orig_fx_rate, t.orig_currency),
+      };
+    };
+
+    // Opening balance (before dateFrom): GL + synthetic, PKR with USD approx.
     let openingBalance = 0;
     if (dateFrom) {
       const openingResult = await lineBase()
@@ -1148,54 +1190,50 @@ const accountingService = {
         .select(db.raw(`COALESCE(SUM((jl.credit - jl.debit) * (${factorSql})), 0)::numeric as balance`))
         .first();
       openingBalance = parseFloat(openingResult.balance);
+      for (const s of synthetic) {
+        if (s.date && s.date < dateFrom) { const n = normalize(s); openingBalance += (n.credit - n.debit); }
+      }
     }
     const openingBalanceUsd = usdRate ? openingBalance / usdRate : 0;
 
-    // Transactions within period
+    // In-period GL lines
     let txnQuery = lineBase()
       .join('chart_of_accounts as coa', 'jl.account_id', 'coa.id');
-
     if (dateFrom) txnQuery = txnQuery.where('je.date', '>=', dateFrom);
     if (dateTo) txnQuery = txnQuery.where('je.date', '<=', dateTo);
-
-    const transactions = await txnQuery
+    const glTxns = await txnQuery
       .select(
-        'je.date',
-        'je.journal_no',
-        'je.ref_no',
-        'je.description',
-        'coa.code as account_code',
-        'coa.name as account_name',
-        'jl.debit',
-        'jl.credit',
-        'je.currency',
-        'je.fx_rate',
-        'je.orig_currency',
-        'je.orig_fx_rate'
+        'je.date', 'je.journal_no', 'je.ref_no', 'je.description',
+        'coa.code as account_code', 'coa.name as account_name',
+        'jl.debit', 'jl.credit', 'je.currency', 'je.fx_rate', 'je.orig_currency', 'je.orig_fx_rate'
       )
       .orderBy(['je.date', 'je.id']);
 
+    // In-period synthetic lines
+    const synthInPeriod = synthetic.filter((s) =>
+      (!dateFrom || (s.date && s.date >= dateFrom)) && (!dateTo || (s.date && s.date <= dateTo)));
+
+    // Merge GL + synthetic, normalize, stable-sort by date, one balance pass.
+    const merged = [...glTxns, ...synthInPeriod]
+      .map(normalize)
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+
     let runningBalance = openingBalance;
     let runningBalanceUsd = openingBalanceUsd;
-    const formattedTxns = transactions.map((t) => {
-      const nd = parseFloat(t.debit), nc = parseFloat(t.credit);
-      const debit = conv(nd, t.currency, t.fx_rate);
-      const credit = conv(nc, t.currency, t.fx_rate);
-      const debitUsd = usdOf(nd, t.currency, t.fx_rate, t.orig_fx_rate, t.orig_currency);
-      const creditUsd = usdOf(nc, t.currency, t.fx_rate, t.orig_fx_rate, t.orig_currency);
-      runningBalance += (credit - debit);
-      runningBalanceUsd += (creditUsd - debitUsd);
+    const formattedTxns = merged.map((n) => {
+      runningBalance += (n.credit - n.debit);
+      runningBalanceUsd += (n.credit_usd - n.debit_usd);
       return {
-        date: t.date,
-        journal_no: t.journal_no,
-        ref_no: t.ref_no,
-        description: t.description,
-        account_code: t.account_code,
-        account_name: t.account_name,
-        debit: parseFloat(debit.toFixed(2)),
-        credit: parseFloat(credit.toFixed(2)),
-        debit_usd: parseFloat(debitUsd.toFixed(2)),
-        credit_usd: parseFloat(creditUsd.toFixed(2)),
+        date: n.date,
+        journal_no: n.journal_no,
+        ref_no: n.ref_no,
+        description: n.description,
+        account_code: n.account_code,
+        account_name: n.account_name,
+        debit: parseFloat(n.debit.toFixed(2)),
+        credit: parseFloat(n.credit.toFixed(2)),
+        debit_usd: parseFloat(n.debit_usd.toFixed(2)),
+        credit_usd: parseFloat(n.credit_usd.toFixed(2)),
         currency: statementCurrency,
         running_balance: parseFloat(runningBalance.toFixed(2)),
         running_balance_usd: parseFloat(runningBalanceUsd.toFixed(2)),

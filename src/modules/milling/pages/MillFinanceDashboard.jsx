@@ -3,14 +3,18 @@ import { Link } from 'react-router-dom';
 import {
   DollarSign, Users, Zap, Shield, TrendingUp, TrendingDown, AlertTriangle,
   Plus, UserPlus, Package, Factory, Wallet, ArrowUpRight, ArrowDownRight, Printer,
+  Building2, Banknote, Receipt,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import {
   useMillExpenses, useCreateMillExpense, useMillWorkers, useCreateMillWorker,
   usePayrollSummary, useRecordAttendance, useInventory, useExpenseVendors,
+  usePayables, useSuppliers, usePurchases, useLocalSalesSummary,
 } from '../../../api/queries';
 import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import SlideDrawer from '../../../components/SlideDrawer';
+import SearchSelect from '../../../shared/components/SearchSelect';
+import MillSupplierStatement from '../components/MillSupplierStatement';
 
 const PKR = (v) => 'Rs ' + Math.round(v || 0).toLocaleString('en-PK');
 const COMPACT_PKR = (v) => {
@@ -33,6 +37,8 @@ const WORKER_ROLES = ['operator', 'laborer', 'supervisor', 'driver', 'guard', 'c
 
 const tabs = [
   { key: 'overview',   label: 'Overview',     icon: DollarSign },
+  { key: 'moneyflow',  label: 'Money In/Out', icon: Wallet },
+  { key: 'suppliers',  label: 'Suppliers',    icon: Building2 },
   { key: 'expenses',   label: 'Expenses',     icon: TrendingDown },
   { key: 'efficiency', label: 'Efficiency',   icon: TrendingUp },
   { key: 'loss',       label: 'Loss & Theft', icon: Shield },
@@ -114,6 +120,17 @@ export default function MillFinanceDashboard() {
   const { data: payrollData } = usePayrollSummary({ month: curMonth });
   const recordAttMut = useRecordAttendance();
 
+  // ── Money In/Out + Suppliers data ──
+  const { data: payablesRaw } = usePayables({});
+  const payables = useMemo(() => {
+    const arr = Array.isArray(payablesRaw) ? payablesRaw : (payablesRaw?.payables || []);
+    return arr.filter((p) => String(p.entity || '').toLowerCase() === 'mill');
+  }, [payablesRaw]);
+  const { data: suppliers = [] } = useSuppliers();
+  const { data: storePurchaseData } = usePurchases();
+  const { data: localSalesSummary } = useLocalSalesSummary();
+  const [selectedSupplier, setSelectedSupplier] = useState(null);
+
   const expenses = expData?.expenses || [];
   const expSummary = expData?.summary || [];
   const totalOverhead = expSummary.reduce((s, e) => s + (parseFloat(e.total) || 0), 0);
@@ -177,6 +194,66 @@ export default function MillFinanceDashboard() {
   }, [completed]);
 
   const margin = kpis.totalRev > 0 ? (kpis.netProfit / kpis.totalRev * 100).toFixed(1) : 0;
+
+  // ── Money In / Out streams ──
+  // Service-milling fees: batches we milled for outside clients (flagged in
+  // notes by the create form). Fee = raw qty (kg) × fee/kg.
+  const serviceFees = useMemo(() => millingBatches.reduce((s, b) => {
+    if (!String(b.notes || '').includes('[SERVICE MILLING]')) return s;
+    return s + (parseFloat(b.millingFeePerKg) || 0) * (parseFloat(b.rawQtyMT) || 0) * 1000;
+  }, 0), [millingBatches]);
+
+  // usePurchases() returns totals raw (snake_case); total_pkr spans ALL purchase
+  // sources (mill store + export costs + lots), so use by_source.mill_store for
+  // the mill-store consumables figure only.
+  const storePurchaseTotal = parseFloat(
+    storePurchaseData?.totals?.by_source?.mill_store ?? storePurchaseData?.totals?.bySource?.mill_store ?? 0
+  ) || 0;
+  // useLocalSalesSummary() shape: { all: { total, due }, profit: { revenue, collected } }
+  const localSalesRevenue = parseFloat(
+    localSalesSummary?.all?.total ?? localSalesSummary?.profit?.revenue ?? 0
+  ) || 0;
+  const localSalesCollected = parseFloat(localSalesSummary?.profit?.collected ?? 0) || 0;
+
+  const moneyFlow = useMemo(() => {
+    const out = {
+      paddy: kpis.totalRaw,
+      batchCosts: kpis.totalOtherCosts,
+      overhead: totalOverhead,
+      payroll: payrollTotal,
+      store: storePurchaseTotal,
+    };
+    out.total = out.paddy + out.batchCosts + out.overhead + out.payroll + out.store;
+    const inc = {
+      output: kpis.totalRev,
+      finished: kpis.finishedRev,
+      byproduct: kpis.byproductRev,
+      localSales: localSalesRevenue,
+      serviceFees,
+    };
+    return { out, inc, netProduction: inc.output - out.total };
+  }, [kpis, totalOverhead, payrollTotal, storePurchaseTotal, localSalesRevenue, serviceFees]);
+
+  // ── Supplier directory (money owed to mill suppliers) ──
+  const supplierRows = useMemo(() => {
+    const map = {};
+    for (const p of payables) {
+      const name = p.supplierName;
+      if (!name) continue;
+      const key = p.supplierId || name;
+      if (!map[key]) map[key] = { id: p.supplierId || null, name, billed: 0, paid: 0, outstanding: 0, count: 0 };
+      map[key].billed += parseFloat(p.originalAmount) || 0;
+      map[key].paid += parseFloat(p.paidAmount) || 0;
+      map[key].outstanding += parseFloat(p.outstanding) || 0;
+      map[key].count += 1;
+    }
+    return Object.values(map).sort((a, b) => b.outstanding - a.outstanding);
+  }, [payables]);
+
+  const supplierTotals = useMemo(() => supplierRows.reduce(
+    (acc, r) => ({ billed: acc.billed + r.billed, paid: acc.paid + r.paid, outstanding: acc.outstanding + r.outstanding }),
+    { billed: 0, paid: 0, outstanding: 0 },
+  ), [supplierRows]);
 
   function openExpDrawer(prefill) {
     setExpForm({
@@ -387,6 +464,141 @@ export default function MillFinanceDashboard() {
                     </div>
                   ))}
                 </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── MONEY IN / OUT ────────────────────────────────────────── */}
+      {activeTab === 'moneyflow' && (
+        <div className="space-y-4">
+          {/* Hero: production margin */}
+          <div className={`rounded-2xl p-5 text-white ${moneyFlow.netProduction >= 0 ? 'bg-gradient-to-br from-emerald-600 to-emerald-700' : 'bg-gradient-to-br from-rose-600 to-rose-700'}`}>
+            <div className="flex items-start justify-between gap-4 flex-wrap">
+              <div>
+                <p className="text-[11px] uppercase tracking-wide text-white/70">Net mill position (output value − money out)</p>
+                <p className="text-3xl font-bold mt-1 tabular-nums">{PKR(moneyFlow.netProduction)}</p>
+                <p className="text-xs text-white/80 mt-1">
+                  Output value {COMPACT_PKR(moneyFlow.inc.output)} · Money out {COMPACT_PKR(moneyFlow.out.total)}
+                  {moneyFlow.inc.localSales > 0 && <> · Local sales {COMPACT_PKR(moneyFlow.inc.localSales)}</>}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-[11px] uppercase tracking-wide text-white/70">Production margin</p>
+                <p className="text-2xl font-semibold tabular-nums">{margin}%</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Money OUT */}
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <ArrowUpRight size={15} className="text-rose-500" />
+              <h3 className="text-sm font-semibold text-gray-700">Money out of the mill</h3>
+              <span className="text-xs text-gray-400">— total {PKR(moneyFlow.out.total)}</span>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+              <Stat label="Paddy / raw purchases" value={COMPACT_PKR(moneyFlow.out.paddy)} tone="red" icon={Package} />
+              <Stat label="Batch process costs" value={COMPACT_PKR(moneyFlow.out.batchCosts)} tone="red" icon={Factory} />
+              <Stat label="Overhead expenses" value={COMPACT_PKR(moneyFlow.out.overhead)} sub="utilities, rent, etc." tone="red" icon={Receipt} />
+              <Stat label="Payroll (this month)" value={COMPACT_PKR(moneyFlow.out.payroll)} tone="red" icon={Users} />
+              <Stat label="Mill store purchases" value={COMPACT_PKR(moneyFlow.out.store)} sub="bags, fuel, spares" tone="red" icon={Package} />
+            </div>
+          </div>
+
+          {/* Money IN */}
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <ArrowDownRight size={15} className="text-emerald-500" />
+              <h3 className="text-sm font-semibold text-gray-700">Money in / production value</h3>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+              <Stat label="Output value produced" value={COMPACT_PKR(moneyFlow.inc.output)} sub="finished + byproducts" tone="green" icon={Wallet} />
+              <Stat label="Finished rice value" value={COMPACT_PKR(moneyFlow.inc.finished)} tone="green" icon={TrendingUp} />
+              <Stat label="Byproduct value" value={COMPACT_PKR(moneyFlow.inc.byproduct)} sub="broken, bran, husk" tone="green" icon={Package} />
+              <Stat label="Local sales" value={COMPACT_PKR(moneyFlow.inc.localSales)} sub={localSalesCollected > 0 ? `${COMPACT_PKR(localSalesCollected)} collected` : 'realized'} tone="green" icon={Banknote} />
+              <Stat label="Service milling fees" value={COMPACT_PKR(moneyFlow.inc.serviceFees)} tone="green" icon={DollarSign} />
+            </div>
+          </div>
+
+          <p className="text-[11px] text-gray-400">
+            Output value is produced rice valued at confirmed batch prices (accrual); local sales and service fees are realized cash.
+            They are shown separately to avoid double-counting output that is later sold.
+          </p>
+        </div>
+      )}
+
+      {/* ─── SUPPLIERS ─────────────────────────────────────────────── */}
+      {activeTab === 'suppliers' && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-3 gap-3">
+            <Stat label="Mill suppliers" value={supplierRows.length} sub="with mill payables" tone="slate" icon={Building2} />
+            <Stat label="Total billed" value={COMPACT_PKR(supplierTotals.billed)} sub={`${COMPACT_PKR(supplierTotals.paid)} paid`} tone="blue" icon={Receipt} />
+            <Stat label="Outstanding" value={COMPACT_PKR(supplierTotals.outstanding)} tone={supplierTotals.outstanding > 0 ? 'amber' : 'green'} icon={Wallet} />
+          </div>
+
+          {/* Pick any supplier to view their statement */}
+          <div className="rounded-xl border border-gray-200 bg-white p-3">
+            <p className="text-[11px] uppercase tracking-wide text-gray-500 mb-1.5">View any supplier statement</p>
+            <SearchSelect
+              value={selectedSupplier?.id || ''}
+              onChange={(val) => {
+                const s = suppliers.find((x) => String(x.id) === String(val));
+                setSelectedSupplier(s ? { id: s.id, name: s.name } : null);
+              }}
+              options={suppliers.map((s) => ({ value: s.id, label: s.name, sub: s.location || s.city || s.country || '' }))}
+              placeholder="Search suppliers…"
+            />
+          </div>
+
+          {/* Inline statement */}
+          {selectedSupplier?.id && (
+            <MillSupplierStatement
+              supplierId={selectedSupplier.id}
+              supplierName={selectedSupplier.name}
+              onClose={() => setSelectedSupplier(null)}
+            />
+          )}
+
+          {/* Directory */}
+          <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-gray-100">
+              <h3 className="text-sm font-semibold text-gray-700">Mill supplier directory</h3>
+              <p className="text-[11px] text-gray-400">Click a supplier to see its statement of money owed & paid.</p>
+            </div>
+            <div className="overflow-x-auto">
+              {supplierRows.length === 0 ? (
+                <div className="p-6 text-center text-sm text-gray-400">No mill supplier payables yet.</div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500">
+                      <th className="text-left font-medium px-4 py-2">Supplier</th>
+                      <th className="text-right font-medium px-4 py-2">Invoices</th>
+                      <th className="text-right font-medium px-4 py-2">Billed</th>
+                      <th className="text-right font-medium px-4 py-2">Paid</th>
+                      <th className="text-right font-medium px-4 py-2">Outstanding</th>
+                      <th className="px-2 py-2" />
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {supplierRows.map((r) => (
+                      <tr
+                        key={r.id || r.name}
+                        className={`hover:bg-blue-50/40 ${r.id ? 'cursor-pointer' : ''} ${selectedSupplier?.id === r.id ? 'bg-blue-50/60' : ''}`}
+                        onClick={() => r.id && setSelectedSupplier({ id: r.id, name: r.name })}
+                      >
+                        <td className="px-4 py-2 font-medium text-gray-800">{r.name}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-gray-500">{r.count}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-gray-700">{PKR(r.billed)}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-emerald-600">{PKR(r.paid)}</td>
+                        <td className={`px-4 py-2 text-right tabular-nums font-medium ${r.outstanding > 0 ? 'text-amber-600' : 'text-gray-400'}`}>{PKR(r.outstanding)}</td>
+                        <td className="px-2 py-2 text-right">{r.id && <span className="text-blue-500 text-xs">View →</span>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               )}
             </div>
           </div>
