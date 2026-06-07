@@ -6,6 +6,7 @@ import {
   Building2, Banknote, Receipt,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
+import { useAuth } from '../../../context/AuthContext';
 import {
   useMillExpenses, useCreateMillExpense, useMillWorkers, useCreateMillWorker,
   usePayrollSummary, useRecordAttendance, useInventory, useExpenseVendors,
@@ -15,6 +16,7 @@ import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import SlideDrawer from '../../../components/SlideDrawer';
 import SearchSelect from '../../../shared/components/SearchSelect';
 import MillSupplierStatement from '../components/MillSupplierStatement';
+import StatementPayDrawer from '../../finance/components/StatementPayDrawer';
 
 const PKR = (v) => 'Rs ' + Math.round(v || 0).toLocaleString('en-PK');
 const COMPACT_PKR = (v) => {
@@ -130,6 +132,10 @@ export default function MillFinanceDashboard() {
   const { data: storePurchaseData } = usePurchases();
   const { data: localSalesSummary } = useLocalSalesSummary();
   const [selectedSupplier, setSelectedSupplier] = useState(null);
+  // Pay a supplier with the same drawer the Finance dashboard uses.
+  const { hasPermission } = useAuth();
+  const canPay = hasPermission('finance', 'confirm_payment');
+  const [payParty, setPayParty] = useState(null);
 
   const expenses = expData?.expenses || [];
   const expSummary = expData?.summary || [];
@@ -554,11 +560,23 @@ export default function MillFinanceDashboard() {
 
           {/* Inline statement */}
           {selectedSupplier?.id && (
-            <MillSupplierStatement
-              supplierId={selectedSupplier.id}
-              supplierName={selectedSupplier.name}
-              onClose={() => setSelectedSupplier(null)}
-            />
+            <div className="space-y-2">
+              {canPay && (
+                <div className="flex justify-end">
+                  <button
+                    onClick={() => setPayParty({ id: selectedSupplier.id, name: selectedSupplier.name })}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 text-sm font-medium"
+                  >
+                    <Banknote size={14} /> Record Payment
+                  </button>
+                </div>
+              )}
+              <MillSupplierStatement
+                supplierId={selectedSupplier.id}
+                supplierName={selectedSupplier.name}
+                onClose={() => setSelectedSupplier(null)}
+              />
+            </div>
           )}
 
           {/* Directory */}
@@ -594,7 +612,17 @@ export default function MillFinanceDashboard() {
                         <td className="px-4 py-2 text-right tabular-nums text-gray-700">{PKR(r.billed)}</td>
                         <td className="px-4 py-2 text-right tabular-nums text-emerald-600">{PKR(r.paid)}</td>
                         <td className={`px-4 py-2 text-right tabular-nums font-medium ${r.outstanding > 0 ? 'text-amber-600' : 'text-gray-400'}`}>{PKR(r.outstanding)}</td>
-                        <td className="px-2 py-2 text-right">{r.id && <span className="text-blue-500 text-xs">View →</span>}</td>
+                        <td className="px-2 py-2 text-right whitespace-nowrap">
+                          {canPay && r.id && r.outstanding > 0 && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setPayParty({ id: r.id, name: r.name }); }}
+                              className="inline-flex items-center gap-1 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1 text-[11px] font-medium mr-2"
+                            >
+                              <Banknote size={12} /> Pay
+                            </button>
+                          )}
+                          {r.id && <span className="text-blue-500 text-xs">View →</span>}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -1043,6 +1071,15 @@ export default function MillFinanceDashboard() {
           </div>
         </div>
       </SlideDrawer>
+
+      {/* Pay a supplier — same drawer the Finance dashboard uses. */}
+      {payParty && (
+        <StatementPayDrawer
+          mode="supplier"
+          party={payParty}
+          onClose={() => setPayParty(null)}
+        />
+      )}
     </div>
   );
 }
