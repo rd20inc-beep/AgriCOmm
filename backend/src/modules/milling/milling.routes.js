@@ -586,7 +586,12 @@ router.get('/payroll/summary', authorize('milling', 'view'), async (req, res) =>
   try {
     const { month } = req.query;
     const startDate = month ? `${month}-01` : new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
-    const endDate = month ? `${month}-31` : new Date().toISOString().split('T')[0];
+    // Last day of the month — `${month}-31` is an invalid date for 30-day
+    // months and February (Postgres throws "date/time field value out of
+    // range"). Date.UTC(year, monthNum, 0) rolls back to the month's last day.
+    const endDate = month
+      ? new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).toISOString().split('T')[0]
+      : new Date().toISOString().split('T')[0];
 
     const workers = await db('mill_workers').where('is_active', true).orderBy('name');
     const attendance = await db('mill_attendance')
