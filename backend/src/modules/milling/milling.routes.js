@@ -569,6 +569,10 @@ router.post('/attendance', authorize('milling', 'create'), async (req, res) => {
   try {
     const { worker_id, date, status, hours_worked, overtime_hours, notes } = req.body;
     if (!worker_id || !date) return res.status(400).json({ success: false, message: 'worker_id and date required.' });
+    const VALID_ATTENDANCE = ['present', 'absent', 'half_day', 'leave'];
+    if (status && !VALID_ATTENDANCE.includes(status)) {
+      return res.status(400).json({ success: false, message: `Invalid status. Must be one of: ${VALID_ATTENDANCE.join(', ')}.` });
+    }
     const [record] = await db('mill_attendance').insert({
       worker_id, date, status: status || 'present',
       hours_worked: hours_worked || 8, overtime_hours: overtime_hours || 0,
