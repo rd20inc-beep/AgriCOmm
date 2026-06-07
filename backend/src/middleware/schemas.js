@@ -331,16 +331,30 @@ const rejectApproval = Joi.object({
 
 const createBatch = Joi.object({
   supplier_id: Joi.number().integer().positive().allow(null),
-  raw_qty_mt: Joi.number().positive().required().messages({
+  // Required for a single-source batch; for a blend it's omitted and the
+  // backend derives it from source_lots. The .or() below requires one of them.
+  raw_qty_mt: Joi.number().positive().messages({
     'number.positive': 'Raw quantity must be greater than zero',
   }),
-  planned_finished_mt: Joi.number().positive().required(),
+  // Blend input: partial quantities from multiple existing mill lots
+  // (raw and/or leftover finished rice). [{ lot_id, qty_mt }].
+  source_lots: Joi.array().items(
+    Joi.object({
+      lot_id: Joi.number().integer().positive().required(),
+      qty_mt: Joi.number().positive().required(),
+    })
+  ),
+  product_id: Joi.number().integer().positive().allow(null),
+  planned_finished_mt: Joi.number().positive().allow(null),
+  milling_fee_per_kg: Joi.number().min(0).allow(null),
+  transport_mode: Joi.string().allow('', null),
+  purchase_price_per_kg: Joi.number().min(0).allow(null),
   linked_export_order_id: Joi.number().integer().allow(null),
   mill_id: Joi.number().integer().allow(null),
   machine_line: Joi.string().allow('', null),
   shift: Joi.string().valid('Day', 'Night', 'Full').default('Day'),
   notes: Joi.string().allow('', null),
-});
+}).or('raw_qty_mt', 'source_lots');
 
 const recordYield = Joi.object({
   actual_finished_mt: Joi.number().min(0).required(),
