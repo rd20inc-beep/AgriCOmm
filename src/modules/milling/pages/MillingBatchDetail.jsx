@@ -458,9 +458,19 @@ export default function MillingBatchDetail() {
   }
 
   function openCostModal() {
+    // Pre-fill each field with the cost already recorded, leaving the rest
+    // empty. safeCosts can be keyed differently from the category list
+    // (rawRice vs raw_rice vs "Raw Rice"), so match on a normalized key.
+    const norm = (s) => String(s).toLowerCase().replace(/[_\s]/g, '');
+    const byNorm = {};
+    for (const [k, v] of Object.entries(safeCosts)) {
+      const val = parseFloat(v);
+      if (val > 0) byNorm[norm(k)] = val;
+    }
     const form = {};
     millingCostCategories.forEach(cat => {
-      form[cat.key] = safeCosts[cat.key] || '';
+      const v = byNorm[norm(cat.key)];
+      form[cat.key] = v != null ? String(v) : '';
     });
     setCostForm(form);
     setShowCostModal(true);
@@ -468,20 +478,23 @@ export default function MillingBatchDetail() {
 
   async function handleCostSubmit(e) {
     e.preventDefault();
-    const costs = {};
-    millingCostCategories.forEach(cat => {
-      costs[cat.key] = parseFloat(costForm[cat.key]) || 0;
-    });
+    // Map each category to the exact key already stored (normalized), so an edit
+    // updates the existing milling_cost row (e.g. a blend's 'raw_rice') rather
+    // than inserting a duplicate under a different casing — the backend upserts
+    // by (batch_id, category).
+    const norm = (s) => String(s).toLowerCase().replace(/[_\s]/g, '');
+    const existingKeyByNorm = {};
+    for (const k of Object.keys(safeCosts)) existingKeyByNorm[norm(k)] = k;
     try {
+      let total = 0;
       for (const cat of millingCostCategories) {
-        if (costs[cat.key] > 0) {
-          await addCostMut.mutateAsync({
-            id: batchId,
-            data: { category: cat.key, amount: costs[cat.key] },
-          });
+        const amount = parseFloat(costForm[cat.key]) || 0;
+        if (amount > 0) {
+          const category = existingKeyByNorm[norm(cat.key)] || cat.key;
+          await addCostMut.mutateAsync({ id: batchId, data: { category, amount } });
+          total += amount;
         }
       }
-      const total = Object.values(costs).reduce((s, v) => s + v, 0);
       addToast(`Costs updated for ${batch.id} — Total: Rs ${Math.round(total).toLocaleString()}`);
     } catch (err) {
       addToast(`Failed to save costs: ${err.message}`, 'error');
