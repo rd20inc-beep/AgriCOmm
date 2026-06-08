@@ -96,8 +96,10 @@ const DEFAULT_BYPRODUCT_RATES = {
   husk: 8400,
 };
 
-export default function MillingCostSheet({ batch, companyProfile, millingCostCategories, vehicles = [], byproductRates = DEFAULT_BYPRODUCT_RATES }) {
+export default function MillingCostSheet({ batch, companyProfile, millingCostCategories, vehicles = [], sourceLots = [], byproductRates = DEFAULT_BYPRODUCT_RATES }) {
   if (!batch) return null;
+
+  const isBlend = Array.isArray(sourceLots) && sourceLots.length > 0;
 
   const safeCosts = (batch.costs && typeof batch.costs === 'object' && !Array.isArray(batch.costs)) ? batch.costs : {};
   const safeSample = batch.sampleAnalysis || null;
@@ -266,18 +268,64 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
 
         {/* ═══ SECTION B: Raw Material Buying Cost (auto-populated) ═══ */}
         <div className="border-x border-t border-gray-200 px-6 py-3" style={{ backgroundColor: '#fefce8' }}>
-          <p className="text-[10px] font-bold text-amber-800 uppercase tracking-widest mb-2">Section B — Raw Material Buying Cost {inputPriceMT > 0 ? '(Auto-populated from Quality Sheet)' : '(Manual Entry)'}</p>
-          <div className="grid grid-cols-5 gap-4">
-            <div><p className="text-xs text-amber-700">Input Quantity</p><p className="text-base font-bold text-gray-900">{rawQtyMT} MT</p><p className="text-[10px] text-gray-500">{rawQtyKG.toLocaleString()} KG</p></div>
-            <div><p className="text-xs text-amber-700">{safeSample?.pricePerMT ? 'Sample Price' : 'Rate'}</p><p className="text-base font-bold text-gray-900">{safeSample?.pricePerMT ? fmtPKR(safeSample.pricePerMT) : '—'}<span className="text-xs font-normal text-gray-500"> /MT</span></p></div>
-            <div><p className="text-xs text-amber-700">{safeArrival?.pricePerMT ? 'Agreed/Arrival Price' : 'Agreed Price'}</p><p className="text-base font-bold text-blue-900">{inputPriceMT > 0 ? fmtPKR(inputPriceMT) : '—'}<span className="text-xs font-normal text-gray-500"> /MT</span></p></div>
-            <div><p className="text-xs text-amber-700">Rate per KG</p><p className="text-base font-bold text-gray-900">{inputPriceKG > 0 ? fmtPKR(inputPriceKG) : '—'}</p></div>
-            <div><p className="text-xs text-amber-700">Total Raw Material Cost</p><p className="text-base font-bold text-gray-900">{rawMaterialCost > 0 ? fmtPKR(rawMaterialCost) : fmtPKR(effectiveRawRiceCost)}</p></div>
-          </div>
-          {rawRiceCostManual > 0 && rawMaterialCost > 0 && Math.abs(rawRiceCostManual - rawMaterialCost) > 100 && (
-            <p className="mt-2 text-[10px] text-amber-700 bg-amber-100 rounded px-2 py-1">
-              Note: Manual cost entry ({fmtPKR(rawRiceCostManual)}) differs from quality sheet ({fmtPKR(rawMaterialCost)}). Using manual entry.
-            </p>
+          {isBlend ? (() => {
+            const avgPerMt = rawQtyMT > 0 ? effectiveRawRiceCost / rawQtyMT : 0;
+            return (
+              <>
+                <p className="text-[10px] font-bold text-amber-800 uppercase tracking-widest mb-2">Section B — Raw Material Buying Cost (Blended — {sourceLots.length} lots)</p>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-amber-700 border-b border-amber-200">
+                      <th className="text-left py-1 font-semibold">Lot / Supplier</th>
+                      <th className="text-right font-semibold">Qty (MT)</th>
+                      <th className="text-right font-semibold">Agreed Price /MT</th>
+                      <th className="text-right font-semibold">/KG</th>
+                      <th className="text-right font-semibold">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sourceLots.map((l) => {
+                      const perMt = Math.round((pf(l.unit_cost_pkr || l.landed_cost_per_kg)) * 1000);
+                      return (
+                        <tr key={l.id} className="border-b border-amber-100">
+                          <td className="py-1 text-gray-800">{l.lot_no}{l.supplier_name ? ` · ${l.supplier_name}` : ''}</td>
+                          <td className="text-right text-gray-900">{pf(l.qty_mt).toFixed(2)}</td>
+                          <td className="text-right text-gray-900">{fmtPKR(perMt)}</td>
+                          <td className="text-right text-gray-500">{fmtPKR(perMt / 1000)}</td>
+                          <td className="text-right text-gray-900">{fmtPKR(pf(l.cost_total_pkr))}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="font-bold text-gray-900 border-t-2 border-amber-300">
+                      <td className="py-1.5">Blended average</td>
+                      <td className="text-right">{rawQtyMT} MT</td>
+                      <td className="text-right text-blue-900">{fmtPKR(avgPerMt)}</td>
+                      <td className="text-right text-blue-900">{fmtPKR(avgPerMt / 1000)}</td>
+                      <td className="text-right">{fmtPKR(effectiveRawRiceCost)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+                <p className="mt-1.5 text-[9px] text-amber-700">Blended average = total blended cost ÷ total input qty. Used as the raw material cost below.</p>
+              </>
+            );
+          })() : (
+            <>
+              <p className="text-[10px] font-bold text-amber-800 uppercase tracking-widest mb-2">Section B — Raw Material Buying Cost {inputPriceMT > 0 ? '(Auto-populated from Quality Sheet)' : '(Manual Entry)'}</p>
+              <div className="grid grid-cols-5 gap-4">
+                <div><p className="text-xs text-amber-700">Input Quantity</p><p className="text-base font-bold text-gray-900">{rawQtyMT} MT</p><p className="text-[10px] text-gray-500">{rawQtyKG.toLocaleString()} KG</p></div>
+                <div><p className="text-xs text-amber-700">{safeSample?.pricePerMT ? 'Sample Price' : 'Rate'}</p><p className="text-base font-bold text-gray-900">{safeSample?.pricePerMT ? fmtPKR(safeSample.pricePerMT) : '—'}<span className="text-xs font-normal text-gray-500"> /MT</span></p></div>
+                <div><p className="text-xs text-amber-700">{safeArrival?.pricePerMT ? 'Agreed/Arrival Price' : 'Agreed Price'}</p><p className="text-base font-bold text-blue-900">{inputPriceMT > 0 ? fmtPKR(inputPriceMT) : '—'}<span className="text-xs font-normal text-gray-500"> /MT</span></p></div>
+                <div><p className="text-xs text-amber-700">Rate per KG</p><p className="text-base font-bold text-gray-900">{inputPriceKG > 0 ? fmtPKR(inputPriceKG) : '—'}</p></div>
+                <div><p className="text-xs text-amber-700">Total Raw Material Cost</p><p className="text-base font-bold text-gray-900">{rawMaterialCost > 0 ? fmtPKR(rawMaterialCost) : fmtPKR(effectiveRawRiceCost)}</p></div>
+              </div>
+              {rawRiceCostManual > 0 && rawMaterialCost > 0 && Math.abs(rawRiceCostManual - rawMaterialCost) > 100 && (
+                <p className="mt-2 text-[10px] text-amber-700 bg-amber-100 rounded px-2 py-1">
+                  Note: Manual cost entry ({fmtPKR(rawRiceCostManual)}) differs from quality sheet ({fmtPKR(rawMaterialCost)}). Using manual entry.
+                </p>
+              )}
+            </>
           )}
         </div>
 
