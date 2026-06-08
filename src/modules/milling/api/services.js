@@ -2,6 +2,7 @@ import api from '../../../api/client';
 export const millingApi = {
   listBatches: (params) => api.get('/api/milling/batches', params),
   getBatch: (id) => api.get(`/api/milling/batches/${id}`),
+  sourceLots: (id) => api.get(`/api/milling/batches/${id}/source-lots`),
   createBatch: (data) => api.post('/api/milling/batches', data),
   updateBatch: (id, data) => api.put(`/api/milling/batches/${id}`, data),
   saveQuality: (id, data) => api.post(`/api/milling/batches/${id}/quality`, data),

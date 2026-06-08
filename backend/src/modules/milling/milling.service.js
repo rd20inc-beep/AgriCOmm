@@ -373,17 +373,58 @@ const millingService = {
   },
 
   async getSourceLots(batchId) {
-    return db('batch_source_lots as bsl')
+    // Rich blend detail: each source lot carries the supplier, rice type/variety
+    // and the original quality analysis recorded when the lot was first created,
+    // plus the vehicles that delivered it — so a blended batch never needs the
+    // supplier / vehicles / quality re-entered. A blend can span several
+    // suppliers, summarised in blend_suppliers.
+    const lots = await db('batch_source_lots as bsl')
       .leftJoin('inventory_lots as il', 'bsl.lot_id', 'il.id')
+      .leftJoin('suppliers as s', 'il.supplier_id', 's.id')
+      .leftJoin('products as p', 'il.product_id', 'p.id')
       .select(
-        'bsl.*',
-        'il.lot_no',
-        'il.item_name',
-        'il.qty as lot_qty',
-        'il.available_qty as lot_available_qty'
+        'bsl.id', 'bsl.batch_id', 'bsl.lot_id', 'bsl.qty_mt',
+        'bsl.lot_type', 'bsl.unit_cost_pkr', 'bsl.cost_total_pkr', 'bsl.notes', 'bsl.created_at',
+        'il.lot_no', 'il.item_name', 'il.type', 'il.variety', 'il.grade',
+        'il.available_qty as lot_available_qty', 'il.purchase_date',
+        'il.moisture_pct', 'il.broken_pct', 'il.whiteness', 'il.quality_notes', 'il.quality_json',
+        'il.landed_cost_per_kg',
+        'il.supplier_id', 's.name as supplier_name', 's.phone as supplier_phone',
+        'p.name as product_name'
       )
       .where('bsl.batch_id', batchId)
       .orderBy('bsl.created_at', 'asc');
+
+    if (lots.length === 0) return { source_lots: [], blend_suppliers: [] };
+
+    // Vehicles captured against each source lot at creation time.
+    const lotIds = [...new Set(lots.map((l) => l.lot_id).filter(Boolean))];
+    const vehicles = lotIds.length
+      ? await db('milling_vehicle_arrivals')
+        .whereIn('lot_id', lotIds)
+        .select('id', 'lot_id', 'vehicle_no', 'driver_name', 'driver_phone',
+          'weight_mt', 'bag_size_kg', 'total_bags', 'arrival_date', 'quality_json')
+        .orderBy('created_at', 'asc')
+      : [];
+    const vByLot = {};
+    for (const v of vehicles) (vByLot[v.lot_id] ||= []).push(v);
+    for (const l of lots) l.vehicles = vByLot[l.lot_id] || [];
+
+    // Distinct suppliers across the blend, with their lot/qty/cost contribution.
+    const supMap = {};
+    for (const l of lots) {
+      if (!l.supplier_id) continue;
+      const k = l.supplier_id;
+      if (!supMap[k]) {
+        supMap[k] = { supplier_id: l.supplier_id, supplier_name: l.supplier_name,
+          phone: l.supplier_phone, lot_count: 0, qty_mt: 0, cost_total_pkr: 0 };
+      }
+      supMap[k].lot_count += 1;
+      supMap[k].qty_mt += parseFloat(l.qty_mt) || 0;
+      supMap[k].cost_total_pkr += parseFloat(l.cost_total_pkr) || 0;
+    }
+
+    return { source_lots: lots, blend_suppliers: Object.values(supMap) };
   },
 
   // =========================================================================

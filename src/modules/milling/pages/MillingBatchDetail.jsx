@@ -20,6 +20,7 @@ import {
   Plus,
   Truck,
   Trash2,
+  Layers,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
@@ -27,7 +28,7 @@ import { queryKeys } from '../../../api/queryClient';
 import {
   useMillingBatch, useSaveQuality, useRecordYield,
   useAddBatchCost, useAddVehicle, useUpdateMillingBatch,
-  useDeleteVehicle, useDeleteBatch,
+  useDeleteVehicle, useDeleteBatch, useBatchSourceLots,
 } from '../../../api/queries';
 import { millingApi } from '../../../api/services';
 import { millingApi as millingModApi } from '../api/services';
@@ -84,6 +85,19 @@ export default function MillingBatchDetail() {
 
   // Fetch batch detail via TanStack Query
   const { data: batch, isLoading: batchLoading } = useMillingBatch(id);
+
+  // Blend source lots — present only for blended batches. Carries each lot's
+  // supplier, rice type/variety, original quality and the vehicles that
+  // delivered it, so a blend never needs supplier/vehicles/quality re-entered.
+  const { data: blend } = useBatchSourceLots(batch?.dbId || batch?.id);
+  const sourceLots = blend?.sourceLots || [];
+  const blendSuppliers = blend?.blendSuppliers || [];
+  const isBlend = sourceLots.length > 0;
+  // Vehicles inherited from the blended lots (recorded at lot creation).
+  const inheritedVehicles = useMemo(
+    () => sourceLots.flatMap((l) => (l.vehicles || []).map((v) => ({ ...v, lotNo: l.lot_no }))),
+    [sourceLots],
+  );
 
   // Mutations
   const saveQualityMut = useSaveQuality();
@@ -579,7 +593,7 @@ export default function MillingBatchDetail() {
                 <PauseCircle size={16} /> Awaiting Owner approval
               </span>
             )}
-            {!batch.supplierName && batch.status !== 'Completed' && batch.status !== 'Cancelled' && (
+            {!isBlend && !batch.supplierName && batch.status !== 'Completed' && batch.status !== 'Cancelled' && (
               <button
                 onClick={() => setShowSupplierModal(true)}
                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 transition-colors"
@@ -691,6 +705,67 @@ export default function MillingBatchDetail() {
                 </div>
               </div>
 
+              {isBlend ? (
+                <div className="bg-white rounded-xl shadow-sm p-5">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-medium text-gray-500 flex items-center gap-1.5">
+                      <Layers size={14} className="text-purple-500" /> Blend — Source Lots
+                    </h3>
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-purple-50 text-purple-600 font-medium">
+                      {sourceLots.length} lot(s) · {parseFloat(batch.rawQtyMT || 0).toFixed(2)} MT
+                    </span>
+                  </div>
+                  {/* Suppliers in the blend (can be several) — no entry needed */}
+                  {blendSuppliers.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mb-3">
+                      {blendSuppliers.map((s) => (
+                        <span key={s.supplier_id} className="text-[11px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
+                          {s.supplier_name} · {parseFloat(s.qty_mt).toFixed(1)}MT
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <div className="space-y-2 text-sm">
+                    {sourceLots.map((l) => {
+                      const q = l.quality_json || {};
+                      const moisture = l.moisture_pct ?? q.moisture;
+                      const broken = l.broken_pct ?? q.broken;
+                      const costKg = Math.round(parseFloat(l.unit_cost_pkr || l.landed_cost_per_kg) || 0);
+                      return (
+                        <div key={l.id} className="rounded-lg border border-gray-100 bg-gray-50/60 px-3 py-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <span className="font-mono font-semibold text-gray-900">{l.lot_no || l.item_name}</span>
+                              <span className="ml-2 text-[11px] px-1.5 py-0.5 rounded bg-white border border-gray-200 text-gray-600">
+                                {(l.lot_type || l.type || 'lot')}{l.variety ? ` · ${l.variety}` : ''}
+                              </span>
+                            </div>
+                            <span className="font-medium text-gray-900 tabular-nums shrink-0">{parseFloat(l.qty_mt).toFixed(2)} MT</span>
+                          </div>
+                          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-gray-500">
+                            <span>Supplier: <span className="text-gray-700">{l.supplier_name || '—'}</span></span>
+                            {costKg > 0 && <span>Rs {costKg}/kg</span>}
+                            {moisture != null && <span>Moisture {moisture}%</span>}
+                            {broken != null && <span>Broken {broken}%</span>}
+                            {l.grade && <span>Grade {l.grade}</span>}
+                            {l.vehicles?.length > 0 && (
+                              <span className="inline-flex items-center gap-0.5"><Truck size={11} /> {l.vehicles.length}</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {batch.linkedExportOrder && (
+                    <div className="mt-3 pt-2 border-t border-gray-100 flex justify-between text-sm">
+                      <span className="text-gray-500">Export Order</span>
+                      <Link to={`/export/${batch.linkedExportOrder}`} className="font-medium text-blue-600 hover:text-blue-800">
+                        {batch.linkedExportOrder}
+                      </Link>
+                    </div>
+                  )}
+                </div>
+              ) : (
               <div className="bg-white rounded-xl shadow-sm p-5">
                 <h3 className="text-sm font-medium text-gray-500 mb-3">Source Lots</h3>
                 <div className="space-y-2 text-sm">
@@ -718,19 +793,57 @@ export default function MillingBatchDetail() {
                   )}
                 </div>
               </div>
+              )}
 
               {/* Vehicle Arrivals Card */}
               <div className="bg-white rounded-xl shadow-sm p-5">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-sm font-medium text-gray-500">Vehicle Arrivals</h3>
-                  <button
-                    onClick={() => setShowVehicleModal(true)}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors"
-                  >
-                    <Plus size={12} /> Add Vehicle
-                  </button>
+                  {isBlend ? (
+                    <span className="text-[11px] text-gray-400">Inherited from source lots</span>
+                  ) : (
+                    <button
+                      onClick={() => setShowVehicleModal(true)}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                    >
+                      <Plus size={12} /> Add Vehicle
+                    </button>
+                  )}
                 </div>
-                {(safeVehicles && safeVehicles.length > 0) ? (
+                {/* For a blend, vehicles come from the source lots (recorded when
+                    each lot was first received) — no re-entry needed. */}
+                {isBlend && safeVehicles.length === 0 ? (
+                  inheritedVehicles.length > 0 ? (
+                    <div className="space-y-2">
+                      {inheritedVehicles.map((v, idx) => {
+                        const kg = (parseFloat(v.weight_mt) || 0) * 1000;
+                        const bags = parseInt(v.total_bags, 10) || 0;
+                        return (
+                          <div key={v.id || idx} className="flex flex-wrap items-center justify-between text-sm bg-gray-50 rounded-lg px-3 py-2 gap-2">
+                            <div>
+                              <span className="font-bold text-gray-900 font-mono">{v.vehicle_no}</span>
+                              {v.driver_name && <span className="text-gray-500 ml-2">({v.driver_name})</span>}
+                              {v.lotNo && <span className="text-[10px] text-gray-400 ml-2">lot {v.lotNo}</span>}
+                            </div>
+                            <div className="text-right">
+                              <span className="font-medium text-gray-900">{kg > 0 ? `${kg.toLocaleString()} kg` : '—'}</span>
+                              {bags > 0 && <span className="text-gray-500 text-xs ml-2">{bags} bags</span>}
+                              <span className="text-gray-400 text-xs ml-2">{v.arrival_date}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      <div className="text-xs text-gray-500 pt-1 border-t border-gray-100 flex justify-between">
+                        <span>{inheritedVehicles.length} vehicle(s) from {sourceLots.length} lot(s)</span>
+                        <span>Total: {(inheritedVehicles.reduce((s, v) => s + (parseFloat(v.weight_mt) || 0), 0) * 1000).toLocaleString()} kg</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center py-4">
+                      <p className="text-xs text-gray-400">No vehicles recorded on the source lots.</p>
+                    </div>
+                  )
+                ) : (safeVehicles && safeVehicles.length > 0) ? (
                   <div className="space-y-2">
                     {safeVehicles.map((v, idx) => {
                       const kg = (parseFloat(v.weightMT) || 0) * 1000;
