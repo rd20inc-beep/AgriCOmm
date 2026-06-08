@@ -322,8 +322,10 @@ export default function MillingBatchDetail() {
   async function handleYieldSubmit(e) {
     e.preventDefault();
 
-    // Validation: require vehicle arrivals and arrival price (unless service milling)
-    if (!batch.isServiceMilling) {
+    // Validation: require vehicle arrivals and arrival price (unless service
+    // milling, or a blend — a blend inherits its material, quality and cost from
+    // the source lots, so there are no paddy arrivals to record).
+    if (!batch.isServiceMilling && !isBlend) {
       const vehicles = Array.isArray(batch.vehicleArrivals) ? batch.vehicleArrivals : [];
       if (vehicles.length === 0) {
         addToast('Please add at least one vehicle arrival before recording yield. Go to the Overview tab to add vehicle details.', 'error');
@@ -1163,8 +1165,9 @@ export default function MillingBatchDetail() {
         {/* YIELD TAB */}
         {activeTab === 'yield' && (
           <div className="space-y-4">
-            {/* Warnings for missing data */}
-            {!batch.isServiceMilling && batch.status !== 'Completed' && (
+            {/* Warnings for missing data (a blend inherits material/quality/cost
+                from its source lots, so these paddy-arrival prompts don't apply) */}
+            {!batch.isServiceMilling && !isBlend && batch.status !== 'Completed' && (
               <>
                 {(!batch.vehicleArrivals || batch.vehicleArrivals.length === 0) && (
                   <div className="bg-red-50 border border-red-300 rounded-xl p-4 flex items-start gap-3">
@@ -1283,7 +1286,9 @@ export default function MillingBatchDetail() {
         {activeTab === 'costs' && (() => {
           // Auto-populate raw material cost from quality sheet
           const inputPriceMT = parseFloat(safeArrival?.pricePerMT || safeSample?.pricePerMT) || 0;
-          const missingPrice = !inputPriceMT && !batch.isServiceMilling;
+          // A blend's raw cost comes from the source lots (milling_costs raw_rice),
+          // not a paddy arrival price — so it's never "missing" for a blend.
+          const missingPrice = !inputPriceMT && !batch.isServiceMilling && !isBlend;
           const rawMaterialCostFromQuality = batch.rawQtyMT * inputPriceMT;
           const manualRawCost = parseFloat(safeCosts.rawRice) || 0;
           const effectiveRawCost = manualRawCost > 0 ? manualRawCost : rawMaterialCostFromQuality;
