@@ -410,8 +410,8 @@ const millingAdvancedController = {
   async listSourceLots(req, res) {
     try {
       const { id } = req.params;
-      const lots = await millingService.getSourceLots(id);
-      return res.json({ success: true, data: { source_lots: lots } });
+      const data = await millingService.getSourceLots(id);
+      return res.json({ success: true, data });
     } catch (err) {
       console.error('listSourceLots error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });

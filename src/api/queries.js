@@ -264,6 +264,22 @@ export function useMillingBatch(id) {
   });
 }
 
+// Blend source lots for a batch — each lot's supplier, rice type/variety,
+// original quality analysis and the vehicles that delivered it, plus a
+// distinct-suppliers summary. Empty for non-blend batches.
+export function useBatchSourceLots(id) {
+  return useQuery({
+    queryKey: ['batch-source-lots', id],
+    queryFn: async () => {
+      const res = await millingApi.sourceLots(id);
+      const d = res?.data || res || {};
+      return { sourceLots: d.source_lots || [], blendSuppliers: d.blend_suppliers || [] };
+    },
+    enabled: !!id,
+    staleTime: 30 * 1000,
+  });
+}
+
 export function useCreateMillingBatch() {
   const qc = useQueryClient();
   return useMutation({
