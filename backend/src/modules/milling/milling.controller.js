@@ -350,6 +350,36 @@ const millingController = {
             notes: `Blended ${blendRows.length} lot(s): ${blendRows.map((b) => `${b.lot.lot_no || b.lot.id}×${b.qty}MT`).join(', ')}`,
             created_by: req.user.id,
           });
+
+          // Auto-populate the batch's arrival quality analysis from the source
+          // lots (qty-weighted), so a blend inherits the analysis already
+          // recorded on its lots instead of asking the user to re-enter it. The
+          // price/MT is the weighted landed cost of the blend; the raw cost is
+          // already set above (milling_costs), so this doesn't double-count.
+          const wAvg = (getter) => {
+            let num = 0, den = 0;
+            for (const b of blendRows) {
+              const raw = getter(b.lot);
+              const v = raw == null ? NaN : parseFloat(raw);
+              if (Number.isNaN(v)) continue;
+              num += v * b.qty; den += b.qty;
+            }
+            return den > 0 ? Math.round((num / den) * 100) / 100 : null;
+          };
+          const qj = (l, key) => (l.quality_json && l.quality_json[key] != null ? l.quality_json[key] : null);
+          const pricePerMt = resolvedRawQty > 0 ? Math.round((blendRawCostTotal / resolvedRawQty) * 100) / 100 : null;
+          await trx('milling_quality_samples').insert({
+            batch_id: batch.id,
+            analysis_type: 'arrival',
+            moisture: wAvg((l) => l.moisture_pct ?? qj(l, 'moisture')),
+            broken: wAvg((l) => l.broken_pct ?? qj(l, 'broken')),
+            chalky: wAvg((l) => qj(l, 'chalky')),
+            foreign_matter: wAvg((l) => qj(l, 'foreign_matter')),
+            purity: wAvg((l) => qj(l, 'purity')),
+            price_per_mt: pricePerMt,
+            price_per_kg: pricePerMt != null ? Math.round((pricePerMt / 1000) * 100) / 100 : null,
+            created_by: req.user.id,
+          });
         }
 
         let updatedOrder = null;
