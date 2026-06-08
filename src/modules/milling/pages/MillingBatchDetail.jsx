@@ -1349,8 +1349,51 @@ export default function MillingBatchDetail() {
               </div>
             </div>
 
-            {/* Raw material cost from quality sheet */}
-            {inputPriceMT > 0 && (
+            {/* Raw material cost — for a blend, show each lot's agreed price and
+                the blended average; otherwise the single agreed price. */}
+            {isBlend && sourceLots.length > 0 ? (() => {
+              const blendAvgPerMt = batch.rawQtyMT > 0 ? effectiveRawCost / batch.rawQtyMT : 0;
+              return (
+                <div className="bg-amber-50 rounded-xl border border-amber-200 p-4">
+                  <p className="text-xs font-semibold text-amber-700 uppercase mb-2">Raw Material Cost — Blended Lots</p>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-[11px] text-amber-700 uppercase">
+                        <th className="text-left font-medium py-1">Lot / Supplier</th>
+                        <th className="text-right font-medium">Qty</th>
+                        <th className="text-right font-medium">Agreed Price /MT</th>
+                        <th className="text-right font-medium">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sourceLots.map((l) => {
+                        const perMt = Math.round((parseFloat(l.unit_cost_pkr || l.landed_cost_per_kg) || 0) * 1000);
+                        return (
+                          <tr key={l.id} className="border-t border-amber-100">
+                            <td className="py-1.5">
+                              <span className="font-mono text-gray-800">{l.lot_no}</span>
+                              {l.supplier_name && <span className="text-[10px] text-gray-500 ml-1.5">{l.supplier_name}</span>}
+                            </td>
+                            <td className="text-right tabular-nums">{parseFloat(l.qty_mt).toFixed(2)} MT</td>
+                            <td className="text-right tabular-nums font-medium">{formatPKR(perMt)}</td>
+                            <td className="text-right tabular-nums">{formatPKR(parseFloat(l.cost_total_pkr) || 0)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t-2 border-amber-300 font-bold text-gray-900">
+                        <td className="py-1.5">Blended average</td>
+                        <td className="text-right tabular-nums">{batch.rawQtyMT} MT</td>
+                        <td className="text-right tabular-nums text-blue-900">{formatPKR(blendAvgPerMt)} /MT</td>
+                        <td className="text-right tabular-nums">{formatPKR(effectiveRawCost)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                  <p className="mt-1.5 text-[10px] text-amber-600">Average = total blended cost ÷ total input qty ({formatPKR(blendAvgPerMt / 1000)}/KG). This is the raw material cost in the costing sheet.</p>
+                </div>
+              );
+            })() : inputPriceMT > 0 ? (
               <div className="bg-amber-50 rounded-xl border border-amber-200 p-4">
                 <p className="text-xs font-semibold text-amber-700 uppercase mb-2">Raw Material Cost (Auto from Quality Sheet)</p>
                 <div className="grid grid-cols-4 gap-4 text-sm">
@@ -1360,7 +1403,7 @@ export default function MillingBatchDetail() {
                   <div><span className="text-amber-600">Per KG:</span> <span className="font-bold">{formatPKR(inputPriceMT / 1000)}</span></div>
                 </div>
               </div>
-            )}
+            ) : null}
 
             {/* Cost entry table + buttons */}
             <div className="bg-white rounded-xl border border-gray-100 p-5">
@@ -1856,7 +1899,7 @@ export default function MillingBatchDetail() {
 
       {/* Costing Sheet Modal */}
       <Modal isOpen={showCostSheet} onClose={() => setShowCostSheet(false)} title={`Costing Sheet — ${batch.id}`} size="lg">
-        <MillingCostSheet batch={batch} companyProfile={companyProfileData} millingCostCategories={millingCostCategories} vehicles={safeVehicles} byproductRates={{ broken: commodityPrices.broken, sortex: commodityPrices.sortex, bran: commodityPrices.bran, husk: commodityPrices.husk }} />
+        <MillingCostSheet batch={batch} companyProfile={companyProfileData} millingCostCategories={millingCostCategories} vehicles={safeVehicles} sourceLots={sourceLots} byproductRates={{ broken: commodityPrices.broken, sortex: commodityPrices.sortex, bran: commodityPrices.bran, husk: commodityPrices.husk }} />
       </Modal>
 
       {/* Add Vehicle Modal */}
