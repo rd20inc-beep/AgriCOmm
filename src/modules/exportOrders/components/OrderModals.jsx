@@ -96,9 +96,9 @@ export function AdvancePaymentModal({
             onChange={e => setAdvanceMethod(e.target.value)}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
           >
-            <option value="Bank Transfer">Bank Transfer</option>
-            <option value="Wire">Wire</option>
-            <option value="Cash">Cash</option>
+            <option value="bank_transfer">Bank Transfer</option>
+            <option value="wire">Wire</option>
+            <option value="cash">Cash</option>
           </select>
         </div>
         <div>
@@ -252,10 +252,10 @@ export function BalancePaymentModal({
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>
           <select value={balanceMethod} onChange={e => setBalanceMethod(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
-            <option value="Bank Transfer">Bank Transfer</option>
-            <option value="Wire">Wire</option>
-            <option value="LC">LC</option>
-            <option value="Cash">Cash</option>
+            <option value="bank_transfer">Bank Transfer</option>
+            <option value="wire">Wire</option>
+            <option value="lc">LC</option>
+            <option value="cash">Cash</option>
           </select>
         </div>
         <div>

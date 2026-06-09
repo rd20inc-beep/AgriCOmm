@@ -664,11 +664,11 @@ export default function FinanceConfirmations() {
                   onChange={(e) => setFormData({ ...formData, paymentMethod: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
                 >
-                  <option value="Bank Transfer">Bank Transfer</option>
-                  <option value="Wire">Wire</option>
-                  <option value="LC">Letter of Credit</option>
-                  <option value="TT">Telegraphic Transfer</option>
-                  <option value="Cash">Cash</option>
+                  <option value="bank_transfer">Bank Transfer</option>
+                  <option value="wire">Wire</option>
+                  <option value="lc">Letter of Credit</option>
+                  <option value="tt">Telegraphic Transfer</option>
+                  <option value="cash">Cash</option>
                 </select>
               </div>
             </div>
