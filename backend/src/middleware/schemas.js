@@ -255,7 +255,7 @@ const recordPayment = Joi.object({
     'number.positive': 'Payment amount must be greater than zero',
   }),
   currency: Joi.string().valid('USD', 'PKR', 'EUR').required(),
-  payment_method: Joi.string().valid('bank_transfer', 'cash', 'cheque', 'lc', 'tt').required(),
+  payment_method: Joi.string().valid('bank_transfer', 'cash', 'cheque', 'lc', 'tt', 'wire', 'online', 'mobile').required(),
   bank_account_id: Joi.number().integer().positive().allow(null),
   bank_reference: Joi.string().allow('', null),
   payment_date: Joi.date().iso().required(),
