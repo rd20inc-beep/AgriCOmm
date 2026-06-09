@@ -280,6 +280,19 @@ export function useBatchSourceLots(id) {
   });
 }
 
+// Mill cash account — actual money in/out (realized cash) with running-balance
+// ledger, paid-vs-outstanding by stream, and collected-vs-outstanding for sales.
+export function useMillCashFlow(params = {}) {
+  return useQuery({
+    queryKey: ['mill-cash-flow', params],
+    queryFn: async () => {
+      const res = await millingApi.cashFlow(params);
+      return res?.data || res || {};
+    },
+    staleTime: 15 * 1000,
+  });
+}
+
 export function useCreateMillingBatch() {
   const qc = useQueryClient();
   return useMutation({

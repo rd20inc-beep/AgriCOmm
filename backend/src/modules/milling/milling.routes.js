@@ -209,6 +209,7 @@ router.put(
 // Source Lots (Batch-level)
 // =============================================================================
 
+router.get('/cash-flow', authorize('milling', 'view'), advancedController.cashFlow);
 router.get('/batches/:id/source-lots', authorize('milling', 'view'), advancedController.listSourceLots);
 router.post(
   '/batches/:id/source-lots',
