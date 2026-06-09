@@ -718,6 +718,99 @@ const millingAdvancedController = {
       return res.status(status).json({ success: false, message: err.message });
     }
   },
+
+  // =========================================================================
+  // Mill cash account — actual money in/out (realized cash), paid-vs-outstanding
+  // =========================================================================
+  async cashFlow(req, res) {
+    try {
+      const { from_date, to_date } = req.query;
+      const amtPkr = 'COALESCE(p.base_amount_pkr, p.amount)';
+      const applyDates = (q) => {
+        if (from_date) q.where('p.payment_date', '>=', from_date);
+        if (to_date) q.where('p.payment_date', '<=', to_date);
+        return q;
+      };
+
+      // Cash OUT — payments settling a mill payable.
+      const outRows = await applyDates(
+        db('payments as p')
+          .join('payables as pa', 'pa.id', 'p.linked_payable_id')
+          .leftJoin('suppliers as s', 's.id', 'pa.supplier_id')
+          .where('p.type', 'payment').andWhere('pa.entity', 'mill')
+          .select(
+            'p.id', 'p.payment_no', 'p.payment_date', 'p.payment_method',
+            db.raw(`${amtPkr} as amount_pkr`),
+            'pa.category', 'pa.pay_no as ref', 'pa.source_table',
+            's.name as counterparty'
+          )
+      );
+
+      // Cash IN — receipts against a mill local sale.
+      const inRows = await applyDates(
+        db('payments as p')
+          .join('local_sales as ls', 'ls.id', 'p.local_sale_id')
+          .leftJoin('customers as c', 'c.id', 'ls.customer_id')
+          .where('p.type', 'receipt').andWhere('ls.entity', 'mill')
+          .select(
+            'p.id', 'p.payment_no', 'p.payment_date', 'p.payment_method',
+            db.raw(`${amtPkr} as amount_pkr`),
+            'ls.item_name as category', 'ls.sale_no as ref',
+            db.raw('COALESCE(c.name, ls.buyer_name) as counterparty')
+          )
+      );
+
+      const num = (v) => parseFloat(v) || 0;
+      const ledger = [
+        ...outRows.map((r) => ({ ...r, direction: 'out', amount_pkr: num(r.amount_pkr) })),
+        ...inRows.map((r) => ({ ...r, direction: 'in', amount_pkr: num(r.amount_pkr) })),
+      ].sort((a, b) => new Date(a.payment_date) - new Date(b.payment_date) || a.id - b.id);
+
+      const cashOut = outRows.reduce((s, r) => s + num(r.amount_pkr), 0);
+      const cashIn = inRows.reduce((s, r) => s + num(r.amount_pkr), 0);
+
+      // Money-out streams: current paid-vs-outstanding snapshot.
+      const streamRows = await db('payables')
+        .where('entity', 'mill')
+        .select(
+          db.raw(`CASE
+            WHEN source_table = 'milling_costs' THEN 'Paddy & batch costs'
+            WHEN source_table = 'mill_purchases' THEN 'Mill store purchases'
+            WHEN source_table IN ('mill_expenses', 'business_expenses') THEN 'Expenses & overhead'
+            ELSE COALESCE(source_table, 'Other') END as stream`),
+          db.raw('SUM(original_amount) as billed'),
+          db.raw('SUM(paid_amount) as paid'),
+          db.raw('SUM(outstanding) as outstanding')
+        )
+        .groupBy('stream');
+
+      // Money-in summary: local-sale collected vs outstanding.
+      const inSummary = await db('local_sales')
+        .where('entity', 'mill').whereNotIn('status', ['Cancelled', 'Voided'])
+        .select(
+          db.raw('COALESCE(SUM(total_amount), 0) as billed'),
+          db.raw('COALESCE(SUM(paid_amount), 0) as collected'),
+          db.raw('COALESCE(SUM(due_amount), 0) as outstanding')
+        ).first();
+
+      return res.json({
+        success: true,
+        data: {
+          ledger,
+          summary: { cashIn, cashOut, net: cashIn - cashOut, count: ledger.length },
+          moneyOutStreams: streamRows.map((r) => ({
+            stream: r.stream, billed: num(r.billed), paid: num(r.paid), outstanding: num(r.outstanding),
+          })).sort((a, b) => b.billed - a.billed),
+          moneyInSummary: {
+            billed: num(inSummary?.billed), collected: num(inSummary?.collected), outstanding: num(inSummary?.outstanding),
+          },
+        },
+      });
+    } catch (err) {
+      console.error('cashFlow error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
 };
 
 module.exports = millingAdvancedController;

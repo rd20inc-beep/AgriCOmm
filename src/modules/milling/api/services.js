@@ -3,6 +3,7 @@ export const millingApi = {
   listBatches: (params) => api.get('/api/milling/batches', params),
   getBatch: (id) => api.get(`/api/milling/batches/${id}`),
   sourceLots: (id) => api.get(`/api/milling/batches/${id}/source-lots`),
+  cashFlow: (params) => api.get('/api/milling/cash-flow', params),
   createBatch: (data) => api.post('/api/milling/batches', data),
   updateBatch: (id, data) => api.put(`/api/milling/batches/${id}`, data),
   saveQuality: (id, data) => api.post(`/api/milling/batches/${id}/quality`, data),

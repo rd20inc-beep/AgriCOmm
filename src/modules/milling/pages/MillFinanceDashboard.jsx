@@ -10,7 +10,7 @@ import { useAuth } from '../../../context/AuthContext';
 import {
   useMillExpenses, useCreateMillExpense, useMillWorkers, useCreateMillWorker,
   usePayrollSummary, useRecordAttendance, useInventory, useExpenseVendors,
-  usePayables, useSuppliers, usePurchases, useLocalSalesSummary,
+  usePayables, useSuppliers, usePurchases, useLocalSalesSummary, useMillCashFlow,
 } from '../../../api/queries';
 import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import SlideDrawer from '../../../components/SlideDrawer';
@@ -19,6 +19,11 @@ import MillSupplierStatement from '../components/MillSupplierStatement';
 import StatementPayDrawer from '../../finance/components/StatementPayDrawer';
 
 const PKR = (v) => 'Rs ' + Math.round(v || 0).toLocaleString('en-PK');
+const fmtDate = (d) => {
+  if (!d) return '—';
+  const dt = new Date(d);
+  return Number.isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+};
 const COMPACT_PKR = (v) => {
   const n = Math.round(v || 0);
   if (Math.abs(n) >= 10000000) return `Rs ${(n / 10000000).toFixed(2)}Cr`;
@@ -136,6 +141,31 @@ export default function MillFinanceDashboard() {
   const { hasPermission } = useAuth();
   const canPay = hasPermission('finance', 'confirm_payment');
   const [payParty, setPayParty] = useState(null);
+
+  // ── Cash account: actual money in/out ledger with a period filter ──
+  const [cashRange, setCashRange] = useState('all'); // all | month | quarter | ytd
+  const cashParams = useMemo(() => {
+    if (cashRange === 'all') return {};
+    const now = new Date();
+    const y = now.getFullYear();
+    let from;
+    if (cashRange === 'month') from = new Date(y, now.getMonth(), 1);
+    else if (cashRange === 'quarter') from = new Date(y, Math.floor(now.getMonth() / 3) * 3, 1);
+    else from = new Date(y, 0, 1); // ytd
+    return { from_date: from.toISOString().slice(0, 10) };
+  }, [cashRange]);
+  const { data: cashFlow } = useMillCashFlow(cashParams);
+  const cashLedger = useMemo(() => {
+    const rows = cashFlow?.ledger || [];
+    return rows.reduce((acc, r) => {
+      const prev = acc.length ? acc[acc.length - 1].balance : 0;
+      acc.push({ ...r, balance: prev + (r.direction === 'in' ? r.amount_pkr : -r.amount_pkr) });
+      return acc;
+    }, []);
+  }, [cashFlow]);
+  const cashSummary = cashFlow?.summary || { cashIn: 0, cashOut: 0, net: 0, count: 0 };
+  const moneyOutStreams = cashFlow?.moneyOutStreams || [];
+  const moneyInSummary = cashFlow?.moneyInSummary || { billed: 0, collected: 0, outstanding: 0 };
 
   const expenses = expData?.expenses || [];
   const expSummary = expData?.summary || [];
@@ -478,60 +508,127 @@ export default function MillFinanceDashboard() {
 
       {/* ─── MONEY IN / OUT ────────────────────────────────────────── */}
       {activeTab === 'moneyflow' && (
-        <div className="space-y-4">
-          {/* Hero: production margin */}
-          <div className={`rounded-2xl p-5 text-white ${moneyFlow.netProduction >= 0 ? 'bg-gradient-to-br from-emerald-600 to-emerald-700' : 'bg-gradient-to-br from-rose-600 to-rose-700'}`}>
-            <div className="flex items-start justify-between gap-4 flex-wrap">
-              <div>
-                <p className="text-[11px] uppercase tracking-wide text-white/70">Net mill position (output value − money out)</p>
-                <p className="text-3xl font-bold mt-1 tabular-nums">{PKR(moneyFlow.netProduction)}</p>
-                <p className="text-xs text-white/80 mt-1">
-                  Output value {COMPACT_PKR(moneyFlow.inc.output)} · Money out {COMPACT_PKR(moneyFlow.out.total)}
-                  {moneyFlow.inc.localSales > 0 && <> · Local sales {COMPACT_PKR(moneyFlow.inc.localSales)}</>}
-                </p>
-              </div>
-              <div className="text-right">
-                <p className="text-[11px] uppercase tracking-wide text-white/70">Production margin</p>
-                <p className="text-2xl font-semibold tabular-nums">{margin}%</p>
-              </div>
+        <div className="space-y-5">
+          {/* Period filter */}
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h3 className="text-sm font-semibold text-gray-700">Mill cash account — money in &amp; out</h3>
+            <div className="flex items-center gap-0.5 rounded-lg bg-gray-100 p-0.5">
+              {[['all', 'All'], ['ytd', 'YTD'], ['quarter', 'Quarter'], ['month', 'This month']].map(([k, l]) => (
+                <button key={k} onClick={() => setCashRange(k)}
+                  className={`px-2.5 py-1 text-xs rounded-md ${cashRange === k ? 'bg-white shadow-sm font-medium text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>{l}</button>
+              ))}
             </div>
           </div>
 
-          {/* Money OUT */}
+          {/* Realized cash summary */}
+          <div className="grid grid-cols-3 gap-3">
+            <Stat label="Cash in (received)" value={PKR(cashSummary.cashIn)} sub="receipts" tone="green" icon={ArrowDownRight} />
+            <Stat label="Cash out (paid)" value={PKR(cashSummary.cashOut)} sub="payments made" tone="red" icon={ArrowUpRight} />
+            <Stat label="Net cash flow" value={PKR(cashSummary.net)} sub={`${cashSummary.count} transaction(s)`} tone={cashSummary.net >= 0 ? 'green' : 'red'} icon={Wallet} />
+          </div>
+
+          {/* Money OUT — paid vs outstanding */}
           <div>
             <div className="flex items-center gap-2 mb-2">
               <ArrowUpRight size={15} className="text-rose-500" />
-              <h3 className="text-sm font-semibold text-gray-700">Money out of the mill</h3>
-              <span className="text-xs text-gray-400">— total {PKR(moneyFlow.out.total)}</span>
+              <h3 className="text-sm font-semibold text-gray-700">Money out — paid vs outstanding</h3>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-              <Stat label="Paddy / raw purchases" value={COMPACT_PKR(moneyFlow.out.paddy)} tone="red" icon={Package} />
-              <Stat label="Batch process costs" value={COMPACT_PKR(moneyFlow.out.batchCosts)} tone="red" icon={Factory} />
-              <Stat label="Overhead expenses" value={COMPACT_PKR(moneyFlow.out.overhead)} sub="utilities, rent, etc." tone="red" icon={Receipt} />
-              <Stat label="Payroll (this month)" value={COMPACT_PKR(moneyFlow.out.payroll)} tone="red" icon={Users} />
-              <Stat label="Mill store purchases" value={COMPACT_PKR(moneyFlow.out.store)} sub="bags, fuel, spares" tone="red" icon={Package} />
+            <div className="rounded-xl border border-gray-200 bg-white divide-y divide-gray-100">
+              {moneyOutStreams.length === 0 ? (
+                <div className="p-4 text-center text-sm text-gray-400">No mill payables.</div>
+              ) : moneyOutStreams.map((s) => {
+                const pct = s.billed > 0 ? Math.round((s.paid / s.billed) * 100) : 0;
+                return (
+                  <div key={s.stream} className="p-3">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="font-medium text-gray-800">{s.stream}</span>
+                      <span className="text-gray-500 text-xs">{PKR(s.billed)} billed</span>
+                    </div>
+                    <div className="mt-1.5 h-2 rounded-full bg-amber-100 overflow-hidden">
+                      <div className="h-full bg-emerald-500" style={{ width: `${pct}%` }} />
+                    </div>
+                    <div className="mt-1 flex justify-between text-[11px]">
+                      <span className="text-emerald-600">{PKR(s.paid)} paid ({pct}%)</span>
+                      <span className="text-amber-600">{PKR(s.outstanding)} outstanding</span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
-          {/* Money IN */}
+          {/* Money IN — local sales collected vs outstanding */}
           <div>
             <div className="flex items-center gap-2 mb-2">
               <ArrowDownRight size={15} className="text-emerald-500" />
-              <h3 className="text-sm font-semibold text-gray-700">Money in / production value</h3>
+              <h3 className="text-sm font-semibold text-gray-700">Money in — local sales (collected vs outstanding)</h3>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-              <Stat label="Output value produced" value={COMPACT_PKR(moneyFlow.inc.output)} sub="finished + byproducts" tone="green" icon={Wallet} />
-              <Stat label="Finished rice value" value={COMPACT_PKR(moneyFlow.inc.finished)} tone="green" icon={TrendingUp} />
-              <Stat label="Byproduct value" value={COMPACT_PKR(moneyFlow.inc.byproduct)} sub="broken, bran, husk" tone="green" icon={Package} />
-              <Stat label="Local sales" value={COMPACT_PKR(moneyFlow.inc.localSales)} sub={localSalesCollected > 0 ? `${COMPACT_PKR(localSalesCollected)} collected` : 'realized'} tone="green" icon={Banknote} />
-              <Stat label="Service milling fees" value={COMPACT_PKR(moneyFlow.inc.serviceFees)} tone="green" icon={DollarSign} />
+            <div className="grid grid-cols-3 gap-3">
+              <Stat label="Sales billed" value={COMPACT_PKR(moneyInSummary.billed)} tone="slate" icon={Receipt} />
+              <Stat label="Collected" value={COMPACT_PKR(moneyInSummary.collected)} tone="green" icon={Banknote} />
+              <Stat label="Outstanding" value={COMPACT_PKR(moneyInSummary.outstanding)} tone={moneyInSummary.outstanding > 0 ? 'amber' : 'green'} icon={Wallet} />
             </div>
           </div>
 
-          <p className="text-[11px] text-gray-400">
-            Output value is produced rice valued at confirmed batch prices (accrual); local sales and service fees are realized cash.
-            They are shown separately to avoid double-counting output that is later sold.
-          </p>
+          {/* Cash ledger */}
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Banknote size={15} className="text-indigo-500" />
+              <h3 className="text-sm font-semibold text-gray-700">Cash ledger</h3>
+              <span className="text-xs text-gray-400">— actual money in &amp; out, running balance</span>
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-white overflow-x-auto">
+              {cashLedger.length === 0 ? (
+                <div className="p-6 text-center text-sm text-gray-400">No cash transactions in this period.</div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500">
+                      <th className="text-left font-medium px-3 py-2">Date</th>
+                      <th className="text-left font-medium px-3 py-2">Description</th>
+                      <th className="text-left font-medium px-3 py-2">Method</th>
+                      <th className="text-right font-medium px-3 py-2">Out</th>
+                      <th className="text-right font-medium px-3 py-2">In</th>
+                      <th className="text-right font-medium px-3 py-2">Balance</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {cashLedger.map((r) => (
+                      <tr key={`${r.direction}-${r.id}`} className="hover:bg-gray-50/60">
+                        <td className="px-3 py-1.5 whitespace-nowrap text-gray-600">{fmtDate(r.payment_date)}</td>
+                        <td className="px-3 py-1.5">
+                          <span className="text-gray-800">{r.counterparty || '—'}</span>
+                          <span className="text-[10px] text-gray-400 ml-1.5">{r.category}{r.ref ? ` · ${r.ref}` : ''}</span>
+                        </td>
+                        <td className="px-3 py-1.5 text-gray-500 capitalize">{r.payment_method || '—'}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums text-rose-600">{r.direction === 'out' ? PKR(r.amount_pkr) : ''}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums text-emerald-600">{r.direction === 'in' ? PKR(r.amount_pkr) : ''}</td>
+                        <td className={`px-3 py-1.5 text-right tabular-nums ${r.balance < 0 ? 'text-rose-700' : 'text-gray-800'}`}>{PKR(r.balance)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+
+          {/* Production value (accrual) — kept separate from cash */}
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Factory size={15} className="text-gray-400" />
+              <h3 className="text-sm font-semibold text-gray-700">Production value <span className="text-xs font-normal text-gray-400">— accrual, not cash</span></h3>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+              <Stat label="Output value produced" value={COMPACT_PKR(moneyFlow.inc.output)} sub="finished + byproducts" tone="slate" icon={Wallet} />
+              <Stat label="Finished rice value" value={COMPACT_PKR(moneyFlow.inc.finished)} tone="slate" icon={TrendingUp} />
+              <Stat label="Byproduct value" value={COMPACT_PKR(moneyFlow.inc.byproduct)} sub="broken, bran, husk" tone="slate" icon={Package} />
+              <Stat label="Mill costs (accrued)" value={COMPACT_PKR(moneyFlow.out.total)} sub="paddy + process + overhead" tone="slate" icon={Receipt} />
+              <Stat label="Net production margin" value={COMPACT_PKR(moneyFlow.netProduction)} sub={`${margin}% margin`} tone={moneyFlow.netProduction >= 0 ? 'green' : 'red'} icon={Factory} />
+            </div>
+            <p className="mt-2 text-[11px] text-gray-400">
+              Production value is rice produced at confirmed prices (accrual). The cash ledger above is money actually received and paid.
+            </p>
+          </div>
         </div>
       )}
 
