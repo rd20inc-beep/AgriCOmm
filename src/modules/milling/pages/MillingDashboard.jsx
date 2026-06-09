@@ -29,11 +29,12 @@ import {
 } from 'recharts';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
-import { useCreateMillingBatch, useMills, useMillExpenses, useCreateMillExpense, useInventory, useProducts } from '../../../api/queries';
+import { useCreateMillingBatch, useMillExpenses, useCreateMillExpense, useInventory, useProducts } from '../../../api/queries';
 import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import KPICard from '../../../components/KPICard';
 import StatusBadge from '../../../components/StatusBadge';
 import Modal from '../../../components/Modal';
+import SlideDrawer from '../../../components/SlideDrawer';
 // Chart data computed from real batch data below (no mock imports)
 
 function formatPKR(value) {
@@ -52,7 +53,6 @@ export default function MillingDashboard() {
   const commodityPrices = useCommodityPrices();
   const MILL_PRICES_PKR = { finishedRicePerMT: commodityPrices.finished, brokenPerMT: commodityPrices.broken, branPerMT: commodityPrices.bran, huskPerMT: commodityPrices.husk };
   const createBatchMut = useCreateMillingBatch();
-  const { data: mills = [] } = useMills();
   const { data: expenseData } = useMillExpenses();
   const createExpenseMut = useCreateMillExpense();
   const millExpenses = expenseData?.expenses || [];
@@ -998,7 +998,18 @@ export default function MillingDashboard() {
       </Modal>
 
       {/* New Batch Modal */}
-      <Modal isOpen={showNewBatch} onClose={() => setShowNewBatch(false)} title="Create Milling Batch" size="md">
+      <SlideDrawer
+        open={showNewBatch}
+        onClose={() => setShowNewBatch(false)}
+        title="Create Milling Batch"
+        size="xl"
+        footer={(
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setShowNewBatch(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+            <button onClick={handleCreateBatch} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">Create Batch</button>
+          </div>
+        )}
+      >
         <div className="space-y-4">
           {/* Milling Type Toggle */}
           <div>
@@ -1162,24 +1173,8 @@ export default function MillingDashboard() {
             <input type="number" value={batchForm.plannedFinishedKg} onChange={e => setBF('plannedFinishedKg', e.target.value)} placeholder="Auto: ~65% of raw" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
           </div>
 
-          {/* Mill & Shift */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Mill</label>
-              <select value={batchForm.millId} onChange={e => setBF('millId', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none bg-white">
-                <option value="">Select mill...</option>
-                {mills.map(m => <option key={m.id} value={m.id}>{m.name} — {m.location || 'N/A'}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Shift</label>
-              <select value={batchForm.shift} onChange={e => setBF('shift', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none bg-white">
-                <option value="Day">Day</option>
-                <option value="Night">Night</option>
-                <option value="Full">Full Day</option>
-              </select>
-            </div>
-          </div>
+          {/* Mill & shift are not asked: there is a single mill (resolved
+              server-side) and shift isn't tracked per batch. */}
 
           {/* Milling Fee */}
           <div>
@@ -1212,12 +1207,8 @@ export default function MillingDashboard() {
             </div>
           )}
 
-          <div className="flex justify-end gap-2 pt-2 border-t border-gray-200">
-            <button onClick={() => setShowNewBatch(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
-            <button onClick={handleCreateBatch} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">Create Batch</button>
-          </div>
         </div>
-      </Modal>
+      </SlideDrawer>
     </div>
   );
 }
