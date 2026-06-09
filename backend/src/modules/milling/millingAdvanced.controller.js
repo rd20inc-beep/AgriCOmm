@@ -725,7 +725,14 @@ const millingAdvancedController = {
   async cashFlow(req, res) {
     try {
       const { from_date, to_date } = req.query;
-      const amtPkr = 'COALESCE(p.base_amount_pkr, p.amount)';
+      // PKR-normalized amount. base_amount_pkr is the locked PKR value, but some
+      // rows (e.g. local-sale receipts) leave it 0 — so fall back to the PKR
+      // amount, or convert a foreign amount by its fx rate. (COALESCE alone
+      // would keep a literal 0 and zero out those receipts.)
+      const amtPkr = `CASE
+        WHEN p.base_amount_pkr > 0 THEN p.base_amount_pkr
+        WHEN COALESCE(p.currency, 'PKR') = 'PKR' THEN p.amount
+        ELSE p.amount * COALESCE(NULLIF(p.fx_rate, 0), 1) END`;
       const applyDates = (q) => {
         if (from_date) q.where('p.payment_date', '>=', from_date);
         if (to_date) q.where('p.payment_date', '<=', to_date);
