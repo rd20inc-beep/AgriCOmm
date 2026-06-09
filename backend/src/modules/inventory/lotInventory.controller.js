@@ -861,6 +861,9 @@ module.exports = {
       if (!name || !String(name).trim()) {
         return res.status(400).json({ success: false, message: 'Template name is required.' });
       }
+      if (type && !['raw', 'finished', 'byproduct', 'packaging'].includes(type)) {
+        return res.status(400).json({ success: false, message: 'Invalid type. Must be raw, finished, byproduct or packaging.' });
+      }
       const [row] = await db('purchase_lot_templates').insert({
         name: String(name).trim(),
         owner_id: userId,
@@ -895,6 +898,9 @@ module.exports = {
       delete updates.id;
       delete updates.owner_id;
       delete updates.created_at;
+      if (updates.type != null && !['raw', 'finished', 'byproduct', 'packaging'].includes(updates.type)) {
+        return res.status(400).json({ success: false, message: 'Invalid type. Must be raw, finished, byproduct or packaging.' });
+      }
       updates.updated_at = db.fn.now();
       const [row] = await db('purchase_lot_templates')
         .where({ id: req.params.id, owner_id: userId })
