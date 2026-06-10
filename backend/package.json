@@ -10,6 +10,8 @@
     "migrate:rollback": "knex migrate:rollback",
     "seed": "knex seed:run",
     "backfill:shipment-containers": "node scripts/backfillShipmentContainers.js",
+    "schema:fingerprint": "node scripts/schemaFingerprint.js",
+    "schema:check": "node scripts/checkSchemaDrift.js",
     "test": "jest --passWithNoTests"
   },
   "keywords": [],

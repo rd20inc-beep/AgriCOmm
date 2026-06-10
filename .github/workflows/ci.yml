@@ -29,6 +29,61 @@ jobs:
       - name: Run tests
         run: npm test
 
+  schema-drift:
+    name: Schema Drift Guard
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: riceflow
+          POSTGRES_PASSWORD: riceflow
+          POSTGRES_DB: riceflow_erp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U riceflow"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_NAME: riceflow_erp
+      DB_USER: riceflow
+      DB_PASSWORD: riceflow
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build schema from migrations
+        run: npm run migrate
+
+      - name: Assert migrations match committed baseline
+        run: |
+          npm run --silent schema:fingerprint > /tmp/live.fingerprint
+          if ! diff -u schema.baseline.txt /tmp/live.fingerprint; then
+            echo ""
+            echo "::error::Schema built from migrations does not match backend/schema.baseline.txt."
+            echo "A migration changed the schema (lines prefixed '+' above are new, '-' were removed)."
+            echo "Regenerate the baseline and commit it:"
+            echo "    cd backend && npm run schema:fingerprint > schema.baseline.txt"
+            exit 1
+          fi
+          echo "Migrations build a schema identical to the committed baseline."
+
   build-frontend:
     name: Build Frontend
     runs-on: ubuntu-latest
@@ -49,7 +104,7 @@ jobs:
 
   deploy:
     name: Deploy to Production
-    needs: [test-backend, build-frontend]
+    needs: [test-backend, build-frontend, schema-drift]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
@@ -70,3 +125,14 @@ jobs:
             docker-compose build --no-cache
             docker-compose up -d
             docker image prune -f
+            # Schema-drift guard: after migrations run on start, confirm prod's
+            # live schema has nothing the migrations baseline doesn't. Catches
+            # columns/constraints ALTERed onto prod outside the migration system.
+            echo "Waiting for backend to finish migrations..."
+            for i in $(seq 1 30); do
+              if docker exec riceflow-backend node -e "require('/app/src/config/database').raw('select 1').then(()=>process.exit(0)).catch(()=>process.exit(1))" >/dev/null 2>&1; then
+                break
+              fi
+              sleep 3
+            done
+            docker exec riceflow-backend node scripts/checkSchemaDrift.js
