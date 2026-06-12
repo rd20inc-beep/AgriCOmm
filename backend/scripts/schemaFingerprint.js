@@ -7,8 +7,11 @@
  * up as a diff.
  *
  * Lines are of two kinds, both stable across dumps:
- *   COL <table>.<column>:<type>
+ *   COL <table>.<column>:<type>:<NOT NULL|NULL>
  *   CON <table>.<constraint_name>(<contype>)
+ *
+ * Nullability is part of the COL line so the drift guard catches a column that
+ * gains or loses NOT NULL out-of-band — not just added/removed columns.
  *
  * knex's own bookkeeping tables (knex_migrations*) are excluded — they're
  * environment state, not schema. Run via `npm run schema:fingerprint`.
@@ -18,7 +21,7 @@ const db = require('../src/config/database');
 
 async function fingerprint() {
   const cols = await db.raw(`
-    SELECT table_name, column_name, data_type
+    SELECT table_name, column_name, data_type, is_nullable
     FROM information_schema.columns
     WHERE table_schema = 'public'
       AND table_name NOT LIKE 'knex_migrations%'
@@ -36,7 +39,7 @@ async function fingerprint() {
   `);
 
   const lines = [
-    ...cols.rows.map((r) => `COL ${r.table_name}.${r.column_name}:${r.data_type}`),
+    ...cols.rows.map((r) => `COL ${r.table_name}.${r.column_name}:${r.data_type}:${r.is_nullable === 'NO' ? 'NOT NULL' : 'NULL'}`),
     ...cons.rows.map((r) => `CON ${r.table_name}.${r.conname}(${r.contype})`),
   ];
   // Sort the whole set so COL/CON ordering is irrelevant and the output is
