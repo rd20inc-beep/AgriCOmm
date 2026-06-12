@@ -22,7 +22,7 @@ COL advance_payments.bank_account_id:integer:NULL
 COL advance_payments.bank_reference:character varying:NULL
 COL advance_payments.created_at:timestamp with time zone:NOT NULL
 COL advance_payments.created_by:integer:NULL
-COL advance_payments.currency:character varying:NULL
+COL advance_payments.currency:character varying:NOT NULL
 COL advance_payments.customer_id:integer:NULL
 COL advance_payments.id:integer:NOT NULL
 COL advance_payments.notes:text:NULL
@@ -79,7 +79,7 @@ COL approval_queue.entity_type:character varying:NOT NULL
 COL approval_queue.expires_at:timestamp with time zone:NULL
 COL approval_queue.id:integer:NOT NULL
 COL approval_queue.notes:text:NULL
-COL approval_queue.priority:character varying:NULL
+COL approval_queue.priority:character varying:NOT NULL
 COL approval_queue.proposed_data:jsonb:NULL
 COL approval_queue.rejection_reason:text:NULL
 COL approval_queue.requested_at:timestamp with time zone:NULL
@@ -123,7 +123,7 @@ COL bank_accounts.account_number:character varying:NULL
 COL bank_accounts.bank_name:character varying:NULL
 COL bank_accounts.branch:character varying:NULL
 COL bank_accounts.created_at:timestamp with time zone:NOT NULL
-COL bank_accounts.currency:character varying:NULL
+COL bank_accounts.currency:character varying:NOT NULL
 COL bank_accounts.current_balance:numeric:NULL
 COL bank_accounts.id:integer:NOT NULL
 COL bank_accounts.is_active:boolean:NOT NULL
@@ -160,7 +160,7 @@ COL bank_transactions.category:character varying:NULL
 COL bank_transactions.counterparty:character varying:NULL
 COL bank_transactions.created_at:timestamp with time zone:NOT NULL
 COL bank_transactions.created_by:integer:NULL
-COL bank_transactions.currency:character varying:NULL
+COL bank_transactions.currency:character varying:NOT NULL
 COL bank_transactions.id:integer:NOT NULL
 COL bank_transactions.linked_payment_id:integer:NULL
 COL bank_transactions.notes:text:NULL
@@ -189,7 +189,7 @@ COL business_expenses.batch_id:integer:NULL
 COL business_expenses.category:character varying:NOT NULL
 COL business_expenses.created_at:timestamp with time zone:NOT NULL
 COL business_expenses.created_by:integer:NULL
-COL business_expenses.currency:character varying:NULL
+COL business_expenses.currency:character varying:NOT NULL
 COL business_expenses.description:text:NULL
 COL business_expenses.due_date:date:NULL
 COL business_expenses.expense_date:date:NOT NULL
@@ -204,14 +204,14 @@ COL business_expenses.paid_amount:numeric:NOT NULL
 COL business_expenses.paid_date:date:NULL
 COL business_expenses.payment_method:character varying:NULL
 COL business_expenses.payment_reference:character varying:NULL
-COL business_expenses.payment_status:character varying:NULL
+COL business_expenses.payment_status:character varying:NOT NULL
 COL business_expenses.subcategory:character varying:NULL
 COL business_expenses.supplier_id:integer:NULL
 COL business_expenses.updated_at:timestamp with time zone:NOT NULL
 COL business_expenses.vendor_name:character varying:NULL
 COL chart_of_accounts.code:character varying:NOT NULL
 COL chart_of_accounts.created_at:timestamp with time zone:NOT NULL
-COL chart_of_accounts.currency:character varying:NULL
+COL chart_of_accounts.currency:character varying:NOT NULL
 COL chart_of_accounts.description:text:NULL
 COL chart_of_accounts.entity:character varying:NULL
 COL chart_of_accounts.id:integer:NOT NULL
@@ -226,7 +226,7 @@ COL chart_of_accounts.updated_at:timestamp with time zone:NOT NULL
 COL comments.comment:text:NOT NULL
 COL comments.created_at:timestamp with time zone:NULL
 COL comments.id:integer:NOT NULL
-COL comments.is_internal:boolean:NULL
+COL comments.is_internal:boolean:NOT NULL
 COL comments.linked_id:integer:NOT NULL
 COL comments.linked_type:character varying:NOT NULL
 COL comments.mentioned_users:jsonb:NULL
@@ -239,7 +239,7 @@ COL commodity_rate_master.is_locked:boolean:NOT NULL
 COL commodity_rate_master.notes:text:NULL
 COL commodity_rate_master.product_id:integer:NULL
 COL commodity_rate_master.product_type:character varying:NULL
-COL commodity_rate_master.rate_currency:character varying:NULL
+COL commodity_rate_master.rate_currency:character varying:NOT NULL
 COL commodity_rate_master.rate_type:character varying:NOT NULL
 COL commodity_rate_master.rate_value:numeric:NOT NULL
 COL commodity_rate_master.source_reference:character varying:NULL
@@ -285,7 +285,7 @@ COL country_doc_requirements.created_at:timestamp with time zone:NULL
 COL country_doc_requirements.doc_type:character varying:NOT NULL
 COL country_doc_requirements.id:integer:NOT NULL
 COL country_doc_requirements.incoterm:character varying:NULL
-COL country_doc_requirements.is_required:boolean:NULL
+COL country_doc_requirements.is_required:boolean:NOT NULL
 COL country_doc_requirements.notes:text:NULL
 COL country_doc_requirements.updated_at:timestamp with time zone:NULL
 COL country_doc_requirements.validation_rules:jsonb:NULL
@@ -294,7 +294,7 @@ COL credit_notes.adjustment_amount:numeric:NOT NULL
 COL credit_notes.created_at:timestamp with time zone:NOT NULL
 COL credit_notes.created_by:integer:NULL
 COL credit_notes.credit_note_no:character varying:NOT NULL
-COL credit_notes.currency:character varying:NULL
+COL credit_notes.currency:character varying:NOT NULL
 COL credit_notes.customer_id:integer:NULL
 COL credit_notes.id:integer:NOT NULL
 COL credit_notes.issue_date:date:NOT NULL
@@ -304,7 +304,7 @@ COL credit_notes.original_price_per_mt:numeric:NULL
 COL credit_notes.qty_mt:numeric:NULL
 COL credit_notes.reason:character varying:NULL
 COL credit_notes.reference_invoice:character varying:NULL
-COL credit_notes.status:character varying:NULL
+COL credit_notes.status:character varying:NOT NULL
 COL credit_notes.updated_at:timestamp with time zone:NOT NULL
 COL customer_scores.avg_advance_days:numeric:NULL
 COL customer_scores.avg_balance_days:numeric:NULL
@@ -335,7 +335,7 @@ COL customers.contact_person:character varying:NULL
 COL customers.country:character varying:NULL
 COL customers.created_at:timestamp with time zone:NOT NULL
 COL customers.credit_limit:numeric:NULL
-COL customers.currency:character varying:NULL
+COL customers.currency:character varying:NOT NULL
 COL customers.email:character varying:NULL
 COL customers.id:integer:NOT NULL
 COL customers.is_active:boolean:NOT NULL
@@ -375,8 +375,8 @@ COL document_checklists.doc_type:character varying:NOT NULL
 COL document_checklists.document_id:integer:NULL
 COL document_checklists.due_date:date:NULL
 COL document_checklists.id:integer:NOT NULL
-COL document_checklists.is_fulfilled:boolean:NULL
-COL document_checklists.is_required:boolean:NULL
+COL document_checklists.is_fulfilled:boolean:NOT NULL
+COL document_checklists.is_required:boolean:NOT NULL
 COL document_checklists.linked_id:integer:NOT NULL
 COL document_checklists.linked_type:character varying:NOT NULL
 COL document_checklists.notes:text:NULL
@@ -400,7 +400,7 @@ COL document_store.file_name:character varying:NULL
 COL document_store.file_path:text:NULL
 COL document_store.file_size:integer:NULL
 COL document_store.id:integer:NOT NULL
-COL document_store.is_latest:boolean:NULL
+COL document_store.is_latest:boolean:NOT NULL
 COL document_store.linked_id:integer:NULL
 COL document_store.linked_type:character varying:NOT NULL
 COL document_store.mime_type:character varying:NULL
@@ -447,7 +447,7 @@ COL email_templates.subject_template:character varying:NOT NULL
 COL email_templates.updated_at:timestamp with time zone:NOT NULL
 COL exception_inbox.amount_at_risk:numeric:NULL
 COL exception_inbox.assigned_to:integer:NULL
-COL exception_inbox.auto_generated:boolean:NULL
+COL exception_inbox.auto_generated:boolean:NOT NULL
 COL exception_inbox.created_at:timestamp with time zone:NULL
 COL exception_inbox.currency:character varying:NULL
 COL exception_inbox.description:text:NULL
@@ -560,7 +560,7 @@ COL export_orders.booked_fx_rate:numeric:NULL
 COL export_orders.booking_no:character varying:NULL
 COL export_orders.brand_marking:character varying:NULL
 COL export_orders.broken_pct_target:numeric:NULL
-COL export_orders.consignee_type:character varying:NULL
+COL export_orders.consignee_type:character varying:NOT NULL
 COL export_orders.container_no:character varying:NULL
 COL export_orders.contract_number:character varying:NULL
 COL export_orders.contract_value:numeric:NOT NULL
@@ -659,13 +659,13 @@ COL fx_rates.is_active:boolean:NOT NULL
 COL fx_rates.notes:text:NULL
 COL fx_rates.rate:numeric:NOT NULL
 COL fx_rates.source:character varying:NULL
-COL fx_rates.source_type:character varying:NULL
+COL fx_rates.source_type:character varying:NOT NULL
 COL fx_rates.to_currency:character varying:NOT NULL
 COL goods_receipt_notes.accepted_qty_mt:numeric:NULL
 COL goods_receipt_notes.batch_id:integer:NULL
 COL goods_receipt_notes.broken_actual:numeric:NULL
 COL goods_receipt_notes.created_at:timestamp with time zone:NOT NULL
-COL goods_receipt_notes.currency:character varying:NULL
+COL goods_receipt_notes.currency:character varying:NOT NULL
 COL goods_receipt_notes.driver_name:character varying:NULL
 COL goods_receipt_notes.driver_phone:character varying:NULL
 COL goods_receipt_notes.grn_no:character varying:NOT NULL
@@ -676,7 +676,7 @@ COL goods_receipt_notes.moisture_actual:numeric:NULL
 COL goods_receipt_notes.net_weight_mt:numeric:NULL
 COL goods_receipt_notes.po_id:integer:NOT NULL
 COL goods_receipt_notes.price_per_mt:numeric:NULL
-COL goods_receipt_notes.quality_status:character varying:NULL
+COL goods_receipt_notes.quality_status:character varying:NOT NULL
 COL goods_receipt_notes.receipt_date:date:NOT NULL
 COL goods_receipt_notes.received_by:integer:NULL
 COL goods_receipt_notes.rejected_qty_mt:numeric:NULL
@@ -727,7 +727,7 @@ COL inventory_lots.bag_weight_kg:numeric:NULL
 COL inventory_lots.batch_ref:character varying:NULL
 COL inventory_lots.broken_pct:numeric:NULL
 COL inventory_lots.broker_id:integer:NULL
-COL inventory_lots.cost_currency:character varying:NULL
+COL inventory_lots.cost_currency:character varying:NOT NULL
 COL inventory_lots.cost_incomplete:boolean:NOT NULL
 COL inventory_lots.cost_per_unit:numeric:NULL
 COL inventory_lots.created_at:timestamp with time zone:NOT NULL
@@ -753,7 +753,7 @@ COL inventory_lots.notes:text:NULL
 COL inventory_lots.other_cost:numeric:NULL
 COL inventory_lots.packing_cost:numeric:NULL
 COL inventory_lots.paid_amount:numeric:NULL
-COL inventory_lots.payment_status:character varying:NULL
+COL inventory_lots.payment_status:character varying:NOT NULL
 COL inventory_lots.product_id:integer:NOT NULL
 COL inventory_lots.purchase_amount:numeric:NULL
 COL inventory_lots.purchase_date:date:NULL
@@ -769,7 +769,7 @@ COL inventory_lots.reserved_against:character varying:NULL
 COL inventory_lots.reserved_qty:numeric:NOT NULL
 COL inventory_lots.sold_weight_kg:numeric:NULL
 COL inventory_lots.sortex_status:character varying:NULL
-COL inventory_lots.standard_unit_type:character varying:NULL
+COL inventory_lots.standard_unit_type:character varying:NOT NULL
 COL inventory_lots.status:character varying:NOT NULL
 COL inventory_lots.supplier_id:integer:NULL
 COL inventory_lots.total_bag_cost:numeric:NULL
@@ -787,7 +787,7 @@ COL inventory_movements.batch_id:integer:NULL
 COL inventory_movements.cost_per_unit:numeric:NULL
 COL inventory_movements.created_at:timestamp with time zone:NULL
 COL inventory_movements.created_by:integer:NULL
-COL inventory_movements.currency:character varying:NULL
+COL inventory_movements.currency:character varying:NOT NULL
 COL inventory_movements.dest_entity:character varying:NULL
 COL inventory_movements.from_warehouse_id:integer:NULL
 COL inventory_movements.id:integer:NOT NULL
@@ -891,7 +891,7 @@ COL local_sales.notes:text:NULL
 COL local_sales.paid_amount:numeric:NULL
 COL local_sales.payment_mode:character varying:NULL
 COL local_sales.payment_reference:character varying:NULL
-COL local_sales.payment_status:character varying:NULL
+COL local_sales.payment_status:character varying:NOT NULL
 COL local_sales.profit_per_kg:numeric:NULL
 COL local_sales.quantity_bags:integer:NULL
 COL local_sales.quantity_input:numeric:NOT NULL
@@ -1042,7 +1042,7 @@ COL mill_performance.avg_yield_pct:numeric:NULL
 COL mill_performance.batches_processed:integer:NULL
 COL mill_performance.calculated_at:timestamp with time zone:NULL
 COL mill_performance.created_at:timestamp with time zone:NULL
-COL mill_performance.currency:character varying:NULL
+COL mill_performance.currency:character varying:NOT NULL
 COL mill_performance.id:integer:NOT NULL
 COL mill_performance.mill_id:integer:NULL
 COL mill_performance.period_end:date:NOT NULL
@@ -1064,12 +1064,12 @@ COL mill_purchase_items.total_cost:numeric:NOT NULL
 COL mill_purchase_items.warehouse_id:integer:NULL
 COL mill_purchases.created_at:timestamp with time zone:NULL
 COL mill_purchases.created_by:integer:NULL
-COL mill_purchases.currency:character varying:NULL
+COL mill_purchases.currency:character varying:NOT NULL
 COL mill_purchases.id:integer:NOT NULL
 COL mill_purchases.invoice_number:character varying:NULL
 COL mill_purchases.notes:text:NULL
 COL mill_purchases.paid_amount:numeric:NOT NULL
-COL mill_purchases.payment_status:character varying:NULL
+COL mill_purchases.payment_status:character varying:NOT NULL
 COL mill_purchases.purchase_date:date:NOT NULL
 COL mill_purchases.purchase_no:character varying:NOT NULL
 COL mill_purchases.supplier_id:integer:NULL
@@ -1092,7 +1092,7 @@ COL mill_stock_adjustments.quantity_delta:numeric:NOT NULL
 COL mill_stock_adjustments.reason:text:NOT NULL
 COL mill_stock_adjustments.rejection_reason:text:NULL
 COL mill_stock_adjustments.requested_by:integer:NULL
-COL mill_stock_adjustments.status:character varying:NULL
+COL mill_stock_adjustments.status:character varying:NOT NULL
 COL mill_stock_adjustments.warehouse_id:integer:NULL
 COL mill_stock_movements.approved_by:integer:NULL
 COL mill_stock_movements.cost_per_unit:numeric:NULL
@@ -1371,7 +1371,7 @@ COL pricing_simulations.bags_cost_per_mt:numeric:NULL
 COL pricing_simulations.clearing_cost_per_mt:numeric:NULL
 COL pricing_simulations.created_at:timestamp with time zone:NULL
 COL pricing_simulations.created_by:integer:NULL
-COL pricing_simulations.currency:character varying:NULL
+COL pricing_simulations.currency:character varying:NOT NULL
 COL pricing_simulations.freight_cost_per_mt:numeric:NULL
 COL pricing_simulations.fx_rate:numeric:NULL
 COL pricing_simulations.id:integer:NOT NULL
@@ -1440,14 +1440,14 @@ COL purchase_lot_templates.name:character varying:NOT NULL
 COL purchase_lot_templates.owner_id:integer:NOT NULL
 COL purchase_lot_templates.product_id:integer:NULL
 COL purchase_lot_templates.supplier_id:integer:NULL
-COL purchase_lot_templates.type:character varying:NULL
+COL purchase_lot_templates.type:character varying:NOT NULL
 COL purchase_lot_templates.updated_at:timestamp with time zone:NOT NULL
 COL purchase_lot_templates.variety:character varying:NULL
 COL purchase_lot_templates.warehouse_id:integer:NULL
 COL purchase_orders.broken_expected:numeric:NULL
 COL purchase_orders.created_at:timestamp with time zone:NOT NULL
 COL purchase_orders.created_by:integer:NULL
-COL purchase_orders.currency:character varying:NULL
+COL purchase_orders.currency:character varying:NOT NULL
 COL purchase_orders.delivery_date:date:NULL
 COL purchase_orders.entity:character varying:NULL
 COL purchase_orders.id:integer:NOT NULL
@@ -1474,7 +1474,7 @@ COL purchase_requisitions.id:integer:NOT NULL
 COL purchase_requisitions.linked_batch_id:integer:NULL
 COL purchase_requisitions.linked_export_order_id:integer:NULL
 COL purchase_requisitions.notes:text:NULL
-COL purchase_requisitions.priority:character varying:NULL
+COL purchase_requisitions.priority:character varying:NOT NULL
 COL purchase_requisitions.product_id:integer:NULL
 COL purchase_requisitions.product_name:character varying:NULL
 COL purchase_requisitions.qty_mt:numeric:NOT NULL
@@ -1586,7 +1586,7 @@ COL saved_reports.created_by:integer:NULL
 COL saved_reports.entity:character varying:NULL
 COL saved_reports.filters:jsonb:NULL
 COL saved_reports.id:integer:NOT NULL
-COL saved_reports.is_shared:boolean:NULL
+COL saved_reports.is_shared:boolean:NOT NULL
 COL saved_reports.last_run:timestamp with time zone:NULL
 COL saved_reports.name:character varying:NOT NULL
 COL saved_reports.report_type:character varying:NOT NULL
@@ -1626,7 +1626,7 @@ COL scheduled_tasks.task_type:character varying:NOT NULL
 COL scheduled_tasks.updated_at:timestamp with time zone:NOT NULL
 COL shipment_containers.bags_count:integer:NULL
 COL shipment_containers.container_no:character varying:NOT NULL
-COL shipment_containers.container_type:character varying:NULL
+COL shipment_containers.container_type:character varying:NOT NULL
 COL shipment_containers.created_at:timestamp with time zone:NOT NULL
 COL shipment_containers.created_by:integer:NULL
 COL shipment_containers.gross_weight_kg:numeric:NULL
@@ -1640,7 +1640,7 @@ COL shipment_containers.sequence_no:integer:NOT NULL
 COL shipment_containers.tare_weight_kg:numeric:NULL
 COL shipment_containers.updated_at:timestamp with time zone:NOT NULL
 COL stock_adjustments.adjustment_type:character varying:NOT NULL
-COL stock_adjustments.approval_status:character varying:NULL
+COL stock_adjustments.approval_status:character varying:NOT NULL
 COL stock_adjustments.approved_at:timestamp with time zone:NULL
 COL stock_adjustments.approved_by:integer:NULL
 COL stock_adjustments.created_at:timestamp with time zone:NOT NULL
@@ -1684,7 +1684,7 @@ COL stock_counts.warehouse_id:integer:NULL
 COL supplier_invoices.approved_by:integer:NULL
 COL supplier_invoices.created_at:timestamp with time zone:NOT NULL
 COL supplier_invoices.created_by:integer:NULL
-COL supplier_invoices.currency:character varying:NULL
+COL supplier_invoices.currency:character varying:NOT NULL
 COL supplier_invoices.deductions:numeric:NULL
 COL supplier_invoices.due_date:date:NULL
 COL supplier_invoices.grn_id:integer:NULL
@@ -1735,7 +1735,7 @@ COL suppliers.reviewed_at:timestamp with time zone:NULL
 COL suppliers.reviewed_by:integer:NULL
 COL suppliers.submitted_at:timestamp with time zone:NULL
 COL suppliers.submitted_by:integer:NULL
-COL suppliers.type:character varying:NULL
+COL suppliers.type:character varying:NOT NULL
 COL suppliers.uid:character varying:NULL
 COL suppliers.updated_at:timestamp with time zone:NOT NULL
 COL system_health.check_type:character varying:NULL
@@ -1773,20 +1773,20 @@ COL tasks_assignments.due_date:date:NULL
 COL tasks_assignments.id:integer:NOT NULL
 COL tasks_assignments.linked_id:integer:NULL
 COL tasks_assignments.linked_type:character varying:NULL
-COL tasks_assignments.priority:character varying:NULL
+COL tasks_assignments.priority:character varying:NOT NULL
 COL tasks_assignments.status:character varying:NOT NULL
 COL tasks_assignments.task_no:character varying:NOT NULL
 COL tasks_assignments.title:character varying:NOT NULL
 COL tasks_assignments.updated_at:timestamp with time zone:NOT NULL
 COL user_preferences.created_at:timestamp with time zone:NOT NULL
-COL user_preferences.currency_display:character varying:NULL
+COL user_preferences.currency_display:character varying:NOT NULL
 COL user_preferences.dashboard_layout:jsonb:NULL
 COL user_preferences.date_format:character varying:NULL
 COL user_preferences.id:integer:NOT NULL
 COL user_preferences.language:character varying:NULL
-COL user_preferences.notifications_email:boolean:NULL
-COL user_preferences.notifications_push:boolean:NULL
-COL user_preferences.notifications_sms:boolean:NULL
+COL user_preferences.notifications_email:boolean:NOT NULL
+COL user_preferences.notifications_push:boolean:NOT NULL
+COL user_preferences.notifications_sms:boolean:NOT NULL
 COL user_preferences.number_format:character varying:NULL
 COL user_preferences.theme:character varying:NULL
 COL user_preferences.timezone:character varying:NULL
@@ -1805,7 +1805,7 @@ COL users.updated_at:timestamp with time zone:NOT NULL
 COL utility_consumption.batch_id:integer:NULL
 COL utility_consumption.consumption:numeric:NULL
 COL utility_consumption.created_at:timestamp with time zone:NULL
-COL utility_consumption.currency:character varying:NULL
+COL utility_consumption.currency:character varying:NOT NULL
 COL utility_consumption.id:integer:NOT NULL
 COL utility_consumption.mill_id:integer:NULL
 COL utility_consumption.notes:text:NULL
