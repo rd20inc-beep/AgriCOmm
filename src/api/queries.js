@@ -1683,6 +1683,18 @@ export function useCreatePurchaseLot() {
   });
 }
 
+// Add another purchase (same supplier) onto an existing untouched lot.
+export function useAddPurchaseToLot() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => lotInventoryApi.addPurchaseToLot(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['lot-inventory'] });
+      qc.invalidateQueries({ queryKey: queryKeys.inventory.all });
+    },
+  });
+}
+
 // ─── Saved Purchase Lot Templates ───
 export function useLotTemplates() {
   return useQuery({

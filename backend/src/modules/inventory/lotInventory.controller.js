@@ -10,6 +10,7 @@ const accountingService = require('../../services/accountingService');
 // Shared lot-number generators — keeps the Purchase Lot drawer and the
 // Add Vehicle flow on the same SUP-VARIETY-YYMMDD-SEQ format.
 const inventoryService = require('./inventory.service');
+const { blendPurchaseIntoLot } = require('./lotCosting');
 
 async function generateTxnNo(trx) {
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -513,6 +514,216 @@ module.exports = {
     } catch (err) {
       console.error('createPurchaseLot error:', err);
       return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
+  // ─── Add another purchase to an EXISTING raw lot ───
+  //
+  // Tops up a lot with a further delivery from the SAME supplier instead of
+  // opening a separate lot. The lot's landed cost becomes the weighted average
+  // of both purchases:
+  //   new_per_kg = (old_landed_total + add_landed_total) / (old_kg + add_kg)
+  //
+  // Only allowed while the lot is still untouched (nothing reserved, milled,
+  // sold or transferred) — otherwise blending the cost would retroactively
+  // change the COGS of stock that has already left the lot. Mirrors
+  // createPurchaseLot's side-effects: a purchase_in lot_transaction, a
+  // purchase_receipt movement, a fresh payable for the added amount, and a
+  // purchase_invoice journal posting.
+  async addPurchaseToLot(req, res) {
+    try {
+      const lotId = parseInt(req.params.id, 10);
+      const {
+        quantity_input, quantity_unit = 'katta', bag_weight_kg,
+        rate_input, rate_unit = 'katta',
+        transport_cost = 0, labor_cost = 0, unloading_cost = 0,
+        packing_cost = 0, other_cost = 0,
+        bag_cost_per_bag = 0, bag_cost_included = false,
+        total_bags: inputTotalBags,
+        purchase_date, payment_status = 'Pending', paid_amount,
+        notes, supplier_id: bodySupplierId,
+      } = req.body;
+
+      const missing = [];
+      if (quantity_input == null || quantity_input === '' || !(parseFloat(quantity_input) > 0)) missing.push('weight');
+      if (rate_input == null || rate_input === '' || !(parseFloat(rate_input) > 0)) missing.push('price');
+      if (missing.length) {
+        return res.status(400).json({ success: false, message: `Please fill in: ${missing.join(', ')}.`, missing });
+      }
+
+      const result = await db.transaction(async (trx) => {
+        const lot = await trx('inventory_lots').where({ id: lotId }).first();
+        if (!lot) { const e = new Error('Lot not found.'); e.status = 404; throw e; }
+
+        // ── Guards ──────────────────────────────────────────────────────
+        if (lot.type !== 'raw' || lot.entity !== 'mill') {
+          const e = new Error('Additional purchases can only be added to raw mill lots.'); e.status = 422; throw e;
+        }
+        if (!lot.supplier_id) {
+          const e = new Error('This lot has no supplier on record, so a supplier purchase cannot be attached.'); e.status = 422; throw e;
+        }
+        if (bodySupplierId && parseInt(bodySupplierId, 10) !== lot.supplier_id) {
+          const e = new Error('A purchase can only be added to a lot from the same supplier.'); e.status = 422; throw e;
+        }
+        if (String(lot.status) !== 'Available') {
+          const e = new Error(`Cannot add a purchase to a lot with status "${lot.status}".`); e.status = 422; throw e;
+        }
+        // Cost-integrity gate: the lot must be wholly intact. Blending cost into
+        // a lot that has already been drawn down would rewrite the cost of stock
+        // that has already left.
+        const currentNetKg = parseFloat(lot.net_weight_kg) || (parseFloat(lot.qty) || 0) * 1000;
+        const availableKg = (parseFloat(lot.available_qty) || 0) * 1000;
+        const reservedKg = (parseFloat(lot.reserved_qty) || 0) * 1000;
+        const soldKg = parseFloat(lot.sold_weight_kg) || 0;
+        const damagedKg = parseFloat(lot.damaged_weight_kg) || 0;
+        const outbound = await trx('lot_transactions')
+          .where({ lot_id: lotId })
+          .whereIn('transaction_type', [
+            'milling_issue', 'export_dispatch_out', 'local_sale_out', 'export_allocation',
+            'stock_adjustment_minus', 'damage_out', 'shortage_out', 'warehouse_transfer_out',
+          ])
+          .first();
+        if (reservedKg > 0.5 || soldKg > 0.5 || damagedKg > 0.5 || outbound || availableKg < currentNetKg - 1) {
+          const e = new Error('Cannot add a purchase: this lot has already been reserved, milled, sold or transferred. Create a new lot instead.');
+          e.status = 422; throw e;
+        }
+
+        // ── Landed cost of the added purchase (same math as createPurchaseLot) ──
+        const bagWt = parseFloat(bag_weight_kg) || parseFloat(lot.bag_weight_kg) || 50;
+        const addNetKg = uc.toKg(quantity_input, quantity_unit, bagWt);
+        const addRatePerKg = uc.rateToPerKg(rate_input, rate_unit, bagWt);
+        const addBags = inputTotalBags
+          || (quantity_unit === 'katta' || quantity_unit === 'bag'
+            ? Math.round(parseFloat(quantity_input))
+            : Math.round(addNetKg / bagWt));
+        const addPurchaseAmount = uc.round2(addNetKg * addRatePerKg);
+        const addDirectCosts = [transport_cost, labor_cost, unloading_cost, packing_cost, other_cost]
+          .reduce((s, c) => s + (parseFloat(c) || 0), 0);
+        const addBagCost = bag_cost_included ? 0 : (parseFloat(bag_cost_per_bag) || 0) * addBags;
+        const addLandedTotal = uc.round2(addPurchaseAmount + addDirectCosts + addBagCost);
+
+        // ── Payment for the added purchase ──
+        const status = String(payment_status || 'Pending');
+        const addPaid = status === 'Paid'
+          ? addLandedTotal
+          : status === 'Partial'
+            ? Math.max(0, Math.min(addLandedTotal, parseFloat(paid_amount) || 0))
+            : Math.max(0, parseFloat(paid_amount) || 0);
+
+        // ── Blend into the existing lot (weighted-average landed cost) ──
+        const {
+          newNetKg, newBags, newLandedTotal, newPurchaseAmount,
+          newLandedPerKg, newRatePerKg, newPaid, newDue, newPaymentStatus,
+        } = blendPurchaseIntoLot(lot, {
+          netKg: addNetKg,
+          bags: addBags,
+          landedTotal: addLandedTotal,
+          purchaseAmount: addPurchaseAmount,
+          paid: addPaid,
+        });
+
+        await trx('inventory_lots').where({ id: lotId }).update({
+          qty: uc.kgToTon(newNetKg),
+          net_weight_kg: newNetKg,
+          gross_weight_kg: newNetKg,
+          total_bags: newBags,
+          available_qty: newNetKg / 1000,
+          purchase_amount: newPurchaseAmount,
+          rate_per_kg: newRatePerKg,
+          transport_cost: (parseFloat(lot.transport_cost) || 0) + (parseFloat(transport_cost) || 0),
+          labor_cost: (parseFloat(lot.labor_cost) || 0) + (parseFloat(labor_cost) || 0),
+          unloading_cost: (parseFloat(lot.unloading_cost) || 0) + (parseFloat(unloading_cost) || 0),
+          packing_cost: (parseFloat(lot.packing_cost) || 0) + (parseFloat(packing_cost) || 0),
+          other_cost: (parseFloat(lot.other_cost) || 0) + (parseFloat(other_cost) || 0),
+          total_bag_cost: (parseFloat(lot.total_bag_cost) || 0) + addBagCost,
+          landed_cost_total: newLandedTotal,
+          landed_cost_per_kg: newLandedPerKg,
+          cost_per_unit: newLandedPerKg * 1000,
+          total_value: newLandedTotal,
+          paid_amount: newPaid,
+          due_amount: newDue,
+          payment_status: newPaymentStatus,
+          updated_at: trx.fn.now(),
+        });
+
+        const txnNo = await generateTxnNo(trx);
+        await trx('lot_transactions').insert({
+          transaction_no: txnNo,
+          transaction_date: purchase_date || new Date().toISOString().slice(0, 10),
+          lot_id: lotId,
+          transaction_type: 'purchase_in',
+          reference_module: 'purchase',
+          warehouse_to_id: lot.warehouse_id,
+          input_unit: quantity_unit,
+          input_qty: parseFloat(quantity_input),
+          quantity_kg: addNetKg,
+          quantity_bags: addBags,
+          rate_input_unit: rate_unit,
+          rate_input_value: parseFloat(rate_input),
+          rate_per_kg: addRatePerKg,
+          cost_impact: addLandedTotal,
+          currency: 'PKR',
+          balance_kg: newNetKg,
+          balance_bags: newBags,
+          remarks: `Added purchase: ${parseFloat(quantity_input)} ${quantity_unit} @ ${parseFloat(rate_input)}/${rate_unit}`
+            + (notes ? ` — ${String(notes).slice(0, 200)}` : ''),
+          created_by: req.user?.id || null,
+          performed_by: req.user?.id || null,
+          performed_at: new Date(),
+        });
+
+        await trx('inventory_movements').insert({
+          lot_id: lotId,
+          movement_type: 'purchase_receipt',
+          qty: uc.kgToTon(addNetKg),
+          to_warehouse_id: lot.warehouse_id,
+          dest_entity: lot.entity,
+          notes: `Added purchase to lot ${lot.lot_no}`,
+          cost_per_unit: (addNetKg > 0 ? uc.round4(addLandedTotal / addNetKg) : 0) * 1000,
+          total_cost: addLandedTotal,
+          currency: 'PKR',
+          created_by: req.user?.id || null,
+        });
+
+        if (addLandedTotal > 0) {
+          const payNo = await generatePayNo(trx);
+          await trx('payables').insert({
+            pay_no: payNo,
+            entity: 'mill',
+            category: 'Raw Material',
+            supplier_id: lot.supplier_id,
+            linked_ref: lot.lot_no,
+            original_amount: addLandedTotal,
+            paid_amount: addPaid,
+            outstanding: Math.max(0, uc.round2(addLandedTotal - addPaid)),
+            due_date: addDays(purchase_date, 30),
+            status: addPaid >= addLandedTotal - 0.01 ? 'Paid' : addPaid > 0 ? 'Partial' : 'Pending',
+            currency: 'PKR',
+            notes: `Added purchase to lot ${lot.lot_no}`,
+          });
+
+          await accountingService.autoPost(trx, {
+            triggerEvent: 'purchase_invoice',
+            entity: 'mill',
+            amount: addLandedTotal,
+            currency: 'PKR',
+            refType: 'Purchase Lot',
+            refNo: lot.lot_no,
+            description: `Added purchase to lot ${lot.lot_no} (${lot.item_name})`,
+            userId: req.user?.id || null,
+            partyType: 'supplier',
+            partyId: lot.supplier_id,
+          });
+        }
+
+        return trx('inventory_lots').where({ id: lotId }).first();
+      });
+
+      return res.status(200).json({ success: true, data: { lot: enrichLot(result) } });
+    } catch (err) {
+      const status = err.status || 500;
+      if (status === 500) console.error('addPurchaseToLot error:', err);
+      return res.status(status).json({ success: false, message: err.message || 'Failed to add purchase to lot.' });
     }
   },
 

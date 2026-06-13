@@ -192,6 +192,29 @@ const createPurchaseLot = Joi.object({
   paid_amount: Joi.number().min(0).allow(null),
 });
 
+// Add another purchase onto an existing lot. Only the quantity / rate / cost /
+// payment fields — item, product, quality etc. are inherited from the lot.
+const addPurchaseToLot = Joi.object({
+  supplier_id: Joi.number().integer().positive().allow(null),
+  purchase_date: Joi.date().iso().allow(null, ''),
+  quantity_input: Joi.number().positive().required(),
+  quantity_unit: Joi.string().valid('katta', 'bag', 'kg', 'maund', 'ton', 'mt').default('katta'),
+  bag_weight_kg: Joi.number().positive().allow(null),
+  rate_input: Joi.number().positive().required(),
+  rate_unit: Joi.string().valid('katta', 'bag', 'kg', 'maund', 'ton', 'mt').default('katta'),
+  transport_cost: Joi.number().min(0).default(0),
+  labor_cost: Joi.number().min(0).default(0),
+  unloading_cost: Joi.number().min(0).default(0),
+  packing_cost: Joi.number().min(0).default(0),
+  other_cost: Joi.number().min(0).default(0),
+  bag_cost_per_bag: Joi.number().min(0).allow(null),
+  bag_cost_included: Joi.boolean().default(false),
+  total_bags: Joi.number().integer().min(0).allow(null),
+  payment_status: Joi.string().valid('Pending', 'Partial', 'Paid').default('Pending'),
+  paid_amount: Joi.number().min(0).allow(null),
+  notes: Joi.string().allow(null, ''),
+});
+
 const recordLotTransaction = Joi.object({
   transaction_type: Joi.string().required(),
   transaction_date: Joi.date().iso().allow(null, ''),
@@ -373,6 +396,7 @@ module.exports = {
   confirmBalance,
   allocateExportStock,
   createPurchaseLot,
+  addPurchaseToLot,
   recordLotTransaction,
   updateLotCosts,
   createAdvance,
