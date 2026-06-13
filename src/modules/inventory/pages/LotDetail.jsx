@@ -904,7 +904,7 @@ export default function LotDetail() {
 
       {/* ─── Modals ─── */}
       <TransactionModal isOpen={showTxnModal} onClose={() => setShowTxnModal(false)} lotId={lot.id} lotNo={lot.lotNo} availableKg={availKg} bagWeightKg={bw} warehouses={warehousesList} addToast={addToast} refetch={refetch} mutation={txnMutation} />
-      <CostEditModal isOpen={showCostModal} onClose={() => setShowCostModal(false)} lot={lot} addToast={addToast} refetch={refetch} />
+      <CostEditModal isOpen={showCostModal} onClose={() => setShowCostModal(false)} lot={lot} milled={millingBatches.length > 0 || outboundTxns.length > 0} addToast={addToast} refetch={refetch} />
       <AllocateToBatchModal isOpen={showAllocateModal} onClose={() => setShowAllocateModal(false)} lot={lot} addToast={addToast} refetch={refetch} />
       <AddLotVehicleModal
         isOpen={showAddVehicle}
@@ -1003,7 +1003,7 @@ function TransactionModal({ isOpen, onClose, lotId, lotNo, availableKg, bagWeigh
 }
 
 // ─── Cost Edit Modal ───
-function CostEditModal({ isOpen, onClose, lot, addToast, refetch }) {
+function CostEditModal({ isOpen, onClose, lot, milled, addToast, refetch }) {
   const [costs, setCosts] = useState({
     transport_cost: lot.transportCost || '', labor_cost: lot.laborCost || '', unloading_cost: lot.unloadingCost || '',
     packing_cost: lot.packingCost || '', other_cost: lot.otherCost || '', bag_cost_per_bag: lot.bagCostPerBag || '',
@@ -1022,6 +1022,12 @@ function CostEditModal({ isOpen, onClose, lot, addToast, refetch }) {
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Edit Additional Costs" size="md">
       <div className="space-y-4">
+        {milled && (
+          <div className="flex gap-2.5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-amber-600" />
+            <span>This lot has already been milled or drawn into a batch. The batch was costed at the lot's cost <em>at that time</em>, and editing here updates only the lot — it won't change the batch's recorded cost. To correct cost that has already flowed into a batch, use <span className="font-semibold">Repair Cost</span> (Inventory → Data Problems).</span>
+          </div>
+        )}
         {[['transport_cost','Transport'],['labor_cost','Labor'],['unloading_cost','Unloading'],['packing_cost','Packing'],['other_cost','Other'],['bag_cost_per_bag','Bag Cost/Bag']].map(([k,l]) => (
           <div key={k} className="form-group"><label className="form-label">{l}</label>
             <input type="number" value={costs[k]} onChange={e => setC(k, e.target.value)} className="form-input" placeholder="Rs" min="0" /></div>
