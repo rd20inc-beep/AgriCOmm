@@ -73,6 +73,15 @@ router.put(
   controller.updateLotCosts
 );
 
+// Edit a lot's recorded quality after creation
+router.put(
+  '/lots/:id/quality',
+  authorize('inventory', 'edit'),
+  validate(schemas.updateLotQuality),
+  auditAction('update_lot_quality', 'inventory_lot', (req) => req.params.id),
+  controller.updateLotQuality
+);
+
 // Allocate a raw lot into an existing milling batch
 router.post(
   '/lots/:id/allocate-to-batch',

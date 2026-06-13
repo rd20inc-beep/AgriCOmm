@@ -22,6 +22,7 @@ export const lotInventoryApi = {
   startMillingForLot: (id, data) => api.post(`/api/lot-inventory/lots/${id}/start-milling`, data),
   recordTransaction: (lotId, data) => api.post(`/api/lot-inventory/lots/${lotId}/transactions`, data),
   updateLotCosts: (id, data) => api.put(`/api/lot-inventory/lots/${id}/costs`, data),
+  updateLotQuality: (id, data) => api.put(`/api/lot-inventory/lots/${id}/quality`, data),
   allocateLotToBatch: (id, data) => api.post(`/api/lot-inventory/lots/${id}/allocate-to-batch`, data),
   stockReport: (params) => api.get('/api/lot-inventory/reports/stock', params),
   getLotAncestry: (id) => api.get(`/api/lot-inventory/lots/${id}/ancestry`),

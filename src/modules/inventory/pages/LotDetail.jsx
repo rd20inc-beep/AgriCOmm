@@ -17,6 +17,7 @@ import Modal from '../../../components/Modal';
 import { fromKg, allEquivalents, allRateEquivalents, toKg, UNITS } from '../../../utils/unitConversion';
 import LotCostSheet from '../components/LotCostSheet';
 import AddPurchaseModal from '../components/AddPurchaseModal';
+import QualityEditModal from '../components/QualityEditModal';
 import api from '../../../api/client';
 import { lotInventoryApi } from '../../../api/services';
 
@@ -61,6 +62,7 @@ export default function LotDetail() {
   const [showStartMilling, setShowStartMilling] = useState(false);
   const [showAddVehicle, setShowAddVehicle] = useState(false);
   const [showAddPurchase, setShowAddPurchase] = useState(false);
+  const [showQualityModal, setShowQualityModal] = useState(false);
   const [linkedBatch, setLinkedBatch] = useState(null);
   const [lotVehicles, setLotVehicles] = useState([]);
   // lotSales provided by hook below
@@ -308,7 +310,10 @@ export default function LotDetail() {
 
           {/* Quality Specs */}
           <div className="bg-white rounded-xl border border-gray-100 p-5">
-            <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4 flex items-center gap-2"><BarChart3 className="w-4 h-4 text-violet-600" /> Quality Specifications</h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider flex items-center gap-2"><BarChart3 className="w-4 h-4 text-violet-600" /> Quality Specifications</h3>
+              <button onClick={() => setShowQualityModal(true)} className="btn btn-sm btn-secondary"><Edit3 className="w-3.5 h-3.5" /> Edit</button>
+            </div>
             <div className="space-y-2.5">
               {[
                 ['Rice Type', lot.itemName],
@@ -922,6 +927,13 @@ export default function LotDetail() {
         isOpen={showAddPurchase}
         lot={lot}
         onClose={() => setShowAddPurchase(false)}
+        onSuccess={() => refetch()}
+      />
+      <QualityEditModal
+        isOpen={showQualityModal}
+        lot={lot}
+        addToast={addToast}
+        onClose={() => setShowQualityModal(false)}
         onSuccess={() => refetch()}
       />
 

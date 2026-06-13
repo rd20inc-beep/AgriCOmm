@@ -949,6 +949,61 @@ module.exports = {
     }
   },
 
+  // ─── Edit a lot's recorded quality after creation ───
+  //
+  // Quality is an analysis record, not a cost input, so it can be corrected at
+  // any time without touching landed cost or stock. moisture/broken are stored
+  // both on dedicated columns AND inside quality_json; we drive both from the
+  // submitted quality object so they never diverge.
+  async updateLotQuality(req, res) {
+    try {
+      const { id } = req.params;
+      const lot = await db('inventory_lots').where({ id }).first();
+      if (!lot) return res.status(404).json({ success: false, message: 'Lot not found.' });
+
+      const b = req.body;
+      const update = {};
+      for (const f of ['variety', 'grade', 'sortex_status', 'quality_notes', 'bag_quality']) {
+        if (f in b) update[f] = (b[f] === '' || b[f] == null) ? null : String(b[f]);
+      }
+      // whiteness is a numeric column (a whiteness index), not free text
+      if ('whiteness' in b) {
+        update.whiteness = (b.whiteness === '' || b.whiteness == null || Number.isNaN(parseFloat(b.whiteness)))
+          ? null : parseFloat(b.whiteness);
+      }
+      if ('quality_json' in b || 'quality' in b) {
+        const qj = sanitizeLotQuality(b.quality_json || b.quality);
+        update.quality_json = qj;
+        // keep the dedicated shortlist columns in step with the jsonb
+        update.moisture_pct = qj && qj.moisture != null ? qj.moisture : null;
+        update.broken_pct = qj && qj.broken != null ? qj.broken : null;
+      }
+      // explicit dedicated values win if sent directly
+      if ('moisture_pct' in b) update.moisture_pct = (b.moisture_pct === '' || b.moisture_pct == null) ? null : parseFloat(b.moisture_pct);
+      if ('broken_pct' in b) update.broken_pct = (b.broken_pct === '' || b.broken_pct == null) ? null : parseFloat(b.broken_pct);
+
+      if (Object.keys(update).length === 0) {
+        return res.status(400).json({ success: false, message: 'No quality fields supplied.' });
+      }
+      // moisture/broken feed CHECK-constrained 0–100 columns; reject out-of-range
+      // up front so the operator gets a clear message instead of a DB error.
+      for (const [f, label] of [['moisture_pct', 'Moisture'], ['broken_pct', 'Broken']]) {
+        const v = update[f];
+        if (v != null && (v < 0 || v > 100)) {
+          return res.status(400).json({ success: false, message: `${label} must be between 0 and 100.` });
+        }
+      }
+      update.updated_at = db.fn.now();
+
+      await db('inventory_lots').where({ id }).update(update);
+      const updated = await db('inventory_lots').where({ id }).first();
+      return res.json({ success: true, data: { lot: enrichLot(updated) } });
+    } catch (err) {
+      console.error('updateLotQuality error:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
   /**
    * GET /sources
    * Return milling batches with vehicle arrivals and quality data,

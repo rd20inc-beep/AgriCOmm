@@ -240,6 +240,21 @@ const updateLotCosts = Joi.object({
   bag_cost_per_bag: Joi.number().min(0).allow(null),
 });
 
+// Edit a lot's recorded quality after creation. moisture/broken come through
+// quality_json (and are mirrored to the dedicated columns server-side).
+const updateLotQuality = Joi.object({
+  variety: Joi.string().allow(null, ''),
+  grade: Joi.string().allow(null, ''),
+  sortex_status: Joi.string().allow(null, ''),
+  whiteness: Joi.number().min(0).allow(null, ''),
+  bag_quality: Joi.string().allow(null, ''),
+  quality_notes: Joi.string().allow(null, ''),
+  moisture_pct: Joi.number().min(0).max(100).allow(null),
+  broken_pct: Joi.number().min(0).max(100).allow(null),
+  quality_json: Joi.object().unknown(true).allow(null),
+  quality: Joi.object().unknown(true).allow(null),
+}).min(1);
+
 const createAdvance = Joi.object({
   customer_id: Joi.number().integer().positive().required(),
   amount: Joi.number().positive().required(),
@@ -399,6 +414,7 @@ module.exports = {
   addPurchaseToLot,
   recordLotTransaction,
   updateLotCosts,
+  updateLotQuality,
   createAdvance,
   allocateAdvance,
   createInternalTransfer,
