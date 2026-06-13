@@ -16,6 +16,7 @@ import StatusBadge from '../../../components/StatusBadge';
 import Modal from '../../../components/Modal';
 import { fromKg, allEquivalents, allRateEquivalents, toKg, UNITS } from '../../../utils/unitConversion';
 import LotCostSheet from '../components/LotCostSheet';
+import AddPurchaseModal from '../components/AddPurchaseModal';
 import api from '../../../api/client';
 import { lotInventoryApi } from '../../../api/services';
 
@@ -59,6 +60,7 @@ export default function LotDetail() {
   const [showAllocateModal, setShowAllocateModal] = useState(false);
   const [showStartMilling, setShowStartMilling] = useState(false);
   const [showAddVehicle, setShowAddVehicle] = useState(false);
+  const [showAddPurchase, setShowAddPurchase] = useState(false);
   const [linkedBatch, setLinkedBatch] = useState(null);
   const [lotVehicles, setLotVehicles] = useState([]);
   // lotSales provided by hook below
@@ -208,6 +210,21 @@ export default function LotDetail() {
           && (parseFloat(lot.availableQty) > 0) && (
           <button onClick={() => setShowAllocateModal(true)} className="btn btn-sm btn-secondary">
             <Factory className="w-4 h-4" /> Use in Batch
+          </button>
+        )}
+        {/* Add another purchase from the SAME supplier onto this lot — only
+            while it is still wholly intact (nothing reserved, milled, sold or
+            routed into a batch), so blending the landed cost is sound. */}
+        {lot.type === 'raw'
+          && lot.entity === 'mill'
+          && lot.status === 'Available'
+          && lot.supplierName
+          && millingBatches.length === 0
+          && outboundTxns.length === 0
+          && reservedKg < 1
+          && (netKg - availKg) < 1 && (
+          <button onClick={() => setShowAddPurchase(true)} className="btn btn-sm btn-secondary">
+            <Plus className="w-4 h-4" /> Add Purchase
           </button>
         )}
         <div className="flex bg-gray-100 rounded-lg p-0.5">
@@ -900,6 +917,12 @@ export default function LotDetail() {
           if (batch?.batch_no) navigate(`/milling/${batch.batch_no}`);
           else refetch();
         }}
+      />
+      <AddPurchaseModal
+        isOpen={showAddPurchase}
+        lot={lot}
+        onClose={() => setShowAddPurchase(false)}
+        onSuccess={() => refetch()}
       />
 
       {/* Costing Sheet Modal — Print button lives inside LotCostSheet */}

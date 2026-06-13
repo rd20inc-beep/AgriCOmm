@@ -46,6 +46,15 @@ router.post(
   controller.createPurchaseLot
 );
 
+// Add another purchase (same supplier) onto an existing untouched lot
+router.post(
+  '/lots/:id/add-purchase',
+  authorize('inventory', 'create'),
+  validate(schemas.addPurchaseToLot),
+  auditAction('add_purchase_to_lot', 'inventory_lot', (req) => req.params.id),
+  controller.addPurchaseToLot
+);
+
 // Record transaction on lot
 router.post(
   '/lots/:lot_id/transactions',
