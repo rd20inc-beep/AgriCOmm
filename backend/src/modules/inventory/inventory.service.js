@@ -2068,25 +2068,45 @@ const inventoryService = {
     const newCostKg = parseFloat(lot.landed_cost_per_kg) || 0;
 
     const sourceRows = await trx('batch_source_lots').where({ lot_id: lotId });
-    if (sourceRows.length === 0) return { affectedBatches: 0 };
+    // Legacy single-lot linkage: a raw lot points at its batch via
+    // inventory_lots.batch_ref (no batch_source_lots row). Cover those too.
+    let refBatchId = null;
+    if (lot.batch_ref && /^batch-\d+$/.test(lot.batch_ref)) {
+      refBatchId = parseInt(lot.batch_ref.replace('batch-', ''), 10);
+    }
+    const batchIds = [...new Set([...sourceRows.map((r) => r.batch_id), ...(refBatchId != null ? [refBatchId] : [])])];
+    if (batchIds.length === 0) return { affectedBatches: 0 };
 
     const summary = { affectedBatches: 0, reallocated: 0, cogsUpdated: 0, cogsLockedSkipped: 0 };
-    const batchIds = [...new Set(sourceRows.map((r) => r.batch_id))];
 
     for (const batchId of batchIds) {
-      // 1. Refresh this lot's source rows for the batch.
-      for (const r of sourceRows.filter((s) => s.batch_id === batchId)) {
-        const costTotal = Math.round(newCostKg * (parseFloat(r.qty_mt) || 0) * 1000 * 100) / 100;
-        await trx('batch_source_lots').where({ id: r.id }).update({ unit_cost_pkr: newCostKg, cost_total_pkr: costTotal });
+      const batch = await trx('milling_batches').where({ id: batchId }).first();
+      if (!batch) continue;
+
+      // 1+2. Recompute the batch's raw_rice cost pool.
+      const myRows = sourceRows.filter((s) => s.batch_id === batchId);
+      let newRawPool;
+      if (myRows.length > 0) {
+        // Blend / source-lots flow: each source lot carries its own cost_total.
+        for (const r of myRows) {
+          const costTotal = Math.round(newCostKg * (parseFloat(r.qty_mt) || 0) * 1000 * 100) / 100;
+          await trx('batch_source_lots').where({ id: r.id }).update({ unit_cost_pkr: newCostKg, cost_total_pkr: costTotal });
+        }
+        const poolRow = await trx('batch_source_lots').where({ batch_id: batchId }).sum('cost_total_pkr as t').first();
+        newRawPool = Math.round((parseFloat(poolRow?.t) || 0) * 100) / 100;
+      } else {
+        // Legacy batch_ref flow: this lot IS the batch's raw source. Only cascade
+        // when it is genuinely the SOLE raw lot for the batch, so the quantity is
+        // unambiguous — price the batch's authoritative raw_qty_mt at the lot cost.
+        const rawCount = await trx('inventory_lots').where({ batch_ref: `batch-${batchId}`, type: 'raw' }).count('id as c').first();
+        if (parseInt(rawCount.c, 10) !== 1) continue;
+        newRawPool = Math.round(newCostKg * (parseFloat(batch.raw_qty_mt) || 0) * 1000 * 100) / 100;
       }
-      // 2. Rebuild the batch raw_rice pool from ALL its source lots.
-      const poolRow = await trx('batch_source_lots').where({ batch_id: batchId }).sum('cost_total_pkr as t').first();
-      const newRawPool = Math.round((parseFloat(poolRow?.t) || 0) * 100) / 100;
       const existingRaw = await trx('milling_costs').where({ batch_id: batchId, category: 'raw_rice' }).first();
       if (existingRaw) {
         await trx('milling_costs').where({ id: existingRaw.id }).update({ amount: newRawPool });
       } else {
-        await trx('milling_costs').insert({ batch_id: batchId, category: 'raw_rice', amount: newRawPool, notes: 'Raw rice cost (recomputed from source lots)' });
+        await trx('milling_costs').insert({ batch_id: batchId, category: 'raw_rice', amount: newRawPool, notes: 'Raw rice cost (recomputed from source lot)' });
       }
       // 3. Re-derive output costs if the batch has already yielded.
       const realloc = await inventoryService.reallocateBatchCosts(trx, batchId);
