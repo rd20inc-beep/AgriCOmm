@@ -304,6 +304,14 @@ const millingController = {
           resolvedRawQty = Math.round(sumQty * 100) / 100;
         }
 
+        // Processing type: a run that mixes >1 distinct variety is a blend, so
+        // its output is isolated from pure (and from other blends). The operator
+        // can force it via req.body.processing_type; otherwise we infer it.
+        const blendVarieties = [...new Set(blendRows.map((b) => (b.lot.variety || '').trim()).filter(Boolean))];
+        const processingType = ['single_variety', 'blended'].includes(req.body.processing_type)
+          ? req.body.processing_type
+          : (blendVarieties.length > 1 ? 'blended' : 'single_variety');
+
         const [batch] = await trx('milling_batches')
           .insert({
             batch_no: batchNo,
@@ -311,6 +319,7 @@ const millingController = {
             mill_id: resolvedMillId,
             linked_export_order_id: linked_export_order_id || null,
             raw_qty_mt: resolvedRawQty,
+            processing_type: processingType,
             planned_finished_mt: planned_finished_mt ? parseFloat(planned_finished_mt) : null,
             milling_fee_per_kg: milling_fee_per_kg ? parseFloat(milling_fee_per_kg) : 5,
             transport_mode: transport_mode || 'with',
@@ -335,6 +344,9 @@ const millingController = {
               unit_cost_pkr: b.unit_cost_pkr,
               cost_total_pkr: b.cost_total_pkr,
               notes: b.lot_type === 'finished' ? 'Re-milled finished rice' : null,
+              // Immutable recipe snapshot — survives later edits to the source lot.
+              variety: b.lot.variety || null,
+              ratio_pct: resolvedRawQty > 0 ? Math.round((b.qty / resolvedRawQty) * 10000) / 100 : null,
             });
             // Mark the lot In Milling so it isn't double-booked; consumed at yield.
             await trx('inventory_lots').where({ id: b.lot.id }).update({

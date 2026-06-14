@@ -383,6 +383,9 @@ const createBatch = Joi.object({
     })
   ),
   product_id: Joi.number().integer().positive().allow(null),
+  // Single-Variety vs Blended. Omit to let the backend infer it from the number
+  // of distinct source-lot varieties.
+  processing_type: Joi.string().valid('single_variety', 'blended').allow(null),
   planned_finished_mt: Joi.number().positive().allow(null),
   milling_fee_per_kg: Joi.number().min(0).allow(null),
   transport_mode: Joi.string().allow('', null),
