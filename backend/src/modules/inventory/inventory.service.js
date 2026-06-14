@@ -781,9 +781,10 @@ const inventoryService = {
     // Blended-milling output is isolated PER RECIPE: each blend batch's saleable
     // rice (finished + broken grades) gets a batch-scoped identity (grade
     // 'M-033-B1', name 'Blend M-033 — …') so it never pools with pure B1/B2 or
-    // with another blend. All blended lots also carry processing_type +
-    // blend_batch_no for rollups that group by product. Bran/husk/sortex are
-    // fungible byproducts — flagged for traceability but not per-batch renamed.
+    // with another blend. Every blended output — finished, broken grades AND
+    // bran/husk/sortex — is isolated per batch (broken via the batch-scoped
+    // grade 'M-033-B1', the rest via 'Blend M-033 — …' + blend_batch_no), and
+    // all carry processing_type for rollups that group by product.
     const isBlend = batchRow?.processing_type === 'blended';
     const blendNo = isBlend ? (batchRow.batch_no || `batch-${batchId}`) : null;
     let finishedProductId = batchRow && batchRow.product_id ? batchRow.product_id : null;
@@ -987,9 +988,9 @@ const inventoryService = {
       const [lot] = await trx('inventory_lots')
         .insert({
           lot_no: lotNo,
-          // Broken grades from a blend are isolated per batch (M-033-B1);
-          // bran/husk/sortex stay generic but flagged.
-          item_name: (isBlend && bp.grade) ? `Blend ${blendNo} — ${bp.name}` : bp.name,
+          // Every blended byproduct is per-batch: broken via grade (M-033-B1),
+          // bran/husk/sortex via the name + blend_batch_no.
+          item_name: isBlend ? `Blend ${blendNo} — ${bp.name}` : bp.name,
           type: 'byproduct',
           entity: 'mill',
           warehouse_id: bpWarehouse.id,

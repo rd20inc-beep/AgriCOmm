@@ -902,9 +902,9 @@ const reportingController = {
             THEN 'Blended Finished — ' || COALESCE(l.blend_batch_no, '?')
           WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%broken%'
             THEN 'Blended Broken — ' || COALESCE(l.grade, l.blend_batch_no, '?')
-          WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%bran%'   THEN 'Rice Bran (blended)'
-          WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%husk%'   THEN 'Rice Husk (blended)'
-          WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%sortex%' THEN 'Sortex Rejects (blended)'
+          WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%bran%'   THEN 'Blended Bran — '   || COALESCE(l.blend_batch_no, '?')
+          WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%husk%'   THEN 'Blended Husk — '   || COALESCE(l.blend_batch_no, '?')
+          WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%sortex%' THEN 'Blended Sortex — ' || COALESCE(l.blend_batch_no, '?')
           WHEN l.type = 'finished' THEN 'Finished Rice'
           WHEN l.type = 'raw'      THEN 'Incoming Rice'
           WHEN l.item_name ILIKE '%sortex%' THEN 'Sortex Rejects'
