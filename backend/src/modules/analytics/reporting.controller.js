@@ -893,8 +893,18 @@ const reportingController = {
       // broken lots by grade and surfaces Sortex Rejects / Rice Bran /
       // Husk as their own categories, so a single Stock report can
       // answer "how much B1 do I have, how much B2, how much sortex".
+      // Blended-milling output is kept separate from pure stock and from other
+      // blends: blended broken carries a batch-scoped grade ('M-033-B1'), so it
+      // already splits in the blended branches below. Pure rules are unchanged.
       const SUBTYPE_EXPR = `
         CASE
+          WHEN l.processing_type = 'blended' AND l.type = 'finished'
+            THEN 'Blended Finished — ' || COALESCE(l.blend_batch_no, '?')
+          WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%broken%'
+            THEN 'Blended Broken — ' || COALESCE(l.grade, l.blend_batch_no, '?')
+          WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%bran%'   THEN 'Rice Bran (blended)'
+          WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%husk%'   THEN 'Rice Husk (blended)'
+          WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%sortex%' THEN 'Sortex Rejects (blended)'
           WHEN l.type = 'finished' THEN 'Finished Rice'
           WHEN l.type = 'raw'      THEN 'Incoming Rice'
           WHEN l.item_name ILIKE '%sortex%' THEN 'Sortex Rejects'
@@ -911,6 +921,7 @@ const reportingController = {
       else if (group_by === 'variety') { groupCol = 'l.variety';      nameCol = 'l.variety'; }
       else if (group_by === 'type')    { groupCol = 'l.type';         nameCol = 'l.type'; }
       else if (group_by === 'grade')   { groupCol = 'l.grade';        nameCol = 'l.grade'; }
+      else if (group_by === 'processing_type') { groupCol = 'l.processing_type'; nameCol = 'l.processing_type'; }
       else if (group_by === 'subtype') { groupCol = db.raw(SUBTYPE_EXPR); nameCol = SUBTYPE_EXPR; }
       else                              { groupCol = 'l.product_id';  nameCol = 'p.name'; }
 

@@ -877,6 +877,8 @@ module.exports = {
       if (group_by === 'supplier') { groupCol = 'l.supplier_id'; nameCol = 's.name'; }
       else if (group_by === 'warehouse') { groupCol = 'l.warehouse_id'; nameCol = 'w.name'; }
       else if (group_by === 'variety') { groupCol = 'l.variety'; nameCol = 'l.variety'; }
+      else if (group_by === 'grade') { groupCol = 'l.grade'; nameCol = 'l.grade'; }
+      else if (group_by === 'processing_type') { groupCol = 'l.processing_type'; nameCol = 'l.processing_type'; }
       else { groupCol = 'l.type'; nameCol = 'l.type'; }
 
       const rows = await query
