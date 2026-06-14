@@ -778,6 +778,14 @@ const inventoryService = {
     // → product matching productName → seeded FINISHED-RICE fallback
     // → any non-byproduct rice product → first product as last resort.
     const batchRow = await trx('milling_batches').where({ id: batchId }).first();
+    // Blended-milling output is isolated PER RECIPE: each blend batch's saleable
+    // rice (finished + broken grades) gets a batch-scoped identity (grade
+    // 'M-033-B1', name 'Blend M-033 — …') so it never pools with pure B1/B2 or
+    // with another blend. All blended lots also carry processing_type +
+    // blend_batch_no for rollups that group by product. Bran/husk/sortex are
+    // fungible byproducts — flagged for traceability but not per-batch renamed.
+    const isBlend = batchRow?.processing_type === 'blended';
+    const blendNo = isBlend ? (batchRow.batch_no || `batch-${batchId}`) : null;
     let finishedProductId = batchRow && batchRow.product_id ? batchRow.product_id : null;
     if (!finishedProductId && batchRow && batchRow.linked_export_order_id) {
       const linked = await trx('export_orders').where({ id: batchRow.linked_export_order_id }).first('product_id');
@@ -862,7 +870,7 @@ const inventoryService = {
       const [lot] = await trx('inventory_lots')
         .insert({
           lot_no: lotNo,
-          item_name: productName || 'Finished Rice',
+          item_name: isBlend ? `Blend ${blendNo} — Finished Rice` : (productName || 'Finished Rice'),
           type: 'finished',
           entity: 'mill',
           warehouse_id: fgWarehouse.id,
@@ -870,6 +878,8 @@ const inventoryService = {
           qty: 0,
           unit: 'MT',
           batch_ref: `batch-${batchId}`,
+          processing_type: isBlend ? 'blended' : 'single_variety',
+          blend_batch_no: blendNo,
           cost_per_unit: 0,
           cost_currency: 'PKR',
           total_value: 0,
@@ -879,7 +889,7 @@ const inventoryService = {
           created_by: userId || null,
           // Enrichment from batch/quality data
           supplier_id: supplierInfo?.supplierId || null,
-          variety: qualityInfo?.variety || null,
+          variety: isBlend ? `Blend ${blendNo}` : (qualityInfo?.variety || null),
           grade: qualityInfo?.grade || null,
           moisture_pct: qualityInfo?.moisture || null,
           broken_pct: qualityInfo?.broken || null,
@@ -977,7 +987,9 @@ const inventoryService = {
       const [lot] = await trx('inventory_lots')
         .insert({
           lot_no: lotNo,
-          item_name: bp.name,
+          // Broken grades from a blend are isolated per batch (M-033-B1);
+          // bran/husk/sortex stay generic but flagged.
+          item_name: (isBlend && bp.grade) ? `Blend ${blendNo} — ${bp.name}` : bp.name,
           type: 'byproduct',
           entity: 'mill',
           warehouse_id: bpWarehouse.id,
@@ -985,6 +997,8 @@ const inventoryService = {
           qty: 0,
           unit: 'MT',
           batch_ref: `batch-${batchId}`,
+          processing_type: isBlend ? 'blended' : 'single_variety',
+          blend_batch_no: blendNo,
           cost_per_unit: bpCostPerMT,
           cost_currency: 'PKR',
           total_value: 0,
@@ -996,8 +1010,8 @@ const inventoryService = {
           landed_cost_per_kg: bpCostPerKg,
           raw_cost_component: bpCostPerKg,
           cost_incomplete: bpCostPerKg === 0,
-          grade: bp.grade || null,
-          variety: bp.grade ? `Broken ${bp.grade}` : null,
+          grade: (isBlend && bp.grade) ? `${blendNo}-${bp.grade}` : (bp.grade || null),
+          variety: (isBlend && bp.grade) ? `Blend ${blendNo} — Broken ${bp.grade}` : (bp.grade ? `Broken ${bp.grade}` : null),
           status: 'Available',
           created_by: userId || null,
         })
