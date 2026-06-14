@@ -1014,8 +1014,14 @@ function CostEditModal({ isOpen, onClose, lot, milled, addToast, refetch }) {
   async function handleSave() {
     setSaving(true);
     try {
-      await lotInventoryApi.updateLotCosts(lot.id, costs);
-      addToast('Costs updated', 'success'); refetch(); onClose();
+      const res = await lotInventoryApi.updateLotCosts(lot.id, costs);
+      const prop = res?.data?.propagation;
+      const msg = prop?.affectedBatches > 0
+        ? `Costs updated — cascaded into ${prop.affectedBatches} batch(es)`
+          + (prop.cogsUpdated ? `, ${prop.cogsUpdated} COGS recomputed` : '')
+          + (prop.cogsLockedSkipped ? `, ${prop.cogsLockedSkipped} locked left as-is` : '')
+        : 'Costs updated';
+      addToast(msg, 'success'); refetch(); onClose();
     } catch (err) { addToast(err.message || 'Failed', 'error'); } finally { setSaving(false); }
   }
 
@@ -1023,9 +1029,9 @@ function CostEditModal({ isOpen, onClose, lot, milled, addToast, refetch }) {
     <Modal isOpen={isOpen} onClose={onClose} title="Edit Additional Costs" size="md">
       <div className="space-y-4">
         {milled && (
-          <div className="flex gap-2.5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-amber-600" />
-            <span>This lot has already been milled or drawn into a batch. The batch was costed at the lot's cost <em>at that time</em>, and editing here updates only the lot — it won't change the batch's recorded cost. To correct cost that has already flowed into a batch, use <span className="font-semibold">Repair Cost</span> (Inventory → Data Problems).</span>
+          <div className="flex gap-2.5 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-blue-600" />
+            <span>This lot has already been milled or drawn into a batch. Saving will <span className="font-semibold">cascade the new cost</span> into the batch's recorded cost and recompute COGS for any linked order or sale that isn't locked at dispatch. Figures already locked at dispatch are left unchanged.</span>
           </div>
         )}
         {[['transport_cost','Transport'],['labor_cost','Labor'],['unloading_cost','Unloading'],['packing_cost','Packing'],['other_cost','Other'],['bag_cost_per_bag','Bag Cost/Bag']].map(([k,l]) => (

@@ -914,38 +914,49 @@ module.exports = {
       const { id } = req.params;
       const { transport_cost, labor_cost, unloading_cost, packing_cost, other_cost, bag_cost_per_bag } = req.body;
 
-      const lot = await db('inventory_lots').where({ id }).first();
-      if (!lot) return res.status(404).json({ success: false, message: 'Lot not found.' });
+      const result = await db.transaction(async (trx) => {
+        const lot = await trx('inventory_lots').where({ id }).first();
+        if (!lot) { const e = new Error('Lot not found.'); e.status = 404; throw e; }
 
-      const netKg = parseFloat(lot.net_weight_kg) || 0;
-      const totalBags = lot.total_bags || 0;
-      const purchaseAmount = parseFloat(lot.purchase_amount) || 0;
+        const netKg = parseFloat(lot.net_weight_kg) || 0;
+        const totalBags = lot.total_bags || 0;
+        const purchaseAmount = parseFloat(lot.purchase_amount) || 0;
 
-      const tc = parseFloat(transport_cost) ?? parseFloat(lot.transport_cost) ?? 0;
-      const lc = parseFloat(labor_cost) ?? parseFloat(lot.labor_cost) ?? 0;
-      const ulc = parseFloat(unloading_cost) ?? parseFloat(lot.unloading_cost) ?? 0;
-      const pc = parseFloat(packing_cost) ?? parseFloat(lot.packing_cost) ?? 0;
-      const oc = parseFloat(other_cost) ?? parseFloat(lot.other_cost) ?? 0;
-      const bcpb = parseFloat(bag_cost_per_bag) ?? parseFloat(lot.bag_cost_per_bag) ?? 0;
-      const totalBagCost = lot.bag_cost_included ? 0 : bcpb * totalBags;
-      const directCosts = tc + lc + ulc + pc + oc;
-      const landedTotal = uc.round2(purchaseAmount + directCosts + totalBagCost);
-      const landedPerKg = netKg > 0 ? uc.round4(landedTotal / netKg) : 0;
+        const tc = parseFloat(transport_cost) ?? parseFloat(lot.transport_cost) ?? 0;
+        const lc = parseFloat(labor_cost) ?? parseFloat(lot.labor_cost) ?? 0;
+        const ulc = parseFloat(unloading_cost) ?? parseFloat(lot.unloading_cost) ?? 0;
+        const pc = parseFloat(packing_cost) ?? parseFloat(lot.packing_cost) ?? 0;
+        const oc = parseFloat(other_cost) ?? parseFloat(lot.other_cost) ?? 0;
+        const bcpb = parseFloat(bag_cost_per_bag) ?? parseFloat(lot.bag_cost_per_bag) ?? 0;
+        const totalBagCost = lot.bag_cost_included ? 0 : bcpb * totalBags;
+        const directCosts = tc + lc + ulc + pc + oc;
+        const landedTotal = uc.round2(purchaseAmount + directCosts + totalBagCost);
+        const landedPerKg = netKg > 0 ? uc.round4(landedTotal / netKg) : 0;
 
-      await db('inventory_lots').where({ id }).update({
-        transport_cost: tc, labor_cost: lc, unloading_cost: ulc,
-        packing_cost: pc, other_cost: oc, bag_cost_per_bag: bcpb,
-        total_bag_cost: totalBagCost,
-        landed_cost_total: landedTotal,
-        landed_cost_per_kg: landedPerKg,
-        total_value: landedTotal,
-        cost_per_unit: landedPerKg * 1000,
+        await trx('inventory_lots').where({ id }).update({
+          transport_cost: tc, labor_cost: lc, unloading_cost: ulc,
+          packing_cost: pc, other_cost: oc, bag_cost_per_bag: bcpb,
+          total_bag_cost: totalBagCost,
+          landed_cost_total: landedTotal,
+          landed_cost_per_kg: landedPerKg,
+          total_value: landedTotal,
+          cost_per_unit: landedPerKg * 1000,
+        });
+
+        // Cascade the corrected cost into any batch that already consumed this
+        // lot (batch_source_lots, raw-cost pool, output-lot costs, non-locked
+        // COGS). No-op when the lot hasn't been milled.
+        const propagation = await inventoryService.propagateLotCostToBatches(trx, parseInt(id, 10), { userId: req.user?.id });
+
+        const updated = await trx('inventory_lots').where({ id }).first();
+        return { updated, propagation };
       });
 
-      const updated = await db('inventory_lots').where({ id }).first();
-      return res.json({ success: true, data: { lot: enrichLot(updated) } });
+      return res.json({ success: true, data: { lot: enrichLot(result.updated), propagation: result.propagation } });
     } catch (err) {
-      return res.status(500).json({ success: false, message: err.message });
+      const status = err.status || 500;
+      if (status === 500) console.error('updateLotCosts error:', err);
+      return res.status(status).json({ success: false, message: err.message });
     }
   },
 
