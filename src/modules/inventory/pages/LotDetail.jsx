@@ -165,6 +165,11 @@ export default function LotDetail() {
             <span className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold bg-gray-100 text-gray-600`}>
               {lot.type || 'raw'}
             </span>
+            {lot.processingType === 'blended' && (
+              <span className="inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold bg-purple-100 text-purple-700" title={lot.blendBatchNo ? `Blend ${lot.blendBatchNo} — kept separate from pure stock` : 'Blended stock'}>
+                BLENDED{lot.blendBatchNo ? ` · ${lot.blendBatchNo}` : ''}
+              </span>
+            )}
           </div>
           <p className="text-sm text-gray-500 mt-0.5">{lot.itemName}{lot.variety ? ` — ${lot.variety}` : ''}{lot.grade ? ` (${lot.grade})` : ''}</p>
         </div>

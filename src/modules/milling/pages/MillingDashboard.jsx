@@ -109,6 +109,24 @@ export default function MillingDashboard() {
     }
     return { mt, cost };
   }, [blendRows, blendableLots]);
+  // Live recipe: each input's variety + share, and whether this is a true blend
+  // (>1 distinct variety) — drives the processing_type sent to the backend so
+  // the output is isolated from pure stock.
+  const blendRecipe = useMemo(() => {
+    const rows = [];
+    const varieties = new Set();
+    for (const r of blendRows) {
+      const lot = blendableLots.find(l => String(l.id) === String(r.lotId));
+      const q = parseFloat(r.qtyMt) || 0;
+      if (!lot || q <= 0) continue;
+      const variety = lot.type === 'finished' ? (lot.variety || 'Finished rice') : (lot.variety || 'Raw');
+      varieties.add(variety);
+      rows.push({ variety, qty: q });
+    }
+    const total = rows.reduce((s, r) => s + r.qty, 0);
+    const withPct = rows.map(r => ({ ...r, pct: total > 0 ? (r.qty / total) * 100 : 0 }));
+    return { rows: withPct, distinct: varieties.size, processingType: varieties.size > 1 ? 'blended' : 'single_variety' };
+  }, [blendRows, blendableLots]);
   const resetBatchForm = () => {
     setBatchForm({
       millingType: 'own_stock', supplierId: '', rawQtyKg: '', totalBags: '', plannedFinishedKg: '',
@@ -159,7 +177,7 @@ export default function MillingDashboard() {
           ? `[SERVICE MILLING] Client: ${batchForm.clientName}${batchForm.clientContact ? ` | Contact: ${batchForm.clientContact}` : ''}${batchForm.millingFeePerMT ? ` | Fee: PKR ${batchForm.millingFeePerMT}/MT` : ''}${batchForm.notes ? ` | ${batchForm.notes}` : ''}`
           : batchForm.notes || null,
         ...(useBlend
-          ? { source_lots: blendLots, product_id: blendProductId ? parseInt(blendProductId) : null }
+          ? { source_lots: blendLots, product_id: blendProductId ? parseInt(blendProductId) : null, processing_type: blendRecipe.processingType }
           : { supplier_id: parseInt(batchForm.supplierId), raw_qty_mt: rawQty }),
       };
       const res = await createBatchMut.mutateAsync(payload);
@@ -1114,8 +1132,29 @@ export default function MillingDashboard() {
               </div>
               {blendTotals.mt > 0 && (
                 <div className="flex justify-between text-sm border-t border-blue-200 pt-2">
-                  <span className="text-gray-600">Blend total</span>
+                  <span className="text-gray-600">Combined total</span>
                   <span className="font-semibold">{blendTotals.mt.toFixed(2)} MT · Rs {Math.round(blendTotals.cost).toLocaleString()} <span className="text-gray-400 font-normal">(≈Rs {Math.round(blendTotals.cost / (blendTotals.mt * 1000))}/kg)</span></span>
+                </div>
+              )}
+              {/* Live recipe + processing type — yield is computed against the combined total above */}
+              {blendRecipe.rows.length > 0 && (
+                <div className="border-t border-blue-200 pt-2 space-y-1.5">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-600">Processing type</span>
+                    <span className={`px-2 py-0.5 rounded-md text-xs font-semibold ${blendRecipe.processingType === 'blended' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}`}>
+                      {blendRecipe.processingType === 'blended' ? 'Blended' : 'Single-Variety'}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {blendRecipe.rows.map((r, i) => (
+                      <span key={i} className="text-xs bg-white border border-blue-200 rounded px-1.5 py-0.5 text-gray-700">
+                        {r.variety} <span className="font-semibold">{r.pct.toFixed(0)}%</span>
+                      </span>
+                    ))}
+                  </div>
+                  {blendRecipe.processingType === 'blended' && (
+                    <p className="text-[11px] text-purple-600">Output is tracked separately as a blend — it won't mix with pure B1/B2 stock or other blends.</p>
+                  )}
                 </div>
               )}
             </div>
