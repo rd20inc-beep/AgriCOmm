@@ -180,7 +180,9 @@ COL batch_source_lots.lot_id:integer:NOT NULL
 COL batch_source_lots.lot_type:character varying:NULL
 COL batch_source_lots.notes:text:NULL
 COL batch_source_lots.qty_mt:numeric:NOT NULL
+COL batch_source_lots.ratio_pct:numeric:NULL
 COL batch_source_lots.unit_cost_pkr:numeric:NULL
+COL batch_source_lots.variety:character varying:NULL
 COL business_expenses.amount:numeric:NOT NULL
 COL business_expenses.amount_pkr:numeric:NULL
 COL business_expenses.approved_by:integer:NULL
@@ -725,6 +727,7 @@ COL inventory_lots.bag_type:character varying:NULL
 COL inventory_lots.bag_weight_gm:numeric:NULL
 COL inventory_lots.bag_weight_kg:numeric:NULL
 COL inventory_lots.batch_ref:character varying:NULL
+COL inventory_lots.blend_batch_no:character varying:NULL
 COL inventory_lots.broken_pct:numeric:NULL
 COL inventory_lots.broker_id:integer:NULL
 COL inventory_lots.cost_currency:character varying:NOT NULL
@@ -754,6 +757,7 @@ COL inventory_lots.other_cost:numeric:NOT NULL
 COL inventory_lots.packing_cost:numeric:NOT NULL
 COL inventory_lots.paid_amount:numeric:NOT NULL
 COL inventory_lots.payment_status:character varying:NOT NULL
+COL inventory_lots.processing_type:character varying:NOT NULL
 COL inventory_lots.product_id:integer:NOT NULL
 COL inventory_lots.purchase_amount:numeric:NOT NULL
 COL inventory_lots.purchase_date:date:NULL
@@ -1157,6 +1161,7 @@ COL milling_batches.planned_finished_mt:numeric:NULL
 COL milling_batches.post_milling_grade:character varying:NULL
 COL milling_batches.prices_confirmed:boolean:NOT NULL
 COL milling_batches.processing_hours:numeric:NOT NULL
+COL milling_batches.processing_type:character varying:NOT NULL
 COL milling_batches.product_id:integer:NULL
 COL milling_batches.purchase_price_per_kg:numeric:NULL
 COL milling_batches.raw_cost_per_kg_finished:numeric:NULL
@@ -1906,6 +1911,7 @@ CON batch_source_lots.batch_source_lots_batch_id_foreign(f)
 CON batch_source_lots.batch_source_lots_lot_id_foreign(f)
 CON batch_source_lots.batch_source_lots_pkey(p)
 CON batch_source_lots.batch_source_lots_qty_mt_positive(c)
+CON batch_source_lots.chk_batch_source_lots_ratio_pct(c)
 CON batch_source_lots.chk_batch_source_lots_unit_cost_pkr_nn(c)
 CON business_expenses.business_expenses_approved_by_foreign(f)
 CON business_expenses.business_expenses_bank_account_id_foreign(f)
@@ -2092,6 +2098,7 @@ CON inventory_lots.chk_inventory_lots_gross_weight_kg_nn(c)
 CON inventory_lots.chk_inventory_lots_landed_cost_per_kg_nn(c)
 CON inventory_lots.chk_inventory_lots_moisture_pct_range(c)
 CON inventory_lots.chk_inventory_lots_payment_status_valid(c)
+CON inventory_lots.chk_inventory_lots_processing_type(c)
 CON inventory_lots.chk_inventory_lots_rate_per_kg_nn(c)
 CON inventory_lots.chk_inventory_lots_sold_weight_kg_nn(c)
 CON inventory_lots.chk_inventory_lots_total_bags_nn(c)
@@ -2284,6 +2291,7 @@ CON milling_batches.chk_milling_batches_milling_fee_per_kg_nn(c)
 CON milling_batches.chk_milling_batches_moisture_loss_pct_range(c)
 CON milling_batches.chk_milling_batches_planned_finished_mt_nn(c)
 CON milling_batches.chk_milling_batches_processing_hours_nn(c)
+CON milling_batches.chk_milling_batches_processing_type(c)
 CON milling_batches.chk_milling_batches_purchase_price_per_kg_nn(c)
 CON milling_batches.chk_milling_batches_raw_cost_per_kg_finished_nn(c)
 CON milling_batches.chk_milling_batches_raw_cost_total_nonneg(c)
