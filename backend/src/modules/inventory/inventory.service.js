@@ -1957,6 +1957,183 @@ const inventoryService = {
 
     return cogs;
   },
+
+  // ───────────────────────────────────────────────────────────────────────
+  // Re-derive a milling batch's output costs from its CURRENT cost pool.
+  //
+  // Mirrors recordYield's market-value joint-cost allocation so a re-run
+  // produces the same numbers the original yield did — used when an upstream
+  // raw-lot cost is corrected after milling. Updates the batch's cost-per-kg
+  // fields and every output lot (finished + byproducts). No-op if the batch
+  // hasn't produced finished goods yet (its allocation will run fresh at yield).
+  //
+  // Cost model (kept identical to recordYield/recordMillingOutput):
+  //   finished lot  = (raw + processing + millingFee) / finishedKg   [full pool]
+  //   byproduct lot = market-value share of the pool / its kg
+  // ───────────────────────────────────────────────────────────────────────
+  async reallocateBatchCosts(trx, batchId) {
+    const batch = await trx('milling_batches').where({ id: batchId }).first();
+    if (!batch) return null;
+    const finished = parseFloat(batch.actual_finished_mt) || 0;
+    if (finished <= 0) return { skipped: 'no-yield' };
+
+    const rawCostTotal = parseFloat(
+      (await trx('milling_costs').where({ batch_id: batchId }).where('category', 'raw_rice').sum('amount as t').first())?.t
+    ) || 0;
+    const processingCosts = parseFloat(
+      (await trx('milling_costs').where({ batch_id: batchId }).whereNot('category', 'raw_rice').sum('amount as t').first())?.t
+    ) || 0;
+    const millingFeeTotal = (parseFloat(batch.milling_fee_per_kg) || 0) * (parseFloat(batch.raw_qty_mt) || 0) * 1000;
+    const totalBatchCostPool = rawCostTotal + processingCosts + millingFeeTotal;
+
+    const p = (v) => parseFloat(v) || 0;
+    const broken = p(batch.broken_mt), bran = p(batch.bran_mt), husk = p(batch.husk_mt), sortex = p(batch.sortex_rejects_mt);
+    const b1 = p(batch.b1_mt), b2 = p(batch.b2_mt), b3 = p(batch.b3_mt), csr = p(batch.csr_mt), shortGrain = p(batch.short_grain_mt);
+    const brokenPrice = p(batch.broken_price_per_mt);
+    const prices = {
+      finished: p(batch.finished_price_per_mt),
+      b1: p(batch.b1_price_per_mt) || brokenPrice, b2: p(batch.b2_price_per_mt) || brokenPrice,
+      b3: p(batch.b3_price_per_mt) || brokenPrice, csr: p(batch.csr_price_per_mt) || brokenPrice,
+      short_grain: p(batch.short_grain_price_per_mt) || brokenPrice,
+      broken: brokenPrice, bran: p(batch.bran_price_per_mt), husk: p(batch.husk_price_per_mt),
+      sortex: p(batch.sortex_rejects_price_per_mt),
+    };
+    const hasPerGradeBroken = (b1 + b2 + b3 + csr + shortGrain) > 0;
+    const outputs = {
+      finished: { qty: finished, price: prices.finished },
+      ...(hasPerGradeBroken
+        ? { b1: { qty: b1, price: prices.b1 }, b2: { qty: b2, price: prices.b2 }, b3: { qty: b3, price: prices.b3 },
+            csr: { qty: csr, price: prices.csr }, short_grain: { qty: shortGrain, price: prices.short_grain } }
+        : { broken: { qty: broken, price: prices.broken } }),
+      bran: { qty: bran, price: prices.bran }, husk: { qty: husk, price: prices.husk }, sortex: { qty: sortex, price: prices.sortex },
+    };
+    let totalMV = 0;
+    for (const o of Object.values(outputs)) { o.marketValue = o.qty * o.price; totalMV += o.marketValue; }
+    const alloc = {};
+    for (const [name, o] of Object.entries(outputs)) {
+      const share = (o.qty > 0 && totalMV > 0) ? o.marketValue / totalMV : 0;
+      const allocatedCost = totalBatchCostPool * share;
+      alloc[name] = { qty: o.qty, costPerKg: o.qty > 0 ? allocatedCost / (o.qty * 1000) : 0 };
+    }
+
+    const finishedKg = finished * 1000;
+    const finishedCostPerKg = finishedKg > 0 ? totalBatchCostPool / finishedKg : 0; // full pool on finished
+    await trx('milling_batches').where({ id: batchId }).update({
+      raw_cost_total: rawCostTotal,
+      raw_cost_per_kg_finished: finishedKg > 0 ? rawCostTotal / finishedKg : 0,
+      milling_cost_per_kg_finished: finishedKg > 0 ? (processingCosts + millingFeeTotal) / finishedKg : 0,
+      total_cost_per_kg_finished: alloc.finished.costPerKg,
+    });
+
+    // Update output lots. Finished lot(s) take the full-pool cost; byproduct
+    // lots take their market-value-allocated cost, mapped by item_name/grade.
+    const outLots = await trx('inventory_lots')
+      .where({ batch_ref: `batch-${batchId}` })
+      .whereIn('type', ['finished', 'byproduct']);
+    const keyForByproduct = (lot) => {
+      const n = (lot.item_name || '').toLowerCase();
+      const g = (lot.grade || '').toLowerCase();
+      if (n.includes('bran')) return 'bran';
+      if (n.includes('husk')) return 'husk';
+      if (n.includes('sortex')) return 'sortex';
+      if (g === 'b1') return 'b1'; if (g === 'b2') return 'b2'; if (g === 'b3') return 'b3';
+      if (g === 'csr') return 'csr'; if (g.includes('short')) return 'short_grain';
+      return 'broken';
+    };
+    let updatedLots = 0;
+    for (const lot of outLots) {
+      const costKg = lot.type === 'finished'
+        ? finishedCostPerKg
+        : (alloc[keyForByproduct(lot)]?.costPerKg ?? alloc.broken?.costPerKg ?? 0);
+      const qtyKg = (parseFloat(lot.qty) || 0) * 1000;
+      await trx('inventory_lots').where({ id: lot.id }).update({
+        landed_cost_per_kg: costKg,
+        landed_cost_total: costKg * qtyKg,
+        cost_per_unit: costKg * 1000,
+        total_value: costKg * qtyKg,
+        updated_at: trx.fn.now(),
+      });
+      updatedLots += 1;
+    }
+    return { batchId, totalBatchCostPool, finishedCostPerKg, updatedLots, outputLotIds: outLots.map((l) => l.id) };
+  },
+
+  // Cascade a corrected raw-lot cost into every batch that consumed it:
+  // refresh batch_source_lots + the raw_rice cost pool, re-derive output costs
+  // for already-yielded batches, and recompute COGS for any linked order/sale
+  // that ISN'T locked at dispatch (locked figures are left intact, only logged).
+  async propagateLotCostToBatches(trx, lotId, { userId } = {}) {
+    const lot = await trx('inventory_lots').where({ id: lotId }).first();
+    if (!lot) return { affectedBatches: 0 };
+    const newCostKg = parseFloat(lot.landed_cost_per_kg) || 0;
+
+    const sourceRows = await trx('batch_source_lots').where({ lot_id: lotId });
+    if (sourceRows.length === 0) return { affectedBatches: 0 };
+
+    const summary = { affectedBatches: 0, reallocated: 0, cogsUpdated: 0, cogsLockedSkipped: 0 };
+    const batchIds = [...new Set(sourceRows.map((r) => r.batch_id))];
+
+    for (const batchId of batchIds) {
+      // 1. Refresh this lot's source rows for the batch.
+      for (const r of sourceRows.filter((s) => s.batch_id === batchId)) {
+        const costTotal = Math.round(newCostKg * (parseFloat(r.qty_mt) || 0) * 1000 * 100) / 100;
+        await trx('batch_source_lots').where({ id: r.id }).update({ unit_cost_pkr: newCostKg, cost_total_pkr: costTotal });
+      }
+      // 2. Rebuild the batch raw_rice pool from ALL its source lots.
+      const poolRow = await trx('batch_source_lots').where({ batch_id: batchId }).sum('cost_total_pkr as t').first();
+      const newRawPool = Math.round((parseFloat(poolRow?.t) || 0) * 100) / 100;
+      const existingRaw = await trx('milling_costs').where({ batch_id: batchId, category: 'raw_rice' }).first();
+      if (existingRaw) {
+        await trx('milling_costs').where({ id: existingRaw.id }).update({ amount: newRawPool });
+      } else {
+        await trx('milling_costs').insert({ batch_id: batchId, category: 'raw_rice', amount: newRawPool, notes: 'Raw rice cost (recomputed from source lots)' });
+      }
+      // 3. Re-derive output costs if the batch has already yielded.
+      const realloc = await inventoryService.reallocateBatchCosts(trx, batchId);
+      if (realloc && !realloc.skipped) summary.reallocated += 1;
+
+      // 4. Recompute COGS for non-locked orders/sales linked to this batch's outputs.
+      const outLotIds = (realloc && realloc.outputLotIds) || [];
+      if (outLotIds.length) {
+        const orderIds = [...new Set((await trx('inventory_reservations').whereIn('lot_id', outLotIds).select('order_id')).map((x) => x.order_id).filter(Boolean))];
+        for (const orderId of orderIds) {
+          const order = await trx('export_orders').where({ id: orderId }).first();
+          if (!order) continue;
+          if (order.cost_locked_at_dispatch) { summary.cogsLockedSkipped += 1; continue; }
+          const cogs = await inventoryService.calculateOrderCOGS(trx, orderId);
+          await trx('export_orders').where({ id: orderId }).update({
+            inventory_cogs_total_pkr: cogs.totalCOGS,
+            inventory_cogs_per_mt_pkr: cogs.cogsPerMT,
+          });
+          summary.cogsUpdated += 1;
+        }
+        const saleIds = [...new Set((await trx('local_sales').whereIn('lot_id', outLotIds).select('id')).map((x) => x.id))];
+        for (const saleId of saleIds) {
+          const sale = await trx('local_sales').where({ id: saleId }).first();
+          if (!sale) continue;
+          if (sale.cost_locked_at_dispatch) { summary.cogsLockedSkipped += 1; continue; }
+          const cogs = await inventoryService.calculateSaleCOGS(trx, saleId);
+          await trx('local_sales').where({ id: saleId }).update({
+            cogs_total_pkr: cogs.totalCOGS, cogs_per_kg: cogs.cogsPerKg, gross_profit_pkr: cogs.grossProfit,
+          });
+          summary.cogsUpdated += 1;
+        }
+      }
+
+      // 5. Audit trail.
+      await trx('historical_cost_repair_log').insert({
+        lot_id: lotId,
+        batch_id: batchId,
+        issue_type: 'lot_cost_edit_propagated',
+        old_value_json: JSON.stringify({ note: 'raw lot cost edited' }),
+        new_value_json: JSON.stringify({ landed_cost_per_kg: newCostKg, rawPool: newRawPool, reallocated: !!(realloc && !realloc.skipped) }),
+        repaired_by: userId || null,
+        repaired_at: new Date(),
+      });
+      summary.affectedBatches += 1;
+    }
+    return summary;
+  },
 };
 
 module.exports = inventoryService;
