@@ -123,7 +123,7 @@ jobs:
             rsync -a --delete --exclude='.env' --exclude='node_modules' /opt/riceflow-erp/ /root/riceflow-erp/
             cd /root/riceflow-erp
             docker-compose build --no-cache
-            docker-compose up -d
+            docker-compose up -d --force-recreate
             docker image prune -f
             # Schema-drift guard: after migrations run on start, confirm prod's
             # live schema has nothing the migrations baseline doesn't. Catches
