@@ -462,7 +462,10 @@ export default function PurchaseLotDrawer({
             renderItem={(p) => (
               <div className="flex items-center justify-between gap-2">
                 <span className="truncate">
-                  {p.code && <span className="font-mono text-xs text-gray-500 mr-1.5">{p.code}</span>}
+                  {/* show a real product code, but hide auto-generated SKUs (PRD-…) */}
+                  {p.code && !(/^PRD[-_]\d{6,}/i.test(p.code) || /\d{8,}/.test(p.code) || p.code.length > 18) && (
+                    <span className="font-mono text-xs text-gray-500 mr-1.5">{p.code}</span>
+                  )}
                   {p.name}
                   {p.grade && <span className="text-xs text-gray-400 ml-1">({p.grade})</span>}
                 </span>
@@ -471,7 +474,7 @@ export default function PurchaseLotDrawer({
             )}
             selectedLabel={
               selectedProduct
-                ? `${selectedProduct.code ? selectedProduct.code + ' · ' : ''}${selectedProduct.name}`
+                ? (selectedProduct.name || selectedProduct.code)
                 : null
             }
             selectedBadge={selectedProduct?.approval_status === 'pending' ? <PendingBadge /> : null}

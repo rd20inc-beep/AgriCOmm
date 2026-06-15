@@ -99,6 +99,17 @@ function looksLikeAutoSku(s) {
   return false;
 }
 
+// Human-readable rice type for a lot: a real variety, else the product NAME
+// (e.g. "1121 Basmati White Rice"), and only an auto-generated product code
+// (PRD-…) as a last resort — so the UI shows the name, not the SKU.
+function riceTypeName(lot) {
+  const v = lot.variety;
+  if (v && !looksLikeAutoSku(v)) return v;
+  if (lot.productName) return lot.productName;
+  if (lot.productCode && !looksLikeAutoSku(lot.productCode)) return lot.productCode;
+  return lot.itemName || v || lot.productCode || null;
+}
+
 /**
  * Single-lot row renderer — used by both flat view and the expanded
  * children inside grouped view (with a slight indent in the latter).
@@ -107,7 +118,7 @@ function renderLotRow(lot, displayUnit, navigate, indented) {
   const netKg = parseFloat(lot.netWeightKg) || parseFloat(lot.qty) * 1000 || 0;
   const availKg = (parseFloat(lot.availableQty) || 0) * 1000;
   const bw = parseFloat(lot.bagWeightKg) || 50;
-  const variety = lot.variety || lot.productCode || lot.productName || null;
+  const variety = riceTypeName(lot);
   const grade = lot.grade;
   const itemLower = (lot.itemName || '').toLowerCase();
   const varLower = (variety || '').toLowerCase();
@@ -265,7 +276,7 @@ export default function LotInventory() {
     for (const lot of filtered) {
       const s = lotSubtype(lot);
       if (s === 'rice-in' || s === 'other') { standalone.push(lot); continue; }
-      const variety = lot.variety || lot.productCode || lot.productName || '—';
+      const variety = riceTypeName(lot) || '—';
       // Blended output is grouped per recipe (blend_batch_no), so each blend
       // batch stays its own row and never merges with pure or another blend.
       const blended = lot.processingType === 'blended';
