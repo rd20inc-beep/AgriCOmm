@@ -953,8 +953,13 @@ const millingController = {
           sortexMT: parseFloat(sortex),
           productName: linkedOrder?.product_name || 'Finished Rice',
           costPerMT: finAlloc.costPerMT,
-          rawCostComponent: finAlloc.qty > 0 ? rawCostTotal / (finAlloc.qty * 1000) : 0,
-          millingCostComponent: finAlloc.qty > 0 ? (processingCosts + millingFeeTotal) / (finAlloc.qty * 1000) : 0,
+          // Finished rice carries its market-value SHARE of the pool (finAlloc
+          // .costPerKg), not the whole pool — otherwise priced by-products would
+          // double-count. Split that share into raw vs milling in the same ratio
+          // the pool itself is composed, so raw+milling = the allocated share and
+          // Σ(all outputs) = the pool.
+          rawCostComponent: totalBatchCostPool > 0 ? finAlloc.costPerKg * (rawCostTotal / totalBatchCostPool) : 0,
+          millingCostComponent: totalBatchCostPool > 0 ? finAlloc.costPerKg * ((processingCosts + millingFeeTotal) / totalBatchCostPool) : 0,
           // Pass per-output allocated costs for byproducts. When the
           // batch has per-grade broken outputs, each grade carries its
           // own cost (derived from its own market value share);

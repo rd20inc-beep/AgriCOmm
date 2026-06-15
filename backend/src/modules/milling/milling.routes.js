@@ -403,7 +403,7 @@ router.put('/batches/:id/prices', authorize('milling', 'edit'),
         csr_price_per_mt, short_grain_price_per_mt,
       } = req.body;
 
-      const [updated] = await db('milling_batches').where({ id }).update({
+      const priceUpdate = {
         finished_price_per_mt: parseFloat(finished_price_per_mt) || null,
         broken_price_per_mt: parseFloat(broken_price_per_mt) || null,
         bran_price_per_mt: parseFloat(bran_price_per_mt) || null,
@@ -415,10 +415,21 @@ router.put('/batches/:id/prices', authorize('milling', 'edit'),
         csr_price_per_mt: parseFloat(csr_price_per_mt) || null,
         short_grain_price_per_mt: parseFloat(short_grain_price_per_mt) || null,
         prices_confirmed: true,
-        updated_at: db.fn.now(),
-      }).returning('*');
+      };
 
-      return res.json({ success: true, data: { batch: updated } });
+      // Persist the prices AND re-run the cost allocation across the batch's
+      // output lots in one transaction — so a by-product priced after yield
+      // finally gets its market-value share (and finished stops absorbing the
+      // whole pool), with COGS recomputed for any non-locked order/sale.
+      const inventoryService = require('../inventory/inventory.service');
+      const result = await db.transaction(async (trx) => {
+        const [updated] = await trx('milling_batches').where({ id })
+          .update({ ...priceUpdate, updated_at: trx.fn.now() }).returning('*');
+        const realloc = await inventoryService.recomputeBatchOutputsAfterPriceChange(trx, id, { userId: req.user?.id });
+        return { updated, realloc };
+      });
+
+      return res.json({ success: true, data: { batch: result.updated, reallocation: result.realloc } });
     } catch (err) {
       return res.status(500).json({ success: false, message: err.message });
     }
