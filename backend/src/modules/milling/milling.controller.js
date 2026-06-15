@@ -323,6 +323,13 @@ const millingController = {
           ? req.body.processing_type
           : (blendVarieties.length > 1 ? 'blended' : 'single_variety');
 
+        // Rice type: prefer an explicit product_id; otherwise inherit it from the
+        // linked export order so an order-driven batch carries its variety from
+        // the moment it's created (not only once output is recorded).
+        const resolvedProductId = product_id
+          ? parseInt(product_id)
+          : (linkedOrder && linkedOrder.product_id ? linkedOrder.product_id : null);
+
         const [batch] = await trx('milling_batches')
           .insert({
             batch_no: batchNo,
@@ -335,7 +342,7 @@ const millingController = {
             milling_fee_per_kg: milling_fee_per_kg ? parseFloat(milling_fee_per_kg) : 5,
             transport_mode: transport_mode || 'with',
             purchase_price_per_kg: purchase_price_per_kg ? parseFloat(purchase_price_per_kg) : null,
-            product_id: product_id ? parseInt(product_id) : null,
+            product_id: resolvedProductId,
             machine_line: machine_line || null,
             shift: shift || 'Day',
             notes: notes || null,

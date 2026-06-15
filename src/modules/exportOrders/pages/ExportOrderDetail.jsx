@@ -394,6 +394,7 @@ export default function ExportOrderDetail() {
       const res = await createMillingMut.mutateAsync({
         supplier_id: supplierId,
         linked_export_order_id: orderId || null,
+        product_id: order.productId ? parseInt(order.productId) : null,
         raw_qty_mt: rawQty,
         planned_finished_mt: order.qtyMT,
       });

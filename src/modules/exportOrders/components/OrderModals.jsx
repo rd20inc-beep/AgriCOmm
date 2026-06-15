@@ -298,6 +298,13 @@ export function MillingDemandModal({
           Export Order: <span className="font-medium text-gray-900">{order.id}</span> &mdash; {order.qtyMT} MT finished rice required
         </div>
         <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Rice Type</label>
+          <div className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-900">
+            {order.productName || '—'}
+          </div>
+          <p className="text-xs text-gray-400 mt-1">From this export order — the batch and its output lots inherit this variety.</p>
+        </div>
+        <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Raw Qty Required (MT)</label>
           <input
             type="number"
