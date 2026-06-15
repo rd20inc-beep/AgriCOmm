@@ -208,9 +208,37 @@ module.exports = {
         .orderBy('mb.pass_number', 'asc')
         .orderBy('mb.created_at', 'asc');
 
+      // Blend recipe — for a blended OUTPUT lot, the varieties + ratios that
+      // were milled to make it, so the operator can trace it back from the lot.
+      let blendRecipe = null;
+      if (lot.blend_batch_no) {
+        const batch = await db('milling_batches')
+          .where({ batch_no: lot.blend_batch_no })
+          .first('id', 'batch_no', 'raw_qty_mt');
+        if (batch) {
+          const inputs = await db('batch_source_lots as bsl')
+            .leftJoin('inventory_lots as il', 'bsl.lot_id', 'il.id')
+            .where('bsl.batch_id', batch.id)
+            .select('bsl.qty_mt', 'bsl.ratio_pct', 'bsl.variety', 'bsl.lot_type', 'bsl.unit_cost_pkr', 'il.lot_no as source_lot_no')
+            .orderBy('bsl.qty_mt', 'desc');
+          blendRecipe = {
+            batch_no: batch.batch_no,
+            raw_qty_mt: parseFloat(batch.raw_qty_mt) || 0,
+            inputs: inputs.map((i) => ({
+              variety: i.variety || 'Unknown',
+              qty_mt: parseFloat(i.qty_mt) || 0,
+              ratio_pct: i.ratio_pct != null ? parseFloat(i.ratio_pct) : null,
+              unit_cost_pkr: i.unit_cost_pkr != null ? parseFloat(i.unit_cost_pkr) : null,
+              source_lot_no: i.source_lot_no || null,
+              lot_type: i.lot_type || null,
+            })),
+          };
+        }
+      }
+
       return res.json({
         success: true,
-        data: { lot: enrichLot(lot), transactions, reservations, millingBatches },
+        data: { lot: enrichLot(lot), transactions, reservations, millingBatches, blendRecipe },
       });
     } catch (err) {
       console.error('getLotDetail error:', err);

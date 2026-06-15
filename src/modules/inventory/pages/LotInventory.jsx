@@ -40,9 +40,18 @@ const SUBTYPE_OPTIONS = [
   { value: 'husk',          label: 'Rice Husk (legacy)' },
 ];
 
+// A blended broken lot carries a batch-scoped grade ('M-033-B1'); strip the
+// blend_batch_no prefix to recover the bare grade so it still classifies as B1.
+function baseGrade(l) {
+  const g = l.grade || '';
+  if (l.processingType === 'blended' && l.blendBatchNo && g.startsWith(`${l.blendBatchNo}-`)) {
+    return g.slice(l.blendBatchNo.length + 1);
+  }
+  return g;
+}
 function lotSubtype(l) {
   const name = (l.itemName || '').toLowerCase();
-  const grade = (l.grade || '').toLowerCase();
+  const grade = baseGrade(l).toLowerCase();
   if (l.type === 'finished') return 'finished';
   if (l.type === 'raw') return 'rice-in';
   if (name.includes('broken')) {
@@ -121,8 +130,13 @@ function renderLotRow(lot, displayUnit, navigate, indented) {
       </td>
       <td className="max-w-[16rem]">
         <div className="text-gray-900 font-medium truncate" title={lot.itemName}>{lot.itemName}</div>
-        {(!varIsRedundant || grade) && (
-          <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
+        {(!varIsRedundant || grade || lot.processingType === 'blended') && (
+          <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-1 flex-wrap">
+            {lot.processingType === 'blended' && (
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-700" title={lot.blendBatchNo ? `Blended — ${lot.blendBatchNo}` : 'Blended'}>
+                BLENDED{lot.blendBatchNo ? ` · ${lot.blendBatchNo}` : ''}
+              </span>
+            )}
             {!varIsRedundant && (
               <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 truncate max-w-[10rem]" title={variety}>
                 {variety}
@@ -161,6 +175,7 @@ export default function LotInventory() {
   const [typeFilter, setTypeFilter] = useState('All');
   const [subtypeFilter, setSubtypeFilter] = useState('All');
   const [entityFilter, setEntityFilter] = useState('All');
+  const [processingFilter, setProcessingFilter] = useState('All'); // All | single_variety | blended
   const [searchTerm, setSearchTerm] = useState('');
   // Grouped vs flat view. Grouped collapses output lots (finished /
   // broken grades / sortex / bran / husk) into one summary row per
@@ -199,6 +214,7 @@ export default function LotInventory() {
     return lots.filter(l => {
       if (typeFilter !== 'All' && l.type !== typeFilter) return false;
       if (entityFilter !== 'All' && l.entity !== entityFilter) return false;
+      if (processingFilter !== 'All' && (l.processingType || 'single_variety') !== processingFilter) return false;
       if (subtypeFilter !== 'All') {
         const s = lotSubtype(l);
         // "broken" matches any broken-* subtype (parent rollup).
@@ -222,7 +238,7 @@ export default function LotInventory() {
       }
       return true;
     });
-  }, [lots, searchTerm, typeFilter, subtypeFilter, entityFilter]);
+  }, [lots, searchTerm, typeFilter, subtypeFilter, entityFilter, processingFilter]);
 
   // Summary KPIs
   const kpis = useMemo(() => {
@@ -250,8 +266,12 @@ export default function LotInventory() {
       const s = lotSubtype(lot);
       if (s === 'rice-in' || s === 'other') { standalone.push(lot); continue; }
       const variety = lot.variety || lot.productCode || lot.productName || '—';
-      const key = `${s}|${variety}`;
-      if (!map.has(key)) map.set(key, { key, subtype: s, variety, lots: [] });
+      // Blended output is grouped per recipe (blend_batch_no), so each blend
+      // batch stays its own row and never merges with pure or another blend.
+      const blended = lot.processingType === 'blended';
+      const blendKey = blended ? (lot.blendBatchNo || 'blend') : 'pure';
+      const key = `${s}|${variety}|${blendKey}`;
+      if (!map.has(key)) map.set(key, { key, subtype: s, variety, lots: [], blended, blendBatchNo: blended ? lot.blendBatchNo : null });
       map.get(key).lots.push(lot);
     }
     const groups = Array.from(map.values()).map((g) => {
@@ -367,6 +387,15 @@ export default function LotInventory() {
               </button>
             ))}
           </div>
+          {/* Pure vs Blended */}
+          <div className="flex bg-gray-100 rounded-lg p-0.5">
+            {[['All', 'All Stock'], ['single_variety', 'Pure'], ['blended', 'Blended']].map(([val, label]) => (
+              <button key={val} onClick={() => setProcessingFilter(val)}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${processingFilter === val ? (val === 'blended' ? 'bg-white text-purple-600 shadow-sm' : 'bg-white text-blue-600 shadow-sm') : 'text-gray-600 hover:text-gray-800'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
           {/* Subtype (more granular than Type — drills into broken grades, sortex, etc.) */}
           <select
             value={subtypeFilter}
@@ -477,7 +506,14 @@ export default function LotInventory() {
                                 </span>
                               </td>
                               <td className="max-w-[16rem]">
-                                <div className="text-gray-900 font-semibold truncate" title={g.variety}>{g.variety}</div>
+                                <div className="text-gray-900 font-semibold truncate flex items-center gap-1.5" title={g.variety}>
+                                  {g.blended && (
+                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-700 shrink-0" title={g.blendBatchNo ? `Blended — ${g.blendBatchNo}` : 'Blended'}>
+                                      BLENDED{g.blendBatchNo ? ` · ${g.blendBatchNo}` : ''}
+                                    </span>
+                                  )}
+                                  <span className="truncate">{g.variety}</span>
+                                </div>
                                 {g.batchIds.length > 0 && (
                                   <div className="text-[11px] text-gray-500 mt-0.5 truncate" title={`From batches: ${g.batchIds.join(', ')}`}>
                                     from {g.batchIds.length} batch{g.batchIds.length === 1 ? '' : 'es'}
