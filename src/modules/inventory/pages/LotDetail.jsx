@@ -72,6 +72,7 @@ export default function LotDetail() {
   const transactions = data?.transactions || [];
   const reservations = data?.reservations || [];
   const millingBatches = data?.millingBatches || [];
+  const blendRecipe = data?.blendRecipe || null;
   const { data: lotSales = [] } = useLocalSalesByLot(lot.id);
 
   // Fetch linked milling batch for vehicles and quality
@@ -294,6 +295,33 @@ export default function LotDetail() {
       {/* ═══ OVERVIEW TAB ═══ */}
       {activeTab === 'overview' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Blend recipe — what varieties + ratios were milled to make this
+              blended output lot, so it traces straight back from the lot. */}
+          {blendRecipe && blendRecipe.inputs?.length > 0 && (
+            <div className="lg:col-span-2 bg-purple-50/50 rounded-xl border border-purple-200 p-5">
+              <h3 className="text-sm font-semibold text-purple-800 uppercase tracking-wider mb-3 flex items-center gap-2">
+                <BarChart3 className="w-4 h-4 text-purple-600" /> Blend Recipe
+                <span className="text-[11px] font-medium text-purple-500 normal-case">· batch {blendRecipe.batchNo} · {(blendRecipe.rawQtyMt || 0).toLocaleString()} MT in</span>
+              </h3>
+              <div className="space-y-2">
+                {blendRecipe.inputs.map((inp, i) => (
+                  <div key={i} className="flex items-center gap-3">
+                    <div className="w-32 shrink-0 text-sm font-semibold text-gray-900 truncate" title={inp.variety}>{inp.variety}</div>
+                    <div className="flex-1 h-5 bg-white rounded-full overflow-hidden ring-1 ring-purple-100">
+                      <div className="h-full bg-purple-400 rounded-full flex items-center justify-end pr-2" style={{ width: `${Math.max(2, Math.min(100, inp.ratioPct || 0))}%` }}>
+                        <span className="text-[10px] font-bold text-white">{inp.ratioPct != null ? `${inp.ratioPct}%` : ''}</span>
+                      </div>
+                    </div>
+                    <div className="w-28 shrink-0 text-right text-xs text-gray-600 tabular-nums">
+                      {(inp.qtyMt || 0).toLocaleString()} MT
+                      {inp.lotType === 'finished' ? ' · re-mill' : ''}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-purple-500 mt-3">This lot is tracked separately as a blend — kept apart from pure stock and from other blends.</p>
+            </div>
+          )}
           {/* Purchase Details */}
           <div className="bg-white rounded-xl border border-gray-100 p-5">
             <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4 flex items-center gap-2"><Truck className="w-4 h-4 text-blue-600" /> Purchase Details</h3>

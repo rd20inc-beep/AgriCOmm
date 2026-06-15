@@ -1642,6 +1642,11 @@ export function useLotDetail(id) {
         transactions: (data.transactions || []).map(transformKeys),
         reservations: (data.reservations || []).map(transformKeys),
         millingBatches: (data.millingBatches || []).map(transformKeys),
+        blendRecipe: data.blendRecipe ? {
+          batchNo: data.blendRecipe.batch_no,
+          rawQtyMt: data.blendRecipe.raw_qty_mt,
+          inputs: (data.blendRecipe.inputs || []).map(transformKeys),
+        } : null,
       };
     },
     enabled: isAuthenticated() && !!id,
