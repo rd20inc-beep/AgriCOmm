@@ -83,18 +83,35 @@ export default function LotCostSheet({ lot, companyProfile, linkedBatch, transac
   const landedKg = parseFloat(lot.landedCostPerKg) || 0;
   const rEq = allRateEquivalents(rateKg, bw);
   const lEq = allRateEquivalents(landedKg, bw);
-  const purchaseAmt = parseFloat(lot.purchaseAmount) || 0;
-  const landedTotal = parseFloat(lot.landedCostTotal) || 0;
+  // A milled output lot (finished rice / by-product) isn't purchased — its cost
+  // is the milling allocation, stored per-kg as raw_cost_component (the raw-rice
+  // share = its "purchase amount") + milling_cost_component (processing share).
+  // landed_cost_total is left 0 on these lots, so derive the total from per-kg.
+  const isMilled = lot.type === 'finished' || lot.type === 'byproduct';
+  const rawCompKg = parseFloat(lot.rawCostComponent) || 0;
+  const millCompKg = parseFloat(lot.millingCostComponent) || 0;
+  // Lots milled before the raw/milling split carry only landed_cost_per_kg.
+  // With no split, attribute the whole cost to the raw-rice (purchase) line.
+  const hasSplit = rawCompKg > 0 || millCompKg > 0;
+  const purchaseAmt = isMilled ? (hasSplit ? rawCompKg : landedKg) * netKg : (parseFloat(lot.purchaseAmount) || 0);
+  const landedTotal = isMilled
+    ? landedKg * netKg
+    : (parseFloat(lot.landedCostTotal) || 0);
 
-  const costItems = [
-    { label: 'Purchase Amount', value: purchaseAmt },
-    { label: 'Transport / Freight', value: parseFloat(lot.transportCost) || 0 },
-    { label: 'Labor / Loading', value: parseFloat(lot.laborCost) || 0 },
-    { label: 'Unloading', value: parseFloat(lot.unloadingCost) || 0 },
-    { label: 'Packing', value: parseFloat(lot.packingCost) || 0 },
-    { label: 'Other Expenses', value: parseFloat(lot.otherCost) || 0 },
-    { label: 'Bag Cost', value: parseFloat(lot.totalBagCost) || 0 },
-  ];
+  const costItems = isMilled
+    ? [
+        { label: 'Purchase Amount (raw rice)', value: purchaseAmt },
+        ...(hasSplit ? [{ label: 'Milling / Processing Cost', value: millCompKg * netKg }] : []),
+      ]
+    : [
+        { label: 'Purchase Amount', value: purchaseAmt },
+        { label: 'Transport / Freight', value: parseFloat(lot.transportCost) || 0 },
+        { label: 'Labor / Loading', value: parseFloat(lot.laborCost) || 0 },
+        { label: 'Unloading', value: parseFloat(lot.unloadingCost) || 0 },
+        { label: 'Packing', value: parseFloat(lot.packingCost) || 0 },
+        { label: 'Other Expenses', value: parseFloat(lot.otherCost) || 0 },
+        { label: 'Bag Cost', value: parseFloat(lot.totalBagCost) || 0 },
+      ];
   const totalDirectCosts = costItems.reduce((s, c) => s + c.value, 0);
 
   const vehicles = linkedBatch?.vehicles || [];
@@ -371,7 +388,8 @@ export default function LotCostSheet({ lot, companyProfile, linkedBatch, transac
           );
         })()}
 
-        {/* ===== PAYMENT STATUS ===== */}
+        {/* ===== PAYMENT STATUS (purchase concept — not shown for milled output) ===== */}
+        {!isMilled && (
         <div className="border-x border-t border-gray-200 px-6 py-3 bg-white">
           <p className="text-[10px] font-semibold text-gray-500 uppercase mb-2">Payment Summary</p>
           <div className="grid grid-cols-3 gap-4">
@@ -380,6 +398,7 @@ export default function LotCostSheet({ lot, companyProfile, linkedBatch, transac
             <div><p className="text-xs text-red-600">Outstanding</p><p className="font-bold text-red-700">{fmtPKR(lot.dueAmount)}</p></div>
           </div>
         </div>
+        )}
 
         {/* ===== FOOTER ===== */}
         <div className="rounded-b-xl px-8 py-4 text-center" style={{ backgroundColor: '#1e3a5f' }}>

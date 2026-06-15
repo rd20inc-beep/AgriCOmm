@@ -139,6 +139,19 @@ export default function LotDetail() {
   const rEq = allRateEquivalents(rateKg, bw);
   const lEq = allRateEquivalents(landedKg, bw);
 
+  // Milled output lots (finished / by-product) carry no purchase — their cost is
+  // the milling allocation, stored per-kg as raw_cost_component (the raw-rice
+  // share = the lot's "purchase amount") + milling_cost_component. landed_cost_
+  // total is left 0 on these, so derive totals from per-kg × net weight.
+  const isMilled = lot.type === 'finished' || lot.type === 'byproduct';
+  const rawCompKg = parseFloat(lot.rawCostComponent) || 0;
+  const millCompKg = parseFloat(lot.millingCostComponent) || 0;
+  // Lots milled before the raw/milling split carry only landed_cost_per_kg —
+  // attribute the whole cost to the raw-rice (purchase) line in that case.
+  const hasMillSplit = rawCompKg > 0 || millCompKg > 0;
+  const purchaseAmount = isMilled ? (hasMillSplit ? rawCompKg : landedKg) * netKg : (parseFloat(lot.purchaseAmount) || 0);
+  const landedTotal = isMilled ? landedKg * netKg : (parseFloat(lot.landedCostTotal) || 0);
+
   // Stock utilization percentage
   const usedPct = netKg > 0 ? Math.round(((netKg - availKg) / netKg) * 100) : 0;
 
@@ -274,7 +287,7 @@ export default function LotDetail() {
         </div>
         <div className="bg-white rounded-xl border border-gray-100 p-4">
           <p className="text-xs font-medium text-gray-500 uppercase">Lot Value</p>
-          <p className="text-xl font-bold text-gray-900 mt-1">{fmtPKR(lot.landedCostTotal || lot.purchaseAmount)}</p>
+          <p className="text-xl font-bold text-gray-900 mt-1">{fmtPKR(landedTotal || purchaseAmount)}</p>
           <p className="text-xs text-gray-400">{usedPct}% utilized</p>
         </div>
       </div>
@@ -478,8 +491,8 @@ export default function LotDetail() {
                 <p className="text-lg font-bold text-gray-900">{fmtPKR(rEq.perKatta)}</p>
               </div>
               <div>
-                <p className="text-xs text-blue-600">Purchase Amount</p>
-                <p className="text-lg font-bold text-gray-900">{fmtPKR(lot.purchaseAmount)}</p>
+                <p className="text-xs text-blue-600">{isMilled ? 'Purchase Amount (raw rice)' : 'Purchase Amount'}</p>
+                <p className="text-lg font-bold text-gray-900">{fmtPKR(purchaseAmount)}</p>
               </div>
             </div>
           </div>
@@ -574,32 +587,46 @@ export default function LotDetail() {
               <div className="flex justify-between text-sm"><span className="text-gray-500">Rate per Katta</span><span className="font-medium">{fmtPKR(rEq.perKatta)}</span></div>
               <div className="flex justify-between text-sm"><span className="text-gray-500">Rate per Maund</span><span className="font-medium">{fmtPKR(rEq.perMaund)}</span></div>
               <div className="flex justify-between text-sm"><span className="text-gray-500">Rate per Ton</span><span className="font-medium">{fmtPKR(rEq.perTon)}</span></div>
-              <div className="flex justify-between text-sm border-t pt-2"><span className="text-gray-700 font-semibold">Purchase Amount</span><span className="font-bold text-gray-900">{fmtPKR(lot.purchaseAmount)}</span></div>
+              <div className="flex justify-between text-sm border-t pt-2"><span className="text-gray-700 font-semibold">{isMilled ? 'Purchase Amount (raw rice)' : 'Purchase Amount'}</span><span className="font-bold text-gray-900">{fmtPKR(purchaseAmount)}</span></div>
             </div>
           </div>
 
           <div className="bg-white rounded-xl border border-gray-100 p-5">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">Additional Costs</h3>
-              <button onClick={() => setShowCostModal(true)} className="btn btn-sm btn-secondary"><Edit3 className="w-3.5 h-3.5" /> Edit</button>
+              <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">{isMilled ? 'Milling Allocation' : 'Additional Costs'}</h3>
+              {!isMilled && (
+                <button onClick={() => setShowCostModal(true)} className="btn btn-sm btn-secondary"><Edit3 className="w-3.5 h-3.5" /> Edit</button>
+              )}
             </div>
-            <div className="space-y-2.5">
-              {[['Transport', lot.transportCost], ['Labor', lot.laborCost], ['Unloading', lot.unloadingCost],
-                ['Packing', lot.packingCost], ['Other', lot.otherCost], ['Total Bag Cost', lot.totalBagCost],
-              ].map(([l, v]) => (
-                <div key={l} className="flex justify-between text-sm"><span className="text-gray-500">{l}</span><span className="font-medium">{fmtPKR(v)}</span></div>
-              ))}
-              <div className="flex justify-between text-sm border-t pt-2">
-                <span className="text-gray-700 font-semibold">Total Additional</span>
-                <span className="font-bold text-gray-900">{fmtPKR((parseFloat(lot.transportCost)||0)+(parseFloat(lot.laborCost)||0)+(parseFloat(lot.unloadingCost)||0)+(parseFloat(lot.packingCost)||0)+(parseFloat(lot.otherCost)||0)+(parseFloat(lot.totalBagCost)||0))}</span>
+            {isMilled ? (
+              <div className="space-y-2.5">
+                <div className="flex justify-between text-sm"><span className="text-gray-500">Raw rice cost (allocated)</span><span className="font-medium">{fmtPKR(purchaseAmount)}</span></div>
+                <div className="flex justify-between text-sm"><span className="text-gray-500">Milling / processing cost</span><span className="font-medium">{fmtPKR(hasMillSplit ? millCompKg * netKg : 0)}</span></div>
+                <div className="flex justify-between text-sm border-t pt-2">
+                  <span className="text-gray-700 font-semibold">Total Allocated</span>
+                  <span className="font-bold text-gray-900">{fmtPKR(landedTotal)}</span>
+                </div>
+                <p className="text-[11px] text-gray-400 pt-1">Share of the milling batch cost, by market value of the output.</p>
               </div>
-            </div>
+            ) : (
+              <div className="space-y-2.5">
+                {[['Transport', lot.transportCost], ['Labor', lot.laborCost], ['Unloading', lot.unloadingCost],
+                  ['Packing', lot.packingCost], ['Other', lot.otherCost], ['Total Bag Cost', lot.totalBagCost],
+                ].map(([l, v]) => (
+                  <div key={l} className="flex justify-between text-sm"><span className="text-gray-500">{l}</span><span className="font-medium">{fmtPKR(v)}</span></div>
+                ))}
+                <div className="flex justify-between text-sm border-t pt-2">
+                  <span className="text-gray-700 font-semibold">Total Additional</span>
+                  <span className="font-bold text-gray-900">{fmtPKR((parseFloat(lot.transportCost)||0)+(parseFloat(lot.laborCost)||0)+(parseFloat(lot.unloadingCost)||0)+(parseFloat(lot.packingCost)||0)+(parseFloat(lot.otherCost)||0)+(parseFloat(lot.totalBagCost)||0))}</span>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="bg-amber-50 rounded-xl border border-amber-100 p-5 lg:col-span-2">
             <h3 className="text-sm font-semibold text-amber-700 uppercase tracking-wider mb-3">Landed Cost Breakdown</h3>
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
-              <div><p className="text-xs text-amber-600">Total Landed</p><p className="text-lg font-bold text-gray-900">{fmtPKR(lot.landedCostTotal)}</p></div>
+              <div><p className="text-xs text-amber-600">Total Landed</p><p className="text-lg font-bold text-gray-900">{fmtPKR(landedTotal)}</p></div>
               <div><p className="text-xs text-amber-600">Per KG</p><p className="text-lg font-bold text-gray-900">{fmtPKR(landedKg)}</p></div>
               <div><p className="text-xs text-amber-600">Per Katta</p><p className="text-lg font-bold text-gray-900">{fmtPKR(lEq.perKatta)}</p></div>
               <div><p className="text-xs text-amber-600">Per Maund</p><p className="text-lg font-bold text-gray-900">{fmtPKR(lEq.perMaund)}</p></div>
@@ -607,7 +634,8 @@ export default function LotDetail() {
             </div>
           </div>
 
-          {/* Payment Status */}
+          {/* Payment Status — a purchase concept; milled output isn't payable */}
+          {!isMilled && (
           <div className="bg-white rounded-xl border border-gray-100 p-5 lg:col-span-2">
             <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">Payment Status</h3>
             <div className="grid grid-cols-3 gap-4">
@@ -619,6 +647,7 @@ export default function LotDetail() {
               <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${lot.landedCostTotal > 0 ? Math.min(((parseFloat(lot.paidAmount)||0) / parseFloat(lot.landedCostTotal)) * 100, 100) : 0}%` }} />
             </div>
           </div>
+          )}
         </div>
       )}
 
