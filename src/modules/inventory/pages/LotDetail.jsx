@@ -306,7 +306,18 @@ export default function LotDetail() {
               <div className="space-y-2">
                 {blendRecipe.inputs.map((inp, i) => (
                   <div key={i} className="flex items-center gap-3">
-                    <div className="w-32 shrink-0 text-sm font-semibold text-gray-900 truncate" title={inp.variety}>{inp.variety}</div>
+                    <div className="w-40 shrink-0 min-w-0">
+                      <div className={`text-sm font-semibold truncate ${inp.varietyKnown ? 'text-gray-900' : 'text-gray-400 italic'}`} title={inp.variety}>{inp.variety}</div>
+                      {inp.sourceLotNo && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); navigate(`/lot-inventory/${inp.sourceLotNo}`); }}
+                          className="text-[10px] text-blue-600 hover:underline truncate max-w-full block text-left"
+                          title={inp.varietyKnown ? 'Open source lot' : 'Open source lot to set its variety'}
+                        >
+                          {inp.sourceLotNo}{!inp.varietyKnown ? ' · set variety' : ''}
+                        </button>
+                      )}
+                    </div>
                     <div className="flex-1 h-5 bg-white rounded-full overflow-hidden ring-1 ring-purple-100">
                       <div className="h-full bg-purple-400 rounded-full flex items-center justify-end pr-2" style={{ width: `${Math.max(2, Math.min(100, inp.ratioPct || 0))}%` }}>
                         <span className="text-[10px] font-bold text-white">{inp.ratioPct != null ? `${inp.ratioPct}%` : ''}</span>

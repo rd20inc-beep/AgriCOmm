@@ -218,20 +218,32 @@ module.exports = {
         if (batch) {
           const inputs = await db('batch_source_lots as bsl')
             .leftJoin('inventory_lots as il', 'bsl.lot_id', 'il.id')
+            .leftJoin('products as ilp', 'il.product_id', 'ilp.id')
             .where('bsl.batch_id', batch.id)
-            .select('bsl.qty_mt', 'bsl.ratio_pct', 'bsl.variety', 'bsl.lot_type', 'bsl.unit_cost_pkr', 'il.lot_no as source_lot_no')
+            .select(
+              'bsl.qty_mt', 'bsl.ratio_pct', 'bsl.variety', 'bsl.lot_type', 'bsl.unit_cost_pkr',
+              'il.lot_no as source_lot_no', 'il.variety as lot_variety',
+              'il.item_name as lot_item_name', 'ilp.name as lot_product_name',
+            )
             .orderBy('bsl.qty_mt', 'desc');
           blendRecipe = {
             batch_no: batch.batch_no,
             raw_qty_mt: parseFloat(batch.raw_qty_mt) || 0,
-            inputs: inputs.map((i) => ({
-              variety: i.variety || 'Unknown',
-              qty_mt: parseFloat(i.qty_mt) || 0,
-              ratio_pct: i.ratio_pct != null ? parseFloat(i.ratio_pct) : null,
-              unit_cost_pkr: i.unit_cost_pkr != null ? parseFloat(i.unit_cost_pkr) : null,
-              source_lot_no: i.source_lot_no || null,
-              lot_type: i.lot_type || null,
-            })),
+            inputs: inputs.map((i) => {
+              // Recipe snapshot first; if it was never captured (old blends),
+              // fall back to the source lot's CURRENT variety → item name →
+              // product. So setting a variety on the raw lot fills the recipe in.
+              const variety = i.variety || i.lot_variety || i.lot_item_name || i.lot_product_name || 'Unknown';
+              return {
+                variety,
+                variety_known: !!(i.variety || i.lot_variety),
+                qty_mt: parseFloat(i.qty_mt) || 0,
+                ratio_pct: i.ratio_pct != null ? parseFloat(i.ratio_pct) : null,
+                unit_cost_pkr: i.unit_cost_pkr != null ? parseFloat(i.unit_cost_pkr) : null,
+                source_lot_no: i.source_lot_no || null,
+                lot_type: i.lot_type || null,
+              };
+            }),
           };
         }
       }
