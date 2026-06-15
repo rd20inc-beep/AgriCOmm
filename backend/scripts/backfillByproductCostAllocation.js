@@ -22,6 +22,7 @@ const db = require('../src/config/database');
 const inventoryService = require('../src/modules/inventory/inventory.service');
 
 const COMMIT = process.argv.includes('--commit');
+const FORCE_UNBALANCED = process.argv.includes('--force-unbalanced');
 
 // Candidate batches: yielded, with a real cost pool and at least one confirmed
 // output price, AND at least one output lot still showing zero/incomplete cost.
@@ -99,7 +100,18 @@ async function main() {
             console.log(`      ${(bl.item_name || '').padEnd(16)} ${b0.toFixed(2).padStart(10)} → ${a0.toFixed(2).padStart(10)} /kg`);
           }
         }
-        if (!balanced) stillOff.push(b.batch_no);
+        // Never PERSIST cost onto a batch whose output lots don't reconcile to
+        // the pool — an imbalance means duplicated or qty-mismatched output lots,
+        // and writing would double-count or strand inventory value. Show it in
+        // the dry run, but roll it back on --commit and flag for manual repair.
+        // --force-unbalanced overrides if you really mean to.
+        if (!balanced) {
+          stillOff.push(b.batch_no);
+          if (COMMIT && !FORCE_UNBALANCED) {
+            console.log('      ↳ skipped on commit (unbalanced — reconcile lots first)');
+            throw new Error('__ROLLBACK_UNBALANCED__');
+          }
+        }
 
         cogsUpdated += out.cogsUpdated || 0;
         cogsLocked += out.cogsLockedSkipped || 0;
@@ -108,6 +120,7 @@ async function main() {
         if (!COMMIT) throw new Error('__ROLLBACK_DRY__');
       });
     } catch (err) {
+      if (err.message === '__ROLLBACK_UNBALANCED__') { skipped += 1; continue; }
       if (err.message === '__ROLLBACK_DRY__' || err.message === '__ROLLBACK_SKIP__') continue;
       console.error(`  ${b.batch_no} — ERROR: ${err.message}`);
       stillOff.push(`${b.batch_no} (error)`);
