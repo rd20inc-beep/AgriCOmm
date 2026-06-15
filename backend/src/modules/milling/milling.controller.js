@@ -324,11 +324,18 @@ const millingController = {
           : (blendVarieties.length > 1 ? 'blended' : 'single_variety');
 
         // Rice type: prefer an explicit product_id; otherwise inherit it from the
-        // linked export order so an order-driven batch carries its variety from
-        // the moment it's created (not only once output is recorded).
+        // linked export order, then from the source lots when they share a single
+        // product (a single-variety stock batch milled from one purchase lot). So
+        // a batch carries its variety from the moment it's created (not only once
+        // output is recorded), and the landed cost flows in from the lot.
+        const distinctLotProducts = [
+          ...new Set(blendRows.map((b) => b.lot.product_id).filter((v) => v != null)),
+        ];
         const resolvedProductId = product_id
           ? parseInt(product_id)
-          : (linkedOrder && linkedOrder.product_id ? linkedOrder.product_id : null);
+          : (linkedOrder && linkedOrder.product_id
+            ? linkedOrder.product_id
+            : (distinctLotProducts.length === 1 ? distinctLotProducts[0] : null));
 
         const [batch] = await trx('milling_batches')
           .insert({
@@ -377,7 +384,7 @@ const millingController = {
             batch_id: batch.id,
             category: 'raw_rice',
             amount: Math.round(blendRawCostTotal * 100) / 100,
-            notes: `Blended ${blendRows.length} lot(s): ${blendRows.map((b) => `${b.lot.lot_no || b.lot.id}×${b.qty}MT`).join(', ')}`,
+            notes: `${processingType === 'blended' ? 'Blended' : 'Milled from'} ${blendRows.length} lot(s): ${blendRows.map((b) => `${b.lot.lot_no || b.lot.id}×${b.qty}MT`).join(', ')}`,
             created_by: req.user.id,
           });
 

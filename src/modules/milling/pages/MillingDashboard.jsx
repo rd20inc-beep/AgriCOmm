@@ -87,7 +87,10 @@ export default function MillingDashboard() {
   const setBF = (k, v) => setBatchForm(p => ({ ...p, [k]: v }));
   // Blend: consume partial quantities from multiple stock lots (mixed
   // varieties / leftover finished rice) into one batch.
-  const [useBlend, setUseBlend] = useState(false);
+  // Source of the rice. true = from existing stock lot(s): landed cost flows in
+  // automatically and the lot is consumed (single lot = single-variety; 2+
+  // varieties = blend). false = direct supplier + quantity (rice not yet a lot).
+  const [useBlend, setUseBlend] = useState(true);
   const [blendProductId, setBlendProductId] = useState('');
   const [blendRows, setBlendRows] = useState([{ lotId: '', qtyMt: '' }]);
   const { data: products = [] } = useProducts();
@@ -134,7 +137,7 @@ export default function MillingDashboard() {
       millingFeePerKg: '5',
       millId: '', shift: 'Day', notes: '', clientName: '', clientContact: '', millingFeePerMT: '',
     });
-    setUseBlend(false); setBlendProductId(''); setBlendRows([{ lotId: '', qtyMt: '' }]);
+    setUseBlend(true); setBlendProductId(''); setBlendRows([{ lotId: '', qtyMt: '' }]);
   };
 
   async function handleCreateBatch() {
@@ -145,8 +148,13 @@ export default function MillingDashboard() {
           .map(r => ({ lot_id: parseInt(r.lotId), qty_mt: parseFloat(r.qtyMt) }))
       : [];
     if (useBlend) {
-      if (!blendProductId) { addToast('Rice type (output product) is required so the blend can be tracked', 'error'); return; }
-      if (blendLots.length === 0) { addToast('Add at least one source lot with a quantity', 'error'); return; }
+      if (blendLots.length === 0) { addToast('Add at least one stock lot with a quantity', 'error'); return; }
+      // A multi-variety blend needs an explicit output product; a single-variety
+      // run inherits the rice type from its lot, so it's optional there.
+      if (blendRecipe.processingType === 'blended' && !blendProductId) {
+        addToast('Pick the blended output product so the blend can be tracked', 'error');
+        return;
+      }
       // Don't let a row request more than the lot has available.
       for (const r of blendRows) {
         const lot = blendableLots.find(l => String(l.id) === String(r.lotId));
@@ -1040,7 +1048,7 @@ export default function MillingDashboard() {
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
-                onClick={() => setBF('millingType', 'own_stock')}
+                onClick={() => { setBF('millingType', 'own_stock'); setUseBlend(true); }}
                 className={`p-3 rounded-lg border-2 text-center transition-all text-sm ${
                   batchForm.millingType === 'own_stock'
                     ? 'border-blue-500 bg-blue-50 text-blue-700 font-semibold'
@@ -1053,7 +1061,7 @@ export default function MillingDashboard() {
               </button>
               <button
                 type="button"
-                onClick={() => setBF('millingType', 'service_milling')}
+                onClick={() => { setBF('millingType', 'service_milling'); setUseBlend(false); }}
                 className={`p-3 rounded-lg border-2 text-center transition-all text-sm ${
                   batchForm.millingType === 'service_milling'
                     ? 'border-amber-500 bg-amber-50 text-amber-700 font-semibold'
@@ -1088,28 +1096,53 @@ export default function MillingDashboard() {
             </div>
           )}
 
-          {/* Blend from stock lots (own-stock only) */}
+          {/* Rice source (own-stock only): from a purchase lot vs direct */}
           {batchForm.millingType !== 'service_milling' && (
-            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-              <input type="checkbox" checked={useBlend} onChange={e => setUseBlend(e.target.checked)} className="w-4 h-4" />
-              <span className="font-medium">Blend from stock lots</span>
-              <span className="text-xs text-gray-400">— partial qty from multiple lots, mixed varieties, or leftover finished rice</span>
-            </label>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Rice Source</label>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setUseBlend(true)}
+                  className={`p-3 rounded-lg border-2 text-left transition-all text-sm ${
+                    useBlend ? 'border-blue-500 bg-blue-50 text-blue-700 font-semibold' : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                  }`}
+                >
+                  From stock lot(s)
+                  <p className="text-xs font-normal text-gray-400 mt-0.5">Cost & variety pulled from the purchase; lot is consumed</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUseBlend(false)}
+                  className={`p-3 rounded-lg border-2 text-left transition-all text-sm ${
+                    !useBlend ? 'border-blue-500 bg-blue-50 text-blue-700 font-semibold' : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                  }`}
+                >
+                  Direct (supplier + qty)
+                  <p className="text-xs font-normal text-gray-400 mt-0.5">Rice not yet received as a lot; enter cost later</p>
+                </button>
+              </div>
+            </div>
           )}
 
           {/* Blend source-lot picker */}
           {useBlend && batchForm.millingType !== 'service_milling' && (
             <div className="space-y-3 rounded-lg border border-blue-200 bg-blue-50/40 p-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Rice Type (output product) *</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Rice Type (output product) {blendRecipe.processingType === 'blended' ? '*' : <span className="text-gray-400 font-normal">— optional</span>}
+                </label>
                 <select value={blendProductId} onChange={e => setBlendProductId(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none bg-white">
-                  <option value="">Select rice type…</option>
+                  <option value="">{blendRecipe.processingType === 'blended' ? 'Select blended output product…' : 'Auto — inherit from the stock lot'}</option>
                   {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
+                {!blendProductId && blendRecipe.processingType !== 'blended' && blendRecipe.rows.length > 0 && (
+                  <p className="text-xs text-gray-400 mt-0.5">Will use the lot's variety{blendRecipe.rows[0]?.variety ? `: ${blendRecipe.rows[0].variety}` : ''}.</p>
+                )}
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className="block text-sm font-medium text-gray-700">Source Lots</label>
+                  <label className="block text-sm font-medium text-gray-700">Stock Lot(s)</label>
                   <span className="text-xs text-gray-400">{blendableLots.length} available</span>
                 </div>
                 {blendRows.map((row, i) => (
