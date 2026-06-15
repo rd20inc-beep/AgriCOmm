@@ -226,6 +226,17 @@ const millingController = {
         });
       }
 
+      // Rice type is mandatory for traceability. A blend derives its variety
+      // from the source lots' recipe; a single-source batch has no recipe, so
+      // it MUST carry a product_id — unless it's tied to an export order, which
+      // supplies the product itself.
+      if (blendLots.length === 0 && !product_id && !linked_export_order_id) {
+        return res.status(400).json({
+          success: false,
+          message: 'product_id (rice type) is required so the batch and its output lots can be traced.',
+        });
+      }
+
       // Resolve mill_id: take what the client sent, otherwise fall back to
       // the first active mill in the DB. The "Create Milling Demand" modal
       // on the export order doesn't ask for a mill yet, so this default

@@ -78,6 +78,7 @@ export default function MillingDashboard() {
   const [showNewBatch, setShowNewBatch] = useState(false);
   const [batchForm, setBatchForm] = useState({
     millingType: 'own_stock',
+    productId: '',
     supplierId: '', rawQtyKg: '', totalBags: '', plannedFinishedKg: '',
     millId: '', shift: 'Day', notes: '',
     // Service milling fields
@@ -129,7 +130,7 @@ export default function MillingDashboard() {
   }, [blendRows, blendableLots]);
   const resetBatchForm = () => {
     setBatchForm({
-      millingType: 'own_stock', supplierId: '', rawQtyKg: '', totalBags: '', plannedFinishedKg: '',
+      millingType: 'own_stock', productId: '', supplierId: '', rawQtyKg: '', totalBags: '', plannedFinishedKg: '',
       millingFeePerKg: '5',
       millId: '', shift: 'Day', notes: '', clientName: '', clientContact: '', millingFeePerMT: '',
     });
@@ -144,6 +145,7 @@ export default function MillingDashboard() {
           .map(r => ({ lot_id: parseInt(r.lotId), qty_mt: parseFloat(r.qtyMt) }))
       : [];
     if (useBlend) {
+      if (!blendProductId) { addToast('Rice type (output product) is required so the blend can be tracked', 'error'); return; }
       if (blendLots.length === 0) { addToast('Add at least one source lot with a quantity', 'error'); return; }
       // Don't let a row request more than the lot has available.
       for (const r of blendRows) {
@@ -153,6 +155,9 @@ export default function MillingDashboard() {
           return;
         }
       }
+    } else if (!batchForm.productId) {
+      addToast('Rice type is required so the batch can be tracked', 'error');
+      return;
     } else if (!batchForm.supplierId || !batchForm.rawQtyKg) {
       addToast('Supplier and raw quantity are required', 'error');
       return;
@@ -178,7 +183,7 @@ export default function MillingDashboard() {
           : batchForm.notes || null,
         ...(useBlend
           ? { source_lots: blendLots, product_id: blendProductId ? parseInt(blendProductId) : null, processing_type: blendRecipe.processingType }
-          : { supplier_id: parseInt(batchForm.supplierId), raw_qty_mt: rawQty }),
+          : { supplier_id: parseInt(batchForm.supplierId), raw_qty_mt: rawQty, product_id: parseInt(batchForm.productId) }),
       };
       const res = await createBatchMut.mutateAsync(payload);
       const batchNo = res?.data?.batch?.batch_no || res?.data?.batch?.id;
@@ -1096,9 +1101,9 @@ export default function MillingDashboard() {
           {useBlend && batchForm.millingType !== 'service_milling' && (
             <div className="space-y-3 rounded-lg border border-blue-200 bg-blue-50/40 p-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Output Product</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Rice Type (output product) *</label>
                 <select value={blendProductId} onChange={e => setBlendProductId(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none bg-white">
-                  <option value="">Select milled output product…</option>
+                  <option value="">Select rice type…</option>
                   {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
               </div>
@@ -1158,6 +1163,18 @@ export default function MillingDashboard() {
                 </div>
               )}
             </div>
+          )}
+
+          {/* Rice type (mandatory — without it the batch & its output lots can't be traced) */}
+          {!useBlend && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Rice Type *</label>
+            <select value={batchForm.productId} onChange={e => setBF('productId', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none bg-white">
+              <option value="">Select rice type…</option>
+              {products.map(p => <option key={p.id} value={p.id}>{p.name || p.code}</option>)}
+            </select>
+            <p className="text-xs text-gray-400 mt-0.5">Required — the variety being milled, so the batch and its output lots are traceable.</p>
+          </div>
           )}
 
           {/* Supplier (rice source) */}
