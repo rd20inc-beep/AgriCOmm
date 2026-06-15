@@ -2048,7 +2048,8 @@ const inventoryService = {
     const millFrac = totalBatchCostPool > 0 ? (processingCosts + millingFeeTotal) / totalBatchCostPool : 0;
     const outLots = await trx('inventory_lots')
       .where({ batch_ref: `batch-${batchId}` })
-      .whereIn('type', ['finished', 'byproduct']);
+      .whereIn('type', ['finished', 'byproduct'])
+      .whereNot('status', 'Closed'); // voided/closed duplicates don't get re-costed
     const keyForByproduct = (lot) => {
       const n = (lot.item_name || '').toLowerCase();
       const g = (lot.grade || '').toLowerCase();

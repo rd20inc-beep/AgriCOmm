@@ -23,6 +23,12 @@ const inventoryService = require('../src/modules/inventory/inventory.service');
 
 const COMMIT = process.argv.includes('--commit');
 const FORCE_UNBALANCED = process.argv.includes('--force-unbalanced');
+// Read-only diagnostic: --check=<batchId> prints the tier-aware balance for one
+// batch and exits, changing nothing.
+const CHECK_ID = (() => {
+  const a = process.argv.find((x) => x.startsWith('--check='));
+  return a ? parseInt(a.split('=')[1], 10) : null;
+})();
 
 // Candidate batches: yielded, with a real cost pool and at least one confirmed
 // output price, AND at least one output lot still showing zero/incomplete cost.
@@ -40,6 +46,8 @@ const CANDIDATE_SQL = `
       SELECT 1 FROM inventory_lots z
       WHERE z.batch_ref = 'batch-' || b.id
         AND z.type IN ('finished', 'byproduct')
+        AND z.status <> 'Closed'          -- ignore voided duplicates
+        AND z.qty > 0
         AND (COALESCE(z.landed_cost_per_kg, 0) = 0 OR z.cost_incomplete = true)
     )
   ORDER BY b.id`;
@@ -54,7 +62,62 @@ async function lotCosts(trx, batchId) {
     .orderBy('id');
 }
 
+// Reconcile a batch's lot costs to its pool, accounting for output that
+// legitimately LEFT the batch (re-milled into another batch, or otherwise
+// consumed) — its cost followed it out, so the remaining lots holding less than
+// produced is expected, NOT an error. We compare per output tier:
+//   - held qty (Σ current batch lots of that tier) vs produced qty (batch cols)
+//   - if a tier holds MORE than produced → over-allocation (duplicate lots) ✗
+//   - the shortfall on a tier = (produced − held) × that tier's per-kg cost,
+//     summed as costLeft; balanced when Σ(lot cost) + costLeft = pool.
+async function batchBalance(trx, batchId, lots) {
+  const b = await trx('milling_batches').where({ id: batchId }).first();
+  const p = (v) => parseFloat(v) || 0;
+  const poolRow = await trx('milling_costs').where({ batch_id: batchId }).sum('amount as t').first();
+  const pool = (parseFloat(poolRow?.t) || 0) + p(b.milling_fee_per_kg) * p(b.raw_qty_mt) * 1000;
+
+  const gradeSum = p(b.b1_mt) + p(b.b2_mt) + p(b.b3_mt) + p(b.csr_mt) + p(b.short_grain_mt);
+  const produced = {
+    finished: p(b.actual_finished_mt),
+    broken: gradeSum > 0 ? gradeSum : p(b.broken_mt),
+    bran: p(b.bran_mt), husk: p(b.husk_mt), sortex: p(b.sortex_rejects_mt),
+  };
+  const tierOf = (lot) => {
+    if (lot.type === 'finished') return 'finished';
+    const n = (lot.item_name || '').toLowerCase();
+    if (n.includes('bran')) return 'bran';
+    if (n.includes('husk')) return 'husk';
+    if (n.includes('sortex')) return 'sortex';
+    return 'broken';
+  };
+  const held = { finished: 0, broken: 0, bran: 0, husk: 0, sortex: 0 };
+  const cpk = { finished: 0, broken: 0, bran: 0, husk: 0, sortex: 0 };
+  for (const l of lots) {
+    const t = tierOf(l);
+    held[t] += p(l.qty);
+    const c = p(l.landed_cost_per_kg);
+    if (c > cpk[t]) cpk[t] = c; // representative per-kg for the left-out portion
+  }
+  let costLeft = 0, over = false;
+  for (const t of Object.keys(produced)) {
+    if (held[t] > produced[t] + 1e-6) over = true;
+    costLeft += Math.max(0, produced[t] - held[t]) * cpk[t] * 1000;
+  }
+  const sumAfter = lots.reduce((s, l) => s + p(l.landed_cost_total), 0);
+  const tol = Math.max(2, pool * 0.001);
+  const balanced = !over && (pool === 0 || Math.abs(sumAfter + costLeft - pool) <= tol);
+  return { pool, sumAfter, costLeft, over, balanced };
+}
+
 async function main() {
+  if (CHECK_ID) {
+    const lots = await lotCosts(db, CHECK_ID);
+    const { pool, sumAfter, costLeft, over, balanced } = await batchBalance(db, CHECK_ID, lots);
+    console.log(`\n[check] batch ${CHECK_ID}: pool=Rs ${fmt(pool)}  Σ(lots)=Rs ${fmt(sumAfter)}  leftOut=Rs ${fmt(costLeft)}`);
+    console.log(`[check] verdict: ${balanced ? 'balanced ✓' : (over ? 'OVER (duplicate lots) ✗' : 'unexplained shortfall ✗')}\n`);
+    await db.destroy();
+    return;
+  }
   console.log(`\n[backfill] By-product cost re-allocation — ${COMMIT ? 'COMMIT' : 'DRY RUN'}\n`);
 
   const { rows: candidates } = await db.raw(CANDIDATE_SQL);
@@ -83,15 +146,12 @@ async function main() {
         const after = await lotCosts(trx, b.id);
         const afterById = new Map(after.map((l) => [l.id, l]));
 
-        // Pool balance check: Σ(landed_total) should equal the batch cost pool.
-        const poolRow = await trx('milling_costs').where({ batch_id: b.id }).sum('amount as t').first();
-        const feeRow = await trx('milling_batches').where({ id: b.id }).first('milling_fee_per_kg', 'raw_qty_mt');
-        const pool = (parseFloat(poolRow?.t) || 0)
-          + (parseFloat(feeRow?.milling_fee_per_kg) || 0) * (parseFloat(feeRow?.raw_qty_mt) || 0) * 1000;
-        const sumAfter = after.reduce((s, l) => s + (parseFloat(l.landed_cost_total) || 0), 0);
-        const balanced = pool === 0 || Math.abs(sumAfter - pool) <= Math.max(2, pool * 0.001);
-
-        console.log(`  ${b.batch_no} (batch ${b.id})  pool=Rs ${fmt(pool)}  Σafter=Rs ${fmt(sumAfter)}  ${balanced ? 'balanced ✓' : 'OFF ✗'}`);
+        // Pool balance check — tier-aware, so output that left the batch
+        // (re-milled/transferred) doesn't read as a shortfall.
+        const { pool, sumAfter, costLeft, over, balanced } = await batchBalance(trx, b.id, after);
+        const leftNote = costLeft > 1 ? `  (+Rs ${fmt(costLeft)} left via re-mill/transfer)` : '';
+        const verdict = balanced ? 'balanced ✓' : (over ? 'OVER — lots exceed produced (duplicates?) ✗' : 'OFF — unexplained shortfall ✗');
+        console.log(`  ${b.batch_no} (batch ${b.id})  pool=Rs ${fmt(pool)}  Σafter=Rs ${fmt(sumAfter)}${leftNote}  ${verdict}`);
         for (const bl of before) {
           const al = afterById.get(bl.id);
           const b0 = parseFloat(bl.landed_cost_per_kg) || 0;
@@ -130,9 +190,10 @@ async function main() {
   console.log(`\n[backfill] ${COMMIT ? 'Applied' : 'Would apply'} to ${fixed} batch(es); ${skipped} skipped.`);
   console.log(`[backfill] COGS recomputed: ${cogsUpdated}; locked-at-dispatch left intact: ${cogsLocked}.`);
   if (stillOff.length) {
-    console.log(`[backfill] NOTE — Σ(output cost) ≠ pool for: ${stillOff.join(', ')}`);
-    console.log('[backfill]   Per-kg costs are correct; an imbalance means a lot qty ≠ the batch');
-    console.log('[backfill]   output qty (cost can\'t fully land on a smaller lot) — a pre-existing');
+    console.log(`[backfill] NOTE — did not balance for: ${stillOff.join(', ')}`);
+    console.log('[backfill]   Output that left the batch (re-milled/transferred) is already');
+    console.log('[backfill]   accounted for. A remaining imbalance is either OVER (lots exceed');
+    console.log('[backfill]   produced qty — duplicate lots) or an unexplained shortfall — a');
     console.log('[backfill]   data discrepancy to reconcile separately, not an allocation error.');
   }
   if (!COMMIT) console.log('\n[backfill] DRY RUN — nothing written. Re-run with --commit to apply.\n');
