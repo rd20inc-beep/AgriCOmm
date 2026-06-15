@@ -652,6 +652,19 @@ const millingController = {
               created_by: req.user?.id || null,
             });
           }
+
+          // If the batch has already yielded, cascade the updated raw cost into
+          // the output lots (re-cost finished + by-products by market value) and
+          // recompute non-locked COGS — same as confirming output prices. Without
+          // this, editing the arrival cost after yield leaves the existing output
+          // lots (and their costing sheet) showing the old cost.
+          const yielded = await trx('inventory_lots')
+            .where({ batch_ref: `batch-${id}` })
+            .whereIn('type', ['finished', 'byproduct'])
+            .first('id');
+          if (yielded) {
+            await inventoryService.recomputeBatchOutputsAfterPriceChange(trx, id, { userId: req.user?.id });
+          }
         }
 
         // Calculate variance between sample and arrival if both exist
