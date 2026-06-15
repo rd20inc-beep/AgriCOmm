@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Save, Loader2 } from 'lucide-react';
-import Modal from '../../../components/Modal';
+import Drawer from '../../../components/Drawer';
 import { lotInventoryApi } from '../api/services';
 
 // Extended quality percentages stored in inventory_lots.quality_json. Keys match
@@ -78,7 +78,21 @@ export default function QualityEditModal({ isOpen, lot, onClose, onSuccess, addT
   );
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={`Edit quality — ${lot?.lotNo || 'lot'}`} size="lg">
+    <Drawer
+      isOpen={isOpen}
+      onClose={onClose}
+      title={`Edit quality — ${lot?.lotNo || 'lot'}`}
+      subtitle="Correct the recorded analysis — never touches cost or stock"
+      width="2xl"
+      footer={
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+          <button onClick={save} disabled={saving} className="px-4 py-2 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 inline-flex items-center gap-2 disabled:opacity-60">
+            {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />} Save quality
+          </button>
+        </div>
+      }
+    >
       <div className="space-y-4">
         <div className="grid grid-cols-3 gap-3">
           <div><label className={lbl}>Variety</label><input value={form.variety} onChange={(e) => set('variety', e.target.value)} className={inp} placeholder="e.g. D-98" /></div>
@@ -102,14 +116,7 @@ export default function QualityEditModal({ isOpen, lot, onClose, onSuccess, addT
           <label className={lbl}>Notes</label>
           <input value={form.quality_notes} onChange={(e) => set('quality_notes', e.target.value)} className={inp} placeholder="Optional" />
         </div>
-
-        <div className="flex justify-end gap-2 pt-2 border-t">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
-          <button onClick={save} disabled={saving} className="px-4 py-2 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 inline-flex items-center gap-2 disabled:opacity-60">
-            {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />} Save quality
-          </button>
-        </div>
       </div>
-    </Modal>
+    </Drawer>
   );
 }
