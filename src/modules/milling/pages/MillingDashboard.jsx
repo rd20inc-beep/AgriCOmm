@@ -35,6 +35,7 @@ import KPICard from '../../../components/KPICard';
 import StatusBadge from '../../../components/StatusBadge';
 import Modal from '../../../components/Modal';
 import SlideDrawer from '../../../components/SlideDrawer';
+import RiceTypePicker from '../../../components/RiceTypePicker';
 // Chart data computed from real batch data below (no mock imports)
 
 function formatPKR(value) {
@@ -1129,15 +1130,16 @@ export default function MillingDashboard() {
           {useBlend && batchForm.millingType !== 'service_milling' && (
             <div className="space-y-3 rounded-lg border border-blue-200 bg-blue-50/40 p-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Rice Type (output product) {blendRecipe.processingType === 'blended' ? '*' : <span className="text-gray-400 font-normal">— optional</span>}
-                </label>
-                <select value={blendProductId} onChange={e => setBlendProductId(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none bg-white">
-                  <option value="">{blendRecipe.processingType === 'blended' ? 'Select blended output product…' : 'Auto — inherit from the stock lot'}</option>
-                  {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
+                <RiceTypePicker
+                  label={<>Rice Type (output product) {blendRecipe.processingType === 'blended' ? '*' : <span className="text-gray-400 font-normal">— optional</span>}</>}
+                  value={blendProductId}
+                  onChange={setBlendProductId}
+                  products={products}
+                  addToast={addToast}
+                  placeholder={blendRecipe.processingType === 'blended' ? 'Search blended output product…' : 'Search rice type (or leave to inherit from lot)…'}
+                />
                 {!blendProductId && blendRecipe.processingType !== 'blended' && blendRecipe.rows.length > 0 && (
-                  <p className="text-xs text-gray-400 mt-0.5">Will use the lot's variety{blendRecipe.rows[0]?.variety ? `: ${blendRecipe.rows[0].variety}` : ''}.</p>
+                  <p className="text-xs text-gray-400 mt-1">Will use the lot's variety{blendRecipe.rows[0]?.variety ? `: ${blendRecipe.rows[0].variety}` : ''}.</p>
                 )}
               </div>
               <div className="space-y-2">
@@ -1201,12 +1203,16 @@ export default function MillingDashboard() {
           {/* Rice type (mandatory — without it the batch & its output lots can't be traced) */}
           {!useBlend && (
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Rice Type *</label>
-            <select value={batchForm.productId} onChange={e => setBF('productId', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none bg-white">
-              <option value="">Select rice type…</option>
-              {products.map(p => <option key={p.id} value={p.id}>{p.name || p.code}</option>)}
-            </select>
-            <p className="text-xs text-gray-400 mt-0.5">Required — the variety being milled, so the batch and its output lots are traceable.</p>
+            <RiceTypePicker
+              label={<>Rice Type <span className="text-red-500">*</span></>}
+              value={batchForm.productId}
+              onChange={(id) => setBF('productId', id)}
+              products={products}
+              addToast={addToast}
+              placeholder="Search rice type, e.g. 1121 Basmati, D98…"
+              clearable={false}
+            />
+            <p className="text-xs text-gray-400 mt-1">Required — the variety being milled, so the batch and its output lots are traceable.</p>
           </div>
           )}
 
