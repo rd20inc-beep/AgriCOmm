@@ -200,14 +200,20 @@ export default function MillFinanceDashboard() {
     const totalOtherCosts = completed.reduce((s, b) => {
       return s + Object.entries(b.costs || {}).reduce((cs, [k, v]) => RAW_KEYS.has(k) ? cs : cs + (parseFloat(v) || 0), 0);
     }, 0);
+    // Milling cost = the processing/milling fee (Rs/kg × raw qty). It lives on the
+    // batch (milling_fee_per_kg), not as a milling_costs row, so the batch-cost
+    // sums above miss it. Own production only — a service-milled batch's fee is
+    // revenue (counted in serviceFees), not a cost.
+    const totalMilling = completed.reduce((s, b) =>
+      s + (b.isServiceMilling ? 0 : (parseFloat(b.millingFeePerKg) || 0) * (parseFloat(b.rawQtyMT) || 0) * 1000), 0);
     const finishedRev = completed.reduce((s, b) => s + b.actualFinishedMT * batchPrice(b, 'finished'), 0);
     const byproductRev = completed.reduce((s, b) =>
       s + b.brokenMT * batchPrice(b, 'broken') + b.branMT * batchPrice(b, 'bran') + b.huskMT * batchPrice(b, 'husk'), 0);
     const totalRev = finishedRev + byproductRev;
-    const totalCost = totalRaw + totalOtherCosts + totalOverhead;
+    const totalCost = totalRaw + totalMilling + totalOtherCosts + totalOverhead;
     const totalFinishedKg = completed.reduce((s, b) => s + b.actualFinishedMT * 1000, 0);
     const costPerKg = totalFinishedKg > 0 ? totalCost / totalFinishedKg : 0;
-    return { totalRev, totalRaw, totalOtherCosts, totalCost, netProfit: totalRev - totalCost, costPerKg, finishedRev, byproductRev };
+    return { totalRev, totalRaw, totalMilling, totalOtherCosts, totalCost, netProfit: totalRev - totalCost, costPerKg, finishedRev, byproductRev };
   }, [completed, totalOverhead]);
 
   const efficiency = useMemo(() => {
@@ -259,12 +265,13 @@ export default function MillFinanceDashboard() {
   const moneyFlow = useMemo(() => {
     const out = {
       paddy: kpis.totalRaw,
+      milling: kpis.totalMilling,
       batchCosts: kpis.totalOtherCosts,
       overhead: totalOverhead,
       payroll: payrollTotal,
       store: storePurchaseTotal,
     };
-    out.total = out.paddy + out.batchCosts + out.overhead + out.payroll + out.store;
+    out.total = out.paddy + out.milling + out.batchCosts + out.overhead + out.payroll + out.store;
     const inc = {
       output: kpis.totalRev,
       finished: kpis.finishedRev,
@@ -442,6 +449,7 @@ export default function MillFinanceDashboard() {
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
             <Stat tone="blue"   icon={TrendingUp}   label="Revenue"        value={PKR(kpis.totalRev)}   sub={`Finished ${COMPACT_PKR(kpis.finishedRev)}`} />
             <Stat tone="red"    icon={TrendingDown} label="Raw Material"   value={PKR(kpis.totalRaw)}   sub="Rice purchase" />
+            <Stat tone="purple" icon={Factory}      label="Milling Cost"   value={PKR(kpis.totalMilling)} sub="Processing fee" />
             <Stat tone="amber"  icon={DollarSign}   label="Operating"      value={PKR(kpis.totalOtherCosts + totalOverhead)} sub={`Batch ${COMPACT_PKR(kpis.totalOtherCosts)} · OH ${COMPACT_PKR(totalOverhead)}`} />
             <Stat tone={kpis.netProfit >= 0 ? 'green' : 'red'} icon={TrendingUp} label="Net Profit" value={PKR(kpis.netProfit)} sub={`Margin ${margin}%`} />
             <Stat tone="slate"  icon={DollarSign}   label="Cost/kg"        value={`Rs ${kpis.costPerKg.toFixed(2)}`} sub="All-in" />
@@ -627,7 +635,7 @@ export default function MillFinanceDashboard() {
               <Stat label="Output value produced" value={COMPACT_PKR(moneyFlow.inc.output)} sub="finished + byproducts" tone="slate" icon={Wallet} />
               <Stat label="Finished rice value" value={COMPACT_PKR(moneyFlow.inc.finished)} tone="slate" icon={TrendingUp} />
               <Stat label="Byproduct value" value={COMPACT_PKR(moneyFlow.inc.byproduct)} sub="broken, bran, husk" tone="slate" icon={Package} />
-              <Stat label="Mill costs (accrued)" value={COMPACT_PKR(moneyFlow.out.total)} sub="paddy + process + overhead" tone="slate" icon={Receipt} />
+              <Stat label="Mill costs (accrued)" value={COMPACT_PKR(moneyFlow.out.total)} sub="rice + milling + overhead" tone="slate" icon={Receipt} />
               <Stat label="Net production margin" value={COMPACT_PKR(moneyFlow.netProduction)} sub={`${margin}% margin`} tone={moneyFlow.netProduction >= 0 ? 'green' : 'red'} icon={Factory} />
             </div>
             <p className="mt-2 text-[11px] text-gray-400">
