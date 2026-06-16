@@ -237,6 +237,7 @@ export function transformBatch(dbBatch) {
     dbId: dbBatch.id,
     linkedExportOrder: dbBatch.linked_export_order_id,
     status: dbBatch.status || 'Queued',
+    processingType: dbBatch.processing_type || null,
     rawQtyMT: parseFloat(dbBatch.raw_qty_mt) || 0,
     plannedFinishedMT: parseFloat(dbBatch.planned_finished_mt) || 0,
     actualFinishedMT: parseFloat(dbBatch.actual_finished_mt) || 0,

@@ -190,8 +190,13 @@ export default function MillFinanceDashboard() {
     return 0;
   };
 
+  // A blend re-mills already-owned finished rice, so its raw_rice cost is the
+  // internal value of stock already counted as raw material on its source
+  // batches — excluding it stops the raw-material/cost KPIs double-counting.
+  const isBlendBatch = (b) => b.processingType === 'blended';
+
   const kpis = useMemo(() => {
-    const totalRaw = completed.reduce((s, b) => s + getRawCost(b.costs), 0);
+    const totalRaw = completed.reduce((s, b) => s + (isBlendBatch(b) ? 0 : getRawCost(b.costs)), 0);
     const totalOtherCosts = completed.reduce((s, b) => {
       return s + Object.entries(b.costs || {}).reduce((cs, [k, v]) => RAW_KEYS.has(k) ? cs : cs + (parseFloat(v) || 0), 0);
     }, 0);
