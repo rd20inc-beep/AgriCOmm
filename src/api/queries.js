@@ -1645,7 +1645,12 @@ export function useLotDetail(id) {
         blendRecipe: data.blendRecipe ? {
           batchNo: data.blendRecipe.batch_no,
           rawQtyMt: data.blendRecipe.raw_qty_mt,
+          suppliers: data.blendRecipe.suppliers || [],
           inputs: (data.blendRecipe.inputs || []).map(transformKeys),
+        } : null,
+        batchQuality: data.batchQuality ? {
+          arrival: data.batchQuality.arrival ? transformKeys(data.batchQuality.arrival) : null,
+          post: data.batchQuality.post ? transformKeys(data.batchQuality.post) : null,
         } : null,
       };
     },

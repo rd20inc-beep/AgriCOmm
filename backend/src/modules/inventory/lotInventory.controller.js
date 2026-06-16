@@ -208,6 +208,21 @@ module.exports = {
         .orderBy('mb.pass_number', 'asc')
         .orderBy('mb.created_at', 'asc');
 
+      // The lot's own batch's full quality analysis (arrival + post-milling), so
+      // the lot's Quality Specifications can show the complete sheet a finished/raw
+      // lot inherits — not just the moisture/broken stamped on the lot row.
+      let batchQuality = null;
+      const brMatch = /^batch-(\d+)$/.exec(lot.batch_ref || '');
+      const ownBatchId = brMatch ? parseInt(brMatch[1], 10) : null;
+      if (ownBatchId) {
+        const [arrival, post] = await Promise.all([
+          db('milling_quality_samples').where({ batch_id: ownBatchId, analysis_type: 'arrival' })
+            .orderBy('created_at', 'desc').first(),
+          db('milling_quality_post').where({ batch_id: ownBatchId }).orderBy('created_at', 'desc').first(),
+        ]);
+        if (arrival || post) batchQuality = { arrival: arrival || null, post: post || null };
+      }
+
       // Blend recipe — for a blended OUTPUT lot, the varieties + ratios that
       // were milled to make it, so the operator can trace it back from the lot.
       let blendRecipe = null;
@@ -226,6 +241,8 @@ module.exports = {
               'il.lot_no as source_lot_no', 'il.variety as lot_variety',
               'il.item_name as lot_item_name', 'ilp.name as lot_product_name',
               'il.supplier_id as source_supplier_id', 'ils.name as source_supplier_name',
+              'il.moisture_pct as lot_moisture', 'il.broken_pct as lot_broken',
+              'il.grade as lot_grade', 'il.whiteness as lot_whiteness',
             )
             .orderBy('bsl.qty_mt', 'desc');
           // A blend can draw from several suppliers (one per source lot) — surface
@@ -253,6 +270,10 @@ module.exports = {
                 lot_type: i.lot_type || null,
                 supplier_id: i.source_supplier_id || null,
                 supplier_name: i.source_supplier_name || null,
+                moisture: i.lot_moisture != null ? parseFloat(i.lot_moisture) : null,
+                broken: i.lot_broken != null ? parseFloat(i.lot_broken) : null,
+                grade: i.lot_grade || null,
+                whiteness: i.lot_whiteness != null ? parseFloat(i.lot_whiteness) : null,
               };
             }),
           };
@@ -261,7 +282,7 @@ module.exports = {
 
       return res.json({
         success: true,
-        data: { lot: enrichLot(lot), transactions, reservations, millingBatches, blendRecipe },
+        data: { lot: enrichLot(lot), transactions, reservations, millingBatches, blendRecipe, batchQuality },
       });
     } catch (err) {
       console.error('getLotDetail error:', err);

@@ -73,6 +73,7 @@ export default function LotDetail() {
   const reservations = data?.reservations || [];
   const millingBatches = data?.millingBatches || [];
   const blendRecipe = data?.blendRecipe || null;
+  const batchQuality = data?.batchQuality || null;
   const { data: lotSales = [] } = useLocalSalesByLot(lot.id);
 
   // Fetch linked milling batch for vehicles and quality
@@ -378,72 +379,83 @@ export default function LotDetail() {
               <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider flex items-center gap-2"><BarChart3 className="w-4 h-4 text-violet-600" /> Quality Specifications</h3>
               <button onClick={() => setShowQualityModal(true)} className="btn btn-sm btn-secondary"><Edit3 className="w-3.5 h-3.5" /> Edit</button>
             </div>
-            <div className="space-y-2.5">
-              {[
-                ['Rice Type', lot.itemName],
-                ['Variety', lot.variety],
-                ['Grade', lot.grade],
-                ['Sortex Status', lot.sortexStatus],
-                ['Whiteness', lot.whiteness],
-              ].map(([l, v]) => v ? <div key={l} className="flex justify-between text-sm"><span className="text-gray-500">{l}</span><span className="font-medium text-gray-900">{v}</span></div> : null)}
-            </div>
-
-            {/* Extended quality from quality_json + the dedicated
-                moisture_pct / broken_pct columns. Renders only the
-                non-null values so the panel stays compact for lots
-                that captured a partial sheet. */}
             {(() => {
-              const qj = lot.qualityJson || {};
-              const pct = (v) => (v == null || v === '') ? null : `${Number(v).toFixed(2)}%`;
+              // Merge every source of quality for this lot, in priority order:
+              // the lot's own captured sheet → its batch's post-milling analysis
+              // (finished output) → its batch's arrival analysis (raw input) → the
+              // lot columns. First non-empty wins; the full sheet always renders.
+              const sources = [lot.qualityJson || {}, batchQuality?.post || {}, batchQuality?.arrival || {}, lot];
+              const qv = (...keys) => {
+                for (const src of sources) for (const k of keys) {
+                  if (src && src[k] != null && src[k] !== '') return src[k];
+                }
+                return null;
+              };
+              const pct = (v) => (v == null || v === '') ? '—' : `${Number(v).toFixed(2)}%`;
+              const raw = (v) => (v == null || v === '') ? '—' : v;
+              const specs = [
+                ['Rice Type', raw(lot.itemName)],
+                ['Variety', raw(lot.variety)],
+                ['Grade', raw(qv('grade', 'gradeAssigned'))],
+                ['Sortex Status', raw(lot.sortexStatus)],
+                ['Whiteness', raw(qv('whiteness'))],
+                ['Grain length', (() => { const g = qv('grainLength', 'grainSize'); return g == null ? '—' : `${g} mm`; })()],
+              ];
               const aggregate = [
-                ['Moisture',       pct(qj.moisture ?? lot.moisturePct)],
-                ['Broken',         pct(qj.broken   ?? lot.brokenPct)],
-                ['Foreign matter', pct(qj.foreign_matter)],
-                ['Chalky',         pct(qj.chalky)],
-                ['Purity',         pct(qj.purity)],
-              ].filter(([, v]) => v);
+                ['Moisture',       pct(qv('moisture', 'moisturePct'))],
+                ['Broken',         pct(qv('broken', 'brokenPct'))],
+                ['Foreign matter', pct(qv('foreignMatter'))],
+                ['Chalky',         pct(qv('chalky', 'chalkyPct'))],
+                ['Discoloration',  pct(qv('discoloration'))],
+                ['Purity',         pct(qv('purity'))],
+              ];
               const grades = [
-                ['B1',          pct(qj.b1)],
-                ['B2',          pct(qj.b2)],
-                ['B3',          pct(qj.b3)],
-                ['CSR',         pct(qj.csr)],
-                ['Short Grain', pct(qj.short_grain)],
-                ['Cobba',       pct(qj.cobba)],
-                ['N.B',         pct(qj.nb)],
-                ['O.V',         pct(qj.ov)],
-              ].filter(([, v]) => v);
-              if (aggregate.length === 0 && grades.length === 0) return null;
+                ['B1', pct(qv('b1', 'b1Pct'))],
+                ['B2', pct(qv('b2', 'b2Pct'))],
+                ['B3', pct(qv('b3', 'b3Pct'))],
+                ['CSR', pct(qv('csr', 'csrPct'))],
+                ['Short Grain', pct(qv('shortGrain', 'shortGrainPct'))],
+                ['Cobba', pct(qv('cobba', 'cobbaPct'))],
+                ['N.B', pct(qv('nb', 'nbPct'))],
+                ['O.V', pct(qv('ov', 'ovPct'))],
+              ];
+              const Row = ([l, v], tone) => (
+                <div key={l} className="flex justify-between text-sm">
+                  <span className="text-gray-500">{l}</span>
+                  <span className={`font-medium tabular-nums ${tone || 'text-gray-900'}`}>{v}</span>
+                </div>
+              );
               return (
-                <div className="mt-3 pt-3 border-t border-gray-100 space-y-3">
-                  {aggregate.length > 0 && (
-                    <div>
-                      <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Sample Analysis</p>
-                      <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-                        {aggregate.map(([l, v]) => (
-                          <div key={l} className="flex justify-between text-sm">
-                            <span className="text-gray-500">{l}</span>
-                            <span className="font-medium text-gray-900 tabular-nums">{v}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {grades.length > 0 && (
-                    <div>
-                      <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Broken-grade breakdown</p>
-                      <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-                        {grades.map(([l, v]) => (
-                          <div key={l} className="flex justify-between text-sm">
-                            <span className="text-gray-500">{l}</span>
-                            <span className="font-medium text-amber-700 tabular-nums">{v}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                <div className="space-y-3">
+                  <div className="space-y-2.5">{specs.map(r => Row(r))}</div>
+                  <div className="pt-3 border-t border-gray-100">
+                    <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Sample Analysis</p>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1">{aggregate.map(r => Row(r))}</div>
+                  </div>
+                  <div className="pt-3 border-t border-gray-100">
+                    <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Broken-grade breakdown</p>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1">{grades.map(r => Row(r, 'text-amber-700'))}</div>
+                  </div>
                 </div>
               );
             })()}
+
+            {/* Per-source-lot quality — for a blend, what each component contributed. */}
+            {blendRecipe?.inputs?.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-gray-100">
+                <p className="text-[11px] font-semibold text-purple-600 uppercase tracking-wide mb-1.5">Per-source quality (blend)</p>
+                <div className="space-y-1.5">
+                  {blendRecipe.inputs.map((inp, i) => (
+                    <div key={i} className="flex items-center justify-between text-xs gap-2">
+                      <span className="text-gray-700 truncate">{inp.variety}{inp.supplierName ? ` · ${inp.supplierName}` : ''}</span>
+                      <span className="text-gray-500 tabular-nums shrink-0">
+                        Moist {inp.moisture != null ? `${inp.moisture}%` : '—'} · Broken {inp.broken != null ? `${inp.broken}%` : '—'}{inp.grade ? ` · ${inp.grade}` : ''}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {lot.qualityNotes && <div className="mt-3 pt-3 border-t"><p className="text-xs text-gray-500"><span className="font-medium">Notes:</span> {lot.qualityNotes}</p></div>}
           </div>
