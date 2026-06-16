@@ -133,50 +133,25 @@ const financeController = {
       const { page = 1, limit = 200, status, supplier_id, overdue, from_date, to_date } = req.query;
       const offset = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
 
-      // Check if the payables table has data
-      const payableCount = await db('payables').count('* as n').first();
-      const hasPayablesTable = parseInt(payableCount?.n || 0) > 0;
-
-      if (hasPayablesTable) {
-        let query = db('payables as p')
-          .leftJoin('suppliers as s', 'p.supplier_id', 's.id')
-          .select('p.*', 's.name as supplier_name')
-          .where(function() {
-            // Show every real money-out liability:
-            //   - 'vendor'   : invoiced supplier debt (legacy)
-            //   - 'expense'  : business expense awaiting payment
-            //   - 'purchase' : mill-store stock purchase
-            //   - NULL       : older rows seeded before the column existed
-            // Internal cost allocations were the only thing previously
-            // filtered, but those don't actually land in this table —
-            // they live on export_order_costs / milling_costs.
-            this.whereIn('p.payable_type', ['vendor', 'expense', 'purchase'])
-                .orWhereNull('p.payable_type');
-          });
-
-        if (status) query = query.where('p.status', status);
-        if (supplier_id) query = query.where('p.supplier_id', supplier_id);
-        if (overdue === 'true') query = query.where('p.due_date', '<', db.fn.now()).where('p.status', '!=', 'Paid');
-        // Honour the global date-range filter from FinanceLayout.
-        if (from_date) query = query.where('p.created_at', '>=', from_date);
-        if (to_date)   query = query.where('p.created_at', '<=', to_date);
-
-        const countQuery = query.clone().clearSelect().clearOrder().count('p.id as total').first();
-        const [payables, countResult] = await Promise.all([
-          // Newest payable first; tie-break on id so within the same
-          // millisecond the higher id (later insert) wins.
-          query.orderBy('p.created_at', 'desc').orderBy('p.id', 'desc').limit(parseInt(limit)).offset(offset),
-          countQuery,
-        ]);
-
-        return res.json({
-          success: true,
-          data: {
-            payables,
-            pagination: { page: parseInt(page), limit: parseInt(limit), total: parseInt(countResult.total), totalPages: Math.ceil(parseInt(countResult.total) / parseInt(limit)) },
-          },
+      // Stored payables (real rows that CAN be paid — they have a numeric id).
+      // We MERGE these with the cost-derived ones below rather than either/or, so
+      // a materialized payable (e.g. a mill raw-rice purchase, which recordPayment
+      // needs a real row to settle) and the still-derived costs (export/expenses)
+      // both show. Derived rows whose source is already stored are skipped to
+      // avoid double-counting.
+      const storedRows = await db('payables as p')
+        .leftJoin('suppliers as s', 'p.supplier_id', 's.id')
+        .select('p.*', 's.name as supplier_name')
+        .where(function() {
+          this.whereIn('p.payable_type', ['vendor', 'expense', 'purchase'])
+              .orWhereNull('p.payable_type');
         });
-      }
+      // Source keys already materialized — suppress their derived duplicates.
+      // Mill raw-rice payables are keyed by batch (source_table 'milling_raw_rice').
+      const storedRawRiceBatchIds = new Set(
+        storedRows.filter((r) => r.source_table === 'milling_raw_rice' && r.source_id != null)
+          .map((r) => r.source_id),
+      );
 
       // Derive payables from cost tables. Resolve the supplier from the batch's
       // supplier_id (the denormalized supplier_name is sometimes null) and carry
@@ -222,6 +197,9 @@ const financeController = {
         // counting it here would double-count what we owe (and disagree with the GL
         // supplier statement, which has no AP journal for blends). Skip it.
         if (mc.category === 'raw_rice' && mc.processing_type === 'blended') return;
+        // Materialized as a real stored payable already (so it can be paid) —
+        // skip the derived duplicate.
+        if (mc.category === 'raw_rice' && storedRawRiceBatchIds.has(mc.batch_id)) return;
         derived.push({
           id: `MC-${mc.id}`,
           pay_no: `MC-${mc.id}`,
@@ -285,10 +263,19 @@ const financeController = {
         });
       });
 
-      // Apply filters
-      let filtered = derived;
+      // Merge stored (real, payable) + derived (synthetic) into one feed.
+      const all = [...storedRows, ...derived];
+
+      // Apply filters uniformly across the merged set.
+      let filtered = all;
       if (status) filtered = filtered.filter(p => p.status === status);
-      if (overdue === 'true') filtered = filtered.filter(p => new Date(p.due_date) < new Date());
+      if (supplier_id) filtered = filtered.filter(p => String(p.supplier_id) === String(supplier_id));
+      if (overdue === 'true') filtered = filtered.filter(p => p.due_date && new Date(p.due_date) < new Date() && p.status !== 'Paid');
+      if (from_date) filtered = filtered.filter(p => p.created_at && new Date(p.created_at) >= new Date(from_date));
+      if (to_date) filtered = filtered.filter(p => p.created_at && new Date(p.created_at) <= new Date(to_date));
+
+      // Newest first; tie-break on id (stored numeric > synthetic string sort).
+      filtered.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
 
       const total = filtered.length;
       const paged = filtered.slice(offset, offset + parseInt(limit));
@@ -298,7 +285,7 @@ const financeController = {
         data: {
           payables: paged,
           pagination: { page: parseInt(page), limit: parseInt(limit), total, totalPages: Math.ceil(total / parseInt(limit)) },
-          source: 'derived_from_costs',
+          source: 'merged',
         },
       });
     } catch (err) {

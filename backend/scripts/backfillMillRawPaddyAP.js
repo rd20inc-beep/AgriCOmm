@@ -41,35 +41,60 @@ async function main() {
       .sum('amount as total').first();
     const rawValue = parseFloat(rawRow?.total || 0);
 
-    const existing = await db('journal_entries')
-      .whereIn('ref_type', ['Rice Purchase', 'Raw Paddy Purchase'])
-      .where({ ref_no: b.batch_no })
-      .first();
-
     if (rawValue <= 0) { console.log(`  skip ${b.batch_no}: no raw_rice cost`); skipped++; continue; }
-    if (existing) { console.log(`  skip ${b.batch_no}: AP journal already exists (${existing.journal_no})`); skipped++; continue; }
 
-    console.log(`  ${COMMIT ? 'POST' : 'would post'} ${b.batch_no}: DR Raw Rice / CR Supplier Payable Rs ${Math.round(rawValue).toLocaleString()} → ${b.supplier_name} (id ${b.supplier_id}) · ${b.rice_type || 'rice'}`);
+    const existingJournal = await db('journal_entries')
+      .whereIn('ref_type', ['Rice Purchase', 'Raw Paddy Purchase'])
+      .where({ ref_no: b.batch_no }).first();
+    const existingPayable = await db('payables')
+      .where({ source_table: 'milling_raw_rice', source_id: b.id }).first();
+
+    if (existingJournal && existingPayable) {
+      console.log(`  skip ${b.batch_no}: journal + payable already exist`); skipped++; continue;
+    }
+
+    console.log(`  ${COMMIT ? 'APPLY' : 'would apply'} ${b.batch_no}: Rs ${Math.round(rawValue).toLocaleString()} → ${b.supplier_name} (id ${b.supplier_id}) · ${b.rice_type || 'rice'}` +
+      `${existingJournal ? ' [journal exists]' : ''}${existingPayable ? ' [payable exists]' : ''}`);
 
     if (COMMIT) {
       await db.transaction(async (trx) => {
-        await accountingService.autoPost(trx, {
-          triggerEvent: 'purchase_invoice',
-          entity: 'mill',
-          amount: rawValue,
-          currency: 'PKR',
-          refType: 'Rice Purchase',
-          refNo: b.batch_no,
-          description: `Rice purchase — ${b.rice_type || 'rice'} (batch ${b.batch_no})`,
-          partyType: 'supplier',
-          partyId: b.supplier_id,
-          userId: null,
-        });
+        if (!existingPayable) {
+          await trx('payables').insert({
+            pay_no: `MILL-RICE-${b.batch_no}`,
+            payable_type: 'vendor',
+            entity: 'mill',
+            supplier_id: b.supplier_id,
+            category: 'Raw Rice',
+            original_amount: rawValue,
+            paid_amount: 0,
+            outstanding: rawValue,
+            currency: 'PKR',
+            status: 'Pending',
+            source_table: 'milling_raw_rice',
+            source_id: b.id,
+            linked_ref: b.batch_no,
+            due_date: trx.fn.now(),
+            notes: `Rice purchase — ${b.rice_type || 'rice'} (batch ${b.batch_no})`,
+            created_by: null,
+          });
+        }
+        if (!existingJournal) {
+          await accountingService.autoPost(trx, {
+            triggerEvent: 'purchase_invoice',
+            entity: 'mill',
+            amount: rawValue,
+            currency: 'PKR',
+            refType: 'Rice Purchase',
+            refNo: b.batch_no,
+            description: `Rice purchase — ${b.rice_type || 'rice'} (batch ${b.batch_no})`,
+            partyType: 'supplier',
+            partyId: b.supplier_id,
+            userId: null,
+          });
+        }
       });
-      posted++;
-    } else {
-      posted++;
     }
+    posted++;
   }
 
   console.log(`\n${COMMIT ? 'Posted' : 'Would post'}: ${posted}, skipped: ${skipped}`);

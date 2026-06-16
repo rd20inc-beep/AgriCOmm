@@ -1038,6 +1038,31 @@ const millingController = {
             .where({ ref_type: 'Rice Purchase', ref_no: batch.batch_no })
             .first();
           if (rawRiceValue > 0 && !existingAP) {
+            // A real, settle-able payable row (recordPayment needs a numeric id
+            // to apply a payment against). Keyed by batch so getPayables can
+            // suppress the derived duplicate. Idempotent.
+            const existingPayable = await trx('payables')
+              .where({ source_table: 'milling_raw_rice', source_id: batch.id }).first();
+            if (!existingPayable) {
+              await trx('payables').insert({
+                pay_no: `MILL-RICE-${batch.batch_no}`,
+                payable_type: 'vendor',
+                entity: 'mill',
+                supplier_id: batch.supplier_id,
+                category: 'Raw Rice',
+                original_amount: rawRiceValue,
+                paid_amount: 0,
+                outstanding: rawRiceValue,
+                currency: 'PKR',
+                status: 'Pending',
+                source_table: 'milling_raw_rice',
+                source_id: batch.id,
+                linked_ref: batch.batch_no,
+                due_date: trx.fn.now(),
+                notes: `Rice purchase — ${riceTypeName || 'rice'} (batch ${batch.batch_no})`,
+                created_by: req.user?.id || null,
+              });
+            }
             await accountingService.autoPost(trx, {
               triggerEvent: 'purchase_invoice',
               entity: 'mill',
