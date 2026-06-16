@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useState, useMemo, useEffect } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import PartyLink from '../../../shared/components/PartyLink';
 import {
   Wheat,
@@ -141,6 +141,20 @@ export default function MillingDashboard() {
     });
     setUseBlend(true); setBlendProductId(''); setBlendRows([{ lotId: '', qtyMt: '' }]);
   };
+
+  // Deep-link: the Mill home dashboard's "New Batch" button navigates here with
+  // ?new=1 — open the New Batch drawer directly and strip the param so a refresh
+  // or back-nav doesn't reopen it.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (searchParams.get('new') === '1') {
+      resetBatchForm();
+      setShowNewBatch(true);
+      searchParams.delete('new');
+      setSearchParams(searchParams, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   async function handleCreateBatch() {
     // Blend mode: validate the source-lot lines instead of supplier + qty.
