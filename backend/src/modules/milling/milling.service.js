@@ -390,6 +390,7 @@ const millingService = {
         'il.moisture_pct', 'il.broken_pct', 'il.whiteness', 'il.quality_notes', 'il.quality_json',
         'il.landed_cost_per_kg',
         'il.supplier_id', 's.name as supplier_name', 's.phone as supplier_phone',
+        'il.batch_ref as lot_batch_ref',
         'p.name as product_name'
       )
       .where('bsl.batch_id', batchId)
@@ -397,18 +398,37 @@ const millingService = {
 
     if (lots.length === 0) return { source_lots: [], blend_suppliers: [] };
 
-    // Vehicles captured against each source lot at creation time.
+    // Vehicles captured against each source lot — directly via lot_id, or
+    // inherited from the BATCH that produced the lot. A finished source lot
+    // (re-milled rice) was the output of an earlier batch and links to it via
+    // inventory_lots.batch_ref = 'batch-<id>'; that batch's arrivals carry
+    // batch_id with lot_id null, so a lot_id-only match misses them and the
+    // blend shows no vehicles.
     const lotIds = [...new Set(lots.map((l) => l.lot_id).filter(Boolean))];
-    const vehicles = lotIds.length
+    const batchByLot = {};
+    for (const l of lots) {
+      const m = /^batch-(\d+)$/.exec(l.lot_batch_ref || '');
+      if (m) batchByLot[l.lot_id] = parseInt(m[1], 10);
+    }
+    const originBatchIds = [...new Set(Object.values(batchByLot))];
+    const vehicles = (lotIds.length || originBatchIds.length)
       ? await db('milling_vehicle_arrivals')
-        .whereIn('lot_id', lotIds)
-        .select('id', 'lot_id', 'vehicle_no', 'driver_name', 'driver_phone',
+        .where(function () {
+          if (lotIds.length) this.whereIn('lot_id', lotIds);
+          if (originBatchIds.length) this.orWhereIn('batch_id', originBatchIds);
+        })
+        .select('id', 'lot_id', 'batch_id', 'vehicle_no', 'driver_name', 'driver_phone',
           'weight_mt', 'bag_size_kg', 'total_bags', 'arrival_date', 'quality_json')
         .orderBy('created_at', 'asc')
       : [];
-    const vByLot = {};
-    for (const v of vehicles) (vByLot[v.lot_id] ||= []).push(v);
-    for (const l of lots) l.vehicles = vByLot[l.lot_id] || [];
+    // Attach a vehicle to a lot when its lot_id matches, OR (batch-level arrival
+    // with no lot_id) when its batch_id matches the lot's originating batch.
+    for (const l of lots) {
+      l.vehicles = vehicles.filter((v) =>
+        (v.lot_id && v.lot_id === l.lot_id) ||
+        (!v.lot_id && batchByLot[l.lot_id] && v.batch_id === batchByLot[l.lot_id])
+      );
+    }
 
     // Distinct suppliers across the blend, with their lot/qty/cost contribution.
     const supMap = {};
