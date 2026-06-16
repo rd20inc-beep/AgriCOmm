@@ -1,5 +1,6 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
 import {
   Factory, Wheat, FlaskConical, Gauge, Clock, AlertTriangle,
   Plus, ArrowRight, CheckCircle2, TrendingUp, Truck, Activity,
@@ -111,6 +112,7 @@ function BatchColumn({ title, batches, accent, onBatchClick }) {
 
 export default function MillHomeDashboard() {
   const navigate = useNavigate();
+  const [showNewPurchase, setShowNewPurchase] = useState(false);
   const { summary, isLoading, batches: rawBatches } = useMillSummary();
   const { data: rawInventory } = useInventory({});
   const { data: storeSummary } = useMillStoreSummary();
@@ -364,9 +366,9 @@ export default function MillHomeDashboard() {
             <span className="text-xs text-gray-400">consumables · spares · packaging</span>
           </div>
           <div className="flex items-center gap-2">
-            <Link to="/mill-store/purchases/new" className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg bg-gray-900 text-white hover:bg-gray-700">
+            <button onClick={() => setShowNewPurchase(true)} className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg bg-gray-900 text-white hover:bg-gray-700">
               <Plus size={12} /> New Purchase
-            </Link>
+            </button>
             <Link to="/mill-store" className="text-xs text-blue-600 hover:underline">Open Mill Store →</Link>
           </div>
         </div>
@@ -494,6 +496,9 @@ export default function MillHomeDashboard() {
           )}
         </div>
       </div>
+
+      {/* New Purchase — right slide-over */}
+      <NewPurchaseDrawer open={showNewPurchase} onClose={() => setShowNewPurchase(false)} />
     </div>
   );
 }
