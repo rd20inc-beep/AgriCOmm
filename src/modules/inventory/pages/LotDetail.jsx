@@ -144,6 +144,9 @@ export default function LotDetail() {
   // share = the lot's "purchase amount") + milling_cost_component. landed_cost_
   // total is left 0 on these, so derive totals from per-kg × net weight.
   const isMilled = lot.type === 'finished' || lot.type === 'byproduct';
+  // The lot `type` is the milling-stage classification; show a rice-aware label
+  // since we receive milled rice (a variety), not generic "raw material".
+  const typeLabel = { raw: 'Raw Rice', finished: 'Finished Rice', byproduct: 'By-product' }[lot.type] || lot.type || 'Raw Rice';
   const rawCompKg = parseFloat(lot.rawCostComponent) || 0;
   const millCompKg = parseFloat(lot.millingCostComponent) || 0;
   // Lots milled before the raw/milling split carry only landed_cost_per_kg —
@@ -177,7 +180,7 @@ export default function LotDetail() {
               {lot.entity === 'mill' ? 'Mill' : 'Export'}
             </span>
             <span className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold bg-gray-100 text-gray-600`}>
-              {lot.type || 'raw'}
+              {typeLabel}
             </span>
             {lot.processingType === 'blended' && (
               <span className="inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold bg-purple-100 text-purple-700" title={lot.blendBatchNo ? `Blend ${lot.blendBatchNo} — kept separate from pure stock` : 'Blended stock'}>
@@ -357,7 +360,7 @@ export default function LotDetail() {
                 ['Crop Year', lot.cropYear],
                 ['Warehouse / Godown', lot.warehouseName],
                 ['Entity', lot.entity === 'mill' ? 'Milling Division' : 'Export Division'],
-                ['Type', lot.type],
+                ['Type', typeLabel],
                 ['Payment Status', lot.paymentStatus],
                 ['Due Amount', lot.dueAmount ? fmtPKR(lot.dueAmount) : null],
                 ['Paid Amount', lot.paidAmount ? fmtPKR(lot.paidAmount) : null],
