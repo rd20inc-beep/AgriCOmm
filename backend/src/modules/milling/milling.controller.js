@@ -838,6 +838,17 @@ const millingController = {
               .first()
           : null;
 
+        // The batch's own rice-type product is the authoritative name for the
+        // finished lot — every batch carries a product_id since rice type became
+        // mandatory. Fall back to the linked order's product only when the batch
+        // somehow lacks one, so an UNLINKED batch still stamps its real variety
+        // (e.g. 'Basmati Rice') instead of the generic 'Finished Rice'/null that
+        // then propagates blank into any blend that consumes the lot.
+        const batchProduct = batch.product_id
+          ? await trx('products').where('id', batch.product_id).select('name').first()
+          : null;
+        const riceTypeName = batchProduct?.name || linkedOrder?.product_name || null;
+
         // Fetch quality & cost data for lot enrichment
         const arrivalQuality = await trx('milling_quality_samples')
           .where({ batch_id: batch.id, analysis_type: 'arrival' }).first();
@@ -964,7 +975,7 @@ const millingController = {
           branMT: parseFloat(bran),
           huskMT: parseFloat(husk),
           sortexMT: parseFloat(sortex),
-          productName: linkedOrder?.product_name || 'Finished Rice',
+          productName: riceTypeName || 'Finished Rice',
           costPerMT: finAlloc.costPerMT,
           // Finished rice carries its market-value SHARE of the pool (finAlloc
           // .costPerKg), not the whole pool — otherwise priced by-products would
@@ -1002,7 +1013,7 @@ const millingController = {
           userId: req.user?.id,
           supplierInfo: { supplierId: batch.supplier_id },
           qualityInfo: arrivalQuality ? {
-            variety: linkedOrder?.product_name,
+            variety: riceTypeName,
             grade: batch.post_milling_grade || null,
             moisture: arrivalQuality.moisture ? parseFloat(arrivalQuality.moisture) : null,
             broken: arrivalQuality.broken ? parseFloat(arrivalQuality.broken) : null,

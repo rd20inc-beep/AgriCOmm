@@ -752,7 +752,7 @@ export default function MillingBatchDetail() {
                             <div className="min-w-0">
                               <span className="font-mono font-semibold text-gray-900">{l.lot_no || l.item_name}</span>
                               <span className="ml-2 text-[11px] px-1.5 py-0.5 rounded bg-white border border-gray-200 text-gray-600">
-                                {(l.lot_type || l.type || 'lot')}{l.variety ? ` · ${l.variety}` : ''}
+                                {(l.lot_type || l.type || 'lot')}{(l.variety || l.product_name) ? ` · ${l.variety || l.product_name}` : ''}
                               </span>
                             </div>
                             <span className="font-medium text-gray-900 tabular-nums shrink-0">{parseFloat(l.qty_mt).toFixed(2)} MT</span>

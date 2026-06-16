@@ -890,7 +890,7 @@ const inventoryService = {
           created_by: userId || null,
           // Enrichment from batch/quality data
           supplier_id: supplierInfo?.supplierId || null,
-          variety: isBlend ? `Blend ${blendNo}` : (qualityInfo?.variety || null),
+          variety: isBlend ? `Blend ${blendNo}` : (qualityInfo?.variety || productName || null),
           grade: qualityInfo?.grade || null,
           moisture_pct: qualityInfo?.moisture || null,
           broken_pct: qualityInfo?.broken || null,
