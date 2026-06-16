@@ -90,7 +90,7 @@ const advanceController = {
             unallocated_amount: amt,
             currency: currency || 'USD',
             bank_account_id: bank_account_id || null,
-            payment_method: payment_method || null,
+            payment_method: payment_method ? payment_method.toLowerCase().replace(/\s+/g, '_') : null,
             bank_reference: bank_reference || null,
             payment_date: payment_date || trx.fn.now(),
             status: 'Unallocated',

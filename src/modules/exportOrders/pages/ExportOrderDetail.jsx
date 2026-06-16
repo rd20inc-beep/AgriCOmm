@@ -73,7 +73,7 @@ export default function ExportOrderDetail() {
   // Advance Payment form state
   const [advanceAmount, setAdvanceAmount] = useState('');
   const [advanceDate, setAdvanceDate] = useState('');
-  const [advanceMethod, setAdvanceMethod] = useState('Bank Transfer');
+  const [advanceMethod, setAdvanceMethod] = useState('bank_transfer');
   const [advanceBankAccountId, setAdvanceBankAccountId] = useState('');
   const [advanceBankRef, setAdvanceBankRef] = useState('');
   const [advanceNotes, setAdvanceNotes] = useState('');
@@ -82,7 +82,7 @@ export default function ExportOrderDetail() {
   // Balance Payment form state
   const [balanceAmount, setBalanceAmount] = useState('');
   const [balanceDate, setBalanceDate] = useState('');
-  const [balanceMethod, setBalanceMethod] = useState('Bank Transfer');
+  const [balanceMethod, setBalanceMethod] = useState('bank_transfer');
   const [balanceBankAccountId, setBalanceBankAccountId] = useState('');
   const [balanceBankRef, setBalanceBankRef] = useState('');
   const [balanceNotes, setBalanceNotes] = useState('');
@@ -219,7 +219,7 @@ export default function ExportOrderDetail() {
   const openAdvanceModal = () => {
     setAdvanceAmount(Math.max(0, (order.advanceExpected || 0) - (order.advanceReceived || 0)));
     setAdvanceDate(today());
-    setAdvanceMethod('Bank Transfer');
+    setAdvanceMethod('bank_transfer');
     setAdvanceBankAccountId('');
     setAdvanceBankRef('');
     setAdvanceNotes('');
@@ -232,7 +232,7 @@ export default function ExportOrderDetail() {
   const openBalanceModal = () => {
     setBalanceAmount(Math.max(0, (order.balanceExpected || 0) - (order.balanceReceived || 0)));
     setBalanceDate(today());
-    setBalanceMethod('Bank Transfer');
+    setBalanceMethod('bank_transfer');
     setBalanceBankAccountId('');
     setBalanceBankRef('');
     setBalanceNotes('');
