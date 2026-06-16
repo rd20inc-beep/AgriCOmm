@@ -4,13 +4,15 @@ import PartyLink from '../../../shared/components/PartyLink';
 import {
   ShoppingCart, Plus, Search, DollarSign, Package, Truck,
   CreditCard, X, Clock, CheckCircle, RefreshCw, Download,
-  Check, ChevronLeft, ChevronRight,
+  Check, ChevronLeft, ChevronRight, UserPlus,
 } from 'lucide-react';
 import { useLocalSales, useLocalSalesSummary, useCreateLocalSale, useAcceptLocalSalePayment, useLotInventory } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
 import { LoadingSpinner, ErrorState, EmptyState } from '../../../components/LoadingState';
 import StatusBadge from '../../../components/StatusBadge';
 import Modal from '../../../components/Modal';
+import SlideDrawer from '../../../components/SlideDrawer';
+import { adminApi } from '../../admin/api/services';
 import { localSalesApi } from '../../../api/services';
 import { toKg, fromKg, rateToPerKg, allEquivalents, allRateEquivalents, UNITS } from '../../../utils/unitConversion';
 import { downloadCSV } from '../../../utils/csvExport';
@@ -309,6 +311,10 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   });
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
   const [step, setStep] = useState(1); // 1=Buyer/Item, 2=Qty/Pricing/Payment
+  // Walk-in (no registered customer): offer to register the buyer as a customer,
+  // which queues an admin approval that adds them to the system.
+  const [registerCustomer, setRegisterCustomer] = useState(true);
+  const isWalkIn = !form.customer_id;
 
   const bagWt = parseFloat(form.bag_weight_kg) || 50;
   const qtyKg = toKg(form.quantity_input, form.quantity_unit, bagWt);
@@ -330,6 +336,16 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
       const payload = { ...form, paid_amount: parseFloat(form.paid_amount) || totalAmount };
       const res = await createMutation.mutateAsync(payload);
       addToast(`Sale ${res?.data?.sale?.sale_no || ''} created — ${fmtPKR(totalAmount)}`, 'success');
+      // Walk-in buyer the operator chose to register → queue a customer for admin
+      // approval. Best-effort: the sale already succeeded, so don't fail on this.
+      if (isWalkIn && registerCustomer && form.buyer_name.trim()) {
+        try {
+          const r = await adminApi.customersQuickAdd({ name: form.buyer_name.trim(), phone: form.buyer_phone || null });
+          addToast(r?.data?.deduped
+            ? `${form.buyer_name.trim()} is already a customer`
+            : `${form.buyer_name.trim()} sent for admin approval as a customer`, 'success');
+        } catch { /* non-blocking */ }
+      }
       refreshFromApi('local-sales');
       onClose();
       setForm({ customer_id: '', buyer_name: '', buyer_phone: '', lot_id: '', item_name: '', item_type: '', quantity_input: '', quantity_unit: 'katta', bag_weight_kg: '50', rate_input: '', rate_unit: 'katta', payment_mode: 'cash', paid_amount: '', vehicle_no: '', driver_name: '', notes: '' });
@@ -351,11 +367,38 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
     { n: 2, label: 'Quantity & Payment' },
   ];
 
+  const footer = (
+    <div className="flex items-center justify-between gap-3">
+      <div className="text-xs text-gray-500 flex items-center gap-3 flex-wrap">
+        {qtyKg > 0 && <span><span className="font-medium text-gray-900">{qtyKg.toLocaleString()}</span> kg</span>}
+        {totalAmount > 0 && <span><span className="text-gray-400">Total</span> <span className="font-medium text-emerald-700">Rs {totalAmount.toLocaleString()}</span></span>}
+      </div>
+      <div className="flex items-center gap-2">
+        <button onClick={onClose} className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-900">Cancel</button>
+        {step > 1 && (
+          <button onClick={() => setStep(s => Math.max(1, s - 1))} className="px-3 py-1.5 text-sm text-gray-700 hover:text-gray-900 inline-flex items-center gap-1">
+            <ChevronLeft size={14} /> Back
+          </button>
+        )}
+        {step === 1 ? (
+          <button onClick={tryNext} disabled={!step1Valid}
+            className={`px-4 py-2 text-sm font-medium rounded-lg inline-flex items-center gap-1 ${step1Valid ? 'bg-gray-900 text-white hover:bg-gray-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}>
+            Next <ChevronRight size={14} />
+          </button>
+        ) : (
+          <button onClick={handleSubmit} disabled={createMutation.isPending || !step2Valid}
+            className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:bg-gray-300">
+            {createMutation.isPending ? 'Creating…' : totalAmount > 0 ? `Create Sale — Rs ${totalAmount.toLocaleString()}` : 'Create Sale'}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="New Local Sale" size="xl">
-      <div className="flex flex-col" style={{ minHeight: '60vh' }}>
+    <SlideDrawer open={isOpen} onClose={onClose} title="New Local Sale" subtitle={STEPS[step - 1]?.label} icon={ShoppingCart} size="xl" footer={footer}>
         {/* Step indicator */}
-        <div className="-mx-6 -mt-2 px-8 pt-3 pb-4 border-b border-gray-100 bg-white">
+        <div className="-mx-5 -mt-5 mb-5 px-5 pt-4 pb-4 border-b border-gray-100 bg-gray-50/60">
           <div className="flex items-center justify-between max-w-md mx-auto">
             {STEPS.map((s, idx) => {
               const isActive = step === s.n;
@@ -381,7 +424,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto py-4 space-y-5" style={{ maxHeight: '58vh' }}>
+        <div className="space-y-5">
 
         {step === 1 && <>
         {/* Buyer */}
@@ -404,6 +447,17 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
               <input value={form.buyer_phone} onChange={e => set('buyer_phone', e.target.value)} className={INPUT} placeholder="Phone number" />
             </div>
           </div>
+          {/* Walk-in → offer to register as a customer (admin approves) */}
+          {isWalkIn && form.buyer_name.trim() && (
+            <label className="mt-3 flex items-start gap-2.5 rounded-lg border border-violet-200 bg-violet-50/60 px-3 py-2.5 cursor-pointer">
+              <input type="checkbox" checked={registerCustomer} onChange={e => setRegisterCustomer(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-500" />
+              <span className="text-sm">
+                <span className="font-medium text-violet-900 inline-flex items-center gap-1"><UserPlus size={13} /> Register “{form.buyer_name.trim()}” as a customer</span>
+                <span className="block text-xs text-violet-700/80 mt-0.5">Sends an approval to Admin → Approvals. Once approved they’re added to the system for future sales.</span>
+              </span>
+            </label>
+          )}
         </div>
 
         {/* Item */}
@@ -518,34 +572,6 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
 
         </>}
         </div>
-
-        {/* Sticky footer */}
-        <div className="border-t border-gray-100 -mx-6 -mb-2 px-6 py-3 bg-white flex items-center justify-between gap-3 mt-2">
-          <div className="text-xs text-gray-500 flex items-center gap-3 flex-wrap">
-            {qtyKg > 0 && <span><span className="font-medium text-gray-900">{qtyKg.toLocaleString()}</span> kg</span>}
-            {totalAmount > 0 && <span><span className="text-gray-400">Total</span> <span className="font-medium text-emerald-700">Rs {totalAmount.toLocaleString()}</span></span>}
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={onClose} className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-900">Cancel</button>
-            {step > 1 && (
-              <button onClick={() => setStep(s => Math.max(1, s - 1))} className="px-3 py-1.5 text-sm text-gray-700 hover:text-gray-900 inline-flex items-center gap-1">
-                <ChevronLeft size={14} /> Back
-              </button>
-            )}
-            {step === 1 ? (
-              <button onClick={tryNext} disabled={!step1Valid}
-                className={`px-4 py-1.5 text-sm font-medium rounded inline-flex items-center gap-1 ${step1Valid ? 'bg-gray-900 text-white hover:bg-gray-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}>
-                Next <ChevronRight size={14} />
-              </button>
-            ) : (
-              <button onClick={handleSubmit} disabled={createMutation.isPending || !step2Valid}
-                className="px-4 py-1.5 text-sm font-medium text-white bg-emerald-600 rounded hover:bg-emerald-700 disabled:bg-gray-300">
-                {createMutation.isPending ? 'Creating…' : totalAmount > 0 ? `Create Sale — Rs ${totalAmount.toLocaleString()}` : 'Create Sale'}
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    </Modal>
+    </SlideDrawer>
   );
 }

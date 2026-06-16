@@ -328,6 +328,7 @@ COL customer_scores.total_revenue:numeric:NULL
 COL customer_scores.updated_at:timestamp with time zone:NULL
 COL customer_scores.volume_score:numeric:NULL
 COL customers.address:text:NULL
+COL customers.approval_status:character varying:NOT NULL
 COL customers.archived:boolean:NOT NULL
 COL customers.bank_account:character varying:NULL
 COL customers.bank_iban:character varying:NULL
@@ -345,6 +346,11 @@ COL customers.is_favorite:boolean:NOT NULL
 COL customers.name:character varying:NOT NULL
 COL customers.payment_terms:character varying:NULL
 COL customers.phone:character varying:NULL
+COL customers.review_notes:text:NULL
+COL customers.reviewed_at:timestamp with time zone:NULL
+COL customers.reviewed_by:integer:NULL
+COL customers.submitted_at:timestamp with time zone:NULL
+COL customers.submitted_by:integer:NULL
 COL customers.uid:character varying:NULL
 COL customers.updated_at:timestamp with time zone:NOT NULL
 COL customers.vat_number:character varying:NULL
@@ -1972,7 +1978,10 @@ CON customer_scores.chk_customer_scores_profitability_score_range(c)
 CON customer_scores.chk_customer_scores_volume_score_range(c)
 CON customer_scores.customer_scores_customer_id_foreign(f)
 CON customer_scores.customer_scores_pkey(p)
+CON customers.chk_customers_approval_status(c)
 CON customers.customers_pkey(p)
+CON customers.customers_reviewed_by_foreign(f)
+CON customers.customers_submitted_by_foreign(f)
 CON customers.customers_uid_unique(u)
 CON dashboard_snapshots.dashboard_snapshots_pkey(p)
 CON data_imports.data_imports_created_by_foreign(f)

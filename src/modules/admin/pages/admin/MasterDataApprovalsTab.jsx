@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { CheckCircle2, XCircle, Clock, User as UserIcon, Calendar, RefreshCw, Truck, Package, AlertCircle, Loader2 } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, User as UserIcon, Calendar, RefreshCw, Truck, Package, AlertCircle, Loader2, Users } from 'lucide-react';
 import { adminApi } from '../../api/services';
 import { useApp } from '../../../../context/AppContext';
 
@@ -62,7 +62,7 @@ function RejectModal({ open, onClose, onConfirm, target }) {
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 space-y-4">
         <div>
-          <h3 className="text-base font-semibold text-gray-900">Reject {target?.type === 'products' ? 'rice type' : 'supplier'}</h3>
+          <h3 className="text-base font-semibold text-gray-900">Reject {target?._type === 'products' ? 'rice type' : target?._type === 'customers' ? 'customer' : 'supplier'}</h3>
           <p className="text-sm text-gray-500 mt-1">
             Reject <span className="font-medium text-gray-800">{target?.name}</span>?
             They&apos;ll see your note so they can fix and resubmit.
@@ -170,6 +170,7 @@ export default function MasterDataApprovalsTab() {
   const [statusFilter, setStatusFilter] = useState('pending');
   const [products, setProducts] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
+  const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
   const [rejectTarget, setRejectTarget] = useState(null);
@@ -181,6 +182,7 @@ export default function MasterDataApprovalsTab() {
       const data = res?.data || res;
       setProducts((data?.products || []).map(p => ({ ...p, _type: 'products' })));
       setSuppliers((data?.suppliers || []).map(s => ({ ...s, _type: 'suppliers' })));
+      setCustomers((data?.customers || []).map(c => ({ ...c, _type: 'customers' })));
     } catch (err) {
       addToast?.(err.message || 'Failed to load approvals', 'error');
     } finally {
@@ -223,7 +225,7 @@ export default function MasterDataApprovalsTab() {
         <div>
           <h2 className="text-xl font-semibold text-gray-900">Master Data Approvals</h2>
           <p className="text-sm text-gray-500 mt-0.5">
-            Review rice types and suppliers added on-the-go by operators from the Purchase Lot screen.
+            Review rice types, suppliers and walk-in customers added on-the-go by operators.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -237,7 +239,7 @@ export default function MasterDataApprovalsTab() {
         </div>
       </div>
 
-      {statusFilter === 'pending' && (suppliers.length + products.length) === 0 && !loading && (
+      {statusFilter === 'pending' && (suppliers.length + products.length + customers.length) === 0 && !loading && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 text-sm text-emerald-800 flex items-center gap-2">
           <CheckCircle2 size={16} /> All caught up — no pending submissions.
         </div>
@@ -263,6 +265,15 @@ export default function MasterDataApprovalsTab() {
             icon={Truck}
             color="bg-blue-50 text-blue-900"
             rows={suppliers}
+            busyId={busyId}
+            onApprove={approve}
+            onReject={(r) => setRejectTarget(r)}
+          />
+          <Section
+            title="Customers"
+            icon={Users}
+            color="bg-violet-50 text-violet-900"
+            rows={customers}
             busyId={busyId}
             onApprove={approve}
             onReject={(r) => setRejectTarget(r)}

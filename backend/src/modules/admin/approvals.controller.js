@@ -15,6 +15,7 @@ const db = require('../../config/database');
 const ALLOWED_TABLES = {
   products: { table: 'products', label: 'product' },
   suppliers: { table: 'suppliers', label: 'supplier' },
+  customers: { table: 'customers', label: 'customer' },
 };
 
 // Does the caller's role have permission to bypass approval?
@@ -72,6 +73,45 @@ const approvalsController = {
       return res.status(201).json({ success: true, data: { supplier } });
     } catch (err) {
       console.error('quickAddSupplier error:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
+  // ─────────────── Quick-add: customer ───────────────
+  async quickAddCustomer(req, res) {
+    try {
+      const { name, contact_person, phone, email, address, country } = req.body || {};
+      if (!name || !String(name).trim()) {
+        return res.status(400).json({ success: false, message: 'Customer name is required.' });
+      }
+      // Dedupe by case-insensitive name so repeat walk-ins don't pile up.
+      const existing = await db('customers')
+        .whereRaw('LOWER(name) = LOWER(?)', [String(name).trim()])
+        .first();
+      if (existing) {
+        return res.status(200).json({ success: true, data: { customer: existing, deduped: true } });
+      }
+      const autoApprove = await callerCanAutoApprove(req);
+      const now = db.fn.now();
+      const [customer] = await db('customers').insert({
+        name: String(name).trim(),
+        contact_person: contact_person || null,
+        phone: phone || null,
+        email: email || null,
+        address: address || null,
+        country: country || null,
+        payment_terms: 'Cash',
+        currency: 'PKR',
+        is_active: true,
+        approval_status: autoApprove ? 'approved' : 'pending',
+        submitted_by: req.user?.id || null,
+        submitted_at: now,
+        reviewed_by: autoApprove ? (req.user?.id || null) : null,
+        reviewed_at: autoApprove ? now : null,
+      }).returning('*');
+      return res.status(201).json({ success: true, data: { customer } });
+    } catch (err) {
+      console.error('quickAddCustomer error:', err);
       return res.status(500).json({ success: false, message: err.message });
     }
   },
@@ -142,9 +182,10 @@ const approvalsController = {
         return q.limit(500);
       };
 
-      const [products, suppliers] = await Promise.all([
+      const [products, suppliers, customers] = await Promise.all([
         buildQuery('products'),
         buildQuery('suppliers'),
+        buildQuery('customers'),
       ]);
 
       return res.json({
@@ -152,10 +193,12 @@ const approvalsController = {
         data: {
           products,
           suppliers,
+          customers,
           summary: {
             products: products.length,
             suppliers: suppliers.length,
-            total: products.length + suppliers.length,
+            customers: customers.length,
+            total: products.length + suppliers.length + customers.length,
           },
         },
       });
@@ -168,15 +211,17 @@ const approvalsController = {
   // ─────────────── Approvals: count (for top-bar badge) ───────────────
   async approvalsCount(req, res) {
     try {
-      const [p, s] = await Promise.all([
+      const [p, s, c] = await Promise.all([
         db('products').where({ approval_status: 'pending' }).count('id as c').first(),
         db('suppliers').where({ approval_status: 'pending' }).count('id as c').first(),
+        db('customers').where({ approval_status: 'pending' }).count('id as c').first(),
       ]);
       const products = parseInt(p?.c) || 0;
       const suppliers = parseInt(s?.c) || 0;
+      const customers = parseInt(c?.c) || 0;
       return res.json({
         success: true,
-        data: { products, suppliers, total: products + suppliers },
+        data: { products, suppliers, customers, total: products + suppliers + customers },
       });
     } catch (err) {
       console.error('approvalsCount error:', err);

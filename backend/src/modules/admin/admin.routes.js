@@ -23,6 +23,12 @@ router.post(
   auditAction('quick_add', 'product', (req, data) => data?.data?.product?.id),
   approvalsCtrl.quickAddProduct
 );
+router.post(
+  '/customers/quick-add',
+  authorize('inventory', 'create'),
+  auditAction('quick_add', 'customer', (req, data) => data?.data?.customer?.id),
+  approvalsCtrl.quickAddCustomer
+);
 
 // Admin review queue
 router.get('/approvals',       authorize('admin', 'view'), approvalsCtrl.listApprovals);
