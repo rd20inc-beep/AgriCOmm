@@ -209,7 +209,20 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
             </label>
             <select
               value={form.bankAccountId}
-              onChange={(e) => setForm((f) => ({ ...f, bankAccountId: e.target.value }))}
+              onChange={(e) => {
+                const id = e.target.value;
+                // A cash account (e.g. Office Petty Cash) implies a cash payment;
+                // switching back to a bank account flips the default back. A
+                // non-cash method the user picked themselves is left alone.
+                const acct = bankAccounts.find((a) => String(a.id) === String(id));
+                setForm((f) => ({
+                  ...f,
+                  bankAccountId: id,
+                  method: acct?.type === 'cash'
+                    ? 'cash'
+                    : (f.method === 'cash' ? 'bank_transfer' : f.method),
+                }));
+              }}
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
               <option value="">Select bank account…</option>
               {bankAccounts.map((a) => (
