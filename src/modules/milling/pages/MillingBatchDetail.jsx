@@ -191,14 +191,17 @@ export default function MillingBatchDetail() {
   const branValue = parseFloat(batch.branMT) || 0;
   const huskValue = parseFloat(batch.huskMT) || 0;
   const pct = (v) => rawQty > 0 ? ((v / rawQty) * 100).toFixed(1) : 0;
+  // Label the finished output with the batch's actual rice type (falls back to
+  // the generic 'Finished Rice' only when the batch has no product set).
+  const finishedLabel = batch.productName || 'Finished Rice';
   const yieldBreakdown = [
-    { label: 'Finished Rice', value: parseFloat(batch.actualFinishedMT) || 0, color: 'bg-blue-500', pct: pct(parseFloat(batch.actualFinishedMT) || 0) },
+    { label: finishedLabel, value: parseFloat(batch.actualFinishedMT) || 0, color: 'bg-blue-500', pct: pct(parseFloat(batch.actualFinishedMT) || 0) },
     { label: 'Broken', value: parseFloat(batch.brokenMT) || 0, color: 'bg-amber-500', pct: pct(parseFloat(batch.brokenMT) || 0) },
     { label: 'Sortex Rejects', value: sortexValue, color: 'bg-orange-500', pct: pct(sortexValue) },
     { label: 'Wastage', value: parseFloat(batch.wastageMT) || 0, color: 'bg-red-500', pct: pct(parseFloat(batch.wastageMT) || 0) },
     ...(branValue > 0 ? [{ label: 'Bran (legacy)', value: branValue, color: 'bg-green-500', pct: pct(branValue) }] : []),
     ...(huskValue > 0 ? [{ label: 'Husk (legacy)', value: huskValue, color: 'bg-purple-500', pct: pct(huskValue) }] : []),
-  ].filter(r => r.value > 0 || r.label === 'Finished Rice');
+  ].filter(r => r.value > 0 || r.label === finishedLabel);
 
   // Stock movement history derived from batch data
   const transfers = [
@@ -565,6 +568,9 @@ export default function MillingBatchDetail() {
                     {batch.linkedExportOrder}
                   </Link>
                 </span>
+              )}
+              {batch.productName && (
+                <span>Rice Type: <span className="font-medium text-gray-700">{batch.productName}</span></span>
               )}
               {batch.supplierName ? (
                 <span>Supplier: <PartyLink type="supplier" id={batch.supplierId} name={batch.supplierName} /></span>
@@ -1782,7 +1788,7 @@ export default function MillingBatchDetail() {
             const accounted = rawQty > 0 ? ((total / rawQty) * 100).toFixed(1) : '0.0';
 
             const rows = [
-              { label: 'Finished Rice', value: f, bold: true, color: 'text-blue-700' },
+              { label: finishedLabel, value: f, bold: true, color: 'text-blue-700' },
             ];
             if (b > 0) rows.push({ label: 'Broken Rice (total)', value: b, color: 'text-amber-700' });
             if (b1) rows.push({ label: '  B1', value: b1, indent: true });
