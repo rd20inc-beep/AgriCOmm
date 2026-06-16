@@ -1365,6 +1365,23 @@ module.exports = {
             .whereRaw('il.id = ?', [lotId])
             .andWhereRaw("il.batch_ref = 'batch-' || milling_vehicle_arrivals.batch_id");
         })
+        .orWhereExists(function () {
+          // The lot is the OUTPUT of a blend batch: trace through that batch's
+          // source lots to their originating batches' arrivals, so a blended
+          // lot shows the trucks that delivered the raw material across the
+          // whole blend (the blend batch itself records no direct arrivals).
+          this.select(db.raw('1'))
+            .from('inventory_lots as out_lot')
+            .join('batch_source_lots as bsl', function () {
+              this.on(db.raw("out_lot.batch_ref = 'batch-' || bsl.batch_id"));
+            })
+            .join('inventory_lots as src', 'src.id', 'bsl.lot_id')
+            .whereRaw('out_lot.id = ?', [lotId])
+            .andWhere(function () {
+              this.whereRaw('milling_vehicle_arrivals.lot_id = src.id')
+                .orWhereRaw("milling_vehicle_arrivals.lot_id IS NULL AND src.batch_ref = 'batch-' || milling_vehicle_arrivals.batch_id");
+            });
+        })
         .orderBy('arrival_date', 'desc')
         .orderBy('id', 'desc');
       return res.json({ success: true, data: { vehicles: rows } });
