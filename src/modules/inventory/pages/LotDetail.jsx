@@ -335,6 +335,7 @@ export default function LotDetail() {
                           {inp.sourceLotNo}{!inp.varietyKnown ? ' · set variety' : ''}
                         </button>
                       )}
+                      {inp.supplierName && <span className="text-[10px] text-gray-400 truncate block" title={inp.supplierName}>{inp.supplierName}</span>}
                     </div>
                     <div className="flex-1 h-5 bg-white rounded-full overflow-hidden ring-1 ring-purple-100">
                       <div className="h-full bg-purple-400 rounded-full flex items-center justify-end pr-2" style={{ width: `${Math.max(2, Math.min(100, inp.ratioPct || 0))}%` }}>
@@ -357,7 +358,8 @@ export default function LotDetail() {
             <div className="space-y-2.5">
               {[
                 ['Lot Number', lot.lotNo],
-                ['Supplier', lot.supplierName],
+                [blendRecipe?.suppliers?.length > 1 ? 'Suppliers' : 'Supplier',
+                  blendRecipe?.suppliers?.length ? blendRecipe.suppliers.map(s => s.name).join(', ') : lot.supplierName],
                 ['Purchase Date', fmtDate(lot.purchaseDate)],
                 ['Crop Year', lot.cropYear],
                 ['Warehouse / Godown', lot.warehouseName],
