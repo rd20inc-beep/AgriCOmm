@@ -27,11 +27,13 @@ export default function QualityEditModal({ isOpen, lot, onClose, onSuccess, addT
     const v = qj[k] ?? (k === 'moisture' ? lot?.moisturePct : k === 'broken' ? lot?.brokenPct : undefined);
     return v == null ? '' : String(v);
   };
+  const grainInit = qj.grain_size ?? qj.grainSize;
   const [form, setForm] = useState({
     variety: lot?.variety || '',
     grade: lot?.grade || '',
     sortex_status: lot?.sortexStatus || '',
     whiteness: lot?.whiteness || '',
+    grain_size: grainInit == null ? '' : String(grainInit),
     bag_quality: lot?.bagQuality || '',
     quality_notes: lot?.qualityNotes || '',
     quality: [...AGGREGATE, ...GRADES].reduce((a, [k]) => ({ ...a, [k]: init(k) }), {}),
@@ -47,6 +49,10 @@ export default function QualityEditModal({ isOpen, lot, onClose, onSuccess, addT
       for (const [k] of [...AGGREGATE, ...GRADES]) {
         const v = form.quality[k];
         if (v !== '' && v != null && !Number.isNaN(parseFloat(v))) quality[k] = parseFloat(v);
+      }
+      // Grain length (mm) is stored in quality_json.grain_size (whitelisted).
+      if (form.grain_size !== '' && form.grain_size != null && !Number.isNaN(parseFloat(form.grain_size))) {
+        quality.grain_size = parseFloat(form.grain_size);
       }
       await lotInventoryApi.updateLotQuality(lot.id, {
         variety: form.variety || null,
@@ -99,6 +105,7 @@ export default function QualityEditModal({ isOpen, lot, onClose, onSuccess, addT
           <div><label className={lbl}>Grade</label><input value={form.grade} onChange={(e) => set('grade', e.target.value)} className={inp} /></div>
           <div><label className={lbl}>Sortex status</label><input value={form.sortex_status} onChange={(e) => set('sortex_status', e.target.value)} className={inp} /></div>
           <div><label className={lbl}>Whiteness</label><input type="number" min="0" step="0.1" value={form.whiteness} onChange={(e) => set('whiteness', e.target.value)} className={inp} placeholder="index" /></div>
+          <div><label className={lbl}>Grain length (mm)</label><input type="number" min="0" step="0.01" value={form.grain_size} onChange={(e) => set('grain_size', e.target.value)} className={inp} placeholder="mm" /></div>
           <div><label className={lbl}>Bag quality</label><input value={form.bag_quality} onChange={(e) => set('bag_quality', e.target.value)} className={inp} /></div>
         </div>
 
