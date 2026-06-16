@@ -109,6 +109,15 @@ router.get('/rice-purchases', authorize('milling', 'view'), async (req, res) => 
           .as('lot'),
         'lot.batch_ref', db.raw("'batch-' || mb.id")
       )
+      // Arrival analysis carries the agreed price/MT + moisture/broken for the
+      // batch (entered after the truck arrives). The ledger surfaces these —
+      // they live in milling_quality_samples, not the vehicle row's quality_json.
+      .leftJoin(
+        db.raw(`(SELECT DISTINCT ON (batch_id) batch_id, moisture, broken, price_per_kg, price_per_mt
+                 FROM milling_quality_samples WHERE analysis_type = 'arrival'
+                 ORDER BY batch_id, created_at DESC) as aq`),
+        'aq.batch_id', 'mb.id'
+      )
       .select(
         'va.id',
         'va.vehicle_no',
@@ -130,7 +139,11 @@ router.get('/rice-purchases', authorize('milling', 'view'), async (req, res) => 
         'p.code as product_code',
         'p.name as product_name',
         'lot.lot_no',
-        'lot.lot_id'
+        'lot.lot_id',
+        'aq.moisture as aq_moisture',
+        'aq.broken as aq_broken',
+        'aq.price_per_kg as aq_price_per_kg',
+        'aq.price_per_mt as aq_price_per_mt'
       )
       .orderBy('va.arrival_date', 'desc')
       .orderBy('va.created_at', 'desc')
@@ -141,7 +154,24 @@ router.get('/rice-purchases', authorize('milling', 'view'), async (req, res) => 
     if (supplier_id) q = q.where('mb.supplier_id', supplier_id);
     if (product_id) q = q.where('mb.product_id', product_id);
 
-    const rows = await q;
+    const rawRows = await q;
+    // Merge the arrival analysis (price/MT, moisture, broken) into quality_json so
+    // the ledger's Price/MT, Value and Moisture columns populate. A value already
+    // on the vehicle row's own quality_json wins.
+    const rows = rawRows.map((r) => {
+      const qj = r.quality_json || {};
+      const { aq_moisture, aq_broken, aq_price_per_kg, aq_price_per_mt, ...rest } = r;
+      return {
+        ...rest,
+        quality_json: {
+          ...qj,
+          price_per_mt: qj.price_per_mt ?? (aq_price_per_mt != null ? parseFloat(aq_price_per_mt) : null),
+          price_per_kg: qj.price_per_kg ?? (aq_price_per_kg != null ? parseFloat(aq_price_per_kg) : null),
+          moisture: qj.moisture ?? (aq_moisture != null ? parseFloat(aq_moisture) : null),
+          broken: qj.broken ?? (aq_broken != null ? parseFloat(aq_broken) : null),
+        },
+      };
+    });
 
     // Summary totals
     const totalWeight = rows.reduce((s, r) => s + (parseFloat(r.weight_mt) || 0), 0);
