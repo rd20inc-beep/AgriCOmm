@@ -1652,6 +1652,7 @@ export function useLotDetail(id) {
           arrival: data.batchQuality.arrival ? transformKeys(data.batchQuality.arrival) : null,
           post: data.batchQuality.post ? transformKeys(data.batchQuality.post) : null,
         } : null,
+        batchYield: data.batchYield ? transformKeys(data.batchYield) : null,
       };
     },
     enabled: isAuthenticated() && !!id,

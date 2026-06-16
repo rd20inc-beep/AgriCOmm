@@ -212,15 +212,23 @@ module.exports = {
       // the lot's Quality Specifications can show the complete sheet a finished/raw
       // lot inherits — not just the moisture/broken stamped on the lot row.
       let batchQuality = null;
+      let batchYield = null;
       const brMatch = /^batch-(\d+)$/.exec(lot.batch_ref || '');
       const ownBatchId = brMatch ? parseInt(brMatch[1], 10) : null;
       if (ownBatchId) {
-        const [arrival, post] = await Promise.all([
+        const [arrival, post, byield] = await Promise.all([
           db('milling_quality_samples').where({ batch_id: ownBatchId, analysis_type: 'arrival' })
             .orderBy('created_at', 'desc').first(),
           db('milling_quality_post').where({ batch_id: ownBatchId }).orderBy('created_at', 'desc').first(),
+          // The grade split captured when yield was recorded — the output
+          // composition the operator entered (finished + B1/B2/B3/CSR/Short Grain
+          // + bran/husk/sortex). Surfaced so the lot's quality panel reflects it.
+          db('milling_batches').where({ id: ownBatchId }).first(
+            'actual_finished_mt', 'broken_mt', 'b1_mt', 'b2_mt', 'b3_mt', 'csr_mt',
+            'short_grain_mt', 'bran_mt', 'husk_mt', 'sortex_rejects_mt', 'post_milling_grade'),
         ]);
         if (arrival || post) batchQuality = { arrival: arrival || null, post: post || null };
+        batchYield = byield || null;
       }
 
       // Blend recipe — for a blended OUTPUT lot, the varieties + ratios that
@@ -282,7 +290,7 @@ module.exports = {
 
       return res.json({
         success: true,
-        data: { lot: enrichLot(lot), transactions, reservations, millingBatches, blendRecipe, batchQuality },
+        data: { lot: enrichLot(lot), transactions, reservations, millingBatches, blendRecipe, batchQuality, batchYield },
       });
     } catch (err) {
       console.error('getLotDetail error:', err);

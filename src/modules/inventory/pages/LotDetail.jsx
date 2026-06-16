@@ -74,6 +74,7 @@ export default function LotDetail() {
   const millingBatches = data?.millingBatches || [];
   const blendRecipe = data?.blendRecipe || null;
   const batchQuality = data?.batchQuality || null;
+  const batchYield = data?.batchYield || null;
   const { data: lotSales = [] } = useLocalSalesByLot(lot.id);
 
   // Fetch linked milling batch for vehicles and quality
@@ -435,6 +436,51 @@ export default function LotDetail() {
                   <div className="pt-3 border-t border-gray-100">
                     <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Broken-grade breakdown</p>
                     <div className="grid grid-cols-2 gap-x-3 gap-y-1">{grades.map(r => Row(r, 'text-amber-700'))}</div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Output composition captured at yield — the grade split the operator
+                entered (finished + broken grades + by-products). */}
+            {(() => {
+              if (!batchYield) return null;
+              const n = (v) => parseFloat(v) || 0;
+              const fin = n(batchYield.actualFinishedMt);
+              const broken = n(batchYield.brokenMt);
+              const bran = n(batchYield.branMt), husk = n(batchYield.huskMt), sortex = n(batchYield.sortexRejectsMt);
+              const total = fin + broken + bran + husk + sortex;
+              if (total <= 0) return null;
+              const pctOf = (v) => total > 0 ? `${(v / total * 100).toFixed(1)}%` : '—';
+              const subGrades = [
+                ['B1', n(batchYield.b1Mt)], ['B2', n(batchYield.b2Mt)], ['B3', n(batchYield.b3Mt)],
+                ['CSR', n(batchYield.csrMt)], ['Short Grain', n(batchYield.shortGrainMt)],
+              ].filter(([, v]) => v > 0);
+              const tops = [
+                ['Finished', fin], ['Broken', broken], ['Bran', bran], ['Husk', husk], ['Sortex', sortex],
+              ].filter(([, v]) => v > 0);
+              return (
+                <div className="mt-3 pt-3 border-t border-gray-100">
+                  <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+                    Output composition (from yield){batchYield.postMillingGrade ? ` · grade ${batchYield.postMillingGrade}` : ''}
+                  </p>
+                  <div className="space-y-1">
+                    {tops.map(([l, v]) => (
+                      <div key={l} className="flex justify-between text-sm">
+                        <span className="text-gray-500">{l}</span>
+                        <span className="font-medium text-gray-900 tabular-nums">{v.toLocaleString()} MT <span className="text-gray-400">({pctOf(v)})</span></span>
+                      </div>
+                    ))}
+                    {subGrades.length > 0 && (
+                      <div className="pl-3 mt-0.5 grid grid-cols-2 gap-x-3 gap-y-0.5">
+                        {subGrades.map(([l, v]) => (
+                          <div key={l} className="flex justify-between text-xs">
+                            <span className="text-gray-400">{l}</span>
+                            <span className="text-amber-700 tabular-nums">{v.toLocaleString()} MT</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               );
