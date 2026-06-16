@@ -186,7 +186,7 @@ const financeController = {
         .leftJoin('suppliers as s', 's.id', 'mb.supplier_id')
         .select(
           'mc.id', 'mc.batch_id', 'mc.category', 'mc.amount', 'mc.currency',
-          'mc.created_at', 'mb.batch_no', 'mb.processing_type',
+          'mc.created_at', 'mb.batch_no', 'mb.processing_type', 'mb.supplier_id',
           db.raw('COALESCE(s.name, mb.supplier_name) as supplier_name'),
         )
         .where('mc.amount', '>', 0)
@@ -210,7 +210,7 @@ const financeController = {
         for (const r of splitRows) {
           const byBatch = (blendSplitMap[r.batch_id] ||= {});
           const key = r.supplier_id || r.supplier_name || 'unknown';
-          if (!byBatch[key]) byBatch[key] = { supplier_name: r.supplier_name || null, amount: 0 };
+          if (!byBatch[key]) byBatch[key] = { supplier_id: r.supplier_id || null, supplier_name: r.supplier_name || null, amount: 0 };
           byBatch[key].amount += parseFloat(r.cost_total_pkr) || 0;
         }
       }
@@ -245,14 +245,15 @@ const financeController = {
           ? Object.values(blendSplitMap[mc.batch_id])
           : null;
         const rows = splits && splits.length
-          ? splits.map((sp, i) => ({ suffix: `-${i}`, supplier_name: sp.supplier_name, amount: sp.amount }))
-          : [{ suffix: '', supplier_name: mc.supplier_name || null, amount: parseFloat(mc.amount) }];
+          ? splits.map((sp, i) => ({ suffix: `-${i}`, supplier_id: sp.supplier_id, supplier_name: sp.supplier_name, amount: sp.amount }))
+          : [{ suffix: '', supplier_id: mc.supplier_id || null, supplier_name: mc.supplier_name || null, amount: parseFloat(mc.amount) }];
         rows.forEach((r) => {
           derived.push({
             id: `MC-${mc.id}${r.suffix}`,
             pay_no: `MC-${mc.id}${r.suffix}`,
             entity: 'mill',
             category: categoryLabel(mc.category),
+            supplier_id: r.supplier_id,
             supplier_name: r.supplier_name,
             linked_ref: mc.batch_no,
             original_amount: r.amount,
