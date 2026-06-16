@@ -217,6 +217,8 @@ export default function LotDetail() {
         ) : (
           (lot.type === 'raw' || lot.type === 'finished')
           && lot.entity === 'mill'
+          // A blend output is a final product — don't offer to re-mill it again.
+          && lot.processingType !== 'blended'
           && (parseFloat(lot.availableQty) > 0)
           && lot.millingStatus !== 'Consumed'
           && lot.millingStatus !== 'In Milling' && (
