@@ -433,19 +433,27 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2">
               <label className={LABEL}>Customer</label>
-              <select value={form.customer_id} onChange={e => set('customer_id', e.target.value)} className={SELECT}>
+              <select value={form.customer_id}
+                onChange={e => { const v = e.target.value; setForm(p => ({ ...p, customer_id: v, ...(v ? { buyer_name: '', buyer_phone: '' } : {}) })); }}
+                className={SELECT}>
                 <option value="">Walk-in / not registered</option>
                 {(customers || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
-            <div>
-              <label className={LABEL}>Buyer Name {!form.customer_id && '*'}</label>
-              <input value={form.buyer_name} onChange={e => set('buyer_name', e.target.value)} className={INPUT} placeholder="Walk-in buyer name" />
-            </div>
-            <div>
-              <label className={LABEL}>Phone</label>
-              <input value={form.buyer_phone} onChange={e => set('buyer_phone', e.target.value)} className={INPUT} placeholder="Phone number" />
-            </div>
+            {/* Buyer name + phone only apply to a walk-in / not-registered buyer;
+                a registered customer already carries these. */}
+            {isWalkIn && (
+              <>
+                <div>
+                  <label className={LABEL}>Buyer Name *</label>
+                  <input value={form.buyer_name} onChange={e => set('buyer_name', e.target.value)} className={INPUT} placeholder="Walk-in buyer name" />
+                </div>
+                <div>
+                  <label className={LABEL}>Phone</label>
+                  <input value={form.buyer_phone} onChange={e => set('buyer_phone', e.target.value)} className={INPUT} placeholder="Phone number" />
+                </div>
+              </>
+            )}
           </div>
           {/* Walk-in → offer to register as a customer (admin approves) */}
           {isWalkIn && form.buyer_name.trim() && (
