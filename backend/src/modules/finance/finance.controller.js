@@ -178,15 +178,42 @@ const financeController = {
         });
       }
 
-      // Derive payables from cost tables
+      // Derive payables from cost tables. Resolve the supplier from the batch's
+      // supplier_id (the denormalized supplier_name is sometimes null) and carry
+      // processing_type so a blend's raw cost can be split per supplier below.
       const millingCosts = await db('milling_costs as mc')
         .join('milling_batches as mb', 'mc.batch_id', 'mb.id')
+        .leftJoin('suppliers as s', 's.id', 'mb.supplier_id')
         .select(
           'mc.id', 'mc.batch_id', 'mc.category', 'mc.amount', 'mc.currency',
-          'mc.created_at', 'mb.batch_no', 'mb.supplier_name',
+          'mc.created_at', 'mb.batch_no', 'mb.processing_type',
+          db.raw('COALESCE(s.name, mb.supplier_name) as supplier_name'),
         )
         .where('mc.amount', '>', 0)
         .orderBy('mc.created_at', 'desc');
+
+      // A blended batch's raw_rice cost is one pooled row, but the rice came from
+      // several source lots / suppliers. Split it per supplier (by source-lot
+      // cost) so the money-out shows every supplier, not just one. Aggregated by
+      // supplier in case multiple lots share one.
+      const blendBatchIds = [...new Set(
+        millingCosts.filter((mc) => mc.category === 'raw_rice' && mc.processing_type === 'blended')
+          .map((mc) => mc.batch_id),
+      )];
+      const blendSplitMap = {};
+      if (blendBatchIds.length) {
+        const splitRows = await db('batch_source_lots as bsl')
+          .join('inventory_lots as il', 'il.id', 'bsl.lot_id')
+          .leftJoin('suppliers as s', 's.id', 'il.supplier_id')
+          .whereIn('bsl.batch_id', blendBatchIds)
+          .select('bsl.batch_id', 'il.supplier_id', 's.name as supplier_name', 'bsl.cost_total_pkr');
+        for (const r of splitRows) {
+          const byBatch = (blendSplitMap[r.batch_id] ||= {});
+          const key = r.supplier_id || r.supplier_name || 'unknown';
+          if (!byBatch[key]) byBatch[key] = { supplier_name: r.supplier_name || null, amount: 0 };
+          byBatch[key].amount += parseFloat(r.cost_total_pkr) || 0;
+        }
+      }
 
       const exportCosts = await db('export_order_costs as eoc')
         .join('export_orders as eo', 'eoc.order_id', 'eo.id')
@@ -212,23 +239,33 @@ const financeController = {
       };
 
       millingCosts.forEach(mc => {
-        derived.push({
-          id: `MC-${mc.id}`,
-          pay_no: `MC-${mc.id}`,
-          entity: 'mill',
-          category: categoryLabel(mc.category),
-          supplier_name: mc.supplier_name || null,
-          linked_ref: mc.batch_no,
-          original_amount: parseFloat(mc.amount),
-          paid_amount: 0,
-          outstanding: parseFloat(mc.amount),
-          due_date: mc.created_at,
-          status: 'Pending',
-          currency: mc.currency || 'PKR',
-          aging: 0,
-          notes: `${categoryLabel(mc.category)} cost for batch ${mc.batch_no}`,
-          created_at: mc.created_at,
-          source: 'milling_costs',
+        // For a blend's raw rice, emit one payable per source-lot supplier so
+        // each supplier's share is visible; otherwise a single payable.
+        const splits = (mc.category === 'raw_rice' && blendSplitMap[mc.batch_id])
+          ? Object.values(blendSplitMap[mc.batch_id])
+          : null;
+        const rows = splits && splits.length
+          ? splits.map((sp, i) => ({ suffix: `-${i}`, supplier_name: sp.supplier_name, amount: sp.amount }))
+          : [{ suffix: '', supplier_name: mc.supplier_name || null, amount: parseFloat(mc.amount) }];
+        rows.forEach((r) => {
+          derived.push({
+            id: `MC-${mc.id}${r.suffix}`,
+            pay_no: `MC-${mc.id}${r.suffix}`,
+            entity: 'mill',
+            category: categoryLabel(mc.category),
+            supplier_name: r.supplier_name,
+            linked_ref: mc.batch_no,
+            original_amount: r.amount,
+            paid_amount: 0,
+            outstanding: r.amount,
+            due_date: mc.created_at,
+            status: 'Pending',
+            currency: mc.currency || 'PKR',
+            aging: 0,
+            notes: `${categoryLabel(mc.category)} cost for batch ${mc.batch_no}`,
+            created_at: mc.created_at,
+            source: 'milling_costs',
+          });
         });
       });
 
