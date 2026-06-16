@@ -229,6 +229,7 @@ export default function RicePurchasesLedger() {
                   <th className="px-3 py-2 text-right">Price/MT</th>
                   <th className="px-3 py-2 text-right">Value</th>
                   <th className="px-3 py-2 text-right">Moisture</th>
+                  <th className="px-3 py-2 text-right">Broken</th>
                   <th className="px-3 py-2">Driver</th>
                 </tr>
               </thead>
@@ -275,6 +276,9 @@ export default function RicePurchasesLedger() {
                       </td>
                       <td className="px-3 py-2 text-right">
                         {q.moisture != null ? `${q.moisture}%` : '—'}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {q.broken != null ? `${q.broken}%` : '—'}
                       </td>
                       <td className="px-3 py-2 text-gray-600">{r.driver_name || '—'}</td>
                     </tr>
