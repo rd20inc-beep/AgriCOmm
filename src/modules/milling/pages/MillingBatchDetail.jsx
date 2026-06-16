@@ -572,7 +572,19 @@ export default function MillingBatchDetail() {
               {batch.productName && (
                 <span>Rice Type: <span className="font-medium text-gray-700">{batch.productName}</span></span>
               )}
-              {batch.supplierName ? (
+              {isBlend && blendSuppliers.length > 0 ? (
+                // A blend draws from several source lots — show every supplier,
+                // not just the one the blend batch happened to inherit.
+                <span className="flex flex-wrap items-center gap-1">
+                  {blendSuppliers.length > 1 ? 'Suppliers:' : 'Supplier:'}
+                  {blendSuppliers.map((s, i) => (
+                    <span key={s.supplier_id} className="inline-flex items-center">
+                      <PartyLink type="supplier" id={s.supplier_id} name={s.supplier_name} />
+                      {i < blendSuppliers.length - 1 && <span className="text-gray-300">,</span>}
+                    </span>
+                  ))}
+                </span>
+              ) : batch.supplierName ? (
                 <span>Supplier: <PartyLink type="supplier" id={batch.supplierId} name={batch.supplierName} /></span>
               ) : (
                 <span className="text-amber-600 font-medium">No supplier assigned</span>
