@@ -1,6 +1,8 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Plus, Trash2, ShoppingCart } from 'lucide-react';
 import SlideDrawer from './SlideDrawer';
+import SupplierPicker from './SupplierPicker';
+import ItemPicker from './ItemPicker';
 import { useApp } from '../context/AppContext';
 import { useMillStoreItems, useCreatePurchase } from '../modules/millStore/api/queries';
 
@@ -14,6 +16,13 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved }) {
   const { data: items = [] } = useMillStoreItems({ limit: 500 });
   const safeItems = Array.isArray(items) ? items : [];
   const createMut = useCreatePurchase();
+
+  // Items added inline via the picker — merged on top so every line sees them.
+  const [localItems, setLocalItems] = useState([]);
+  const mergedItems = useMemo(() => {
+    const seen = new Set();
+    return [...localItems, ...safeItems].filter(i => i && !seen.has(i.id) && seen.add(i.id));
+  }, [localItems, safeItems]);
 
   const [supplierId, setSupplierId] = useState('');
   const [invoiceNumber, setInvoiceNumber] = useState('');
@@ -83,11 +92,15 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved }) {
         {/* Header fields */}
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2">
-            <label className={LABEL}>Supplier <span className="text-gray-400 normal-case font-normal">(optional)</span></label>
-            <select value={supplierId} onChange={e => setSupplierId(e.target.value)} className={INPUT}>
-              <option value="">No supplier (cash / walk-in)</option>
-              {(suppliersList || []).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
+            <SupplierPicker
+              label="Supplier (optional)"
+              value={supplierId}
+              onChange={setSupplierId}
+              suppliers={suppliersList || []}
+              addToast={addToast}
+              clearable
+              placeholder="Search supplier (or leave blank for cash / walk-in)…"
+            />
           </div>
           <div>
             <label className={LABEL}>Date *</label>
@@ -116,16 +129,18 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved }) {
               const lineTotal = (Number(line.quantity) || 0) * (Number(line.cost_per_unit) || 0);
               return (
                 <div key={idx} className="rounded-lg border border-gray-200 bg-gray-50/50 p-3 space-y-2">
-                  <select value={line.item_id}
-                    onChange={e => {
-                      setLine(idx, 'item_id', e.target.value);
-                      const item = safeItems.find(i => String(i.id) === e.target.value);
+                  <ItemPicker
+                    label="Item"
+                    value={line.item_id}
+                    onChange={(id) => {
+                      setLine(idx, 'item_id', id);
+                      const item = mergedItems.find(i => String(i.id) === String(id));
                       if (item?.last_purchase_cost) setLine(idx, 'cost_per_unit', item.last_purchase_cost);
                     }}
-                    className={INPUT}>
-                    <option value="">Select item…</option>
-                    {safeItems.map(i => <option key={i.id} value={i.id}>{i.code} — {i.name} ({i.unit})</option>)}
-                  </select>
+                    items={mergedItems}
+                    onItemAdded={(it) => setLocalItems(prev => [it, ...prev])}
+                    addToast={addToast}
+                  />
                   <div className="grid grid-cols-3 gap-2">
                     <div>
                       <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-0.5">Qty</label>
