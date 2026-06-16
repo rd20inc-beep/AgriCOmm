@@ -467,7 +467,7 @@ const financeController = {
   // and Money Out tabs on the Reports hub.
   async listPayments(req, res) {
     try {
-      const { type, from_date, to_date, limit = 500 } = req.query;
+      const { type, from_date, to_date, entity, limit = 500 } = req.query;
       let q = db('payments as p')
         .leftJoin('receivables as r', 'p.linked_receivable_id', 'r.id')
         .leftJoin('payables as pa',   'p.linked_payable_id',    'pa.id')
@@ -490,6 +490,15 @@ const financeController = {
       if (type) q = q.where('p.type', type);
       if (from_date) q = q.where('p.payment_date', '>=', from_date);
       if (to_date)   q = q.where('p.payment_date', '<=', to_date);
+      // Entity scope (e.g. a Mill role must not see export-order payments): keep
+      // only rows whose receivable / payable / local-sale belongs to that entity.
+      if (entity) {
+        q = q.where(function () {
+          this.where('r.entity', entity)
+            .orWhere('pa.entity', entity)
+            .orWhere('ls.entity', entity);
+        });
+      }
       const rows = await q
         .orderBy('p.payment_date', 'desc')
         .orderBy('p.created_at', 'desc')

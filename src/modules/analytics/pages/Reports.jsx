@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useAuth } from '../../../context/AuthContext';
 import {
   BarChart3, TrendingUp, Users, Globe, Package, Award, Coins, Printer, RefreshCw,
   ArrowUpRight, ArrowDownLeft, Activity, Calendar, ExternalLink, AlertTriangle,
@@ -77,9 +78,20 @@ const TABS = [
 ];
 
 export default function Reports() {
+  const { user } = useAuth();
+  // A Mill role's reports must stay mill-only — no export-order payments,
+  // customers, countries or export A/R / booked profit.
+  const millScoped = user?.role === 'Mill Manager';
+  const visibleTabs = millScoped
+    ? TABS.filter(t => ['moneyIn', 'moneyOut', 'inventory', 'quality'].includes(t.key))
+    : TABS;
+
   const [range, setRange] = useState('');
   const [tab, setTab] = useState('moneyIn');
-  const params = useMemo(() => rangeToParams(range), [range]);
+  const params = useMemo(
+    () => ({ ...rangeToParams(range), ...(millScoped ? { entity: 'mill' } : {}) }),
+    [range, millScoped],
+  );
 
   const { data: exec = {}, isLoading: execLoading, refetch: refetchExec } = useExecutiveSummary(params);
   // Headline money totals across the system — receipts vs payments
@@ -134,14 +146,18 @@ export default function Reports() {
         <KpiTile icon={ArrowUpRight}  tone="rose"    label="Total Money Out" primary={fmtPKR(totalOut)} secondary={`${paymentsData?.count ?? 0} payments`} />
         <KpiTile icon={Activity}      tone={netFlow >= 0 ? 'violet' : 'rose'} label="Net Cashflow"
                  primary={fmtPKR(netFlow)} secondary={netFlow >= 0 ? 'Positive' : 'Negative'} />
-        <KpiTile icon={Coins}         tone="amber"   label="Outstanding A/R" primary={fmtPKR(exec.totalOutstandingPkr)} secondary={`${exec.openReceivables ?? 0} open`} loading={execLoading} />
-        <KpiTile icon={TrendingUp}    tone="blue"    label="Booked Profit"   primary={fmtPKR(exec.bookedProfitPkr)} secondary={`Margin ${fmtPct(exec.avgMarginPct)}`} loading={execLoading} />
+        {!millScoped && (
+          <KpiTile icon={Coins}       tone="amber"   label="Outstanding A/R" primary={fmtPKR(exec.totalOutstandingPkr)} secondary={`${exec.openReceivables ?? 0} open`} loading={execLoading} />
+        )}
+        {!millScoped && (
+          <KpiTile icon={TrendingUp}  tone="blue"    label="Booked Profit"   primary={fmtPKR(exec.bookedProfitPkr)} secondary={`Margin ${fmtPct(exec.avgMarginPct)}`} loading={execLoading} />
+        )}
       </div>
 
       {/* ─── Tabs ─────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <nav className="flex overflow-x-auto border-b border-gray-200">
-          {TABS.map(t => {
+          {visibleTabs.map(t => {
             const Icon = t.icon;
             return (
               <button key={t.key} onClick={() => setTab(t.key)}

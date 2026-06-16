@@ -113,6 +113,7 @@ function ExportRoutes() {
         <Route path="/buyers" element={<Buyers />} />
         <Route path="/documents" element={<Documents />} />
         <Route path="/reports" element={<Reports />} />
+        <Route path="/reports/print" element={<PrintableReports />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </ExportLayout>
@@ -141,6 +142,7 @@ function MillRoutes() {
         <Route path="/local-sales" element={<LocalSales />} />
         <Route path="/local-sales/:id" element={<LocalSaleDetail />} />
         <Route path="/reports" element={<Reports />} />
+        <Route path="/reports/print" element={<PrintableReports />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </MillLayout>
