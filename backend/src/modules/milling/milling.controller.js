@@ -110,15 +110,29 @@ const millingController = {
       // so the dashboard board can compute "Pending QC" (arrivals with no
       // arrival analysis) without needing a per-batch detail fetch.
       const batchIds = batches.map(b => b.id);
-      const [allCosts, allArrivals, allArrivalSamples] = batchIds.length > 0
+      const [allCosts, allArrivals, allArrivalSamples, consumedRows] = batchIds.length > 0
         ? await Promise.all([
             db('milling_costs').whereIn('batch_id', batchIds),
             db('milling_vehicle_arrivals').whereIn('batch_id', batchIds),
             db('milling_quality_samples')
               .whereIn('batch_id', batchIds)
               .where({ analysis_type: 'arrival' }),
+            // How much of each batch's FINISHED output a downstream blend
+            // re-milled (lot_type 'finished' source lots), keyed by the source
+            // batch via inventory_lots.batch_ref = 'batch-<id>'. Lets the
+            // dashboard count only un-re-milled output and avoid double-counting
+            // the blend's revenue against its source batches.
+            db('batch_source_lots as bsl')
+              .join('inventory_lots as il', 'il.id', 'bsl.lot_id')
+              .where('bsl.lot_type', 'finished')
+              .whereIn('il.batch_ref', batchIds.map(id => `batch-${id}`))
+              .groupBy('il.batch_ref')
+              .select('il.batch_ref', db.raw('SUM(bsl.qty_mt) as consumed')),
           ])
-        : [[], [], []];
+        : [[], [], [], []];
+
+      const consumedByRef = {};
+      consumedRows.forEach(r => { consumedByRef[r.batch_ref] = parseFloat(r.consumed) || 0; });
 
       const batchesEnriched = batches.map(b => {
         const batchCosts = allCosts.filter(c => c.batch_id === b.id);
@@ -126,7 +140,10 @@ const millingController = {
         batchCosts.forEach(c => { costs[c.category] = parseFloat(c.amount) || 0; });
         const vehicleArrivals = allArrivals.filter(a => a.batch_id === b.id);
         const arrivalSample = allArrivalSamples.find(q => q.batch_id === b.id) || null;
-        return { ...b, costs, vehicleArrivals, arrivalAnalysis: arrivalSample };
+        return {
+          ...b, costs, vehicleArrivals, arrivalAnalysis: arrivalSample,
+          finished_consumed_mt: consumedByRef[`batch-${b.id}`] || 0,
+        };
       });
 
       return res.json({

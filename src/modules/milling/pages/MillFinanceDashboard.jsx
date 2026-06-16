@@ -206,12 +206,16 @@ export default function MillFinanceDashboard() {
     // revenue (counted in serviceFees), not a cost.
     const totalMilling = completed.reduce((s, b) =>
       s + (b.isServiceMilling ? 0 : (parseFloat(b.millingFeePerKg) || 0) * (parseFloat(b.rawQtyMT) || 0) * 1000), 0);
-    const finishedRev = completed.reduce((s, b) => s + b.actualFinishedMT * batchPrice(b, 'finished'), 0);
+    // Count only finished output NOT re-milled into a downstream blend (sellable
+    // rice) — otherwise the blend's output double-counts its source batches', as
+    // that rice can only be sold once.
+    const sellableFinishedMT = (b) => Math.max(0, b.actualFinishedMT - (b.finishedConsumedMT || 0));
+    const finishedRev = completed.reduce((s, b) => s + sellableFinishedMT(b) * batchPrice(b, 'finished'), 0);
     const byproductRev = completed.reduce((s, b) =>
       s + b.brokenMT * batchPrice(b, 'broken') + b.branMT * batchPrice(b, 'bran') + b.huskMT * batchPrice(b, 'husk'), 0);
     const totalRev = finishedRev + byproductRev;
     const totalCost = totalRaw + totalMilling + totalOtherCosts + totalOverhead;
-    const totalFinishedKg = completed.reduce((s, b) => s + b.actualFinishedMT * 1000, 0);
+    const totalFinishedKg = completed.reduce((s, b) => s + sellableFinishedMT(b) * 1000, 0);
     const costPerKg = totalFinishedKg > 0 ? totalCost / totalFinishedKg : 0;
     return { totalRev, totalRaw, totalMilling, totalOtherCosts, totalCost, netProfit: totalRev - totalCost, costPerKg, finishedRev, byproductRev };
   }, [completed, totalOverhead]);

@@ -241,6 +241,7 @@ export function transformBatch(dbBatch) {
     rawQtyMT: parseFloat(dbBatch.raw_qty_mt) || 0,
     plannedFinishedMT: parseFloat(dbBatch.planned_finished_mt) || 0,
     actualFinishedMT: parseFloat(dbBatch.actual_finished_mt) || 0,
+    finishedConsumedMT: parseFloat(dbBatch.finished_consumed_mt) || 0,
     brokenMT: parseFloat(dbBatch.broken_mt) || 0,
     b1MT: parseFloat(dbBatch.b1_mt) || 0,
     b2MT: parseFloat(dbBatch.b2_mt) || 0,
