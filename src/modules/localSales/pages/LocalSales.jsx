@@ -324,6 +324,8 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   const selectedLot = safeLots.find(l => String(l.id) === String(form.lot_id));
   const availableKg = selectedLot ? (parseFloat(selectedLot.availableQty) || 0) * 1000 : null;
   const remainingKg = availableKg != null ? availableKg - qtyKg : null;
+  // Block selling more than the selected lot holds.
+  const isOverSell = availableKg != null && qtyKg > availableKg;
   const totalAmount = Math.round(qtyKg * ratePerKg);
   const qtyEq = allEquivalents(qtyKg, bagWt);
   const rateEq = allRateEquivalents(ratePerKg, bagWt);
@@ -337,6 +339,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   async function handleSubmit() {
     if (!form.item_name || !form.quantity_input || !form.rate_input) { addToast('Item, quantity, and rate are required', 'error'); return; }
     if (!form.customer_id && !form.buyer_name) { addToast('Select a customer or enter buyer name', 'error'); return; }
+    if (isOverSell) { addToast(`Only ${Math.round(availableKg).toLocaleString()} kg in stock — reduce the quantity`, 'error'); return; }
     try {
       const payload = { ...form, paid_amount: parseFloat(form.paid_amount) || totalAmount };
       const res = await createMutation.mutateAsync(payload);
@@ -359,7 +362,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
 
   // Step gating
   const step1Valid = !!form.item_name && (!!form.customer_id || !!form.buyer_name);
-  const step2Valid = qtyKg > 0 && ratePerKg > 0;
+  const step2Valid = qtyKg > 0 && ratePerKg > 0 && !isOverSell;
   function tryNext() {
     if (step === 1 && !step1Valid) {
       addToast(!form.item_name ? 'Item name is required' : 'Select a customer or enter buyer name', 'error');
