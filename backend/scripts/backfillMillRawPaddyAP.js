@@ -26,9 +26,11 @@ const COMMIT = process.argv.includes('--commit');
 async function main() {
   const batches = await db('milling_batches as mb')
     .leftJoin('suppliers as s', 's.id', 'mb.supplier_id')
+    .leftJoin('products as p', 'p.id', 'mb.product_id')
     .whereNot('mb.processing_type', 'blended')
     .whereNotNull('mb.supplier_id')
-    .select('mb.id', 'mb.batch_no', 'mb.supplier_id', 'mb.processing_type', 's.name as supplier_name');
+    .select('mb.id', 'mb.batch_no', 'mb.supplier_id', 'mb.processing_type',
+      's.name as supplier_name', 'p.name as rice_type');
 
   console.log(`${COMMIT ? 'COMMIT' : 'DRY-RUN'} — ${batches.length} single-source mill batch(es) with a supplier\n`);
 
@@ -40,13 +42,14 @@ async function main() {
     const rawValue = parseFloat(rawRow?.total || 0);
 
     const existing = await db('journal_entries')
-      .where({ ref_type: 'Raw Paddy Purchase', ref_no: b.batch_no })
+      .whereIn('ref_type', ['Rice Purchase', 'Raw Paddy Purchase'])
+      .where({ ref_no: b.batch_no })
       .first();
 
     if (rawValue <= 0) { console.log(`  skip ${b.batch_no}: no raw_rice cost`); skipped++; continue; }
     if (existing) { console.log(`  skip ${b.batch_no}: AP journal already exists (${existing.journal_no})`); skipped++; continue; }
 
-    console.log(`  ${COMMIT ? 'POST' : 'would post'} ${b.batch_no}: DR Raw Paddy / CR Supplier Payable Rs ${Math.round(rawValue).toLocaleString()} → ${b.supplier_name} (id ${b.supplier_id})`);
+    console.log(`  ${COMMIT ? 'POST' : 'would post'} ${b.batch_no}: DR Raw Rice / CR Supplier Payable Rs ${Math.round(rawValue).toLocaleString()} → ${b.supplier_name} (id ${b.supplier_id}) · ${b.rice_type || 'rice'}`);
 
     if (COMMIT) {
       await db.transaction(async (trx) => {
@@ -55,9 +58,9 @@ async function main() {
           entity: 'mill',
           amount: rawValue,
           currency: 'PKR',
-          refType: 'Raw Paddy Purchase',
+          refType: 'Rice Purchase',
           refNo: b.batch_no,
-          description: `Raw paddy purchase for batch ${b.batch_no}`,
+          description: `Rice purchase — ${b.rice_type || 'rice'} (batch ${b.batch_no})`,
           partyType: 'supplier',
           partyId: b.supplier_id,
           userId: null,

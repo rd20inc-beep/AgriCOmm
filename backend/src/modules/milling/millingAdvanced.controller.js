@@ -781,7 +781,7 @@ const millingAdvancedController = {
         .where('entity', 'mill')
         .select(
           db.raw(`CASE
-            WHEN source_table = 'milling_costs' THEN 'Paddy & batch costs'
+            WHEN source_table = 'milling_costs' THEN 'Rice & batch costs'
             WHEN source_table = 'mill_purchases' THEN 'Mill store purchases'
             WHEN source_table IN ('mill_expenses', 'business_expenses') THEN 'Expenses & overhead'
             ELSE COALESCE(source_table, 'Other') END as stream`),
