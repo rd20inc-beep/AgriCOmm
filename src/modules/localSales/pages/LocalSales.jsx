@@ -319,6 +319,11 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   const bagWt = parseFloat(form.bag_weight_kg) || 50;
   const qtyKg = toKg(form.quantity_input, form.quantity_unit, bagWt);
   const ratePerKg = rateToPerKg(form.rate_input, form.rate_unit, bagWt);
+  // Available stock for the selected lot (availableQty is in MT) → show under
+  // the Quantity field and live-subtract what's being sold.
+  const selectedLot = safeLots.find(l => String(l.id) === String(form.lot_id));
+  const availableKg = selectedLot ? (parseFloat(selectedLot.availableQty) || 0) * 1000 : null;
+  const remainingKg = availableKg != null ? availableKg - qtyKg : null;
   const totalAmount = Math.round(qtyKg * ratePerKg);
   const qtyEq = allEquivalents(qtyKg, bagWt);
   const rateEq = allRateEquivalents(ratePerKg, bagWt);
@@ -506,6 +511,16 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                   <option value="katta">Katta</option><option value="maund">Maund</option><option value="kg">KG</option><option value="ton">Ton</option>
                 </select>
               </div>
+              {availableKg != null && (
+                <div className="mt-1.5 flex items-center justify-between text-xs">
+                  <span className="text-gray-500">In stock: <span className="font-semibold text-gray-800">{Math.round(availableKg).toLocaleString()} kg</span></span>
+                  {qtyKg > 0 && (
+                    remainingKg < 0
+                      ? <span className="font-semibold text-red-600">Short by {Math.round(-remainingKg).toLocaleString()} kg</span>
+                      : <span className="font-semibold text-emerald-700">{Math.round(remainingKg).toLocaleString()} kg left after sale</span>
+                  )}
+                </div>
+              )}
             </div>
             <div>
               <label className={LABEL}>Sale Rate *</label>
