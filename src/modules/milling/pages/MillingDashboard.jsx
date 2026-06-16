@@ -37,6 +37,7 @@ import Modal from '../../../components/Modal';
 import SlideDrawer from '../../../components/SlideDrawer';
 import RiceTypePicker from '../../../components/RiceTypePicker';
 import SupplierPicker from '../../../components/SupplierPicker';
+import MillExpenseDrawer from '../../../components/MillExpenseDrawer';
 // Chart data computed from real batch data below (no mock imports)
 
 function formatPKR(value) {
@@ -56,25 +57,12 @@ export default function MillingDashboard() {
   const MILL_PRICES_PKR = { finishedRicePerMT: commodityPrices.finished, brokenPerMT: commodityPrices.broken, branPerMT: commodityPrices.bran, huskPerMT: commodityPrices.husk };
   const createBatchMut = useCreateMillingBatch();
   const { data: expenseData } = useMillExpenses();
-  const createExpenseMut = useCreateMillExpense();
   const millExpenses = expenseData?.expenses || [];
   const expenseSummary = expenseData?.summary || [];
   const totalOverhead = expenseSummary.reduce((s, e) => s + (parseFloat(e.total) || 0), 0);
 
-  // Expense modal
+  // Add Expense slide-over (shared component, same as Mill Finance)
   const [showExpenseModal, setShowExpenseModal] = useState(false);
-  const [expForm, setExpForm] = useState({ category: 'salaries', description: '', amount: '', expense_date: new Date().toISOString().split('T')[0], notes: '' });
-  const setEF = (k, v) => setExpForm(p => ({ ...p, [k]: v }));
-
-  async function handleAddExpense() {
-    if (!expForm.amount) { addToast('Amount is required', 'error'); return; }
-    try {
-      await createExpenseMut.mutateAsync(expForm);
-      addToast('Expense recorded', 'success');
-      setShowExpenseModal(false);
-      setExpForm({ category: 'salaries', description: '', amount: '', expense_date: new Date().toISOString().split('T')[0], notes: '' });
-    } catch (err) { addToast(err.message || 'Failed', 'error'); }
-  }
 
   // New batch modal
   const [showNewBatch, setShowNewBatch] = useState(false);
@@ -996,53 +984,12 @@ export default function MillingDashboard() {
         </div>
       )}
 
-      {/* Add Expense Modal */}
-      <Modal isOpen={showExpenseModal} onClose={() => setShowExpenseModal(false)} title="Add Mill Expense" size="md">
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
-              <select value={expForm.category} onChange={e => setEF('category', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none bg-white">
-                <option value="salaries">Salaries & Wages</option>
-                <option value="utilities">Utilities (Electricity/Gas/Water)</option>
-                <option value="rent">Rent / Facility</option>
-                <option value="maintenance">Maintenance & Repairs</option>
-                <option value="insurance">Insurance</option>
-                <option value="transport">Transport</option>
-                <option value="fuel">Fuel & Diesel</option>
-                <option value="packaging">Packaging Material</option>
-                <option value="misc">Miscellaneous</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Amount (PKR) *</label>
-              <input type="number" value={expForm.amount} onChange={e => setEF('amount', e.target.value)} placeholder="0" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-            <input type="text" value={expForm.description} onChange={e => setEF('description', e.target.value)} placeholder="e.g. March electricity bill" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Date *</label>
-              <input type="date" value={expForm.expense_date} onChange={e => setEF('expense_date', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Reference</label>
-              <input type="text" value={expForm.reference || ''} onChange={e => setEF('reference', e.target.value)} placeholder="Receipt/invoice #" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-            <textarea value={expForm.notes} onChange={e => setEF('notes', e.target.value)} rows={2} placeholder="Optional" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none resize-none" />
-          </div>
-          <div className="flex justify-end gap-2 pt-2 border-t border-gray-200">
-            <button onClick={() => setShowExpenseModal(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
-            <button onClick={handleAddExpense} className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700">Record Expense</button>
-          </div>
-        </div>
-      </Modal>
+      {/* Add Expense — shared slide-over (same as Mill Finance) */}
+      <MillExpenseDrawer
+        open={showExpenseModal}
+        onClose={() => setShowExpenseModal(false)}
+        addToast={addToast}
+      />
 
       {/* New Batch Modal */}
       <SlideDrawer
