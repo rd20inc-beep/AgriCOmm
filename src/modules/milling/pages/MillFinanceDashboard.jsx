@@ -468,6 +468,42 @@ export default function MillFinanceDashboard() {
             <Stat tone="blue"   label="Working Cap."  value={PKR(inventoryValue.total)} sub="Locked in stock" />
           </div>
 
+          {/* Net profit & margin breakdown */}
+          <div className="bg-white rounded-xl border border-gray-100 p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold text-gray-800">Net Profit &amp; Margin</h3>
+              <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${kpis.netProfit >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+                Margin {margin}%
+              </span>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-10 gap-y-1.5">
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-sm font-semibold text-gray-900"><span>Revenue</span><span className="tabular-nums text-emerald-600">{PKR(kpis.totalRev)}</span></div>
+                <div className="flex justify-between text-xs text-gray-500 pl-3"><span>Finished rice (sellable)</span><span className="tabular-nums">{PKR(kpis.finishedRev)}</span></div>
+                <div className="flex justify-between text-xs text-gray-500 pl-3"><span>By-products</span><span className="tabular-nums">{PKR(kpis.byproductRev)}</span></div>
+              </div>
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-sm font-semibold text-gray-900"><span>Costs</span><span className="tabular-nums text-red-600">{PKR(kpis.totalCost)}</span></div>
+                <div className="flex justify-between text-xs text-gray-500 pl-3"><span>Raw material</span><span className="tabular-nums">−{PKR(kpis.totalRaw)}</span></div>
+                <div className="flex justify-between text-xs text-gray-500 pl-3"><span>Milling cost</span><span className="tabular-nums">−{PKR(kpis.totalMilling)}</span></div>
+                {kpis.totalOtherCosts > 0 && (
+                  <div className="flex justify-between text-xs text-gray-500 pl-3"><span>Batch costs</span><span className="tabular-nums">−{PKR(kpis.totalOtherCosts)}</span></div>
+                )}
+                <div className="flex justify-between text-xs text-gray-500 pl-3"><span>Overhead</span><span className="tabular-nums">−{PKR(totalOverhead)}</span></div>
+              </div>
+            </div>
+            <div className="mt-4 pt-3 border-t border-gray-200 flex items-center justify-between">
+              <span className="text-sm font-semibold text-gray-800">Net Profit</span>
+              <span className={`text-lg font-bold tabular-nums ${kpis.netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{PKR(kpis.netProfit)}</span>
+            </div>
+            {payrollTotal > 0 && (
+              <div className="mt-1 flex items-center justify-between text-xs text-gray-400">
+                <span>After payroll (−{PKR(payrollTotal)})</span>
+                <span className="tabular-nums">{PKR(kpis.netProfit - payrollTotal)}</span>
+              </div>
+            )}
+          </div>
+
           {/* Expense breakdown + Payroll summary */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="bg-white rounded-xl border border-gray-100 p-5">
