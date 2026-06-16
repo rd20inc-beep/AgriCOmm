@@ -161,7 +161,7 @@ export default function MillLayout({ children }) {
           )}
         </div>
 
-        <nav className="flex-1 py-3 space-y-0.5 overflow-y-auto scrollbar-hide">
+        <nav className="flex-1 py-3 space-y-0.5 overflow-y-auto sidebar-scroll">
           {millNav.map((item, idx) => {
             if (item.section) {
               if (sidebarCollapsed) return <div key={idx} className="my-2 mx-3 border-t border-white/[0.06]" />;
