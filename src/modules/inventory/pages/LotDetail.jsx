@@ -221,7 +221,7 @@ export default function LotDetail() {
           && lot.millingStatus !== 'Consumed'
           && lot.millingStatus !== 'In Milling' && (
             <button onClick={() => setShowStartMilling(true)} className="btn btn-sm bg-emerald-600 text-white hover:bg-emerald-700">
-              <Play className="w-4 h-4" /> Start Milling
+              <Play className="w-4 h-4" /> {lot.type === 'finished' ? 'Re-Mill / Blend' : 'Start Milling'}
             </button>
           )
         )}
