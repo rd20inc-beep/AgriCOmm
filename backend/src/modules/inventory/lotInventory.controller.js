@@ -1354,6 +1354,17 @@ module.exports = {
             .whereRaw('bsl.lot_id = ?', [lotId])
             .andWhereRaw('milling_vehicle_arrivals.batch_id = bsl.batch_id');
         })
+        .orWhereExists(function () {
+          // The lot is the RAW/primary lot of a batch (linked via
+          // inventory_lots.batch_ref = 'batch-<id>'), and the vehicle was added
+          // at the batch level (lot_id null). Surface those on the lot too —
+          // otherwise the lot's vehicle panel reads empty while the batch's
+          // own Vehicle Arrivals card shows the same truck.
+          this.select(db.raw('1'))
+            .from('inventory_lots as il')
+            .whereRaw('il.id = ?', [lotId])
+            .andWhereRaw("il.batch_ref = 'batch-' || milling_vehicle_arrivals.batch_id");
+        })
         .orderBy('arrival_date', 'desc')
         .orderBy('id', 'desc');
       return res.json({ success: true, data: { vehicles: rows } });
