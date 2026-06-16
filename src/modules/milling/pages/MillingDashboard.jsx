@@ -36,6 +36,7 @@ import StatusBadge from '../../../components/StatusBadge';
 import Modal from '../../../components/Modal';
 import SlideDrawer from '../../../components/SlideDrawer';
 import RiceTypePicker from '../../../components/RiceTypePicker';
+import SupplierPicker from '../../../components/SupplierPicker';
 // Chart data computed from real batch data below (no mock imports)
 
 function formatPKR(value) {
@@ -1219,13 +1220,14 @@ export default function MillingDashboard() {
           {/* Supplier (rice source) */}
           {!useBlend && (
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              {batchForm.millingType === 'service_milling' ? 'Rice Source (Client / Broker)' : 'Supplier'} *
-            </label>
-            <select value={batchForm.supplierId} onChange={e => setBF('supplierId', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none bg-white">
-              <option value="">Select supplier...</option>
-              {(suppliersList || []).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
+            <SupplierPicker
+              label={<>{batchForm.millingType === 'service_milling' ? 'Rice Source (Client / Broker)' : 'Supplier'} <span className="text-red-500">*</span></>}
+              value={batchForm.supplierId}
+              onChange={(id) => setBF('supplierId', id)}
+              suppliers={suppliersList || []}
+              addToast={addToast}
+              placeholder={batchForm.millingType === 'service_milling' ? 'Search client / broker…' : 'Search supplier…'}
+            />
           </div>
           )}
 
