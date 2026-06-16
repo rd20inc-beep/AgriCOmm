@@ -1209,6 +1209,25 @@ const accountingService = {
       )
       .orderBy(['je.date', 'je.id']);
 
+    // How each payment was made (method + bank/cash account) lives on the
+    // payments table, not the journal. Match by ref_no = payment_no so the
+    // statement can show "Paid via <bank>" / "Paid via Cash".
+    const payRefs = [...new Set(glTxns.map((t) => t.ref_no).filter((r) => r && /^PAY-/i.test(r)))];
+    const payInfo = {};
+    if (payRefs.length) {
+      const payRows = await db('payments as p')
+        .leftJoin('bank_accounts as ba', 'ba.id', 'p.bank_account_id')
+        .whereIn('p.payment_no', payRefs)
+        .select('p.payment_no', 'p.payment_method', 'ba.name as bank_name', 'ba.type as bank_type');
+      for (const r of payRows) {
+        const isCash = r.bank_type === 'cash' || r.payment_method === 'cash';
+        payInfo[r.payment_no] = {
+          payment_method: r.payment_method || null,
+          paid_via: r.bank_name || (isCash ? 'Cash' : null),
+        };
+      }
+    }
+
     // In-period synthetic lines
     const synthInPeriod = synthetic.filter((s) =>
       (!dateFrom || (s.date && s.date >= dateFrom)) && (!dateTo || (s.date && s.date <= dateTo)));
@@ -1237,6 +1256,9 @@ const accountingService = {
         currency: statementCurrency,
         running_balance: parseFloat(runningBalance.toFixed(2)),
         running_balance_usd: parseFloat(runningBalanceUsd.toFixed(2)),
+        // Present only on payment rows: how it was paid (method + bank/cash).
+        payment_method: (n.ref_no && payInfo[n.ref_no]?.payment_method) || null,
+        paid_via: (n.ref_no && payInfo[n.ref_no]?.paid_via) || null,
       };
     });
 

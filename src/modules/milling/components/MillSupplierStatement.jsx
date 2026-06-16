@@ -12,6 +12,12 @@ function curSymbol(cur) {
 }
 const fmtCur = (v, cur) => `${curSymbol(cur)}${Math.round(parseFloat(v) || 0).toLocaleString()}`;
 
+const METHOD_LABELS = {
+  bank_transfer: 'Bank Transfer', cheque: 'Cheque', cash: 'Cash', online: 'Online',
+  mobile: 'Mobile', tt: 'TT', wire: 'Wire', lc: 'Letter of Credit',
+};
+const methodLabel = (m) => METHOD_LABELS[m] || m;
+
 const refLink = (refNo) => {
   if (!refNo) return null;
   if (refNo.startsWith('EX-')) return `/export/${refNo}`;
@@ -118,6 +124,11 @@ export default function MillSupplierStatement({ supplierId, supplierName, params
                       <span className="block truncate text-gray-700" title={t.description}>{t.description || '—'}</span>
                       {(t.account_code || t.account_name) && (
                         <span className="block truncate text-[10px] text-gray-400">{t.account_code} {t.account_name}</span>
+                      )}
+                      {t.paid_via && (
+                        <span className="block truncate text-[10px] text-emerald-600">
+                          Paid via {t.paid_via}{t.payment_method && t.payment_method !== 'cash' ? ` · ${methodLabel(t.payment_method)}` : ''}
+                        </span>
                       )}
                     </td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-emerald-600">{parseFloat(t.debit) ? fmtCur(t.debit, cur) : ''}</td>
