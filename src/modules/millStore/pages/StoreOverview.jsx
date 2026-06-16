@@ -5,6 +5,7 @@ import {
   Search, Filter, ArrowRight,
 } from 'lucide-react';
 import { useMillStoreItems, useMillStoreSummary } from '../api/queries';
+import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
 
 function formatPKR(v) {
   const n = Number(v) || 0;
@@ -40,6 +41,7 @@ export default function StoreOverview() {
   const { data: summary = {} } = useMillStoreSummary();
   const [category, setCategory] = useState('all');
   const [search, setSearch] = useState('');
+  const [showNewPurchase, setShowNewPurchase] = useState(false);
   const { data: items = [], isLoading } = useMillStoreItems({
     ...(category !== 'all' ? { category } : {}),
     ...(search ? { search } : {}),
@@ -60,12 +62,12 @@ export default function StoreOverview() {
           <h1 className="text-2xl font-bold text-gray-900">Mill Store</h1>
           <p className="text-sm text-gray-500 mt-0.5">Consumable materials stock overview</p>
         </div>
-        <Link
-          to="/mill-store/purchases/new"
+        <button
+          onClick={() => setShowNewPurchase(true)}
           className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
         >
           <ShoppingCart size={16} /> New Purchase
-        </Link>
+        </button>
       </div>
 
       {/* KPIs */}
@@ -163,6 +165,9 @@ export default function StoreOverview() {
           </div>
         )}
       </div>
+
+      {/* New Purchase — right slide-over */}
+      <NewPurchaseDrawer open={showNewPurchase} onClose={() => setShowNewPurchase(false)} />
     </div>
   );
 }
