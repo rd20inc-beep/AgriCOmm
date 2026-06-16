@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Printer, RefreshCw, Calendar, Factory, Boxes, TrendingUp, Wallet, ArrowDownLeft, ArrowUpRight } from 'lucide-react';
 import api from '../../../api/client';
 import { useApp } from '../../../context/AppContext';
+import { useAuth } from '../../../context/AuthContext';
 import {
   ProductionReportView, StockReportView,
   PnlReportView, CashflowReportView, AgingReportView,
@@ -50,6 +51,12 @@ const STOCK_GROUP_OPTIONS = [
 
 export default function PrintableReports() {
   const { addToast, companyProfileData } = useApp();
+  const { user } = useAuth();
+  // A Mill role only gets the mill/inventory reports — the company-wide
+  // financials (P&L, Cashflow, AR/AP aging) mix export data, which the mill
+  // must not see. Their mill financials live on the Mill Finance dashboard.
+  const millScoped = user?.role === 'Mill Manager';
+  const REPORT_TYPES = millScoped ? ['production', 'stock'] : ['production', 'stock', 'pnl', 'cashflow', 'ar_aging', 'ap_aging'];
 
   const [reportType, setReportType] = useState('production'); // 'production' | 'stock' | 'pnl' | 'cashflow' | 'ar_aging' | 'ap_aging'
   const [preset, setPreset] = useState('monthly');
@@ -101,6 +108,11 @@ export default function PrintableReports() {
     }
   }, [reportType, range, stockGroupBy, addToast]);
 
+  // Belt-and-suspenders: never hold/load a report type this role can't see.
+  useEffect(() => {
+    if (millScoped && !['production', 'stock'].includes(reportType)) setReportType('production');
+  }, [millScoped, reportType]);
+
   useEffect(() => { loadReport(); }, [loadReport]);
 
   // Print in the current tab. The global @media print rule in index.css
@@ -134,7 +146,7 @@ export default function PrintableReports() {
               { k: 'cashflow',   l: 'Cashflow',   i: Wallet },
               { k: 'ar_aging',   l: 'AR Aging',   i: ArrowDownLeft },
               { k: 'ap_aging',   l: 'AP Aging',   i: ArrowUpRight },
-            ].map(({ k, l, i: Ic }) => (
+            ].filter(({ k }) => REPORT_TYPES.includes(k)).map(({ k, l, i: Ic }) => (
               <button key={k} onClick={() => setReportType(k)}
                 className={`px-3 py-2 text-sm font-medium inline-flex items-center gap-1.5 ${reportType === k ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}>
                 <Ic className="w-4 h-4" /> {l}
