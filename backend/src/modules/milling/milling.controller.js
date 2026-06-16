@@ -1021,6 +1021,37 @@ const millingController = {
           } : null,
         });
 
+        // Recognize the supplier payable for the raw paddy purchase so the
+        // supplier's GL party ledger / statement reflects what we owe. Only for
+        // single-source batches: a blend re-mills already-owned finished stock,
+        // so its raw cost isn't a new supplier purchase (would double-count).
+        // purchase_invoice rule: DR Raw Paddy Stock / CR Supplier Payable. The
+        // milling_completion journal below then moves Raw Paddy → Finished, so
+        // Raw Paddy nets to zero and the supplier payable stands.
+        if (batch.processing_type !== 'blended' && batch.supplier_id) {
+          const rawCostRow = await trx('milling_costs')
+            .where({ batch_id: batch.id, category: 'raw_rice' })
+            .sum('amount as total').first();
+          const rawPaddyValue = parseFloat(rawCostRow?.total || 0);
+          const existingAP = await trx('journal_entries')
+            .where({ ref_type: 'Raw Paddy Purchase', ref_no: batch.batch_no })
+            .first();
+          if (rawPaddyValue > 0 && !existingAP) {
+            await accountingService.autoPost(trx, {
+              triggerEvent: 'purchase_invoice',
+              entity: 'mill',
+              amount: rawPaddyValue,
+              currency: 'PKR',
+              refType: 'Raw Paddy Purchase',
+              refNo: batch.batch_no,
+              description: `Raw paddy purchase for batch ${batch.batch_no}`,
+              partyType: 'supplier',
+              partyId: batch.supplier_id,
+              userId: req.user?.id,
+            });
+          }
+        }
+
         // Auto-post accounting journal for milling completion
         // Calculate cost from batch raw rice value
         const millingCosts = await trx('milling_costs')
