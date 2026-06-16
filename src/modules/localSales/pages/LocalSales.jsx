@@ -430,8 +430,8 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
         {/* Buyer */}
         <div>
           <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Buyer</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2">
               <label className={LABEL}>Customer</label>
               <select value={form.customer_id} onChange={e => set('customer_id', e.target.value)} className={SELECT}>
                 <option value="">Walk-in / not registered</option>
@@ -463,7 +463,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
         {/* Item */}
         <div>
           <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Item</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4">
             <div>
               <label className={LABEL}>Select from Inventory</label>
               <select value={form.lot_id} onChange={e => handleLotSelect(e.target.value)} className={SELECT}>
@@ -486,7 +486,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
         {/* Quantity & Rate — WIDE layout */}
         <div>
           <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Quantity & Rate</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4">
             <div>
               <label className={LABEL}>Quantity *</label>
               <div className="flex gap-2">
@@ -522,7 +522,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
         {/* Live preview */}
         {(parseFloat(form.quantity_input) > 0 || parseFloat(form.rate_input) > 0) && (
           <div className="bg-blue-50 rounded-xl border border-blue-200 p-4">
-            <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 text-sm">
+            <div className="grid grid-cols-3 gap-3 text-sm">
               <div><p className="text-[10px] text-blue-600 uppercase font-semibold">KG</p><p className="font-bold text-gray-900">{qtyEq.kg.toLocaleString()}</p></div>
               <div><p className="text-[10px] text-blue-600 uppercase font-semibold">Katta</p><p className="font-bold text-gray-900">{qtyEq.katta.toLocaleString()}</p></div>
               <div><p className="text-[10px] text-blue-600 uppercase font-semibold">Maund</p><p className="font-bold text-gray-900">{qtyEq.maund.toLocaleString()}</p></div>
@@ -540,7 +540,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
         {/* Payment & Dispatch */}
         <div>
           <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Payment & Dispatch</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={LABEL}>Payment Mode</label>
               <select value={form.payment_mode} onChange={e => set('payment_mode', e.target.value)} className={SELECT}>
@@ -554,7 +554,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
               {form.payment_mode === 'credit' && <p className="text-xs text-amber-600 mt-1">Leave empty or partial for credit sale</p>}
             </div>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
+          <div className="grid grid-cols-1 gap-4 mt-4">
             <div>
               <label className={LABEL}>Vehicle No</label>
               <input value={form.vehicle_no} onChange={e => set('vehicle_no', e.target.value)} className={INPUT} placeholder="e.g. LHR-1234" />
