@@ -940,7 +940,11 @@ const reportingController = {
           db.raw('COALESCE(SUM(CAST(l.reserved_qty AS DECIMAL) * 1000), 0)::numeric as reserved_kg'),
           db.raw('COALESCE(SUM(CASE WHEN l.landed_cost_total > 0 THEN l.landed_cost_total ELSE l.total_value END), 0)::numeric as total_value_pkr'),
         )
-        .groupBy(groupCol, nameCol)
+        // Subtype groups by the raw CASE expression itself — passing the long
+        // SQL string as a second groupBy arg makes Knex quote it as a column
+        // identifier and produces invalid SQL (HTTP 500). Every other dimension
+        // must group by both the id column and its joined name.
+        .groupBy(...(group_by === 'subtype' ? [db.raw(SUBTYPE_EXPR)] : [groupCol, nameCol]))
         .orderBy('total_kg', 'desc');
 
       const num = (v) => parseFloat(v) || 0;
