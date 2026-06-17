@@ -365,30 +365,22 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
                 <td className="px-6 py-2 text-right text-amber-700">{rawQtyMT > 0 ? fmtPKR(effectiveRawRiceCost / rawQtyMT) : '—'}</td>
                 <td className="px-6 py-2 text-right text-amber-700">{totalBatchCost > 0 ? ((effectiveRawRiceCost / totalBatchCost) * 100).toFixed(1) : '—'}%</td>
               </tr>
-              {/* Process costs */}
-              {processCats.map((cat, idx) => {
-                const v = pf(safeCosts[cat.key]);
-                return (
-                  <tr key={cat.key} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                    <td className="px-6 py-1.5 text-gray-900">{cat.label}</td>
-                    <td className="px-6 py-1.5 text-right text-gray-700">{v > 0 ? fmtPKR(v) : '—'}</td>
-                    <td className="px-6 py-1.5 text-right text-gray-500">{v > 0 && rawQtyMT > 0 ? fmtPKR(v / rawQtyMT) : '—'}</td>
-                    <td className="px-6 py-1.5 text-right text-gray-500">{v > 0 && totalBatchCost > 0 ? ((v / totalBatchCost) * 100).toFixed(1) + '%' : '—'}</td>
-                  </tr>
-                );
-              })}
-              {/* Overhead costs */}
-              {overheadCats.map((cat, idx) => {
-                const v = pf(safeCosts[cat.key]);
-                return v > 0 ? (
-                  <tr key={cat.key} className="bg-gray-50">
-                    <td className="px-6 py-1.5 text-gray-700 italic">{cat.label}</td>
-                    <td className="px-6 py-1.5 text-right text-gray-600">{fmtPKR(v)}</td>
-                    <td className="px-6 py-1.5 text-right text-gray-500">{rawQtyMT > 0 ? fmtPKR(v / rawQtyMT) : '—'}</td>
-                    <td className="px-6 py-1.5 text-right text-gray-500">{totalBatchCost > 0 ? ((v / totalBatchCost) * 100).toFixed(1) + '%' : '—'}</td>
-                  </tr>
-                ) : null;
-              })}
+              {/* Milling Cost + Other Expenses — the residual-model cost lines
+                  (operator-entered, or the recorded-cost fallback). Shown
+                  explicitly so the figures the operator entered are visible and
+                  Raw + Milling + Other = Net Purchase reconciles. */}
+              <tr className="bg-white">
+                <td className="px-6 py-1.5 text-gray-900">Milling Cost</td>
+                <td className="px-6 py-1.5 text-right text-gray-700">{millingCostVal > 0 ? fmtPKR(millingCostVal) : '—'}</td>
+                <td className="px-6 py-1.5 text-right text-gray-500">{millingCostVal > 0 && rawQtyMT > 0 ? fmtPKR(millingCostVal / rawQtyMT) : '—'}</td>
+                <td className="px-6 py-1.5 text-right text-gray-500">{millingCostVal > 0 && totalBatchCost > 0 ? ((millingCostVal / totalBatchCost) * 100).toFixed(1) + '%' : '—'}</td>
+              </tr>
+              <tr className="bg-gray-50">
+                <td className="px-6 py-1.5 text-gray-900">Other Expenses</td>
+                <td className="px-6 py-1.5 text-right text-gray-700">{otherExpVal > 0 ? fmtPKR(otherExpVal) : '—'}</td>
+                <td className="px-6 py-1.5 text-right text-gray-500">{otherExpVal > 0 && rawQtyMT > 0 ? fmtPKR(otherExpVal / rawQtyMT) : '—'}</td>
+                <td className="px-6 py-1.5 text-right text-gray-500">{otherExpVal > 0 && totalBatchCost > 0 ? ((otherExpVal / totalBatchCost) * 100).toFixed(1) + '%' : '—'}</td>
+              </tr>
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-gray-300 bg-gray-100">
