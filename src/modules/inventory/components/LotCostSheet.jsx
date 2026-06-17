@@ -195,9 +195,9 @@ export default function LotCostSheet({ lot, companyProfile, linkedBatch, transac
 
         {/* ===== PURCHASE PRICING ===== */}
         <div className="border-x border-t border-gray-200 px-6 py-3 bg-white">
-          <p className="text-[10px] font-semibold text-gray-500 uppercase mb-2">Purchase Rate</p>
+          <p className="text-[10px] font-semibold text-gray-500 uppercase mb-2">{isMilled ? 'Production Cost' : 'Purchase Rate'}</p>
           <div className="grid grid-cols-5 gap-4">
-            <div><p className="text-xs text-gray-500">Original Rate</p><p className="font-bold text-gray-900">Rs {lot.rateInputValue || '—'} / {lot.rateInputUnit || 'kg'}</p></div>
+            <div><p className="text-xs text-gray-500">{isMilled ? 'Production Cost' : 'Original Rate'}</p><p className="font-bold text-gray-900">{isMilled ? `${fmtPKR(landedKg)} / kg` : `Rs ${lot.rateInputValue || '—'} / ${lot.rateInputUnit || 'kg'}`}</p></div>
             <div><p className="text-xs text-gray-500">Per KG</p><p className="font-bold text-gray-900">{fmtPKR(rateKg)}</p></div>
             <div><p className="text-xs text-gray-500">Per Katta</p><p className="font-bold text-gray-900">{fmtPKR(rEq.perKatta)}</p></div>
             <div><p className="text-xs text-gray-500">Per Maund</p><p className="font-bold text-gray-900">{fmtPKR(rEq.perMaund)}</p></div>
