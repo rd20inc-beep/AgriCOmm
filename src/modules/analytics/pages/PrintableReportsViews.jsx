@@ -38,6 +38,17 @@ export function ProductionReportView({ data, companyName, range, preset }) {
         { label: 'Avg Yield', value: fmtPct(summary.avgYieldPct) },
       ]} />
 
+      {/* Blends re-mill already-finished owned rice, so their tonnage is kept
+          OUT of Raw Input / Finished above to avoid double-counting the
+          original purchase. Surface it here so the number is transparent. */}
+      {summary.blendedCount > 0 && (
+        <div className="text-xs text-gray-600 border border-gray-200 rounded p-2 bg-gray-50">
+          Excludes {summary.blendedCount} blend batch{summary.blendedCount === 1 ? '' : 'es'} that re-milled
+          {' '}{fmtMt(summary.blendedRawMt)} MT of finished rice → {fmtMt(summary.blendedFinishedMt)} MT
+          {' '}(not counted as new raw input, to avoid double-counting).
+        </div>
+      )}
+
       {/* "By Mill" section + the Mill column on Batch Detail are dropped
           since there is only one mill — the breakdown was always a
           single row identical to the period totals. */}
@@ -56,7 +67,8 @@ export function ProductionReportView({ data, companyName, range, preset }) {
           head={['Batch No', 'Supplier', 'Product', 'Status', 'Raw MT', 'Finished MT', 'Yield %', 'Created']}
           align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'left']}
           rows={batches.map(b => [
-            b.batchNo, b.supplierName || '—', b.productName || '—',
+            b.isBlend ? `${b.batchNo} (blend)` : b.batchNo,
+            b.supplierName || '—', b.productName || '—',
             b.status, fmtMt(b.rawMt), fmtMt(b.finishedMt), fmtPct(b.yieldPct), fmtDate(b.createdAt),
           ])}
           empty="No batches in this period."

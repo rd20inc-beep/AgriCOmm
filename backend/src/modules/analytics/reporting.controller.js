@@ -494,7 +494,7 @@ const reportingController = {
         .leftJoin('suppliers as s', 'b.supplier_id', 's.id')
         .leftJoin('products as p', 'b.product_id', 'p.id')
         .select(
-          'b.id', 'b.batch_no', 'b.status',
+          'b.id', 'b.batch_no', 'b.status', 'b.processing_type',
           'b.raw_qty_mt', 'b.planned_finished_mt', 'b.actual_finished_mt', 'b.yield_pct',
           'b.created_at', 'b.completed_at',
           'm.name as mill_name',
@@ -505,22 +505,35 @@ const reportingController = {
         .orderBy('b.created_at', 'asc');
 
       const num = (v) => parseFloat(v) || 0;
+      // A blend re-mills already-finished OWNED rice, so its raw_qty_mt is
+      // finished rice re-entering as "raw" — counting it as raw input
+      // double-counts the original purchase. Keep blends out of the raw/
+      // finished/yield totals (and the by-product/by-mill tonnage); report
+      // them separately so the figure is transparent, not hidden.
+      const isBlend = (b) => b.processing_type === 'blended';
       const summary = batches.reduce(
         (acc, b) => {
           acc.batchCount += 1;
-          acc.rawMt += num(b.raw_qty_mt);
-          acc.finishedMt += num(b.actual_finished_mt);
-          acc.plannedMt += num(b.planned_finished_mt);
           if (b.status === 'Completed' || b.status === 'Approved') acc.completed += 1;
+          if (isBlend(b)) {
+            acc.blendedCount += 1;
+            acc.blendedRawMt += num(b.raw_qty_mt);
+            acc.blendedFinishedMt += num(b.actual_finished_mt);
+          } else {
+            acc.rawMt += num(b.raw_qty_mt);
+            acc.finishedMt += num(b.actual_finished_mt);
+            acc.plannedMt += num(b.planned_finished_mt);
+          }
           return acc;
         },
-        { batchCount: 0, rawMt: 0, finishedMt: 0, plannedMt: 0, completed: 0 }
+        { batchCount: 0, rawMt: 0, finishedMt: 0, plannedMt: 0, completed: 0, blendedCount: 0, blendedRawMt: 0, blendedFinishedMt: 0 }
       );
       summary.avgYieldPct = summary.rawMt > 0 ? (summary.finishedMt / summary.rawMt) * 100 : 0;
 
+      const nonBlendBatches = batches.filter((b) => !isBlend(b));
       const groupBy = (key, label) => {
         const map = new Map();
-        for (const b of batches) {
+        for (const b of nonBlendBatches) {
           const k = b[key] || '—';
           const r = map.get(k) || { name: k, batchCount: 0, rawMt: 0, finishedMt: 0 };
           r.batchCount += 1;
@@ -543,6 +556,8 @@ const reportingController = {
           byProduct: groupBy('product_name'),
           batches:   batches.map(b => ({
             id: b.id, batchNo: b.batch_no, status: b.status,
+            processingType: b.processing_type,
+            isBlend: isBlend(b),
             rawMt: num(b.raw_qty_mt),
             plannedMt: num(b.planned_finished_mt),
             finishedMt: num(b.actual_finished_mt),
