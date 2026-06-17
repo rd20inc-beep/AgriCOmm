@@ -8,6 +8,7 @@ export const reportingApi = {
   countryAnalysis: (params) => api.get('/api/reporting/profitability/countries', params),
   supplierQualityRanking: (params) => api.get('/api/reporting/quality/supplier-ranking', params),
   stockAging: () => api.get('/api/reporting/inventory/stock-aging'),
+  printableStock: (params) => api.get('/api/reporting/printable/stock', params),
   cashForecast: (params) => api.get('/api/reporting/financial/cash-forecast', params),
   kpiBenchmarks: (params) => api.get('/api/reporting/kpi/benchmarks', params),
   exportReport: (data) => api.post('/api/reporting/export', data),

@@ -11,7 +11,7 @@ import {
 import {
   useExecutiveSummary, useOrderProfitability, useCustomerProfitability,
   useCountryAnalysis, useStockAgingReport, useSupplierQualityRanking,
-  usePayments, useReceivables, usePayables,
+  usePayments, useReceivables, usePayables, usePrintableStock,
 } from '../../../api/queries';
 
 // ─── Formatting ────────────────────────────────────────────────────────
@@ -406,33 +406,126 @@ function CountriesTab({ params }) {
 }
 
 // ─── Tab: Inventory ───────────────────────────────────────────────────
-function InventoryTab() {
-  const { data: rows = [], isLoading } = useStockAgingReport();
-  if (isLoading) return <Skeleton />;
-  if (rows.length === 0) return <Empty msg="No stock to report." />;
+const fmtMT = (kg) => `${((parseFloat(kg) || 0) / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })} MT`;
 
-  const totalValue = rows.reduce((s, r) => s + (parseFloat(r.totalValuePkr) || parseFloat(r.totalValue) || 0), 0);
-  const totalKg    = rows.reduce((s, r) => s + (parseFloat(r.totalKg) || 0), 0);
+// Aging buckets derived from each lot's days-in-stock.
+const AGE_BUCKETS = [
+  ['0–30 days',  (d) => d <= 30],
+  ['31–60 days', (d) => d > 30 && d <= 60],
+  ['61–90 days', (d) => d > 60 && d <= 90],
+  ['90+ days',   (d) => d > 90],
+];
+
+function StockBreakdown({ title, subtitle, query, groupHead }) {
+  const { data, isLoading } = query;
+  if (isLoading) return null;
+  const rows = data?.rows || [];
+  if (rows.length === 0) return null;
+  const grand = data?.grand || {};
+  return (
+    <div className="space-y-2">
+      <SectionHeader title={title} subtitle={subtitle} />
+      <Table
+        head={[groupHead, 'Lots', 'Total', 'Available', 'Reserved', 'Value (PKR)']}
+        align={['left', 'right', 'right', 'right', 'right', 'right']}
+        rows={[
+          ...rows.map((r) => [
+            r.name || '—', r.lotCount || 0, fmtMT(r.totalKg), fmtMT(r.availableKg), fmtMT(r.reservedKg), fmtPKR(r.valuePkr),
+          ]),
+          ...(grand.lotCount != null
+            ? [['TOTAL', grand.lotCount, fmtMT(grand.totalKg), fmtMT(grand.availableKg), fmtMT(grand.reservedKg), fmtPKR(grand.valuePkr)]
+                .map((c, i) => <span key={i} className="font-semibold text-gray-900">{c}</span>)]
+            : []),
+        ]}
+      />
+    </div>
+  );
+}
+
+function InventoryTab() {
+  const { data: lots = [], isLoading } = useStockAgingReport();   // per-lot array
+  const byType = usePrintableStock('type');
+  const byWarehouse = usePrintableStock('warehouse');
+  const bySubtype = usePrintableStock('subtype');
+
+  if (isLoading) return <Skeleton />;
+  if (!Array.isArray(lots) || lots.length === 0) return <Empty msg="No stock to report." />;
+
+  // Headline totals — prefer the printable-stock grand (carries available/reserved),
+  // fall back to summing the per-lot aging data so the tab is never blank.
+  const grand = byType.data?.grand || {};
+  const totalKg = grand.totalKg != null ? parseFloat(grand.totalKg) : lots.reduce((s, l) => s + (parseFloat(l.qty) || 0) * 1000, 0);
+  const availKg = grand.availableKg;
+  const reservedKg = grand.reservedKg;
+  const totalValue = grand.valuePkr != null ? parseFloat(grand.valuePkr) : lots.reduce((s, l) => s + (parseFloat(l.totalValue) || 0), 0);
+  const deadStock = lots.filter((l) => l.isDeadStock);
+  const deadValue = deadStock.reduce((s, l) => s + (parseFloat(l.totalValue) || 0), 0);
+
+  // Aging buckets from days-in-stock.
+  const bucketRows = AGE_BUCKETS.map(([label, test]) => {
+    const ls = lots.filter((l) => test(parseInt(l.daysInStock, 10) || 0));
+    const kg = ls.reduce((s, l) => s + (parseFloat(l.qty) || 0) * 1000, 0);
+    const val = ls.reduce((s, l) => s + (parseFloat(l.totalValue) || 0), 0);
+    return [label, ls.length, fmtMT(kg), fmtPKR(val), totalValue > 0 ? `${(val / totalValue * 100).toFixed(1)}%` : '—'];
+  });
+
+  // Oldest lots — the 8 longest-held, most useful for spotting stale stock.
+  const oldest = [...lots].sort((a, b) => (b.daysInStock || 0) - (a.daysInStock || 0)).slice(0, 8);
 
   return (
-    <div className="space-y-4">
-      <SectionHeader title="Stock Aging" subtitle="Inventory grouped by holding period" />
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <SummaryCell label="Total weight"  value={`${(totalKg / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 })} MT`} />
-        <SummaryCell label="Total value"   value={fmtPKR(totalValue)} />
-        <SummaryCell label="Aging buckets" value={String(rows.length)} />
-        <SummaryCell label="See printable" value={<Link to="/reports/print" className="text-blue-600 hover:underline inline-flex items-center gap-1">/reports/print <ExternalLink size={12} /></Link>} />
+    <div className="space-y-6">
+      {/* Headline numbers */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <SummaryCell label="Total lots" value={String(grand.lotCount ?? lots.length)} />
+        <SummaryCell label="Total weight" value={fmtMT(totalKg)} />
+        <SummaryCell label="Available" value={availKg != null ? fmtMT(availKg) : '—'} />
+        <SummaryCell label="Reserved" value={reservedKg != null ? fmtMT(reservedKg) : '—'} />
+        <SummaryCell label="Total value" value={fmtPKR(totalValue)} />
+        <SummaryCell
+          label="Dead stock (90+d)"
+          value={<span className={deadStock.length ? 'text-rose-600' : 'text-emerald-600'}>{deadStock.length} · {fmtPKR(deadValue)}</span>}
+        />
       </div>
-      <Table
-        head={['Bucket', 'Lots', 'Quantity (kg)', 'Value (PKR)']}
-        align={['left','right','right','right']}
-        rows={rows.map(r => [
-          r.ageBucket || r.bucket || '—',
-          r.lotCount || 0,
-          (parseFloat(r.totalKg) || 0).toLocaleString(),
-          fmtPKR(parseFloat(r.totalValuePkr) || parseFloat(r.totalValue) || 0),
-        ])}
-      />
+
+      <StockBreakdown title="By Type" subtitle="Raw / finished / byproduct" query={byType} groupHead="Type" />
+      <StockBreakdown title="By Category" subtitle="Finished, broken grades, sortex, bran, husk, blends" query={bySubtype} groupHead="Category" />
+      <StockBreakdown title="By Warehouse" subtitle="Where the stock is held" query={byWarehouse} groupHead="Warehouse" />
+
+      {/* Aging */}
+      <div className="space-y-2">
+        <SectionHeader title="Stock Aging" subtitle="How long stock has been held" />
+        <Table
+          head={['Bucket', 'Lots', 'Weight', 'Value (PKR)', '% of value']}
+          align={['left', 'right', 'right', 'right', 'right']}
+          rows={bucketRows}
+        />
+      </div>
+
+      {/* Oldest lots */}
+      <div className="space-y-2">
+        <SectionHeader title="Oldest Lots" subtitle="Longest-held stock first" />
+        <Table
+          head={['Lot No', 'Item', 'Type', 'Warehouse', 'Qty', 'Value (PKR)', 'Days held']}
+          align={['left', 'left', 'left', 'left', 'right', 'right', 'right']}
+          rows={oldest.map((l) => [
+            l.lotNo || '—',
+            l.itemName || '—',
+            l.type || '—',
+            l.warehouseName || '—',
+            `${(parseFloat(l.qty) || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} ${l.unit || 'MT'}`,
+            fmtPKR(l.totalValue),
+            l.isDeadStock
+              ? <span className="inline-flex items-center gap-1 text-rose-600 font-medium"><AlertTriangle size={12} /> {l.daysInStock}</span>
+              : (l.daysInStock || 0),
+          ])}
+        />
+      </div>
+
+      <div className="flex justify-end">
+        <Link to="/reports/print" className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm">
+          Printable stock report <ExternalLink size={12} />
+        </Link>
+      </div>
     </div>
   );
 }

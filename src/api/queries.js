@@ -1301,6 +1301,16 @@ export function useStockAgingReport() {
   });
 }
 
+export function usePrintableStock(groupBy = 'product', status = 'Available') {
+  return useQuery({
+    queryKey: ['printable-stock', groupBy, status],
+    queryFn: async () => {
+      const res = await reportingApi.printableStock({ group_by: groupBy, status });
+      return transformKeys(unwrap(res) || {});
+    },
+  });
+}
+
 export function useSupplierQualityRanking(params = {}) {
   return useQuery({
     queryKey: ['supplier-quality-ranking', params],
