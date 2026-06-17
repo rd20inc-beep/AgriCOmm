@@ -458,15 +458,19 @@ export default function LotDetail() {
               const fin = n(batchYield.actualFinishedMt);
               const broken = n(batchYield.brokenMt);
               const bran = n(batchYield.branMt), husk = n(batchYield.huskMt), sortex = n(batchYield.sortexRejectsMt);
-              const total = fin + broken + bran + husk + sortex;
+              const powder = n(batchYield.powderMt), sweeping = n(batchYield.sweepingMt);
+              const total = fin + broken + bran + husk + sortex + powder + sweeping;
               if (total <= 0) return null;
               const pctOf = (v) => total > 0 ? `${(v / total * 100).toFixed(1)}%` : '—';
               const subGrades = [
                 ['B1', n(batchYield.b1Mt)], ['B2', n(batchYield.b2Mt)], ['B3', n(batchYield.b3Mt)],
                 ['CSR', n(batchYield.csrMt)], ['Short Grain', n(batchYield.shortGrainMt)],
               ].filter(([, v]) => v > 0);
+              // "Broken" here is the grade-tier subtotal (its breakdown shows below) —
+              // not a generic Broken Rice product.
               const tops = [
-                ['Finished', fin], ['Broken', broken], ['Bran', bran], ['Husk', husk], ['Sortex', sortex],
+                ['Finished', fin], ['Broken', broken], ['Sortex', sortex],
+                ['Powder', powder], ['Sweeping', sweeping], ['Bran', bran], ['Husk', husk],
               ].filter(([, v]) => v > 0);
               return (
                 <div className="mt-3 pt-3 border-t border-gray-100">

@@ -153,7 +153,8 @@ async function buildLotDetail(lot) {
       db('milling_quality_post').where({ batch_id: ownBatchId }).orderBy('created_at', 'desc').first(),
       db('milling_batches').where({ id: ownBatchId }).first(
         'actual_finished_mt', 'broken_mt', 'b1_mt', 'b2_mt', 'b3_mt', 'csr_mt',
-        'short_grain_mt', 'bran_mt', 'husk_mt', 'sortex_rejects_mt', 'post_milling_grade'),
+        'short_grain_mt', 'bran_mt', 'husk_mt', 'sortex_rejects_mt',
+        'powder_mt', 'sweeping_mt', 'post_milling_grade'),
     ]);
     if (arrival || post) batchQuality = { arrival: arrival || null, post: post || null };
     batchYield = byield || null;
