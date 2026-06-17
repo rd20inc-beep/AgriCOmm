@@ -1031,6 +1031,7 @@ COL mill_expenses.reference:character varying:NULL
 COL mill_expenses.updated_at:timestamp with time zone:NOT NULL
 COL mill_items.avg_cost_per_unit:numeric:NULL
 COL mill_items.bag_type_id:integer:NULL
+COL mill_items.capacity_kg:numeric:NULL
 COL mill_items.category:character varying:NOT NULL
 COL mill_items.code:character varying:NOT NULL
 COL mill_items.created_at:timestamp with time zone:NOT NULL
@@ -1043,8 +1044,24 @@ COL mill_items.notes:text:NULL
 COL mill_items.preferred_supplier_id:integer:NULL
 COL mill_items.reorder_level:numeric:NOT NULL
 COL mill_items.subcategory:character varying:NULL
+COL mill_items.tare_weight_kg:numeric:NULL
 COL mill_items.unit:character varying:NOT NULL
 COL mill_items.updated_at:timestamp with time zone:NOT NULL
+COL mill_packing_logs.bag_item_id:integer:NOT NULL
+COL mill_packing_logs.bags_count:numeric:NOT NULL
+COL mill_packing_logs.batch_id:integer:NOT NULL
+COL mill_packing_logs.capacity_kg_per_bag:numeric:NOT NULL
+COL mill_packing_logs.cost_per_bag:numeric:NULL
+COL mill_packing_logs.created_at:timestamp with time zone:NOT NULL
+COL mill_packing_logs.gross_weight_kg:numeric:NOT NULL
+COL mill_packing_logs.id:integer:NOT NULL
+COL mill_packing_logs.notes:text:NULL
+COL mill_packing_logs.packed_by:integer:NULL
+COL mill_packing_logs.packed_weight_kg:numeric:NOT NULL
+COL mill_packing_logs.tare_kg_per_bag:numeric:NOT NULL
+COL mill_packing_logs.tare_weight_kg:numeric:NOT NULL
+COL mill_packing_logs.total_cost:numeric:NULL
+COL mill_packing_logs.warehouse_id:integer:NULL
 COL mill_performance.avg_bran_pct:numeric:NULL
 COL mill_performance.avg_broken_pct:numeric:NULL
 COL mill_performance.avg_cost_per_mt:numeric:NULL
@@ -2262,6 +2279,12 @@ CON mill_items.mill_items_code_unique(u)
 CON mill_items.mill_items_created_by_foreign(f)
 CON mill_items.mill_items_pkey(p)
 CON mill_items.mill_items_preferred_supplier_id_foreign(f)
+CON mill_packing_logs.chk_mill_packing_logs_bags_positive(c)
+CON mill_packing_logs.mill_packing_logs_bag_item_id_foreign(f)
+CON mill_packing_logs.mill_packing_logs_batch_id_foreign(f)
+CON mill_packing_logs.mill_packing_logs_packed_by_foreign(f)
+CON mill_packing_logs.mill_packing_logs_pkey(p)
+CON mill_packing_logs.mill_packing_logs_warehouse_id_foreign(f)
 CON mill_performance.chk_mill_performance_avg_bran_pct_range(c)
 CON mill_performance.chk_mill_performance_avg_broken_pct_range(c)
 CON mill_performance.chk_mill_performance_avg_cost_per_mt_nn(c)

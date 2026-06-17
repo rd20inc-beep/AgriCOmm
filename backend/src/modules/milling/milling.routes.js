@@ -697,4 +697,21 @@ router.get(
   consumptionCtrl.history
 );
 
+// =============================================================================
+// Mill Store — Batch Packing (bag the finished rice; records bag weight)
+// =============================================================================
+const packingCtrl = require('../millStore/packing.controller');
+
+router.post(
+  '/batches/:id/packing',
+  authorize('mill_store', 'record_consumption'),
+  auditAction('pack_batch', 'milling_batch', (req) => req.params.id),
+  packingCtrl.pack
+);
+router.get(
+  '/batches/:id/packing',
+  authorize('mill_store', 'view'),
+  packingCtrl.history
+);
+
 module.exports = router;

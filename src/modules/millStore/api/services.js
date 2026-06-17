@@ -23,9 +23,14 @@ export const millStoreApi = {
   getStock: (params) => api.get('/api/mill-store/stock', params),
   getAlerts: () => api.get('/api/mill-store/stock/alerts'),
   getItemMovements: (id, params) => api.get(`/api/mill-store/items/${id}/movements`, params),
+  setStock: (id, data) => api.put(`/api/mill-store/items/${id}/stock`, data),
 
   // Summary
   getSummary: () => api.get('/api/mill-store/summary'),
+
+  // Packing (on milling routes — bag the batch's finished rice)
+  packBatch: (batchId, data) => api.post(`/api/milling/batches/${batchId}/packing`, data),
+  getPackingHistory: (batchId) => api.get(`/api/milling/batches/${batchId}/packing`),
 
   // Adjustments
   listAdjustments: (params) => api.get('/api/mill-store/adjustments', params),

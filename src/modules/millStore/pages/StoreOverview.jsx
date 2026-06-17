@@ -1,11 +1,13 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Package, AlertTriangle, ShoppingCart, TrendingDown,
-  Search, Filter, ArrowRight,
+  Search, Pencil, Save, Loader2,
 } from 'lucide-react';
-import { useMillStoreItems, useMillStoreSummary } from '../api/queries';
+import { useMillStoreItems, useMillStoreSummary, useSetMillStock, useUpdateMillStoreItem } from '../api/queries';
 import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
+import SlideDrawer from '../../../components/SlideDrawer';
+import { useApp } from '../../../context/AppContext';
 
 function formatPKR(v) {
   const n = Number(v) || 0;
@@ -42,6 +44,7 @@ export default function StoreOverview() {
   const [category, setCategory] = useState('all');
   const [search, setSearch] = useState('');
   const [showNewPurchase, setShowNewPurchase] = useState(false);
+  const [editItem, setEditItem] = useState(null);
   const { data: items = [], isLoading } = useMillStoreItems({
     ...(category !== 'all' ? { category } : {}),
     ...(search ? { search } : {}),
@@ -130,9 +133,12 @@ export default function StoreOverview() {
                   <th className="text-left py-2 px-3 font-semibold text-gray-600">Item</th>
                   <th className="text-left py-2 px-3 font-semibold text-gray-600">Category</th>
                   <th className="text-right py-2 px-3 font-semibold text-gray-600">On Hand</th>
+                  <th className="text-right py-2 px-3 font-semibold text-gray-600">Bag kg</th>
+                  <th className="text-right py-2 px-3 font-semibold text-gray-600">Tare kg</th>
                   <th className="text-right py-2 px-3 font-semibold text-gray-600">Reorder</th>
                   <th className="text-right py-2 px-3 font-semibold text-gray-600">Avg Cost</th>
                   <th className="text-right py-2 px-3 font-semibold text-gray-600">Value</th>
+                  <th className="text-right py-2 px-3 font-semibold text-gray-600"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -154,9 +160,24 @@ export default function StoreOverview() {
                         {qty} {item.unit}
                         {isLow && <AlertTriangle size={12} className="inline ml-1 text-red-500" />}
                       </td>
+                      <td className="py-2 px-3 text-right text-gray-700">
+                        {item.capacity_kg != null && item.capacity_kg !== '' ? Number(item.capacity_kg) : '—'}
+                      </td>
+                      <td className="py-2 px-3 text-right text-gray-500">
+                        {item.tare_weight_kg != null && item.tare_weight_kg !== '' ? Number(item.tare_weight_kg) : '—'}
+                      </td>
                       <td className="py-2 px-3 text-right text-gray-500">{reorder}</td>
                       <td className="py-2 px-3 text-right text-gray-700">{formatPKR(avg)}</td>
                       <td className="py-2 px-3 text-right text-gray-900 font-medium">{formatPKR(qty * avg)}</td>
+                      <td className="py-2 px-3 text-right">
+                        <button
+                          onClick={() => setEditItem(item)}
+                          className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          title="Edit stock"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -168,6 +189,114 @@ export default function StoreOverview() {
 
       {/* New Purchase — right slide-over */}
       <NewPurchaseDrawer open={showNewPurchase} onClose={() => setShowNewPurchase(false)} />
+
+      {/* Edit stock + bag weights — right slide-over */}
+      <StockEditDrawer item={editItem} onClose={() => setEditItem(null)} />
     </div>
+  );
+}
+
+function StockEditDrawer({ item, onClose }) {
+  const { addToast } = useApp();
+  const setStock = useSetMillStock();
+  const updateItem = useUpdateMillStoreItem();
+  const [form, setForm] = useState(null);
+
+  useEffect(() => {
+    if (!item) { setForm(null); return; }
+    setForm({
+      quantity: String(Number(item.quantity_available) || 0),
+      reorder_level: String(Number(item.reorder_level) || 0),
+      capacity_kg: item.capacity_kg != null ? String(item.capacity_kg) : '',
+      tare_weight_kg: item.tare_weight_kg != null ? String(item.tare_weight_kg) : '',
+      reason: '',
+    });
+  }, [item]);
+
+  if (!item || !form) return null;
+  const isPackaging = item.category === 'packaging';
+  const saving = setStock.isPending || updateItem.isPending;
+  const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
+  async function save() {
+    try {
+      const newQty = parseFloat(form.quantity);
+      if (Number.isNaN(newQty) || newQty < 0) { addToast('Enter a valid quantity.', 'error'); return; }
+
+      // Master fields (reorder + bag weights) — only send what changed.
+      const itemPatch = {};
+      const reorder = parseFloat(form.reorder_level);
+      if (!Number.isNaN(reorder) && reorder !== Number(item.reorder_level)) itemPatch.reorder_level = reorder;
+      if (isPackaging) {
+        const cap = form.capacity_kg === '' ? null : parseFloat(form.capacity_kg);
+        const tare = form.tare_weight_kg === '' ? null : parseFloat(form.tare_weight_kg);
+        if (cap !== (item.capacity_kg == null ? null : Number(item.capacity_kg))) itemPatch.capacity_kg = cap;
+        if (tare !== (item.tare_weight_kg == null ? null : Number(item.tare_weight_kg))) itemPatch.tare_weight_kg = tare;
+      }
+      if (Object.keys(itemPatch).length) await updateItem.mutateAsync({ id: item.id, data: itemPatch });
+
+      // Direct stock set if quantity changed.
+      if (newQty !== Number(item.quantity_available)) {
+        await setStock.mutateAsync({ id: item.id, data: { quantity_available: newQty, reason: form.reason || null } });
+      }
+      addToast('Stock updated', 'success');
+      onClose();
+    } catch (err) {
+      addToast(err?.response?.data?.message || err.message || 'Failed to update stock', 'error');
+    }
+  }
+
+  const lbl = 'block text-xs font-medium text-gray-600 mb-1';
+  const inp = 'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500';
+
+  return (
+    <SlideDrawer
+      open={!!item}
+      onClose={onClose}
+      title={`Edit — ${item.name}`}
+      subtitle={`${item.code} · ${item.category}`}
+      icon={Package}
+      footer={
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+          <button onClick={save} disabled={saving} className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 inline-flex items-center gap-2 disabled:opacity-60">
+            {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />} Save
+          </button>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        <div>
+          <label className={lbl}>On-hand quantity ({item.unit})</label>
+          <input type="number" min="0" step="0.01" value={form.quantity} onChange={(e) => set('quantity', e.target.value)} className={inp} />
+          <p className="text-[11px] text-gray-400 mt-1">Sets stock directly — change is logged to the movement ledger.</p>
+        </div>
+        <div>
+          <label className={lbl}>Reason for change (optional)</label>
+          <input value={form.reason} onChange={(e) => set('reason', e.target.value)} className={inp} placeholder="e.g. physical count correction" />
+        </div>
+        <div>
+          <label className={lbl}>Reorder level</label>
+          <input type="number" min="0" step="0.01" value={form.reorder_level} onChange={(e) => set('reorder_level', e.target.value)} className={inp} />
+        </div>
+
+        {isPackaging && (
+          <div className="border-t border-gray-200 pt-4">
+            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-2">Bag weights</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={lbl}>Capacity (kg/bag)</label>
+                <input type="number" min="0" step="0.001" value={form.capacity_kg} onChange={(e) => set('capacity_kg', e.target.value)} className={inp} placeholder="rice held" />
+              </div>
+              <div>
+                <label className={lbl}>Tare (kg/bag)</label>
+                <input type="number" min="0" step="0.0001" value={form.tare_weight_kg} onChange={(e) => set('tare_weight_kg', e.target.value)} className={inp} placeholder="empty bag" />
+              </div>
+            </div>
+            <p className="text-[11px] text-gray-400 mt-1">Capacity = rice a bag holds; tare = empty-bag weight. Used when packing a batch.</p>
+          </div>
+        )}
+      </div>
+    </SlideDrawer>
   );
 }

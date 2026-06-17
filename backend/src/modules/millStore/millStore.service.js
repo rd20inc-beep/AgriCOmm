@@ -116,6 +116,12 @@ const millStoreService = {
     return repo.getItemMovements(itemId, params);
   },
 
+  async setStock(id, data, userId) {
+    const result = await repo.setStock(id, data, userId);
+    if (!result) throw new NotFoundError('Item not found.');
+    return result;
+  },
+
   // ─── Forecast ───
   async getForecast() {
     return repo.getForecast();

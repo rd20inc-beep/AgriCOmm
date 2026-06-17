@@ -12,6 +12,10 @@ const createItemSchema = Joi.object({
   bag_type_id: Joi.number().integer().allow(null).optional(),
   reorder_level: Joi.number().min(0).default(0),
   preferred_supplier_id: Joi.number().integer().allow(null).optional(),
+  // Bag weights — only meaningful for packaging items. capacity = kg of rice a
+  // bag holds; tare = weight of the empty bag.
+  capacity_kg: Joi.number().min(0).allow(null).optional(),
+  tare_weight_kg: Joi.number().min(0).allow(null).optional(),
   notes: Joi.string().allow(null, '').optional(),
 });
 
@@ -23,9 +27,27 @@ const updateItemSchema = Joi.object({
   bag_type_id: Joi.number().integer().allow(null).optional(),
   reorder_level: Joi.number().min(0).optional(),
   preferred_supplier_id: Joi.number().integer().allow(null).optional(),
+  capacity_kg: Joi.number().min(0).allow(null).optional(),
+  tare_weight_kg: Joi.number().min(0).allow(null).optional(),
   notes: Joi.string().allow(null, '').optional(),
   is_active: Joi.boolean().optional(),
 }).min(1);
+
+// Direct, audit-logged stock edit (no approval gate) — sets the on-hand
+// quantity for an item at a location (default: main store).
+const setStockSchema = Joi.object({
+  quantity_available: Joi.number().min(0).required(),
+  warehouse_id: Joi.number().integer().allow(null).optional(),
+  reason: Joi.string().trim().max(500).allow(null, '').optional(),
+});
+
+// Pack a milling batch's finished rice into bags.
+const packSchema = Joi.object({
+  bag_item_id: Joi.number().integer().required(),
+  bags_count: Joi.number().greater(0).required(),
+  warehouse_id: Joi.number().integer().allow(null).optional(),
+  notes: Joi.string().trim().max(500).allow(null, '').optional(),
+});
 
 const createRatioSchema = Joi.object({
   item_id: Joi.number().integer().required(),
@@ -76,6 +98,8 @@ const rejectAdjustmentSchema = Joi.object({
 module.exports = {
   createItemSchema,
   updateItemSchema,
+  setStockSchema,
+  packSchema,
   createRatioSchema,
   updateRatioSchema,
   createPurchaseSchema,

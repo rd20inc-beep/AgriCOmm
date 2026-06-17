@@ -560,6 +560,50 @@ const millStoreRepo = {
     }).returning('*');
     return row;
   },
+
+  // Direct, audit-logged stock set (no approval) — sets the on-hand quantity for
+  // an item at a location and records the delta as a 'adjustment' movement.
+  async setStock(itemId, { quantity_available, warehouse_id = null, reason }, userId) {
+    return db.transaction(async (trx) => {
+      const item = await trx('mill_items').where('id', itemId).first();
+      if (!item) return null;
+      const target = Math.max(0, Number(quantity_available) || 0);
+      const warehouseId = warehouse_id || null;
+
+      const stockRow = await trx('mill_stock')
+        .where({ item_id: itemId, warehouse_id: warehouseId })
+        .first();
+      const prev = Number(stockRow?.quantity_available || 0);
+      const delta = Number((target - prev).toFixed(4));
+
+      if (stockRow) {
+        await trx('mill_stock').where('id', stockRow.id)
+          .update({ quantity_available: target, updated_at: trx.fn.now() });
+      } else {
+        await trx('mill_stock').insert({
+          item_id: itemId, warehouse_id: warehouseId,
+          quantity_available: target, quantity_reserved: 0,
+        });
+      }
+
+      if (delta !== 0) {
+        const costPerUnit = Number(item.avg_cost_per_unit) || 0;
+        await trx('mill_stock_movements').insert({
+          item_id: itemId,
+          warehouse_id: warehouseId,
+          movement_type: 'adjustment',
+          quantity: delta,
+          cost_per_unit: costPerUnit,
+          total_cost: Number((Math.abs(delta) * costPerUnit).toFixed(2)),
+          reference_type: 'manual_edit',
+          reason: reason || `Direct stock set to ${target}`,
+          performed_by: userId,
+        });
+      }
+
+      return { item_id: itemId, warehouse_id: warehouseId, previous: prev, quantity_available: target, delta };
+    });
+  },
 };
 
 module.exports = millStoreRepo;

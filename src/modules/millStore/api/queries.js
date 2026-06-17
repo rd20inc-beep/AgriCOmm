@@ -90,11 +90,46 @@ export function useConsumptionHistory(batchId) {
   });
 }
 
+export function usePackingHistory(batchId) {
+  return useQuery({
+    queryKey: ['mill-store', 'packing', batchId],
+    queryFn: async () => {
+      const res = await millStoreApi.getPackingHistory(batchId);
+      return unwrap(res) || {};
+    },
+    enabled: !!batchId,
+  });
+}
+
 // ─── Mutations ───
 export function useCreateMillStoreItem() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data) => millStoreApi.createItem(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['mill-store'] }),
+  });
+}
+
+export function useUpdateMillStoreItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => millStoreApi.updateItem(id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['mill-store'] }),
+  });
+}
+
+export function useSetMillStock() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => millStoreApi.setStock(id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['mill-store'] }),
+  });
+}
+
+export function usePackBatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ batchId, data }) => millStoreApi.packBatch(batchId, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['mill-store'] }),
   });
 }

@@ -3,6 +3,7 @@ const { parsePagination, paginationMeta } = require('../../shared/utils/paginati
 const {
   createItemSchema,
   updateItemSchema,
+  setStockSchema,
   createRatioSchema,
   updateRatioSchema,
   createPurchaseSchema,
@@ -68,6 +69,15 @@ const millStoreController = {
     try {
       await service.deleteItem(req.params.id);
       res.json({ success: true, message: 'Item deactivated.' });
+    } catch (err) { next(err); }
+  },
+
+  // Direct, audit-logged stock set (no approval).
+  async setStock(req, res, next) {
+    try {
+      const data = validate(setStockSchema, req.body);
+      const result = await service.setStock(req.params.id, data, req.user?.id);
+      res.json({ success: true, data: result });
     } catch (err) { next(err); }
   },
 

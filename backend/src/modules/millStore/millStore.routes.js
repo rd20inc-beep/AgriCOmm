@@ -25,6 +25,13 @@ router.delete(
   auditAction('delete', 'mill_item', (req) => req.params.id),
   ctrl.deleteItem
 );
+// Direct, audit-logged stock set (no approval gate).
+router.put(
+  '/items/:id/stock',
+  authorize('mill_store', 'request_adjustment'),
+  auditAction('set_stock', 'mill_item', (req) => req.params.id),
+  ctrl.setStock
+);
 
 // Consumption ratios
 router.get('/ratios', authorize('mill_store', 'view'), ctrl.listRatios);

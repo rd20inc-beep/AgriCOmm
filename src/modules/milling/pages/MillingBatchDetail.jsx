@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   Package,
   Wheat,
+  Boxes,
   FlaskConical,
   BarChart3,
   DollarSign,
@@ -38,6 +39,7 @@ import Modal from '../../../components/Modal';
 import StatusBadge from '../../../components/StatusBadge';
 import MillingCostSheet from '../components/MillingCostSheet';
 import ConsumptionPanel from '../../millStore/components/ConsumptionPanel';
+import PackingPanel from '../../millStore/components/PackingPanel';
 
 // Pakistani-rice per-grade quality split. Stored on milling_quality_samples
 // in snake_case (b1_pct / b2_pct / cobba_pct / csr_pct / nb_pct / ov_pct);
@@ -65,6 +67,7 @@ const tabs = [
   { key: 'quality', label: 'Quality', icon: FlaskConical },
   { key: 'yield', label: 'Yield', icon: BarChart3 },
   { key: 'consumption', label: 'Consumption', icon: Wheat },
+  { key: 'packing', label: 'Packing', icon: Boxes },
   { key: 'costs', label: 'Costs', icon: DollarSign },
   { key: 'transfers', label: 'Transfers', icon: ArrowRightLeft },
   { key: 'activity', label: 'Activity', icon: Activity },
@@ -1306,6 +1309,16 @@ export default function MillingBatchDetail() {
         {activeTab === 'consumption' && (
           <div className="bg-white rounded-xl shadow-sm p-5">
             <ConsumptionPanel
+              batchId={batch.dbId || batch.id}
+              batchStatus={batch.status}
+              addToast={addToast}
+            />
+          </div>
+        )}
+
+        {activeTab === 'packing' && (
+          <div className="bg-white rounded-xl shadow-sm p-5">
+            <PackingPanel
               batchId={batch.dbId || batch.id}
               batchStatus={batch.status}
               addToast={addToast}
