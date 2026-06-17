@@ -279,6 +279,10 @@ export function transformBatch(dbBatch) {
     rawCostPerKgFinished: parseFloat(dbBatch.raw_cost_per_kg_finished) || 0,
     millingCostPerKgFinished: parseFloat(dbBatch.milling_cost_per_kg_finished) || 0,
     totalCostPerKgFinished: parseFloat(dbBatch.total_cost_per_kg_finished) || 0,
+    // Residual costing — operator-entered Milling Cost / Other Expenses. Null when
+    // not entered (the costing views distinguish null from 0), so DON'T coerce to 0.
+    manualMillingCostPkr: dbBatch.manual_milling_cost_pkr == null ? null : parseFloat(dbBatch.manual_milling_cost_pkr),
+    manualOtherExpensesPkr: dbBatch.manual_other_expenses_pkr == null ? null : parseFloat(dbBatch.manual_other_expenses_pkr),
     millId: dbBatch.mill_id,
     machineLine: dbBatch.machine_line,
     shift: dbBatch.shift,
