@@ -37,7 +37,7 @@ export default function PackingPanel({ batchId, batchStatus, addToast }) {
       addToast?.('Packed — bags deducted, weight recorded', 'success');
       setBags('');
     } catch (err) {
-      addToast?.(err?.response?.data?.message || err.message || 'Failed to pack', 'error');
+      addToast?.(err?.data?.errors?.[0]?.message || err?.data?.message || err.message || 'Failed to pack', 'error');
     }
   }
 

@@ -105,10 +105,12 @@ const packingService = {
         packed_by: userId,
       }).returning('*');
 
+      // Packing consumes bags; movement_type is constrained to a fixed set, so
+      // record it as 'consumption' and distinguish it via reference_type='packing'.
       await trx('mill_stock_movements').insert({
         item_id: bag_item_id,
         warehouse_id: warehouseId,
-        movement_type: 'packing',
+        movement_type: 'consumption',
         quantity: -bagsCount,
         cost_per_unit: costPerBag,
         total_cost: totalCost,

@@ -242,7 +242,7 @@ function StockEditDrawer({ item, onClose }) {
       addToast('Stock updated', 'success');
       onClose();
     } catch (err) {
-      addToast(err?.response?.data?.message || err.message || 'Failed to update stock', 'error');
+      addToast(err?.data?.errors?.[0]?.message || err?.data?.message || err.message || 'Failed to update stock', 'error');
     }
   }
 
