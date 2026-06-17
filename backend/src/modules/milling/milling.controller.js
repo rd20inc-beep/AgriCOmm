@@ -333,13 +333,17 @@ const millingController = {
           resolvedRawQty = Math.round(sumQty * 100) / 100;
         }
 
-        // Processing type: a run that mixes >1 distinct variety is a blend, so
+        // Processing type: a run that mixes >1 distinct rice TYPE is a blend, so
         // its output is isolated from pure (and from other blends). The operator
-        // can force it via req.body.processing_type; otherwise we infer it.
-        const blendVarieties = [...new Set(blendRows.map((b) => (b.lot.variety || '').trim()).filter(Boolean))];
+        // can force it via req.body.processing_type; otherwise we infer it by
+        // DISTINCT TYPE (product_id → variety) — several lots of the same type
+        // are NOT a blend.
+        const blendTypes = [...new Set(blendRows.map((b) =>
+          (b.lot.product_id != null ? `p:${b.lot.product_id}` : (b.lot.variety || '').trim().toLowerCase())
+        ).filter(Boolean))];
         const processingType = ['single_variety', 'blended'].includes(req.body.processing_type)
           ? req.body.processing_type
-          : (blendVarieties.length > 1 ? 'blended' : 'single_variety');
+          : (blendTypes.length > 1 ? 'blended' : 'single_variety');
 
         // Rice type: prefer an explicit product_id; otherwise inherit it from the
         // linked export order, then from the source lots when they share a single

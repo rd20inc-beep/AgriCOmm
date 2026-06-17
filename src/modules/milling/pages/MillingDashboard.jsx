@@ -108,18 +108,22 @@ export default function MillingDashboard() {
   // the output is isolated from pure stock.
   const blendRecipe = useMemo(() => {
     const rows = [];
-    const varieties = new Set();
+    // Blended = 2+ distinct rice TYPES. Classify by the rice type/product
+    // (productName → variety → itemName), NOT a per-lot label — so picking
+    // several stock lots of the SAME type stays single-variety, not "blended".
+    const types = new Set();
     for (const r of blendRows) {
       const lot = blendableLots.find(l => String(l.id) === String(r.lotId));
       const q = parseFloat(r.qtyMt) || 0;
       if (!lot || q <= 0) continue;
       const variety = lot.type === 'finished' ? (lot.variety || 'Finished rice') : (lot.variety || 'Raw');
-      varieties.add(variety);
+      const typeKey = (lot.productName || lot.variety || lot.itemName || '').trim().toLowerCase();
+      if (typeKey) types.add(typeKey);
       rows.push({ variety, qty: q });
     }
     const total = rows.reduce((s, r) => s + r.qty, 0);
     const withPct = rows.map(r => ({ ...r, pct: total > 0 ? (r.qty / total) * 100 : 0 }));
-    return { rows: withPct, distinct: varieties.size, processingType: varieties.size > 1 ? 'blended' : 'single_variety' };
+    return { rows: withPct, distinct: types.size, processingType: types.size > 1 ? 'blended' : 'single_variety' };
   }, [blendRows, blendableLots]);
   const resetBatchForm = () => {
     setBatchForm({
@@ -186,7 +190,7 @@ export default function MillingDashboard() {
 
     try {
       const payload = {
-        milling_fee_per_kg: parseFloat(batchForm.millingFeePerKg) || 5,
+        milling_fee_per_kg: 0, // fee removed from the form; milling cost is entered in the Costing dialog
         mill_id: batchForm.millId ? parseInt(batchForm.millId) : null,
         shift: batchForm.shift,
         planned_finished_mt: planned,
@@ -1234,12 +1238,8 @@ export default function MillingDashboard() {
           {/* Mill & shift are not asked: there is a single mill (resolved
               server-side) and shift isn't tracked per batch. */}
 
-          {/* Milling Fee */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Milling Fee (PKR/KG)</label>
-            <input type="number" value={batchForm.millingFeePerKg} onChange={e => setBF('millingFeePerKg', e.target.value)} placeholder="5" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
-            <p className="text-xs text-gray-400 mt-1">Cost charged per KG of raw rice processed. Default: PKR 5/KG</p>
-          </div>
+          {/* Milling fee removed — milling cost is entered per batch in the
+              Costing dialog (residual model), not as a flat per-KG fee here. */}
 
           {/* Notes */}
           <div>
