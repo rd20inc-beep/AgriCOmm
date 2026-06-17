@@ -973,12 +973,11 @@ const millingController = {
           // each tier becomes its own inventory lot and can be sold at its
           // own price. Falls back to the aggregate brokenMT when no grade
           // values are present on the batch.
+          // Use the just-entered grade quantities (not the stale pre-update batch
+          // row, which is still 0 on a first yield) so per-grade lots (B1/B2/…)
+          // are actually created instead of one generic broken lot.
           brokenGrades: {
-            b1:         parseFloat(batch.b1_mt) || 0,
-            b2:         parseFloat(batch.b2_mt) || 0,
-            b3:         parseFloat(batch.b3_mt) || 0,
-            csr:        parseFloat(batch.csr_mt) || 0,
-            shortGrain: parseFloat(batch.short_grain_mt) || 0,
+            b1, b2, b3, csr, shortGrain,
           },
           userId: req.user?.id,
           supplierInfo: { supplierId: batch.supplier_id },
