@@ -1356,21 +1356,21 @@ export default function MillingBatchDetail() {
           const manualRawCost = parseFloat(safeCosts.rawRice ?? safeCosts.raw_rice) || 0;
           const effectiveRawCost = manualRawCost > 0 ? manualRawCost : rawMaterialCostFromQuality;
 
-          // By-product values — prefer batch-confirmed prices, fall back to live commodity rates.
-          const bpRates = {
-            broken: parseFloat(batch.brokenPricePerMT) || commodityPrices.broken,
-            sortex: parseFloat(batch.sortexRejectsPricePerMT || batch.sortex_rejects_price_per_mt) || commodityPrices.sortex,
-            bran:   parseFloat(batch.branPricePerMT) || commodityPrices.bran,
-            husk:   parseFloat(batch.huskPricePerMT) || commodityPrices.husk,
-          };
-          const sortexMTval = parseFloat(batch.sortexRejectsMT || batch.sortex_rejects_mt) || 0;
-          const bpValue = (parseFloat(batch.brokenMT)||0) * bpRates.broken
-                        + sortexMTval                    * bpRates.sortex
-                        + (parseFloat(batch.branMT)||0)  * bpRates.bran
-                        + (parseFloat(batch.huskMT)||0)  * bpRates.husk;
-          const netCost = totalCosts > 0 ? totalCosts - bpValue : effectiveRawCost - bpValue;
+          // Residual costing: Net Purchase = Raw + Milling + Other (manual values
+          // when entered, else milling fee + recorded processing). Finished cost is
+          // the residual after crediting by-products, and is read off the batch's
+          // stored total_cost_per_kg_finished (the authoritative engine value), so
+          // the three figures reconcile: NetPurchase − ByProduct = ReadyRiceCost.
+          const procCosts = Object.entries(batch.costs || {}).reduce(
+            (s, [k, v]) => (k === 'raw_rice' ? s : s + (parseFloat(v) || 0)), 0);
+          const feeTotal = (parseFloat(batch.millingFeePerKg) || 0) * (parseFloat(batch.rawQtyMT) || 0) * 1000;
+          const millingCostVal = batch.manualMillingCostPkr != null ? parseFloat(batch.manualMillingCostPkr) : feeTotal;
+          const otherExpVal = batch.manualOtherExpensesPkr != null ? parseFloat(batch.manualOtherExpensesPkr) : procCosts;
+          const netPurchase = effectiveRawCost + millingCostVal + otherExpVal;
           const finishedKG = (parseFloat(batch.actualFinishedMT)||0) * 1000;
-          const netCostPerKG = finishedKG > 0 ? (totalCosts > 0 ? netCost : effectiveRawCost - bpValue) / finishedKG : 0;
+          const netCostPerKG = parseFloat(batch.totalCostPerKgFinished) || 0;
+          const readyRiceCost = netCostPerKG * finishedKG;
+          const bpValue = Math.max(0, netPurchase - readyRiceCost);
 
           return (
           <div className="space-y-6">
@@ -1399,12 +1399,14 @@ export default function MillingBatchDetail() {
                 <p className="text-xl font-bold text-green-700 mt-1">{formatPKR(bpValue)}</p>
               </div>
               <div className="bg-white rounded-xl border border-gray-100 p-4">
-                <p className="text-xs font-medium text-gray-500 uppercase">Total Batch Cost</p>
-                <p className="text-xl font-bold text-gray-900 mt-1">{formatPKR(totalCosts > 0 ? totalCosts : effectiveRawCost)}</p>
+                <p className="text-xs font-medium text-gray-500 uppercase">Net Purchase</p>
+                <p className="text-xl font-bold text-gray-900 mt-1">{formatPKR(netPurchase)}</p>
+                <p className="text-[10px] text-gray-400 mt-0.5">Raw + Milling + Other</p>
               </div>
               <div className="bg-amber-50 rounded-xl border border-amber-100 p-4">
-                <p className="text-xs font-medium text-amber-600 uppercase">Net Cost/KG</p>
+                <p className="text-xs font-medium text-amber-600 uppercase">Finished Cost/KG</p>
                 <p className="text-xl font-bold text-amber-900 mt-1">{formatPKR(netCostPerKG)}</p>
+                <p className="text-[10px] text-amber-500 mt-0.5">{formatPKR(netCostPerKG * 1000)}/MT</p>
               </div>
               <div className="bg-white rounded-xl border border-gray-100 p-4">
                 <p className="text-xs font-medium text-gray-500 uppercase">Yield</p>
