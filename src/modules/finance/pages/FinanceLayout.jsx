@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { NavLink, useSearchParams } from 'react-router-dom';
 import {
   LayoutDashboard, ArrowDownLeft, ArrowUpRight, DollarSign,
@@ -113,7 +114,10 @@ export default function FinanceLayout({ children }) {
 
       {/* Page content */}
       <div className="flex-1 overflow-y-auto p-4 sm:p-6">
-        {children}
+        {/* Keep the finance sub-nav mounted while a lazy sub-page loads. */}
+        <Suspense fallback={<div className="flex items-center justify-center py-20 text-sm text-gray-400">Loading…</div>}>
+          {children}
+        </Suspense>
       </div>
     </div>
   );
