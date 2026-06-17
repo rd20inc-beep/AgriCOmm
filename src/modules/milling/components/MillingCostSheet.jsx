@@ -187,7 +187,9 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
     .filter(bp => {
       if (bp.legacy) return bp.qty > 0;
       if (usePerGradeBroken && ['b1','b2','b3','csr','sg'].includes(bp.key)) return bp.qty > 0;
-      if (bp.key === 'powder' || bp.key === 'sweeping') return bp.qty > 0;
+      // Powder & Sweeping always show on the sheet (match the costing dialog),
+      // even at qty 0, so their line + rate are always visible.
+      if (bp.key === 'powder' || bp.key === 'sweeping') return true;
       return true;
     })
     .map(bp => ({
