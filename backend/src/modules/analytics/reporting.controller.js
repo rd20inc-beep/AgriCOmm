@@ -899,12 +899,12 @@ const reportingController = {
       const SUBTYPE_EXPR = `
         CASE
           WHEN l.processing_type = 'blended' AND l.type = 'finished'
-            THEN 'Blended Finished — ' || COALESCE(l.blend_batch_no, '?')
+            THEN 'Blended Finished — ' || COALESCE(l.blend_batch_no, 'n/a')
           WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%broken%'
-            THEN 'Blended Broken — ' || COALESCE(l.grade, l.blend_batch_no, '?')
-          WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%bran%'   THEN 'Blended Bran — '   || COALESCE(l.blend_batch_no, '?')
-          WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%husk%'   THEN 'Blended Husk — '   || COALESCE(l.blend_batch_no, '?')
-          WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%sortex%' THEN 'Blended Sortex — ' || COALESCE(l.blend_batch_no, '?')
+            THEN 'Blended Broken — ' || COALESCE(l.grade, l.blend_batch_no, 'n/a')
+          WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%bran%'   THEN 'Blended Bran — '   || COALESCE(l.blend_batch_no, 'n/a')
+          WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%husk%'   THEN 'Blended Husk — '   || COALESCE(l.blend_batch_no, 'n/a')
+          WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%sortex%' THEN 'Blended Sortex — ' || COALESCE(l.blend_batch_no, 'n/a')
           WHEN l.type = 'finished' THEN 'Finished Rice'
           WHEN l.type = 'raw'      THEN 'Incoming Rice'
           WHEN l.item_name ILIKE '%sortex%' THEN 'Sortex Rejects'
