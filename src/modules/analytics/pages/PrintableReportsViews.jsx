@@ -41,11 +41,21 @@ export function ProductionReportView({ data, companyName, range, preset }) {
       {/* Blends re-mill already-finished owned rice, so their tonnage is kept
           OUT of Raw Input / Finished above to avoid double-counting the
           original purchase. Surface it here so the number is transparent. */}
-      {summary.blendedCount > 0 && (
-        <div className="text-xs text-gray-600 border border-gray-200 rounded p-2 bg-gray-50">
-          Excludes {summary.blendedCount} blend batch{summary.blendedCount === 1 ? '' : 'es'} that re-milled
-          {' '}{fmtMt(summary.blendedRawMt)} MT of finished rice → {fmtMt(summary.blendedFinishedMt)} MT
-          {' '}(not counted as new raw input, to avoid double-counting).
+      {(summary.blendedCount > 0 || summary.pendingCount > 0) && (
+        <div className="text-xs text-gray-600 border border-gray-200 rounded p-2 bg-gray-50 space-y-1">
+          {summary.pendingCount > 0 && (
+            <div>
+              Excludes {summary.pendingCount} not-yet-received batch{summary.pendingCount === 1 ? '' : 'es'}
+              {' '}(Queued/Planned) holding {fmtMt(summary.pendingRawMt)} MT — raw not received yet.
+            </div>
+          )}
+          {summary.blendedCount > 0 && (
+            <div>
+              Excludes {summary.blendedCount} blend batch{summary.blendedCount === 1 ? '' : 'es'} that re-milled
+              {' '}{fmtMt(summary.blendedRawMt)} MT of finished rice → {fmtMt(summary.blendedFinishedMt)} MT
+              {' '}(not counted as new raw input, to avoid double-counting).
+            </div>
+          )}
         </div>
       )}
 

@@ -508,9 +508,13 @@ const reportingController = {
       // A blend re-mills already-finished OWNED rice, so its raw_qty_mt is
       // finished rice re-entering as "raw" — counting it as raw input
       // double-counts the original purchase. Keep blends out of the raw/
-      // finished/yield totals (and the by-product/by-mill tonnage); report
-      // them separately so the figure is transparent, not hidden.
+      // finished/yield totals (and the by-product/by-mill tonnage).
       const isBlend = (b) => b.processing_type === 'blended';
+      // Raw is only "input" once it has actually been received/milled. A
+      // Queued/Planned/Pending/Draft batch's raw_qty_mt is just a target — the
+      // rice hasn't arrived yet — so it must not inflate Raw Input or skew yield.
+      const NOT_RECEIVED = ['Queued', 'Planned', 'Pending', 'Draft'];
+      const isReceived = (b) => !NOT_RECEIVED.includes(b.status);
       const summary = batches.reduce(
         (acc, b) => {
           acc.batchCount += 1;
@@ -519,6 +523,9 @@ const reportingController = {
             acc.blendedCount += 1;
             acc.blendedRawMt += num(b.raw_qty_mt);
             acc.blendedFinishedMt += num(b.actual_finished_mt);
+          } else if (!isReceived(b)) {
+            acc.pendingCount += 1;
+            acc.pendingRawMt += num(b.raw_qty_mt);
           } else {
             acc.rawMt += num(b.raw_qty_mt);
             acc.finishedMt += num(b.actual_finished_mt);
@@ -526,11 +533,13 @@ const reportingController = {
           }
           return acc;
         },
-        { batchCount: 0, rawMt: 0, finishedMt: 0, plannedMt: 0, completed: 0, blendedCount: 0, blendedRawMt: 0, blendedFinishedMt: 0 }
+        { batchCount: 0, rawMt: 0, finishedMt: 0, plannedMt: 0, completed: 0,
+          blendedCount: 0, blendedRawMt: 0, blendedFinishedMt: 0, pendingCount: 0, pendingRawMt: 0 }
       );
       summary.avgYieldPct = summary.rawMt > 0 ? (summary.finishedMt / summary.rawMt) * 100 : 0;
 
-      const nonBlendBatches = batches.filter((b) => !isBlend(b));
+      // By-product / by-mill tonnage reflects only actually-milled raw rice.
+      const nonBlendBatches = batches.filter((b) => !isBlend(b) && isReceived(b));
       const groupBy = (key, label) => {
         const map = new Map();
         for (const b of nonBlendBatches) {
