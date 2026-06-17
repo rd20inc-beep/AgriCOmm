@@ -1548,7 +1548,7 @@ export default function MillingBatchDetail() {
                         </tr>
                         <tr className="bg-blue-50 border-t border-blue-200">
                           <td className="py-2.5 px-3 font-bold text-blue-900">Net Cost (Finished Rice)</td>
-                          <td className="py-2.5 px-3 text-right font-bold text-blue-900">{formatPKR(totalCosts > 0 ? netCost : effectiveRawCost - bpValue)}</td>
+                          <td className="py-2.5 px-3 text-right font-bold text-blue-900">{formatPKR(readyRiceCost)}</td>
                           <td className="py-2.5 px-3 text-right font-semibold text-blue-700">{formatPKR(netCostPerKG)} /KG</td>
                           <td className="py-2.5 px-3 text-right font-semibold text-blue-700">{formatPKR(netCostPerKG * 40)} /Md</td>
                         </tr>
