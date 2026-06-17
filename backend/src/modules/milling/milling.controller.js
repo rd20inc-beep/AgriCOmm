@@ -883,6 +883,9 @@ const millingController = {
         // values when set, else fee + recorded processing costs). The same
         // computeResidualAllocation runs on price-confirm, so numbers match.
         // =================================================================
+        // Lot-started batches carry no raw_rice milling_cost — derive it from the
+        // source lots so Net Purchase has its raw component.
+        await inventoryService.ensureRawCostFromSourceLots(trx, batch.id);
         const rawCostTotal = parseFloat(
           (await trx('milling_costs').where({ batch_id: batch.id })
             .where('category', 'raw_rice').sum('amount as total').first())?.total

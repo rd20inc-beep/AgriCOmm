@@ -2041,12 +2041,50 @@ const inventoryService = {
       finishedCostPerKg, byCostPerKg, brokenTierCostPerKg, hasPerGradeBroken, rawFrac, millFrac, clamped, finished };
   },
 
+  // Ensure a batch has its raw-rice cost. Batches started from a lot
+  // (startMillingForLot) only get batch_source_lots — no raw_rice milling_cost —
+  // so without this the residual Net Purchase has no raw component. Derive it
+  // from each source lot's landed cost × qty consumed (and backfill the source-
+  // lot cost columns). No-op if a raw_rice cost already exists (blends/createBatch
+  // set it) or there are no priced source lots.
+  async ensureRawCostFromSourceLots(trx, batchId) {
+    const existing = parseFloat(
+      (await trx('milling_costs').where({ batch_id: batchId }).where('category', 'raw_rice').sum('amount as t').first())?.t
+    ) || 0;
+    if (existing > 0) return existing;
+
+    const srcLots = await trx('batch_source_lots as bsl')
+      .leftJoin('inventory_lots as il', 'bsl.lot_id', 'il.id')
+      .where('bsl.batch_id', batchId)
+      .select('bsl.id', 'bsl.qty_mt', 'il.lot_no', 'il.landed_cost_per_kg', 'il.rate_per_kg');
+    if (!srcLots.length) return 0;
+
+    let rawTotal = 0;
+    const labels = [];
+    for (const s of srcLots) {
+      const costKg = parseFloat(s.landed_cost_per_kg) || parseFloat(s.rate_per_kg) || 0;
+      const qtyKg = (parseFloat(s.qty_mt) || 0) * 1000;
+      const costTotal = Math.round(costKg * qtyKg * 100) / 100;
+      rawTotal += costTotal;
+      await trx('batch_source_lots').where('id', s.id).update({ unit_cost_pkr: costKg, cost_total_pkr: costTotal });
+      labels.push(`${s.lot_no || s.id}×${parseFloat(s.qty_mt) || 0}MT`);
+    }
+    if (rawTotal > 0) {
+      await trx('milling_costs').insert({
+        batch_id: batchId, category: 'raw_rice', amount: Math.round(rawTotal * 100) / 100,
+        currency: 'PKR', notes: `Raw rice from source lot(s): ${labels.join(', ')}`,
+      });
+    }
+    return rawTotal;
+  },
+
   async reallocateBatchCosts(trx, batchId) {
     const batch = await trx('milling_batches').where({ id: batchId }).first();
     if (!batch) return null;
     const finished = parseFloat(batch.actual_finished_mt) || 0;
     if (finished <= 0) return { skipped: 'no-yield' };
 
+    await inventoryService.ensureRawCostFromSourceLots(trx, batchId);
     const rawCostTotal = parseFloat(
       (await trx('milling_costs').where({ batch_id: batchId }).where('category', 'raw_rice').sum('amount as t').first())?.t
     ) || 0;
