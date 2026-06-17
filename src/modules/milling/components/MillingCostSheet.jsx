@@ -164,17 +164,19 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
   // broken price → commodity-rate prop → built-in default.
   const fallbackBrokenRate = rate(batch.brokenPricePerMT, byproductRates.broken);
   const brokenRows = usePerGradeBroken ? [
-    { type: 'Broken Rice — B1',          key: 'b1',  qty: b1MT,  rate: rate(batch.b1PricePerMT,         fallbackBrokenRate), color: 'bg-amber-500' },
-    { type: 'Broken Rice — B2',          key: 'b2',  qty: b2MT,  rate: rate(batch.b2PricePerMT,         fallbackBrokenRate), color: 'bg-amber-400' },
-    { type: 'Broken Rice — B3',          key: 'b3',  qty: b3MT,  rate: rate(batch.b3PricePerMT,         fallbackBrokenRate), color: 'bg-amber-300' },
-    { type: 'Broken Rice — CSR',         key: 'csr', qty: csrMT, rate: rate(batch.csrPricePerMT,        fallbackBrokenRate), color: 'bg-yellow-500' },
-    { type: 'Broken Rice — Short Grain', key: 'sg',  qty: sgMT,  rate: rate(batch.shortGrainPricePerMT, fallbackBrokenRate), color: 'bg-yellow-400' },
+    { type: 'B1',          key: 'b1',  qty: b1MT,  rate: rate(batch.b1PricePerMT,         fallbackBrokenRate), color: 'bg-amber-500' },
+    { type: 'B2',          key: 'b2',  qty: b2MT,  rate: rate(batch.b2PricePerMT,         fallbackBrokenRate), color: 'bg-amber-400' },
+    { type: 'B3',          key: 'b3',  qty: b3MT,  rate: rate(batch.b3PricePerMT,         fallbackBrokenRate), color: 'bg-amber-300' },
+    { type: 'CSR',         key: 'csr', qty: csrMT, rate: rate(batch.csrPricePerMT,        fallbackBrokenRate), color: 'bg-yellow-500' },
+    { type: 'Short Grain', key: 'sg',  qty: sgMT,  rate: rate(batch.shortGrainPricePerMT, fallbackBrokenRate), color: 'bg-yellow-400' },
   ] : [
-    { type: 'Broken Rice', key: 'broken', qty: pf(batch.brokenMT), rate: fallbackBrokenRate, color: 'bg-amber-500' },
+    { type: 'Broken', key: 'broken', qty: pf(batch.brokenMT), rate: fallbackBrokenRate, color: 'bg-amber-500' },
   ];
   const allByproducts = [
     ...brokenRows,
     { type: 'Sortex Rejects',      key: 'sortex', qty: sortexMT,           rate: rate(batch.sortexRejectsPricePerMT || batch.sortex_rejects_price_per_mt, byproductRates.sortex), color: 'bg-orange-500' },
+    { type: 'Powder',              key: 'powder', qty: pf(batch.powderMT),   rate: rate(batch.powderPricePerMT,   byproductRates.powder),   color: 'bg-gray-400' },
+    { type: 'Sweeping',            key: 'sweeping', qty: pf(batch.sweepingMT), rate: rate(batch.sweepingPricePerMT, byproductRates.sweeping), color: 'bg-gray-300' },
     { type: 'Rice Bran (legacy)',  key: 'bran',   qty: branMTval,          rate: rate(batch.branPricePerMT,                                         byproductRates.bran),   color: 'bg-green-500',  legacy: true },
     { type: 'Rice Husk (legacy)',  key: 'husk',   qty: huskMTval,          rate: rate(batch.huskPricePerMT,                                         byproductRates.husk),   color: 'bg-purple-500', legacy: true },
   ];
@@ -185,6 +187,7 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
     .filter(bp => {
       if (bp.legacy) return bp.qty > 0;
       if (usePerGradeBroken && ['b1','b2','b3','csr','sg'].includes(bp.key)) return bp.qty > 0;
+      if (bp.key === 'powder' || bp.key === 'sweeping') return bp.qty > 0;
       return true;
     })
     .map(bp => ({

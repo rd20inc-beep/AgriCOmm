@@ -130,7 +130,7 @@ export default function MillingBatchDetail() {
   const [showYieldModal, setShowYieldModal] = useState(false);
   const [yieldForm, setYieldForm] = useState({
     actualFinishedMT: '', brokenMT: '', b1MT: '', b2MT: '', b3MT: '', csrMT: '', shortGrainMT: '',
-    sortexMT: '', wastageMT: '',
+    sortexMT: '', powderMT: '', sweepingMT: '', wastageMT: '',
     // bran/husk retained in payload for legacy batches but no longer surfaced in the form
     branMT: '', huskMT: '',
   });
@@ -373,8 +373,10 @@ export default function MillingBatchDetail() {
     const bran = parseFloat(yieldForm.branMT) || 0;     // legacy, hidden in UI
     const husk = parseFloat(yieldForm.huskMT) || 0;     // legacy, hidden in UI
     const sortex = parseFloat(yieldForm.sortexMT) || 0;
+    const powder = parseFloat(yieldForm.powderMT) || 0;
+    const sweeping = parseFloat(yieldForm.sweepingMT) || 0;
     const wastage = parseFloat(yieldForm.wastageMT) || 0;
-    const totalOutput = finished + broken + bran + husk + sortex + wastage;
+    const totalOutput = finished + broken + bran + husk + sortex + powder + sweeping + wastage;
     const yieldPct = batch.rawQtyMT > 0 ? parseFloat(((finished / batch.rawQtyMT) * 100).toFixed(1)) : 0;
 
     try {
@@ -391,6 +393,8 @@ export default function MillingBatchDetail() {
           bran_mt: bran,
           husk_mt: husk,
           sortex_rejects_mt: sortex,
+          powder_mt: powder,
+          sweeping_mt: sweeping,
           wastage_mt: wastage,
         },
       });
@@ -1733,11 +1737,11 @@ export default function MillingBatchDetail() {
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
           </div>
 
-          {/* Broken — per-grade inputs are now first-class. Total broken
-              is computed from the sum and displayed live. */}
+          {/* Grades — B1/B2/B3/CSR/Short Grain are first-class outputs (no
+              generic "Broken Rice" tag). Total is computed and shown live. */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-sm font-medium text-gray-700">Broken Rice (MT)</label>
+              <label className="block text-sm font-medium text-gray-700">Grades (MT)</label>
               {(() => {
                 const total = ['b1MT','b2MT','b3MT','csrMT','shortGrainMT']
                   .reduce((s, k) => s + (parseFloat(yieldForm[k]) || 0), 0);
@@ -1796,12 +1800,28 @@ export default function MillingBatchDetail() {
               <p className="text-[11px] text-gray-400 mt-0.5">Color-sorter rejected kernels (yellow/damaged)</p>
             </div>
             <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Powder (MT)</label>
+              <input type="number" step="0.01" min="0" value={yieldForm.powderMT}
+                onChange={(e) => setYieldForm(prev => ({ ...prev, powderMT: e.target.value }))}
+                placeholder="e.g. 0.5"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+              <p className="text-[11px] text-gray-400 mt-0.5">Rice powder — sellable, goes to inventory</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Sweeping (MT)</label>
+              <input type="number" step="0.01" min="0" value={yieldForm.sweepingMT}
+                onChange={(e) => setYieldForm(prev => ({ ...prev, sweepingMT: e.target.value }))}
+                placeholder="e.g. 0.3"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+              <p className="text-[11px] text-gray-400 mt-0.5">Floor sweepings — sellable, goes to inventory</p>
+            </div>
+            <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Wastage (MT)</label>
               <input type="number" step="0.01" min="0" value={yieldForm.wastageMT}
                 onChange={(e) => setYieldForm(prev => ({ ...prev, wastageMT: e.target.value }))}
                 placeholder="e.g. 1.3"
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
-              <p className="text-[11px] text-gray-400 mt-0.5">Dust / fines / unaccounted</p>
+              <p className="text-[11px] text-gray-400 mt-0.5">Dust / fines / unaccounted — no value</p>
             </div>
           </div>
           {(parseFloat(yieldForm.branMT) > 0 || parseFloat(yieldForm.huskMT) > 0) && (
@@ -1821,13 +1841,15 @@ export default function MillingBatchDetail() {
             const br = parseFloat(yieldForm.branMT) || 0;   // legacy
             const h = parseFloat(yieldForm.huskMT) || 0;    // legacy
             const sx = parseFloat(yieldForm.sortexMT) || 0;
+            const pw = parseFloat(yieldForm.powderMT) || 0;
+            const sw = parseFloat(yieldForm.sweepingMT) || 0;
             const w = parseFloat(yieldForm.wastageMT) || 0;
             const gradeTotal = b1 + b2 + b3 + csr + sg;
             // Broken total derives from the per-grade inputs (gradeTotal)
             // — falls back to legacy yieldForm.brokenMT only for batches
             // saved before this change.
             const b = gradeTotal > 0 ? gradeTotal : (parseFloat(yieldForm.brokenMT) || 0);
-            const total = f + b + br + h + sx + w;
+            const total = f + b + br + h + sx + pw + sw + w;
             const rawQty = batch.rawQtyMT || 0;
             const yieldPct = rawQty > 0 ? ((f / rawQty) * 100).toFixed(1) : '0.0';
             const accounted = rawQty > 0 ? ((total / rawQty) * 100).toFixed(1) : '0.0';
@@ -1835,16 +1857,16 @@ export default function MillingBatchDetail() {
             const rows = [
               { label: finishedLabel, value: f, bold: true, color: 'text-blue-700' },
             ];
-            if (b > 0) rows.push({ label: 'Broken Rice (total)', value: b, color: 'text-amber-700' });
+            if (b > 0) rows.push({ label: 'Grades (total)', value: b, color: 'text-amber-700' });
             if (b1) rows.push({ label: '  B1', value: b1, indent: true });
             if (b2) rows.push({ label: '  B2', value: b2, indent: true });
             if (b3) rows.push({ label: '  B3', value: b3, indent: true });
             if (csr) rows.push({ label: '  CSR', value: csr, indent: true });
             if (sg) rows.push({ label: '  Short Grain', value: sg, indent: true });
-            rows.push(
-              { label: 'Sortex Rejects', value: sx, color: 'text-orange-700' },
-              { label: 'Wastage', value: w, color: 'text-red-600' },
-            );
+            rows.push({ label: 'Sortex Rejects', value: sx, color: 'text-orange-700' });
+            if (pw > 0) rows.push({ label: 'Powder', value: pw, color: 'text-gray-600' });
+            if (sw > 0) rows.push({ label: 'Sweeping', value: sw, color: 'text-gray-600' });
+            rows.push({ label: 'Wastage', value: w, color: 'text-red-600' });
             // Show bran/husk in the preview only when they were carried from
             // an existing batch — keeps the math correct for legacy batches.
             if (br > 0) rows.push({ label: 'Rice Bran (legacy)', value: br, color: 'text-gray-500' });
@@ -2169,16 +2191,21 @@ export default function MillingBatchDetail() {
           const b1MT = parseFloat(batch?.b1MT) || 0, b2MT = parseFloat(batch?.b2MT) || 0;
           const b3MT = parseFloat(batch?.b3MT) || 0, csrMT = parseFloat(batch?.csrMT) || 0;
           const sgMT = parseFloat(batch?.shortGrainMT) || 0;
+          const powderMT = parseFloat(batch?.powderMT) || 0;
+          const sweepingMT = parseFloat(batch?.sweepingMT) || 0;
+          const wastageMT = parseFloat(batch?.wastageMT) || 0;
           const finishedMT = parseFloat(batch?.actualFinishedMT) || 0;
           const usePerGrade = (b1MT + b2MT + b3MT + csrMT + sgMT) > 0;
           // By-product sale-price inputs (drive the credit). Finished is derived.
           const byFields = [
             ...(usePerGrade ? [
-              { key: 'b1', label: 'Broken B1', qty: b1MT }, { key: 'b2', label: 'Broken B2', qty: b2MT },
-              { key: 'b3', label: 'Broken B3', qty: b3MT }, { key: 'csr', label: 'Broken CSR', qty: csrMT },
+              { key: 'b1', label: 'B1', qty: b1MT }, { key: 'b2', label: 'B2', qty: b2MT },
+              { key: 'b3', label: 'B3', qty: b3MT }, { key: 'csr', label: 'CSR', qty: csrMT },
               { key: 'shortGrain', label: 'Short Grain', qty: sgMT },
-            ] : [{ key: 'broken', label: 'Broken Rice', qty: parseFloat(batch?.brokenMT) || 0 }]),
+            ] : [{ key: 'broken', label: 'Broken', qty: parseFloat(batch?.brokenMT) || 0 }]),
             { key: 'sortex', label: 'Sortex Rejects', qty: sortexMT },
+            { key: 'powder', label: 'Powder', qty: powderMT },
+            { key: 'sweeping', label: 'Sweeping', qty: sweepingMT },
             ...(branMT > 0 ? [{ key: 'bran', label: 'Rice Bran', qty: branMT }] : []),
             ...(huskMT > 0 ? [{ key: 'husk', label: 'Rice Husk', qty: huskMT }] : []),
           ].filter(f => f.qty > 0);
@@ -2237,6 +2264,9 @@ export default function MillingBatchDetail() {
                   ))}
                 </div>
                 <div className="flex justify-between mt-2 text-sm"><span className="text-gray-600">By-product value (credit)</span><span className="font-semibold text-emerald-700">− {Rs(byproductValue)}</span></div>
+                {wastageMT > 0 && (
+                  <p className="text-[11px] text-gray-400 mt-1">Wastage: {wastageMT.toFixed(2)} MT — recorded as loss, carries no value (not credited).</p>
+                )}
               </div>
 
               {/* Derived finished cost */}
@@ -2261,6 +2291,8 @@ export default function MillingBatchDetail() {
                       b3_price_per_mt: num(priceForm.b3),
                       csr_price_per_mt: num(priceForm.csr),
                       short_grain_price_per_mt: num(priceForm.shortGrain),
+                      powder_price_per_mt: num(priceForm.powder),
+                      sweeping_price_per_mt: num(priceForm.sweeping),
                       manual_milling_cost_pkr: millingCost,
                       manual_other_expenses_pkr: otherExpenses,
                     });

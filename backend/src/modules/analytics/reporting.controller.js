@@ -920,22 +920,27 @@ const reportingController = {
       // Blended-milling output is kept separate from pure stock and from other
       // blends: blended broken carries a batch-scoped grade ('M-033-B1'), so it
       // already splits in the blended branches below. Pure rules are unchanged.
+      // Grade lots are named by their grade (B1/B2/CSR/…), not "Broken Rice", so
+      // classify broken tiers by l.grade. Powder/Sweeping are their own subtypes.
       const SUBTYPE_EXPR = `
         CASE
           WHEN l.processing_type = 'blended' AND l.type = 'finished'
             THEN 'Blended Finished — ' || COALESCE(l.blend_batch_no, 'n/a')
-          WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%broken%'
-            THEN 'Blended Broken — ' || COALESCE(l.grade, l.blend_batch_no, 'n/a')
+          WHEN l.processing_type = 'blended' AND (l.grade IN ('B1','B2','B3','CSR','Short Grain') OR l.item_name ILIKE '%broken%')
+            THEN 'Blended ' || COALESCE(l.grade, 'Broken') || ' — ' || COALESCE(l.blend_batch_no, 'n/a')
+          WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%powder%'  THEN 'Blended Powder — '  || COALESCE(l.blend_batch_no, 'n/a')
+          WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%sweeping%' THEN 'Blended Sweeping — ' || COALESCE(l.blend_batch_no, 'n/a')
           WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%bran%'   THEN 'Blended Bran — '   || COALESCE(l.blend_batch_no, 'n/a')
           WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%husk%'   THEN 'Blended Husk — '   || COALESCE(l.blend_batch_no, 'n/a')
           WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%sortex%' THEN 'Blended Sortex — ' || COALESCE(l.blend_batch_no, 'n/a')
           WHEN l.type = 'finished' THEN 'Finished Rice'
           WHEN l.type = 'raw'      THEN 'Incoming Rice'
           WHEN l.item_name ILIKE '%sortex%' THEN 'Sortex Rejects'
+          WHEN l.item_name ILIKE '%powder%' THEN 'Powder'
+          WHEN l.item_name ILIKE '%sweeping%' THEN 'Sweeping'
           WHEN l.item_name ILIKE '%bran%'   THEN 'Rice Bran'
           WHEN l.item_name ILIKE '%husk%'   THEN 'Rice Husk'
-          WHEN l.item_name ILIKE 'broken%' AND l.grade IN ('B1','B2','B3','CSR','Short Grain')
-            THEN 'Broken ' || l.grade
+          WHEN l.grade IN ('B1','B2','B3','CSR','Short Grain') THEN l.grade
           WHEN l.item_name ILIKE 'broken%'  THEN 'Broken (ungraded)'
           ELSE COALESCE(p.name, l.item_name, '—')
         END

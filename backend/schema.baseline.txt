@@ -1184,6 +1184,8 @@ COL milling_batches.parent_batch_id:integer:NULL
 COL milling_batches.pass_number:integer:NOT NULL
 COL milling_batches.planned_finished_mt:numeric:NULL
 COL milling_batches.post_milling_grade:character varying:NULL
+COL milling_batches.powder_mt:numeric:NOT NULL
+COL milling_batches.powder_price_per_mt:numeric:NULL
 COL milling_batches.prices_confirmed:boolean:NOT NULL
 COL milling_batches.processing_hours:numeric:NOT NULL
 COL milling_batches.processing_type:character varying:NOT NULL
@@ -1202,6 +1204,8 @@ COL milling_batches.sortex_rejects_price_per_mt:numeric:NULL
 COL milling_batches.status:character varying:NOT NULL
 COL milling_batches.supplier_id:integer:NULL
 COL milling_batches.supplier_name:character varying:NULL
+COL milling_batches.sweeping_mt:numeric:NOT NULL
+COL milling_batches.sweeping_price_per_mt:numeric:NULL
 COL milling_batches.total_cost_per_kg_finished:numeric:NULL
 COL milling_batches.transport_mode:character varying:NOT NULL
 COL milling_batches.updated_at:timestamp with time zone:NOT NULL

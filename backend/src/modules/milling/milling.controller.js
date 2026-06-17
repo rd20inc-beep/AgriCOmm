@@ -734,6 +734,7 @@ const millingController = {
         bran_mt,
         husk_mt,
         sortex_rejects_mt,
+        powder_mt, sweeping_mt,
         wastage_mt,
       } = req.body;
 
@@ -753,8 +754,10 @@ const millingController = {
       const bran = parseFloat(bran_mt) || 0;
       const husk = parseFloat(husk_mt) || 0;
       const sortex = parseFloat(sortex_rejects_mt) || 0;
+      const powder = parseFloat(powder_mt) || 0;
+      const sweeping = parseFloat(sweeping_mt) || 0;
       const wastage = parseFloat(wastage_mt) || 0;
-      const totalOutput = finished + broken + bran + husk + sortex + wastage;
+      const totalOutput = finished + broken + bran + husk + sortex + powder + sweeping + wastage;
 
       // Use actual received weight (from raw lot) if it differs from declared raw_qty_mt
       const rawLot = await db('inventory_lots')
@@ -815,6 +818,8 @@ const millingController = {
         bran_mt: bran,
         husk_mt: husk,
         sortex_rejects_mt: sortex,
+        powder_mt: powder,
+        sweeping_mt: sweeping,
         wastage_mt: wastage,
         yield_pct: yieldPct,
         updated_at: db.fn.now(),
@@ -939,6 +944,8 @@ const millingController = {
           branMT: parseFloat(bran),
           huskMT: parseFloat(husk),
           sortexMT: parseFloat(sortex),
+          powderMT: parseFloat(powder),
+          sweepingMT: parseFloat(sweeping),
           productName: riceTypeName || 'Finished Rice',
           costPerMT: finAlloc.costPerMT,
           // Finished rice carries the RESIDUAL cost (Net Purchase − by-product
@@ -959,6 +966,8 @@ const millingController = {
             bran:        allocations.bran?.costPerKg        || 0,
             husk:        allocations.husk?.costPerKg        || 0,
             sortex:      allocations.sortex?.costPerKg      || 0,
+            powder:      allocations.powder?.costPerKg      || 0,
+            sweeping:    allocations.sweeping?.costPerKg    || 0,
           },
           // Split broken into its grades (B1, B2, B3, CSR, Short Grain) so
           // each tier becomes its own inventory lot and can be sold at its

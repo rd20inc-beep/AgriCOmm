@@ -232,6 +232,8 @@ const inventoryService = {
       sortex:   'SORTEX',
       bran:     'BRAN',
       husk:     'HUSK',
+      powder:   'POWDER',
+      sweeping: 'SWEEP',
     };
     const GRADE_CODES = {
       'B1': 'B1', 'B2': 'B2', 'B3': 'B3', 'CSR': 'CSR', 'Short Grain': 'SG',
@@ -752,11 +754,13 @@ const inventoryService = {
     branMT,
     huskMT,
     sortexMT,
+    powderMT,
+    sweepingMT,
     productName,
     costPerMT,
     rawCostComponent,
     millingCostComponent,
-    byproductCosts, // { broken, bran, husk, sortex } cost per kg
+    byproductCosts, // { broken, bran, husk, sortex, powder, sweeping } cost per kg
     // Optional per-grade split of brokenMT. When supplied, recordMillingOutput
     // creates one byproduct lot per non-zero grade (B1, B2, B3, CSR, Short
     // Grain) instead of collapsing them into a single "Broken Rice" lot.
@@ -824,12 +828,18 @@ const inventoryService = {
     // doesn't carry a separate product per grade — the grade is stamped
     // on the inventory_lots row instead.
     const byproductProductLookup = async (itemName) => {
-      const baseName = itemName.startsWith('Broken Rice') ? 'Broken Rice' : itemName;
+      // Grade-named lots (B1/B2/B3/CSR/Short Grain) still link to the Broken Rice
+      // product for grouping, even though their item_name is just the grade.
+      const GRADE_LABELS = ['B1', 'B2', 'B3', 'CSR', 'Short Grain'];
+      const baseName = (itemName.startsWith('Broken Rice') || GRADE_LABELS.includes(itemName))
+        ? 'Broken Rice' : itemName;
       const byCode = {
         'Broken Rice':    ['PROD-BROKEN-RICE',    'BROKEN-RICE'],
         'Rice Bran':      ['PROD-RICE-BRAN',      'RICE-BRAN'],
         'Rice Husk':      ['PROD-RICE-HUSK',      'RICE-HUSK'],
         'Sortex Rejects': ['PROD-SORTEX-REJECTS', 'SORTEX-REJECTS'],
+        'Powder':         ['PROD-POWDER',         'POWDER'],
+        'Sweeping':       ['PROD-SWEEPING',       'SWEEPING'],
       }[baseName] || [];
       for (const code of byCode) {
         const p = await trx('products').where({ code }).first('id');
@@ -948,7 +958,10 @@ const inventoryService = {
     const brokenItems = hasAnyGrade
       ? gradeNames
           .map(g => ({
-            name: `Broken Rice - ${g.label}`,
+            // Grades are first-class — the lot is named by its grade (B1, B2,
+            // CSR, …), not a generic "Broken Rice" tag. Grade is also stamped on
+            // inventory_lots.grade; product link stays via byproductProductLookup.
+            name: g.label,
             // Prefer the per-grade cost if the caller provided one;
             // fall back to the aggregate "broken" cost otherwise.
             key: bpCosts[COST_KEY_BY_GRADE[g.key]] != null ? COST_KEY_BY_GRADE[g.key] : 'broken',
@@ -965,6 +978,8 @@ const inventoryService = {
       { name: 'Rice Bran',      key: 'bran',   grade: null, qty: parseFloat(branMT) || 0 },
       { name: 'Rice Husk',      key: 'husk',   grade: null, qty: parseFloat(huskMT) || 0 },
       { name: 'Sortex Rejects', key: 'sortex', grade: null, qty: parseFloat(sortexMT) || 0 },
+      { name: 'Powder',         key: 'powder', grade: null, qty: parseFloat(powderMT) || 0 },
+      { name: 'Sweeping',       key: 'sweeping', grade: null, qty: parseFloat(sweepingMT) || 0 },
     ];
 
     for (const bp of byproducts) {
@@ -2007,17 +2022,19 @@ const inventoryService = {
     const finished = p(batch.actual_finished_mt);
     const broken = p(batch.broken_mt), bran = p(batch.bran_mt), husk = p(batch.husk_mt), sortex = p(batch.sortex_rejects_mt);
     const b1 = p(batch.b1_mt), b2 = p(batch.b2_mt), b3 = p(batch.b3_mt), csr = p(batch.csr_mt), shortGrain = p(batch.short_grain_mt);
+    const powder = p(batch.powder_mt), sweeping = p(batch.sweeping_mt);
     const brokenPrice = p(batch.broken_price_per_mt);
     const price = {
       b1: p(batch.b1_price_per_mt) || brokenPrice, b2: p(batch.b2_price_per_mt) || brokenPrice,
       b3: p(batch.b3_price_per_mt) || brokenPrice, csr: p(batch.csr_price_per_mt) || brokenPrice,
       short_grain: p(batch.short_grain_price_per_mt) || brokenPrice, broken: brokenPrice,
       bran: p(batch.bran_price_per_mt), husk: p(batch.husk_price_per_mt), sortex: p(batch.sortex_rejects_price_per_mt),
+      powder: p(batch.powder_price_per_mt), sweeping: p(batch.sweeping_price_per_mt),
     };
     const hasPerGradeBroken = (b1 + b2 + b3 + csr + shortGrain) > 0;
     const byQty = hasPerGradeBroken
-      ? { b1, b2, b3, csr, short_grain: shortGrain, bran, husk, sortex }
-      : { broken, bran, husk, sortex };
+      ? { b1, b2, b3, csr, short_grain: shortGrain, bran, husk, sortex, powder, sweeping }
+      : { broken, bran, husk, sortex, powder, sweeping };
 
     let byproductValue = 0;
     const byCostPerKg = {};
@@ -2121,6 +2138,8 @@ const inventoryService = {
       if (n.includes('bran')) return 'bran';
       if (n.includes('husk')) return 'husk';
       if (n.includes('sortex')) return 'sortex';
+      if (n.includes('powder')) return 'powder';
+      if (n.includes('sweeping')) return 'sweeping';
       if (g === 'b1') return 'b1'; if (g === 'b2') return 'b2'; if (g === 'b3') return 'b3';
       if (g === 'csr') return 'csr'; if (g.includes('short')) return 'short_grain';
       return 'broken';

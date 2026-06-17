@@ -29,13 +29,15 @@ const SUBTYPE_OPTIONS = [
   { value: 'All',           label: 'All' },
   { value: 'finished',      label: 'Finished Rice' },
   { value: 'rice-in',       label: 'Incoming Rice' },
-  { value: 'broken',        label: 'Broken (all grades)' },
-  { value: 'broken-b1',     label: '  Broken B1' },
-  { value: 'broken-b2',     label: '  Broken B2' },
-  { value: 'broken-b3',     label: '  Broken B3' },
-  { value: 'broken-csr',    label: '  Broken CSR' },
-  { value: 'broken-sg',     label: '  Broken Short Grain' },
+  { value: 'broken-b1',     label: 'B1' },
+  { value: 'broken-b2',     label: 'B2' },
+  { value: 'broken-b3',     label: 'B3' },
+  { value: 'broken-csr',    label: 'CSR' },
+  { value: 'broken-sg',     label: 'Short Grain' },
+  { value: 'broken',        label: 'Broken (ungraded)' },
   { value: 'sortex',        label: 'Sortex Rejects' },
+  { value: 'powder',        label: 'Powder' },
+  { value: 'sweeping',      label: 'Sweeping' },
   { value: 'bran',          label: 'Rice Bran (legacy)' },
   { value: 'husk',          label: 'Rice Husk (legacy)' },
 ];
@@ -54,15 +56,17 @@ function lotSubtype(l) {
   const grade = baseGrade(l).toLowerCase();
   if (l.type === 'finished') return 'finished';
   if (l.type === 'raw') return 'rice-in';
-  if (name.includes('broken')) {
-    if (grade === 'b1') return 'broken-b1';
-    if (grade === 'b2') return 'broken-b2';
-    if (grade === 'b3') return 'broken-b3';
-    if (grade === 'csr') return 'broken-csr';
-    if (grade === 'short grain' || grade === 'sg') return 'broken-sg';
-    return 'broken';
-  }
+  // Grade lots are named by grade (B1/B2/CSR/…) with the grade on the lot;
+  // classify by grade first, then a legacy generic "broken" lot.
+  if (grade === 'b1') return 'broken-b1';
+  if (grade === 'b2') return 'broken-b2';
+  if (grade === 'b3') return 'broken-b3';
+  if (grade === 'csr') return 'broken-csr';
+  if (grade === 'short grain' || grade === 'sg') return 'broken-sg';
+  if (name.includes('broken')) return 'broken';
   if (name.includes('sortex')) return 'sortex';
+  if (name.includes('powder')) return 'powder';
+  if (name.includes('sweeping')) return 'sweeping';
   if (name.includes('bran')) return 'bran';
   if (name.includes('husk')) return 'husk';
   return 'other';
