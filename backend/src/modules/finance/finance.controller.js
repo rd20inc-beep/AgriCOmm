@@ -514,7 +514,10 @@ const financeController = {
         if (r.type === 'receipt') {
           counterparty = r.customer_name || r.sale_buyer || 'Walk-in customer';
           sourceRef = r.recv_no || r.sale_no || null;
-          if (r.recv_no && r.recv_no.startsWith('RCV-LS')) sourceHref = '/local-sales';
+          // Link to the local-sales screen for any sale-linked receipt — both
+          // the RCV-LS receivables and the party-ledger receipts that carry a
+          // local_sale_id (their recv_no is null, so the prefix check missed them).
+          if ((r.recv_no && r.recv_no.startsWith('RCV-LS')) || r.local_sale_id) sourceHref = '/local-sales';
         } else {
           counterparty = r.supplier_name || r.pay_linked_ref || 'Vendor';
           sourceRef = r.pay_no || null;
