@@ -118,14 +118,20 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
   const overheadCats = (millingCostCategories || []).filter(c => c.section === 'overhead');
   const allCats = [...materialCats, ...processCats, ...overheadCats];
 
-  // Auto-populate rawRice from quality sheet if not manually set
+  // Raw cost — milling_costs raw_rice (residual model), else arrival price × qty.
   const rawRiceCostFromSheet = rawMaterialCost;
-  const rawRiceCostManual = pf(safeCosts.rawRice);
+  const rawRiceCostManual = pf(safeCosts.rawRice ?? safeCosts.raw_rice);
   const effectiveRawRiceCost = rawRiceCostManual > 0 ? rawRiceCostManual : rawRiceCostFromSheet;
 
+  // Residual costing: Net Purchase = Raw + Milling + Other, using the operator's
+  // manual Milling Cost / Other Expenses (fallback to milling fee + recorded
+  // process/overhead categories), to match the costing box and Costs tab.
   const processCostTotal = processCats.reduce((s, c) => s + pf(safeCosts[c.key]), 0);
   const overheadCostTotal = overheadCats.reduce((s, c) => s + pf(safeCosts[c.key]), 0);
-  const totalBatchCost = effectiveRawRiceCost + processCostTotal + overheadCostTotal;
+  const feeTotal = pf(batch.millingFeePerKg) * rawQtyMT * 1000;
+  const millingCostVal = batch.manualMillingCostPkr != null ? pf(batch.manualMillingCostPkr) : (processCostTotal > 0 ? processCostTotal : feeTotal);
+  const otherExpVal = batch.manualOtherExpensesPkr != null ? pf(batch.manualOtherExpensesPkr) : overheadCostTotal;
+  const totalBatchCost = effectiveRawRiceCost + millingCostVal + otherExpVal;
 
   // ═══ SECTION D: Yield Output ═══
   const finishedMT = pf(batch.actualFinishedMT);
@@ -192,7 +198,13 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
 
   // ═══ SECTION F: Final Costing ═══
   const netCostAfterByproducts = totalBatchCost - totalByproductValue;
-  const finalCostPerKG = finishedKG > 0 ? netCostAfterByproducts / finishedKG : 0;
+  // Use the engine's stored residual finished cost as the authoritative figure so
+  // the sheet matches the costing box / Costs tab exactly; fall back to the local
+  // computation for batches not yet costed by the residual engine.
+  const storedFinishedPerKG = pf(batch.totalCostPerKgFinished);
+  const finalCostPerKG = storedFinishedPerKG > 0
+    ? storedFinishedPerKG
+    : (finishedKG > 0 ? netCostAfterByproducts / finishedKG : 0);
   const finalCostPerMaund = finalCostPerKG * 40;
   const finalCostPerKatta = finalCostPerKG * 50;
   const finalCostPerTon = finalCostPerKG * 1000;
