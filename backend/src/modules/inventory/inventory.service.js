@@ -846,7 +846,17 @@ const inventoryService = {
         if (p) return p.id;
       }
       const named = await trx('products').whereILike('name', baseName).first('id');
-      return named ? named.id : null;
+      if (named) return named.id;
+      // inventory_lots.product_id is NOT NULL, so a byproduct with no seeded
+      // product (e.g. Powder/Sweeping) must get one. Auto-create an approved
+      // byproduct product, idempotently keyed on a stable code.
+      const code = (byCode[0]) || `PROD-${baseName.toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
+      const existing = await trx('products').where({ code }).first('id');
+      if (existing) return existing.id;
+      const [created] = await trx('products').insert({
+        code, name: baseName, is_byproduct: true, is_active: true, approval_status: 'approved',
+      }).returning('id');
+      return created.id || created;
     };
 
     // Find or create Mill Finished Goods warehouse
