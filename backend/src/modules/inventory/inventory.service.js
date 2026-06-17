@@ -1997,9 +1997,10 @@ const inventoryService = {
   // reallocation produce identical numbers.
   computeResidualAllocation(batch, rawCostTotal, processingCosts) {
     const p = (v) => parseFloat(v) || 0;
-    const rawQty = p(batch.raw_qty_mt);
-    const millingFeeTotal = p(batch.milling_fee_per_kg) * rawQty * 1000;
-    const millingCost = batch.manual_milling_cost_pkr != null ? p(batch.manual_milling_cost_pkr) : millingFeeTotal;
+    // Milling Cost is operator-entered; until they enter it, it's 0 (the milling
+    // fee is NOT auto-added). Other Expenses falls back to recorded processing
+    // costs (consumption/packing) so those real costs still count.
+    const millingCost = batch.manual_milling_cost_pkr != null ? p(batch.manual_milling_cost_pkr) : 0;
     const otherExpenses = batch.manual_other_expenses_pkr != null ? p(batch.manual_other_expenses_pkr) : processingCosts;
     const netPurchase = rawCostTotal + millingCost + otherExpenses;
 

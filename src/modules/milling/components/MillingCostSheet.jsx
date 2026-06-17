@@ -128,9 +128,11 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
   // process/overhead categories), to match the costing box and Costs tab.
   const processCostTotal = processCats.reduce((s, c) => s + pf(safeCosts[c.key]), 0);
   const overheadCostTotal = overheadCats.reduce((s, c) => s + pf(safeCosts[c.key]), 0);
-  const feeTotal = pf(batch.millingFeePerKg) * rawQtyMT * 1000;
-  const millingCostVal = batch.manualMillingCostPkr != null ? pf(batch.manualMillingCostPkr) : (processCostTotal > 0 ? processCostTotal : feeTotal);
-  const otherExpVal = batch.manualOtherExpensesPkr != null ? pf(batch.manualOtherExpensesPkr) : overheadCostTotal;
+  // Milling Cost defaults to 0 until entered (no auto milling fee). Other
+  // Expenses falls back to recorded processing costs (process + overhead), to
+  // match the engine's Net Purchase.
+  const millingCostVal = batch.manualMillingCostPkr != null ? pf(batch.manualMillingCostPkr) : 0;
+  const otherExpVal = batch.manualOtherExpensesPkr != null ? pf(batch.manualOtherExpensesPkr) : (processCostTotal + overheadCostTotal);
   const totalBatchCost = effectiveRawRiceCost + millingCostVal + otherExpVal;
 
   // ═══ SECTION D: Yield Output ═══

@@ -153,11 +153,11 @@ export default function MillingBatchDetail() {
   // saved manual values, else fall back to the milling fee total and the recorded
   // processing costs (consumption/packing). Editable in the modal.
   function defaultCostInputs() {
-    const rawQty = parseFloat(batch?.rawQtyMT) || 0;
-    const feeTotal = (parseFloat(batch?.millingFeePerKg) || 0) * rawQty * 1000;
     const proc = Object.entries(batch?.costs || {}).reduce(
       (s, [k, v]) => (k === 'raw_rice' ? s : s + (parseFloat(v) || 0)), 0);
-    const milling = batch?.manualMillingCostPkr != null ? parseFloat(batch.manualMillingCostPkr) : feeTotal;
+    // Milling Cost defaults to 0 until entered (no auto milling fee). Other
+    // Expenses prefills from recorded processing costs.
+    const milling = batch?.manualMillingCostPkr != null ? parseFloat(batch.manualMillingCostPkr) : 0;
     const other = batch?.manualOtherExpensesPkr != null ? parseFloat(batch.manualOtherExpensesPkr) : proc;
     return { millingCost: String(Math.round(milling)), otherExpenses: String(Math.round(other)) };
   }
@@ -1363,8 +1363,7 @@ export default function MillingBatchDetail() {
           // the three figures reconcile: NetPurchase − ByProduct = ReadyRiceCost.
           const procCosts = Object.entries(batch.costs || {}).reduce(
             (s, [k, v]) => (k === 'raw_rice' ? s : s + (parseFloat(v) || 0)), 0);
-          const feeTotal = (parseFloat(batch.millingFeePerKg) || 0) * (parseFloat(batch.rawQtyMT) || 0) * 1000;
-          const millingCostVal = batch.manualMillingCostPkr != null ? parseFloat(batch.manualMillingCostPkr) : feeTotal;
+          const millingCostVal = batch.manualMillingCostPkr != null ? parseFloat(batch.manualMillingCostPkr) : 0;
           const otherExpVal = batch.manualOtherExpensesPkr != null ? parseFloat(batch.manualOtherExpensesPkr) : procCosts;
           const netPurchase = effectiveRawCost + millingCostVal + otherExpVal;
           const finishedKG = (parseFloat(batch.actualFinishedMT)||0) * 1000;
