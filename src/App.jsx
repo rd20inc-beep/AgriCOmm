@@ -40,6 +40,7 @@ const Inventory = lazy(() => import('./modules/inventory/pages/Inventory'));
 const Documents = lazy(() => import('./modules/documents/pages/Documents'));
 const Reports = lazy(() => import('./modules/analytics/pages/Reports'));
 const PrintableReports = lazy(() => import('./modules/analytics/pages/PrintableReports'));
+const LotReport = lazy(() => import('./modules/analytics/pages/LotReport'));
 const StandalonePrintReport = lazy(() => import('./modules/analytics/pages/StandalonePrintReport'));
 const Approvals = lazy(() => import('./modules/admin/pages/Approvals'));
 const AuditLog = lazy(() => import('./modules/admin/pages/AuditLog'));
@@ -114,6 +115,7 @@ function ExportRoutes() {
         <Route path="/documents" element={<Documents />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/reports/print" element={<PrintableReports />} />
+        <Route path="/reports/lots" element={<LotReport />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </ExportLayout>
@@ -143,6 +145,7 @@ function MillRoutes() {
         <Route path="/local-sales/:id" element={<LocalSaleDetail />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/reports/print" element={<PrintableReports />} />
+        <Route path="/reports/lots" element={<LotReport />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </MillLayout>
@@ -182,6 +185,7 @@ function StandardRoutes() {
         <Route path="/mill-store/ratios"        element={<ProtectedRoute module="mill_store" action="view"><StoreRatios /></ProtectedRoute>} />
         <Route path="/reports" element={<ProtectedRoute module="reports" action="view"><Reports /></ProtectedRoute>} />
         <Route path="/reports/print" element={<ProtectedRoute module="reports" action="view"><PrintableReports /></ProtectedRoute>} />
+        <Route path="/reports/lots" element={<ProtectedRoute module="reports" action="view"><LotReport /></ProtectedRoute>} />
         <Route path="/exceptions" element={<ProtectedRoute module="admin" action="view"><ExceptionDashboard /></ProtectedRoute>} />
         <Route path="/intelligence" element={<ProtectedRoute anyOf={[{ module: 'finance', action: 'view' }, { module: 'admin', action: 'view' }]}><Intelligence /></ProtectedRoute>} />
         <Route path="/simulator" element={<ProtectedRoute anyOf={[{ module: 'finance', action: 'view' }, { module: 'admin', action: 'view' }]}><ScenarioSimulator /></ProtectedRoute>} />

@@ -112,6 +112,117 @@ function enrichLot(lot) {
   };
 }
 
+// Assemble the full detail bundle for ONE lot row (already fetched with the
+// warehouse/product/supplier joins). Shared by the single-lot detail endpoint
+// and the multi-lot printable report so both stay in lockstep.
+async function buildLotDetail(lot) {
+  const transactions = await db('lot_transactions')
+    .where({ lot_id: lot.id })
+    .orderBy('transaction_date', 'desc')
+    .orderBy('created_at', 'desc');
+
+  const reservations = await db('inventory_reservations as r')
+    .leftJoin('export_orders as eo', 'r.order_id', 'eo.id')
+    .select('r.*', 'eo.order_no')
+    .where({ 'r.lot_id': lot.id });
+
+  // Milling batches consuming this lot — surfaced via batch_source_lots.
+  const millingBatches = await db('batch_source_lots as bsl')
+    .join('milling_batches as mb', 'bsl.batch_id', 'mb.id')
+    .where('bsl.lot_id', lot.id)
+    .select(
+      'mb.id', 'mb.batch_no', 'mb.status', 'mb.pass_number',
+      'mb.parent_batch_id', 'mb.raw_qty_mt', 'mb.actual_finished_mt',
+      'mb.yield_pct', 'mb.created_at', 'mb.completed_at',
+      'bsl.qty_mt as source_qty_mt'
+    )
+    .orderBy('mb.pass_number', 'asc')
+    .orderBy('mb.created_at', 'asc');
+
+  // The lot's own batch's full quality analysis (arrival + post-milling) + the
+  // grade-split yield, so the lot's Quality Specifications can show the complete
+  // sheet a finished/raw lot inherits — not just the moisture/broken on the row.
+  let batchQuality = null;
+  let batchYield = null;
+  const brMatch = /^batch-(\d+)$/.exec(lot.batch_ref || '');
+  const ownBatchId = brMatch ? parseInt(brMatch[1], 10) : null;
+  if (ownBatchId) {
+    const [arrival, post, byield] = await Promise.all([
+      db('milling_quality_samples').where({ batch_id: ownBatchId, analysis_type: 'arrival' })
+        .orderBy('created_at', 'desc').first(),
+      db('milling_quality_post').where({ batch_id: ownBatchId }).orderBy('created_at', 'desc').first(),
+      db('milling_batches').where({ id: ownBatchId }).first(
+        'actual_finished_mt', 'broken_mt', 'b1_mt', 'b2_mt', 'b3_mt', 'csr_mt',
+        'short_grain_mt', 'bran_mt', 'husk_mt', 'sortex_rejects_mt', 'post_milling_grade'),
+    ]);
+    if (arrival || post) batchQuality = { arrival: arrival || null, post: post || null };
+    batchYield = byield || null;
+  }
+
+  // Blend recipe — for a blended OUTPUT lot, the varieties + ratios + per-source
+  // suppliers that were milled to make it.
+  let blendRecipe = null;
+  if (lot.blend_batch_no) {
+    const batch = await db('milling_batches')
+      .where({ batch_no: lot.blend_batch_no })
+      .first('id', 'batch_no', 'raw_qty_mt');
+    if (batch) {
+      const inputs = await db('batch_source_lots as bsl')
+        .leftJoin('inventory_lots as il', 'bsl.lot_id', 'il.id')
+        .leftJoin('products as ilp', 'il.product_id', 'ilp.id')
+        .leftJoin('suppliers as ils', 'il.supplier_id', 'ils.id')
+        .where('bsl.batch_id', batch.id)
+        .select(
+          'bsl.qty_mt', 'bsl.ratio_pct', 'bsl.variety', 'bsl.lot_type', 'bsl.unit_cost_pkr',
+          'il.lot_no as source_lot_no', 'il.variety as lot_variety',
+          'il.item_name as lot_item_name', 'ilp.name as lot_product_name',
+          'il.supplier_id as source_supplier_id', 'ils.name as source_supplier_name',
+          'il.moisture_pct as lot_moisture', 'il.broken_pct as lot_broken',
+          'il.grade as lot_grade', 'il.whiteness as lot_whiteness',
+        )
+        .orderBy('bsl.qty_mt', 'desc');
+      const supMap = {};
+      for (const i of inputs) {
+        if (i.source_supplier_id && !supMap[i.source_supplier_id]) supMap[i.source_supplier_id] = i.source_supplier_name;
+      }
+      blendRecipe = {
+        batch_no: batch.batch_no,
+        raw_qty_mt: parseFloat(batch.raw_qty_mt) || 0,
+        suppliers: Object.entries(supMap).map(([id, name]) => ({ id: Number(id), name })),
+        inputs: inputs.map((i) => {
+          const variety = i.variety || i.lot_variety || i.lot_item_name || i.lot_product_name || 'Unknown';
+          return {
+            variety,
+            variety_known: !!(i.variety || i.lot_variety),
+            qty_mt: parseFloat(i.qty_mt) || 0,
+            ratio_pct: i.ratio_pct != null ? parseFloat(i.ratio_pct) : null,
+            unit_cost_pkr: i.unit_cost_pkr != null ? parseFloat(i.unit_cost_pkr) : null,
+            source_lot_no: i.source_lot_no || null,
+            lot_type: i.lot_type || null,
+            supplier_id: i.source_supplier_id || null,
+            supplier_name: i.source_supplier_name || null,
+            moisture: i.lot_moisture != null ? parseFloat(i.lot_moisture) : null,
+            broken: i.lot_broken != null ? parseFloat(i.lot_broken) : null,
+            grade: i.lot_grade || null,
+            whiteness: i.lot_whiteness != null ? parseFloat(i.lot_whiteness) : null,
+          };
+        }),
+      };
+    }
+  }
+
+  return { lot: enrichLot(lot), transactions, reservations, millingBatches, blendRecipe, batchQuality, batchYield };
+}
+
+// Fetch a lot row (by numeric id or lot_no) with the standard display joins.
+function lotRowQuery() {
+  return db('inventory_lots as l')
+    .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
+    .leftJoin('products as p', 'l.product_id', 'p.id')
+    .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
+    .select('l.*', 'w.name as warehouse_name', 'p.name as product_name', 'p.code as product_code', 's.name as supplier_name');
+}
+
 module.exports = {
 
   // ─── List Lots ───
@@ -173,127 +284,60 @@ module.exports = {
       const isNumeric = /^\d+$/.test(id);
       const where = isNumeric ? { 'l.id': +id } : { 'l.lot_no': id };
 
-      const lot = await db('inventory_lots as l')
-        .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
-        .leftJoin('products as p', 'l.product_id', 'p.id')
-        .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
-        .select('l.*', 'w.name as warehouse_name', 'p.name as product_name', 'p.code as product_code', 's.name as supplier_name')
-        .where(where).first();
-
+      const lot = await lotRowQuery().where(where).first();
       if (!lot) return res.status(404).json({ success: false, message: 'Lot not found.' });
 
-      const transactions = await db('lot_transactions')
-        .where({ lot_id: lot.id })
-        .orderBy('transaction_date', 'desc')
-        .orderBy('created_at', 'desc');
-
-      const reservations = await db('inventory_reservations as r')
-        .leftJoin('export_orders as eo', 'r.order_id', 'eo.id')
-        .select('r.*', 'eo.order_no')
-        .where({ 'r.lot_id': lot.id });
-
-      // Milling batches consuming this lot — surfaced via
-      // batch_source_lots. Used by the UI to replace the Start Milling
-      // button with a link to the running batch, and to list passes for
-      // multi-pass workflows.
-      const millingBatches = await db('batch_source_lots as bsl')
-        .join('milling_batches as mb', 'bsl.batch_id', 'mb.id')
-        .where('bsl.lot_id', lot.id)
-        .select(
-          'mb.id', 'mb.batch_no', 'mb.status', 'mb.pass_number',
-          'mb.parent_batch_id', 'mb.raw_qty_mt', 'mb.actual_finished_mt',
-          'mb.yield_pct', 'mb.created_at', 'mb.completed_at',
-          'bsl.qty_mt as source_qty_mt'
-        )
-        .orderBy('mb.pass_number', 'asc')
-        .orderBy('mb.created_at', 'asc');
-
-      // The lot's own batch's full quality analysis (arrival + post-milling), so
-      // the lot's Quality Specifications can show the complete sheet a finished/raw
-      // lot inherits — not just the moisture/broken stamped on the lot row.
-      let batchQuality = null;
-      let batchYield = null;
-      const brMatch = /^batch-(\d+)$/.exec(lot.batch_ref || '');
-      const ownBatchId = brMatch ? parseInt(brMatch[1], 10) : null;
-      if (ownBatchId) {
-        const [arrival, post, byield] = await Promise.all([
-          db('milling_quality_samples').where({ batch_id: ownBatchId, analysis_type: 'arrival' })
-            .orderBy('created_at', 'desc').first(),
-          db('milling_quality_post').where({ batch_id: ownBatchId }).orderBy('created_at', 'desc').first(),
-          // The grade split captured when yield was recorded — the output
-          // composition the operator entered (finished + B1/B2/B3/CSR/Short Grain
-          // + bran/husk/sortex). Surfaced so the lot's quality panel reflects it.
-          db('milling_batches').where({ id: ownBatchId }).first(
-            'actual_finished_mt', 'broken_mt', 'b1_mt', 'b2_mt', 'b3_mt', 'csr_mt',
-            'short_grain_mt', 'bran_mt', 'husk_mt', 'sortex_rejects_mt', 'post_milling_grade'),
-        ]);
-        if (arrival || post) batchQuality = { arrival: arrival || null, post: post || null };
-        batchYield = byield || null;
-      }
-
-      // Blend recipe — for a blended OUTPUT lot, the varieties + ratios that
-      // were milled to make it, so the operator can trace it back from the lot.
-      let blendRecipe = null;
-      if (lot.blend_batch_no) {
-        const batch = await db('milling_batches')
-          .where({ batch_no: lot.blend_batch_no })
-          .first('id', 'batch_no', 'raw_qty_mt');
-        if (batch) {
-          const inputs = await db('batch_source_lots as bsl')
-            .leftJoin('inventory_lots as il', 'bsl.lot_id', 'il.id')
-            .leftJoin('products as ilp', 'il.product_id', 'ilp.id')
-            .leftJoin('suppliers as ils', 'il.supplier_id', 'ils.id')
-            .where('bsl.batch_id', batch.id)
-            .select(
-              'bsl.qty_mt', 'bsl.ratio_pct', 'bsl.variety', 'bsl.lot_type', 'bsl.unit_cost_pkr',
-              'il.lot_no as source_lot_no', 'il.variety as lot_variety',
-              'il.item_name as lot_item_name', 'ilp.name as lot_product_name',
-              'il.supplier_id as source_supplier_id', 'ils.name as source_supplier_name',
-              'il.moisture_pct as lot_moisture', 'il.broken_pct as lot_broken',
-              'il.grade as lot_grade', 'il.whiteness as lot_whiteness',
-            )
-            .orderBy('bsl.qty_mt', 'desc');
-          // A blend can draw from several suppliers (one per source lot) — surface
-          // them so the lot page shows all, not just the blend batch's single one.
-          const supMap = {};
-          for (const i of inputs) {
-            if (i.source_supplier_id && !supMap[i.source_supplier_id]) supMap[i.source_supplier_id] = i.source_supplier_name;
-          }
-          blendRecipe = {
-            batch_no: batch.batch_no,
-            raw_qty_mt: parseFloat(batch.raw_qty_mt) || 0,
-            suppliers: Object.entries(supMap).map(([id, name]) => ({ id: Number(id), name })),
-            inputs: inputs.map((i) => {
-              // Recipe snapshot first; if it was never captured (old blends),
-              // fall back to the source lot's CURRENT variety → item name →
-              // product. So setting a variety on the raw lot fills the recipe in.
-              const variety = i.variety || i.lot_variety || i.lot_item_name || i.lot_product_name || 'Unknown';
-              return {
-                variety,
-                variety_known: !!(i.variety || i.lot_variety),
-                qty_mt: parseFloat(i.qty_mt) || 0,
-                ratio_pct: i.ratio_pct != null ? parseFloat(i.ratio_pct) : null,
-                unit_cost_pkr: i.unit_cost_pkr != null ? parseFloat(i.unit_cost_pkr) : null,
-                source_lot_no: i.source_lot_no || null,
-                lot_type: i.lot_type || null,
-                supplier_id: i.source_supplier_id || null,
-                supplier_name: i.source_supplier_name || null,
-                moisture: i.lot_moisture != null ? parseFloat(i.lot_moisture) : null,
-                broken: i.lot_broken != null ? parseFloat(i.lot_broken) : null,
-                grade: i.lot_grade || null,
-                whiteness: i.lot_whiteness != null ? parseFloat(i.lot_whiteness) : null,
-              };
-            }),
-          };
-        }
-      }
-
-      return res.json({
-        success: true,
-        data: { lot: enrichLot(lot), transactions, reservations, millingBatches, blendRecipe, batchQuality, batchYield },
-      });
+      return res.json({ success: true, data: await buildLotDetail(lot) });
     } catch (err) {
       console.error('getLotDetail error:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
+  // ─── Multi-lot printable report ───
+  // Returns the FULL detail bundle for several lots at once so the Lot Reports
+  // page can render/print one or many lots. Accepts either an explicit list of
+  // ids (?ids=1,2,3) or the same filters as listLots (type/entity/warehouse_id/
+  // status/supplier_id/variety/search) to report a whole filtered set.
+  async getLotsReport(req, res) {
+    try {
+      const { ids, type, entity, warehouse_id, status, supplier_id, variety, search, limit = 100 } = req.query;
+      const cap = Math.min(parseInt(limit, 10) || 100, 200);
+
+      let rows;
+      if (ids) {
+        const idList = String(ids).split(',').map(s => parseInt(s.trim(), 10)).filter(Number.isFinite);
+        if (!idList.length) return res.json({ success: true, data: { lots: [], generatedAt: new Date().toISOString() } });
+        // Preserve the caller's id order so the printed report matches selection.
+        const fetched = await lotRowQuery().whereIn('l.id', idList.slice(0, cap));
+        const byId = new Map(fetched.map(l => [l.id, l]));
+        rows = idList.map(id => byId.get(id)).filter(Boolean);
+      } else {
+        let q = lotRowQuery();
+        if (type) q = q.where('l.type', type);
+        if (entity) q = q.where('l.entity', entity);
+        if (warehouse_id) q = q.where('l.warehouse_id', warehouse_id);
+        if (status) q = q.where('l.status', status);
+        if (supplier_id) q = q.where('l.supplier_id', supplier_id);
+        if (variety) q = q.where('l.variety', 'ilike', `%${variety}%`);
+        if (search) {
+          q = q.where(function () {
+            this.where('l.lot_no', 'ilike', `%${search}%`)
+              .orWhere('l.item_name', 'ilike', `%${search}%`)
+              .orWhere('l.variety', 'ilike', `%${search}%`)
+              .orWhere('l.grade', 'ilike', `%${search}%`);
+          });
+        }
+        rows = await q.orderBy('l.created_at', 'desc').limit(cap);
+      }
+
+      // Build detail sequentially to keep the connection pool sane on large sets.
+      const lots = [];
+      for (const row of rows) lots.push(await buildLotDetail(row));
+
+      return res.json({ success: true, data: { lots, generatedAt: new Date().toISOString() } });
+    } catch (err) {
+      console.error('getLotsReport error:', err);
       return res.status(500).json({ success: false, message: err.message });
     }
   },

@@ -4,7 +4,7 @@ import PartyLink from '../../../shared/components/PartyLink';
 import {
   ArrowLeft, Package, Truck, DollarSign, FileText, BarChart3,
   Plus, Save, Edit3, AlertTriangle, Warehouse, ShoppingBag, Scale,
-  Activity, ChevronRight, TrendingUp, Clock, Factory, Play, Trash2, Loader2,
+  Activity, ChevronRight, TrendingUp, Clock, Factory, Play, Trash2, Loader2, Printer,
 } from 'lucide-react';
 import {
   useLotDetail, useRecordLotTransaction, useLocalSalesByLot,
@@ -195,6 +195,15 @@ export default function LotDetail() {
         <button onClick={() => setShowCostSheet(true)} className="btn btn-primary btn-sm">
           <FileText className="w-4 h-4" /> Costing Sheet
         </button>
+        <a
+          href={`/print-report?type=lot&ids=${lot.id}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="btn btn-secondary btn-sm"
+          title="Open a printable detailed report for this lot"
+        >
+          <Printer className="w-4 h-4" /> Print Report
+        </a>
         {/* Milling state: once a batch is created from this lot, hide
             Start Milling and surface the batch link(s) instead. This
             also covers multi-pass — show every batch this lot fed. */}

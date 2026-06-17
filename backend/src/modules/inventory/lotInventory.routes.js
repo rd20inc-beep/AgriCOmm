@@ -34,6 +34,9 @@ router.delete(
 
 // Lot queries
 router.get('/lots', authorize('inventory', 'view'), controller.listLots);
+// Multi-lot printable report — registered before /lots/:id so the literal
+// path wins over the param route.
+router.get('/lots-report', authorize('inventory', 'view'), controller.getLotsReport);
 router.get('/lots/:id', authorize('inventory', 'view'), controller.getLotDetail);
 router.get('/lots/:id/transactions', authorize('inventory', 'view'), controller.getLotTransactions);
 

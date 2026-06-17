@@ -11,6 +11,7 @@ import {
   ProductionReportView, StockReportView,
   PnlReportView, CashflowReportView, AgingReportView,
 } from './PrintableReportsViews';
+import { LotReportView } from './LotReportViews';
 
 const STOCK_GROUP_OPTIONS = [
   { key: 'product',   label: 'By Product' },
@@ -32,6 +33,8 @@ export default function StandalonePrintReport() {
   const to = params.get('to');
   const preset = params.get('preset') || 'monthly';
   const stockGroupBy = params.get('group_by') || 'product';
+  const lotIds = params.get('ids') || '';
+  const lotDetail = params.get('detail') || 'full';
 
   useEffect(() => {
     let cancelled = false;
@@ -54,6 +57,8 @@ export default function StandalonePrintReport() {
           res = await api.get('/api/reporting/printable/ar-aging');
         } else if (type === 'ap_aging') {
           res = await api.get('/api/reporting/printable/ap-aging');
+        } else if (type === 'lot') {
+          res = await api.get('/api/lot-inventory/lots-report', { ids: lotIds });
         } else {
           throw new Error(`Unknown report type "${type}"`);
         }
@@ -66,7 +71,7 @@ export default function StandalonePrintReport() {
     }
     load();
     return () => { cancelled = true; };
-  }, [type, from, to, stockGroupBy]);
+  }, [type, from, to, stockGroupBy, lotIds]);
 
   // Trigger native print once data has rendered. Use double rAF to make
   // sure the browser has committed at least one paint frame containing
@@ -148,6 +153,9 @@ export default function StandalonePrintReport() {
           )}
           {type === 'ap_aging' && data.buckets && (
             <AgingReportView data={data} companyName={companyName} kind="payable" />
+          )}
+          {type === 'lot' && Array.isArray(data.lots) && (
+            <LotReportView lots={data.lots} companyName={companyName} detail={lotDetail} generatedAt={data.generatedAt} />
           )}
         </div>
       )}

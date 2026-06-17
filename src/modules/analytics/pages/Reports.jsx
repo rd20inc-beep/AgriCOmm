@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext';
 import {
   BarChart3, TrendingUp, Users, Globe, Package, Award, Coins, Printer, RefreshCw,
-  ArrowUpRight, ArrowDownLeft, Activity, Calendar, ExternalLink, AlertTriangle,
+  ArrowUpRight, ArrowDownLeft, Activity, Calendar, ExternalLink, AlertTriangle, FileText,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell,
@@ -132,6 +132,10 @@ export default function Reports() {
               className="bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors">
               <RefreshCw size={12} /> Refresh
             </button>
+            <Link to="/reports/lots"
+              className="bg-white/15 hover:bg-white/25 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-sm font-medium inline-flex items-center gap-2 transition-colors">
+              <FileText size={14} /> Lot Reports
+            </Link>
             <Link to="/reports/print"
               className="bg-white text-slate-900 hover:bg-gray-100 px-4 py-2 rounded-lg text-sm font-medium inline-flex items-center gap-2 shadow-sm transition-colors">
               <Printer size={14} /> Print Reports

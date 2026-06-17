@@ -3,20 +3,20 @@
 // (/print-report) that opens in a new tab. Pulling them into a single
 // file keeps the two entry points in lockstep.
 
-function fmtMt(v) {
+export function fmtMt(v) {
   return (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
-function fmtKg(v) {
+export function fmtKg(v) {
   return (parseFloat(v) || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
 }
-function fmtPkr(v) {
+export function fmtPkr(v) {
   return 'Rs ' + (parseFloat(v) || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
 }
-function fmtPct(v) {
+export function fmtPct(v) {
   const n = parseFloat(v) || 0;
   return n.toFixed(1) + '%';
 }
-function fmtDate(iso) {
+export function fmtDate(iso) {
   if (!iso) return '—';
   return new Date(iso).toLocaleDateString();
 }
@@ -261,7 +261,7 @@ export function AgingReportView({ data, companyName, kind }) {
 }
 
 // ─── Shared print blocks ───────────────────────────────────────────────
-function Header({ companyName, title, subtitle }) {
+export function Header({ companyName, title, subtitle }) {
   return (
     <div className="border-b-2 border-gray-900 pb-3">
       <div className="flex items-end justify-between">
@@ -278,7 +278,7 @@ function Header({ companyName, title, subtitle }) {
   );
 }
 
-function SummaryRow({ items }) {
+export function SummaryRow({ items }) {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
       {items.map((it, i) => (
@@ -291,7 +291,7 @@ function SummaryRow({ items }) {
   );
 }
 
-function Section({ title, children }) {
+export function Section({ title, children }) {
   return (
     <div>
       <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-2 border-b border-gray-200 pb-1">{title}</h2>
@@ -300,7 +300,7 @@ function Section({ title, children }) {
   );
 }
 
-function Table({ head, align = [], rows, empty, totalRow }) {
+export function Table({ head, align = [], rows, empty, totalRow }) {
   if (!rows || rows.length === 0) {
     return <div className="text-center text-xs text-gray-400 py-4">{empty || 'No data.'}</div>;
   }
@@ -337,7 +337,7 @@ function Table({ head, align = [], rows, empty, totalRow }) {
   );
 }
 
-function Footer() {
+export function Footer() {
   return (
     <div className="text-[11px] text-gray-400 pt-4 border-t border-gray-200 flex justify-between">
       <span>AgriCOmm ERP · Printable Report</span>
