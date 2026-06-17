@@ -1565,14 +1565,17 @@ function AddLotVehicleModal({ isOpen, onClose, lot, addToast, onSaved }) {
 // ─── Start Milling Modal ───
 function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
   const isReMill = lot?.type === 'finished';
-  const [form, setForm] = useState({ mill_id: '', machine_line: '', shift: 'Day', milling_fee_per_kg: '', notes: '' });
+  const [form, setForm] = useState({ mill_id: '', machine_line: '', shift: 'Day', milling_fee_per_kg: '', notes: '', qty_mt: '' });
   const [mills, setMills] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
-    setForm({ mill_id: '', machine_line: '', shift: 'Day', milling_fee_per_kg: '', notes: '' });
+    const availMT = parseFloat(lot?.availableQty) || 0;
+    // Default the quantity to the whole lot — the operator can lower it to
+    // mill only part of the lot.
+    setForm({ mill_id: '', machine_line: '', shift: 'Day', milling_fee_per_kg: '', notes: '', qty_mt: availMT > 0 ? String(availMT) : '' });
     setVehicles([]);
     // Load mills + vehicles lazily so the page open isn't blocked
     api.get('/api/milling/mills').then(res => {
@@ -1591,10 +1594,18 @@ function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
   const inheritableVehicles = vehicles.filter(v => !v.batch_id);
   const inheritedMT = inheritableVehicles.reduce((s, v) => s + (parseFloat(v.weight_mt) || 0), 0);
 
+  const qtyToMill = parseFloat(form.qty_mt);
+  const qtyValid = form.qty_mt !== '' && qtyToMill > 0 && qtyToMill <= availableMT + 1e-6;
+  const remainingMT = qtyValid ? Math.max(0, availableMT - qtyToMill) : 0;
+
   async function handleSubmit(e) {
     e.preventDefault();
     if (availableMT <= 0) {
       addToast?.('This lot has no available stock to mill.', 'error');
+      return;
+    }
+    if (!qtyValid) {
+      addToast?.(`Enter a quantity between 0 and ${availableMT.toFixed(2)} MT.`, 'error');
       return;
     }
     setSubmitting(true);
@@ -1604,6 +1615,7 @@ function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
         machine_line: form.machine_line.trim() || null,
         shift: form.shift || 'Day',
         milling_fee_per_kg: form.milling_fee_per_kg ? parseFloat(form.milling_fee_per_kg) : null,
+        raw_qty_mt: qtyToMill,
         notes: form.notes.trim() || null,
       });
       const data = res?.data || res;
@@ -1678,6 +1690,33 @@ function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
           )}
         </div>
 
+        {/* Quantity to mill — defaults to the whole lot; lower it to mill a
+            part and leave the remainder in the lot. */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Quantity to mill (MT)
+          </label>
+          <div className="flex items-center gap-2">
+            <input
+              type="number" step="0.01" min="0" max={availableMT}
+              value={form.qty_mt}
+              onChange={(e) => setForm(p => ({ ...p, qty_mt: e.target.value }))}
+              className="w-40 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+            <button type="button" onClick={() => setForm(p => ({ ...p, qty_mt: String(availableMT) }))}
+              className="text-xs text-blue-600 hover:underline">Mill all ({availableMT.toFixed(2)} MT)</button>
+          </div>
+          <p className="text-xs mt-1">
+            {!qtyValid ? (
+              <span className="text-red-500">Enter a value between 0 and {availableMT.toFixed(2)} MT.</span>
+            ) : remainingMT > 0 ? (
+              <span className="text-amber-600">{qtyToMill.toFixed(2)} MT will be milled · <span className="font-medium">{remainingMT.toFixed(2)} MT stays in the lot</span>.</span>
+            ) : (
+              <span className="text-gray-500">Milling the whole lot.</span>
+            )}
+          </p>
+        </div>
+
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Mill</label>
@@ -1720,7 +1759,7 @@ function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
 
         <div className="flex justify-end gap-2 pt-2 border-t">
           <button type="button" onClick={onClose} className="btn btn-secondary">Cancel</button>
-          <button type="submit" disabled={submitting || availableMT <= 0}
+          <button type="submit" disabled={submitting || availableMT <= 0 || !qtyValid}
             className="btn btn-primary disabled:opacity-50 inline-flex items-center gap-1.5">
             {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
             {isReMill ? 'Start Re-Milling' : 'Start Milling'}

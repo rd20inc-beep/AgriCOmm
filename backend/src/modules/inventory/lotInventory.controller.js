@@ -1619,7 +1619,23 @@ module.exports = {
         }
         const batchNo = `M-${String(nextNum).padStart(3, '0')}`;
 
-        const rawQtyMT = overrideQty != null && overrideQty !== '' ? parseFloat(overrideQty) : availableMT;
+        // Partial milling: the operator can mill less than the whole lot. The
+        // committed qty (batch_source_lots.qty_mt) is what consumeForMilling
+        // draws down from the lot at yield, so the remainder stays available.
+        let rawQtyMT = availableMT;
+        if (overrideQty != null && overrideQty !== '') {
+          const q = parseFloat(overrideQty);
+          if (!(q > 0)) {
+            const err = new Error('Quantity to mill must be greater than zero.');
+            err.statusCode = 400; throw err;
+          }
+          if (q > availableMT + 1e-6) {
+            const err = new Error(`Cannot mill ${q} MT — only ${availableMT.toFixed(2)} MT available in lot ${lot.lot_no}.`);
+            err.statusCode = 400; throw err;
+          }
+          rawQtyMT = q;
+        }
+        const isPartial = rawQtyMT < availableMT - 1e-6;
 
         const [batch] = await trx('milling_batches').insert({
           batch_no: batchNo,
