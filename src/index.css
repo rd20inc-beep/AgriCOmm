@@ -479,8 +479,6 @@ input, select, textarea { font-size: 14px; }
   body.app-print-mask .print-report { position: absolute; left: 0; top: 0; width: 100%; }
   body.app-print-mask .sidebar,
   body.app-print-mask header { display: none !important; }
-  /* Each full lot card starts on a fresh page in multi-lot reports. */
-  .lot-page-break { break-before: page; page-break-before: always; }
 }
 
 /* ===== FOCUS VISIBLE ===== */
