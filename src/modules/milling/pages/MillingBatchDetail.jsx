@@ -95,8 +95,19 @@ export default function MillingBatchDetail() {
   const { data: blend } = useBatchSourceLots(batch?.dbId || batch?.id);
   const sourceLots = blend?.sourceLots || [];
   const blendSuppliers = blend?.blendSuppliers || [];
-  const isBlend = sourceLots.length > 0;
-  // Vehicles inherited from the blended lots (recorded at lot creation).
+  const isFromLots = sourceLots.length > 0;
+  // A true blend mixes 2+ distinct rice TYPES. Picking several stock lots of the
+  // SAME type (or a single lot) is still a single-variety run, not a blend — so
+  // the "Blend" wording is keyed on distinct types, not on merely having lots.
+  const isBlend = useMemo(() => {
+    const types = new Set();
+    for (const l of sourceLots) {
+      const key = (l.product_name || l.variety || l.type || l.item_name || '').trim().toLowerCase();
+      if (key) types.add(key);
+    }
+    return types.size > 1;
+  }, [sourceLots]);
+  // Vehicles inherited from the source lots (recorded at lot creation).
   const inheritedVehicles = useMemo(
     () => sourceLots.flatMap((l) => (l.vehicles || []).map((v) => ({ ...v, lotNo: l.lot_no }))),
     [sourceLots],
@@ -346,7 +357,7 @@ export default function MillingBatchDetail() {
     // Validation: require vehicle arrivals and arrival price (unless service
     // milling, or a blend — a blend inherits its material, quality and cost from
     // the source lots, so there are no paddy arrivals to record).
-    if (!batch.isServiceMilling && !isBlend) {
+    if (!batch.isServiceMilling && !isFromLots) {
       const vehicles = Array.isArray(batch.vehicleArrivals) ? batch.vehicleArrivals : [];
       if (vehicles.length === 0) {
         addToast('Please add at least one vehicle arrival before recording yield. Go to the Overview tab to add vehicle details.', 'error');
@@ -594,7 +605,7 @@ export default function MillingBatchDetail() {
               {batch.productName && (
                 <span>Rice Type: <span className="font-medium text-gray-700">{batch.productName}</span></span>
               )}
-              {isBlend && blendSuppliers.length > 0 ? (
+              {isFromLots && blendSuppliers.length > 0 ? (
                 // A blend draws from several source lots — show every supplier,
                 // not just the one the blend batch happened to inherit.
                 <span className="flex flex-wrap items-center gap-1">
@@ -648,7 +659,7 @@ export default function MillingBatchDetail() {
                 <PauseCircle size={16} /> Awaiting Owner approval
               </span>
             )}
-            {!isBlend && !batch.supplierName && batch.status !== 'Completed' && batch.status !== 'Cancelled' && (
+            {!isFromLots && !batch.supplierName && batch.status !== 'Completed' && batch.status !== 'Cancelled' && (
               <button
                 onClick={() => setShowSupplierModal(true)}
                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 transition-colors"
@@ -760,13 +771,13 @@ export default function MillingBatchDetail() {
                 </div>
               </div>
 
-              {isBlend ? (
+              {isFromLots ? (
                 <div className="bg-white rounded-xl shadow-sm p-5">
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="text-sm font-medium text-gray-500 flex items-center gap-1.5">
-                      <Layers size={14} className="text-purple-500" /> Blend — Source Lots
+                      <Layers size={14} className={isBlend ? 'text-purple-500' : 'text-gray-400'} /> {isBlend ? 'Blend — Source Lots' : 'Source Lots'}
                     </h3>
-                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-purple-50 text-purple-600 font-medium">
+                    <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${isBlend ? 'bg-purple-50 text-purple-600' : 'bg-gray-100 text-gray-600'}`}>
                       {sourceLots.length} lot(s) · {parseFloat(batch.rawQtyMT || 0).toFixed(2)} MT
                     </span>
                   </div>
@@ -854,7 +865,7 @@ export default function MillingBatchDetail() {
               <div className="bg-white rounded-xl shadow-sm p-5">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-sm font-medium text-gray-500">Vehicle Arrivals</h3>
-                  {isBlend ? (
+                  {isFromLots ? (
                     <span className="text-[11px] text-gray-400">Inherited from source lots</span>
                   ) : (
                     <button
@@ -867,7 +878,7 @@ export default function MillingBatchDetail() {
                 </div>
                 {/* For a blend, vehicles come from the source lots (recorded when
                     each lot was first received) — no re-entry needed. */}
-                {isBlend && safeVehicles.length === 0 ? (
+                {isFromLots && safeVehicles.length === 0 ? (
                   inheritedVehicles.length > 0 ? (
                     <div className="space-y-2">
                       {inheritedVehicles.map((v, idx) => {
@@ -1220,7 +1231,7 @@ export default function MillingBatchDetail() {
           <div className="space-y-4">
             {/* Warnings for missing data (a blend inherits material/quality/cost
                 from its source lots, so these paddy-arrival prompts don't apply) */}
-            {!batch.isServiceMilling && !isBlend && batch.status !== 'Completed' && (
+            {!batch.isServiceMilling && !isFromLots && batch.status !== 'Completed' && (
               <>
                 {(!batch.vehicleArrivals || batch.vehicleArrivals.length === 0) && (
                   <div className="bg-red-50 border border-red-300 rounded-xl p-4 flex items-start gap-3">
@@ -1351,7 +1362,7 @@ export default function MillingBatchDetail() {
           const inputPriceMT = parseFloat(safeArrival?.pricePerMT || safeSample?.pricePerMT) || 0;
           // A blend's raw cost comes from the source lots (milling_costs raw_rice),
           // not a paddy arrival price — so it's never "missing" for a blend.
-          const missingPrice = !inputPriceMT && !batch.isServiceMilling && !isBlend;
+          const missingPrice = !inputPriceMT && !batch.isServiceMilling && !isFromLots;
           const rawMaterialCostFromQuality = batch.rawQtyMT * inputPriceMT;
           // useMillingBatch keys costs by their DB category, so the raw cost is
           // under `raw_rice` (snake_case); `rawRice` is never set. Reading only the
@@ -1419,7 +1430,7 @@ export default function MillingBatchDetail() {
 
             {/* Raw material cost — for a blend, show each lot's agreed price and
                 the blended average; otherwise the single agreed price. */}
-            {isBlend && sourceLots.length > 0 ? (() => {
+            {isFromLots && sourceLots.length > 0 ? (() => {
               const blendAvgPerMt = batch.rawQtyMT > 0 ? effectiveRawCost / batch.rawQtyMT : 0;
               return (
                 <div className="bg-amber-50 rounded-xl border border-amber-200 p-4">

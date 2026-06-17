@@ -99,7 +99,13 @@ const DEFAULT_BYPRODUCT_RATES = {
 export default function MillingCostSheet({ batch, companyProfile, millingCostCategories, vehicles = [], sourceLots = [], byproductRates = DEFAULT_BYPRODUCT_RATES }) {
   if (!batch) return null;
 
-  const isBlend = Array.isArray(sourceLots) && sourceLots.length > 0;
+  const isFromLots = Array.isArray(sourceLots) && sourceLots.length > 0;
+  // A true blend mixes 2+ distinct rice TYPES; same-type / single lots stay single-variety.
+  const isBlend = isFromLots && new Set(
+    sourceLots
+      .map((l) => (l.product_name || l.variety || l.type || l.item_name || '').trim().toLowerCase())
+      .filter(Boolean),
+  ).size > 1;
 
   const safeCosts = (batch.costs && typeof batch.costs === 'object' && !Array.isArray(batch.costs)) ? batch.costs : {};
   const safeSample = batch.sampleAnalysis || null;
@@ -287,11 +293,11 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
 
         {/* ═══ SECTION B: Raw Material Buying Cost (auto-populated) ═══ */}
         <div className="border-x border-t border-gray-200 px-6 py-3" style={{ backgroundColor: '#fefce8' }}>
-          {isBlend ? (() => {
+          {isFromLots ? (() => {
             const avgPerMt = rawQtyMT > 0 ? effectiveRawRiceCost / rawQtyMT : 0;
             return (
               <>
-                <p className="text-[10px] font-bold text-amber-800 uppercase tracking-widest mb-2">Section B — Raw Material Buying Cost (Blended — {sourceLots.length} lots)</p>
+                <p className="text-[10px] font-bold text-amber-800 uppercase tracking-widest mb-2">Section B — Raw Material Buying Cost ({isBlend ? 'Blended — ' : 'Source Lots — '}{sourceLots.length} lot{sourceLots.length === 1 ? '' : 's'})</p>
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="text-amber-700 border-b border-amber-200">
@@ -318,7 +324,7 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
                   </tbody>
                   <tfoot>
                     <tr className="font-bold text-gray-900 border-t-2 border-amber-300">
-                      <td className="py-1.5">Blended average</td>
+                      <td className="py-1.5">{isBlend ? 'Blended average' : 'Weighted average'}</td>
                       <td className="text-right">{rawQtyMT} MT</td>
                       <td className="text-right text-blue-900">{fmtPKR(avgPerMt)}</td>
                       <td className="text-right text-blue-900">{fmtPKR(avgPerMt / 1000)}</td>
@@ -326,7 +332,7 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
                     </tr>
                   </tfoot>
                 </table>
-                <p className="mt-1.5 text-[9px] text-amber-700">Blended average = total blended cost ÷ total input qty. Used as the raw material cost below.</p>
+                <p className="mt-1.5 text-[9px] text-amber-700">{isBlend ? 'Blended average' : 'Weighted average'} = total cost ÷ total input qty. Used as the raw material cost below.</p>
               </>
             );
           })() : (
