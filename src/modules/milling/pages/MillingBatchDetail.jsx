@@ -2204,11 +2204,13 @@ export default function MillingBatchDetail() {
               { key: 'shortGrain', label: 'Short Grain', qty: sgMT },
             ] : [{ key: 'broken', label: 'Broken', qty: parseFloat(batch?.brokenMT) || 0 }]),
             { key: 'sortex', label: 'Sortex Rejects', qty: sortexMT },
-            { key: 'powder', label: 'Powder', qty: powderMT },
-            { key: 'sweeping', label: 'Sweeping', qty: sweepingMT },
+            // Powder & Sweeping always show so their sale price can be set even
+            // before a quantity is recorded (keep: true bypasses the qty filter).
+            { key: 'powder', label: 'Powder', qty: powderMT, keep: true },
+            { key: 'sweeping', label: 'Sweeping', qty: sweepingMT, keep: true },
             ...(branMT > 0 ? [{ key: 'bran', label: 'Rice Bran', qty: branMT }] : []),
             ...(huskMT > 0 ? [{ key: 'husk', label: 'Rice Husk', qty: huskMT }] : []),
-          ].filter(f => f.qty > 0);
+          ].filter(f => f.keep || f.qty > 0);
 
           const num = (v) => parseFloat(v) || 0;
           const rawPurchase = num(batch?.costs?.raw_rice);
