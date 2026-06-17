@@ -1986,6 +1986,61 @@ const inventoryService = {
   //   finished lot  = (raw + processing + millingFee) / finishedKg   [full pool]
   //   byproduct lot = market-value share of the pool / its kg
   // ───────────────────────────────────────────────────────────────────────
+  // ── Residual (by-product-credit) cost model ──
+  // Finished rice absorbs whatever is left after crediting by-products at their
+  // SALE value:  finished = max(0, NetPurchase − Σ byproduct sale value).
+  //   NetPurchase = rawCostTotal + millingCost + otherExpenses
+  //   millingCost  = batch.manual_milling_cost_pkr  ?? (fee/kg × raw kg)   [fallback]
+  //   otherExpenses= batch.manual_other_expenses_pkr ?? recorded processing costs
+  // By-products are costed at price/1000 (NRV → zero gain on sale). Pure function
+  // of the batch row + the two cost sums, so recordYield and the price-confirm
+  // reallocation produce identical numbers.
+  computeResidualAllocation(batch, rawCostTotal, processingCosts) {
+    const p = (v) => parseFloat(v) || 0;
+    const rawQty = p(batch.raw_qty_mt);
+    const millingFeeTotal = p(batch.milling_fee_per_kg) * rawQty * 1000;
+    const millingCost = batch.manual_milling_cost_pkr != null ? p(batch.manual_milling_cost_pkr) : millingFeeTotal;
+    const otherExpenses = batch.manual_other_expenses_pkr != null ? p(batch.manual_other_expenses_pkr) : processingCosts;
+    const netPurchase = rawCostTotal + millingCost + otherExpenses;
+
+    const finished = p(batch.actual_finished_mt);
+    const broken = p(batch.broken_mt), bran = p(batch.bran_mt), husk = p(batch.husk_mt), sortex = p(batch.sortex_rejects_mt);
+    const b1 = p(batch.b1_mt), b2 = p(batch.b2_mt), b3 = p(batch.b3_mt), csr = p(batch.csr_mt), shortGrain = p(batch.short_grain_mt);
+    const brokenPrice = p(batch.broken_price_per_mt);
+    const price = {
+      b1: p(batch.b1_price_per_mt) || brokenPrice, b2: p(batch.b2_price_per_mt) || brokenPrice,
+      b3: p(batch.b3_price_per_mt) || brokenPrice, csr: p(batch.csr_price_per_mt) || brokenPrice,
+      short_grain: p(batch.short_grain_price_per_mt) || brokenPrice, broken: brokenPrice,
+      bran: p(batch.bran_price_per_mt), husk: p(batch.husk_price_per_mt), sortex: p(batch.sortex_rejects_price_per_mt),
+    };
+    const hasPerGradeBroken = (b1 + b2 + b3 + csr + shortGrain) > 0;
+    const byQty = hasPerGradeBroken
+      ? { b1, b2, b3, csr, short_grain: shortGrain, bran, husk, sortex }
+      : { broken, bran, husk, sortex };
+
+    let byproductValue = 0;
+    const byCostPerKg = {};
+    for (const [k, qty] of Object.entries(byQty)) {
+      byproductValue += qty * price[k];
+      byCostPerKg[k] = price[k] / 1000; // by-product valued at sale price
+    }
+    const residual = netPurchase - byproductValue;
+    const clamped = residual < 0;
+    const finishedTotal = Math.max(0, residual);
+    const finishedKg = finished * 1000;
+    const finishedCostPerKg = finishedKg > 0 ? finishedTotal / finishedKg : 0;
+    const rawFrac = netPurchase > 0 ? rawCostTotal / netPurchase : 0;
+    const millFrac = netPurchase > 0 ? (millingCost + otherExpenses) / netPurchase : 0;
+    // Aggregate broken-tier rate for a generic "Broken Rice" lot when the batch
+    // recorded per-grade quantities (qty-weighted average sale price).
+    const gradeQty = b1 + b2 + b3 + csr + shortGrain;
+    const brokenTierCostPerKg = gradeQty > 0
+      ? (b1 * price.b1 + b2 * price.b2 + b3 * price.b3 + csr * price.csr + shortGrain * price.short_grain) / gradeQty / 1000
+      : brokenPrice / 1000;
+    return { netPurchase, millingCost, otherExpenses, byproductValue, finishedTotal,
+      finishedCostPerKg, byCostPerKg, brokenTierCostPerKg, hasPerGradeBroken, rawFrac, millFrac, clamped, finished };
+  },
+
   async reallocateBatchCosts(trx, batchId) {
     const batch = await trx('milling_batches').where({ id: batchId }).first();
     if (!batch) return null;
@@ -1998,54 +2053,25 @@ const inventoryService = {
     const processingCosts = parseFloat(
       (await trx('milling_costs').where({ batch_id: batchId }).whereNot('category', 'raw_rice').sum('amount as t').first())?.t
     ) || 0;
-    const millingFeeTotal = (parseFloat(batch.milling_fee_per_kg) || 0) * (parseFloat(batch.raw_qty_mt) || 0) * 1000;
-    const totalBatchCostPool = rawCostTotal + processingCosts + millingFeeTotal;
 
-    const p = (v) => parseFloat(v) || 0;
-    const broken = p(batch.broken_mt), bran = p(batch.bran_mt), husk = p(batch.husk_mt), sortex = p(batch.sortex_rejects_mt);
-    const b1 = p(batch.b1_mt), b2 = p(batch.b2_mt), b3 = p(batch.b3_mt), csr = p(batch.csr_mt), shortGrain = p(batch.short_grain_mt);
-    const brokenPrice = p(batch.broken_price_per_mt);
-    const prices = {
-      finished: p(batch.finished_price_per_mt),
-      b1: p(batch.b1_price_per_mt) || brokenPrice, b2: p(batch.b2_price_per_mt) || brokenPrice,
-      b3: p(batch.b3_price_per_mt) || brokenPrice, csr: p(batch.csr_price_per_mt) || brokenPrice,
-      short_grain: p(batch.short_grain_price_per_mt) || brokenPrice,
-      broken: brokenPrice, bran: p(batch.bran_price_per_mt), husk: p(batch.husk_price_per_mt),
-      sortex: p(batch.sortex_rejects_price_per_mt),
-    };
-    const hasPerGradeBroken = (b1 + b2 + b3 + csr + shortGrain) > 0;
-    const outputs = {
-      finished: { qty: finished, price: prices.finished },
-      ...(hasPerGradeBroken
-        ? { b1: { qty: b1, price: prices.b1 }, b2: { qty: b2, price: prices.b2 }, b3: { qty: b3, price: prices.b3 },
-            csr: { qty: csr, price: prices.csr }, short_grain: { qty: shortGrain, price: prices.short_grain } }
-        : { broken: { qty: broken, price: prices.broken } }),
-      bran: { qty: bran, price: prices.bran }, husk: { qty: husk, price: prices.husk }, sortex: { qty: sortex, price: prices.sortex },
-    };
-    let totalMV = 0;
-    for (const o of Object.values(outputs)) { o.marketValue = o.qty * o.price; totalMV += o.marketValue; }
-    const alloc = {};
-    for (const [name, o] of Object.entries(outputs)) {
-      const share = (o.qty > 0 && totalMV > 0) ? o.marketValue / totalMV : 0;
-      const allocatedCost = totalBatchCostPool * share;
-      alloc[name] = { qty: o.qty, costPerKg: o.qty > 0 ? allocatedCost / (o.qty * 1000) : 0 };
-    }
+    const a = inventoryService.computeResidualAllocation(batch, rawCostTotal, processingCosts);
+    const alloc = { finished: { qty: finished, costPerKg: a.finishedCostPerKg } };
+    for (const [k, perKg] of Object.entries(a.byCostPerKg)) alloc[k] = { qty: 1, costPerKg: perKg };
+    const brokenTierCostPerKg = a.brokenTierCostPerKg;
 
     const finishedKg = finished * 1000;
     await trx('milling_batches').where({ id: batchId }).update({
       raw_cost_total: rawCostTotal,
-      raw_cost_per_kg_finished: finishedKg > 0 ? rawCostTotal / finishedKg : 0,
-      milling_cost_per_kg_finished: finishedKg > 0 ? (processingCosts + millingFeeTotal) / finishedKg : 0,
-      total_cost_per_kg_finished: alloc.finished.costPerKg,
+      raw_cost_per_kg_finished: a.finishedCostPerKg * a.rawFrac,
+      milling_cost_per_kg_finished: a.finishedCostPerKg * a.millFrac,
+      total_cost_per_kg_finished: a.finishedCostPerKg,
     });
 
-    // Update output lots. EVERY output — finished included — takes its
-    // market-value-allocated cost (alloc[*].costPerKg), so Σ(outputs) = the pool
-    // and priced by-products no longer leave finished with the whole pool. The
-    // per-kg cost is split into raw vs milling in the pool's own ratio, matching
-    // recordMillingOutput so the costing sheet shows the same breakdown.
-    const rawFrac = totalBatchCostPool > 0 ? rawCostTotal / totalBatchCostPool : 0;
-    const millFrac = totalBatchCostPool > 0 ? (processingCosts + millingFeeTotal) / totalBatchCostPool : 0;
+    // Update output lots. Finished takes the residual cost; each by-product is
+    // valued at its own sale price (NRV). Per-kg cost is split raw/milling in the
+    // Net Purchase ratio, matching recordMillingOutput's breakdown.
+    const rawFrac = a.rawFrac;
+    const millFrac = a.millFrac;
     const outLots = await trx('inventory_lots')
       .where({ batch_ref: `batch-${batchId}` })
       .whereIn('type', ['finished', 'byproduct'])
@@ -2060,18 +2086,9 @@ const inventoryService = {
       if (g === 'csr') return 'csr'; if (g.includes('short')) return 'short_grain';
       return 'broken';
     };
-    // Broken-tier fallback: a batch can record per-grade quantities (b1_mt…)
-    // while its output lot is a single generic "Broken Rice" (or vice-versa).
-    // The grade key then has no matching alloc/lot and cost is lost. Pool the
-    // whole broken tier into one per-kg rate and apply it to any broken-tier lot
-    // that has no exact-key allocation, so the tier's cost lands somewhere.
+    // Broken-tier keys — a generic "Broken Rice" lot (no exact grade key) gets
+    // the qty-weighted tier rate computed in computeResidualAllocation.
     const BROKEN_KEYS = ['broken', 'b1', 'b2', 'b3', 'csr', 'short_grain'];
-    let btAllocated = 0, btQtyKg = 0;
-    for (const k of BROKEN_KEYS) {
-      const a = alloc[k];
-      if (a && a.qty > 0) { btAllocated += a.costPerKg * a.qty * 1000; btQtyKg += a.qty * 1000; }
-    }
-    const brokenTierCostPerKg = btQtyKg > 0 ? btAllocated / btQtyKg : 0;
     let updatedLots = 0;
     for (const lot of outLots) {
       let costKg;
@@ -2097,7 +2114,11 @@ const inventoryService = {
       });
       updatedLots += 1;
     }
-    return { batchId, totalBatchCostPool, finishedCostPerKg: alloc.finished.costPerKg, updatedLots, outputLotIds: outLots.map((l) => l.id) };
+    return {
+      batchId, netPurchase: a.netPurchase, byproductValue: a.byproductValue,
+      finishedCostPerKg: a.finishedCostPerKg, clamped: a.clamped,
+      updatedLots, outputLotIds: outLots.map((l) => l.id),
+    };
   },
 
   // Cascade a corrected raw-lot cost into every batch that consumed it:
@@ -2205,7 +2226,11 @@ const inventoryService = {
   // left intact and only logged. Call inside a transaction.
   async recomputeBatchOutputsAfterPriceChange(trx, batchId, { userId } = {}) {
     const realloc = await inventoryService.reallocateBatchCosts(trx, batchId);
-    const summary = { reallocated: !!(realloc && !realloc.skipped), cogsUpdated: 0, cogsLockedSkipped: 0 };
+    const summary = {
+      reallocated: !!(realloc && !realloc.skipped), cogsUpdated: 0, cogsLockedSkipped: 0,
+      finishedCostPerKg: realloc?.finishedCostPerKg, netPurchase: realloc?.netPurchase,
+      byproductValue: realloc?.byproductValue, clamped: realloc?.clamped,
+    };
     if (!realloc || realloc.skipped) return summary;
 
     const outLotIds = realloc.outputLotIds || [];

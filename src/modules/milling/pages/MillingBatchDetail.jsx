@@ -142,10 +142,25 @@ export default function MillingBatchDetail() {
   const [showSupplierModal, setShowSupplierModal] = useState(false);
   const [selectedSupplier, setSelectedSupplier] = useState('');
   const [priceForm, setPriceForm] = useState({
-    finished: '', broken: '', sortex: '', bran: '', husk: '',
+    broken: '', sortex: '', bran: '', husk: '',
     b1: '', b2: '', b3: '', csr: '', shortGrain: '',
+    // Residual costing inputs (PKR totals) — finished cost is derived.
+    millingCost: '', otherExpenses: '',
   });
   const [priceLoading, setPriceLoading] = useState(false);
+
+  // Default Milling Cost / Other Expenses for the costing box: use the operator's
+  // saved manual values, else fall back to the milling fee total and the recorded
+  // processing costs (consumption/packing). Editable in the modal.
+  function defaultCostInputs() {
+    const rawQty = parseFloat(batch?.rawQtyMT) || 0;
+    const feeTotal = (parseFloat(batch?.millingFeePerKg) || 0) * rawQty * 1000;
+    const proc = Object.entries(batch?.costs || {}).reduce(
+      (s, [k, v]) => (k === 'raw_rice' ? s : s + (parseFloat(v) || 0)), 0);
+    const milling = batch?.manualMillingCostPkr != null ? parseFloat(batch.manualMillingCostPkr) : feeTotal;
+    const other = batch?.manualOtherExpensesPkr != null ? parseFloat(batch.manualOtherExpensesPkr) : proc;
+    return { millingCost: String(Math.round(milling)), otherExpenses: String(Math.round(other)) };
+  }
   const [vehicleForm, setVehicleForm] = useState({
     vehicleNo: '', driverName: '', driverPhone: '',
     weightKg: '', totalBags: '',
@@ -390,7 +405,6 @@ export default function MillingBatchDetail() {
           const res = await millingApi.getLastPrices();
           const lp = res?.data?.lastPrices || {};
           setPriceForm({
-            finished: String(lp.finished || commodityPrices.finished),
             broken: String(lp.broken || commodityPrices.broken),
             sortex: String(lp.sortex || commodityPrices.sortex),
             bran: String(lp.bran || commodityPrices.bran),
@@ -400,6 +414,7 @@ export default function MillingBatchDetail() {
             b3: String(lp.b3 || lp.broken || commodityPrices.broken),
             csr: String(lp.csr || lp.broken || commodityPrices.broken),
             shortGrain: String(lp.short_grain || lp.broken || commodityPrices.broken),
+            ...defaultCostInputs(),
           });
         } catch { /* use defaults */ }
         setPriceLoading(false);
@@ -2145,104 +2160,118 @@ export default function MillingBatchDetail() {
       </Modal>
 
       {/* Confirm Product Prices Modal */}
-      <Modal isOpen={showPriceModal} onClose={() => setShowPriceModal(false)} title="Confirm Product Prices" size="md">
-        <div className="space-y-4">
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
-            Confirm today's market prices for the costing sheet. Previous prices are pre-filled.
-          </div>
-          {(() => {
-            const sortexMT = parseFloat(batch?.sortexRejectsMT || batch?.sortex_rejects_mt) || 0;
-            const branMT  = parseFloat(batch?.branMT) || 0;
-            const huskMT  = parseFloat(batch?.huskMT) || 0;
-            // Per-grade broken quantities — when any have value, we ask
-            // for per-grade prices instead of a single aggregate broken
-            // price (each grade lot will carry its own market value).
-            const b1MT = parseFloat(batch?.b1MT) || 0;
-            const b2MT = parseFloat(batch?.b2MT) || 0;
-            const b3MT = parseFloat(batch?.b3MT) || 0;
-            const csrMT = parseFloat(batch?.csrMT) || 0;
-            const sgMT = parseFloat(batch?.shortGrainMT) || 0;
-            const gradeTotal = b1MT + b2MT + b3MT + csrMT + sgMT;
-            const usePerGrade = gradeTotal > 0;
-            // Only render price inputs for outputs the batch actually has.
-            // Bran/Husk get a slot only if the batch carries a non-zero
-            // legacy quantity, so new batches see a clean form.
-            const fields = [
-              { key: 'finished', label: 'Finished Rice (PKR/MT)', qty: parseFloat(batch?.actualFinishedMT) || 0, required: true },
-              ...(usePerGrade ? [
-                { key: 'b1',         label: 'Broken B1 (PKR/MT)',         qty: b1MT },
-                { key: 'b2',         label: 'Broken B2 (PKR/MT)',         qty: b2MT },
-                { key: 'b3',         label: 'Broken B3 (PKR/MT)',         qty: b3MT },
-                { key: 'csr',        label: 'Broken CSR (PKR/MT)',        qty: csrMT },
-                { key: 'shortGrain', label: 'Broken Short Grain (PKR/MT)', qty: sgMT },
-              ] : [
-                { key: 'broken', label: 'Broken Rice (PKR/MT)', qty: parseFloat(batch?.brokenMT) || 0 },
-              ]),
-              { key: 'sortex',   label: 'Sortex Rejects (PKR/MT)', qty: sortexMT },
-              ...(branMT > 0 ? [{ key: 'bran', label: 'Rice Bran (legacy, PKR/MT)', qty: branMT }] : []),
-              ...(huskMT > 0 ? [{ key: 'husk', label: 'Rice Husk (legacy, PKR/MT)', qty: huskMT }] : []),
-            ].filter(f => f.required || f.qty > 0);
+      <Modal isOpen={showPriceModal} onClose={() => setShowPriceModal(false)} title="Costing — by-product prices & finished cost" size="md">
+        {(() => {
+          const sortexMT = parseFloat(batch?.sortexRejectsMT || batch?.sortex_rejects_mt) || 0;
+          const branMT  = parseFloat(batch?.branMT) || 0;
+          const huskMT  = parseFloat(batch?.huskMT) || 0;
+          const b1MT = parseFloat(batch?.b1MT) || 0, b2MT = parseFloat(batch?.b2MT) || 0;
+          const b3MT = parseFloat(batch?.b3MT) || 0, csrMT = parseFloat(batch?.csrMT) || 0;
+          const sgMT = parseFloat(batch?.shortGrainMT) || 0;
+          const finishedMT = parseFloat(batch?.actualFinishedMT) || 0;
+          const usePerGrade = (b1MT + b2MT + b3MT + csrMT + sgMT) > 0;
+          // By-product sale-price inputs (drive the credit). Finished is derived.
+          const byFields = [
+            ...(usePerGrade ? [
+              { key: 'b1', label: 'Broken B1', qty: b1MT }, { key: 'b2', label: 'Broken B2', qty: b2MT },
+              { key: 'b3', label: 'Broken B3', qty: b3MT }, { key: 'csr', label: 'Broken CSR', qty: csrMT },
+              { key: 'shortGrain', label: 'Short Grain', qty: sgMT },
+            ] : [{ key: 'broken', label: 'Broken Rice', qty: parseFloat(batch?.brokenMT) || 0 }]),
+            { key: 'sortex', label: 'Sortex Rejects', qty: sortexMT },
+            ...(branMT > 0 ? [{ key: 'bran', label: 'Rice Bran', qty: branMT }] : []),
+            ...(huskMT > 0 ? [{ key: 'husk', label: 'Rice Husk', qty: huskMT }] : []),
+          ].filter(f => f.qty > 0);
 
-            const totalRevenue = fields.reduce((s, f) => s + f.qty * (parseFloat(priceForm[f.key]) || 0), 0);
+          const num = (v) => parseFloat(v) || 0;
+          const rawPurchase = num(batch?.costs?.raw_rice);
+          const millingCost = num(priceForm.millingCost);
+          const otherExpenses = num(priceForm.otherExpenses);
+          const netPurchase = rawPurchase + millingCost + otherExpenses;
+          const byproductValue = byFields.reduce((s, f) => s + f.qty * num(priceForm[f.key]), 0);
+          const readyRiceCost = Math.max(0, netPurchase - byproductValue);
+          const clamped = netPurchase - byproductValue < 0;
+          const finishedPerMT = finishedMT > 0 ? readyRiceCost / finishedMT : 0;
+          const Rs = (n) => 'Rs ' + Math.round(n).toLocaleString('en-PK');
 
-            return (
-              <>
-                <div className="grid grid-cols-2 gap-4">
-                  {fields.map(f => (
+          return (
+            <div className="space-y-4">
+              {/* Net Purchase */}
+              <div>
+                <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-2">Net Purchase</p>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-600 mb-1">Raw Purchase</label>
+                    <div className="w-full border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm text-gray-700">{Rs(rawPurchase)}</div>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 mb-1">Milling Cost</label>
+                    <input type="number" min="0" value={priceForm.millingCost}
+                      onChange={e => setPriceForm(p => ({ ...p, millingCost: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 mb-1">Other Expenses</label>
+                    <input type="number" min="0" value={priceForm.otherExpenses}
+                      onChange={e => setPriceForm(p => ({ ...p, otherExpenses: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+                  </div>
+                </div>
+                <div className="flex justify-between mt-2 text-sm border-t pt-1.5">
+                  <span className="text-gray-600">Raw {Rs(rawPurchase)} + Milling {Rs(millingCost)} + Other {Rs(otherExpenses)}</span>
+                  <span className="font-bold text-gray-900">Net Purchase {Rs(netPurchase)}</span>
+                </div>
+              </div>
+
+              {/* By-product sale prices */}
+              <div>
+                <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-2">By-product sale price (PKR/MT)</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {byFields.map(f => (
                     <div key={f.key}>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        {f.label}
-                        <span className="text-xs text-gray-400 font-normal ml-1">· {f.qty.toFixed(2)} MT</span>
-                      </label>
-                      <input
-                        type="number"
-                        value={priceForm[f.key]}
+                      <label className="block text-xs text-gray-600 mb-1">{f.label}<span className="text-gray-400 ml-1">· {f.qty.toFixed(2)} MT</span></label>
+                      <input type="number" min="0" value={priceForm[f.key] ?? ''}
                         onChange={e => setPriceForm(p => ({ ...p, [f.key]: e.target.value }))}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                      />
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
                     </div>
                   ))}
                 </div>
-                {batch && (
-                  <div className="bg-gray-50 rounded-lg p-3 text-xs space-y-1">
-                    {fields.map(f => (
-                      <div key={f.key} className="flex justify-between">
-                        <span className="text-gray-500">{f.label.replace(/\s*\(.*\)/, '')} revenue</span>
-                        <span className="font-bold">Rs {Math.round(f.qty * (parseFloat(priceForm[f.key]) || 0)).toLocaleString()}</span>
-                      </div>
-                    ))}
-                    <div className="flex justify-between border-t pt-1 mt-1">
-                      <span className="text-gray-700 font-medium">Total Revenue</span>
-                      <span className="font-bold text-green-700">Rs {Math.round(totalRevenue).toLocaleString()}</span>
-                    </div>
-                  </div>
-                )}
-              </>
-            );
-          })()}
-          <div className="flex justify-end gap-2 pt-2 border-t">
-            <button onClick={() => setShowPriceModal(false)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Skip for Now</button>
-            <button onClick={async () => {
-              try {
-                await millingApi.confirmPrices(batchId, {
-                  finished_price_per_mt: parseFloat(priceForm.finished) || 0,
-                  broken_price_per_mt: parseFloat(priceForm.broken) || 0,
-                  bran_price_per_mt: parseFloat(priceForm.bran) || 0,
-                  husk_price_per_mt: parseFloat(priceForm.husk) || 0,
-                  sortex_rejects_price_per_mt: parseFloat(priceForm.sortex) || 0,
-                  b1_price_per_mt: parseFloat(priceForm.b1) || 0,
-                  b2_price_per_mt: parseFloat(priceForm.b2) || 0,
-                  b3_price_per_mt: parseFloat(priceForm.b3) || 0,
-                  csr_price_per_mt: parseFloat(priceForm.csr) || 0,
-                  short_grain_price_per_mt: parseFloat(priceForm.shortGrain) || 0,
-                });
-                addToast('Product prices confirmed for costing sheet');
-                invalidateBatch();
-                setShowPriceModal(false);
-              } catch (err) { addToast(err.message || 'Failed', 'error'); }
-            }} className="px-4 py-2 text-sm text-white bg-green-600 rounded-lg hover:bg-green-700">Confirm Prices</button>
-          </div>
-        </div>
+                <div className="flex justify-between mt-2 text-sm"><span className="text-gray-600">By-product value (credit)</span><span className="font-semibold text-emerald-700">− {Rs(byproductValue)}</span></div>
+              </div>
+
+              {/* Derived finished cost */}
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <div className="flex justify-between text-sm"><span className="text-amber-700">Ready Rice Cost (Net Purchase − By-product)</span><span className="font-bold text-amber-900">{Rs(readyRiceCost)}</span></div>
+                <div className="flex justify-between text-base mt-1"><span className="text-amber-700 font-medium">Finished Rice Cost</span><span className="font-bold text-amber-900">{Rs(finishedPerMT)}/MT · {Rs(finishedPerMT / 1000)}/kg</span></div>
+                <p className="text-[11px] text-amber-600 mt-1">{finishedMT.toFixed(2)} MT finished. Derived automatically — changes as you edit the figures above.</p>
+                {clamped && <p className="text-[11px] text-red-600 mt-1 font-medium">By-products exceed Net Purchase — finished cost floored at 0. Check the figures.</p>}
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <button onClick={() => setShowPriceModal(false)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Skip for Now</button>
+                <button onClick={async () => {
+                  try {
+                    await millingApi.confirmPrices(batchId, {
+                      broken_price_per_mt: num(priceForm.broken),
+                      bran_price_per_mt: num(priceForm.bran),
+                      husk_price_per_mt: num(priceForm.husk),
+                      sortex_rejects_price_per_mt: num(priceForm.sortex),
+                      b1_price_per_mt: num(priceForm.b1),
+                      b2_price_per_mt: num(priceForm.b2),
+                      b3_price_per_mt: num(priceForm.b3),
+                      csr_price_per_mt: num(priceForm.csr),
+                      short_grain_price_per_mt: num(priceForm.shortGrain),
+                      manual_milling_cost_pkr: millingCost,
+                      manual_other_expenses_pkr: otherExpenses,
+                    });
+                    addToast('Costs saved — finished cost computed from Net Purchase − by-products');
+                    invalidateBatch();
+                    setShowPriceModal(false);
+                  } catch (err) { addToast(err.message || 'Failed', 'error'); }
+                }} className="px-4 py-2 text-sm text-white bg-green-600 rounded-lg hover:bg-green-700">Save Costs</button>
+              </div>
+            </div>
+          );
+        })()}
       </Modal>
 
       {/* Price Confirmation Banner — show if batch completed but prices not confirmed */}
@@ -2255,13 +2284,19 @@ export default function MillingBatchDetail() {
             try {
               const res = await millingApi.getLastPrices();
               const lp = res?.data?.lastPrices || {};
-              setPriceForm({
-                finished: String(lp.finished || commodityPrices.finished),
+              setPriceForm(p => ({
+                ...p,
                 broken: String(lp.broken || commodityPrices.broken),
                 sortex: String(lp.sortex || commodityPrices.sortex),
                 bran: String(lp.bran || commodityPrices.bran),
                 husk: String(lp.husk || commodityPrices.husk),
-              });
+                b1: String(lp.b1 || lp.broken || commodityPrices.broken),
+                b2: String(lp.b2 || lp.broken || commodityPrices.broken),
+                b3: String(lp.b3 || lp.broken || commodityPrices.broken),
+                csr: String(lp.csr || lp.broken || commodityPrices.broken),
+                shortGrain: String(lp.short_grain || lp.broken || commodityPrices.broken),
+                ...defaultCostInputs(),
+              }));
             } catch {}
             setPriceLoading(false);
             setShowPriceModal(true);

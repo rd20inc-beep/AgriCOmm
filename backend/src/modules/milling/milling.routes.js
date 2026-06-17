@@ -426,15 +426,20 @@ router.put('/batches/:id/prices', authorize('milling', 'edit'),
     try {
       const id = await controller.resolveBatchId ? await controller.resolveBatchId(req.params.id) : parseInt(req.params.id);
       const {
-        finished_price_per_mt, broken_price_per_mt,
+        broken_price_per_mt,
         bran_price_per_mt, husk_price_per_mt,
         sortex_rejects_price_per_mt,
         b1_price_per_mt, b2_price_per_mt, b3_price_per_mt,
         csr_price_per_mt, short_grain_price_per_mt,
+        // Residual costing inputs — operator-entered Milling Cost and Other
+        // Expenses (PKR totals). Finished price is DERIVED, not accepted here.
+        manual_milling_cost_pkr, manual_other_expenses_pkr,
       } = req.body;
 
+      // 0 is a valid manual cost; only blank/invalid → null.
+      const numOrNull = (v) => (v === '' || v == null || Number.isNaN(parseFloat(v))) ? null : parseFloat(v);
+
       const priceUpdate = {
-        finished_price_per_mt: parseFloat(finished_price_per_mt) || null,
         broken_price_per_mt: parseFloat(broken_price_per_mt) || null,
         bran_price_per_mt: parseFloat(bran_price_per_mt) || null,
         husk_price_per_mt: parseFloat(husk_price_per_mt) || null,
@@ -444,18 +449,23 @@ router.put('/batches/:id/prices', authorize('milling', 'edit'),
         b3_price_per_mt: parseFloat(b3_price_per_mt) || null,
         csr_price_per_mt: parseFloat(csr_price_per_mt) || null,
         short_grain_price_per_mt: parseFloat(short_grain_price_per_mt) || null,
+        manual_milling_cost_pkr: numOrNull(manual_milling_cost_pkr),
+        manual_other_expenses_pkr: numOrNull(manual_other_expenses_pkr),
         prices_confirmed: true,
       };
 
-      // Persist the prices AND re-run the cost allocation across the batch's
-      // output lots in one transaction — so a by-product priced after yield
-      // finally gets its market-value share (and finished stops absorbing the
-      // whole pool), with COGS recomputed for any non-locked order/sale.
+      // Persist prices + manual costs, then run the residual cost engine across
+      // the batch's output lots (finished = Net Purchase − by-product value),
+      // recomputing COGS for any non-locked order/sale. Stamp the derived
+      // finished cost back onto finished_price_per_mt for display.
       const inventoryService = require('../inventory/inventory.service');
       const result = await db.transaction(async (trx) => {
         const [updated] = await trx('milling_batches').where({ id })
           .update({ ...priceUpdate, updated_at: trx.fn.now() }).returning('*');
         const realloc = await inventoryService.recomputeBatchOutputsAfterPriceChange(trx, id, { userId: req.user?.id });
+        if (realloc && realloc.finishedCostPerKg != null) {
+          await trx('milling_batches').where({ id }).update({ finished_price_per_mt: realloc.finishedCostPerKg * 1000 });
+        }
         return { updated, realloc };
       });
 

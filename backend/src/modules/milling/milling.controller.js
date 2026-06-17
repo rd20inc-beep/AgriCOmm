@@ -877,106 +877,49 @@ const millingController = {
         const effectiveCostPerMT = finished > 0 ? batchCostTotal / finished : 0;
 
         // =================================================================
-        // PHASE 3: Market-Value-Based Joint Cost Allocation
+        // PHASE 3: Residual (by-product-credit) cost allocation
+        // Finished = max(0, NetPurchase − Σ by-product sale value); by-products
+        // valued at their sale price. NetPurchase = raw + milling + other (manual
+        // values when set, else fee + recorded processing costs). The same
+        // computeResidualAllocation runs on price-confirm, so numbers match.
         // =================================================================
-
-        const rawQty = parseFloat(batch.raw_qty_mt) || 0;
-        const millingFee = parseFloat(batch.milling_fee_per_kg) || 0;
-
-        // 1. Compute TOTAL BATCH COST POOL (all costs tied to this batch)
         const rawCostTotal = parseFloat(
           (await trx('milling_costs').where({ batch_id: batch.id })
             .where('category', 'raw_rice').sum('amount as total').first())?.total
         ) || 0;
-
         const processingCosts = parseFloat(
           (await trx('milling_costs').where({ batch_id: batch.id })
             .whereNot('category', 'raw_rice').sum('amount as total').first())?.total
         ) || 0;
 
-        const millingFeeTotal = millingFee * rawQty * 1000; // fee per KG × raw KG
-        const totalBatchCostPool = rawCostTotal + processingCosts + millingFeeTotal;
-
-        // 2. Get market prices (from batch if confirmed, otherwise block or use last known)
-        const finishedPrice = parseFloat(batch.finished_price_per_mt) || 0;
-        const brokenPrice = parseFloat(batch.broken_price_per_mt) || 0;
-        const branPrice = parseFloat(batch.bran_price_per_mt) || 0;
-        const huskPrice = parseFloat(batch.husk_price_per_mt) || 0;
-        const sortexPrice = parseFloat(batch.sortex_rejects_price_per_mt) || 0;
-        // Per-grade broken prices — fall back to the aggregate broken
-        // price when a grade-specific price hasn't been set yet.
-        const b1Price = parseFloat(batch.b1_price_per_mt) || brokenPrice;
-        const b2Price = parseFloat(batch.b2_price_per_mt) || brokenPrice;
-        const b3Price = parseFloat(batch.b3_price_per_mt) || brokenPrice;
-        const csrPrice = parseFloat(batch.csr_price_per_mt) || brokenPrice;
-        const sgPrice = parseFloat(batch.short_grain_price_per_mt) || brokenPrice;
-
-        // 3. Compute market values for each saleable output. Per-grade
-        // broken entries replace the aggregate "broken" line whenever
-        // any grade has qty > 0 — that way each grade gets its own
-        // share of the joint cost based on its own market value.
-        const gradeTotal = b1 + b2 + b3 + csr + shortGrain;
-        const hasPerGradeBroken = gradeTotal > 0;
-        const outputValues = {
-          finished: { qty: finished, price: finishedPrice, marketValue: finished * finishedPrice },
-          ...(hasPerGradeBroken ? {
-            b1:          { qty: b1,         price: b1Price,  marketValue: b1 * b1Price },
-            b2:          { qty: b2,         price: b2Price,  marketValue: b2 * b2Price },
-            b3:          { qty: b3,         price: b3Price,  marketValue: b3 * b3Price },
-            csr:         { qty: csr,        price: csrPrice, marketValue: csr * csrPrice },
-            short_grain: { qty: shortGrain, price: sgPrice,  marketValue: shortGrain * sgPrice },
-          } : {
-            broken:    { qty: broken,  price: brokenPrice,  marketValue: broken * brokenPrice },
-          }),
-          bran:     { qty: bran,    price: branPrice,    marketValue: bran * branPrice },
-          husk:     { qty: husk,    price: huskPrice,    marketValue: husk * huskPrice },
-          sortex:   { qty: sortex,  price: sortexPrice,  marketValue: sortex * sortexPrice },
-        };
-        const totalOutputMarketValue = Object.values(outputValues).reduce((s, o) => s + o.marketValue, 0);
-
-        // 4. Allocate costs proportionally by market value
+        const a = inventoryService.computeResidualAllocation(batch, rawCostTotal, processingCosts);
+        const finAlloc = { qty: finished, costPerKg: a.finishedCostPerKg, costPerMT: a.finishedCostPerKg * 1000 };
         const allocations = {};
-        for (const [name, o] of Object.entries(outputValues)) {
-          if (o.qty > 0 && totalOutputMarketValue > 0) {
-            const share = o.marketValue / totalOutputMarketValue;
-            const allocatedCost = totalBatchCostPool * share;
-            const costPerKg = allocatedCost / (o.qty * 1000);
-            allocations[name] = {
-              qty: o.qty,
-              marketValue: o.marketValue,
-              share: share,
-              allocatedCost: allocatedCost,
-              costPerKg: costPerKg,
-              costPerMT: costPerKg * 1000,
-            };
-          } else {
-            allocations[name] = { qty: o.qty, marketValue: 0, share: 0, allocatedCost: 0, costPerKg: 0, costPerMT: 0 };
-          }
-        }
+        for (const [k, perKg] of Object.entries(a.byCostPerKg)) allocations[k] = { costPerKg: perKg };
 
-        // 5. Update batch with full cost decomposition
-        const finAlloc = allocations.finished;
         await trx('milling_batches').where({ id }).update({
           raw_cost_total: rawCostTotal,
-          raw_cost_per_kg_finished: finAlloc.qty > 0 ? rawCostTotal / (finAlloc.qty * 1000) : 0,
-          milling_cost_per_kg_finished: finAlloc.qty > 0 ? (processingCosts + millingFeeTotal) / (finAlloc.qty * 1000) : 0,
-          total_cost_per_kg_finished: finAlloc.costPerKg,
+          raw_cost_per_kg_finished: a.finishedCostPerKg * a.rawFrac,
+          milling_cost_per_kg_finished: a.finishedCostPerKg * a.millFrac,
+          total_cost_per_kg_finished: a.finishedCostPerKg,
         });
 
-        // 6. Store market price allocation snapshot
+        // Snapshot — finished is the DERIVED residual cost; by-products keep their
+        // entered sale prices.
         await trx('milling_output_market_prices').insert({
           batch_id: batch.id,
-          finished_price_per_mt: finishedPrice,
-          broken_price_per_mt: brokenPrice,
-          bran_price_per_mt: branPrice,
-          husk_price_per_mt: huskPrice,
+          finished_price_per_mt: a.finishedCostPerKg * 1000,
+          broken_price_per_mt: parseFloat(batch.broken_price_per_mt) || 0,
+          bran_price_per_mt: parseFloat(batch.bran_price_per_mt) || 0,
+          husk_price_per_mt: parseFloat(batch.husk_price_per_mt) || 0,
           confirmed_by: req.user?.id || null,
           confirmed_at: trx.fn.now(),
           notes: JSON.stringify({
-            totalBatchCost: totalBatchCostPool,
-            totalMarketValue: totalOutputMarketValue,
-            sortexPricePerMT: sortexPrice,
-            allocations,
+            model: 'residual',
+            netPurchase: a.netPurchase,
+            byproductValue: a.byproductValue,
+            finishedCostPerKg: a.finishedCostPerKg,
+            clamped: a.clamped,
           }),
         });
 
@@ -995,13 +938,10 @@ const millingController = {
           sortexMT: parseFloat(sortex),
           productName: riceTypeName || 'Finished Rice',
           costPerMT: finAlloc.costPerMT,
-          // Finished rice carries its market-value SHARE of the pool (finAlloc
-          // .costPerKg), not the whole pool — otherwise priced by-products would
-          // double-count. Split that share into raw vs milling in the same ratio
-          // the pool itself is composed, so raw+milling = the allocated share and
-          // Σ(all outputs) = the pool.
-          rawCostComponent: totalBatchCostPool > 0 ? finAlloc.costPerKg * (rawCostTotal / totalBatchCostPool) : 0,
-          millingCostComponent: totalBatchCostPool > 0 ? finAlloc.costPerKg * ((processingCosts + millingFeeTotal) / totalBatchCostPool) : 0,
+          // Finished rice carries the RESIDUAL cost (Net Purchase − by-product
+          // value), split into raw vs milling in the Net Purchase ratio.
+          rawCostComponent: finAlloc.costPerKg * a.rawFrac,
+          millingCostComponent: finAlloc.costPerKg * a.millFrac,
           // Pass per-output allocated costs for byproducts. When the
           // batch has per-grade broken outputs, each grade carries its
           // own cost (derived from its own market value share);
