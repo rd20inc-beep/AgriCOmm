@@ -1334,7 +1334,11 @@ export default function MillingBatchDetail() {
           // not a paddy arrival price — so it's never "missing" for a blend.
           const missingPrice = !inputPriceMT && !batch.isServiceMilling && !isBlend;
           const rawMaterialCostFromQuality = batch.rawQtyMT * inputPriceMT;
-          const manualRawCost = parseFloat(safeCosts.rawRice) || 0;
+          // useMillingBatch keys costs by their DB category, so the raw cost is
+          // under `raw_rice` (snake_case); `rawRice` is never set. Reading only the
+          // camelCase key left effectiveRawCost at 0 for blends (which have no
+          // paddy arrival price), so the blend raw-material footer showed Rs 0.
+          const manualRawCost = parseFloat(safeCosts.rawRice ?? safeCosts.raw_rice) || 0;
           const effectiveRawCost = manualRawCost > 0 ? manualRawCost : rawMaterialCostFromQuality;
 
           // By-product values — prefer batch-confirmed prices, fall back to live commodity rates.
