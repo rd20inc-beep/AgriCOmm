@@ -229,6 +229,8 @@ const reportingService = {
         'eo.price_per_mt',
         'eo.currency',
         'eo.contract_value',
+        'eo.contract_value_pkr_locked',
+        'eo.inventory_cogs_total_pkr',
         'eo.status',
         'eo.created_at'
       );
@@ -261,11 +263,18 @@ const reportingService = {
     }
 
     const data = orders.map((o) => {
-      const revenue = parseFloat(o.contract_value) || 0;
+      // Revenue must be in PKR to compare against PKR costs. Use the locked PKR
+      // contract value (contract_value_pkr_locked, set when the FX rate was
+      // booked); fall back to the raw contract value only if it's missing.
+      const contractCur = parseFloat(o.contract_value) || 0;          // original currency
+      const revenuePkr = parseFloat(o.contract_value_pkr_locked) || contractCur;
       const orderCosts = costMap[o.id] || { total: 0, breakdown: {} };
-      const grossProfit = revenue - orderCosts.total;
-      const margin = revenue > 0 ? parseFloat(((grossProfit / revenue) * 100).toFixed(2)) : 0;
-      const costPerMT = parseFloat(o.qty_mt) > 0 ? parseFloat((orderCosts.total / parseFloat(o.qty_mt)).toFixed(2)) : 0;
+      const opCostsPkr = orderCosts.total;                            // export operational costs (PKR)
+      const cogsPkr = parseFloat(o.inventory_cogs_total_pkr) || 0;    // rice COGS (PKR, 0 until milled)
+      const totalCost = opCostsPkr + cogsPkr;
+      const grossProfit = revenuePkr - totalCost;
+      const margin = revenuePkr > 0 ? parseFloat(((grossProfit / revenuePkr) * 100).toFixed(2)) : 0;
+      const costPerMT = parseFloat(o.qty_mt) > 0 ? parseFloat((totalCost / parseFloat(o.qty_mt)).toFixed(2)) : 0;
 
       return {
         id: o.id,
@@ -276,8 +285,12 @@ const reportingService = {
         qtyMT: parseFloat(o.qty_mt),
         pricePerMT: parseFloat(o.price_per_mt),
         currency: o.currency,
-        revenue,
-        costs: orderCosts.total,
+        contractValue: contractCur,   // original-currency contract value (for display)
+        revenue: revenuePkr,          // PKR (kept name for back-compat)
+        revenuePkr,
+        costs: totalCost,             // PKR: operational + COGS
+        opCostsPkr,
+        cogsPkr,
         costBreakdown: orderCosts.breakdown,
         grossProfit,
         margin,

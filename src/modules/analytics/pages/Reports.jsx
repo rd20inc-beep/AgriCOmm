@@ -307,15 +307,15 @@ function OrdersTab({ params }) {
   const { data: rows = [], isLoading } = useOrderProfitability(params);
 
   const sorted = useMemo(() =>
-    [...rows].sort((a, b) => (parseFloat(b.bookedProfitPkr) || 0) - (parseFloat(a.bookedProfitPkr) || 0)),
+    [...rows].sort((a, b) => (parseFloat(b.grossProfit) || 0) - (parseFloat(a.grossProfit) || 0)),
     [rows]);
 
   const chartData = useMemo(() =>
     sorted.slice(0, 10).map(r => ({
       name: r.orderNo,
-      Revenue: parseFloat(r.revenuePkrBooked) || 0,
-      Cost:    parseFloat(r.totalCostPkr)     || 0,
-      Profit:  parseFloat(r.bookedProfitPkr)  || 0,
+      Revenue: parseFloat(r.revenuePkr) || 0,
+      Cost:    parseFloat(r.costs)      || 0,
+      Profit:  parseFloat(r.grossProfit) || 0,
     })),
     [sorted]);
 
@@ -324,20 +324,20 @@ function OrdersTab({ params }) {
 
   return (
     <div className="space-y-4">
-      <SectionHeader title="Order-level Profitability" subtitle="Top 10 by booked profit (PKR)" />
+      <SectionHeader title="Order-level Profitability" subtitle="Top 10 by gross profit (PKR) — revenue at locked FX rate, cost = operational + COGS" />
       <ChartBlock data={chartData} />
       <Table
-        head={['Order', 'Customer', 'Status', 'Currency', 'Revenue (PKR)', 'Cost (PKR)', 'Profit (PKR)', 'Margin']}
-        align={['left','left','left','left','right','right','right','right']}
+        head={['Order', 'Customer', 'Status', 'Contract', 'Revenue (PKR)', 'Cost (PKR)', 'Profit (PKR)', 'Margin']}
+        align={['left','left','left','right','right','right','right','right']}
         rows={sorted.map(r => [
           <Link to={`/export/${r.orderNo || r.id}`} className="text-blue-600 hover:underline font-medium">{r.orderNo}</Link>,
           r.customerName || '—',
           <StatusChip s={r.status} />,
-          r.currency || 'PKR',
-          fmtPKR(r.revenuePkrBooked),
-          fmtPKR(r.totalCostPkr),
-          <ProfitCell v={r.bookedProfitPkr} />,
-          fmtPct(r.marginPct),
+          <span className="text-xs text-gray-600">{(r.currency || 'PKR')} {Number(r.contractValue || 0).toLocaleString()}</span>,
+          fmtPKR(r.revenuePkr),
+          fmtPKR(r.costs),
+          <ProfitCell v={r.grossProfit} />,
+          fmtPct(r.margin),
         ])}
       />
     </div>
