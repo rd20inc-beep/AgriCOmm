@@ -699,6 +699,10 @@ const reportingService = {
       const arrivalData = qualityMap[s.supplier_id]?.arrival || {};
       const moistureVariance = Math.abs((arrivalData.avgMoisture || 0) - (sampleData.avgMoisture || 0));
       const brokenVariance = Math.abs((arrivalData.avgBroken || 0) - (sampleData.avgBroken || 0));
+      // Absolute arrival quality (falls back to sample) — more useful on its own
+      // than the variance when there's no second analysis to compare against.
+      const avgMoisture = parseFloat((arrivalData.avgMoisture || sampleData.avgMoisture || 0).toFixed(2));
+      const avgBroken = parseFloat((arrivalData.avgBroken || sampleData.avgBroken || 0).toFixed(2));
 
       const grn = grnMap[s.supplier_id] || { total_grn: 0, rejected_count: 0, total_value: 0 };
       const rejectionRate = parseInt(grn.total_grn, 10) > 0
@@ -715,6 +719,8 @@ const reportingService = {
         totalBatches: parseInt(s.total_batches, 10),
         totalQtyMT: parseFloat(s.total_qty_mt),
         avgYield,
+        avgMoisture,
+        avgBroken,
         avgMoistureVariance: parseFloat(moistureVariance.toFixed(2)),
         avgBrokenVariance: parseFloat(brokenVariance.toFixed(2)),
         rejectionRate,

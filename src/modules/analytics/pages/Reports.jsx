@@ -395,7 +395,7 @@ function CountriesTab({ params }) {
         rows={sorted.map(r => [
           r.country || '—',
           r.orderCount || 0,
-          (parseFloat(r.totalQtyMt) || 0).toFixed(1),
+          (parseFloat(r.totalQtyMT) || 0).toFixed(1),
           fmtPKR(r.totalRevenuePkr),
           <ProfitCell v={r.totalProfitPkr} />,
           fmtPct(r.avgMarginPct),
@@ -531,33 +531,64 @@ function InventoryTab() {
 }
 
 // ─── Tab: Quality ─────────────────────────────────────────────────────
+function QualityScoreChip({ v }) {
+  const n = parseFloat(v) || 0;
+  const tone = n >= 70 ? 'bg-emerald-100 text-emerald-700' : n >= 50 ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700';
+  return <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${tone}`}>{n.toFixed(1)}</span>;
+}
+
 function QualityTab({ params }) {
   const { data: rows = [], isLoading } = useSupplierQualityRanking(params);
   if (isLoading) return <Skeleton />;
-  if (rows.length === 0) return <Empty msg="No quality data yet — record arrival samples on milling batches to populate this report." />;
+  if (!Array.isArray(rows) || rows.length === 0) return <Empty msg="No quality data yet — record arrival samples on milling batches to populate this report." />;
 
-  const sorted = [...rows].sort((a, b) => (parseFloat(b.avgYieldPct) || 0) - (parseFloat(a.avgYieldPct) || 0));
+  // Backend returns: supplierName, totalBatches, totalQtyMT, avgYield, avgMoisture,
+  // avgBroken, avgMoistureVariance, avgBrokenVariance, rejectionRate, qualityScore.
+  const sorted = [...rows].sort((a, b) => (parseFloat(b.qualityScore) || 0) - (parseFloat(a.qualityScore) || 0));
+  const totalBatches = rows.reduce((s, r) => s + (parseInt(r.totalBatches, 10) || 0), 0);
+  const totalQty = rows.reduce((s, r) => s + (parseFloat(r.totalQtyMT) || 0), 0);
+  const withYield = rows.filter((r) => (parseFloat(r.avgYield) || 0) > 0);
+  const avgYieldAll = withYield.length ? withYield.reduce((s, r) => s + parseFloat(r.avgYield), 0) / withYield.length : 0;
+  const best = sorted[0];
+  const anyVariance = rows.some((r) => (parseFloat(r.avgMoistureVariance) || 0) > 0 || (parseFloat(r.avgBrokenVariance) || 0) > 0);
 
   return (
-    <div className="space-y-4">
-      <SectionHeader title="Supplier Quality Ranking" subtitle="Yield + variance by supplier" />
-      <Table
-        head={['#', 'Supplier', 'Batches', 'Avg Yield', 'Avg Broken %', 'Avg Moisture %', 'Variance Flags']}
-        align={['left','left','right','right','right','right','right']}
-        rows={sorted.map((r, i) => [
-          i + 1,
-          r.supplierName || '—',
-          r.batchCount || 0,
-          fmtPct(r.avgYieldPct),
-          fmtPct(r.avgBrokenPct),
-          fmtPct(r.avgMoisturePct),
-          r.varianceFlags > 0 ? (
-            <span className="inline-flex items-center gap-1 text-rose-600 font-medium">
-              <AlertTriangle size={12} /> {r.varianceFlags}
-            </span>
-          ) : <span className="text-emerald-600 font-medium">none</span>,
-        ])}
-      />
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <SummaryCell label="Suppliers" value={String(rows.length)} />
+        <SummaryCell label="Milled batches" value={String(totalBatches)} />
+        <SummaryCell label="Raw input" value={`${totalQty.toLocaleString(undefined, { maximumFractionDigits: 1 })} MT`} />
+        <SummaryCell label="Avg yield" value={fmtPct(avgYieldAll)} />
+      </div>
+
+      {best && (parseFloat(best.avgYield) || 0) > 0 && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 text-sm text-emerald-900">
+          <span className="font-semibold">Top supplier:</span> {best.supplierName} — {fmtPct(best.avgYield)} avg yield across {best.totalBatches} batch{best.totalBatches === 1 ? '' : 'es'} (quality score {(parseFloat(best.qualityScore) || 0).toFixed(1)}).
+        </div>
+      )}
+
+      <div className="space-y-2">
+        <SectionHeader title="Supplier Quality Ranking" subtitle="Best quality score first — yield, arrival moisture/broken & rejection by supplier" />
+        <Table
+          head={['#', 'Supplier', 'Batches', 'Raw MT', 'Avg Yield', 'Moisture', 'Broken', 'Rejection', 'Score']}
+          align={['left', 'left', 'right', 'right', 'right', 'right', 'right', 'right', 'right']}
+          rows={sorted.map((r, i) => [
+            i + 1,
+            r.supplierName || '—',
+            parseInt(r.totalBatches, 10) || 0,
+            (parseFloat(r.totalQtyMT) || 0).toLocaleString(undefined, { maximumFractionDigits: 1 }),
+            (parseFloat(r.avgYield) || 0) > 0 ? fmtPct(r.avgYield) : '—',
+            (parseFloat(r.avgMoisture) || 0) > 0 ? fmtPct(r.avgMoisture) : '—',
+            (parseFloat(r.avgBroken) || 0) > 0 ? fmtPct(r.avgBroken) : '—',
+            `${(parseFloat(r.rejectionRate) || 0).toFixed(1)}%`,
+            <QualityScoreChip v={r.qualityScore} />,
+          ])}
+        />
+        <p className="text-[11px] text-gray-400">
+          Quality score = avg yield − moisture/broken variance − rejection rate.
+          {!anyVariance && ' Moisture/broken shown are arrival-sample averages; variance needs a second (post-milling) analysis to compute.'}
+        </p>
+      </div>
     </div>
   );
 }
