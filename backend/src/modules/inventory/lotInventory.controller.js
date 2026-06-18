@@ -1100,17 +1100,29 @@ module.exports = {
           cost_per_unit: landedPerKg * 1000,
         });
 
-        // Transport → a stored 'Transport' payable owed to the hauler, keyed on the
-        // lot so re-edits upsert instead of duplicating. Shows in Money Out and the
-        // hauler's supplier statement; rice supplier payable is unaffected.
-        const existingTp = await trx('payables').where({ source_table: 'lot_transport', source_id: parseInt(id, 10) }).first();
-        if (tc > 0 && haulerId) {
+        // Transport → a stored 'Transport' payable owed to the hauler PLUS a GL bill
+        // (Dr Operating Expenses / Cr Supplier Payable, stamped to the hauler) so it
+        // books the expense, shows on the hauler's statement, and settles via the
+        // normal Record Payment flow. Keyed on the lot so re-edits reconcile.
+        const lotId = parseInt(id, 10);
+        const existingTp = await trx('payables').where({ source_table: 'lot_transport', source_id: lotId }).first();
+        const paidSoFar = existingTp ? (parseFloat(existingTp.paid_amount) || 0) : 0;
+        const wantBill = tc > 0 && haulerId;
+        // Only reconcile journals while nothing has been paid, so a settled payment is
+        // never orphaned. Reverse any prior posted transport bill for this lot first.
+        if (paidSoFar <= 0.01) {
+          const priorJournals = await trx('journal_entries')
+            .where({ ref_type: 'Lot Transport', ref_no: lot.lot_no, status: 'Posted' }).select('id');
+          for (const j of priorJournals) {
+            await accountingService.reverseJournal(trx, { journalId: j.id, reason: 'Transport cost / hauler updated', userId: req.user?.id });
+          }
+        }
+        if (wantBill) {
           if (existingTp) {
-            const paid = parseFloat(existingTp.paid_amount) || 0;
             await trx('payables').where({ id: existingTp.id }).update({
               supplier_id: haulerId, category: 'Transport', original_amount: tc,
-              outstanding: Math.max(0, uc.round2(tc - paid)),
-              status: (tc - paid) <= 0.01 ? 'Paid' : (paid > 0 ? 'Partial' : 'Pending'),
+              outstanding: Math.max(0, uc.round2(tc - paidSoFar)),
+              status: (tc - paidSoFar) <= 0.01 ? 'Paid' : (paidSoFar > 0 ? 'Partial' : 'Pending'),
               linked_ref: lot.lot_no, updated_at: trx.fn.now(),
             });
           } else {
@@ -1118,14 +1130,21 @@ module.exports = {
             await trx('payables').insert({
               pay_no: payNo, entity: 'mill', payable_type: 'vendor', category: 'Transport',
               supplier_id: haulerId, linked_ref: lot.lot_no,
-              source_table: 'lot_transport', source_id: parseInt(id, 10),
+              source_table: 'lot_transport', source_id: lotId,
               original_amount: tc, paid_amount: 0, outstanding: tc, status: 'Pending',
               currency: 'PKR', notes: `Transport (hauler) for lot ${lot.lot_no}`,
             });
           }
-        } else if (existingTp && (parseFloat(existingTp.paid_amount) || 0) <= 0.01) {
-          // Transport cleared or hauler removed and nothing paid yet → drop it.
-          await trx('payables').where({ id: existingTp.id }).del();
+          if (paidSoFar <= 0.01) {
+            await accountingService.autoPost(trx, {
+              triggerEvent: 'expense_recorded', entity: 'mill', amount: tc, currency: 'PKR',
+              refType: 'Lot Transport', refNo: lot.lot_no,
+              description: `Transport (hauler) for lot ${lot.lot_no}`,
+              userId: req.user?.id, partyType: 'supplier', partyId: haulerId,
+            });
+          }
+        } else if (existingTp && paidSoFar <= 0.01) {
+          await trx('payables').where({ id: existingTp.id }).del(); // cleared/unpaid → drop (journal already reversed)
         }
 
         // Cascade the corrected cost into any batch that already consumed this

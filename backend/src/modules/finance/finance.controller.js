@@ -168,6 +168,7 @@ const financeController = {
             const base = { lotId: l.id, lotNo: l.lot_no, amount };
             if (c.key === 'transport') {
               const p = tpByLot[l.id];
+              base.haulerId = l.transport_vendor_id || null;
               base.haulerName = l.hauler_name || null;
               base.paid = p ? parseFloat(p.paid_amount) || 0 : 0;
               base.outstanding = p ? parseFloat(p.outstanding) || 0 : (l.transport_vendor_id ? amount : 0);
