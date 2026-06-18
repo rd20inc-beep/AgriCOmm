@@ -90,16 +90,16 @@ function subtypeLabel(s) {
 function fmtPKR(v) { return 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString(); }
 
 // Heuristic mirroring the backend deriveProductCode — strings that
-// look like auto-generated SKUs (PRD-DATETIME-…, PROD-…, long-digit
-// IDs, or anything longer than 18 chars) are hidden from the variety
-// badge so old data doesn't clutter the table.
+// look like auto-generated SKUs (PRD-DATETIME-…, PROD-…, long-digit IDs)
+// are hidden from the variety badge so old data doesn't clutter the table.
+// NB: no length cap — real rice variety names ("Super Fine Long Grain White
+// Rice") run well over 18 chars and must NOT be mistaken for a SKU.
 function looksLikeAutoSku(s) {
   if (!s) return false;
   const u = s.toUpperCase();
   if (/^PRD[-_]\d{6,}/.test(u)) return true;
   if (/^PROD[-_]/.test(u)) return true;
   if (/\d{8,}/.test(u)) return true;
-  if (u.length > 18) return true;
   return false;
 }
 
