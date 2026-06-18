@@ -5,7 +5,7 @@ import {
   ArrowLeft, Package, Truck, DollarSign, FileText, BarChart3,
   Plus, Save, Edit3, AlertTriangle, Warehouse, ShoppingBag, Scale,
   Activity, ChevronRight, TrendingUp, Clock, Factory, Play, Trash2, Loader2, Printer,
-  ArrowDownLeft, ArrowUpRight, Calendar, Hash,
+  ArrowDownLeft, ArrowUpRight, Calendar, Hash, Wrench, Boxes,
 } from 'lucide-react';
 import {
   useLotDetail, useRecordLotTransaction, useLocalSalesByLot,
@@ -1337,13 +1337,34 @@ function TransactionModal({ isOpen, onClose, lotId, lotNo, availableKg, bagWeigh
 }
 
 // ─── Cost Edit Modal ───
+const COST_FIELDS = [
+  { k: 'transport_cost', l: 'Transport', icon: Truck, perBag: false },
+  { k: 'labor_cost', l: 'Labor', icon: Wrench, perBag: false },
+  { k: 'unloading_cost', l: 'Unloading', icon: Warehouse, perBag: false },
+  { k: 'packing_cost', l: 'Packing', icon: Boxes, perBag: false },
+  { k: 'other_cost', l: 'Other', icon: DollarSign, perBag: false },
+  { k: 'bag_cost_per_bag', l: 'Bag Cost', icon: ShoppingBag, perBag: true },
+];
+
 function CostEditModal({ isOpen, onClose, lot, milled, addToast, refetch }) {
-  const [costs, setCosts] = useState({
+  const blank = {
     transport_cost: lot.transportCost || '', labor_cost: lot.laborCost || '', unloading_cost: lot.unloadingCost || '',
     packing_cost: lot.packingCost || '', other_cost: lot.otherCost || '', bag_cost_per_bag: lot.bagCostPerBag || '',
-  });
+  };
+  const [costs, setCosts] = useState(blank);
   const [saving, setSaving] = useState(false);
   const setC = (k, v) => setCosts(p => ({ ...p, [k]: v }));
+  // Reset to the lot's current values whenever the drawer opens.
+  useEffect(() => { if (isOpen) setCosts(blank); /* eslint-disable-next-line */ }, [isOpen]);
+
+  const netKg = parseFloat(lot.netWeightKg) || parseFloat(lot.grossWeightKg) || 0;
+  const bw = parseFloat(lot.bagWeightKg) || 50;
+  const bags = parseFloat(lot.totalBags) || (bw > 0 ? Math.round(netKg / bw) : 0);
+  const n = (k) => parseFloat(costs[k]) || 0;
+  const flatTotal = n('transport_cost') + n('labor_cost') + n('unloading_cost') + n('packing_cost') + n('other_cost');
+  const bagTotal = n('bag_cost_per_bag') * bags;
+  const totalAdditional = flatTotal + bagTotal;
+  const perKg = netKg > 0 ? totalAdditional / netKg : 0;
 
   async function handleSave() {
     setSaving(true);
@@ -1359,25 +1380,55 @@ function CostEditModal({ isOpen, onClose, lot, milled, addToast, refetch }) {
     } catch (err) { addToast(err.message || 'Failed', 'error'); } finally { setSaving(false); }
   }
 
+  const footer = (
+    <div className="flex items-center justify-between gap-3">
+      <div className="text-xs text-gray-500">Total Additional <span className="font-bold text-gray-900 ml-1">{fmtPKR(totalAdditional)}</span></div>
+      <div className="flex gap-2">
+        <button onClick={onClose} className="btn btn-secondary btn-sm">Cancel</button>
+        <button onClick={handleSave} disabled={saving} className="btn btn-primary btn-sm"><Save className="w-4 h-4" /> {saving ? 'Saving…' : 'Save Costs'}</button>
+      </div>
+    </div>
+  );
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Edit Additional Costs" size="md">
-      <div className="space-y-4">
+    <SlideDrawer open={isOpen} onClose={onClose} title="Additional Costs" subtitle={lot.lotNo} icon={DollarSign} size="md" footer={footer}>
+      <div className="space-y-5">
         {milled && (
-          <div className="flex gap-2.5 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
-            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-blue-600" />
-            <span>This lot has already been milled or drawn into a batch. Saving will <span className="font-semibold">cascade the new cost</span> into the batch's recorded cost and recompute COGS for any linked order or sale that isn't locked at dispatch. Figures already locked at dispatch are left unchanged.</span>
+          <div className="flex gap-2.5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-amber-600" />
+            <span>This lot has been milled or drawn into a batch. Saving will <span className="font-semibold">cascade the new cost</span> into the batch and recompute COGS for any non-locked linked order/sale. Figures locked at dispatch stay unchanged.</span>
           </div>
         )}
-        {[['transport_cost','Transport'],['labor_cost','Labor'],['unloading_cost','Unloading'],['packing_cost','Packing'],['other_cost','Other'],['bag_cost_per_bag','Bag Cost/Bag']].map(([k,l]) => (
-          <div key={k} className="form-group"><label className="form-label">{l}</label>
-            <input type="number" value={costs[k]} onChange={e => setC(k, e.target.value)} className="form-input" placeholder="Rs" min="0" /></div>
-        ))}
-        <div className="flex justify-end gap-3 pt-3 border-t">
-          <button onClick={onClose} className="btn btn-secondary">Cancel</button>
-          <button onClick={handleSave} disabled={saving} className="btn btn-primary"><Save className="w-4 h-4" /> {saving ? 'Saving...' : 'Save'}</button>
+
+        <div className="space-y-2.5">
+          {COST_FIELDS.map(({ k, l, icon: Icon, perBag }) => {
+            const contribution = perBag ? n(k) * bags : n(k);
+            return (
+              <div key={k} className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center shrink-0"><Icon size={15} className="text-gray-600" /></div>
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm text-gray-700">{l}{perBag && <span className="text-gray-400 text-xs"> / bag</span>}</span>
+                  {perBag && n(k) > 0 && bags > 0 && <span className="block text-[11px] text-gray-400">× {bags.toLocaleString()} bags = {fmtPKR(contribution)}</span>}
+                </div>
+                <div className="relative w-32 shrink-0">
+                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">Rs</span>
+                  <input type="number" value={costs[k]} onChange={e => setC(k, e.target.value)} className="form-input pl-7 text-right" placeholder="0" min="0" />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Live rollup */}
+        <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 space-y-1.5 text-sm">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Summary</p>
+          <div className="flex justify-between"><span className="text-gray-500">Flat costs</span><span className="font-medium text-gray-900">{fmtPKR(flatTotal)}</span></div>
+          {bagTotal > 0 && <div className="flex justify-between"><span className="text-gray-500">Bag cost ({bags.toLocaleString()} bags)</span><span className="font-medium text-gray-900">{fmtPKR(bagTotal)}</span></div>}
+          <div className="flex justify-between border-t border-gray-200 pt-1.5 mt-1.5"><span className="text-gray-700 font-semibold">Total Additional</span><span className="font-bold text-gray-900">{fmtPKR(totalAdditional)}</span></div>
+          <div className="flex justify-between"><span className="text-gray-500">Per kg</span><span className="font-medium text-blue-600">{fmtPKR(perKg)} /kg</span></div>
         </div>
       </div>
-    </Modal>
+    </SlideDrawer>
   );
 }
 
