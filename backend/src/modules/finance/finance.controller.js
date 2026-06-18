@@ -212,6 +212,12 @@ const financeController = {
         storedRows.filter((r) => r.source_table === 'milling_raw_rice' && r.source_id != null)
           .map((r) => r.source_id),
       );
+      // A batch fed by source LOTS (lot-started or blend) gets its raw cost from
+      // those lots — whose own purchase payables already capture the supplier debt.
+      // Deriving a raw_rice payable for such a batch would double-count, so skip it.
+      const batchesFromSourceLots = new Set(
+        (await db('batch_source_lots').distinct('batch_id').select('batch_id')).map((r) => r.batch_id),
+      );
 
       // Derive payables from cost tables. Resolve the supplier from the batch's
       // supplier_id (the denormalized supplier_name is sometimes null) and carry
@@ -260,6 +266,9 @@ const financeController = {
         // Materialized as a real stored payable already (so it can be paid) —
         // skip the derived duplicate.
         if (mc.category === 'raw_rice' && storedRawRiceBatchIds.has(mc.batch_id)) return;
+        // Batch fed by source lots → its raw cost is already owed via those lots'
+        // purchase payables; deriving it again would double-count the supplier.
+        if (mc.category === 'raw_rice' && batchesFromSourceLots.has(mc.batch_id)) return;
         derived.push({
           id: `MC-${mc.id}`,
           pay_no: `MC-${mc.id}`,
