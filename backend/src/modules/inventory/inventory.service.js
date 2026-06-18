@@ -388,7 +388,7 @@ const inventoryService = {
     const newCostPerUnit = parsedCost > 0 ? parsedCost : parseFloat(lot.cost_per_unit) || 0;
     const newTotalValue = newCostPerUnit * newQty;
 
-    await trx('inventory_lots').where('id', lotId).update({
+    const lotUpdate = {
       qty: newQty,
       available_qty: newAvailable,
       cost_per_unit: newCostPerUnit,
@@ -396,7 +396,14 @@ const inventoryService = {
       net_weight_kg: newNetWeightKg,
       gross_weight_kg: newGrossWeightKg,
       updated_at: trx.fn.now(),
-    });
+    };
+    // received_net_weight_kg = immutable original intake: grows on inbound
+    // (purchase receipt / production output), never shrinks on consumption — so a
+    // lot remembers how much it started with even after milling/sales draw it down.
+    if (INBOUND_TYPES.has(movementType)) {
+      lotUpdate.received_net_weight_kg = trx.raw('COALESCE(received_net_weight_kg, 0) + ?', [movementQtyKg]);
+    }
+    await trx('inventory_lots').where('id', lotId).update(lotUpdate);
 
     // Flag zero-cost lots on inbound movements
     if (INBOUND_TYPES.has(movementType) && parsedCost === 0) {

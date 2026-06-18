@@ -536,6 +536,7 @@ module.exports = {
           total_bags: totalBags,
           gross_weight_kg: netWeightKg,
           net_weight_kg: netWeightKg,
+          received_net_weight_kg: netWeightKg, // immutable original intake
           // Pricing
           rate_input_unit: rate_unit,
           rate_input_value: parseFloat(rate_input),
@@ -759,6 +760,7 @@ module.exports = {
           qty: uc.kgToTon(newNetKg),
           net_weight_kg: newNetKg,
           gross_weight_kg: newNetKg,
+          received_net_weight_kg: trx.raw('COALESCE(received_net_weight_kg, 0) + ?', [addNetKg]),
           total_bags: newBags,
           available_qty: newNetKg / 1000,
           purchase_amount: newPurchaseAmount,
@@ -920,6 +922,7 @@ module.exports = {
           available_qty: Math.max(0, newAvailMT),
           qty: Math.max(0, newAvailMT + (parseFloat(lot.reserved_qty) || 0)),
         };
+        if (inbound) updates.received_net_weight_kg = trx.raw('COALESCE(received_net_weight_kg, 0) + ?', [qtyKg]);
         if (soldDelta > 0) updates.sold_weight_kg = (parseFloat(lot.sold_weight_kg) || 0) + soldDelta;
         if (damagedDelta > 0) updates.damaged_weight_kg = (parseFloat(lot.damaged_weight_kg) || 0) + damagedDelta;
         if (newAvailMT <= 0.001 && (parseFloat(lot.reserved_qty) || 0) <= 0.001) updates.status = 'Closed';

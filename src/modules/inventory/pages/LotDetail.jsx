@@ -146,7 +146,10 @@ export default function LotDetail() {
   const inflowKg = txns
     .filter(t => (parseFloat(t.quantityKg) || 0) > 0)
     .reduce((s, t) => s + (parseFloat(t.quantityKg) || 0), 0);
-  const receivedKg = inflowKg > 0 ? inflowKg : netKg;
+  // Prefer the stored immutable intake (received_net_weight_kg); fall back to the
+  // ledger sum, then the current net weight, for lots predating the column.
+  const receivedCol = parseFloat(lot.receivedNetWeightKg) || 0;
+  const receivedKg = receivedCol > 0 ? receivedCol : (inflowKg > 0 ? inflowKg : netKg);
   const eq = allEquivalents(netKg, bw);
   const rateKg = parseFloat(lot.ratePerKg) || 0;
   const landedKg = parseFloat(lot.landedCostPerKg) || 0;
