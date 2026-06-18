@@ -395,11 +395,24 @@ export default function LotCostSheet({ lot, companyProfile, linkedBatch, transac
         {!isMilled && (
         <div className="border-x border-t border-gray-200 px-6 py-3 bg-white">
           <p className="text-[10px] font-semibold text-gray-500 uppercase mb-2">Payment Summary</p>
-          <div className="grid grid-cols-3 gap-4">
-            <div><p className="text-xs text-gray-500">Total Due</p><p className="font-bold text-gray-900">{fmtPKR(landedTotal || purchaseAmt)}</p></div>
-            <div><p className="text-xs text-emerald-600">Paid</p><p className="font-bold text-emerald-700">{fmtPKR(lot.paidAmount)}</p></div>
-            <div><p className="text-xs text-red-600">Outstanding</p><p className="font-bold text-red-700">{fmtPKR(lot.dueAmount)}</p></div>
-          </div>
+          {(() => {
+            const paid = parseFloat(lot.paidAmount) || 0;
+            const outstanding = parseFloat(lot.dueAmount) || 0;
+            const billed = paid + outstanding; // reconciles: Billed = Paid + Outstanding
+            const landed = parseFloat(landedTotal) || parseFloat(purchaseAmt) || 0;
+            return (
+              <>
+                <div className="grid grid-cols-3 gap-4">
+                  <div><p className="text-xs text-gray-500">Total Due</p><p className="font-bold text-gray-900">{fmtPKR(billed)}</p></div>
+                  <div><p className="text-xs text-emerald-600">Paid</p><p className="font-bold text-emerald-700">{fmtPKR(paid)}</p></div>
+                  <div><p className="text-xs text-red-600">Outstanding</p><p className="font-bold text-red-700">{fmtPKR(outstanding)}</p></div>
+                </div>
+                {billed > 0 && Math.abs(landed - billed) > 1 && (
+                  <p className="mt-1.5 text-[10px] text-gray-400">Lot landed cost {fmtPKR(landed)} — the difference was carried over from a split and is billed on its source lot.</p>
+                )}
+              </>
+            );
+          })()}
         </div>
         )}
 
