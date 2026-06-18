@@ -696,7 +696,10 @@ const inventoryService = {
           sourceEntity: 'mill',
           linkedRef: `batch-${batchId}`,
           notes: `${lot.type === 'finished' ? 'Finished rice re-milled' : 'Rice consumed'} for milling batch ${batchId} (lot ${lot.lot_no || lot.id})`,
-          costPerUnit: parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.cost_per_unit) || 0,
+          // postMovement expects costPerUnit PER MT (totalCost = costPerUnit × qtyMT);
+          // landed_cost_per_kg is per KG, so scale by 1000 — else the ledger cost
+          // impact comes out 1000× too small (e.g. Rs 2,820 instead of 2,820,000).
+          costPerUnit: (parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.rate_per_kg) || 0) * 1000,
           currency: lot.cost_currency || 'PKR',
           batchId,
           userId,
@@ -742,7 +745,9 @@ const inventoryService = {
       sourceEntity: 'mill',
       linkedRef: `batch-${batchId}`,
       notes: `Rice consumed for milling batch ${batchId}`,
-      costPerUnit: parseFloat(lot.cost_per_unit) || 0,
+      // Per-MT cost (postMovement multiplies by qtyMT). landed_cost_per_kg is per
+      // KG → scale by 1000 so the ledger cost impact isn't 1000× too small.
+      costPerUnit: (parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.rate_per_kg) || 0) * 1000,
       currency: lot.cost_currency || 'PKR',
       batchId,
       userId,

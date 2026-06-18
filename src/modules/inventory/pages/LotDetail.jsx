@@ -903,27 +903,32 @@ export default function LotDetail() {
               <div className="flex items-center gap-3">
                 <div className="w-3 h-3 rounded-full bg-emerald-500 flex-shrink-0" />
                 <span className="text-sm text-gray-600 w-40">Purchased / Received</span>
-                <div className="flex-1 bg-emerald-100 rounded h-6 relative"><div className="bg-emerald-500 h-full rounded" style={{ width: '100%' }} /><span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white">{dv(netKg).toLocaleString()} {ul()}</span></div>
+                <div className="flex-1 bg-emerald-100 rounded h-6 relative"><div className="bg-emerald-500 h-full rounded" style={{ width: '100%' }} /><span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white">{dv(receivedKg).toLocaleString()} {ul()}</span></div>
               </div>
+              {milledKg > 0 && <div className="flex items-center gap-3">
+                <div className="w-3 h-3 rounded-full bg-indigo-500 flex-shrink-0" />
+                <span className="text-sm text-gray-600 w-40">Milled / Utilized</span>
+                <div className="flex-1 bg-indigo-100 rounded h-6 relative"><div className="bg-indigo-500 h-full rounded" style={{ width: `${receivedKg > 0 ? (milledKg/receivedKg)*100 : 0}%` }} /><span className="absolute inset-0 flex items-center px-2 text-xs font-bold text-indigo-700">{dv(milledKg).toLocaleString()} {ul()}</span></div>
+              </div>}
               {soldKg > 0 && <div className="flex items-center gap-3">
                 <div className="w-3 h-3 rounded-full bg-blue-500 flex-shrink-0" />
                 <span className="text-sm text-gray-600 w-40">Sold / Dispatched</span>
-                <div className="flex-1 bg-blue-100 rounded h-6 relative"><div className="bg-blue-500 h-full rounded" style={{ width: `${netKg > 0 ? (soldKg/netKg)*100 : 0}%` }} /><span className="absolute inset-0 flex items-center px-2 text-xs font-bold text-blue-700">{dv(soldKg).toLocaleString()} {ul()}</span></div>
+                <div className="flex-1 bg-blue-100 rounded h-6 relative"><div className="bg-blue-500 h-full rounded" style={{ width: `${receivedKg > 0 ? (soldKg/receivedKg)*100 : 0}%` }} /><span className="absolute inset-0 flex items-center px-2 text-xs font-bold text-blue-700">{dv(soldKg).toLocaleString()} {ul()}</span></div>
               </div>}
               {reservedKg > 0 && <div className="flex items-center gap-3">
                 <div className="w-3 h-3 rounded-full bg-amber-500 flex-shrink-0" />
                 <span className="text-sm text-gray-600 w-40">Reserved</span>
-                <div className="flex-1 bg-amber-100 rounded h-6 relative"><div className="bg-amber-500 h-full rounded" style={{ width: `${netKg > 0 ? (reservedKg/netKg)*100 : 0}%` }} /><span className="absolute inset-0 flex items-center px-2 text-xs font-bold text-amber-700">{dv(reservedKg).toLocaleString()} {ul()}</span></div>
+                <div className="flex-1 bg-amber-100 rounded h-6 relative"><div className="bg-amber-500 h-full rounded" style={{ width: `${receivedKg > 0 ? (reservedKg/receivedKg)*100 : 0}%` }} /><span className="absolute inset-0 flex items-center px-2 text-xs font-bold text-amber-700">{dv(reservedKg).toLocaleString()} {ul()}</span></div>
               </div>}
               {damagedKg > 0 && <div className="flex items-center gap-3">
                 <div className="w-3 h-3 rounded-full bg-red-500 flex-shrink-0" />
                 <span className="text-sm text-gray-600 w-40">Damaged / Short</span>
-                <div className="flex-1 bg-red-100 rounded h-6 relative"><div className="bg-red-500 h-full rounded" style={{ width: `${netKg > 0 ? (damagedKg/netKg)*100 : 0}%` }} /><span className="absolute inset-0 flex items-center px-2 text-xs font-bold text-red-700">{dv(damagedKg).toLocaleString()} {ul()}</span></div>
+                <div className="flex-1 bg-red-100 rounded h-6 relative"><div className="bg-red-500 h-full rounded" style={{ width: `${receivedKg > 0 ? (damagedKg/receivedKg)*100 : 0}%` }} /><span className="absolute inset-0 flex items-center px-2 text-xs font-bold text-red-700">{dv(damagedKg).toLocaleString()} {ul()}</span></div>
               </div>}
               <div className="flex items-center gap-3">
                 <div className="w-3 h-3 rounded-full bg-emerald-400 flex-shrink-0" />
                 <span className="text-sm text-gray-600 w-40 font-medium">Available</span>
-                <div className="flex-1 bg-emerald-100 rounded h-6 relative"><div className="bg-emerald-400 h-full rounded" style={{ width: `${netKg > 0 ? (availKg/netKg)*100 : 0}%` }} /><span className="absolute inset-0 flex items-center px-2 text-xs font-bold text-emerald-800">{dv(availKg).toLocaleString()} {ul()}</span></div>
+                <div className="flex-1 bg-emerald-100 rounded h-6 relative"><div className="bg-emerald-400 h-full rounded" style={{ width: `${receivedKg > 0 ? (availKg/receivedKg)*100 : 0}%` }} /><span className="absolute inset-0 flex items-center px-2 text-xs font-bold text-emerald-800">{dv(availKg).toLocaleString()} {ul()}</span></div>
               </div>
             </div>
           </div>
