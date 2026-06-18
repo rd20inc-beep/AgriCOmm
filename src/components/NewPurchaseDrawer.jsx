@@ -4,7 +4,16 @@ import SlideDrawer from './SlideDrawer';
 import SupplierPicker from './SupplierPicker';
 import ItemPicker from './ItemPicker';
 import { useApp } from '../context/AppContext';
-import { useMillStoreItems, useCreatePurchase } from '../modules/millStore/api/queries';
+import { useMillStoreItems, useCreatePurchase, useUpdateMillStoreItem } from '../modules/millStore/api/queries';
+
+const CATEGORIES = [
+  { value: 'packaging',   label: 'Packaging' },
+  { value: 'operational', label: 'Operational' },
+  { value: 'fuel',        label: 'Fuel' },
+  { value: 'maintenance', label: 'Maintenance' },
+];
+
+const newLine = () => ({ category: 'packaging', item_id: '', quantity: '', cost_per_unit: '', bag_kg: '', tare_kg: '' });
 
 /**
  * Mill-store "New Purchase" as a right slide-over (same form as the full
@@ -16,6 +25,7 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved }) {
   const { data: items = [] } = useMillStoreItems({ limit: 500 });
   const safeItems = Array.isArray(items) ? items : [];
   const createMut = useCreatePurchase();
+  const updateItemMut = useUpdateMillStoreItem();
 
   // Items added inline via the picker — merged on top so every line sees them.
   const [localItems, setLocalItems] = useState([]);
@@ -28,17 +38,17 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved }) {
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().split('T')[0]);
   const [notes, setNotes] = useState('');
-  const [lines, setLines] = useState([{ item_id: '', quantity: '', cost_per_unit: '' }]);
+  const [lines, setLines] = useState([newLine()]);
 
   // Reset the form each time it opens.
   useEffect(() => {
     if (!open) return;
     setSupplierId(''); setInvoiceNumber(''); setNotes('');
     setPurchaseDate(new Date().toISOString().split('T')[0]);
-    setLines([{ item_id: '', quantity: '', cost_per_unit: '' }]);
+    setLines([newLine()]);
   }, [open]);
 
-  const addLine = () => setLines(prev => [...prev, { item_id: '', quantity: '', cost_per_unit: '' }]);
+  const addLine = () => setLines(prev => [...prev, newLine()]);
   const removeLine = (idx) => setLines(prev => prev.filter((_, i) => i !== idx));
   const setLine = (idx, key, val) => setLines(prev => prev.map((l, i) => i === idx ? { ...l, [key]: val } : l));
 
@@ -48,7 +58,26 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved }) {
   async function handleSubmit() {
     const validLines = lines.filter(l => l.item_id && Number(l.quantity) > 0 && Number(l.cost_per_unit) >= 0);
     if (validLines.length === 0) { addToast('Add at least one line item', 'error'); return; }
+    // Packaging lines need a Bag Kg so we know how much rice each bag holds.
+    const badBag = validLines.find(l => l.category === 'packaging' && !(Number(l.bag_kg) > 0));
+    if (badBag) { addToast('Enter Bag Kg for each packaging item', 'error'); return; }
     try {
+      // Persist any bag-weight edits onto the underlying packaging item first
+      // (Bag Kg / Tare Kg are attributes of the bag, not of this purchase).
+      const weightUpdates = validLines
+        .filter(l => l.category === 'packaging')
+        .map(l => {
+          const item = mergedItems.find(i => String(i.id) === String(l.item_id));
+          const bag = Number(l.bag_kg) || null;
+          const tare = l.tare_kg === '' ? null : Number(l.tare_kg);
+          const changed = !item
+            || Number(item.capacity_kg) !== Number(bag)
+            || Number(item.tare_weight_kg || 0) !== Number(tare || 0);
+          return changed ? { id: Number(l.item_id), data: { capacity_kg: bag, tare_weight_kg: tare } } : null;
+        })
+        .filter(Boolean);
+      await Promise.all(weightUpdates.map(u => updateItemMut.mutateAsync(u)));
+
       await createMut.mutateAsync({
         supplier_id: supplierId ? Number(supplierId) : null,
         invoice_number: invoiceNumber || null,
@@ -129,18 +158,63 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved }) {
               const lineTotal = (Number(line.quantity) || 0) * (Number(line.cost_per_unit) || 0);
               return (
                 <div key={idx} className="rounded-lg border border-gray-200 bg-gray-50/50 p-3 space-y-2">
+                  <div>
+                    <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-0.5">Category</label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {CATEGORIES.map(c => (
+                        <button key={c.value} type="button"
+                          onClick={() => setLines(prev => prev.map((l, i) => i === idx
+                            ? { ...newLine(), category: c.value } : l))}
+                          className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+                            line.category === c.value
+                              ? 'bg-blue-600 text-white border-blue-600'
+                              : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                          }`}>
+                          {c.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <ItemPicker
-                    label="Item"
+                    label={line.category === 'packaging' ? 'Bag' : 'Item'}
+                    category={line.category}
                     value={line.item_id}
                     onChange={(id) => {
                       setLine(idx, 'item_id', id);
                       const item = mergedItems.find(i => String(i.id) === String(id));
                       if (item?.last_purchase_cost) setLine(idx, 'cost_per_unit', item.last_purchase_cost);
+                      if (line.category === 'packaging') {
+                        setLine(idx, 'bag_kg', item?.capacity_kg ?? '');
+                        setLine(idx, 'tare_kg', item?.tare_weight_kg ?? '');
+                      }
                     }}
                     items={mergedItems}
-                    onItemAdded={(it) => setLocalItems(prev => [it, ...prev])}
+                    onItemAdded={(it) => {
+                      setLocalItems(prev => [it, ...prev]);
+                      if (it?.last_purchase_cost) setLine(idx, 'cost_per_unit', it.last_purchase_cost);
+                      if (line.category === 'packaging') {
+                        setLine(idx, 'bag_kg', it?.capacity_kg ?? '');
+                        setLine(idx, 'tare_kg', it?.tare_weight_kg ?? '');
+                      }
+                    }}
                     addToast={addToast}
                   />
+                  {line.category === 'packaging' && line.item_id && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-blue-700 uppercase mb-0.5">Bag Kg *</label>
+                        <input type="number" min="0" step="any" value={line.bag_kg}
+                          onChange={e => setLine(idx, 'bag_kg', e.target.value)}
+                          className={INPUT} placeholder="rice per bag" />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-blue-700 uppercase mb-0.5">Tare Kg</label>
+                        <input type="number" min="0" step="any" value={line.tare_kg}
+                          onChange={e => setLine(idx, 'tare_kg', e.target.value)}
+                          className={INPUT} placeholder="empty bag wt" />
+                      </div>
+                    </div>
+                  )}
                   <div className="grid grid-cols-3 gap-2">
                     <div>
                       <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-0.5">Qty</label>
