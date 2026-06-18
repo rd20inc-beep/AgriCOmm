@@ -1064,6 +1064,12 @@ module.exports = {
         if (!lot) { const e = new Error('Lot not found.'); e.status = 404; throw e; }
 
         const netKg = parseFloat(lot.net_weight_kg) || 0;
+        // purchase_amount + additional costs are for the ORIGINAL received intake,
+        // so the per-kg landed cost must divide by received_net_weight_kg — NOT the
+        // current net weight, which milling/sales have already drawn down. Dividing
+        // by the reduced weight inflates cost/kg wildly (e.g. 210 → 495 after a lot
+        // was half-milled). Falls back to net weight for lots predating the column.
+        const receivedKg = parseFloat(lot.received_net_weight_kg) || netKg;
         const totalBags = lot.total_bags || 0;
         const purchaseAmount = parseFloat(lot.purchase_amount) || 0;
 
@@ -1076,7 +1082,7 @@ module.exports = {
         const totalBagCost = lot.bag_cost_included ? 0 : bcpb * totalBags;
         const directCosts = tc + lc + ulc + pc + oc;
         const landedTotal = uc.round2(purchaseAmount + directCosts + totalBagCost);
-        const landedPerKg = netKg > 0 ? uc.round4(landedTotal / netKg) : 0;
+        const landedPerKg = receivedKg > 0 ? uc.round4(landedTotal / receivedKg) : 0;
 
         await trx('inventory_lots').where({ id }).update({
           transport_cost: tc, labor_cost: lc, unloading_cost: ulc,
