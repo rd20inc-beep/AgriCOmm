@@ -18,7 +18,7 @@ const COST_FIELDS = [
 ];
 
 const BLANK = {
-  weight_kg: '', total_bags: '', price_per_mt: '',
+  weight_kg: '', total_bags: '', price_per_kg: '',
   labor_cost: '', unloading_cost: '', packing_cost: '', other_cost: '',
   bag_cost_per_bag: '', bag_cost_included: true,
   purchase_date: new Date().toISOString().slice(0, 10),
@@ -43,8 +43,8 @@ export default function AddPurchaseModal({ isOpen, lot, onClose, onSuccess }) {
   const calc = useMemo(() => {
     const addKg = num(form.weight_kg);
     const bags = parseInt(form.total_bags, 10) || 0;
-    const pricePerMT = num(form.price_per_mt);
-    const addPurchase = (addKg / 1000) * pricePerMT;
+    const pricePerKg = num(form.price_per_kg);
+    const addPurchase = addKg * pricePerKg;
     const direct = COST_FIELDS.reduce((s, [k]) => s + num(form[k]), 0);
     const bagCost = form.bag_cost_included ? 0 : num(form.bag_cost_per_bag) * bags;
     const addLanded = addPurchase + direct + bagCost;
@@ -60,12 +60,12 @@ export default function AddPurchaseModal({ isOpen, lot, onClose, onSuccess }) {
 
   async function submit() {
     if (!(calc.addKg > 0)) { addToast?.('Enter a weight greater than zero', 'error'); return; }
-    if (!(num(form.price_per_mt) > 0)) { addToast?.('Enter a price per MT', 'error'); return; }
+    if (!(num(form.price_per_kg) > 0)) { addToast?.('Enter a price per kg', 'error'); return; }
     const bags = parseInt(form.total_bags, 10) || 0;
     const payload = {
       quantity_input: calc.addKg,
       quantity_unit: 'kg',
-      rate_input: num(form.price_per_mt) / 1000,
+      rate_input: num(form.price_per_kg),
       rate_unit: 'kg',
       bag_weight_kg: bags > 0 ? calc.addKg / bags : (num(lot?.bagWeightKg) || 50),
       total_bags: bags || null,
@@ -108,7 +108,7 @@ export default function AddPurchaseModal({ isOpen, lot, onClose, onSuccess }) {
       </div>
       <div className="flex gap-2">
         <button onClick={onClose} className="btn btn-secondary btn-sm">Cancel</button>
-        <button onClick={submit} disabled={addMut.isPending || !(calc.addKg > 0) || !(num(form.price_per_mt) > 0)}
+        <button onClick={submit} disabled={addMut.isPending || !(calc.addKg > 0) || !(num(form.price_per_kg) > 0)}
           className="btn btn-primary btn-sm inline-flex items-center gap-1.5 disabled:opacity-60">
           {addMut.isPending ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
           Add to lot
@@ -133,7 +133,7 @@ export default function AddPurchaseModal({ isOpen, lot, onClose, onSuccess }) {
           <div className="grid grid-cols-3 gap-2.5">
             <div><label className={lbl}>Weight (kg) *</label><input type="number" min="0" value={form.weight_kg} onChange={(e) => set('weight_kg', e.target.value)} className={inp} placeholder="0" /></div>
             <div><label className={lbl}>Total bags</label><input type="number" min="0" value={form.total_bags} onChange={(e) => set('total_bags', e.target.value)} className={inp} placeholder="0" /></div>
-            <div><label className={lbl}>Price (Rs/MT) *</label><input type="number" min="0" value={form.price_per_mt} onChange={(e) => set('price_per_mt', e.target.value)} className={inp} placeholder="0" /></div>
+            <div><label className={lbl}>Price (Rs/kg) *</label><input type="number" min="0" value={form.price_per_kg} onChange={(e) => set('price_per_kg', e.target.value)} className={inp} placeholder="0" /></div>
           </div>
         </div>
 

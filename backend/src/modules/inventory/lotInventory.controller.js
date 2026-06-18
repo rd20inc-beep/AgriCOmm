@@ -820,7 +820,11 @@ module.exports = {
             available_qty: newNetKg / 1000, reserved_qty: 0, sold_weight_kg: 0, damaged_weight_kg: 0,
             total_bags: newBags, received_net_weight_kg: newNetKg,
             purchase_amount: newPurchaseAmt,
+            // Blended purchase rate — keep rate_per_kg AND the displayed "Original
+            // Rate" (rate_input_value) in sync so they never disagree on a blended lot.
             rate_per_kg: newNetKg > 0 ? uc.round4(newPurchaseAmt / newNetKg) : 0,
+            rate_input_value: newNetKg > 0 ? uc.round4(newPurchaseAmt / newNetKg) : 0,
+            rate_input_unit: 'kg',
             // Transport stays on the original lot (its hauler payable is keyed there);
             // the remainder lot carries only its share of the non-transport add-ons.
             transport_cost: 0, transport_vendor_id: null,
@@ -837,6 +841,24 @@ module.exports = {
             payment_status: newPaid >= newLanded - 0.01 ? 'Paid' : newPaid > 0 ? 'Partial' : 'Pending',
           }).returning('*');
 
+          // Ledger leg 1: the un-milled remainder carried over from the split (at
+          // the original lot's rate) — so the new lot's ledger reconciles to its
+          // full balance and shows the right price for every kg.
+          if (remainderKg > 0.5) {
+            const splitInTxn = await generateTxnNo(trx);
+            await trx('lot_transactions').insert({
+              transaction_no: splitInTxn, transaction_date: purchase_date || new Date().toISOString().slice(0, 10),
+              lot_id: newLot.id, transaction_type: 'lot_merge', reference_module: 'purchase',
+              warehouse_to_id: newLot.warehouse_id,
+              input_unit: 'kg', input_qty: remainderKg, quantity_kg: remainderKg, quantity_bags: Math.round(remainderKg / bagWt),
+              rate_input_unit: 'kg', rate_input_value: uc.round4(oldRate), rate_per_kg: uc.round4(oldRate),
+              cost_impact: uc.round2(oldRate * remainderKg), currency: 'PKR',
+              balance_kg: remainderKg, balance_bags: Math.round(remainderKg / bagWt),
+              remarks: `Un-milled remainder split from ${lot.lot_no} (${(remainderKg / 1000).toFixed(2)} MT @ ${uc.round4(oldRate)}/kg)`,
+              created_by: req.user?.id || null, performed_by: req.user?.id || null, performed_at: new Date(),
+            });
+          }
+          // Ledger leg 2: the new purchase tranche.
           const newTxn = await generateTxnNo(trx);
           await trx('lot_transactions').insert({
             transaction_no: newTxn, transaction_date: purchase_date || new Date().toISOString().slice(0, 10),
@@ -847,7 +869,7 @@ module.exports = {
             rate_input_unit: rate_unit, rate_input_value: parseFloat(rate_input), rate_per_kg: addRatePerKg,
             cost_impact: addLandedTotal, currency: 'PKR',
             balance_kg: newNetKg, balance_bags: newBags,
-            remarks: `New lot from split of ${lot.lot_no}: ${(remainderKg / 1000).toFixed(2)} MT remainder + ${parseFloat(quantity_input)} ${quantity_unit} purchase`,
+            remarks: `Added purchase: ${parseFloat(quantity_input)} ${quantity_unit} @ ${parseFloat(rate_input)}/${rate_unit}`,
             created_by: req.user?.id || null, performed_by: req.user?.id || null, performed_at: new Date(),
           });
           await trx('inventory_movements').insert({
@@ -897,6 +919,9 @@ module.exports = {
           available_qty: newNetKg / 1000,
           purchase_amount: newPurchaseAmount,
           rate_per_kg: newRatePerKg,
+          // Keep the displayed "Original Rate" in sync with the blended per-kg rate.
+          rate_input_value: newRatePerKg,
+          rate_input_unit: 'kg',
           labor_cost: (parseFloat(lot.labor_cost) || 0) + (parseFloat(labor_cost) || 0),
           unloading_cost: (parseFloat(lot.unloading_cost) || 0) + (parseFloat(unloading_cost) || 0),
           packing_cost: (parseFloat(lot.packing_cost) || 0) + (parseFloat(packing_cost) || 0),
