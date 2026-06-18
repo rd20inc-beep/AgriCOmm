@@ -5,6 +5,7 @@ import {
   ArrowLeft, Package, Truck, DollarSign, FileText, BarChart3,
   Plus, Save, Edit3, AlertTriangle, Warehouse, ShoppingBag, Scale,
   Activity, ChevronRight, TrendingUp, Clock, Factory, Play, Trash2, Loader2, Printer,
+  ArrowDownLeft, ArrowUpRight, Calendar, Hash,
 } from 'lucide-react';
 import {
   useLotDetail, useRecordLotTransaction, useLocalSalesByLot,
@@ -14,6 +15,7 @@ import { useApp } from '../../../context/AppContext';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 import StatusBadge from '../../../components/StatusBadge';
 import Modal from '../../../components/Modal';
+import SlideDrawer from '../../../components/SlideDrawer';
 import { fromKg, allEquivalents, allRateEquivalents, toKg, UNITS } from '../../../utils/unitConversion';
 import LotCostSheet from '../components/LotCostSheet';
 import AddPurchaseModal from '../components/AddPurchaseModal';
@@ -1131,16 +1133,43 @@ export default function LotDetail() {
 }
 
 // ─── Transaction Recording Modal ───
+const TXN_BLANK = {
+  transaction_type: '', quantity_input: '', quantity_unit: 'katta',
+  transaction_date: new Date().toISOString().slice(0, 10),
+  rate_input: '', rate_unit: 'kg',
+  warehouse_from_id: '', warehouse_to_id: '',
+  reference_module: '', reference_no: '', remarks: '',
+};
+
+function rateToPerKg(value, unit, bagWeightKg) {
+  const r = parseFloat(value) || 0;
+  if (!r) return 0;
+  if (unit === 'katta') return r / (bagWeightKg || 50);
+  if (unit === 'maund') return r / 40;
+  if (unit === 'ton' || unit === 'mt') return r / 1000;
+  return r; // kg
+}
+
 function TransactionModal({ isOpen, onClose, lotId, lotNo, availableKg, bagWeightKg, warehouses, addToast, refetch, mutation }) {
-  const [form, setForm] = useState({ transaction_type: '', quantity_input: '', quantity_unit: 'katta', warehouse_from_id: '', warehouse_to_id: '', reference_module: '', reference_no: '', remarks: '' });
+  const [form, setForm] = useState(TXN_BLANK);
+  // Fresh form each time the drawer opens.
+  useEffect(() => { if (isOpen) setForm({ ...TXN_BLANK, transaction_date: new Date().toISOString().slice(0, 10) }); }, [isOpen]);
+
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
   const qtyKg = toKg(form.quantity_input, form.quantity_unit, bagWeightKg);
   const selectedType = TXN_TYPES.find(t => t.value === form.transaction_type);
   const isOutbound = selectedType?.dir === 'out';
+  const isInbound = selectedType?.dir === 'in';
+  const bags = bagWeightKg > 0 ? Math.round(qtyKg / bagWeightKg) : 0;
+  const ratePerKg = rateToPerKg(form.rate_input, form.rate_unit, bagWeightKg);
+  const costImpact = qtyKg * ratePerKg;
+  const availAfter = isOutbound ? availableKg - qtyKg : isInbound ? availableKg + qtyKg : availableKg;
+  const exceeds = isOutbound && qtyKg > availableKg + 0.01;
+  const whList = Array.isArray(warehouses) ? warehouses : [];
 
   async function handleSubmit() {
     if (!form.transaction_type || !form.quantity_input) { addToast('Transaction type and quantity are required', 'error'); return; }
-    if (isOutbound && qtyKg > availableKg + 0.01) { addToast(`Insufficient stock: need ${qtyKg} kg but only ${availableKg.toFixed(0)} kg available`, 'error'); return; }
+    if (exceeds) { addToast(`Insufficient stock: need ${qtyKg.toLocaleString()} kg but only ${availableKg.toFixed(0)} kg available`, 'error'); return; }
     try {
       await mutation.mutateAsync({ lotId, data: { ...form, bag_weight_kg: bagWeightKg } });
       addToast('Transaction recorded', 'success');
@@ -1149,41 +1178,140 @@ function TransactionModal({ isOpen, onClose, lotId, lotNo, availableKg, bagWeigh
     } catch (err) { addToast(err.message || 'Failed', 'error'); }
   }
 
+  const TypePill = ({ t }) => {
+    const active = form.transaction_type === t.value;
+    const out = t.dir === 'out';
+    return (
+      <button type="button" onClick={() => set('transaction_type', t.value)}
+        className={`flex items-center gap-1.5 px-2.5 py-2 rounded-lg border text-xs font-medium text-left transition-colors ${
+          active
+            ? out ? 'border-red-400 bg-red-50 text-red-700 ring-1 ring-red-300' : 'border-emerald-400 bg-emerald-50 text-emerald-700 ring-1 ring-emerald-300'
+            : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+        }`}>
+        {out ? <ArrowUpRight size={13} className="shrink-0" /> : <ArrowDownLeft size={13} className="shrink-0" />}
+        <span className="truncate">{t.label}</span>
+      </button>
+    );
+  };
+
+  const footer = (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-xs text-gray-500">
+        {selectedType ? (
+          <span className={`inline-flex items-center gap-1 font-medium ${isOutbound ? 'text-red-600' : 'text-emerald-600'}`}>
+            {isOutbound ? <ArrowUpRight size={13} /> : <ArrowDownLeft size={13} />}
+            {qtyKg > 0 ? `${qtyKg.toLocaleString()} kg` : selectedType.label}
+          </span>
+        ) : 'Select a transaction type'}
+      </span>
+      <div className="flex gap-2">
+        <button onClick={onClose} className="btn btn-secondary btn-sm">Cancel</button>
+        <button onClick={handleSubmit} disabled={mutation.isPending || !form.transaction_type || !form.quantity_input || exceeds}
+          className="btn btn-primary btn-sm">{mutation.isPending ? 'Recording…' : 'Record Transaction'}</button>
+      </div>
+    </div>
+  );
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={`Record Transaction — ${lotNo}`} size="lg">
-      <div className="space-y-4">
-        <div className="form-grid">
-          <div className="form-group sm:col-span-2"><label className="form-label">Transaction Type *</label>
-            <select value={form.transaction_type} onChange={e => set('transaction_type', e.target.value)} className="form-input">
-              <option value="">Select type...</option>{TXN_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-            </select></div>
-          <div className="form-group"><label className="form-label">Quantity *</label>
-            <div className="flex gap-2">
-              <input type="number" value={form.quantity_input} onChange={e => set('quantity_input', e.target.value)} className="form-input flex-1" placeholder="Qty" min="0" />
-              <select value={form.quantity_unit} onChange={e => set('quantity_unit', e.target.value)} className="form-input w-24">
-                <option value="katta">Katta</option><option value="maund">Maund</option><option value="kg">KG</option><option value="ton">Ton</option>
-              </select>
+    <SlideDrawer open={isOpen} onClose={onClose} title="Record Transaction" subtitle={lotNo} icon={Activity} size="lg" footer={footer}>
+      <div className="space-y-5">
+        {/* Transaction type — grouped pills */}
+        <div>
+          <label className="form-label">Transaction Type *</label>
+          <div className="mt-1 space-y-2.5">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-600 mb-1 flex items-center gap-1"><ArrowDownLeft size={11} /> Stock In</p>
+              <div className="grid grid-cols-2 gap-1.5">{TXN_TYPES.filter(t => t.dir === 'in').map(t => <TypePill key={t.value} t={t} />)}</div>
             </div>
-            {qtyKg > 0 && <p className="text-xs text-blue-600 mt-1">= {qtyKg.toLocaleString()} KG</p>}
-            {isOutbound && qtyKg > availableKg && <p className="text-xs text-red-600 mt-1 font-medium">Exceeds available ({availableKg.toFixed(0)} kg)</p>}
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-red-600 mb-1 flex items-center gap-1"><ArrowUpRight size={11} /> Stock Out</p>
+              <div className="grid grid-cols-2 gap-1.5">{TXN_TYPES.filter(t => t.dir === 'out').map(t => <TypePill key={t.value} t={t} />)}</div>
+            </div>
           </div>
         </div>
-        <div className="form-grid">
-          <div className="form-group"><label className="form-label">Reference Module</label>
+
+        {/* Quantity */}
+        <div className="form-group">
+          <label className="form-label">Quantity *</label>
+          <div className="flex gap-2">
+            <input type="number" value={form.quantity_input} onChange={e => set('quantity_input', e.target.value)} className="form-input flex-1" placeholder="0" min="0" />
+            <select value={form.quantity_unit} onChange={e => set('quantity_unit', e.target.value)} className="form-input w-24">
+              <option value="katta">Katta</option><option value="maund">Maund</option><option value="kg">KG</option><option value="ton">Ton</option>
+            </select>
+          </div>
+          {qtyKg > 0 && (
+            <p className="text-xs text-gray-500 mt-1">= <span className="font-semibold text-blue-600">{qtyKg.toLocaleString()} kg</span>{bags > 0 ? ` · ${bags.toLocaleString()} bags` : ''}</p>
+          )}
+          {exceeds && <p className="text-xs text-red-600 mt-1 font-medium flex items-center gap-1"><AlertTriangle size={12} /> Exceeds available ({availableKg.toFixed(0)} kg)</p>}
+        </div>
+
+        {/* Date + Unit cost */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="form-group">
+            <label className="form-label flex items-center gap-1"><Calendar size={12} /> Date</label>
+            <input type="date" value={form.transaction_date} onChange={e => set('transaction_date', e.target.value)} className="form-input" />
+          </div>
+          <div className="form-group">
+            <label className="form-label flex items-center gap-1"><DollarSign size={12} /> Unit Cost <span className="text-gray-400 font-normal">(optional)</span></label>
+            <div className="flex gap-2">
+              <input type="number" value={form.rate_input} onChange={e => set('rate_input', e.target.value)} className="form-input flex-1" placeholder="Rate" min="0" />
+              <select value={form.rate_unit} onChange={e => set('rate_unit', e.target.value)} className="form-input w-20">
+                <option value="kg">/kg</option><option value="katta">/katta</option><option value="maund">/maund</option><option value="ton">/ton</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* Dynamic warehouse field */}
+        {(isOutbound || isInbound) && (
+          <div className="form-group">
+            <label className="form-label flex items-center gap-1"><Warehouse size={12} /> {isOutbound ? 'From Warehouse' : 'To Warehouse'}</label>
+            <select value={isOutbound ? form.warehouse_from_id : form.warehouse_to_id}
+              onChange={e => set(isOutbound ? 'warehouse_from_id' : 'warehouse_to_id', e.target.value)} className="form-input">
+              <option value="">Select warehouse…</option>
+              {whList.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+            </select>
+          </div>
+        )}
+
+        {/* Reference */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="form-group">
+            <label className="form-label">Reference</label>
             <select value={form.reference_module} onChange={e => set('reference_module', e.target.value)} className="form-input">
               <option value="">None</option><option value="export_order">Export Order</option><option value="milling_batch">Milling Batch</option><option value="purchase">Purchase</option><option value="manual">Manual</option>
-            </select></div>
-          <div className="form-group"><label className="form-label">Reference No</label>
-            <input value={form.reference_no} onChange={e => set('reference_no', e.target.value)} className="form-input" placeholder="e.g. EX-101" /></div>
-          <div className="form-group sm:col-span-2"><label className="form-label">Remarks</label>
-            <textarea value={form.remarks} onChange={e => set('remarks', e.target.value)} className="form-input resize-none" rows={2} /></div>
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label flex items-center gap-1"><Hash size={12} /> Reference No</label>
+            <input value={form.reference_no} onChange={e => set('reference_no', e.target.value)} className="form-input" placeholder="e.g. EX-101" />
+          </div>
         </div>
-        <div className="flex justify-end gap-3 pt-3 border-t">
-          <button onClick={onClose} className="btn btn-secondary">Cancel</button>
-          <button onClick={handleSubmit} disabled={mutation.isPending} className="btn btn-primary">{mutation.isPending ? 'Recording...' : 'Record Transaction'}</button>
+
+        <div className="form-group">
+          <label className="form-label">Remarks</label>
+          <textarea value={form.remarks} onChange={e => set('remarks', e.target.value)} className="form-input resize-none" rows={2} placeholder="Optional note…" />
         </div>
+
+        {/* Live impact preview */}
+        {selectedType && qtyKg > 0 && (
+          <div className={`rounded-xl border p-4 ${isOutbound ? 'bg-red-50/60 border-red-100' : 'bg-emerald-50/60 border-emerald-100'}`}>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-2">Impact Preview</p>
+            <div className="space-y-1.5 text-sm">
+              <div className="flex justify-between"><span className="text-gray-500">Movement</span>
+                <span className={`font-semibold ${isOutbound ? 'text-red-700' : 'text-emerald-700'}`}>{isOutbound ? '−' : '+'}{qtyKg.toLocaleString()} kg</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Available now</span><span className="font-medium text-gray-900">{availableKg.toLocaleString(undefined, { maximumFractionDigits: 0 })} kg</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Available after</span>
+                <span className={`font-bold ${availAfter < 0 ? 'text-red-600' : 'text-gray-900'}`}>{availAfter.toLocaleString(undefined, { maximumFractionDigits: 0 })} kg</span></div>
+              {costImpact > 0 && (
+                <div className="flex justify-between border-t border-gray-200/70 pt-1.5 mt-1.5"><span className="text-gray-500">Cost impact</span>
+                  <span className="font-bold text-gray-900">{fmtPKR(costImpact)}</span></div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
-    </Modal>
+    </SlideDrawer>
   );
 }
 
