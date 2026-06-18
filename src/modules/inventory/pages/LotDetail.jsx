@@ -1170,8 +1170,24 @@ function TransactionModal({ isOpen, onClose, lotId, lotNo, availableKg, bagWeigh
   async function handleSubmit() {
     if (!form.transaction_type || !form.quantity_input) { addToast('Transaction type and quantity are required', 'error'); return; }
     if (exceeds) { addToast(`Insufficient stock: need ${qtyKg.toLocaleString()} kg but only ${availableKg.toFixed(0)} kg available`, 'error'); return; }
+    // Numeric/optional fields must be null (not '') — the Joi schema types them as
+    // number().allow(null) and rejects empty strings.
+    const data = {
+      transaction_type: form.transaction_type,
+      quantity_input: form.quantity_input,
+      quantity_unit: form.quantity_unit,
+      transaction_date: form.transaction_date || null,
+      bag_weight_kg: bagWeightKg,
+      rate_input: form.rate_input === '' ? null : form.rate_input,
+      rate_unit: form.rate_input === '' ? null : form.rate_unit,
+      warehouse_from_id: form.warehouse_from_id || null,
+      warehouse_to_id: form.warehouse_to_id || null,
+      reference_module: form.reference_module || null,
+      reference_no: form.reference_no || null,
+      remarks: form.remarks || null,
+    };
     try {
-      await mutation.mutateAsync({ lotId, data: { ...form, bag_weight_kg: bagWeightKg } });
+      await mutation.mutateAsync({ lotId, data });
       addToast('Transaction recorded', 'success');
       refetch();
       onClose();
