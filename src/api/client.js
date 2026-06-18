@@ -50,6 +50,7 @@ async function request(endpoint, options = {}) {
 
     if (res.status === 401) {
       localStorage.removeItem('riceflow_token');
+      localStorage.removeItem('riceflow_user');
       // Only redirect if not already on login page (prevents infinite loop)
       if (!window.location.pathname.startsWith('/login')) {
         window.location.href = '/login';

@@ -26,9 +26,22 @@ const MOCK_TOKEN = 'mock-prototype-token';
 
 export function AuthProvider({ children }) {
   const qc = useQueryClient();
-  const [user, setUser] = useState(null);
+  // Restore the cached user optimistically so a page reload doesn't flash a
+  // logout while /api/auth/me re-validates. A genuinely-bad token is still caught
+  // by the API client's 401 handler (clears token + redirects to /login).
+  const [user, setUser] = useState(() => {
+    try { const c = localStorage.getItem('riceflow_user'); return c ? JSON.parse(c) : null; } catch { return null; }
+  });
   const [token, setToken] = useState(() => localStorage.getItem('riceflow_token'));
   const [isLoading, setIsLoading] = useState(true);
+
+  // Persist the user alongside the token so reloads can restore the session.
+  const cacheUser = useCallback((u) => {
+    try {
+      if (u) localStorage.setItem('riceflow_user', JSON.stringify(u));
+      else localStorage.removeItem('riceflow_user');
+    } catch { /* storage full / disabled — non-fatal */ }
+  }, []);
 
   const isAuthenticated = !!user && !!token;
 
@@ -57,21 +70,23 @@ export function AuthProvider({ children }) {
         if (payload.permissions) userData.permissions = payload.permissions;
         setUser(userData);
         setToken(storedToken);
-      } else if (!silent) {
+        cacheUser(userData);
+      } else if (res.status === 401 || res.status === 403) {
+        // Token genuinely rejected → log out.
         localStorage.removeItem('riceflow_token');
         setToken(null);
         setUser(null);
+        cacheUser(null);
       }
+      // Any other status (5xx / transient) → KEEP the cached session; the token is
+      // still valid, the server just hiccuped. A real bad token is caught later by
+      // the API client's 401 handler.
     } catch {
-      // Network error — prototype-mode fallback only on initial mount
-      if (!silent && import.meta.env.DEV && storedToken === MOCK_TOKEN) {
-        console.warn('Mock auth fallback activated — backend unreachable (dev mode)');
+      // Network error — DON'T log out (a reload offline/slow shouldn't end the
+      // session). Keep the cached user/token; dev mock fallback retained.
+      if (import.meta.env.DEV && storedToken === MOCK_TOKEN) {
         setUser(MOCK_USER);
         setToken(MOCK_TOKEN);
-      } else if (!silent) {
-        localStorage.removeItem('riceflow_token');
-        setToken(null);
-        setUser(null);
       }
     } finally {
       if (!silent) setIsLoading(false);
@@ -117,6 +132,7 @@ export function AuthProvider({ children }) {
           localStorage.setItem('riceflow_token', newToken);
           setToken(newToken);
           setUser(userData);
+          cacheUser(userData);
           // Force all queries to re-evaluate enabled & refetch
           qc.invalidateQueries();
           return { success: true };
@@ -141,6 +157,7 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(() => {
     localStorage.removeItem('riceflow_token');
+    localStorage.removeItem('riceflow_user');
     setToken(null);
     setUser(null);
   }, []);
