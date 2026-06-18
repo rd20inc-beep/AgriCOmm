@@ -8,6 +8,7 @@ const schemas = require('../../middleware/schemas');
 
 router.get('/receivables', authorize('finance', 'view'), controller.getReceivables);
 router.get('/payables', authorize('finance', 'view'), controller.getPayables);
+router.get('/mill-lot-costs', authorize('finance', 'view'), controller.getMillLotCosts);
 router.get('/journal-entries', authorize('finance', 'view'), controller.getJournalEntries);
 router.get('/alerts', authorize('finance', 'view'), controller.getAlerts);
 router.get('/overview', authorize('finance', 'view'), controller.getOverview);

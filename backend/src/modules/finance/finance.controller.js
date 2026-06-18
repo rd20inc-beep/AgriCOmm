@@ -128,6 +128,65 @@ const financeController = {
     }
   },
 
+  // Traceability breakdown of lot additional costs (transport / labor / unloading /
+  // packing / bag / other) for Mill Finance — itemised by category, each carrying
+  // the source lots so the figure can be traced back to where it was incurred.
+  // Transport also carries the hauler + its payable paid/outstanding.
+  async getMillLotCosts(req, res) {
+    try {
+      const lots = await db('inventory_lots as l')
+        .leftJoin('suppliers as tv', 'l.transport_vendor_id', 'tv.id')
+        .where(function () {
+          this.where('l.transport_cost', '>', 0).orWhere('l.labor_cost', '>', 0)
+            .orWhere('l.unloading_cost', '>', 0).orWhere('l.packing_cost', '>', 0)
+            .orWhere('l.total_bag_cost', '>', 0).orWhere('l.other_cost', '>', 0);
+        })
+        .select('l.id', 'l.lot_no', 'l.transport_cost', 'l.labor_cost', 'l.unloading_cost',
+          'l.packing_cost', 'l.total_bag_cost', 'l.other_cost', 'l.transport_vendor_id', 'tv.name as hauler_name')
+        .orderBy('l.lot_no', 'asc');
+
+      // Stored transport payables (one per lot) for paid/outstanding on the hauler line.
+      const tps = await db('payables').where({ source_table: 'lot_transport' })
+        .select('source_id', 'paid_amount', 'outstanding', 'supplier_id', 'status');
+      const tpByLot = {};
+      for (const p of tps) tpByLot[p.source_id] = p;
+
+      const CATS = [
+        { key: 'transport', label: 'Transport', field: 'transport_cost' },
+        { key: 'labor', label: 'Labor', field: 'labor_cost' },
+        { key: 'unloading', label: 'Unloading', field: 'unloading_cost' },
+        { key: 'packing', label: 'Packing', field: 'packing_cost' },
+        { key: 'bag', label: 'Bag Cost', field: 'total_bag_cost' },
+        { key: 'other', label: 'Other', field: 'other_cost' },
+      ];
+
+      const categories = CATS.map((c) => {
+        const rows = lots
+          .filter((l) => (parseFloat(l[c.field]) || 0) > 0)
+          .map((l) => {
+            const amount = parseFloat(l[c.field]) || 0;
+            const base = { lotId: l.id, lotNo: l.lot_no, amount };
+            if (c.key === 'transport') {
+              const p = tpByLot[l.id];
+              base.haulerName = l.hauler_name || null;
+              base.paid = p ? parseFloat(p.paid_amount) || 0 : 0;
+              base.outstanding = p ? parseFloat(p.outstanding) || 0 : (l.transport_vendor_id ? amount : 0);
+              base.unassigned = !l.transport_vendor_id; // recorded but no hauler/payable yet
+            }
+            return base;
+          });
+        const total = rows.reduce((s, x) => s + x.amount, 0);
+        return { key: c.key, label: c.label, total, count: rows.length, inCogs: c.key !== 'transport', lots: rows };
+      }).filter((c) => c.total > 0);
+
+      const grandTotal = categories.reduce((s, c) => s + c.total, 0);
+      return res.json({ success: true, data: { categories, grandTotal } });
+    } catch (err) {
+      console.error('getMillLotCosts error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
   async getPayables(req, res) {
     try {
       const { page = 1, limit = 200, status, supplier_id, overdue, from_date, to_date } = req.query;

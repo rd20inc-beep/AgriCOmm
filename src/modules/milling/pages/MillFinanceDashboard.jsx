@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   DollarSign, Users, Zap, Shield, TrendingUp, TrendingDown, AlertTriangle,
   Plus, UserPlus, Package, Factory, Wallet, ArrowUpRight, ArrowDownRight, Printer,
-  Building2, Banknote, Receipt,
+  Building2, Banknote, Receipt, Layers, Truck, ExternalLink,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
@@ -11,6 +11,7 @@ import {
   useMillExpenses, useCreateMillExpense, useMillWorkers, useCreateMillWorker,
   usePayrollSummary, useRecordAttendance, useInventory, useExpenseVendors,
   usePayables, useSuppliers, usePurchases, useLocalSalesSummary, useMillCashFlow,
+  useMillLotCosts,
 } from '../../../api/queries';
 import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import SlideDrawer from '../../../components/SlideDrawer';
@@ -47,6 +48,7 @@ const tabs = [
   { key: 'moneyflow',  label: 'Money In/Out', icon: Wallet },
   { key: 'suppliers',  label: 'Suppliers',    icon: Building2 },
   { key: 'expenses',   label: 'Expenses',     icon: TrendingDown },
+  { key: 'addcosts',   label: 'Add. Costs',   icon: Layers },
   { key: 'efficiency', label: 'Efficiency',   icon: TrendingUp },
   { key: 'loss',       label: 'Loss & Theft', icon: Shield },
   { key: 'payroll',    label: 'Payroll',      icon: Users },
@@ -126,6 +128,8 @@ export default function MillFinanceDashboard() {
   const curMonth = new Date().toISOString().slice(0, 7);
   const { data: payrollData } = usePayrollSummary({ month: curMonth });
   const recordAttMut = useRecordAttendance();
+
+  const { data: lotCosts = { categories: [], grandTotal: 0 } } = useMillLotCosts();
 
   // ── Money In/Out + Suppliers data ──
   const { data: payablesRaw } = usePayables({});
@@ -827,6 +831,62 @@ export default function MillFinanceDashboard() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* ─── ADDITIONAL COSTS (traceability) ───────────────────────── */}
+      {activeTab === 'addcosts' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700">Lot additional costs</h3>
+              <p className="text-xs text-gray-500">Transport, labor, unloading, packing, bag &amp; other — itemised and traced to the source lot.</p>
+            </div>
+            <div className="text-right">
+              <p className="text-[10px] text-gray-400 uppercase tracking-wide">Total recorded</p>
+              <p className="text-lg font-bold text-gray-900">{PKR(lotCosts.grandTotal)}</p>
+            </div>
+          </div>
+
+          {(!lotCosts.categories || lotCosts.categories.length === 0) ? (
+            <div className="rounded-xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-400">No additional costs recorded on any lot yet.</div>
+          ) : (
+            <div className="space-y-3">
+              {lotCosts.categories.map((cat) => (
+                <div key={cat.key} className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50 border-b border-gray-100">
+                    <div className="flex items-center gap-2 min-w-0">
+                      {cat.key === 'transport' ? <Truck size={15} className="text-indigo-500 shrink-0" /> : <Layers size={15} className="text-gray-400 shrink-0" />}
+                      <span className="font-semibold text-gray-800 text-sm">{cat.label}</span>
+                      <span className="text-[11px] text-gray-400">{cat.count} lot{cat.count === 1 ? '' : 's'}</span>
+                      {cat.inCogs
+                        ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">in rice cost</span>
+                        : <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600">hauler payable</span>}
+                    </div>
+                    <span className="font-bold text-gray-900 text-sm tabular-nums">{PKR(cat.total)}</span>
+                  </div>
+                  <div className="divide-y divide-gray-50">
+                    {cat.lots.map((l) => (
+                      <div key={l.lotId} className="flex items-center justify-between px-4 py-2 text-sm gap-3">
+                        <Link to={`/lot-inventory/${l.lotNo}`} className="font-mono text-blue-600 hover:underline inline-flex items-center gap-1 shrink-0">
+                          {l.lotNo}<ExternalLink size={11} />
+                        </Link>
+                        <div className="flex items-center gap-3 min-w-0">
+                          {cat.key === 'transport' && (
+                            l.unassigned
+                              ? <span className="text-[11px] text-amber-600 whitespace-nowrap">no hauler set</span>
+                              : <span className="text-[11px] text-gray-500 truncate">{l.haulerName || '—'}{l.outstanding > 0 ? ` · ${PKR(l.outstanding)} due` : ' · paid'}</span>
+                          )}
+                          <span className="font-medium text-gray-900 tabular-nums shrink-0">{PKR(l.amount)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              <p className="text-[11px] text-gray-400">In-rice-cost items are part of finished COGS (inside Raw Material). Transport is a separate payable owed to the hauler.</p>
+            </div>
+          )}
         </div>
       )}
 

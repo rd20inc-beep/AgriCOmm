@@ -492,6 +492,21 @@ export function usePayables(params = {}) {
   });
 }
 
+// Mill lot additional-cost breakdown (transport / labor / unloading / packing /
+// bag / other), itemised by category with the source lots for traceability.
+// Backend already returns camelCase, so no transformKeys.
+export function useMillLotCosts() {
+  return useQuery({
+    queryKey: ['finance', 'mill-lot-costs'],
+    queryFn: async () => {
+      const res = await api.get('/api/finance/mill-lot-costs');
+      return unwrap(res) || { categories: [], grandTotal: 0 };
+    },
+    staleTime: 10 * 1000,
+    refetchOnMount: 'always',
+  });
+}
+
 export function usePayments(params = {}) {
   return useQuery({
     queryKey: ['payments-feed', params],
