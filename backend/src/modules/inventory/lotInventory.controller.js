@@ -1057,7 +1057,7 @@ module.exports = {
   async updateLotCosts(req, res) {
     try {
       const { id } = req.params;
-      const { transport_cost, labor_cost, unloading_cost, packing_cost, other_cost, bag_cost_per_bag } = req.body;
+      const { transport_cost, labor_cost, unloading_cost, packing_cost, other_cost, bag_cost_per_bag, transport_vendor_id } = req.body;
 
       const result = await db.transaction(async (trx) => {
         const lot = await trx('inventory_lots').where({ id }).first();
@@ -1080,19 +1080,53 @@ module.exports = {
         const oc = parseFloat(other_cost) ?? parseFloat(lot.other_cost) ?? 0;
         const bcpb = parseFloat(bag_cost_per_bag) ?? parseFloat(lot.bag_cost_per_bag) ?? 0;
         const totalBagCost = lot.bag_cost_included ? 0 : bcpb * totalBags;
-        const directCosts = tc + lc + ulc + pc + oc;
+        // Transport (freight) is owed to a separate hauler and is NOT part of the
+        // rice's landed cost / finished COGS — it is tracked as its own payable
+        // below. So it is EXCLUDED from directCosts here.
+        const directCosts = lc + ulc + pc + oc;
         const landedTotal = uc.round2(purchaseAmount + directCosts + totalBagCost);
         const landedPerKg = receivedKg > 0 ? uc.round4(landedTotal / receivedKg) : 0;
+        const haulerId = (transport_vendor_id != null && transport_vendor_id !== '')
+          ? parseInt(transport_vendor_id, 10) : (lot.transport_vendor_id || null);
 
         await trx('inventory_lots').where({ id }).update({
           transport_cost: tc, labor_cost: lc, unloading_cost: ulc,
           packing_cost: pc, other_cost: oc, bag_cost_per_bag: bcpb,
+          transport_vendor_id: haulerId,
           total_bag_cost: totalBagCost,
           landed_cost_total: landedTotal,
           landed_cost_per_kg: landedPerKg,
           total_value: landedTotal,
           cost_per_unit: landedPerKg * 1000,
         });
+
+        // Transport → a stored 'Transport' payable owed to the hauler, keyed on the
+        // lot so re-edits upsert instead of duplicating. Shows in Money Out and the
+        // hauler's supplier statement; rice supplier payable is unaffected.
+        const existingTp = await trx('payables').where({ source_table: 'lot_transport', source_id: parseInt(id, 10) }).first();
+        if (tc > 0 && haulerId) {
+          if (existingTp) {
+            const paid = parseFloat(existingTp.paid_amount) || 0;
+            await trx('payables').where({ id: existingTp.id }).update({
+              supplier_id: haulerId, category: 'Transport', original_amount: tc,
+              outstanding: Math.max(0, uc.round2(tc - paid)),
+              status: (tc - paid) <= 0.01 ? 'Paid' : (paid > 0 ? 'Partial' : 'Pending'),
+              linked_ref: lot.lot_no, updated_at: trx.fn.now(),
+            });
+          } else {
+            const payNo = await generatePayNo(trx);
+            await trx('payables').insert({
+              pay_no: payNo, entity: 'mill', payable_type: 'vendor', category: 'Transport',
+              supplier_id: haulerId, linked_ref: lot.lot_no,
+              source_table: 'lot_transport', source_id: parseInt(id, 10),
+              original_amount: tc, paid_amount: 0, outstanding: tc, status: 'Pending',
+              currency: 'PKR', notes: `Transport (hauler) for lot ${lot.lot_no}`,
+            });
+          }
+        } else if (existingTp && (parseFloat(existingTp.paid_amount) || 0) <= 0.01) {
+          // Transport cleared or hauler removed and nothing paid yet → drop it.
+          await trx('payables').where({ id: existingTp.id }).del();
+        }
 
         // Cascade the corrected cost into any batch that already consumed this
         // lot (batch_source_lots, raw-cost pool, output-lot costs, non-locked

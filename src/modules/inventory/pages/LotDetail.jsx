@@ -9,8 +9,9 @@ import {
 } from 'lucide-react';
 import {
   useLotDetail, useRecordLotTransaction, useLocalSalesByLot,
-  useMillingBatches, useAllocateLotToBatch,
+  useMillingBatches, useAllocateLotToBatch, useSuppliers,
 } from '../../../api/queries';
+import SupplierPicker from '../../../components/SupplierPicker';
 import { useApp } from '../../../context/AppContext';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 import StatusBadge from '../../../components/StatusBadge';
@@ -55,6 +56,7 @@ export default function LotDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { addToast, warehousesList, companyProfileData } = useApp();
+  const { data: suppliersList = [] } = useSuppliers();
   const [activeTab, setActiveTab] = useState('overview');
   const [displayUnit, setDisplayUnit] = useState('katta');
   const [showTxnModal, setShowTxnModal] = useState(false);
@@ -1091,7 +1093,7 @@ export default function LotDetail() {
 
       {/* ─── Modals ─── */}
       <TransactionModal isOpen={showTxnModal} onClose={() => setShowTxnModal(false)} lotId={lot.id} lotNo={lot.lotNo} availableKg={availKg} bagWeightKg={bw} defaultRateKg={landedKg || rateKg} warehouses={warehousesList} addToast={addToast} refetch={refetch} mutation={txnMutation} />
-      <CostEditModal isOpen={showCostModal} onClose={() => setShowCostModal(false)} lot={lot} milled={millingBatches.length > 0 || outboundTxns.length > 0} addToast={addToast} refetch={refetch} />
+      <CostEditModal isOpen={showCostModal} onClose={() => setShowCostModal(false)} lot={lot} milled={millingBatches.length > 0 || outboundTxns.length > 0} suppliers={suppliersList} addToast={addToast} refetch={refetch} />
       <AllocateToBatchModal isOpen={showAllocateModal} onClose={() => setShowAllocateModal(false)} lot={lot} addToast={addToast} refetch={refetch} />
       <AddLotVehicleModal
         isOpen={showAddVehicle}
@@ -1337,8 +1339,9 @@ function TransactionModal({ isOpen, onClose, lotId, lotNo, availableKg, bagWeigh
 }
 
 // ─── Cost Edit Modal ───
+// Costs that are part of the rice's landed cost (finished COGS). Transport is
+// handled separately — it's a freight payable owed to a hauler, not in COGS.
 const COST_FIELDS = [
-  { k: 'transport_cost', l: 'Transport', icon: Truck, perBag: false },
   { k: 'labor_cost', l: 'Labor', icon: Wrench, perBag: false },
   { k: 'unloading_cost', l: 'Unloading', icon: Warehouse, perBag: false },
   { k: 'packing_cost', l: 'Packing', icon: Boxes, perBag: false },
@@ -1346,10 +1349,11 @@ const COST_FIELDS = [
   { k: 'bag_cost_per_bag', l: 'Bag Cost', icon: ShoppingBag, perBag: true },
 ];
 
-function CostEditModal({ isOpen, onClose, lot, milled, addToast, refetch }) {
+function CostEditModal({ isOpen, onClose, lot, milled, suppliers = [], addToast, refetch }) {
   const blank = {
     transport_cost: lot.transportCost || '', labor_cost: lot.laborCost || '', unloading_cost: lot.unloadingCost || '',
     packing_cost: lot.packingCost || '', other_cost: lot.otherCost || '', bag_cost_per_bag: lot.bagCostPerBag || '',
+    transport_vendor_id: lot.transportVendorId ? String(lot.transportVendorId) : '',
   };
   const [costs, setCosts] = useState(blank);
   const [saving, setSaving] = useState(false);
@@ -1358,18 +1362,21 @@ function CostEditModal({ isOpen, onClose, lot, milled, addToast, refetch }) {
   useEffect(() => { if (isOpen) setCosts(blank); /* eslint-disable-next-line */ }, [isOpen]);
 
   const netKg = parseFloat(lot.netWeightKg) || parseFloat(lot.grossWeightKg) || 0;
+  const receivedKg = parseFloat(lot.receivedNetWeightKg) || netKg;
   const bw = parseFloat(lot.bagWeightKg) || 50;
-  const bags = parseFloat(lot.totalBags) || (bw > 0 ? Math.round(netKg / bw) : 0);
+  const bags = parseFloat(lot.totalBags) || (bw > 0 ? Math.round(receivedKg / bw) : 0);
   const n = (k) => parseFloat(costs[k]) || 0;
-  const flatTotal = n('transport_cost') + n('labor_cost') + n('unloading_cost') + n('packing_cost') + n('other_cost');
+  const transport = n('transport_cost');
+  const flatTotal = n('labor_cost') + n('unloading_cost') + n('packing_cost') + n('other_cost');
   const bagTotal = n('bag_cost_per_bag') * bags;
-  const totalAdditional = flatTotal + bagTotal;
-  const perKg = netKg > 0 ? totalAdditional / netKg : 0;
+  const landedAdditional = flatTotal + bagTotal; // in rice COGS
+  const perKg = receivedKg > 0 ? landedAdditional / receivedKg : 0;
+  const transportNeedsHauler = transport > 0 && !costs.transport_vendor_id;
 
   async function handleSave() {
     setSaving(true);
     try {
-      const res = await lotInventoryApi.updateLotCosts(lot.id, costs);
+      const res = await lotInventoryApi.updateLotCosts(lot.id, { ...costs, transport_vendor_id: costs.transport_vendor_id || null });
       const prop = res?.data?.propagation;
       const msg = prop?.affectedBatches > 0
         ? `Costs updated — cascaded into ${prop.affectedBatches} batch(es)`
@@ -1382,7 +1389,7 @@ function CostEditModal({ isOpen, onClose, lot, milled, addToast, refetch }) {
 
   const footer = (
     <div className="flex items-center justify-between gap-3">
-      <div className="text-xs text-gray-500">Total Additional <span className="font-bold text-gray-900 ml-1">{fmtPKR(totalAdditional)}</span></div>
+      <div className="text-xs text-gray-500">Rice add-ons <span className="font-bold text-gray-900 ml-1">{fmtPKR(landedAdditional)}</span></div>
       <div className="flex gap-2">
         <button onClick={onClose} className="btn btn-secondary btn-sm">Cancel</button>
         <button onClick={handleSave} disabled={saving} className="btn btn-primary btn-sm"><Save className="w-4 h-4" /> {saving ? 'Saving…' : 'Save Costs'}</button>
@@ -1400,7 +1407,25 @@ function CostEditModal({ isOpen, onClose, lot, milled, addToast, refetch }) {
           </div>
         )}
 
+        {/* Transport — owed to a hauler, NOT part of rice cost */}
+        <div className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-3 space-y-2.5">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center shrink-0"><Truck size={15} className="text-indigo-600" /></div>
+            <div className="flex-1 min-w-0">
+              <span className="text-sm font-medium text-gray-800">Transport</span>
+              <span className="block text-[11px] text-indigo-500">Freight — billed to a hauler, not in rice cost</span>
+            </div>
+            <div className="relative w-32 shrink-0">
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">Rs</span>
+              <input type="number" value={costs.transport_cost} onChange={e => setC('transport_cost', e.target.value)} className="form-input pl-7 text-right" placeholder="0" min="0" />
+            </div>
+          </div>
+          <SupplierPicker label="Hauler" value={costs.transport_vendor_id} onChange={(id) => setC('transport_vendor_id', id || '')} suppliers={suppliers} placeholder="Search hauler / transporter…" addToast={addToast} clearable />
+          {transportNeedsHauler && <p className="text-[11px] text-amber-600">Pick a hauler so the transport payable can be raised.</p>}
+        </div>
+
         <div className="space-y-2.5">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Rice add-on costs (in COGS)</p>
           {COST_FIELDS.map(({ k, l, icon: Icon, perBag }) => {
             const contribution = perBag ? n(k) * bags : n(k);
             return (
@@ -1422,10 +1447,11 @@ function CostEditModal({ isOpen, onClose, lot, milled, addToast, refetch }) {
         {/* Live rollup */}
         <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 space-y-1.5 text-sm">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Summary</p>
-          <div className="flex justify-between"><span className="text-gray-500">Flat costs</span><span className="font-medium text-gray-900">{fmtPKR(flatTotal)}</span></div>
+          <div className="flex justify-between"><span className="text-gray-500">Rice add-ons (flat)</span><span className="font-medium text-gray-900">{fmtPKR(flatTotal)}</span></div>
           {bagTotal > 0 && <div className="flex justify-between"><span className="text-gray-500">Bag cost ({bags.toLocaleString()} bags)</span><span className="font-medium text-gray-900">{fmtPKR(bagTotal)}</span></div>}
-          <div className="flex justify-between border-t border-gray-200 pt-1.5 mt-1.5"><span className="text-gray-700 font-semibold">Total Additional</span><span className="font-bold text-gray-900">{fmtPKR(totalAdditional)}</span></div>
-          <div className="flex justify-between"><span className="text-gray-500">Per kg</span><span className="font-medium text-blue-600">{fmtPKR(perKg)} /kg</span></div>
+          <div className="flex justify-between border-t border-gray-200 pt-1.5 mt-1.5"><span className="text-gray-700 font-semibold">Rice add-ons total</span><span className="font-bold text-gray-900">{fmtPKR(landedAdditional)}</span></div>
+          <div className="flex justify-between"><span className="text-gray-500">Per kg (added to rice cost)</span><span className="font-medium text-blue-600">{fmtPKR(perKg)} /kg</span></div>
+          {transport > 0 && <div className="flex justify-between border-t border-gray-200 pt-1.5 mt-1.5"><span className="text-indigo-600">Transport → hauler payable</span><span className="font-bold text-indigo-700">{fmtPKR(transport)}</span></div>}
         </div>
       </div>
     </SlideDrawer>

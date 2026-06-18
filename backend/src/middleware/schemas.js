@@ -238,6 +238,7 @@ const updateLotCosts = Joi.object({
   packing_cost: Joi.number().min(0).allow(null),
   other_cost: Joi.number().min(0).allow(null),
   bag_cost_per_bag: Joi.number().min(0).allow(null),
+  transport_vendor_id: Joi.number().integer().positive().allow(null, ''),
 });
 
 // Edit a lot's recorded quality after creation. moisture/broken come through

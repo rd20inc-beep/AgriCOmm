@@ -787,6 +787,7 @@ COL inventory_lots.total_bag_cost:numeric:NOT NULL
 COL inventory_lots.total_bags:integer:NULL
 COL inventory_lots.total_value:numeric:NOT NULL
 COL inventory_lots.transport_cost:numeric:NOT NULL
+COL inventory_lots.transport_vendor_id:integer:NULL
 COL inventory_lots.type:character varying:NOT NULL
 COL inventory_lots.unit:character varying:NOT NULL
 COL inventory_lots.unloading_cost:numeric:NOT NULL
