@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
+import { RouteErrorBoundary } from './ErrorBoundary';
 
 const millNav = [
   { section: 'Mill' },
@@ -330,9 +331,11 @@ export default function MillLayout({ children }) {
         <main className="flex-1 overflow-y-auto overflow-x-hidden w-full page-content">
           {/* Scope lazy-page loading to the right pane so the sidebar + header
               stay mounted on navigation (no full-shell remount/flash). */}
-          <Suspense fallback={<div className="flex items-center justify-center h-full text-sm text-gray-400">Loading…</div>}>
-            {children}
-          </Suspense>
+          <RouteErrorBoundary>
+            <Suspense fallback={<div className="flex items-center justify-center h-full text-sm text-gray-400">Loading…</div>}>
+              {children}
+            </Suspense>
+          </RouteErrorBoundary>
         </main>
       </div>
     </div>

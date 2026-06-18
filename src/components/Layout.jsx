@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
+import { RouteErrorBoundary } from './ErrorBoundary';
 
 const sidebarNav = [
   { section: 'Main' },
@@ -504,11 +505,15 @@ export default function Layout({ children }) {
 
         {/* Main content */}
         <main className="flex-1 overflow-y-auto overflow-x-hidden w-full page-content">
-          {/* Scope lazy-page loading to the right pane so the sidebar + header
-              stay mounted on navigation (no full-shell remount/flash). */}
-          <Suspense fallback={<div className="flex items-center justify-center h-full text-sm text-gray-400">Loading…</div>}>
-            {children}
-          </Suspense>
+          {/* Scope lazy-page loading AND error handling to the right pane so the
+              sidebar + header stay mounted — a crashing page shows a "Try again"
+              card here instead of taking down the whole shell, and navigating to
+              another page clears it (RouteErrorBoundary is keyed by route). */}
+          <RouteErrorBoundary>
+            <Suspense fallback={<div className="flex items-center justify-center h-full text-sm text-gray-400">Loading…</div>}>
+              {children}
+            </Suspense>
+          </RouteErrorBoundary>
         </main>
       </div>
     </div>

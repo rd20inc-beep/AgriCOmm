@@ -1,2 +1,2 @@
 // Re-exports from shared/
-export { default } from '../shared/components/ErrorBoundary.jsx';
+export { default, RouteErrorBoundary } from '../shared/components/ErrorBoundary.jsx';
