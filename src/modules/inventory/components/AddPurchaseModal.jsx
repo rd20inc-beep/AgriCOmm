@@ -1,46 +1,42 @@
-import { useMemo, useState } from 'react';
-import { Loader2, CheckCircle2, PlusCircle } from 'lucide-react';
-import Modal from '../../../components/Modal';
+import { useMemo, useState, useEffect } from 'react';
+import { Loader2, CheckCircle2, PlusCircle, Package, Wrench, Warehouse, Boxes, DollarSign, Truck } from 'lucide-react';
+import SlideDrawer from '../../../components/SlideDrawer';
 import { useApp } from '../../../context/AppContext';
 import { useAddPurchaseToLot } from '../../../api/queries';
 
 const fmtPKR = (v) => 'Rs ' + (Math.round((parseFloat(v) || 0) * 100) / 100).toLocaleString();
 const num = (v) => parseFloat(v) || 0;
 
+// Landed (in-COGS) add-on costs. Transport is NOT here — it's a hauler payable set
+// via the Additional Costs editor, not part of the rice's landed cost.
 const COST_FIELDS = [
-  ['transport_cost', 'Transport'],
-  ['labor_cost', 'Labor'],
-  ['unloading_cost', 'Unloading'],
-  ['packing_cost', 'Packing'],
-  ['other_cost', 'Other'],
+  ['labor_cost', 'Labor', Wrench],
+  ['unloading_cost', 'Unloading', Warehouse],
+  ['packing_cost', 'Packing', Boxes],
+  ['other_cost', 'Other', DollarSign],
 ];
 
+const BLANK = {
+  weight_kg: '', total_bags: '', price_per_mt: '',
+  labor_cost: '', unloading_cost: '', packing_cost: '', other_cost: '',
+  bag_cost_per_bag: '', bag_cost_included: true,
+  purchase_date: new Date().toISOString().slice(0, 10),
+  payment_status: 'Pending', paid_amount: '', notes: '',
+};
+
 /**
- * Add another purchase (same supplier) onto an existing untouched lot. Supplier
- * and rice type are inherited from the lot and shown read-only; the operator
- * enters only the new delivery's weight / price / costs. The lot's landed cost
- * becomes the weighted average — previewed live before submit.
+ * Add another purchase (same supplier) onto an existing untouched lot, as a
+ * right-side drawer. Supplier & rice type are inherited from the lot; the operator
+ * enters the new delivery's weight / price / add-on costs. The lot's landed cost
+ * becomes the weighted average — previewed live. Transport is handled separately
+ * (Additional Costs → Hauler), so it isn't collected here.
  */
 export default function AddPurchaseModal({ isOpen, lot, onClose, onSuccess }) {
   const { addToast } = useApp();
   const addMut = useAddPurchaseToLot();
-  const [form, setForm] = useState({
-    weight_kg: '',
-    total_bags: '',
-    price_per_mt: '',
-    transport_cost: '',
-    labor_cost: '',
-    unloading_cost: '',
-    packing_cost: '',
-    other_cost: '',
-    bag_cost_per_bag: '',
-    bag_cost_included: true,
-    purchase_date: new Date().toISOString().slice(0, 10),
-    payment_status: 'Pending',
-    paid_amount: '',
-    notes: '',
-  });
+  const [form, setForm] = useState(BLANK);
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+  useEffect(() => { if (isOpen) setForm({ ...BLANK, purchase_date: new Date().toISOString().slice(0, 10) }); }, [isOpen]);
 
   const calc = useMemo(() => {
     const addKg = num(form.weight_kg);
@@ -71,7 +67,6 @@ export default function AddPurchaseModal({ isOpen, lot, onClose, onSuccess }) {
       rate_unit: 'kg',
       bag_weight_kg: bags > 0 ? calc.addKg / bags : (num(lot?.bagWeightKg) || 50),
       total_bags: bags || null,
-      transport_cost: num(form.transport_cost),
       labor_cost: num(form.labor_cost),
       unloading_cost: num(form.unloading_cost),
       packing_cost: num(form.packing_cost),
@@ -96,69 +91,74 @@ export default function AddPurchaseModal({ isOpen, lot, onClose, onSuccess }) {
   const inp = 'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-500 focus:border-orange-500';
   const lbl = 'block text-xs font-medium text-gray-600 mb-1';
 
+  const footer = (
+    <div className="flex items-center justify-between gap-3">
+      <div className="text-xs text-gray-500">
+        New blended <span className="font-bold text-gray-900 ml-1">{fmtPKR(calc.newPerKg)}/kg</span>
+      </div>
+      <div className="flex gap-2">
+        <button onClick={onClose} className="btn btn-secondary btn-sm">Cancel</button>
+        <button onClick={submit} disabled={addMut.isPending || !(calc.addKg > 0) || !(num(form.price_per_mt) > 0)}
+          className="btn btn-primary btn-sm inline-flex items-center gap-1.5 disabled:opacity-60">
+          {addMut.isPending ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
+          Add to lot
+        </button>
+      </div>
+    </div>
+  );
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={`Add purchase to ${lot?.lotNo || 'lot'}`} size="lg">
-      <div className="space-y-4">
+    <SlideDrawer open={isOpen} onClose={onClose} title="Add Purchase" subtitle={lot?.lotNo} icon={PlusCircle} size="lg" footer={footer}>
+      <div className="space-y-5">
         {/* Inherited context */}
-        <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm bg-gray-50 rounded-lg p-3">
-          <span><span className="text-gray-500">Supplier:</span> <span className="font-medium">{lot?.supplierName || '—'}</span></span>
-          <span><span className="text-gray-500">Rice:</span> <span className="font-medium">{lot?.itemName}{lot?.variety ? ` — ${lot.variety}` : ''}</span></span>
-          <span><span className="text-gray-500">Current:</span> <span className="font-medium">{(calc.oldKg / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })} MT @ {fmtPKR(calc.oldPerKg)}/kg</span></span>
+        <div className="rounded-xl border border-gray-100 bg-gray-50 p-3 text-sm space-y-1">
+          <div className="flex justify-between"><span className="text-gray-500">Supplier</span><span className="font-medium text-gray-900">{lot?.supplierName || '—'}</span></div>
+          <div className="flex justify-between"><span className="text-gray-500">Rice</span><span className="font-medium text-gray-900 truncate ml-2">{lot?.itemName}{lot?.variety ? ` — ${lot.variety}` : ''}</span></div>
+          <div className="flex justify-between"><span className="text-gray-500">Current stock</span><span className="font-medium text-gray-900">{(calc.oldKg / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })} MT @ {fmtPKR(calc.oldPerKg)}/kg</span></div>
         </div>
 
-        <div className="grid grid-cols-3 gap-3">
-          <div>
-            <label className={lbl}>Weight (kg) *</label>
-            <input type="number" min="0" value={form.weight_kg} onChange={(e) => set('weight_kg', e.target.value)} className={inp} placeholder="0" />
-          </div>
-          <div>
-            <label className={lbl}>Total bags</label>
-            <input type="number" min="0" value={form.total_bags} onChange={(e) => set('total_bags', e.target.value)} className={inp} placeholder="0" />
-          </div>
-          <div>
-            <label className={lbl}>Price (Rs / MT) *</label>
-            <input type="number" min="0" value={form.price_per_mt} onChange={(e) => set('price_per_mt', e.target.value)} className={inp} placeholder="0" />
+        {/* Delivery */}
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-2 flex items-center gap-1"><Package size={12} /> New delivery</p>
+          <div className="grid grid-cols-3 gap-2.5">
+            <div><label className={lbl}>Weight (kg) *</label><input type="number" min="0" value={form.weight_kg} onChange={(e) => set('weight_kg', e.target.value)} className={inp} placeholder="0" /></div>
+            <div><label className={lbl}>Total bags</label><input type="number" min="0" value={form.total_bags} onChange={(e) => set('total_bags', e.target.value)} className={inp} placeholder="0" /></div>
+            <div><label className={lbl}>Price (Rs/MT) *</label><input type="number" min="0" value={form.price_per_mt} onChange={(e) => set('price_per_mt', e.target.value)} className={inp} placeholder="0" /></div>
           </div>
         </div>
 
-        <div className="grid grid-cols-5 gap-2">
-          {COST_FIELDS.map(([k, label]) => (
-            <div key={k}>
-              <label className={lbl}>{label}</label>
-              <input type="number" min="0" value={form[k]} onChange={(e) => set(k, e.target.value)} className={inp} placeholder="0" />
+        {/* Add-on costs (in COGS) */}
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-2">Add-on costs (in rice cost)</p>
+          <div className="grid grid-cols-2 gap-2.5">
+            {COST_FIELDS.map(([k, label, Icon]) => (
+              <div key={k}>
+                <label className={`${lbl} flex items-center gap-1`}><Icon size={11} /> {label}</label>
+                <input type="number" min="0" value={form[k]} onChange={(e) => set(k, e.target.value)} className={inp} placeholder="0" />
+              </div>
+            ))}
+            <div>
+              <label className={lbl}>Bag cost / bag</label>
+              <input type="number" min="0" value={form.bag_cost_per_bag} onChange={(e) => set('bag_cost_per_bag', e.target.value)} disabled={form.bag_cost_included} className={`${inp} disabled:bg-gray-100`} placeholder="0" />
             </div>
-          ))}
+            <label className="flex items-center gap-2 text-sm text-gray-700 pt-6">
+              <input type="checkbox" checked={form.bag_cost_included} onChange={(e) => set('bag_cost_included', e.target.checked)} />
+              Bag cost in price
+            </label>
+          </div>
+          <p className="mt-2 text-[11px] text-indigo-500 flex items-center gap-1"><Truck size={11} /> Transport? Add it with a hauler in the Costing tab → Additional Costs.</p>
         </div>
 
-        <div className="grid grid-cols-3 gap-3 items-end">
-          <div>
-            <label className={lbl}>Bag cost / bag</label>
-            <input type="number" min="0" value={form.bag_cost_per_bag} onChange={(e) => set('bag_cost_per_bag', e.target.value)} disabled={form.bag_cost_included} className={`${inp} disabled:bg-gray-100`} placeholder="0" />
-          </div>
-          <label className="flex items-center gap-2 text-sm text-gray-700 pb-2">
-            <input type="checkbox" checked={form.bag_cost_included} onChange={(e) => set('bag_cost_included', e.target.checked)} />
-            Bag cost in price
-          </label>
-          <div>
-            <label className={lbl}>Purchase date</label>
-            <input type="date" value={form.purchase_date} onChange={(e) => set('purchase_date', e.target.value)} className={inp} />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-3 gap-3">
-          <div>
-            <label className={lbl}>Payment</label>
+        {/* Date + payment */}
+        <div className="grid grid-cols-2 gap-2.5">
+          <div><label className={lbl}>Purchase date</label><input type="date" value={form.purchase_date} onChange={(e) => set('purchase_date', e.target.value)} className={inp} /></div>
+          <div><label className={lbl}>Payment</label>
             <select value={form.payment_status} onChange={(e) => set('payment_status', e.target.value)} className={inp}>
-              <option>Pending</option>
-              <option>Partial</option>
-              <option>Paid</option>
+              <option>Pending</option><option>Partial</option><option>Paid</option>
             </select>
           </div>
           {form.payment_status === 'Partial' && (
-            <div>
-              <label className={lbl}>Paid now</label>
-              <input type="number" min="0" value={form.paid_amount} onChange={(e) => set('paid_amount', e.target.value)} className={inp} placeholder="0" />
-            </div>
+            <div><label className={lbl}>Paid now</label><input type="number" min="0" value={form.paid_amount} onChange={(e) => set('paid_amount', e.target.value)} className={inp} placeholder="0" /></div>
           )}
           <div className={form.payment_status === 'Partial' ? '' : 'col-span-2'}>
             <label className={lbl}>Notes</label>
@@ -167,7 +167,7 @@ export default function AddPurchaseModal({ isOpen, lot, onClose, onSuccess }) {
         </div>
 
         {/* Blended-cost preview */}
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 grid grid-cols-3 gap-3 text-center">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 grid grid-cols-3 gap-3 text-center">
           <div>
             <p className="text-[11px] text-amber-700">This purchase (landed)</p>
             <p className="text-base font-bold text-gray-900">{fmtPKR(calc.addLanded)}</p>
@@ -179,20 +179,10 @@ export default function AddPurchaseModal({ isOpen, lot, onClose, onSuccess }) {
           <div>
             <p className="text-[11px] text-amber-700">New blended cost</p>
             <p className="text-base font-bold text-gray-900">{fmtPKR(calc.newPerKg)}/kg</p>
-            {calc.addKg > 0 && (
-              <p className="text-[10px] text-gray-500">was {fmtPKR(calc.oldPerKg)}/kg</p>
-            )}
+            {calc.addKg > 0 && <p className="text-[10px] text-gray-500">was {fmtPKR(calc.oldPerKg)}/kg</p>}
           </div>
         </div>
-
-        <div className="flex justify-end gap-2 pt-1">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
-          <button onClick={submit} disabled={addMut.isPending} className="px-4 py-2 text-sm text-white bg-orange-600 rounded-lg hover:bg-orange-700 inline-flex items-center gap-2 disabled:opacity-60">
-            {addMut.isPending ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
-            Add to lot
-          </button>
-        </div>
       </div>
-    </Modal>
+    </SlideDrawer>
   );
 }

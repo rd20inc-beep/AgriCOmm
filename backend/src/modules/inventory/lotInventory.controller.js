@@ -731,7 +731,9 @@ module.exports = {
             ? Math.round(parseFloat(quantity_input))
             : Math.round(addNetKg / bagWt));
         const addPurchaseAmount = uc.round2(addNetKg * addRatePerKg);
-        const addDirectCosts = [transport_cost, labor_cost, unloading_cost, packing_cost, other_cost]
+        // Transport is EXCLUDED — it's a hauler payable set on the lot via the
+        // Additional Costs editor, not part of the rice's landed cost.
+        const addDirectCosts = [labor_cost, unloading_cost, packing_cost, other_cost]
           .reduce((s, c) => s + (parseFloat(c) || 0), 0);
         const addBagCost = bag_cost_included ? 0 : (parseFloat(bag_cost_per_bag) || 0) * addBags;
         const addLandedTotal = uc.round2(addPurchaseAmount + addDirectCosts + addBagCost);
@@ -765,7 +767,6 @@ module.exports = {
           available_qty: newNetKg / 1000,
           purchase_amount: newPurchaseAmount,
           rate_per_kg: newRatePerKg,
-          transport_cost: (parseFloat(lot.transport_cost) || 0) + (parseFloat(transport_cost) || 0),
           labor_cost: (parseFloat(lot.labor_cost) || 0) + (parseFloat(labor_cost) || 0),
           unloading_cost: (parseFloat(lot.unloading_cost) || 0) + (parseFloat(unloading_cost) || 0),
           packing_cost: (parseFloat(lot.packing_cost) || 0) + (parseFloat(packing_cost) || 0),
