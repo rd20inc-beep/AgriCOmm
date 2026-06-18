@@ -81,6 +81,9 @@ export default function LotCostSheet({ lot, companyProfile, linkedBatch, transac
   const eq = allEquivalents(netKg, bw);
   const rateKg = parseFloat(lot.ratePerKg) || 0;
   const landedKg = parseFloat(lot.landedCostPerKg) || 0;
+  // Milled lots have no purchase rate of their own — show the rate the input
+  // raw rice was bought at (from the originating batch).
+  const rawPurchaseRate = parseFloat(lot.rawPurchaseRatePerKg) || 0;
   const rEq = allRateEquivalents(rateKg, bw);
   const lEq = allRateEquivalents(landedKg, bw);
   // A milled output lot (finished rice / by-product) isn't purchased — its cost
@@ -195,9 +198,9 @@ export default function LotCostSheet({ lot, companyProfile, linkedBatch, transac
 
         {/* ===== PURCHASE PRICING ===== */}
         <div className="border-x border-t border-gray-200 px-6 py-3 bg-white">
-          <p className="text-[10px] font-semibold text-gray-500 uppercase mb-2">{isMilled ? 'Production Cost' : 'Purchase Rate'}</p>
+          <p className="text-[10px] font-semibold text-gray-500 uppercase mb-2">{isMilled ? 'Purchase Rate (raw rice)' : 'Purchase Rate'}</p>
           <div className="grid grid-cols-5 gap-4">
-            <div><p className="text-xs text-gray-500">{isMilled ? 'Production Cost' : 'Original Rate'}</p><p className="font-bold text-gray-900">{isMilled ? `${fmtPKR(landedKg)} / kg` : `Rs ${lot.rateInputValue || '—'} / ${lot.rateInputUnit || 'kg'}`}</p></div>
+            <div><p className="text-xs text-gray-500">{isMilled ? 'Purchase Rate (raw rice)' : 'Original Rate'}</p><p className="font-bold text-gray-900">{isMilled ? `${rawPurchaseRate ? fmtPKR(rawPurchaseRate) : '—'} / kg` : `Rs ${lot.rateInputValue || '—'} / ${lot.rateInputUnit || 'kg'}`}</p></div>
             <div><p className="text-xs text-gray-500">Per KG</p><p className="font-bold text-gray-900">{fmtPKR(rateKg)}</p></div>
             <div><p className="text-xs text-gray-500">Per Katta</p><p className="font-bold text-gray-900">{fmtPKR(rEq.perKatta)}</p></div>
             <div><p className="text-xs text-gray-500">Per Maund</p><p className="font-bold text-gray-900">{fmtPKR(rEq.perMaund)}</p></div>

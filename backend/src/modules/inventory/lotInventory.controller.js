@@ -147,17 +147,25 @@ async function buildLotDetail(lot) {
   const brMatch = /^batch-(\d+)$/.exec(lot.batch_ref || '');
   const ownBatchId = brMatch ? parseInt(brMatch[1], 10) : null;
   if (ownBatchId) {
-    const [arrival, post, byield] = await Promise.all([
+    const [arrival, post, byield, rawCost] = await Promise.all([
       db('milling_quality_samples').where({ batch_id: ownBatchId, analysis_type: 'arrival' })
         .orderBy('created_at', 'desc').first(),
       db('milling_quality_post').where({ batch_id: ownBatchId }).orderBy('created_at', 'desc').first(),
       db('milling_batches').where({ id: ownBatchId }).first(
-        'actual_finished_mt', 'broken_mt', 'b1_mt', 'b2_mt', 'b3_mt', 'csr_mt',
+        'raw_qty_mt', 'actual_finished_mt', 'broken_mt', 'b1_mt', 'b2_mt', 'b3_mt', 'csr_mt',
         'short_grain_mt', 'bran_mt', 'husk_mt', 'sortex_rejects_mt',
         'powder_mt', 'sweeping_mt', 'post_milling_grade'),
+      db('milling_costs').where({ batch_id: ownBatchId, category: 'raw_rice' }).sum('amount as t').first(),
     ]);
     if (arrival || post) batchQuality = { arrival: arrival || null, post: post || null };
     batchYield = byield || null;
+    // Purchase rate of the raw rice this lot was milled from = batch raw-rice
+    // cost ÷ raw input kg. Shared by every output (finished + by-product) of the
+    // batch. A produced lot has no purchase rate of its own; this is the rate the
+    // operator actually paid for the input rice.
+    const rawTotal = parseFloat(rawCost?.t) || 0;
+    const rawKg = (parseFloat(byield?.raw_qty_mt) || 0) * 1000;
+    lot.raw_purchase_rate_per_kg = (rawTotal > 0 && rawKg > 0) ? rawTotal / rawKg : null;
   }
 
   // Blend recipe — for a blended OUTPUT lot, the varieties + ratios + per-source

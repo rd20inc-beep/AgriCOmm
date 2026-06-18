@@ -138,6 +138,9 @@ export default function LotDetail() {
   const eq = allEquivalents(netKg, bw);
   const rateKg = parseFloat(lot.ratePerKg) || 0;
   const landedKg = parseFloat(lot.landedCostPerKg) || 0;
+  // For a milled output lot: the per-kg rate the input raw rice was bought at
+  // (from its originating batch), shown in place of the absent purchase rate.
+  const rawPurchaseRate = parseFloat(lot.rawPurchaseRatePerKg) || 0;
   const rEq = allRateEquivalents(rateKg, bw);
   const lEq = allRateEquivalents(landedKg, bw);
 
@@ -557,9 +560,9 @@ export default function LotDetail() {
             <h3 className="text-sm font-semibold text-blue-700 uppercase tracking-wider mb-3">Purchase Pricing</h3>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div>
-                <p className="text-xs text-blue-600">{isMilled ? 'Production Cost' : 'Original Rate'}</p>
+                <p className="text-xs text-blue-600">{isMilled ? 'Purchase Rate (raw rice)' : 'Original Rate'}</p>
                 {isMilled ? (
-                  <p className="text-lg font-bold text-gray-900">{fmtPKR(landedKg)} <span className="text-xs font-normal text-gray-400">/ kg</span></p>
+                  <p className="text-lg font-bold text-gray-900">{rawPurchaseRate ? fmtPKR(rawPurchaseRate) : '—'} <span className="text-xs font-normal text-gray-400">/ kg</span></p>
                 ) : (
                   <p className="text-lg font-bold text-gray-900">Rs {lot.rateInputValue || '—'} <span className="text-xs font-normal text-gray-400">/ {lot.rateInputUnit || 'kg'}</span></p>
                 )}
@@ -664,7 +667,7 @@ export default function LotDetail() {
           <div className="bg-white rounded-xl border border-gray-100 p-5">
             <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4 flex items-center gap-2"><DollarSign className="w-4 h-4" /> Purchase Cost</h3>
             <div className="space-y-2.5">
-              <div className="flex justify-between text-sm"><span className="text-gray-500">{isMilled ? 'Production Cost' : 'Rate Input'}</span><span className="font-medium">{isMilled ? `${fmtPKR(landedKg)} / kg` : `Rs ${lot.rateInputValue || '—'} / ${lot.rateInputUnit || '—'}`}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-gray-500">{isMilled ? 'Purchase Rate (raw rice)' : 'Rate Input'}</span><span className="font-medium">{isMilled ? `${rawPurchaseRate ? fmtPKR(rawPurchaseRate) : '—'} / kg` : `Rs ${lot.rateInputValue || '—'} / ${lot.rateInputUnit || '—'}`}</span></div>
               <div className="flex justify-between text-sm"><span className="text-gray-500">Rate per KG</span><span className="font-medium">{fmtPKR(rateKg)}</span></div>
               <div className="flex justify-between text-sm"><span className="text-gray-500">Rate per Katta</span><span className="font-medium">{fmtPKR(rEq.perKatta)}</span></div>
               <div className="flex justify-between text-sm"><span className="text-gray-500">Rate per Maund</span><span className="font-medium">{fmtPKR(rEq.perMaund)}</span></div>
