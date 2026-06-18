@@ -200,7 +200,10 @@ export default function LotInventory() {
   // broken grades / sortex / bran / husk) into one summary row per
   // (subtype, variety) — raw rice lots stay as individual rows because
   // each is a distinct purchase.
-  const [viewMode, setViewMode] = useState('grouped');
+  // Grouping mode: 'rice-type' (one row per rice variety — every subtype of that
+  // rice together), 'subtype' (one row per category — all B1 together, all B2…),
+  // or 'flat' (every lot on its own row).
+  const [viewMode, setViewMode] = useState('subtype');
   const [expandedGroups, setExpandedGroups] = useState(() => new Set());
   const [displayUnit, setDisplayUnit] = useState('katta');
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
@@ -273,24 +276,37 @@ export default function LotInventory() {
   function getDisplayQty(kg) { return fromKg(kg, displayUnit); }
   function getUnitLabel() { return displayUnit === 'katta' ? 'Katta' : displayUnit === 'maund' ? 'Maund' : displayUnit === 'ton' ? 'Ton' : 'KG'; }
 
-  // Group output lots (finished / broken grades / sortex / bran / husk)
-  // by (subtype, variety) so the operator sees one row per byproduct
-  // type instead of dozens of individual lots. Raw rice purchases stay
-  // as standalone rows — each purchase is a distinct receipt.
+  // Collapse lots into expandable groups along the chosen dimension:
+  //  • 'rice-type' — one row per rice variety (its finished + every by-product
+  //    grade + raw lots together), blends kept separate per recipe.
+  //  • 'subtype'   — one row per category (all B1 across rice types, all B2, …).
+  // Only unclassifiable ('other') lots stay standalone.
   const visualGroups = useMemo(() => {
-    if (viewMode !== 'grouped') return { groups: [], standalone: filtered };
+    if (viewMode === 'flat') return { groups: [], standalone: filtered };
+    const byRiceType = viewMode === 'rice-type';
     const map = new Map();
     const standalone = [];
     for (const lot of filtered) {
       const s = lotSubtype(lot);
-      if (s === 'rice-in' || s === 'other') { standalone.push(lot); continue; }
+      if (s === 'other') { standalone.push(lot); continue; }
       const variety = riceTypeName(lot) || '—';
-      // Blended output is grouped per recipe (blend_batch_no), so each blend
-      // batch stays its own row and never merges with pure or another blend.
+      // Blended output is grouped per recipe (blend_batch_no) in rice-type mode,
+      // so each blend batch stays its own row and never merges with pure rice.
       const blended = lot.processingType === 'blended';
       const blendKey = blended ? (lot.blendBatchNo || 'blend') : 'pure';
-      const key = `${s}|${variety}|${blendKey}`;
-      if (!map.has(key)) map.set(key, { key, subtype: s, variety, lots: [], blended, blendBatchNo: blended ? lot.blendBatchNo : null });
+      // By Rice Type → key on the variety (every B1/B2/finished of that rice
+      // together). By Subtype → key on the category (all B1 across rice types).
+      const key = byRiceType ? `${variety}|${blendKey}` : s;
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          subtype: byRiceType ? null : s,
+          variety: byRiceType ? variety : null,
+          lots: [],
+          blended: byRiceType ? blended : false,
+          blendBatchNo: (byRiceType && blended) ? lot.blendBatchNo : null,
+        });
+      }
       map.get(key).lots.push(lot);
     }
     const groups = Array.from(map.values()).map((g) => {
@@ -305,6 +321,10 @@ export default function LotInventory() {
         const m = (l.batchRef || '').match(/batch-(\d+)/);
         if (m) batchRefSet.add(parseInt(m[1], 10));
       }
+      // Distinct rice types / categories inside the group, for the header when
+      // the grouping dimension leaves the other column mixed.
+      const varieties = Array.from(new Set(g.lots.map(l => riceTypeName(l) || '—')));
+      const subtypes = Array.from(new Set(g.lots.map(l => subtypeLabel(lotSubtype(l)))));
       return {
         ...g,
         totalKg,
@@ -313,6 +333,8 @@ export default function LotInventory() {
         weightedLanded,
         lotCount: g.lots.length,
         batchIds: Array.from(batchRefSet).sort((a, b) => a - b),
+        varieties,
+        subtypes,
       };
     });
     // Sort groups: lots-out-of-stock at the bottom, otherwise by total qty desc
@@ -442,14 +464,14 @@ export default function LotInventory() {
               placeholder="Search lots, supplier, variety, warehouse..." className="form-input pl-9 py-1.5 text-sm w-full" />
           </div>
           <span className="text-xs text-gray-400">{filtered.length} of {lots.length} lots</span>
-          {/* View mode: grouped collapses output lots (B1, B2, sortex…)
-              into one row per subtype + variety, with the underlying
-              source batches expandable. Raw rice lots always render as
-              individual rows because each is a distinct purchase. */}
+          {/* Grouping dimension: By Rice Type (one row per variety) or By
+              Subtype (one row per category — all B1 together, …); each group
+              expands to its underlying lots. "All lots" disables grouping. */}
           <div className="flex bg-gray-100 rounded-lg p-0.5">
             {[
-              { v: 'grouped', l: 'Grouped' },
-              { v: 'flat',    l: 'All lots' },
+              { v: 'rice-type', l: 'By Rice Type' },
+              { v: 'subtype',   l: 'By Subtype' },
+              { v: 'flat',      l: 'All lots' },
             ].map(o => (
               <button key={o.v} onClick={() => setViewMode(o.v)}
                 className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${viewMode === o.v ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}>
@@ -520,18 +542,24 @@ export default function LotInventory() {
                                 </span>
                               </td>
                               <td>
-                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold whitespace-nowrap ${subtypeBadgeClass(g.subtype)}`}>
-                                  {subtypeLabel(g.subtype)}
-                                </span>
+                                {g.subtype ? (
+                                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold whitespace-nowrap ${subtypeBadgeClass(g.subtype)}`}>
+                                    {subtypeLabel(g.subtype)}
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium whitespace-nowrap bg-gray-100 text-gray-600" title={g.subtypes.join(', ')}>
+                                    {g.subtypes.length <= 2 ? g.subtypes.join(' · ') : `${g.subtypes.length} categories`}
+                                  </span>
+                                )}
                               </td>
                               <td className="max-w-[16rem]">
-                                <div className="text-gray-900 font-semibold truncate flex items-center gap-1.5" title={g.variety}>
+                                <div className="text-gray-900 font-semibold truncate flex items-center gap-1.5" title={(g.variety || g.varieties.join(', '))}>
                                   {g.blended && (
                                     <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-700 shrink-0" title={g.blendBatchNo ? `Blended — ${g.blendBatchNo}` : 'Blended'}>
                                       BLENDED{g.blendBatchNo ? ` · ${g.blendBatchNo}` : ''}
                                     </span>
                                   )}
-                                  <span className="truncate">{g.variety}</span>
+                                  <span className="truncate">{g.variety || (g.varieties.length === 1 ? g.varieties[0] : `${g.varieties.length} rice types`)}</span>
                                 </div>
                                 {g.batchIds.length > 0 && (
                                   <div className="text-[11px] text-gray-500 mt-0.5 truncate" title={`From batches: ${g.batchIds.join(', ')}`}>
