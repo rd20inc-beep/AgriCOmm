@@ -956,6 +956,8 @@ module.exports = {
           balance_bags: Math.round(newNetKg / bagWt),
           remarks: remarks || null,
           created_by: req.user?.id || null,
+          performed_by: req.user?.id || null, // NOT NULL column
+          performed_at: new Date(),
         }).returning('*');
 
         return txn;
