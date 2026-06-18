@@ -1041,9 +1041,10 @@ const inventoryService = {
           cost_incomplete: bpCostPerKg === 0,
           grade: (isBlend && bp.grade) ? `${blendNo}-${bp.grade}` : (bp.grade || null),
           // By-products are identified by their grade/category (B1, B2, CSR, …)
-          // via item_name + grade — never tagged "Broken". variety stays clean:
-          // the blend marker for blended runs, otherwise empty.
-          variety: (isBlend && bp.grade) ? `Blend ${blendNo}` : null,
+          // in item_name + grade (→ the "Subtype" column) — never tagged "Broken".
+          // variety carries the SOURCE RICE TYPE NAME so the "Item / Variety"
+          // column shows the rice it came from (the blend marker for blends).
+          variety: isBlend ? `Blend ${blendNo}` : (qualityInfo?.variety || productName || null),
           status: 'Available',
           created_by: userId || null,
         })

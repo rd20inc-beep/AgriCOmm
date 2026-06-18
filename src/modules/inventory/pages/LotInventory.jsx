@@ -124,7 +124,11 @@ function renderLotRow(lot, displayUnit, navigate, indented) {
   const bw = parseFloat(lot.bagWeightKg) || 50;
   const variety = riceTypeName(lot);
   const grade = lot.grade;
-  const itemLower = (lot.itemName || '').toLowerCase();
+  // By-products are named by category in item_name (B1, Powder, …) which already
+  // shows in the Subtype column. The "Item / Variety" column should show the rice
+  // TYPE the by-product came from (its variety), so it reads as a name, not "B1".
+  const displayName = lot.type === 'byproduct' ? (variety || lot.itemName) : lot.itemName;
+  const itemLower = (displayName || '').toLowerCase();
   const varLower = (variety || '').toLowerCase();
   const varIsRedundant = !variety
     || looksLikeAutoSku(variety)
@@ -144,7 +148,7 @@ function renderLotRow(lot, displayUnit, navigate, indented) {
         </span>
       </td>
       <td className="max-w-[16rem]">
-        <div className="text-gray-900 font-medium truncate" title={lot.itemName}>{lot.itemName}</div>
+        <div className="text-gray-900 font-medium truncate" title={displayName}>{displayName}</div>
         {(!varIsRedundant || grade || lot.processingType === 'blended') && (
           <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-1 flex-wrap">
             {lot.processingType === 'blended' && (
