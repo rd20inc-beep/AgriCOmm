@@ -35,7 +35,7 @@ const SUBTYPE_OPTIONS = [
   { value: 'broken-csr',    label: 'CSR' },
   { value: 'broken-sg',     label: 'Short Grain' },
   { value: 'broken',        label: 'Broken (ungraded)' },
-  { value: 'sortex',        label: 'Sortex Rejects' },
+  { value: 'sortex',        label: 'Sortex' },
   { value: 'powder',        label: 'Powder' },
   { value: 'sweeping',      label: 'Sweeping' },
   { value: 'bran',          label: 'Rice Bran (legacy)' },

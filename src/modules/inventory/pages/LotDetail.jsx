@@ -193,7 +193,7 @@ export default function LotDetail() {
               </span>
             )}
           </div>
-          <p className="text-sm text-gray-500 mt-0.5">{lot.itemName}{lot.variety ? ` — ${lot.variety}` : ''}{lot.grade ? ` (${lot.grade})` : ''}</p>
+          <p className="text-sm text-gray-500 mt-0.5">{lot.itemName}{lot.variety && lot.variety !== lot.itemName ? ` — ${lot.variety}` : ''}{lot.grade && lot.grade !== lot.itemName ? ` (${lot.grade})` : ''}</p>
         </div>
         <button onClick={() => setShowCostSheet(true)} className="btn btn-primary btn-sm">
           <FileText className="w-4 h-4" /> Costing Sheet

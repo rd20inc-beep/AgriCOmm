@@ -837,6 +837,9 @@ const inventoryService = {
         'Broken Rice':    ['PROD-BROKEN-RICE',    'BROKEN-RICE'],
         'Rice Bran':      ['PROD-RICE-BRAN',      'RICE-BRAN'],
         'Rice Husk':      ['PROD-RICE-HUSK',      'RICE-HUSK'],
+        // 'Sortex' is the display name; it still resolves to the seeded
+        // Sortex Rejects product so no duplicate product is created.
+        'Sortex':         ['PROD-SORTEX-REJECTS', 'SORTEX-REJECTS'],
         'Sortex Rejects': ['PROD-SORTEX-REJECTS', 'SORTEX-REJECTS'],
         'Powder':         ['PROD-POWDER',         'POWDER'],
         'Sweeping':       ['PROD-SWEEPING',       'SWEEPING'],
@@ -987,7 +990,7 @@ const inventoryService = {
       ...brokenItems,
       { name: 'Rice Bran',      key: 'bran',   grade: null, qty: parseFloat(branMT) || 0 },
       { name: 'Rice Husk',      key: 'husk',   grade: null, qty: parseFloat(huskMT) || 0 },
-      { name: 'Sortex Rejects', key: 'sortex', grade: null, qty: parseFloat(sortexMT) || 0 },
+      { name: 'Sortex', key: 'sortex', grade: null, qty: parseFloat(sortexMT) || 0 },
       { name: 'Powder',         key: 'powder', grade: null, qty: parseFloat(powderMT) || 0 },
       { name: 'Sweeping',       key: 'sweeping', grade: null, qty: parseFloat(sweepingMT) || 0 },
     ];
@@ -1037,7 +1040,10 @@ const inventoryService = {
           raw_cost_component: bpCostPerKg,
           cost_incomplete: bpCostPerKg === 0,
           grade: (isBlend && bp.grade) ? `${blendNo}-${bp.grade}` : (bp.grade || null),
-          variety: (isBlend && bp.grade) ? `Blend ${blendNo} — Broken ${bp.grade}` : (bp.grade ? `Broken ${bp.grade}` : null),
+          // By-products are identified by their grade/category (B1, B2, CSR, …)
+          // via item_name + grade — never tagged "Broken". variety stays clean:
+          // the blend marker for blended runs, otherwise empty.
+          variety: (isBlend && bp.grade) ? `Blend ${blendNo}` : null,
           status: 'Available',
           created_by: userId || null,
         })
