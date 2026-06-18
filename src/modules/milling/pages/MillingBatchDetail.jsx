@@ -342,6 +342,8 @@ export default function MillingBatchDetail() {
       csrMT: batch.csrMT || batch.csr_mt || '',
       shortGrainMT: batch.shortGrainMT || batch.short_grain_mt || '',
       sortexMT: batch.sortexRejectsMT || batch.sortex_rejects_mt || '',
+      powderMT: batch.powderMT || batch.powder_mt || '',
+      sweepingMT: batch.sweepingMT || batch.sweeping_mt || '',
       wastageMT: batch.wastageMT || '',
       // Carry forward legacy bran/husk so re-submitting an old batch
       // doesn't zero them out.
