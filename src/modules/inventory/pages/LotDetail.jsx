@@ -1829,22 +1829,18 @@ function AddLotVehicleModal({ isOpen, onClose, lot, addToast, onSaved }) {
 // ─── Start Milling Modal ───
 function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
   const isReMill = lot?.type === 'finished';
-  const [form, setForm] = useState({ mill_id: '', machine_line: '', shift: 'Day', milling_fee_per_kg: '', notes: '', qty_mt: '' });
-  const [mills, setMills] = useState([]);
+  const [form, setForm] = useState({ notes: '', qty_mt: '' });
   const [vehicles, setVehicles] = useState([]);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
     const availMT = parseFloat(lot?.availableQty) || 0;
-    // Default the quantity to the whole lot — the operator can lower it to
-    // mill only part of the lot.
-    setForm({ mill_id: '', machine_line: '', shift: 'Day', milling_fee_per_kg: '', notes: '', qty_mt: availMT > 0 ? String(availMT) : '' });
+    // Default the quantity to the whole lot — the operator can lower it to mill
+    // only part of the lot. Single mill, so mill/shift/line are dropped; the
+    // milling fee is entered later in the batch Costing tab.
+    setForm({ notes: '', qty_mt: availMT > 0 ? String(availMT) : '' });
     setVehicles([]);
-    // Load mills + vehicles lazily so the page open isn't blocked
-    api.get('/api/milling/mills').then(res => {
-      setMills(res?.data?.mills || res?.mills || []);
-    }).catch(() => { /* non-critical */ });
     if (lot?.id) {
       lotInventoryApi.listLotVehicles(lot.id)
         .then(res => setVehicles(res?.data?.vehicles || res?.vehicles || []))
@@ -1875,10 +1871,6 @@ function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
     setSubmitting(true);
     try {
       const res = await lotInventoryApi.startMillingForLot(lot.id, {
-        mill_id: form.mill_id ? parseInt(form.mill_id, 10) : null,
-        machine_line: form.machine_line.trim() || null,
-        shift: form.shift || 'Day',
-        milling_fee_per_kg: form.milling_fee_per_kg ? parseFloat(form.milling_fee_per_kg) : null,
         raw_qty_mt: qtyToMill,
         notes: form.notes.trim() || null,
       });
@@ -1900,8 +1892,22 @@ function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
     }
   }
 
+  const footer = (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-xs text-gray-500">{qtyValid ? `${qtyToMill.toFixed(2)} MT → new batch` : 'Set a quantity to mill'}</span>
+      <div className="flex gap-2">
+        <button type="button" onClick={onClose} className="btn btn-secondary btn-sm">Cancel</button>
+        <button type="button" onClick={handleSubmit} disabled={submitting || availableMT <= 0 || !qtyValid}
+          className="btn btn-primary btn-sm disabled:opacity-50 inline-flex items-center gap-1.5">
+          {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+          {isReMill ? 'Start Re-Milling' : 'Start Milling'}
+        </button>
+      </div>
+    </div>
+  );
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={`Start milling ${lot.lotNo || ''}`} size="md">
+    <SlideDrawer open={isOpen} onClose={onClose} title={isReMill ? 'Start Re-Milling' : 'Start Milling'} subtitle={lot?.lotNo} icon={Factory} size="md" footer={footer}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className={`rounded-lg p-3 text-sm ${isReMill ? 'bg-violet-50 border border-violet-200 text-violet-800' : 'bg-emerald-50 border border-emerald-200 text-emerald-800'}`}>
           {isReMill ? (
@@ -1981,38 +1987,6 @@ function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
           </p>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Mill</label>
-            <select value={form.mill_id} onChange={(e) => setForm(p => ({ ...p, mill_id: e.target.value }))}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-              <option value="">Default mill</option>
-              {mills.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Shift</label>
-            <select value={form.shift} onChange={(e) => setForm(p => ({ ...p, shift: e.target.value }))}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-              <option value="Day">Day</option>
-              <option value="Night">Night</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Machine line</label>
-            <input type="text" value={form.machine_line}
-              onChange={(e) => setForm(p => ({ ...p, machine_line: e.target.value }))}
-              placeholder="e.g. Line A"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Milling fee (Rs/kg)</label>
-            <input type="number" step="0.01" min="0" value={form.milling_fee_per_kg}
-              onChange={(e) => setForm(p => ({ ...p, milling_fee_per_kg: e.target.value }))}
-              placeholder="Default 5"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
-          </div>
-        </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
           <input type="text" value={form.notes}
@@ -2021,15 +1995,8 @@ function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
         </div>
 
-        <div className="flex justify-end gap-2 pt-2 border-t">
-          <button type="button" onClick={onClose} className="btn btn-secondary">Cancel</button>
-          <button type="submit" disabled={submitting || availableMT <= 0 || !qtyValid}
-            className="btn btn-primary disabled:opacity-50 inline-flex items-center gap-1.5">
-            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-            {isReMill ? 'Start Re-Milling' : 'Start Milling'}
-          </button>
-        </div>
+        <p className="text-[11px] text-gray-400">Milling fee &amp; processing costs are added later in the batch's Costing tab.</p>
       </form>
-    </Modal>
+    </SlideDrawer>
   );
 }

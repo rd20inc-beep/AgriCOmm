@@ -1723,7 +1723,9 @@ module.exports = {
           mill_id: resolvedMillId,
           machine_line: machine_line || null,
           shift: shift || 'Day',
-          milling_fee_per_kg: milling_fee_per_kg ? parseFloat(milling_fee_per_kg) : 5,
+          // No auto milling fee — it's entered later in the batch Costing tab
+          // (residual costing model). Default 0 instead of the old flat 5/kg.
+          milling_fee_per_kg: milling_fee_per_kg != null ? parseFloat(milling_fee_per_kg) : 0,
           raw_qty_mt: rawQtyMT,
           status: 'Queued',
           notes: notes || null,
