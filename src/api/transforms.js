@@ -252,6 +252,7 @@ export function transformBatch(dbBatch) {
     huskMT: parseFloat(dbBatch.husk_mt) || 0,
     powderMT: parseFloat(dbBatch.powder_mt) || 0,
     sweepingMT: parseFloat(dbBatch.sweeping_mt) || 0,
+    sortexRejectsMT: parseFloat(dbBatch.sortex_rejects_mt) || 0,
     wastageMT: parseFloat(dbBatch.wastage_mt) || 0,
     yieldPct: parseFloat(dbBatch.yield_pct) || 0,
     supplierId: dbBatch.supplier_id,
