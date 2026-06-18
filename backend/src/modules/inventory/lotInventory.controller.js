@@ -837,8 +837,10 @@ module.exports = {
             total_value: newLanded, cost_per_unit: newRate * 1000,
             milling_status: null, status: 'Available',
             quality_json: lot.quality_json == null ? null : (typeof lot.quality_json === 'object' ? JSON.stringify(lot.quality_json) : lot.quality_json),
-            paid_amount: newPaid, due_amount: uc.round2(newLanded - newPaid),
-            payment_status: newPaid >= newLanded - 0.01 ? 'Paid' : newPaid > 0 ? 'Partial' : 'Pending',
+            // Only the NEW purchase is freshly owed here — the remainder's debt was
+            // already booked on the original lot's purchase, so don't double-count it.
+            paid_amount: newPaid, due_amount: uc.round2(addLandedTotal - newPaid),
+            payment_status: newPaid >= addLandedTotal - 0.01 ? 'Paid' : newPaid > 0 ? 'Partial' : 'Pending',
           }).returning('*');
 
           // Ledger leg 1: the un-milled remainder carried over from the split (at
