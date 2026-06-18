@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Loader2, CheckCircle2, PlusCircle, Package, Wrench, Warehouse, Boxes, DollarSign, Truck } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { useApp } from '../../../context/AppContext';
@@ -33,6 +34,7 @@ const BLANK = {
  */
 export default function AddPurchaseModal({ isOpen, lot, onClose, onSuccess }) {
   const { addToast } = useApp();
+  const navigate = useNavigate();
   const addMut = useAddPurchaseToLot();
   const [form, setForm] = useState(BLANK);
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
@@ -79,10 +81,18 @@ export default function AddPurchaseModal({ isOpen, lot, onClose, onSuccess }) {
       notes: form.notes || null,
     };
     try {
-      await addMut.mutateAsync({ id: lot.id, data: payload });
-      addToast?.(`Added ${(calc.addKg / 1000).toFixed(2)} MT to ${lot.lotNo}`, 'success');
+      const resp = await addMut.mutateAsync({ id: lot.id, data: payload });
+      const d = resp?.data || {};
       onSuccess?.();
       onClose?.();
+      if (d.split && d.newLotNo) {
+        // Lot had rice committed to a batch — the remainder + this purchase went to
+        // a fresh lot; the committed portion kept its cost. Jump to the new lot.
+        addToast?.(`Committed stock kept on ${lot.lotNo}; remainder + purchase → new lot ${d.newLotNo}`, 'success');
+        navigate(`/lot-inventory/${d.newLotNo}`);
+      } else {
+        addToast?.(`Added ${(calc.addKg / 1000).toFixed(2)} MT to ${lot.lotNo}`, 'success');
+      }
     } catch (err) {
       addToast?.(err?.response?.data?.message || err.message || 'Failed to add purchase', 'error');
     }

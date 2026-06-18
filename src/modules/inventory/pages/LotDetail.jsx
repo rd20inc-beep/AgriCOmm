@@ -274,11 +274,13 @@ export default function LotDetail() {
         {/* Add another purchase from the SAME supplier onto this lot — only
             while it is still wholly intact (nothing reserved, milled, sold or
             routed into a batch), so blending the landed cost is sound. */}
+        {/* Allowed while the lot is not yet consumed — even if a batch has been
+            started (not yielded). In that case the backend SPLITS: the committed
+            portion keeps its cost and the remainder + new purchase become a new lot. */}
         {lot.type === 'raw'
           && lot.entity === 'mill'
           && lot.status === 'Available'
           && lot.supplierName
-          && millingBatches.length === 0
           && outboundTxns.length === 0
           && reservedKg < 1
           && (netKg - availKg) < 1 && (
