@@ -135,6 +135,18 @@ export default function LotDetail() {
   const soldKg = parseFloat(lot.soldWeightKg) || 0;
   const damagedKg = parseFloat(lot.damagedWeightKg) || 0;
   const consumedKg = netKg - availKg - reservedKg;
+  // Milling decrements a raw lot's net_weight, so the row alone "forgets" the
+  // original intake (e.g. received 30 MT, milled 15 → row shows 15). Recover the
+  // true figures from the ledger: total received = Σ inflow transactions; milled
+  // / utilized = Σ milling_issue outflows.
+  const txns = transactions || [];
+  const milledKg = txns
+    .filter(t => t.transactionType === 'milling_issue')
+    .reduce((s, t) => s + Math.abs(parseFloat(t.quantityKg) || 0), 0);
+  const inflowKg = txns
+    .filter(t => (parseFloat(t.quantityKg) || 0) > 0)
+    .reduce((s, t) => s + (parseFloat(t.quantityKg) || 0), 0);
+  const receivedKg = inflowKg > 0 ? inflowKg : netKg;
   const eq = allEquivalents(netKg, bw);
   const rateKg = parseFloat(lot.ratePerKg) || 0;
   const landedKg = parseFloat(lot.landedCostPerKg) || 0;
@@ -161,7 +173,7 @@ export default function LotDetail() {
   const landedTotal = isMilled ? landedKg * netKg : (parseFloat(lot.landedCostTotal) || 0);
 
   // Stock utilization percentage
-  const usedPct = netKg > 0 ? Math.round(((netKg - availKg) / netKg) * 100) : 0;
+  const usedPct = receivedKg > 0 ? Math.round(((receivedKg - availKg) / receivedKg) * 100) : 0;
 
   function dv(kg) { return fromKg(kg, displayUnit, bw); }
   function ul() { return displayUnit === 'katta' ? 'Katta' : displayUnit === 'maund' ? 'Maund' : displayUnit === 'ton' ? 'Ton' : 'KG'; }
@@ -278,17 +290,24 @@ export default function LotDetail() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className={`grid grid-cols-2 sm:grid-cols-3 gap-3 ${milledKg > 0 ? 'lg:grid-cols-7' : 'lg:grid-cols-6'}`}>
         <div className="bg-white rounded-xl border border-gray-100 p-4">
-          <p className="text-xs font-medium text-gray-500 uppercase">Total Stock</p>
-          <p className="text-xl font-bold text-gray-900 mt-1">{dv(netKg).toLocaleString()}</p>
-          <p className="text-xs text-gray-400">{eq.kg.toLocaleString()} kg</p>
+          <p className="text-xs font-medium text-gray-500 uppercase">{milledKg > 0 ? 'Total Received' : 'Total Stock'}</p>
+          <p className="text-xl font-bold text-gray-900 mt-1">{dv(receivedKg).toLocaleString()}</p>
+          <p className="text-xs text-gray-400">{Math.round(receivedKg).toLocaleString()} kg</p>
         </div>
         <div className="bg-emerald-50 rounded-xl border border-emerald-100 p-4">
           <p className="text-xs font-medium text-emerald-600 uppercase">Available</p>
           <p className="text-xl font-bold text-emerald-700 mt-1">{dv(availKg).toLocaleString()}</p>
           <p className="text-xs text-emerald-500">{ul()}</p>
         </div>
+        {milledKg > 0 && (
+          <div className="bg-indigo-50 rounded-xl border border-indigo-100 p-4">
+            <p className="text-xs font-medium text-indigo-600 uppercase">Milled / Utilized</p>
+            <p className="text-xl font-bold text-indigo-700 mt-1">{dv(milledKg).toLocaleString()}</p>
+            <p className="text-xs text-indigo-500">{ul()}</p>
+          </div>
+        )}
         <div className="bg-amber-50 rounded-xl border border-amber-100 p-4">
           <p className="text-xs font-medium text-amber-600 uppercase">Reserved</p>
           <p className="text-xl font-bold text-amber-700 mt-1">{dv(reservedKg).toLocaleString()}</p>
