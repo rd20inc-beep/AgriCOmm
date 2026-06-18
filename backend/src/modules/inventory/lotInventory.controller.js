@@ -898,39 +898,11 @@ module.exports = {
             });
           }
 
-          // Move the un-milled remainder's PURCHASE debt from the original lot to
-          // the new lot, so each lot's payable matches the rice it holds (the
-          // supplier total is unchanged — it's re-attributed, not re-billed). Only
-          // when the original rice-purchase payable is still fully unpaid; a settled
-          // payment makes reattribution unsafe, so leave it then.
-          const remainderPurchaseShare = uc.round2((parseFloat(lot.rate_per_kg) || oldRate) * remainderKg);
-          if (remainderPurchaseShare > 0.5) {
-            const origPay = await trx('payables')
-              .where({ supplier_id: lot.supplier_id, linked_ref: lot.lot_no, category: 'Raw Material' })
-              .where('paid_amount', '<=', 0.01)
-              .where('outstanding', '>=', remainderPurchaseShare - 0.5)
-              .orderBy('id', 'asc').first();
-            if (origPay) {
-              const reduced = uc.round2(parseFloat(origPay.original_amount) - remainderPurchaseShare);
-              await trx('payables').where({ id: origPay.id }).update({
-                original_amount: reduced, outstanding: reduced, updated_at: trx.fn.now(),
-              });
-              await trx('inventory_lots').where({ id: lotId }).update({
-                due_amount: reduced, payment_status: reduced > 0.5 ? 'Pending' : 'Paid',
-              });
-              const rPayNo = await generatePayNo(trx);
-              await trx('payables').insert({
-                pay_no: rPayNo, entity: 'mill', payable_type: 'vendor', category: 'Raw Material',
-                supplier_id: lot.supplier_id, linked_ref: newLotNo,
-                original_amount: remainderPurchaseShare, paid_amount: 0, outstanding: remainderPurchaseShare,
-                due_date: addDays(purchase_date, 30), status: 'Pending', currency: 'PKR',
-                notes: `Un-milled remainder carried from split of ${lot.lot_no}`,
-              });
-              await trx('inventory_lots').where({ id: newLot.id }).update({
-                due_amount: uc.round2((addLandedTotal - newPaid) + remainderPurchaseShare),
-              });
-            }
-          }
+          // NOTE: we deliberately do NOT reallocate the supplier purchase debt on a
+          // split. A purchase invoice follows the PURCHASE, not the rice's lot
+          // location — the original purchase payable stays as-is, and the new lot is
+          // only newly billed for its added tranche. The remainder it carries was
+          // already invoiced on the original lot's purchase.
           return { __split: true, newLot: enrichLot(newLot), newLotNo, remainderMt: uc.kgToTon(remainderKg), committedMt: uc.kgToTon(committedKg) };
         }
 

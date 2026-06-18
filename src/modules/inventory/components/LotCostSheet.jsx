@@ -407,8 +407,10 @@ export default function LotCostSheet({ lot, companyProfile, linkedBatch, transac
                   <div><p className="text-xs text-emerald-600">Paid</p><p className="font-bold text-emerald-700">{fmtPKR(paid)}</p></div>
                   <div><p className="text-xs text-red-600">Outstanding</p><p className="font-bold text-red-700">{fmtPKR(outstanding)}</p></div>
                 </div>
-                {billed > 0 && (landed - billed) > 1 && (
-                  <p className="mt-1.5 text-[10px] text-gray-400">Landed cost {fmtPKR(landed)} — the {fmtPKR(landed - billed)} difference is add-on costs (labor/unloading/packing/etc.) included in the rice cost but not owed to the supplier.</p>
+                {billed > 0 && Math.abs(landed - billed) > 1 && (
+                  <p className="mt-1.5 text-[10px] text-gray-400">
+                    Total Due is the supplier purchase invoice for this lot; landed cost is {fmtPKR(landed)}. The {fmtPKR(Math.abs(landed - billed))} difference is rice moved via a lot split (invoiced on its source lot) and/or add-on costs not owed to the supplier.
+                  </p>
                 )}
               </>
             );
