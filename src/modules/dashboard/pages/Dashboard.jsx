@@ -6,11 +6,12 @@ import {
   CheckCircle2, ArrowRight, TrendingUp, CreditCard,
   FileText, Truck, Package, RefreshCw, Activity,
   Plus, ArrowDownLeft, ArrowUpRight, ArrowRightLeft,
-  Wallet, Zap, BarChart3,
+  Wallet, Zap, BarChart3, Inbox,
 } from 'lucide-react';
 import { SkeletonDashboard as DashboardSkeleton } from '../../../components/Skeleton';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
+import { useMasterDataApprovalsCount } from '../../../modules/admin/api/queries';
 import { millingApi } from '../../../modules/milling/api/services';
 
 import YieldDistributionChart from './dashboard/YieldDistributionChart';
@@ -36,6 +37,9 @@ export default function Dashboard() {
   const { exportOrders, millingBatches, dataLoading, refreshFromApi, addToast } = useApp();
   const { user } = useAuth();
   const isOwnerOrAdmin = user?.role === 'Owner' || user?.role === 'Super Admin';
+  // Pending master-data quick-add approvals (Admin → Approvals). Hook must run
+  // before the early return below to keep hook order stable.
+  const { data: pendingMasterApprovals = 0 } = useMasterDataApprovalsCount();
 
   if (dataLoading && (exportOrders || []).length === 0) {
     return <DashboardSkeleton />;
@@ -51,7 +55,8 @@ export default function Dashboard() {
   const readyToShip = safeOrders.filter(o => o.status === 'Ready to Ship').length;
   const awaitingBalance = safeOrders.filter(o => o.status === 'Awaiting Balance').length;
   const varianceAlerts = safeBatches.filter(b => b.variancePct != null && Math.abs(Number(b.variancePct)) > 1).length;
-  const totalActions = pendingApprovalBatches.length + awaitingAdvance + docsInPrep + readyToShip + varianceAlerts;
+  const masterApprovals = isOwnerOrAdmin ? pendingMasterApprovals : 0;
+  const totalActions = pendingApprovalBatches.length + awaitingAdvance + docsInPrep + readyToShip + varianceAlerts + masterApprovals;
 
   // ─── KPIs ───
   const activeOrders = safeOrders.filter(o => !['Draft', 'Closed', 'Cancelled'].includes(o.status)).length;
@@ -256,6 +261,7 @@ export default function Dashboard() {
 
         {/* Other action items */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          {isOwnerOrAdmin && <ActionItem icon={Inbox} label="Master-data approvals" count={masterApprovals} to="/admin" accent="amber" />}
           <ActionItem icon={CreditCard}     label="Awaiting advance payment"  count={awaitingAdvance} to="/export?status=Awaiting+Advance"      accent="amber" />
           <ActionItem icon={FileText}       label="Documents in preparation"  count={docsInPrep}      to="/export?status=Docs+In+Preparation"   accent="blue" />
           <ActionItem icon={Ship}           label="Ready to ship"             count={readyToShip}     to="/export?status=Ready+to+Ship"         accent="green" />

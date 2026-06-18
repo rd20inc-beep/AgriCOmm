@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
+import { useMasterDataApprovalsCount } from '../modules/admin/api/queries';
 import { RouteErrorBoundary } from './ErrorBoundary';
 
 const sidebarNav = [
@@ -114,7 +115,7 @@ function buildSidebarNav(items, hasPermission) {
   return output;
 }
 
-function SidebarLink({ to, icon: Icon, label, nested, collapsed, onNavigate }) {
+function SidebarLink({ to, icon: Icon, label, nested, collapsed, onNavigate, badge = 0 }) {
   return (
     <NavLink
       to={to}
@@ -122,7 +123,7 @@ function SidebarLink({ to, icon: Icon, label, nested, collapsed, onNavigate }) {
       onClick={onNavigate}
       title={collapsed ? label : undefined}
       className={({ isActive }) =>
-        `group flex items-center gap-3 px-3 py-2 text-[13px] font-medium rounded-lg mx-2 transition-all ${
+        `group relative flex items-center gap-3 px-3 py-2 text-[13px] font-medium rounded-lg mx-2 transition-all ${
           nested ? 'ml-8' : ''
         } ${
           isActive
@@ -132,12 +133,21 @@ function SidebarLink({ to, icon: Icon, label, nested, collapsed, onNavigate }) {
       }
     >
       {Icon && <Icon size={collapsed && !nested ? 20 : 17} className="flex-shrink-0" />}
-      {!collapsed && <span className="truncate">{label}</span>}
+      {!collapsed && <span className="truncate flex-1">{label}</span>}
+      {badge > 0 && (
+        collapsed && !nested ? (
+          <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-amber-500 ring-2 ring-[var(--color-sidebar)]" />
+        ) : (
+          <span className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-amber-500 text-white text-[10px] font-bold leading-none">
+            {badge > 99 ? '99+' : badge}
+          </span>
+        )
+      )}
     </NavLink>
   );
 }
 
-function SidebarSection({ item, collapsed, onNavigate }) {
+function SidebarSection({ item, collapsed, onNavigate, badge = 0 }) {
   const location = useLocation();
   const isChildActive = item.children?.some((child) =>
     location.pathname === child.to || location.pathname.startsWith(child.to + '/')
@@ -149,7 +159,7 @@ function SidebarSection({ item, collapsed, onNavigate }) {
   }, [isChildActive]);
 
   if (!item.children) {
-    return <SidebarLink to={item.to} icon={item.icon} label={item.label} collapsed={collapsed} onNavigate={onNavigate} />;
+    return <SidebarLink to={item.to} icon={item.icon} label={item.label} collapsed={collapsed} onNavigate={onNavigate} badge={badge} />;
   }
 
   const Icon = item.icon;
@@ -205,6 +215,7 @@ function AlertTypeIcon({ type }) {
 export default function Layout({ children }) {
   const { alerts, addToast, entityFilter, setEntityFilter, dismissAlert, dataLoading } = useApp();
   const { user, logout, hasPermission } = useAuth();
+  const { data: pendingApprovals = 0 } = useMasterDataApprovalsCount();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -267,6 +278,10 @@ export default function Layout({ children }) {
 
   const filteredSidebarNav = buildSidebarNav(sidebarNav, hasPermission);
 
+  // Map nav label → notification badge count. The master-data approval queue
+  // lives under Admin → Approvals, so surface its pending count on the Admin tab.
+  const navBadges = { Admin: pendingApprovals };
+
   const handleSidebarNavigate = () => setSidebarOpen(false);
 
   return (
@@ -322,7 +337,7 @@ export default function Layout({ children }) {
                 </div>
               );
             }
-            return <SidebarSection key={item.label} item={item} collapsed={sidebarCollapsed} onNavigate={handleSidebarNavigate} />;
+            return <SidebarSection key={item.label} item={item} collapsed={sidebarCollapsed} onNavigate={handleSidebarNavigate} badge={navBadges[item.label] || 0} />;
           })}
         </nav>
 
