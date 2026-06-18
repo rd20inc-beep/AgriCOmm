@@ -931,7 +931,12 @@ module.exports = {
 
         // Insert transaction
         const txnNo = await generateTxnNo(trx);
-        const rateKg = rate_input ? uc.rateToPerKg(rate_input, rate_unit || 'kg', bagWt) : null;
+        // Cost basis: use the manually-entered rate if given, otherwise fall back
+        // to the lot's own landed cost (per kg) so a consumption/sale still records
+        // a cost impact instead of a blank.
+        const lotRateKg = parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.rate_per_kg) || 0;
+        const rateKg = rate_input ? uc.rateToPerKg(rate_input, rate_unit || 'kg', bagWt) : (lotRateKg || null);
+        const defaultRemark = `${transaction_type.replace(/_/g, ' ')} — ${parseFloat(quantity_input)} ${quantity_unit}`;
 
         const [txn] = await trx('lot_transactions').insert({
           transaction_no: txnNo,
@@ -947,14 +952,14 @@ module.exports = {
           input_qty: parseFloat(quantity_input),
           quantity_kg: outbound ? -qtyKg : qtyKg,
           quantity_bags: outbound ? -bags : bags,
-          rate_input_unit: rate_unit || null,
-          rate_input_value: rate_input ? parseFloat(rate_input) : null,
+          rate_input_unit: rate_input ? (rate_unit || null) : (rateKg ? 'kg' : null),
+          rate_input_value: rate_input ? parseFloat(rate_input) : (rateKg || null),
           rate_per_kg: rateKg,
           cost_impact: rateKg ? uc.round2(qtyKg * rateKg) : null,
           currency: 'PKR',
           balance_kg: newNetKg,
           balance_bags: Math.round(newNetKg / bagWt),
-          remarks: remarks || null,
+          remarks: remarks || defaultRemark,
           created_by: req.user?.id || null,
           performed_by: req.user?.id || null, // NOT NULL column
           performed_at: new Date(),

@@ -1090,7 +1090,7 @@ export default function LotDetail() {
       )}
 
       {/* ─── Modals ─── */}
-      <TransactionModal isOpen={showTxnModal} onClose={() => setShowTxnModal(false)} lotId={lot.id} lotNo={lot.lotNo} availableKg={availKg} bagWeightKg={bw} warehouses={warehousesList} addToast={addToast} refetch={refetch} mutation={txnMutation} />
+      <TransactionModal isOpen={showTxnModal} onClose={() => setShowTxnModal(false)} lotId={lot.id} lotNo={lot.lotNo} availableKg={availKg} bagWeightKg={bw} defaultRateKg={landedKg || rateKg} warehouses={warehousesList} addToast={addToast} refetch={refetch} mutation={txnMutation} />
       <CostEditModal isOpen={showCostModal} onClose={() => setShowCostModal(false)} lot={lot} milled={millingBatches.length > 0 || outboundTxns.length > 0} addToast={addToast} refetch={refetch} />
       <AllocateToBatchModal isOpen={showAllocateModal} onClose={() => setShowAllocateModal(false)} lot={lot} addToast={addToast} refetch={refetch} />
       <AddLotVehicleModal
@@ -1150,7 +1150,7 @@ function rateToPerKg(value, unit, bagWeightKg) {
   return r; // kg
 }
 
-function TransactionModal({ isOpen, onClose, lotId, lotNo, availableKg, bagWeightKg, warehouses, addToast, refetch, mutation }) {
+function TransactionModal({ isOpen, onClose, lotId, lotNo, availableKg, bagWeightKg, defaultRateKg, warehouses, addToast, refetch, mutation }) {
   const [form, setForm] = useState(TXN_BLANK);
   // Fresh form each time the drawer opens.
   useEffect(() => { if (isOpen) setForm({ ...TXN_BLANK, transaction_date: new Date().toISOString().slice(0, 10) }); }, [isOpen]);
@@ -1161,7 +1161,11 @@ function TransactionModal({ isOpen, onClose, lotId, lotNo, availableKg, bagWeigh
   const isOutbound = selectedType?.dir === 'out';
   const isInbound = selectedType?.dir === 'in';
   const bags = bagWeightKg > 0 ? Math.round(qtyKg / bagWeightKg) : 0;
-  const ratePerKg = rateToPerKg(form.rate_input, form.rate_unit, bagWeightKg);
+  const manualRateKg = rateToPerKg(form.rate_input, form.rate_unit, bagWeightKg);
+  // Fall back to the lot's own landed cost when no rate is entered, so the cost
+  // impact previewed here matches what the server records.
+  const ratePerKg = manualRateKg || (parseFloat(defaultRateKg) || 0);
+  const usingLotCost = !manualRateKg && ratePerKg > 0;
   const costImpact = qtyKg * ratePerKg;
   const availAfter = isOutbound ? availableKg - qtyKg : isInbound ? availableKg + qtyKg : availableKg;
   const exceeds = isOutbound && qtyKg > availableKg + 0.01;
@@ -1320,7 +1324,8 @@ function TransactionModal({ isOpen, onClose, lotId, lotNo, availableKg, bagWeigh
               <div className="flex justify-between"><span className="text-gray-500">Available after</span>
                 <span className={`font-bold ${availAfter < 0 ? 'text-red-600' : 'text-gray-900'}`}>{availAfter.toLocaleString(undefined, { maximumFractionDigits: 0 })} kg</span></div>
               {costImpact > 0 && (
-                <div className="flex justify-between border-t border-gray-200/70 pt-1.5 mt-1.5"><span className="text-gray-500">Cost impact</span>
+                <div className="flex justify-between border-t border-gray-200/70 pt-1.5 mt-1.5">
+                  <span className="text-gray-500">Cost impact{usingLotCost && <span className="text-gray-400"> (lot cost)</span>}</span>
                   <span className="font-bold text-gray-900">{fmtPKR(costImpact)}</span></div>
               )}
             </div>
