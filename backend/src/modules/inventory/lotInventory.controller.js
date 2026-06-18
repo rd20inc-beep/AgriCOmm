@@ -746,14 +746,164 @@ module.exports = {
             ? Math.max(0, Math.min(addLandedTotal, parseFloat(paid_amount) || 0))
             : Math.max(0, parseFloat(paid_amount) || 0);
 
-        // Once the lot is routed into a milling batch, no more purchases can be
-        // added — blending a new cost in would muddy the rice already committed to
-        // milling. Create a new lot for the new delivery instead. (User decision
-        // 2026-06-19: simpler than splitting.)
-        const committedCount = await trx('batch_source_lots').where({ lot_id: lotId }).count('id as c').first();
-        if (parseInt(committedCount.c, 10) > 0) {
-          const e = new Error('Cannot add a purchase: this lot is already in milling. Create a new lot for the new delivery instead.');
-          e.status = 422; throw e;
+        // ── If the lot has rice committed to a milling batch (started but not yet
+        //    yielded — nothing consumed), SPLIT instead of blending in place: freeze
+        //    the committed portion's cost on THIS lot (so the batch is never
+        //    re-priced) and move the un-milled remainder + the new purchase into a
+        //    NEW lot at the blended cost. ─────────────────────────────────────────
+        const committedRows = await trx('batch_source_lots').where({ lot_id: lotId }).select('id', 'batch_id', 'qty_mt');
+        const committedKg = committedRows.reduce((s, r) => s + (parseFloat(r.qty_mt) || 0) * 1000, 0);
+
+        if (committedKg > 0.5) {
+          const oldNetKg = currentNetKg;
+          const oldRate = parseFloat(lot.landed_cost_per_kg) || 0;
+          const oldPurchaseAmt = parseFloat(lot.purchase_amount) || 0;
+          const remainderKg = Math.max(0, oldNetKg - committedKg);
+          const cf = oldNetKg > 0 ? committedKg / oldNetKg : 1; // committed fraction
+          const rf = 1 - cf;                                    // remainder fraction
+          const scale = (v, f) => uc.round2((parseFloat(v) || 0) * f);
+
+          // 1) Freeze committed source-lot cost + lock each batch's raw_rice pool.
+          const byBatch = {};
+          for (const r of committedRows) {
+            const ct = uc.round2(oldRate * (parseFloat(r.qty_mt) || 0) * 1000);
+            await trx('batch_source_lots').where({ id: r.id }).update({ unit_cost_pkr: oldRate, cost_total_pkr: ct });
+            byBatch[r.batch_id] = (byBatch[r.batch_id] || 0) + ct;
+          }
+          for (const bid of Object.keys(byBatch)) {
+            const total = uc.round2(byBatch[bid]);
+            const ex = await trx('milling_costs').where({ batch_id: bid, category: 'raw_rice' }).first();
+            if (ex) await trx('milling_costs').where({ id: ex.id }).update({ amount: total });
+            else await trx('milling_costs').insert({ batch_id: bid, category: 'raw_rice', amount: total, notes: 'Raw rice cost (locked at add-purchase split)' });
+          }
+
+          // 2) Shrink THIS lot to the committed portion (cost rate unchanged).
+          const committedBags = Math.max(0, Math.round(committedKg / bagWt));
+          const committedLanded = uc.round2(oldRate * committedKg);
+          await trx('inventory_lots').where({ id: lotId }).update({
+            qty: uc.kgToTon(committedKg),
+            net_weight_kg: committedKg, gross_weight_kg: committedKg,
+            available_qty: committedKg / 1000, total_bags: committedBags,
+            received_net_weight_kg: committedKg,
+            purchase_amount: scale(oldPurchaseAmt, cf),
+            labor_cost: scale(lot.labor_cost, cf), unloading_cost: scale(lot.unloading_cost, cf),
+            packing_cost: scale(lot.packing_cost, cf), other_cost: scale(lot.other_cost, cf),
+            total_bag_cost: scale(lot.total_bag_cost, cf),
+            landed_cost_total: committedLanded, total_value: committedLanded,
+            cost_per_unit: oldRate * 1000,
+            updated_at: trx.fn.now(),
+          });
+          const splitTxn = await generateTxnNo(trx);
+          await trx('lot_transactions').insert({
+            transaction_no: splitTxn, transaction_date: purchase_date || new Date().toISOString().slice(0, 10),
+            lot_id: lotId, transaction_type: 'lot_split', reference_module: 'purchase',
+            input_unit: 'kg', input_qty: remainderKg, quantity_kg: -remainderKg, quantity_bags: -Math.round(remainderKg / bagWt),
+            balance_kg: committedKg, balance_bags: committedBags, currency: 'PKR',
+            remarks: `Split off ${(remainderKg / 1000).toFixed(2)} MT un-milled remainder into a new lot for an added purchase`,
+            created_by: req.user?.id || null, performed_by: req.user?.id || null, performed_at: new Date(),
+          });
+
+          // 3) New lot = remainder (at old rate) + the new purchase (blended).
+          const newNetKg = remainderKg + addNetKg;
+          const newLanded = uc.round2(oldRate * remainderKg + addLandedTotal);
+          const newRate = newNetKg > 0 ? uc.round4(newLanded / newNetKg) : 0;
+          const newBags = Math.max(0, Math.round(remainderKg / bagWt) + addBags);
+          const newPurchaseAmt = uc.round2(scale(oldPurchaseAmt, rf) + addPurchaseAmount);
+          const newLotNo = await inventoryService.generateRiceLotNo(trx, { supplierId: lot.supplier_id, productId: lot.product_id, date: purchase_date });
+          const newPaid = status === 'Paid' ? addLandedTotal : status === 'Partial' ? Math.max(0, Math.min(addLandedTotal, parseFloat(paid_amount) || 0)) : Math.max(0, parseFloat(paid_amount) || 0);
+          // eslint-disable-next-line no-unused-vars
+          const { id: _oid, created_at: _oc, updated_at: _ou, ...clone } = lot;
+          const [newLot] = await trx('inventory_lots').insert({
+            ...clone,
+            lot_no: newLotNo,
+            qty: uc.kgToTon(newNetKg), net_weight_kg: newNetKg, gross_weight_kg: newNetKg,
+            available_qty: newNetKg / 1000, reserved_qty: 0, sold_weight_kg: 0, damaged_weight_kg: 0,
+            total_bags: newBags, received_net_weight_kg: newNetKg,
+            purchase_amount: newPurchaseAmt,
+            // Blended purchase rate — keep rate_per_kg AND the displayed "Original
+            // Rate" (rate_input_value) in sync so they never disagree on a blended lot.
+            rate_per_kg: newNetKg > 0 ? uc.round4(newPurchaseAmt / newNetKg) : 0,
+            rate_input_value: newNetKg > 0 ? uc.round4(newPurchaseAmt / newNetKg) : 0,
+            rate_input_unit: 'kg',
+            // Transport stays on the original lot (its hauler payable is keyed there);
+            // the remainder lot carries only its share of the non-transport add-ons.
+            transport_cost: 0, transport_vendor_id: null,
+            labor_cost: uc.round2(scale(lot.labor_cost, rf) + (parseFloat(labor_cost) || 0)),
+            unloading_cost: uc.round2(scale(lot.unloading_cost, rf) + (parseFloat(unloading_cost) || 0)),
+            packing_cost: uc.round2(scale(lot.packing_cost, rf) + (parseFloat(packing_cost) || 0)),
+            other_cost: uc.round2(scale(lot.other_cost, rf) + (parseFloat(other_cost) || 0)),
+            total_bag_cost: uc.round2(scale(lot.total_bag_cost, rf) + addBagCost),
+            landed_cost_total: newLanded, landed_cost_per_kg: newRate,
+            total_value: newLanded, cost_per_unit: newRate * 1000,
+            milling_status: null, status: 'Available',
+            quality_json: lot.quality_json == null ? null : (typeof lot.quality_json === 'object' ? JSON.stringify(lot.quality_json) : lot.quality_json),
+            // Only the NEW purchase is freshly owed here — the remainder's debt was
+            // already booked on the original lot's purchase, so don't double-count it.
+            paid_amount: newPaid, due_amount: uc.round2(addLandedTotal - newPaid),
+            payment_status: newPaid >= addLandedTotal - 0.01 ? 'Paid' : newPaid > 0 ? 'Partial' : 'Pending',
+          }).returning('*');
+
+          // Ledger leg 1: the un-milled remainder carried over from the split (at
+          // the original lot's rate) — so the new lot's ledger reconciles to its
+          // full balance and shows the right price for every kg.
+          if (remainderKg > 0.5) {
+            const splitInTxn = await generateTxnNo(trx);
+            await trx('lot_transactions').insert({
+              transaction_no: splitInTxn, transaction_date: purchase_date || new Date().toISOString().slice(0, 10),
+              lot_id: newLot.id, transaction_type: 'lot_merge', reference_module: 'purchase',
+              warehouse_to_id: newLot.warehouse_id,
+              input_unit: 'kg', input_qty: remainderKg, quantity_kg: remainderKg, quantity_bags: Math.round(remainderKg / bagWt),
+              rate_input_unit: 'kg', rate_input_value: uc.round4(oldRate), rate_per_kg: uc.round4(oldRate),
+              cost_impact: uc.round2(oldRate * remainderKg), currency: 'PKR',
+              balance_kg: remainderKg, balance_bags: Math.round(remainderKg / bagWt),
+              remarks: `Un-milled remainder split from ${lot.lot_no} (${(remainderKg / 1000).toFixed(2)} MT @ ${uc.round4(oldRate)}/kg)`,
+              created_by: req.user?.id || null, performed_by: req.user?.id || null, performed_at: new Date(),
+            });
+          }
+          // Ledger leg 2: the new purchase tranche.
+          const newTxn = await generateTxnNo(trx);
+          await trx('lot_transactions').insert({
+            transaction_no: newTxn, transaction_date: purchase_date || new Date().toISOString().slice(0, 10),
+            lot_id: newLot.id, transaction_type: 'purchase_in', reference_module: 'purchase',
+            warehouse_to_id: newLot.warehouse_id,
+            input_unit: quantity_unit, input_qty: parseFloat(quantity_input),
+            quantity_kg: addNetKg, quantity_bags: addBags,
+            rate_input_unit: rate_unit, rate_input_value: parseFloat(rate_input), rate_per_kg: addRatePerKg,
+            cost_impact: addLandedTotal, currency: 'PKR',
+            balance_kg: newNetKg, balance_bags: newBags,
+            remarks: `Added purchase: ${parseFloat(quantity_input)} ${quantity_unit} @ ${parseFloat(rate_input)}/${rate_unit}`,
+            created_by: req.user?.id || null, performed_by: req.user?.id || null, performed_at: new Date(),
+          });
+          await trx('inventory_movements').insert({
+            lot_id: newLot.id, movement_type: 'purchase_receipt', qty: uc.kgToTon(addNetKg),
+            to_warehouse_id: newLot.warehouse_id, dest_entity: newLot.entity,
+            notes: `Added purchase (split from ${lot.lot_no})`,
+            cost_per_unit: (addNetKg > 0 ? uc.round4(addLandedTotal / addNetKg) : 0) * 1000,
+            total_cost: addLandedTotal, currency: 'PKR', created_by: req.user?.id || null,
+          });
+          if (addLandedTotal > 0) {
+            const payNo = await generatePayNo(trx);
+            await trx('payables').insert({
+              pay_no: payNo, entity: 'mill', category: 'Raw Material', supplier_id: lot.supplier_id,
+              linked_ref: newLotNo, original_amount: addLandedTotal, paid_amount: newPaid,
+              outstanding: Math.max(0, uc.round2(addLandedTotal - newPaid)),
+              due_date: addDays(purchase_date, 30),
+              status: newPaid >= addLandedTotal - 0.01 ? 'Paid' : newPaid > 0 ? 'Partial' : 'Pending',
+              currency: 'PKR', notes: `Added purchase — new lot ${newLotNo}`,
+            });
+            await accountingService.autoPost(trx, {
+              triggerEvent: 'purchase_invoice', entity: 'mill', amount: addLandedTotal, currency: 'PKR',
+              refType: 'Purchase Lot', refNo: newLotNo, description: `Added purchase — new lot ${newLotNo} (${lot.item_name})`,
+              userId: req.user?.id || null, partyType: 'supplier', partyId: lot.supplier_id,
+            });
+          }
+
+          // NOTE: we deliberately do NOT reallocate the supplier purchase debt on a
+          // split. A purchase invoice follows the PURCHASE, not the rice's lot
+          // location — the original purchase payable stays as-is, and the new lot is
+          // only newly billed for its added tranche. The remainder it carries was
+          // already invoiced on the original lot's purchase.
+          return { __split: true, newLot: enrichLot(newLot), newLotNo, remainderMt: uc.kgToTon(remainderKg), committedMt: uc.kgToTon(committedKg) };
         }
 
         // ── Blend into the existing lot (weighted-average landed cost) ──
