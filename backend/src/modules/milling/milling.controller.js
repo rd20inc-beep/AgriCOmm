@@ -67,6 +67,19 @@ async function recomputeRawRiceCostFromVehicles(trx, batchId, userId) {
     const p = qj.price_per_mt != null ? parseFloat(qj.price_per_mt) : null;
     if (p != null && !Number.isNaN(p) && p > 0) { pricedW += w; pricedCost += w * p; }
   }
+
+  // Keep yield_pct in step with the current raw qty (yield = actual_finished /
+  // raw_qty). It was a snapshot from record-yield time, so changing trucks after
+  // yield left it stale (e.g. 42/114 → 36.8% even after raw dropped to 54).
+  if (totalW > 0) {
+    const b = await trx('milling_batches').where({ id: batchId }).first('actual_finished_mt');
+    const fin = parseFloat(b?.actual_finished_mt) || 0;
+    if (fin > 0) {
+      await trx('milling_batches').where({ id: batchId })
+        .update({ yield_pct: Math.round((fin / totalW) * 1000) / 10, updated_at: trx.fn.now() });
+    }
+  }
+
   if (pricedW <= 0) return; // no per-truck price anywhere — leave any existing cost alone
   const avg = pricedCost / pricedW;
   const rawRiceCost = Math.round((pricedCost + Math.max(0, totalW - pricedW) * avg) * 100) / 100;
