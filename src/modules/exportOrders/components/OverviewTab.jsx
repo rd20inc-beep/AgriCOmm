@@ -301,7 +301,7 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
                   <th className="py-2 pr-3">Brand</th>
                   <th className="py-2 pr-3">HS Code</th>
                   <th className="py-2 pr-3">Packing</th>
-                  <th className="py-2 pr-3">Bag / Master</th>
+                  <th className="py-2 pr-3">Bag Type / Size</th>
                   <th className="py-2 pr-3 text-right">Qty (MT)</th>
                   <th className="py-2 pr-3 text-right">Rate / MT</th>
                   <th className="py-2 pl-3 text-right">Line Total</th>
@@ -315,10 +315,18 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
                     <td className="py-2 pr-3 text-gray-700">{it.bagBrand || order.bagBrand || '—'}</td>
                     <td className="py-2 pr-3 text-gray-700">{it.hsCode || '—'}</td>
                     <td className="py-2 pr-3 text-gray-700">{it.packing || '—'}</td>
-                    <td className="py-2 pr-3 text-gray-700 whitespace-nowrap">
-                      {it.bagSizeKg ? `${it.bagSizeKg} kg` : '—'}
-                      {it.masterBagSizeKg ? <span className="text-amber-700"> · master {it.masterBagSizeKg} kg</span> : ''}
-                    </td>
+                    {(() => {
+                      const bagType = it.bagType || it.bag_type || order.bagType || order.bag_type;
+                      const bagSize = it.bagSizeKg || it.bag_size_kg;
+                      return (
+                        <td className="py-2 pr-3 text-gray-700 whitespace-nowrap">
+                          {bagType && <span className="font-medium text-gray-900">{bagType}</span>}
+                          {bagType && bagSize ? ' · ' : ''}
+                          {bagSize ? `${bagSize} kg` : (!bagType ? '—' : '')}
+                          {it.masterBagSizeKg ? <span className="text-amber-700"> · master {it.masterBagSizeKg} kg</span> : ''}
+                        </td>
+                      );
+                    })()}
                     <td className="py-2 pr-3 text-right text-gray-900">{it.qtyMT.toLocaleString(undefined, { maximumFractionDigits: 3 })}</td>
                     <td className="py-2 pr-3 text-right text-gray-900">{formatCurrency(it.pricePerMT)}</td>
                     <td className="py-2 pl-3 text-right font-semibold text-gray-900">{formatCurrency(it.lineTotal)}</td>
