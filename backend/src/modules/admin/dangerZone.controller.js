@@ -158,20 +158,22 @@ const dangerZone = {
         await trx('bank_accounts').where('id', acct.id).update({ current_balance: after, updated_at: trx.fn.now() });
 
         // Trail row so the correction is visible in the account's history.
+        // type is constrained to credit/debit and status to posted/pending/reversed.
+        const delta = mode === 'set' ? (after - before) : amt;
         if (await trx.schema.hasTable('bank_transactions')) {
           const last = await trx('bank_transactions').where('transaction_no', 'like', 'BT-%').orderBy('id', 'desc').first('transaction_no');
           const seq = last ? (parseInt(String(last.transaction_no).replace(/^BT-/, ''), 10) || 0) + 1 : 1;
           await trx('bank_transactions').insert({
             transaction_no: `BT-${String(seq).padStart(4, '0')}`,
             bank_account_id: acct.id,
-            type: 'adjustment',
-            amount: mode === 'set' ? (after - before) : amt,
+            type: delta >= 0 ? 'credit' : 'debit',
+            amount: Math.abs(delta),
             currency: acct.currency || 'PKR',
             transaction_date: new Date().toISOString().slice(0, 10),
             reference: 'Danger Zone',
             category: 'manual_adjustment',
             running_balance: after,
-            status: 'completed',
+            status: 'posted',
             source: 'manual_adjustment',
             notes: reason || `Manual balance ${mode} by super admin`,
             created_by: req.user?.id || null,
