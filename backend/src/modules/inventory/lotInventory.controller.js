@@ -158,6 +158,36 @@ async function buildLotDetail(lot) {
       db('milling_costs').where({ batch_id: ownBatchId, category: 'raw_rice' }).sum('amount as t').first(),
     ]);
     if (arrival || post) batchQuality = { arrival: arrival || null, post: post || null };
+
+    // Fallback: quality entered WITH the vehicle arrival (milling_vehicle_arrivals
+    // .quality_json) is never copied into milling_quality_samples, so a batch whose
+    // only quality lives on its truck(s) would show nothing here. Surface it as the
+    // arrival analysis (weight-weighted across vehicles) when no formal arrival
+    // sample exists, so the lot's Quality tab still shows moisture/broken/etc.
+    if (!batchQuality?.arrival) {
+      const arrivals = await db('milling_vehicle_arrivals')
+        .where({ batch_id: ownBatchId }).whereNotNull('quality_json');
+      const withQ = arrivals.filter((a) => a.quality_json && typeof a.quality_json === 'object' && Object.keys(a.quality_json).length);
+      if (withQ.length) {
+        const wAvgQ = (key) => {
+          let num = 0, den = 0;
+          for (const a of withQ) {
+            const v = parseFloat(a.quality_json[key]);
+            if (Number.isNaN(v)) continue;
+            const w = parseFloat(a.weight_mt) || 1;
+            num += v * w; den += w;
+          }
+          return den > 0 ? Math.round((num / den) * 100) / 100 : null;
+        };
+        const vehicleArrival = {
+          analysis_type: 'arrival', from_vehicle: true,
+          moisture: wAvgQ('moisture'), broken: wAvgQ('broken'), chalky: wAvgQ('chalky'),
+          foreign_matter: wAvgQ('foreign_matter'), purity: wAvgQ('purity'),
+          price_per_mt: wAvgQ('price_per_mt'),
+        };
+        batchQuality = { arrival: vehicleArrival, post: batchQuality?.post || null };
+      }
+    }
     batchYield = byield || null;
     // Purchase rate of the raw rice this lot was milled from = batch raw-rice
     // cost ÷ raw input kg. Shared by every output (finished + by-product) of the
