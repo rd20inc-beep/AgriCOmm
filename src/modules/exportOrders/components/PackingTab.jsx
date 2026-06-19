@@ -20,6 +20,19 @@ export default function PackingTab({ order, onUpdated }) {
   const totalBags = order.totalBags || order.total_bags || 0;
   const packingNotes = order.packingNotes || order.packing_notes || '';
   const packingLines = order.packingLines || order.packing_lines || [];
+  // Per-item packing (multi-product P.I.) — each line can carry its own bag.
+  const items = order.items || [];
+  const itemBag = (it) => ({
+    type: it.bagType || it.bag_type || '',
+    sizeKg: it.bagSizeKg || it.bag_size_kg || '',
+    brand: it.bagBrand || it.bag_brand || '',
+    masterKg: it.masterBagSizeKg || it.master_bag_size_kg || '',
+    product: it.productName || it.product_name || '',
+    lineNo: it.lineNo || it.line_no || '',
+  });
+  const hasItemPacking = items.length > 1 && items.some((it) => {
+    const b = itemBag(it); return b.type || b.sizeKg || b.brand;
+  });
 
   function startEdit() {
     setForm({
@@ -62,7 +75,7 @@ export default function PackingTab({ order, onUpdated }) {
 
   const hasBagSpec = bagSpec.type || bagSpec.sizeKg || bagSpec.printing;
   const hasLines = packingLines.length > 0;
-  const isEmpty = !hasBagSpec && !hasLines && !receivingMode && !packingNotes;
+  const isEmpty = !hasBagSpec && !hasLines && !hasItemPacking && !receivingMode && !packingNotes;
 
   return (
     <div className="space-y-6">
@@ -104,6 +117,43 @@ export default function PackingTab({ order, onUpdated }) {
                     {receivingMode && <div><p className="text-xs text-gray-500">Receiving Mode</p><p className="text-sm font-medium capitalize">{receivingMode}</p></div>}
                     {totalBags > 0 && <div><p className="text-xs text-gray-500">Total Bags</p><p className="text-sm font-medium">{totalBags.toLocaleString()}</p></div>}
                   </div>
+                </div>
+              )}
+
+              {/* Per-item Packing (multi-product orders) */}
+              {hasItemPacking && (
+                <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="px-5 py-3 border-b border-gray-100 bg-gray-50">
+                    <h4 className="text-sm font-semibold text-gray-700">Per-item Packing ({items.length})</h4>
+                  </div>
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-100 text-xs text-gray-500 uppercase">
+                        <th className="px-4 py-2 text-left">#</th>
+                        <th className="px-4 py-2 text-left">Product</th>
+                        <th className="px-4 py-2 text-left">Bag Type</th>
+                        <th className="px-4 py-2 text-left">Bag Size</th>
+                        <th className="px-4 py-2 text-left">Brand / Marking</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {items.map((it, i) => {
+                        const b = itemBag(it);
+                        return (
+                          <tr key={it.id || i} className="border-b border-gray-50 last:border-0 hover:bg-gray-50">
+                            <td className="px-4 py-2.5 text-sm text-gray-500">{b.lineNo || i + 1}</td>
+                            <td className="px-4 py-2.5 text-sm font-medium text-gray-900">{b.product || '—'}</td>
+                            <td className="px-4 py-2.5 text-sm">{b.type || '—'}</td>
+                            <td className="px-4 py-2.5 text-sm whitespace-nowrap">
+                              {b.sizeKg ? `${b.sizeKg} KG` : '—'}
+                              {b.masterKg ? <span className="text-amber-700"> · master {b.masterKg} KG</span> : ''}
+                            </td>
+                            <td className="px-4 py-2.5 text-sm text-gray-700">{b.brand || '—'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               )}
 
