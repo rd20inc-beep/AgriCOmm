@@ -838,6 +838,19 @@ const millingController = {
         ? `Output differs from input by ${outputDiffPct.toFixed(1)}% (${totalOutput.toFixed(2)} MT output vs ${actualRawQty.toFixed(2)} MT input)`
         : null;
 
+      // Hard stop: total milling output can't exceed the raw input — you can't
+      // get more rice out than went in. Compare against the batch's maintained
+      // raw_qty_mt (kept = Σ current vehicle weights / blend qty), with a small
+      // tolerance for scale noise. Previously this was only a soft warning, so
+      // an over-100% yield (e.g. 42 MT out of 40 milled) could be saved.
+      const rawCap = parseFloat(batch.raw_qty_mt) || actualRawQty;
+      if (rawCap > 0 && totalOutput > rawCap * 1.02) {
+        return res.status(400).json({
+          success: false,
+          message: `Total output ${totalOutput.toFixed(2)} MT exceeds the raw input ${rawCap.toFixed(2)} MT. Output can't be more than what was milled — check the finished / broken / by-product quantities (and that all raw trucks are recorded).`,
+        });
+      }
+
       // Prevent duplicate yield recording — if batch already has output lots, skip
       const existingOutputLots = await db('inventory_lots')
         .where({ batch_ref: `batch-${batch.id}` })
