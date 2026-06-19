@@ -1296,6 +1296,7 @@ const inventoryService = {
       quantity_kg: 0, // no physical movement
       reservation_effect: parsedQty * 1000,
       remarks: `Reserved ${parsedQty} MT for order ${orderId}`,
+      created_by: userId || null, // NOT NULL since migration 066 — must be set
       performed_by: userId || null,
       performed_at: new Date(),
     });
