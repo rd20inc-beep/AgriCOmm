@@ -811,20 +811,13 @@ const millingController = {
       const wastage = parseFloat(wastage_mt) || 0;
       const totalOutput = finished + broken + bran + husk + sortex + powder + sweeping + wastage;
 
-      // Use actual received weight (from raw lot) if it differs from declared raw_qty_mt
-      const rawLot = await db('inventory_lots')
-        .where({ batch_ref: `batch-${batch.id}`, type: 'raw', entity: 'mill' })
-        .first();
-      // The raw qty for yield calculation = lot qty (what was actually received)
-      // If lot already consumed, use the original qty from transactions
-      let actualRawQty = parseFloat(batch.raw_qty_mt) || 0;
-      if (rawLot) {
-        const totalReceived = await db('lot_transactions')
-          .where({ lot_id: rawLot.id, transaction_type: 'purchase_in' })
-          .sum('input_qty as total').first();
-        const received = parseFloat(totalReceived?.total) || 0;
-        if (received > 0) actualRawQty = received;
-      }
+      // Raw input for the yield = the batch's maintained raw_qty_mt (Σ current
+      // vehicle weights / blend qty). Do NOT sum the lot's purchase_in
+      // transactions — that double-counts receipts from trucks that were later
+      // deleted (their reversal is a separate adjustment_minus), inflating raw and
+      // skewing yield% and the over-yield check (e.g. 30+30 reversed trucks made
+      // raw look like 114 MT instead of 54).
+      const actualRawQty = parseFloat(batch.raw_qty_mt) || 0;
 
       const yieldPct = actualRawQty > 0
         ? ((finished / actualRawQty) * 100).toFixed(2)
