@@ -1767,6 +1767,59 @@ module.exports = {
   },
 
   // ═══════════════════════════════════════════════════════════════════
+  // Transfer an export lot's stock back to the mill entity
+  // ═══════════════════════════════════════════════════════════════════
+  // Mirror of transferLotToExport. Deducts this export lot and creates a
+  // mill-entity lot. Only the lot's AVAILABLE qty can move (reserved-for-order
+  // stock is excluded by the availability check). No internal_transfers row /
+  // journals here — that table + posting rules are mill→export oriented; the
+  // lot ledger (transfer_out/in with entity_from=export, entity_to=mill) is the
+  // record of the reverse move.
+  async transferLotToMill(req, res) {
+    try {
+      const { id } = req.params;
+      const { qty_mt, transfer_price_pkr } = req.body || {};
+      const qty = parseFloat(qty_mt);
+      if (!qty || qty <= 0) {
+        return res.status(400).json({ success: false, message: 'A positive qty_mt is required.' });
+      }
+
+      const result = await db.transaction(async (trx) => {
+        const lot = await trx('inventory_lots').where('id', id).first();
+        if (!lot) { const e = new Error('Lot not found.'); e.status = 404; throw e; }
+        if (lot.entity !== 'export') { const e = new Error('Only export-entity lots can be transferred back to mill.'); e.status = 422; throw e; }
+
+        const avail = parseFloat(lot.available_qty) || 0;
+        if (qty > avail + 0.0001) {
+          const e = new Error(`Insufficient available stock: ${avail} MT in ${lot.lot_no}${parseFloat(lot.reserved_qty) > 0 ? ` (${lot.reserved_qty} MT reserved for an order)` : ''}, requested ${qty} MT.`);
+          e.status = 422; throw e;
+        }
+
+        const moved = await inventoryService.transferToMill(trx, {
+          transferId: null,
+          lotId: lot.id,
+          qtyMT: qty,
+          productName: lot.item_name,
+          transferPricePerMT: (transfer_price_pkr != null && transfer_price_pkr !== '') ? parseFloat(transfer_price_pkr) : null,
+          userId: req.user?.id,
+        });
+
+        return { exportLotNo: lot.lot_no, millLot: moved.millLot };
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: `Transferred ${qty} MT from ${result.exportLotNo} back to mill lot ${result.millLot.lot_no}.`,
+        data: result,
+      });
+    } catch (err) {
+      if (err.status) return res.status(err.status).json({ success: false, message: err.message });
+      console.error('transferLotToMill error:', err);
+      return res.status(500).json({ success: false, message: err.message || 'Transfer failed.' });
+    }
+  },
+
+  // ═══════════════════════════════════════════════════════════════════
   // Lot-level vehicles + Start Milling
   // ═══════════════════════════════════════════════════════════════════
 

@@ -1214,6 +1214,106 @@ const inventoryService = {
   },
 
   // =========================================================================
+  // Transfer stock back from export to mill (mirror of transferToExport)
+  // =========================================================================
+  async transferToMill(trx, { transferId, lotId, qtyMT, productName, transferPricePerMT, totalValuePkr, userId }) {
+    if (!trx) throw new Error('transferToMill requires a transaction');
+
+    const parsedQty = parseFloat(qtyMT);
+    const sourceLot = await trx('inventory_lots').where('id', lotId).first();
+    if (!sourceLot) throw new Error(`Source lot ${lotId} not found`);
+
+    const pricePerMT = (transferPricePerMT != null && transferPricePerMT !== '')
+      ? parseFloat(transferPricePerMT)
+      : (parseFloat(sourceLot.cost_per_unit) || 0);
+    const totalValue = parseFloat(totalValuePkr) || (pricePerMT * parsedQty);
+    const ratePerKg = pricePerMT / 1000;
+
+    // Post transfer_out (reduces export lot)
+    const outMovement = await inventoryService.postMovement(trx, {
+      movementType: MOVEMENT_TYPES.TRANSFER_OUT,
+      lotId: sourceLot.id,
+      qty: parsedQty,
+      fromWarehouseId: sourceLot.warehouse_id,
+      sourceEntity: 'export',
+      destEntity: 'mill',
+      linkedRef: transferId ? `transfer-${transferId}` : null,
+      notes: 'Transfer back to mill',
+      costPerUnit: parseFloat(sourceLot.cost_per_unit) || 0,
+      currency: sourceLot.cost_currency || 'PKR',
+      transferId: transferId || null,
+      userId,
+    });
+
+    // Find or create a mill finished-goods warehouse for the destination.
+    let millWarehouse = await trx('warehouses')
+      .where({ entity: 'mill' })
+      .whereIn('type', ['finished'])
+      .first();
+    if (!millWarehouse) {
+      millWarehouse = await trx('warehouses').where({ entity: 'mill' }).first();
+    }
+    if (!millWarehouse) {
+      [millWarehouse] = await trx('warehouses')
+        .insert({ name: 'Mill Finished Goods', entity: 'mill', type: 'finished' })
+        .returning('*');
+    }
+
+    // Create a new mill-entity lot to hold the returned stock.
+    const lotNo = await inventoryService.generateLotNo(trx);
+    const [millLot] = await trx('inventory_lots')
+      .insert({
+        lot_no: lotNo,
+        item_name: productName || sourceLot.item_name,
+        type: sourceLot.type || 'finished',
+        entity: 'mill',
+        warehouse_id: millWarehouse.id,
+        product_id: sourceLot.product_id || null,
+        qty: 0,
+        unit: sourceLot.unit || 'MT',
+        batch_ref: sourceLot.batch_ref || null,
+        cost_per_unit: pricePerMT,
+        cost_currency: sourceLot.cost_currency || 'PKR',
+        total_value: totalValue,
+        reserved_qty: 0,
+        available_qty: 0,
+        status: 'Available',
+        created_by: userId || null,
+        supplier_id: sourceLot.supplier_id || null,
+        variety: sourceLot.variety || null,
+        grade: sourceLot.grade || null,
+        moisture_pct: sourceLot.moisture_pct || null,
+        broken_pct: sourceLot.broken_pct || null,
+        net_weight_kg: 0,
+        gross_weight_kg: 0,
+        rate_per_kg: ratePerKg,
+        purchase_amount: 0,
+        landed_cost_total: totalValue,
+        landed_cost_per_kg: ratePerKg,
+      })
+      .returning('*');
+
+    // Post transfer_in (increases mill lot)
+    const inMovement = await inventoryService.postMovement(trx, {
+      movementType: MOVEMENT_TYPES.TRANSFER_IN,
+      lotId: millLot.id,
+      qty: parsedQty,
+      toWarehouseId: millWarehouse.id,
+      sourceEntity: 'export',
+      destEntity: 'mill',
+      linkedRef: transferId ? `transfer-${transferId}` : null,
+      notes: 'Received back from export',
+      costPerUnit: parseFloat(sourceLot.cost_per_unit) || 0,
+      currency: sourceLot.cost_currency || 'PKR',
+      transferId: transferId || null,
+      userId,
+    });
+
+    const updatedMillLot = await trx('inventory_lots').where('id', millLot.id).first();
+    return { outMovement, inMovement, millLot: updatedMillLot };
+  },
+
+  // =========================================================================
   // Dispatch for export shipment
   // =========================================================================
   async dispatchForShipment(trx, { orderId, lotId, qtyMT, userId }) {

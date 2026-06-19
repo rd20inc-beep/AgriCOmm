@@ -25,6 +25,7 @@ export const lotInventoryApi = {
   updateLotQuality: (id, data) => api.put(`/api/lot-inventory/lots/${id}/quality`, data),
   allocateLotToBatch: (id, data) => api.post(`/api/lot-inventory/lots/${id}/allocate-to-batch`, data),
   transferLotToExport: (id, data) => api.post(`/api/lot-inventory/lots/${id}/transfer-to-export`, data),
+  transferLotToMill: (id, data) => api.post(`/api/lot-inventory/lots/${id}/transfer-to-mill`, data),
   stockReport: (params) => api.get('/api/lot-inventory/reports/stock', params),
   getLotAncestry: (id) => api.get(`/api/lot-inventory/lots/${id}/ancestry`),
   getLotDescendants: (id) => api.get(`/api/lot-inventory/lots/${id}/descendants`),

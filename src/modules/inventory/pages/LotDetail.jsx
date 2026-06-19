@@ -68,6 +68,7 @@ export default function LotDetail() {
   const [showAddPurchase, setShowAddPurchase] = useState(false);
   const [showQualityModal, setShowQualityModal] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
+  const [showTransferMill, setShowTransferMill] = useState(false);
   const [linkedBatch, setLinkedBatch] = useState(null);
   const [lotVehicles, setLotVehicles] = useState([]);
   // lotSales provided by hook below
@@ -295,6 +296,13 @@ export default function LotDetail() {
           && (parseFloat(lot.availableQty) > 0) && (
           <button onClick={() => setShowTransfer(true)} className="btn btn-sm btn-secondary">
             <ArrowRightLeft className="w-4 h-4" /> Transfer to Export
+          </button>
+        )}
+        {/* Move stock back from the export entity to mill. */}
+        {lot.entity === 'export'
+          && (parseFloat(lot.availableQty) > 0) && (
+          <button onClick={() => setShowTransferMill(true)} className="btn btn-sm btn-secondary">
+            <ArrowRightLeft className="w-4 h-4" /> Transfer to Mill
           </button>
         )}
         <div className="flex bg-gray-100 rounded-lg p-0.5">
@@ -1141,6 +1149,13 @@ export default function LotDetail() {
         lot={lot}
         addToast={addToast}
         onClose={() => setShowTransfer(false)}
+        onSuccess={() => refetch()}
+      />
+      <TransferToMillDrawer
+        isOpen={showTransferMill}
+        lot={lot}
+        addToast={addToast}
+        onClose={() => setShowTransferMill(false)}
         onSuccess={() => refetch()}
       />
 
@@ -2105,6 +2120,83 @@ function TransferToExportDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
               <option key={o.id} value={o.id}>{o.order_no || o.orderNo} — {o.customer_name || o.customerName || ''}</option>
             ))}
           </select>
+        </div>
+      </form>
+    </SlideDrawer>
+  );
+}
+
+// Transfer an export lot's stock back to the mill entity. Deducts this export
+// lot (only its available qty) and creates a matching mill-entity lot.
+function TransferToMillDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
+  const availMT = parseFloat(lot?.availableQty) || 0;
+  const reservedMT = parseFloat(lot?.reservedQty) || 0;
+  const defaultPrice = Math.round(parseFloat(lot?.costPerUnit) || 0); // per MT
+  const [qty, setQty] = useState('');
+  const [price, setPrice] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setQty(availMT ? String(availMT) : '');
+    setPrice(defaultPrice ? String(defaultPrice) : '');
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!lot) return null;
+
+  const q = parseFloat(qty) || 0;
+  const exceeds = q > availMT + 0.0001;
+  const totalVal = q * (parseFloat(price) || 0);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!q || q <= 0) { addToast('Enter a quantity', 'error'); return; }
+    if (exceeds) { addToast(`Only ${availMT} MT available`, 'error'); return; }
+    setSaving(true);
+    try {
+      const res = await lotInventoryApi.transferLotToMill(lot.id, {
+        qty_mt: q,
+        transfer_price_pkr: price === '' ? null : parseFloat(price),
+      });
+      addToast(res?.message || 'Transferred back to mill', 'success');
+      onSuccess?.();
+      onClose?.();
+    } catch (err) {
+      addToast(err?.data?.message || err?.message || 'Transfer failed', 'error');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const footer = (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-sm text-gray-500">Value <span className="font-semibold text-gray-900">Rs {totalVal.toLocaleString()}</span></span>
+      <div className="flex gap-2">
+        <button onClick={onClose} className="btn btn-secondary btn-sm">Cancel</button>
+        <button onClick={handleSubmit} disabled={saving || !q || exceeds} className="btn btn-primary btn-sm">
+          <ArrowRightLeft className="w-4 h-4" /> {saving ? 'Transferring…' : 'Transfer to Mill'}
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <SlideDrawer open={isOpen} onClose={onClose} title="Transfer to Mill" subtitle={lot.lotNo} icon={ArrowRightLeft} size="md" footer={footer}>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">
+          Moves stock from the <b>export</b> entity back to <b>mill</b>. A new mill-entity lot is created and this lot is drawn down. Available: <b>{availMT} MT</b>{reservedMT > 0 ? ` (${reservedMT} MT reserved for an order can't move)` : ''}.
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Quantity (MT) *</label>
+          <input type="number" min="0" max={availMT} step="any" value={qty} onChange={e => setQty(e.target.value)}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
+          {exceeds && <p className="text-xs text-red-600 mt-1">Only {availMT} MT available.</p>}
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Transfer price (Rs / MT)</label>
+          <input type="number" min="0" step="any" value={price} onChange={e => setPrice(e.target.value)}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
+          <p className="text-xs text-gray-400 mt-1">Defaults to the lot's cost. Sets the new mill lot's cost basis.</p>
         </div>
       </form>
     </SlideDrawer>
