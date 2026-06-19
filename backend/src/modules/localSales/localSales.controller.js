@@ -134,25 +134,26 @@ module.exports = {
             throw new Error(`Insufficient stock: need ${qtyKg} kg but only ${availKg.toFixed(0)} kg available in ${lot.lot_no}`);
           }
 
-          // Post sales dispatch movement
-          try {
-            await inventoryService.postMovement(trx, {
-              movementType: 'export_dispatch', // reuse dispatch type for local sales
-              lotId: lot.id,
-              qty: qtyKg / 1000, // convert to MT for legacy
-              fromWarehouseId: lot.warehouse_id,
-              sourceEntity: lot.entity,
-              linkedRef: saleNo,
-              notes: `Local sale ${saleNo} to ${buyer_name || 'customer'}`,
-              costPerUnit: parseFloat(lot.cost_per_unit) || 0,
-              currency: 'PKR',
-              userId: req.user?.id,
-            });
-          } catch (e) {
-            console.warn('Inventory movement for local sale failed:', e.message);
-          }
+          // Post the outbound stock movement — this is what actually draws the
+          // lot down (qty / available_qty) and writes the lot_transactions ledger
+          // entry. It runs INSIDE the sale transaction with NO try/catch: if the
+          // deduction can't be posted, the whole sale rolls back rather than
+          // recording a sale against stock that never moved.
+          await inventoryService.postMovement(trx, {
+            movementType: 'local_sale',
+            lotId: lot.id,
+            qty: qtyKg / 1000, // convert to MT for legacy
+            fromWarehouseId: lot.warehouse_id,
+            sourceEntity: lot.entity,
+            linkedRef: saleNo,
+            notes: `Local sale ${saleNo} to ${buyer_name || 'customer'}`,
+            costPerUnit: parseFloat(lot.cost_per_unit) || 0,
+            currency: 'PKR',
+            userId: req.user?.id,
+          });
 
-          // Update lot sold_weight_kg
+          // Track cumulative quantity sold off this lot (reporting field, separate
+          // from the qty/available_qty that postMovement already decremented).
           await trx('inventory_lots').where({ id: lot_id }).update({
             sold_weight_kg: (parseFloat(lot.sold_weight_kg) || 0) + qtyKg,
           });
