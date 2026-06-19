@@ -1442,6 +1442,7 @@ export default function MillingBatchDetail() {
               batchId={batch.dbId || batch.id}
               batchStatus={batch.status}
               addToast={addToast}
+              exportOrderId={batch.linkedExportOrder}
             />
           </div>
         )}

@@ -1,15 +1,18 @@
 import { useMemo, useState } from 'react';
-import { Boxes, Package, Plus, Loader2 } from 'lucide-react';
+import { Boxes, Package, Plus, Loader2, ClipboardList } from 'lucide-react';
 import { usePackingHistory, usePackBatch, useMillStoreItems } from '../api/queries';
+import { useExportOrder } from '../../../api/queries';
 
 const num = (v) => Number(v) || 0;
 const fmtKg = (v) => `${num(v).toLocaleString(undefined, { maximumFractionDigits: 1 })} kg`;
 
 // Bag the finished rice of a milling batch. Consuming N bags of a packaging item
 // deducts store stock and records the packed (net), tare and gross weight.
-export default function PackingPanel({ batchId, batchStatus, addToast }) {
+export default function PackingPanel({ batchId, batchStatus, addToast, exportOrderId }) {
   const { data = {}, isLoading } = usePackingHistory(batchId);
   const { data: bagItems = [] } = useMillStoreItems({ category: 'packaging', limit: 200 });
+  // When the batch is for an export order, show the buyer's packing requirement.
+  const { data: exportOrder } = useExportOrder(exportOrderId || null);
   const pack = usePackBatch();
 
   const [bagItemId, setBagItemId] = useState('');
@@ -45,6 +48,67 @@ export default function PackingPanel({ batchId, batchStatus, addToast }) {
 
   return (
     <div className="space-y-5">
+      {/* Buyer's packing requirement — shown when the batch is linked to an
+          export order, so the operator packs to match what the buyer ordered. */}
+      {exportOrder && (() => {
+        const items = Array.isArray(exportOrder.items) ? exportOrder.items : [];
+        const multi = items.length > 1;
+        const recv = exportOrder.receivingMode || exportOrder.receiving_mode;
+        const oType = exportOrder.bagType || exportOrder.bag_type;
+        const oSize = exportOrder.bagSizeKg || exportOrder.bag_size_kg;
+        const oBrand = exportOrder.bagBrand || exportOrder.bag_brand;
+        const orderNo = exportOrder.orderNo || exportOrder.order_no || exportOrderId;
+        return (
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2 text-sm font-semibold text-blue-900">
+                <ClipboardList size={16} /> Buyer's packing requirement
+              </div>
+              <a href={`/export/${orderNo}`} className="text-xs font-medium text-blue-600 hover:underline">{orderNo} ↗</a>
+            </div>
+            {(recv || exportOrder.totalBags) && (
+              <p className="text-xs text-blue-800 mb-2">Receiving: <b className="capitalize">{recv || '—'}</b>{exportOrder.totalBags ? ` · ${Number(exportOrder.totalBags).toLocaleString()} bags` : ''}</p>
+            )}
+            {multi ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-left text-blue-700/70 uppercase">
+                      <th className="py-1 pr-3">Product</th>
+                      <th className="py-1 pr-3">Bag Type</th>
+                      <th className="py-1 pr-3 text-right">Bag Size</th>
+                      <th className="py-1 pr-3 text-right">Qty</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((it, i) => {
+                      const t = it.bagType || it.bag_type || oType;
+                      const s = it.bagSizeKg || it.bag_size_kg || oSize;
+                      const q = it.qtyMT || it.qty_mt;
+                      return (
+                        <tr key={it.id || i} className="border-t border-blue-100">
+                          <td className="py-1 pr-3 font-medium text-blue-900">{it.productName || it.product_name || '—'}</td>
+                          <td className="py-1 pr-3">{t || '—'}</td>
+                          <td className="py-1 pr-3 text-right">{s ? `${s} kg` : '—'}</td>
+                          <td className="py-1 pr-3 text-right">{q ? `${q} MT` : '—'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-blue-800">
+                <span>Bag type: <b>{oType || '—'}</b></span>
+                <span>Bag size: <b>{oSize ? `${oSize} kg` : '—'}</b></span>
+                {oBrand && <span>Brand: <b>{oBrand}</b></span>}
+              </div>
+            )}
+            <p className="text-[11px] text-blue-600/80 mt-2">Pack the finished rice to match this. Bag stock is managed in Mill Store.</p>
+          </div>
+        );
+      })()}
+
       {/* Progress */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Stat label="Finished produced" value={fmtKg(finishedKg)} />
