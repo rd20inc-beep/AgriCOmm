@@ -534,8 +534,9 @@ export default function CreateExportOrder() {
         </div>
       )}
 
-      {/* ═══ Section 4: Bag Specification (conditional — only when bags/mixed/custom) ═══ */}
-      {needsBagWidget && !isMixed && (
+      {/* ═══ Section 4: Bag Specification — single-item only (multi-item uses the
+            per-item spec below, so the two never both show) ═══ */}
+      {needsBagWidget && !isMixed && !isMultiItem && (
         <div className="bg-white rounded-xl border border-amber-200 p-6">
           <h2 className="text-sm font-semibold text-amber-700 uppercase tracking-wider mb-4 flex items-center gap-2"><ShoppingBag className="w-4 h-4" /> Bag Specification</h2>
           <div className="form-grid">
@@ -606,6 +607,10 @@ export default function CreateExportOrder() {
             <div className="form-group">
               <label className="form-label">Bag Color</label>
               <input value={form.bagColor} onChange={e => set('bagColor', e.target.value)} className="form-input" placeholder="e.g. White" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Brand / Marking</label>
+              <input value={form.bagBrand} onChange={e => set('bagBrand', e.target.value)} className="form-input" placeholder="Brand on bag" />
             </div>
           </div>
 
@@ -688,11 +693,12 @@ export default function CreateExportOrder() {
         </div>
       )}
 
-      {/* ═══ Section 4c: Brand / Marking — bags, mixed & custom; per-item for multi-item orders ═══ */}
-      {needsBagWidget && (
+      {/* ═══ Section 4c: per-item Bag Specification (multi-item) OR a single brand
+            field for single-item Mixed (which has no order-level spec above) ═══ */}
+      {needsBagWidget && (isMultiItem || isMixed) && (
         <div className="bg-white rounded-xl border border-amber-200 p-6">
           <h2 className="text-sm font-semibold text-amber-700 uppercase tracking-wider mb-4 flex items-center gap-2">
-            <ShoppingBag className="w-4 h-4" /> {isMultiItem ? 'Per-item Bag & Marking' : 'Brand / Marking'}
+            <ShoppingBag className="w-4 h-4" /> {isMultiItem ? 'Bag Specification — per item' : 'Brand / Marking'}
           </h2>
           {isMultiItem ? (
             <div className="space-y-2">
@@ -721,7 +727,7 @@ export default function CreateExportOrder() {
                         }}
                         className="form-input"
                       >
-                        <option value="">Order default{form.bagType ? ` (${form.bagType})` : ''}</option>
+                        <option value="">Select…</option>
                         {bagTypesList.filter(b => b.sizeKg).map(b => (
                           <option key={b.id || b.name} value={b.name}>{b.name}</option>
                         ))}
@@ -739,7 +745,7 @@ export default function CreateExportOrder() {
                         }}
                         className="form-input"
                       >
-                        <option value="">Default{form.bagSizeKg ? ` (${form.bagSizeKg})` : ''}</option>
+                        <option value="">Select…</option>
                         {['0.5', '1', '2', '5', '10', '25', '50', '100'].map(s => (
                           <option key={s} value={s}>{s} KG</option>
                         ))}
@@ -757,7 +763,7 @@ export default function CreateExportOrder() {
                   </div>
                 );
               })}
-              <p className="text-[11px] text-gray-400 mt-1">Each item can use its own bag type / size — leave as “Order default” to inherit the order-level Bag Specification above.</p>
+              <p className="text-[11px] text-gray-400 mt-1">Each item has its own bag type, size &amp; marking.</p>
             </div>
           ) : (
             <div className="form-group max-w-md">
