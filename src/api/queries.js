@@ -233,6 +233,11 @@ export function useMillingBatch(id) {
         raw.vehicleArrivals = (res?.data?.vehicles || []).map(v => ({
           id: v.id, vehicleNo: v.vehicle_no, driverName: v.driver_name,
           driverPhone: v.driver_phone, weightMT: parseFloat(v.weight_mt) || 0,
+          totalBags: v.total_bags, bagSizeKg: v.bag_size_kg,
+          // Per-truck quality entered on arrival — was dropped here, so the
+          // Quality tab's per-vehicle samples never rendered. Keep both the
+          // object and the raw key for camel/snake-tolerant readers.
+          qualityJson: v.quality_json || null, quality_json: v.quality_json || null,
           arrivalDate: v.arrival_date, notes: v.notes,
         }));
         const costsArr = res?.data?.costs || [];
