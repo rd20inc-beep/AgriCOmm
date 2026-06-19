@@ -93,6 +93,14 @@ router.post(
   controller.allocateLotToBatch
 );
 
+// Transfer a finished mill lot's stock to the export entity
+router.post(
+  '/lots/:id/transfer-to-export',
+  authorize('inventory', 'transfer'),
+  auditAction('transfer_lot_to_export', 'inventory_lot', (req) => req.params.id),
+  controller.transferLotToExport
+);
+
 // ─── Lot-level vehicles + Start Milling ───
 router.get(
   '/lots/:id/vehicles',

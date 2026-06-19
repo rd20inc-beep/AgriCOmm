@@ -5,7 +5,7 @@ import {
   ArrowLeft, Package, Truck, DollarSign, FileText, BarChart3,
   Plus, Save, Edit3, AlertTriangle, Warehouse, ShoppingBag, Scale,
   Activity, ChevronRight, TrendingUp, Clock, Factory, Play, Trash2, Loader2, Printer,
-  ArrowDownLeft, ArrowUpRight, Calendar, Hash, Wrench, Boxes,
+  ArrowDownLeft, ArrowUpRight, Calendar, Hash, Wrench, Boxes, ArrowRightLeft,
 } from 'lucide-react';
 import {
   useLotDetail, useRecordLotTransaction, useLocalSalesByLot,
@@ -67,6 +67,7 @@ export default function LotDetail() {
   const [showAddVehicle, setShowAddVehicle] = useState(false);
   const [showAddPurchase, setShowAddPurchase] = useState(false);
   const [showQualityModal, setShowQualityModal] = useState(false);
+  const [showTransfer, setShowTransfer] = useState(false);
   const [linkedBatch, setLinkedBatch] = useState(null);
   const [lotVehicles, setLotVehicles] = useState([]);
   // lotSales provided by hook below
@@ -286,6 +287,14 @@ export default function LotDetail() {
           && (netKg - availKg) < 1 && (
           <button onClick={() => setShowAddPurchase(true)} className="btn btn-sm btn-secondary">
             <Plus className="w-4 h-4" /> Add Purchase
+          </button>
+        )}
+        {/* Move finished/by-product stock from the mill entity to export. */}
+        {(lot.type === 'finished' || lot.type === 'byproduct')
+          && lot.entity === 'mill'
+          && (parseFloat(lot.availableQty) > 0) && (
+          <button onClick={() => setShowTransfer(true)} className="btn btn-sm btn-secondary">
+            <ArrowRightLeft className="w-4 h-4" /> Transfer to Export
           </button>
         )}
         <div className="flex bg-gray-100 rounded-lg p-0.5">
@@ -1125,6 +1134,13 @@ export default function LotDetail() {
         lot={lot}
         addToast={addToast}
         onClose={() => setShowQualityModal(false)}
+        onSuccess={() => refetch()}
+      />
+      <TransferToExportDrawer
+        isOpen={showTransfer}
+        lot={lot}
+        addToast={addToast}
+        onClose={() => setShowTransfer(false)}
         onSuccess={() => refetch()}
       />
 
@@ -1998,6 +2014,98 @@ function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
         </div>
 
         <p className="text-[11px] text-gray-400">Milling fee &amp; processing costs are added later in the batch's Costing tab.</p>
+      </form>
+    </SlideDrawer>
+  );
+}
+
+// Transfer a finished/by-product mill lot's stock to the export entity. Deducts
+// this lot and creates a matching export-entity lot (lot-precise, validated).
+function TransferToExportDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
+  const { exportOrders } = useApp();
+  const availMT = parseFloat(lot?.availableQty) || 0;
+  const defaultPrice = Math.round(parseFloat(lot?.costPerUnit) || 0); // per MT
+  const [qty, setQty] = useState('');
+  const [price, setPrice] = useState('');
+  const [orderId, setOrderId] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setQty(availMT ? String(availMT) : '');
+    setPrice(defaultPrice ? String(defaultPrice) : '');
+    setOrderId('');
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!lot) return null;
+
+  const q = parseFloat(qty) || 0;
+  const exceeds = q > availMT + 0.0001;
+  const totalVal = q * (parseFloat(price) || 0);
+  const activeOrders = (Array.isArray(exportOrders) ? exportOrders : [])
+    .filter(o => !['Closed', 'Cancelled', 'Draft'].includes(o.status));
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!q || q <= 0) { addToast('Enter a quantity', 'error'); return; }
+    if (exceeds) { addToast(`Only ${availMT} MT available`, 'error'); return; }
+    setSaving(true);
+    try {
+      const res = await lotInventoryApi.transferLotToExport(lot.id, {
+        qty_mt: q,
+        transfer_price_pkr: price === '' ? null : parseFloat(price),
+        export_order_id: orderId ? Number(orderId) : null,
+      });
+      addToast(res?.message || 'Transferred to export', 'success');
+      onSuccess?.();
+      onClose?.();
+    } catch (err) {
+      addToast(err?.data?.message || err?.message || 'Transfer failed', 'error');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const footer = (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-sm text-gray-500">Value <span className="font-semibold text-gray-900">Rs {totalVal.toLocaleString()}</span></span>
+      <div className="flex gap-2">
+        <button onClick={onClose} className="btn btn-secondary btn-sm">Cancel</button>
+        <button onClick={handleSubmit} disabled={saving || !q || exceeds} className="btn btn-primary btn-sm">
+          <ArrowRightLeft className="w-4 h-4" /> {saving ? 'Transferring…' : 'Transfer to Export'}
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <SlideDrawer open={isOpen} onClose={onClose} title="Transfer to Export" subtitle={lot.lotNo} icon={ArrowRightLeft} size="md" footer={footer}>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 text-sm text-blue-900">
+          Moves finished rice from the <b>mill</b> entity to <b>export</b>. A new export-entity lot is created and this lot is drawn down. Available: <b>{availMT} MT</b>.
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Quantity (MT) *</label>
+          <input type="number" min="0" max={availMT} step="any" value={qty} onChange={e => setQty(e.target.value)}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
+          {exceeds && <p className="text-xs text-red-600 mt-1">Only {availMT} MT available.</p>}
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Transfer price (Rs / MT)</label>
+          <input type="number" min="0" step="any" value={price} onChange={e => setPrice(e.target.value)}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
+          <p className="text-xs text-gray-400 mt-1">Defaults to the lot's cost. Sets the export lot's cost and the inter-entity transfer value.</p>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Link to export order (optional)</label>
+          <select value={orderId} onChange={e => setOrderId(e.target.value)}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 bg-white">
+            <option value="">None — transfer to the export pool</option>
+            {activeOrders.map(o => (
+              <option key={o.id} value={o.id}>{o.order_no || o.orderNo} — {o.customer_name || o.customerName || ''}</option>
+            ))}
+          </select>
+        </div>
       </form>
     </SlideDrawer>
   );

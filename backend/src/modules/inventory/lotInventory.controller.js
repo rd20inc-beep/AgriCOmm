@@ -1669,6 +1669,104 @@ module.exports = {
   },
 
   // ═══════════════════════════════════════════════════════════════════
+  // Transfer a finished mill lot's stock to the export entity
+  // ═══════════════════════════════════════════════════════════════════
+  // Deducts qty from THIS specific mill lot and creates a matching
+  // export-entity lot (inventoryService.transferToExport). Unlike the
+  // batch→order /internal-transfers flow this is lot-precise and validates
+  // available stock up front, so it can never record a transfer that didn't
+  // actually move inventory. Optionally links to an export order.
+  async transferLotToExport(req, res) {
+    try {
+      const { id } = req.params;
+      const { qty_mt, transfer_price_pkr, export_order_id, notes } = req.body || {};
+      const qty = parseFloat(qty_mt);
+      if (!qty || qty <= 0) {
+        return res.status(400).json({ success: false, message: 'A positive qty_mt is required.' });
+      }
+
+      const result = await db.transaction(async (trx) => {
+        const lot = await trx('inventory_lots').where('id', id).first();
+        if (!lot) { const e = new Error('Lot not found.'); e.status = 404; throw e; }
+        if (lot.entity !== 'mill') { const e = new Error('Only mill-entity lots can be transferred to export.'); e.status = 422; throw e; }
+        if (!['finished', 'byproduct'].includes(lot.type)) { const e = new Error('Only finished or by-product lots can be transferred to export.'); e.status = 422; throw e; }
+
+        const avail = parseFloat(lot.available_qty) || 0;
+        if (qty > avail + 0.0001) {
+          const e = new Error(`Insufficient stock: ${avail} MT available in ${lot.lot_no}, requested ${qty} MT.`); e.status = 422; throw e;
+        }
+
+        const pricePerMT = (transfer_price_pkr != null && transfer_price_pkr !== '')
+          ? parseFloat(transfer_price_pkr)
+          : (parseFloat(lot.cost_per_unit) || 0);
+        const totalValue = pricePerMT * qty;
+
+        // Traceability row (transfer_no IT-NNN). batch_id null — this is a
+        // direct lot transfer, not a batch→order one.
+        const last = await trx('internal_transfers').select('transfer_no').orderBy('created_at', 'desc').first();
+        const seq = (last && last.transfer_no) ? (parseInt(String(last.transfer_no).replace('IT-', ''), 10) || 0) + 1 : 1;
+        const transferNo = `IT-${String(seq).padStart(3, '0')}`;
+        const [t] = await trx('internal_transfers').insert({
+          transfer_no: transferNo,
+          batch_id: null,
+          export_order_id: export_order_id || null,
+          product_name: lot.item_name,
+          qty_mt: qty,
+          transfer_price_pkr: pricePerMT,
+          total_value_pkr: totalValue,
+          pkr_rate: 280,
+          dispatch_date: new Date().toISOString().slice(0, 10),
+          status: 'Completed',
+          created_by: req.user?.id || null,
+        }).returning('*');
+
+        // Move the stock: deduct this lot, create the export-entity lot.
+        const moved = await inventoryService.transferToExport(trx, {
+          transferId: t.id,
+          lotId: lot.id,
+          qtyMT: qty,
+          productName: lot.item_name,
+          orderId: export_order_id || null,
+          transferPricePerMT: pricePerMT,
+          totalValuePkr: totalValue,
+          userId: req.user?.id,
+        });
+
+        // Dual-entity inter-company journals (best-effort — a posting failure
+        // must not roll back the physical transfer).
+        if (totalValue > 0) {
+          try {
+            await trx.transaction(async (sp) => {
+              await accountingService.autoPost(sp, {
+                triggerEvent: 'internal_transfer_mill', entity: 'mill', amount: totalValue, currency: 'PKR',
+                refType: 'Internal Transfer', refNo: transferNo,
+                description: `Stock transfer to export — ${lot.item_name}`, userId: req.user?.id,
+              });
+              await accountingService.autoPost(sp, {
+                triggerEvent: 'internal_transfer_export', entity: 'export', amount: totalValue, currency: 'PKR',
+                refType: 'Internal Transfer', refNo: transferNo,
+                description: `Stock received from mill — ${lot.item_name}`, userId: req.user?.id,
+              });
+            });
+          } catch (e) { console.warn('internal transfer journals failed (non-blocking):', e.message); }
+        }
+
+        return { transfer: t, exportLot: moved.exportLot, sourceLotNo: lot.lot_no };
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: `Transferred ${qty} MT from ${result.sourceLotNo} to export lot ${result.exportLot.lot_no}.`,
+        data: result,
+      });
+    } catch (err) {
+      if (err.status) return res.status(err.status).json({ success: false, message: err.message });
+      console.error('transferLotToExport error:', err);
+      return res.status(500).json({ success: false, message: err.message || 'Transfer failed.' });
+    }
+  },
+
+  // ═══════════════════════════════════════════════════════════════════
   // Lot-level vehicles + Start Milling
   // ═══════════════════════════════════════════════════════════════════
 
