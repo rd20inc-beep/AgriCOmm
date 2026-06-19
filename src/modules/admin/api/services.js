@@ -45,6 +45,12 @@ export const adminApi = {
   approvalsCount: () => api.get('/api/admin/approvals/count'),
   approvalApprove: (type, id) => api.post(`/api/admin/approvals/${type}/${id}/approve`),
   approvalReject:  (type, id, data) => api.post(`/api/admin/approvals/${type}/${id}/reject`, data),
+  // Super-Admin Danger Zone (permanent hard-deletes + balance correction)
+  dangerLotImpact:  (id) => api.get(`/api/admin/danger/lots/${id}/impact`),
+  dangerDeleteLot:  (id, force) => api.delete(`/api/admin/danger/lots/${id}${force ? '?force=true' : ''}`),
+  dangerTxnImpact:  (type, id) => api.get(`/api/admin/danger/transactions/${type}/${id}/impact`),
+  dangerDeleteTxn:  (type, id) => api.delete(`/api/admin/danger/transactions/${type}/${id}`),
+  dangerAdjustBalance: (id, data) => api.post(`/api/admin/danger/bank-accounts/${id}/balance`, data),
 };
 export const customersApi = {
   list: (params) => api.get('/api/customers', params),

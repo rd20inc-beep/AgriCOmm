@@ -240,4 +240,17 @@ router.put(
 // Audit Logs (keep for backward compat, main route is /api/audit-logs)
 router.get('/audit-logs', authorize('admin', 'view'), controller.getAuditLogs);
 
+// ─────────────── Super-Admin Danger Zone (permanent hard-deletes) ───────────────
+// Strictly Super-Admin-only (authorizeRole, not the admin.view permission which
+// other roles may hold). Every action is audit-logged with a before-snapshot.
+const dangerZone = require('./dangerZone.controller');
+router.get('/danger/lots/:id/impact', authorizeRole('Super Admin'), dangerZone.getLotImpact);
+router.delete('/danger/lots/:id', authorizeRole('Super Admin'),
+  auditAction('hard_delete_lot', 'inventory_lot', (req) => req.params.id), dangerZone.hardDeleteLot);
+router.get('/danger/transactions/:type/:id/impact', authorizeRole('Super Admin'), dangerZone.getTransactionImpact);
+router.delete('/danger/transactions/:type/:id', authorizeRole('Super Admin'),
+  auditAction('hard_delete_txn', 'transaction', (req) => `${req.params.type}:${req.params.id}`), dangerZone.hardDeleteTransaction);
+router.post('/danger/bank-accounts/:id/balance', authorizeRole('Super Admin'),
+  auditAction('adjust_bank_balance', 'bank_account', (req) => req.params.id), dangerZone.adjustBankBalance);
+
 module.exports = router;

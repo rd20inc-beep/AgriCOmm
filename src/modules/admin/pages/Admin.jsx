@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Users, Truck, Package, Warehouse, Settings, ShoppingBag, Landmark, Tags, Factory, Files, UsersRound, MessageSquare, Shield, Building2, Inbox } from 'lucide-react';
+import { Users, Truck, Package, Warehouse, Settings, ShoppingBag, Landmark, Tags, Factory, Files, UsersRound, MessageSquare, Shield, Building2, Inbox, ShieldAlert } from 'lucide-react';
+import { useAuth } from '../../../context/AuthContext';
 
 import CustomersTab from './admin/CustomersTab';
 import SuppliersTab from './admin/SuppliersTab';
@@ -17,6 +18,7 @@ import UsersRolesTab from './admin/UsersRolesTab';
 import PermissionsTab from './admin/PermissionsTab';
 import SettingsTab from './admin/SettingsTab';
 import MasterDataApprovalsTab from './admin/MasterDataApprovalsTab';
+import DangerZoneTab from './admin/DangerZoneTab';
 import { adminApi } from '../api/services';
 
 const tabs = [
@@ -36,6 +38,7 @@ const tabs = [
   { key: 'users', label: 'Users & Roles', icon: UsersRound },
   { key: 'permissions', label: 'Permissions', icon: Shield },
   { key: 'settings', label: 'Settings', icon: Settings },
+  { key: 'danger', label: 'Danger Zone', icon: ShieldAlert, superAdminOnly: true },
 ];
 
 const tabComponents = {
@@ -55,9 +58,13 @@ const tabComponents = {
   users: UsersRolesTab,
   permissions: PermissionsTab,
   settings: SettingsTab,
+  danger: DangerZoneTab,
 };
 
 export default function Admin() {
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role === 'Super Admin';
+  const visibleTabs = tabs.filter(t => !t.superAdminOnly || isSuperAdmin);
   const [activeTab, setActiveTab] = useState('approvals');
   const [pendingCount, setPendingCount] = useState(0);
 
@@ -88,17 +95,19 @@ export default function Admin() {
 
       {/* Tabs */}
       <div className="flex items-center gap-1 border-b border-gray-200 overflow-x-auto whitespace-nowrap">
-        {tabs.map(tab => {
+        {visibleTabs.map(tab => {
           const TabIcon = tab.icon;
           const showBadge = tab.key === 'approvals' && pendingCount > 0;
+          const danger = tab.key === 'danger';
           return (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
               className={`inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
                 activeTab === tab.key
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  ? (danger ? 'border-rose-600 text-rose-600' : 'border-blue-600 text-blue-600')
+                  : (danger ? 'border-transparent text-rose-500 hover:text-rose-700 hover:border-rose-300'
+                            : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300')
               }`}
             >
               <TabIcon className="w-4 h-4" />
