@@ -48,6 +48,41 @@ function sanitizeVehicleQuality(raw) {
   return Object.keys(out).length ? out : null;
 }
 
+// Recompute a batch's raw_rice milling_cost from its vehicle arrivals:
+// Σ(weight_mt × the per-truck price in quality_json.price_per_mt). Trucks without
+// a price use the weighted-average price of the priced trucks. No-op if NO truck
+// has a price (e.g. a blend costed from source lots) so it never zeroes out a cost
+// set by another flow. Cascades into already-yielded output lots so their costing
+// sheet stays correct. Keeps the raw cost in sync as trucks are added/removed —
+// previously the cost was a one-time snapshot (arrival price × raw_qty) that
+// ignored extra trucks and their differing prices.
+async function recomputeRawRiceCostFromVehicles(trx, batchId, userId) {
+  const vrows = await trx('milling_vehicle_arrivals').where({ batch_id: batchId });
+  if (!vrows.length) return;
+  let pricedW = 0, pricedCost = 0, totalW = 0;
+  for (const v of vrows) {
+    const w = parseFloat(v.weight_mt) || 0;
+    totalW += w;
+    const qj = v.quality_json || {};
+    const p = qj.price_per_mt != null ? parseFloat(qj.price_per_mt) : null;
+    if (p != null && !Number.isNaN(p) && p > 0) { pricedW += w; pricedCost += w * p; }
+  }
+  if (pricedW <= 0) return; // no per-truck price anywhere — leave any existing cost alone
+  const avg = pricedCost / pricedW;
+  const rawRiceCost = Math.round((pricedCost + Math.max(0, totalW - pricedW) * avg) * 100) / 100;
+  const notes = `Auto from ${vrows.length} vehicle(s): ${Math.round(totalW * 100) / 100} MT @ ~Rs ${Math.round(avg).toLocaleString()}/MT`;
+  const existing = await trx('milling_costs').where({ batch_id: batchId, category: 'raw_rice' }).first();
+  if (existing) {
+    await trx('milling_costs').where({ id: existing.id }).update({ amount: rawRiceCost, notes, updated_at: trx.fn.now() });
+  } else {
+    await trx('milling_costs').insert({ batch_id: batchId, category: 'raw_rice', amount: rawRiceCost, notes, created_by: userId || null });
+  }
+  // If the batch already yielded, re-cost its output lots from the corrected raw cost.
+  const yielded = await trx('inventory_lots')
+    .where({ batch_ref: `batch-${batchId}` }).whereIn('type', ['finished', 'byproduct']).first('id');
+  if (yielded) await inventoryService.recomputeBatchOutputsAfterPriceChange(trx, batchId, { userId });
+}
+
 // Find today's open batch (Queued / Pending Approval) for the given
 // supplier + variety so a new truck can attach to it instead of
 // spawning a new lot. Returns null if none — caller will create a fresh
@@ -1277,6 +1312,9 @@ const millingController = {
           }
         }
 
+        // Keep the raw_rice cost in sync with the trucks (Σ weight × per-truck price).
+        await recomputeRawRiceCostFromVehicles(trx, batchId, req.user?.id);
+
         return v;
       });
 
@@ -1490,6 +1528,9 @@ const millingController = {
           raw_qty_mt: totalReceived,
           updated_at: trx.fn.now(),
         });
+
+        // Keep raw_rice cost in sync with the remaining trucks.
+        await recomputeRawRiceCostFromVehicles(trx, batchId, req.user?.id);
       });
 
       return res.json({ success: true, message: 'Vehicle arrival deleted; inventory reversed.' });
