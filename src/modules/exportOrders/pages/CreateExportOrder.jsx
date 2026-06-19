@@ -415,7 +415,7 @@ export default function CreateExportOrder() {
                 )}
               </div>
               <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-                <div className="md:col-span-5">
+                <div className="md:col-span-4">
                   <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Product *</label>
                   <RiceTypePicker
                     value={it.productId}
@@ -433,28 +433,18 @@ export default function CreateExportOrder() {
                   <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Rate / MT *</label>
                   <input type="number" min="0" step="0.01" value={it.pricePerMT} onChange={e => updateItem(idx, 'pricePerMT', e.target.value)} className="form-input" placeholder={form.currency} />
                 </div>
-                <div className="md:col-span-3">
+                <div className="md:col-span-2">
                   <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">HS Code</label>
                   <input type="text" value={it.hsCode} onChange={e => updateItem(idx, 'hsCode', e.target.value)} className="form-input" placeholder="e.g. 1006.3010" />
                 </div>
-                <div className="md:col-span-6">
-                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Brand / Marking</label>
-                  <input
-                    type="text"
-                    value={it.bagBrand}
-                    onChange={e => updateItem(idx, 'bagBrand', e.target.value)}
-                    className="form-input"
-                    placeholder={form.bagBrand ? `defaults to ${form.bagBrand}` : 'Brand on bag (optional)'}
-                  />
-                </div>
-                <div className="md:col-span-6">
+                <div className="md:col-span-2">
                   <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Line Total ({form.currency})</label>
                   <div className="form-input bg-white text-right font-semibold text-gray-900">
                     {itemTotal(it).toLocaleString(undefined, { maximumFractionDigits: 2 })}
                   </div>
                 </div>
               </div>
-              {/* Packing & bag size are set on the next step — "how the buyer receives this order". */}
+              {/* Packing, bag size & brand/marking are set on the next step — "how the buyer receives this order". */}
             </div>
           ))}
         </div>
@@ -615,10 +605,6 @@ export default function CreateExportOrder() {
               <label className="form-label">Bag Color</label>
               <input value={form.bagColor} onChange={e => set('bagColor', e.target.value)} className="form-input" placeholder="e.g. White" />
             </div>
-            <div className="form-group">
-              <label className="form-label">Brand / Marking</label>
-              <input value={form.bagBrand} onChange={e => set('bagBrand', e.target.value)} className="form-input" placeholder="Brand on bag" />
-            </div>
           </div>
 
           {/* Bag count preview */}
@@ -697,6 +683,62 @@ export default function CreateExportOrder() {
               <p className="mt-2 text-xs text-red-600 font-medium">Packed weight exceeds order quantity!</p>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ═══ Section 4c: Brand / Marking — bags, mixed & custom; per-item for multi-item orders ═══ */}
+      {needsBagWidget && (
+        <div className="bg-white rounded-xl border border-amber-200 p-6">
+          <h2 className="text-sm font-semibold text-amber-700 uppercase tracking-wider mb-4 flex items-center gap-2">
+            <ShoppingBag className="w-4 h-4" /> Brand / Marking{isMultiItem ? ' — per item' : ''}
+          </h2>
+          {isMultiItem ? (
+            <div className="space-y-2">
+              {items.map((it, idx) => {
+                const p = products.find(pp => String(pp.id) === String(it.productId));
+                return (
+                  <div key={idx} className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                    <div className="md:col-span-4 text-sm font-medium text-gray-700 truncate md:pb-2">
+                      {p?.name || it.productName || `Item ${idx + 1}`}
+                    </div>
+                    <div className="md:col-span-3">
+                      <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Bag Size (KG)</label>
+                      <select
+                        value={it.bagSizeKg}
+                        onChange={e => {
+                          const v = e.target.value;
+                          updateItem(idx, 'bagSizeKg', v);
+                          if (requiresMasterBag(v) && !it.masterBagSizeKg) updateItem(idx, 'masterBagSizeKg', '20');
+                          else if (!requiresMasterBag(v)) updateItem(idx, 'masterBagSizeKg', '');
+                        }}
+                        className="form-input"
+                      >
+                        <option value="">Order default{form.bagSizeKg ? ` (${form.bagSizeKg} KG)` : ''}</option>
+                        {['0.5', '1', '2', '5', '10', '25', '50', '100'].map(s => (
+                          <option key={s} value={s}>{s} KG</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="md:col-span-5">
+                      <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Brand / Marking</label>
+                      <input
+                        value={it.bagBrand}
+                        onChange={e => updateItem(idx, 'bagBrand', e.target.value)}
+                        className="form-input"
+                        placeholder={form.bagBrand ? `defaults to ${form.bagBrand}` : 'Brand on bag'}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+              <p className="text-[11px] text-gray-400 mt-1">Leave bag size as “Order default” to use the order-level bag specification above.</p>
+            </div>
+          ) : (
+            <div className="form-group max-w-md">
+              <label className="form-label">Brand / Marking</label>
+              <input value={form.bagBrand} onChange={e => set('bagBrand', e.target.value)} className="form-input" placeholder="Brand on bag" />
+            </div>
+          )}
         </div>
       )}
 
