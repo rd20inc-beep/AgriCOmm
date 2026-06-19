@@ -94,17 +94,35 @@ async function ensureTransitionAllowed(trx, order, toStatus) {
 async function runTransitionSideEffects(trx, order, toStatus, userId) {
   if (toStatus !== 'Shipped') return;
 
-  const exportLot = await trx('inventory_lots')
-    .where({ entity: 'export', type: 'finished', reserved_against: order.order_no })
-    .first();
+  // Deduct inventory for EVERY lot reserved against this order. The authoritative
+  // order→lot link is inventory_reservations (populated by allocate-stock).
+  // The old lookup matched inventory_lots.reserved_against = order.order_no, but
+  // reserveStock stores 'order-<id>', so it never matched and dispatch silently
+  // skipped the deduction. Driving off the reservation rows also handles
+  // multi-lot orders and is idempotent — once consumed, a re-driven Shipped
+  // transition finds no Active reservations and won't double-deduct.
+  const reservations = await trx('inventory_reservations')
+    .where({ order_id: order.id, status: 'Active' });
 
-  if (exportLot) {
+  for (const r of reservations) {
+    const qty = parseFloat(r.reserved_qty) || 0;
+    if (qty <= 0) continue;
+    // Release the hold first (frees reserved_qty), then physically dispatch the
+    // same quantity so available_qty (= qty − reserved_qty) stays consistent.
+    await inventoryService.releaseReservation(trx, { reservationId: r.id, userId });
     await inventoryService.dispatchForShipment(trx, {
       orderId: order.id,
-      lotId: exportLot.id,
-      qtyMT: order.qty_mt,
+      lotId: r.lot_id,
+      qtyMT: qty,
       userId,
     });
+    // releaseReservation marks it 'Released'; record that it actually shipped.
+    await trx('inventory_reservations').where('id', r.id).update({ status: 'Consumed', updated_at: trx.fn.now() });
+    // Clear the stale reserved_against tag once the lot is fully unreserved.
+    const lot = await trx('inventory_lots').where('id', r.lot_id).first();
+    if (lot && parseFloat(lot.reserved_qty) <= 0.0001) {
+      await trx('inventory_lots').where('id', r.lot_id).update({ reserved_against: null });
+    }
   }
 
   // Phase 5: Lock COGS at dispatch
