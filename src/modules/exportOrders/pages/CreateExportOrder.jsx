@@ -11,6 +11,7 @@ import {
 import { validateForm, required, positiveNonZero } from '../../../utils/validation';
 import { toKg, fromKg, allEquivalents, UNITS } from '../../../utils/unitConversion';
 import SearchSelect from '../../../components/SearchSelect';
+import RiceTypePicker from '../../../components/RiceTypePicker';
 import { INCOTERMS, incotermHint } from '../../../shared/constants/incoterms';
 import { PAYMENT_TERMS } from '../../../shared/constants/paymentTerms';
 
@@ -27,7 +28,9 @@ const EMPTY_ITEM = {
   productId: '', productName: '',
   qtyMT: '', pricePerMT: '',
   hsCode: '', packing: '',
-  bagSizeKg: '25', bagCount: '',
+  // Packing / bag size are captured on the next step ("how the buyer receives
+  // this order") — left blank here so the per-item payload sends null.
+  bagSizeKg: '', bagCount: '',
   masterBagSizeKg: '',
   bagBrand: '',
 };
@@ -414,11 +417,12 @@ export default function CreateExportOrder() {
               <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
                 <div className="md:col-span-5">
                   <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Product *</label>
-                  <SearchSelect
+                  <RiceTypePicker
                     value={it.productId}
                     onChange={val => updateItem(idx, 'productId', val)}
-                    options={products.filter(p => !p.isByproduct).map(p => ({ value: p.id, label: p.name, sub: p.grade || '' }))}
-                    placeholder="Type to search product..."
+                    products={products}
+                    addToast={addToast}
+                    placeholder="Search product or add a new one…"
                   />
                 </div>
                 <div className="md:col-span-2">
@@ -433,69 +437,24 @@ export default function CreateExportOrder() {
                   <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">HS Code</label>
                   <input type="text" value={it.hsCode} onChange={e => updateItem(idx, 'hsCode', e.target.value)} className="form-input" placeholder="e.g. 1006.3010" />
                 </div>
-                <div className="md:col-span-4">
-                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Packing</label>
-                  <input type="text" value={it.packing} onChange={e => updateItem(idx, 'packing', e.target.value)} className="form-input" placeholder="e.g. Packed in 25 KG PP BAG" />
-                </div>
-                <div className="md:col-span-3">
+                <div className="md:col-span-6">
                   <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Brand / Marking</label>
                   <input
                     type="text"
                     value={it.bagBrand}
                     onChange={e => updateItem(idx, 'bagBrand', e.target.value)}
                     className="form-input"
-                    placeholder={form.bagBrand ? `defaults to ${form.bagBrand}` : 'Brand on bag'}
+                    placeholder={form.bagBrand ? `defaults to ${form.bagBrand}` : 'Brand on bag (optional)'}
                   />
                 </div>
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Bag Size (kg)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.5"
-                    value={it.bagSizeKg}
-                    onChange={e => {
-                      const v = e.target.value;
-                      updateItem(idx, 'bagSizeKg', v);
-                      if (requiresMasterBag(v) && !it.masterBagSizeKg) {
-                        updateItem(idx, 'masterBagSizeKg', '20');
-                      } else if (!requiresMasterBag(v)) {
-                        updateItem(idx, 'masterBagSizeKg', '');
-                      }
-                    }}
-                    className="form-input"
-                  />
-                </div>
-                {requiresMasterBag(it.bagSizeKg) ? (
-                  <>
-                    <div className="md:col-span-2">
-                      <label className="block text-xs font-semibold text-amber-700 uppercase mb-1">Master Bag *</label>
-                      <select
-                        value={it.masterBagSizeKg}
-                        onChange={e => updateItem(idx, 'masterBagSizeKg', e.target.value)}
-                        className="form-input"
-                      >
-                        {MASTER_BAG_SIZES_KG.map(s => (
-                          <option key={s} value={String(s)}>{s} KG</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="md:col-span-1">
-                      <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Total ({form.currency})</label>
-                      <div className="form-input bg-white text-right font-semibold text-gray-900">
-                        {itemTotal(it).toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <div className="md:col-span-3">
-                    <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Line Total ({form.currency})</label>
-                    <div className="form-input bg-white text-right font-semibold text-gray-900">
-                      {itemTotal(it).toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                    </div>
+                <div className="md:col-span-6">
+                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Line Total ({form.currency})</label>
+                  <div className="form-input bg-white text-right font-semibold text-gray-900">
+                    {itemTotal(it).toLocaleString(undefined, { maximumFractionDigits: 2 })}
                   </div>
-                )}
+                </div>
               </div>
+              {/* Packing & bag size are set on the next step — "how the buyer receives this order". */}
             </div>
           ))}
         </div>
