@@ -213,6 +213,35 @@ export default function MillingBatchDetail() {
   const safeSample = batch.sampleAnalysis || null;
   const safeArrival = batch.arrivalAnalysis || null;
 
+  // Per-truck quality entered on arrival (milling_vehicle_arrivals.quality_json).
+  // Inner keys may be camelCase (transformed) or snake — read both.
+  const vehQ = (v) => v.qualityJson || v.quality_json || null;
+  const qGet = (q, p) => { const raw = q?.[p.key] ?? q?.[p.backendKey]; const n = parseFloat(raw); return Number.isNaN(n) ? null : n; };
+  const vehiclesWithQuality = safeVehicles.filter((v) => { const q = vehQ(v); return q && typeof q === 'object' && Object.keys(q).length > 0; });
+  // Weight-weighted aggregate of the per-truck quality — used to prefill the
+  // batch's arrival analysis so the operator doesn't re-type what the trucks gave.
+  const vehicleQualityAgg = (() => {
+    if (vehiclesWithQuality.length === 0) return null;
+    const agg = {};
+    qualityParams.forEach((p) => {
+      let num = 0, den = 0;
+      vehiclesWithQuality.forEach((v) => {
+        const val = qGet(vehQ(v), p); if (val == null) return;
+        const w = parseFloat(v.weightMT) || 1; num += val * w; den += w;
+      });
+      agg[p.key] = den > 0 ? Math.round((num / den) * 100) / 100 : '';
+    });
+    let pnum = 0, pden = 0;
+    vehiclesWithQuality.forEach((v) => {
+      const q = vehQ(v) || {};
+      const pv = parseFloat(q.pricePerMt ?? q.price_per_mt ?? q.pricePerMT); if (Number.isNaN(pv)) return;
+      const w = parseFloat(v.weightMT) || 1; pnum += pv * w; pden += w;
+    });
+    agg.pricePerMT = pden > 0 ? Math.round(pnum / pden) : '';
+    agg.pricePerKg = agg.pricePerMT ? Math.round((agg.pricePerMT / 1000) * 100) / 100 : '';
+    return agg;
+  })();
+
   // Yield breakdown for progress bars. Sortex Rejects is the new
   // byproduct; Bran/Husk only render if a legacy batch still carries them.
   const rawQty = parseFloat(batch.rawQtyMT) || 0;
@@ -273,6 +302,12 @@ export default function MillingBatchDetail() {
       qualityParams.forEach(p => { next[p.key] = source[p.key] ?? ''; });
       next.pricePerKg = source.pricePerKg ?? '';
       next.pricePerMT = source.pricePerMT ?? '';
+    } else if (type === 'arrival' && vehicleQualityAgg) {
+      // No saved arrival analysis yet — seed it from the truck samples so the
+      // operator can confirm/adjust instead of re-entering.
+      qualityParams.forEach(p => { next[p.key] = vehicleQualityAgg[p.key] ?? ''; });
+      next.pricePerKg = vehicleQualityAgg.pricePerKg ?? '';
+      next.pricePerMT = vehicleQualityAgg.pricePerMT ?? '';
     }
     setAnalysisForm(next);
     setShowAnalysisModal(true);
@@ -1021,6 +1056,59 @@ export default function MillingBatchDetail() {
                     Review the comparison below and take appropriate action.
                   </p>
                 </div>
+              </div>
+            )}
+
+            {/* Per-vehicle quality samples — one row per truck that recorded quality
+                on arrival, so multiple trucks show as multiple samples. */}
+            {vehiclesWithQuality.length > 0 && (
+              <div className="bg-white rounded-xl shadow-sm p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
+                    Vehicle Quality Samples ({vehiclesWithQuality.length})
+                  </h3>
+                  {!safeArrival && (
+                    <button onClick={() => openAnalysisModal('arrival')}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 text-xs font-medium rounded-lg hover:bg-blue-100">
+                      <FlaskConical size={14} /> Record Arrival Analysis
+                    </button>
+                  )}
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200 text-left text-xs uppercase text-gray-500">
+                        <th className="py-2 pr-3">Vehicle</th>
+                        <th className="py-2 pr-3 text-right">Weight</th>
+                        {qualityParams.slice(0, 5).map(p => <th key={p.key} className="py-2 pr-3 text-right whitespace-nowrap">{p.label}</th>)}
+                        <th className="py-2 pl-3 text-right">Price /MT</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {vehiclesWithQuality.map((v, i) => {
+                        const q = vehQ(v) || {};
+                        const price = q.pricePerMt ?? q.price_per_mt ?? q.pricePerMT;
+                        return (
+                          <tr key={v.id || i} className="border-b border-gray-100 last:border-0">
+                            <td className="py-2 pr-3 font-mono font-medium text-gray-900 whitespace-nowrap">{v.vehicleNo}{v.driverName && <span className="text-gray-400 font-sans ml-1.5">({v.driverName})</span>}</td>
+                            <td className="py-2 pr-3 text-right tabular-nums">{(parseFloat(v.weightMT) || 0).toFixed(2)} MT</td>
+                            {qualityParams.slice(0, 5).map(p => { const val = qGet(q, p); return <td key={p.key} className="py-2 pr-3 text-right tabular-nums">{val == null ? '—' : `${val}%`}</td>; })}
+                            <td className="py-2 pl-3 text-right tabular-nums">{price ? `Rs ${Math.round(Number(price)).toLocaleString()}` : '—'}</td>
+                          </tr>
+                        );
+                      })}
+                      {vehiclesWithQuality.length > 1 && vehicleQualityAgg && (
+                        <tr className="border-t-2 border-gray-200 bg-gray-50 font-semibold">
+                          <td className="py-2 pr-3 text-xs uppercase text-gray-500">Weighted avg</td>
+                          <td className="py-2 pr-3"></td>
+                          {qualityParams.slice(0, 5).map(p => <td key={p.key} className="py-2 pr-3 text-right tabular-nums">{vehicleQualityAgg[p.key] === '' ? '—' : `${vehicleQualityAgg[p.key]}%`}</td>)}
+                          <td className="py-2 pl-3 text-right tabular-nums">{vehicleQualityAgg.pricePerMT ? `Rs ${Number(vehicleQualityAgg.pricePerMT).toLocaleString()}` : '—'}</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-[11px] text-gray-400 mt-2">Recorded per truck on arrival.{!safeArrival ? ' Use “Record Arrival Analysis” to confirm the batch analysis (prefilled from these samples).' : ''}</p>
               </div>
             )}
 
