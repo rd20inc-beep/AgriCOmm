@@ -14,63 +14,84 @@ import Toast from './components/Toast';
 import QueryErrorHandler from './components/QueryErrorHandler';
 import { LoadingSpinner } from './components/LoadingState';
 
+// Lazy import that self-heals stale chunks after a deploy. A new build replaces
+// every hashed chunk, so an already-open tab still pointing at an old chunk hash
+// gets a "Failed to fetch dynamically imported module" 404 when it lazy-loads a
+// route. On that failure, reload once to pull the fresh index.html + chunks. A
+// short time-window guard prevents a reload loop if the chunk is genuinely
+// unreachable (network down) rather than just stale.
+function lazyWithReload(factory) {
+  return lazy(() =>
+    factory().catch((err) => {
+      const KEY = 'rf_chunk_reload_ts';
+      const last = Number(sessionStorage.getItem(KEY) || 0);
+      if (Date.now() - last > 10000) {
+        sessionStorage.setItem(KEY, String(Date.now()));
+        window.location.reload();
+        return new Promise(() => {}); // halt rendering until the reload happens
+      }
+      throw err; // already reloaded recently — let the error boundary show it
+    })
+  );
+}
+
 // Lazy-loaded page components (pointing at modular locations)
-const Login = lazy(() => import('./modules/admin/pages/Login'));
-const Dashboard = lazy(() => import('./modules/dashboard/pages/Dashboard'));
-const Buyers = lazy(() => import('./modules/exportOrders/pages/Buyers'));
-const ExportOrders = lazy(() => import('./modules/exportOrders/pages/ExportOrders'));
-const CreateExportOrder = lazy(() => import('./modules/exportOrders/pages/CreateExportOrder'));
-const ExportOrderDetail = lazy(() => import('./modules/exportOrders/pages/ExportOrderDetail'));
-const ExportHomeDashboard = lazy(() => import('./modules/exportOrders/pages/ExportHomeDashboard'));
-const MillingDashboard = lazy(() => import('./modules/milling/pages/MillingDashboard'));
-const MillHomeDashboard = lazy(() => import('./modules/milling/pages/MillHomeDashboard'));
-const StoreOverview = lazy(() => import('./modules/millStore/pages/StoreOverview'));
-const NewPurchase = lazy(() => import('./modules/millStore/pages/NewPurchase'));
-const LocalSaleDetail = lazy(() => import('./modules/localSales/pages/LocalSaleDetail'));
-const StoreAlerts = lazy(() => import('./modules/millStore/pages/StoreAlerts'));
-const StoreAdjustments = lazy(() => import('./modules/millStore/pages/StoreAdjustments'));
-const StoreRatios = lazy(() => import('./modules/millStore/pages/StoreRatios'));
-const MillingBatchDetail = lazy(() => import('./modules/milling/pages/MillingBatchDetail'));
-const MillFinanceDashboard = lazy(() => import('./modules/milling/pages/MillFinanceDashboard'));
-const RicePurchasesLedger = lazy(() => import('./modules/milling/pages/RicePurchasesLedger'));
-const QualityComparison = lazy(() => import('./modules/milling/pages/QualityComparison'));
-const StockAdjustments = lazy(() => import('./modules/inventory/pages/StockAdjustments'));
-const InternalTransfer = lazy(() => import('./modules/inventory/pages/InternalTransfer'));
-const Inventory = lazy(() => import('./modules/inventory/pages/Inventory'));
-const Documents = lazy(() => import('./modules/documents/pages/Documents'));
-const Reports = lazy(() => import('./modules/analytics/pages/Reports'));
-const PrintableReports = lazy(() => import('./modules/analytics/pages/PrintableReports'));
-const LotReport = lazy(() => import('./modules/analytics/pages/LotReport'));
-const StandalonePrintReport = lazy(() => import('./modules/analytics/pages/StandalonePrintReport'));
-const Approvals = lazy(() => import('./modules/admin/pages/Approvals'));
-const AuditLog = lazy(() => import('./modules/admin/pages/AuditLog'));
-const LotInventory = lazy(() => import('./modules/inventory/pages/LotInventory'));
-const LocalSales = lazy(() => import('./modules/localSales/pages/LocalSales'));
-const LotDetail = lazy(() => import('./modules/inventory/pages/LotDetail'));
-const ExceptionDashboard = lazy(() => import('./modules/analytics/pages/ExceptionDashboard'));
-const Intelligence = lazy(() => import('./modules/analytics/pages/Intelligence'));
-const ScenarioSimulator = lazy(() => import('./modules/analytics/pages/ScenarioSimulator'));
-const Admin = lazy(() => import('./modules/admin/pages/Admin'));
+const Login = lazyWithReload(() => import('./modules/admin/pages/Login'));
+const Dashboard = lazyWithReload(() => import('./modules/dashboard/pages/Dashboard'));
+const Buyers = lazyWithReload(() => import('./modules/exportOrders/pages/Buyers'));
+const ExportOrders = lazyWithReload(() => import('./modules/exportOrders/pages/ExportOrders'));
+const CreateExportOrder = lazyWithReload(() => import('./modules/exportOrders/pages/CreateExportOrder'));
+const ExportOrderDetail = lazyWithReload(() => import('./modules/exportOrders/pages/ExportOrderDetail'));
+const ExportHomeDashboard = lazyWithReload(() => import('./modules/exportOrders/pages/ExportHomeDashboard'));
+const MillingDashboard = lazyWithReload(() => import('./modules/milling/pages/MillingDashboard'));
+const MillHomeDashboard = lazyWithReload(() => import('./modules/milling/pages/MillHomeDashboard'));
+const StoreOverview = lazyWithReload(() => import('./modules/millStore/pages/StoreOverview'));
+const NewPurchase = lazyWithReload(() => import('./modules/millStore/pages/NewPurchase'));
+const LocalSaleDetail = lazyWithReload(() => import('./modules/localSales/pages/LocalSaleDetail'));
+const StoreAlerts = lazyWithReload(() => import('./modules/millStore/pages/StoreAlerts'));
+const StoreAdjustments = lazyWithReload(() => import('./modules/millStore/pages/StoreAdjustments'));
+const StoreRatios = lazyWithReload(() => import('./modules/millStore/pages/StoreRatios'));
+const MillingBatchDetail = lazyWithReload(() => import('./modules/milling/pages/MillingBatchDetail'));
+const MillFinanceDashboard = lazyWithReload(() => import('./modules/milling/pages/MillFinanceDashboard'));
+const RicePurchasesLedger = lazyWithReload(() => import('./modules/milling/pages/RicePurchasesLedger'));
+const QualityComparison = lazyWithReload(() => import('./modules/milling/pages/QualityComparison'));
+const StockAdjustments = lazyWithReload(() => import('./modules/inventory/pages/StockAdjustments'));
+const InternalTransfer = lazyWithReload(() => import('./modules/inventory/pages/InternalTransfer'));
+const Inventory = lazyWithReload(() => import('./modules/inventory/pages/Inventory'));
+const Documents = lazyWithReload(() => import('./modules/documents/pages/Documents'));
+const Reports = lazyWithReload(() => import('./modules/analytics/pages/Reports'));
+const PrintableReports = lazyWithReload(() => import('./modules/analytics/pages/PrintableReports'));
+const LotReport = lazyWithReload(() => import('./modules/analytics/pages/LotReport'));
+const StandalonePrintReport = lazyWithReload(() => import('./modules/analytics/pages/StandalonePrintReport'));
+const Approvals = lazyWithReload(() => import('./modules/admin/pages/Approvals'));
+const AuditLog = lazyWithReload(() => import('./modules/admin/pages/AuditLog'));
+const LotInventory = lazyWithReload(() => import('./modules/inventory/pages/LotInventory'));
+const LocalSales = lazyWithReload(() => import('./modules/localSales/pages/LocalSales'));
+const LotDetail = lazyWithReload(() => import('./modules/inventory/pages/LotDetail'));
+const ExceptionDashboard = lazyWithReload(() => import('./modules/analytics/pages/ExceptionDashboard'));
+const Intelligence = lazyWithReload(() => import('./modules/analytics/pages/Intelligence'));
+const ScenarioSimulator = lazyWithReload(() => import('./modules/analytics/pages/ScenarioSimulator'));
+const Admin = lazyWithReload(() => import('./modules/admin/pages/Admin'));
 
 // Finance sub-pages (lazy) — money-flow structure
-const FinanceLayout = lazy(() => import('./modules/finance/pages/FinanceLayout'));
-const FinanceOverview = lazy(() => import('./modules/finance/pages/FinanceOverview'));
-const MoneyIn = lazy(() => import('./modules/finance/pages/MoneyIn'));
-const MoneyOut = lazy(() => import('./modules/finance/pages/MoneyOut'));
-const Cash = lazy(() => import('./modules/finance/pages/Cash'));
-const Profit = lazy(() => import('./modules/finance/pages/Profit'));
-const Accounting = lazy(() => import('./modules/finance/pages/Accounting'));
-const PartyLedger = lazy(() => import('./modules/finance/pages/PartyLedger'));
-const RatesCenter = lazy(() => import('./modules/finance/pages/RatesCenter'));
-const FinanceAlerts = lazy(() => import('./modules/finance/pages/Alerts'));
+const FinanceLayout = lazyWithReload(() => import('./modules/finance/pages/FinanceLayout'));
+const FinanceOverview = lazyWithReload(() => import('./modules/finance/pages/FinanceOverview'));
+const MoneyIn = lazyWithReload(() => import('./modules/finance/pages/MoneyIn'));
+const MoneyOut = lazyWithReload(() => import('./modules/finance/pages/MoneyOut'));
+const Cash = lazyWithReload(() => import('./modules/finance/pages/Cash'));
+const Profit = lazyWithReload(() => import('./modules/finance/pages/Profit'));
+const Accounting = lazyWithReload(() => import('./modules/finance/pages/Accounting'));
+const PartyLedger = lazyWithReload(() => import('./modules/finance/pages/PartyLedger'));
+const RatesCenter = lazyWithReload(() => import('./modules/finance/pages/RatesCenter'));
+const FinanceAlerts = lazyWithReload(() => import('./modules/finance/pages/Alerts'));
 // Legacy routes (still accessible via direct URL)
-const FinanceConfirmations = lazy(() => import('./modules/finance/pages/Confirmations'));
-const CostAllocation = lazy(() => import('./modules/finance/pages/CostAllocation'));
-const FinanceTransfers = lazy(() => import('./modules/finance/pages/InternalTransfers'));
-const Reconciliation = lazy(() => import('./modules/finance/pages/Reconciliation'));
-const Expenses = lazy(() => import('./modules/finance/pages/Expenses'));
-const Purchases = lazy(() => import('./modules/finance/pages/Purchases'));
-const LocalSalesFinance = lazy(() => import('./modules/finance/pages/LocalSalesFinance'));
+const FinanceConfirmations = lazyWithReload(() => import('./modules/finance/pages/Confirmations'));
+const CostAllocation = lazyWithReload(() => import('./modules/finance/pages/CostAllocation'));
+const FinanceTransfers = lazyWithReload(() => import('./modules/finance/pages/InternalTransfers'));
+const Reconciliation = lazyWithReload(() => import('./modules/finance/pages/Reconciliation'));
+const Expenses = lazyWithReload(() => import('./modules/finance/pages/Expenses'));
+const Purchases = lazyWithReload(() => import('./modules/finance/pages/Purchases'));
+const LocalSalesFinance = lazyWithReload(() => import('./modules/finance/pages/LocalSalesFinance'));
 
 function FinanceRoutes() {
   return (
