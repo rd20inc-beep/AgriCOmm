@@ -28,8 +28,9 @@ const EMPTY_ITEM = {
   productId: '', productName: '',
   qtyMT: '', pricePerMT: '',
   hsCode: '', packing: '',
-  // Packing / bag size are captured on the next step ("how the buyer receives
-  // this order") — left blank here so the per-item payload sends null.
+  // Packing / bag type / bag size are captured on the next step ("how the buyer
+  // receives this order") — left blank here so the per-item payload sends null.
+  bagType: '',
   bagSizeKg: '', bagCount: '',
   masterBagSizeKg: '',
   bagBrand: '',
@@ -229,6 +230,7 @@ export default function CreateExportOrder() {
           price_per_mt: itemPrice(it),
           hs_code: it.hsCode || null,
           packing: it.packing || null,
+          bag_type: it.bagType || form.bagType || null,
           bag_size_kg: it.bagSizeKg ? parseFloat(it.bagSizeKg) : null,
           bag_count: it.bagCount ? parseInt(it.bagCount) : null,
           master_bag_size_kg: it.masterBagSizeKg ? parseFloat(it.masterBagSizeKg) : null,
@@ -690,7 +692,7 @@ export default function CreateExportOrder() {
       {needsBagWidget && (
         <div className="bg-white rounded-xl border border-amber-200 p-6">
           <h2 className="text-sm font-semibold text-amber-700 uppercase tracking-wider mb-4 flex items-center gap-2">
-            <ShoppingBag className="w-4 h-4" /> Brand / Marking{isMultiItem ? ' — per item' : ''}
+            <ShoppingBag className="w-4 h-4" /> {isMultiItem ? 'Per-item Bag & Marking' : 'Brand / Marking'}
           </h2>
           {isMultiItem ? (
             <div className="space-y-2">
@@ -698,10 +700,34 @@ export default function CreateExportOrder() {
                 const p = products.find(pp => String(pp.id) === String(it.productId));
                 return (
                   <div key={idx} className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-                    <div className="md:col-span-4 text-sm font-medium text-gray-700 truncate md:pb-2">
+                    <div className="md:col-span-3 text-sm font-medium text-gray-700 truncate md:pb-2">
                       {p?.name || it.productName || `Item ${idx + 1}`}
                     </div>
                     <div className="md:col-span-3">
+                      <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Bag Type</label>
+                      <select
+                        value={it.bagType}
+                        onChange={e => {
+                          const name = e.target.value;
+                          updateItem(idx, 'bagType', name);
+                          // Auto-fill the per-item bag size from the chosen type.
+                          const bt = bagTypesList.find(b => b.name === name);
+                          if (bt?.sizeKg) {
+                            const v = String(bt.sizeKg);
+                            updateItem(idx, 'bagSizeKg', v);
+                            if (requiresMasterBag(v) && !it.masterBagSizeKg) updateItem(idx, 'masterBagSizeKg', '20');
+                            else if (!requiresMasterBag(v)) updateItem(idx, 'masterBagSizeKg', '');
+                          }
+                        }}
+                        className="form-input"
+                      >
+                        <option value="">Order default{form.bagType ? ` (${form.bagType})` : ''}</option>
+                        {bagTypesList.filter(b => b.sizeKg).map(b => (
+                          <option key={b.id || b.name} value={b.name}>{b.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="md:col-span-2">
                       <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Bag Size (KG)</label>
                       <select
                         value={it.bagSizeKg}
@@ -713,13 +739,13 @@ export default function CreateExportOrder() {
                         }}
                         className="form-input"
                       >
-                        <option value="">Order default{form.bagSizeKg ? ` (${form.bagSizeKg} KG)` : ''}</option>
+                        <option value="">Default{form.bagSizeKg ? ` (${form.bagSizeKg})` : ''}</option>
                         {['0.5', '1', '2', '5', '10', '25', '50', '100'].map(s => (
                           <option key={s} value={s}>{s} KG</option>
                         ))}
                       </select>
                     </div>
-                    <div className="md:col-span-5">
+                    <div className="md:col-span-4">
                       <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Brand / Marking</label>
                       <input
                         value={it.bagBrand}
@@ -731,7 +757,7 @@ export default function CreateExportOrder() {
                   </div>
                 );
               })}
-              <p className="text-[11px] text-gray-400 mt-1">Leave bag size as “Order default” to use the order-level bag specification above.</p>
+              <p className="text-[11px] text-gray-400 mt-1">Each item can use its own bag type / size — leave as “Order default” to inherit the order-level Bag Specification above.</p>
             </div>
           ) : (
             <div className="form-group max-w-md">
