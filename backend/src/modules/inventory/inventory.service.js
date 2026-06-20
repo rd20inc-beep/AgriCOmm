@@ -2343,8 +2343,16 @@ const inventoryService = {
       if (n.includes('sortex')) return 'sortex';
       if (n.includes('powder')) return 'powder';
       if (n.includes('sweeping')) return 'sweeping';
-      if (g === 'b1') return 'b1'; if (g === 'b2') return 'b2'; if (g === 'b3') return 'b3';
-      if (g === 'csr') return 'csr'; if (g.includes('short')) return 'short_grain';
+      // Grade can live in the grade column OR the lot_no / item_name (e.g.
+      // "M-002-B1-01", "Blend M-002 — B1"). Output lots created at yield left the
+      // grade column blank, which collapsed every broken grade onto the tier
+      // average instead of its own sale price — so also parse the identifiers.
+      const s = `${lot.lot_no || ''} ${lot.item_name || ''} ${g}`.toLowerCase();
+      if (g === 'b1' || /\bb1\b/.test(s)) return 'b1';
+      if (g === 'b2' || /\bb2\b/.test(s)) return 'b2';
+      if (g === 'b3' || /\bb3\b/.test(s)) return 'b3';
+      if (g === 'csr' || /\bcsr\b/.test(s)) return 'csr';
+      if (g.includes('short') || /short[\s-]?grain/.test(s)) return 'short_grain';
       return 'broken';
     };
     // Broken-tier keys — a generic "Broken Rice" lot (no exact grade key) gets
