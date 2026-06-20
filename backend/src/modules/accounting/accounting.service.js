@@ -215,57 +215,34 @@ const accountingService = {
   },
 
   /**
-   * Reverse a posted journal by creating a mirror entry.
+   * Reverse a posted journal by marking it 'Reversed'.
+   *
+   * Every balance/report query (trial balance, P&L, balance sheet, account &
+   * party ledgers) filters status='Posted', so flipping the entry to 'Reversed'
+   * cleanly nets it out of the GL. We deliberately do NOT post a mirror/contra
+   * entry: a contra is itself 'Posted', and against a Posted-only sum the
+   * original is ALREADY excluded — so a contra would double-count the reversal
+   * (move the books by -2x the entry) and pile up rows on repeated edits. The
+   * reason + reverser are recorded on the entry; it still appears (labelled
+   * 'Reversed') in the journal audit list. The status guard below also blocks
+   * re-reversing an already-reversed entry for free.
    */
   async reverseJournal(trx, { journalId, reason, userId }) {
-    // Wrap in a transaction if one was not provided, to ensure the
-    // reversal journal creation + original status update are atomic.
     const execute = async (knex) => {
       const original = await knex('journal_entries').where({ id: journalId }).first();
       if (!original) throw new Error(`Journal entry ${journalId} not found.`);
       if (original.status !== 'Posted') throw new Error('Only posted journals can be reversed.');
 
-      const originalLines = await knex('journal_lines').where({ journal_id: journalId });
-
-      // Create reversed lines (swap debit/credit)
-      const reversedLines = originalLines.map((line) => ({
-        account_id: line.account_id,
-        account: line.account,
-        debit: parseFloat(line.credit) || 0,
-        credit: parseFloat(line.debit) || 0,
-        narration: `Reversal: ${line.narration || ''}`,
-      }));
-
-      const reversalJournal = await accountingService.createJournal(knex, {
-        date: new Date().toISOString().slice(0, 10),
-        entity: original.entity,
-        refType: original.ref_type,
-        refNo: original.ref_no,
-        description: `Reversal of ${original.journal_no}: ${reason || ''}`,
-        lines: reversedLines,
-        currency: original.currency,
-        fxRate: original.fx_rate,
-        isAuto: false,
-        userId,
-        // Carry the party over so a reversal shows in the same ledger.
-        partyType: original.party_type,
-        partyId: original.party_id,
-      });
-
-      // Link reversal
-      await knex('journal_entries')
-        .where({ id: reversalJournal.id })
-        .update({ reversal_of: journalId });
-
-      // Mark original as Reversed
+      const note = reason ? ` [Reversed: ${reason}]` : ' [Reversed]';
       await knex('journal_entries')
         .where({ id: journalId })
-        .update({ status: 'Reversed', updated_at: knex.fn.now() });
+        .update({
+          status: 'Reversed',
+          description: `${original.description || ''}${note}`.slice(0, 1000),
+          updated_at: knex.fn.now(),
+        });
 
-      // Auto-post the reversal
-      const postedReversal = await accountingService.postJournal(knex, reversalJournal.id);
-
-      return postedReversal;
+      return knex('journal_entries').where({ id: journalId }).first();
     };
 
     if (trx) {
