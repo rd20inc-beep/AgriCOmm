@@ -1309,12 +1309,16 @@ module.exports = {
         const totalBags = lot.total_bags || 0;
         const purchaseAmount = parseFloat(lot.purchase_amount) || 0;
 
-        const tc = parseFloat(transport_cost) ?? parseFloat(lot.transport_cost) ?? 0;
-        const lc = parseFloat(labor_cost) ?? parseFloat(lot.labor_cost) ?? 0;
-        const ulc = parseFloat(unloading_cost) ?? parseFloat(lot.unloading_cost) ?? 0;
-        const pc = parseFloat(packing_cost) ?? parseFloat(lot.packing_cost) ?? 0;
-        const oc = parseFloat(other_cost) ?? parseFloat(lot.other_cost) ?? 0;
-        const bcpb = parseFloat(bag_cost_per_bag) ?? parseFloat(lot.bag_cost_per_bag) ?? 0;
+        // parseFloat(undefined) is NaN, and `NaN ?? x` keeps NaN (?? only catches
+        // null/undefined) — so an omitted body field would corrupt landed cost to
+        // NaN. Fall back to the lot's stored value on any non-finite parse.
+        const pick = (v, fb) => { const n = parseFloat(v); return Number.isFinite(n) ? n : (parseFloat(fb) || 0); };
+        const tc = pick(transport_cost, lot.transport_cost);
+        const lc = pick(labor_cost, lot.labor_cost);
+        const ulc = pick(unloading_cost, lot.unloading_cost);
+        const pc = pick(packing_cost, lot.packing_cost);
+        const oc = pick(other_cost, lot.other_cost);
+        const bcpb = pick(bag_cost_per_bag, lot.bag_cost_per_bag);
         const totalBagCost = lot.bag_cost_included ? 0 : bcpb * totalBags;
         // Transport (freight) is owed to a separate hauler and is NOT part of the
         // rice's landed cost / finished COGS — it is tracked as its own payable
