@@ -352,7 +352,17 @@ async function deleteLocalSale(trx, req, id) {
   await trx('lot_transactions').where('reference_no', sale.sale_no).whereIn('transaction_type', ['local_sale_out', 'export_dispatch_out']).del();
   // Payments (+ their bank_transactions) and receivables tied to the sale.
   const payIds = (await trx('payments').where('local_sale_id', id).select('id')).map(r => r.id);
-  if (payIds.length) await trx('bank_transactions').whereIn('linked_payment_id', payIds).del();
+  if (payIds.length) {
+    // Reverse any account-balance movement these receipts posted before removing
+    // the ledger rows (a credit added cash → debit it back on delete).
+    const bts = await trx('bank_transactions').whereIn('linked_payment_id', payIds).select('bank_account_id', 'type', 'amount');
+    for (const bt of bts) {
+      if (!bt.bank_account_id) continue;
+      const delta = bt.type === 'credit' ? -num(bt.amount) : num(bt.amount);
+      await trx('bank_accounts').where('id', bt.bank_account_id).increment('current_balance', delta);
+    }
+    await trx('bank_transactions').whereIn('linked_payment_id', payIds).del();
+  }
   await trx('payments').where('local_sale_id', id).del();
   await trx('receivables').where('local_sale_id', id).del();
   // Journal entries posted for the sale (lines cascade).

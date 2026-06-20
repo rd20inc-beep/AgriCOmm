@@ -150,6 +150,19 @@ module.exports = {
           resolvedCustomerId = cust.id;
         }
 
+        // Which account a cash / bank receipt lands in (so its balance moves with
+        // the money actually received). Cash → the cash-type account; bank
+        // transfer → the chosen bank account. Cheque (uncleared) and credit
+        // (unpaid) move no balance.
+        let receiptAccountId = null;
+        if (totalPaid > 0) {
+          if (payment_mode === 'bank_transfer') receiptAccountId = bank_account_id || null;
+          else if (payment_mode === 'cash') {
+            const cashAcct = await trx('bank_accounts').where({ type: 'cash', is_active: true }).orderBy('id').first();
+            receiptAccountId = cashAcct ? cashAcct.id : null;
+          }
+        }
+
         let groupNo = null;
         const created = [];
 
@@ -214,14 +227,30 @@ module.exports = {
             // (partial payment on a credit sale) is recorded as cash so it passes
             // the payments.payment_method check constraint.
             const payMethod = (payment_mode && payment_mode !== 'credit') ? payment_mode : 'cash';
-            await trx('payments').insert({
+            const [payRow] = await trx('payments').insert({
               payment_no: `PL-${(parseInt(payCount?.c) || 0) + 1}`, type: 'receipt',
               amount: l.paid, currency: 'PKR', fx_rate: 1, base_amount_pkr: l.paid,
               payment_method: payMethod, bank_reference: payment_reference || null,
-              bank_account_id: bank_account_id || null,
+              bank_account_id: receiptAccountId || bank_account_id || null,
               payment_date: sale_date || trx.fn.now(), notes: `Local sale ${saleNo} — ${l.item_name}`,
               local_sale_id: sale.id, created_by: req.user?.id || null,
-            });
+            }).returning('id');
+
+            // Move the receiving account's balance by the cash/bank received and
+            // drop a Cash & Bank sub-ledger row (reversed on sale delete by its
+            // linked_payment_id).
+            if (receiptAccountId) {
+              await trx('bank_accounts').where({ id: receiptAccountId }).increment('current_balance', l.paid);
+              const lastBt = await trx('bank_transactions').where('transaction_no', 'like', 'BT-%').orderBy('id', 'desc').first('transaction_no');
+              const seq = lastBt ? (parseInt(String(lastBt.transaction_no).replace(/^BT-/, ''), 10) || 0) + 1 : 1;
+              await trx('bank_transactions').insert({
+                transaction_no: `BT-${String(seq).padStart(4, '0')}`, bank_account_id: receiptAccountId,
+                type: 'credit', amount: l.paid, currency: 'PKR', status: 'posted',
+                transaction_date: sale_date || new Date(), reference: payment_reference || saleNo,
+                notes: `Local sale ${saleNo} receipt — ${l.item_name}`, source: 'local_sale',
+                linked_payment_id: payRow.id, created_by: req.user?.id || null,
+              });
+            }
           }
 
           if (dueAmt > 0) {
