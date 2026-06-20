@@ -183,10 +183,14 @@ module.exports = {
 
           if (l.paid > 0) {
             const payCount = await trx('payments').count('id as c').first();
+            // 'credit' is a sale MODE, not a tender method — an actual receipt
+            // (partial payment on a credit sale) is recorded as cash so it passes
+            // the payments.payment_method check constraint.
+            const payMethod = (payment_mode && payment_mode !== 'credit') ? payment_mode : 'cash';
             await trx('payments').insert({
               payment_no: `PL-${(parseInt(payCount?.c) || 0) + 1}`, type: 'receipt',
               amount: l.paid, currency: 'PKR', fx_rate: 1, base_amount_pkr: l.paid,
-              payment_method: payment_mode || 'cash', bank_reference: payment_reference || null,
+              payment_method: payMethod, bank_reference: payment_reference || null,
               payment_date: sale_date || trx.fn.now(), notes: `Local sale ${saleNo} — ${l.item_name}`,
               local_sale_id: sale.id, created_by: req.user?.id || null,
             });
