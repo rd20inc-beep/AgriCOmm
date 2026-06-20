@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Boxes, Package, Plus, Loader2, ClipboardList } from 'lucide-react';
-import { usePackingHistory, usePackBatch, useMillStoreItems } from '../api/queries';
+import { usePackingHistory, usePackBatch, useMillStoreItems, useBatchKatta } from '../api/queries';
 import { useExportOrder } from '../../../api/queries';
 
 const num = (v) => Number(v) || 0;
@@ -10,6 +10,7 @@ const fmtKg = (v) => `${num(v).toLocaleString(undefined, { maximumFractionDigits
 // deducts store stock and records the packed (net), tare and gross weight.
 export default function PackingPanel({ batchId, batchStatus, addToast, exportOrderId }) {
   const { data = {}, isLoading } = usePackingHistory(batchId);
+  const { data: katta } = useBatchKatta(batchId);
   const { data: bagItems = [] } = useMillStoreItems({ category: 'packaging', limit: 200 });
   // When the batch is for an export order, show the buyer's packing requirement.
   const { data: exportOrder } = useExportOrder(exportOrderId || null);
@@ -48,6 +49,29 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
 
   return (
     <div className="space-y-5">
+      {/* Katta accounting — auto at yield: empty bags freed from the milled raw
+          vs katta used to pack the outputs. */}
+      {katta && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Boxes size={16} className="text-amber-600" />
+            <h4 className="text-sm font-semibold text-amber-900">Katta (bags){katta.capacityKg ? ` · ${katta.capacityKg} kg each` : ''}</h4>
+          </div>
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div><p className="text-[11px] uppercase tracking-wide text-amber-700">Freed from raw</p><p className="text-lg font-bold text-emerald-700">+{num(katta.freed).toLocaleString()}</p></div>
+            <div><p className="text-[11px] uppercase tracking-wide text-amber-700">Packed into output</p><p className="text-lg font-bold text-red-600">−{num(katta.packed).toLocaleString()}</p></div>
+            <div><p className="text-[11px] uppercase tracking-wide text-amber-700">Net to store</p><p className="text-lg font-bold text-gray-900">{katta.net >= 0 ? '+' : ''}{num(katta.net).toLocaleString()}</p></div>
+          </div>
+          {katta.lots?.some((l) => l.bags > 0) && (
+            <div className="mt-3 pt-3 border-t border-amber-200 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-amber-800">
+              {katta.lots.filter((l) => l.bags > 0).map((l, i) => (
+                <span key={i}>{l.item_name || l.lot_no}: <span className="font-semibold">{l.bags}</span></span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Buyer's packing requirement — shown when the batch is linked to an
           export order, so the operator packs to match what the buyer ordered. */}
       {exportOrder && (() => {

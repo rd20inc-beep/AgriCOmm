@@ -101,6 +101,17 @@ export function usePackingHistory(batchId) {
   });
 }
 
+export function useBatchKatta(batchId) {
+  return useQuery({
+    queryKey: ['mill-store', 'katta', batchId],
+    queryFn: async () => {
+      const res = await millStoreApi.getBatchKatta(batchId);
+      return unwrap(res) || null;
+    },
+    enabled: !!batchId,
+  });
+}
+
 // ─── Mutations ───
 export function useCreateMillStoreItem() {
   const qc = useQueryClient();

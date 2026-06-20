@@ -726,5 +726,6 @@ router.get(
   authorize('mill_store', 'view'),
   packingCtrl.history
 );
+router.get('/batches/:id/katta', authorize('milling', 'view'), controller.getBatchKatta);
 
 module.exports = router;

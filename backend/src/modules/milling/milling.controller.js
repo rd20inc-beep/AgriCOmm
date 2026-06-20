@@ -912,6 +912,7 @@ const millingController = {
         updateData.completed_at = db.fn.now();
       }
 
+      let kattaInfo = null;
       const updated = await db.transaction(async (trx) => {
         const [result] = await trx('milling_batches')
           .where({ id })
@@ -1073,7 +1074,7 @@ const millingController = {
         // Katta accounting: the raw arrived in katta — milling frees those empty
         // bags into packaging stock, and the outputs are packed into katta,
         // consuming them back. Stamps each output lot's bag count too.
-        await inventoryService.reconcileBatchKatta(trx, batch.id, req.user?.id);
+        kattaInfo = await inventoryService.reconcileBatchKatta(trx, batch.id, req.user?.id);
 
         // Recognize the supplier payable for the raw rice purchase so the
         // supplier's GL party ledger / statement reflects what we owe. Only for
@@ -1201,12 +1202,39 @@ const millingController = {
 
       return res.json({
         success: true,
-        data: { batch: updated },
+        data: { batch: updated, katta: kattaInfo },
         warning: yieldWarning,
       });
     } catch (err) {
       console.error('Milling recordYield error:', err);
       return res.status(500).json({ success: false, message: err.message || 'Internal server error.' });
+    }
+  },
+
+  // Katta summary for a batch: empty bags freed from the milled raw vs katta
+  // used to pack the outputs (read-only — the figures are stamped at yield).
+  async getBatchKatta(req, res) {
+    try {
+      const { id } = req.params;
+      const veh = await db('milling_vehicle_arrivals').where('batch_id', id).sum({ bags: 'total_bags' }).first();
+      const freed = Math.round(parseFloat(veh && veh.bags) || 0);
+      if (freed <= 0) return res.json({ success: true, data: null }); // no katta intake (blend / lot-started)
+      const lots = await db('inventory_lots').where({ batch_ref: `batch-${id}` })
+        .whereIn('type', ['finished', 'byproduct'])
+        .select('lot_no', 'item_name', 'type', 'total_bags', 'bag_size_kg', 'qty')
+        .orderByRaw("CASE WHEN type='finished' THEN 0 ELSE 1 END");
+      const packed = lots.reduce((s, l) => s + (parseInt(l.total_bags, 10) || 0), 0);
+      const cap = lots.find((l) => parseFloat(l.bag_size_kg) > 0);
+      return res.json({
+        success: true,
+        data: {
+          freed, packed, net: freed - packed,
+          capacityKg: cap ? Math.round(parseFloat(cap.bag_size_kg)) : null,
+          lots: lots.map((l) => ({ lot_no: l.lot_no, item_name: l.item_name, type: l.type, bags: parseInt(l.total_bags, 10) || 0 })),
+        },
+      });
+    } catch (err) {
+      return res.status(500).json({ success: false, message: err.message });
     }
   },
 

@@ -428,7 +428,7 @@ export default function MillingBatchDetail() {
     const yieldPct = batch.rawQtyMT > 0 ? parseFloat(((finished / batch.rawQtyMT) * 100).toFixed(1)) : 0;
 
     try {
-      await recordYieldMut.mutateAsync({
+      const yieldRes = await recordYieldMut.mutateAsync({
         id: batchId,
         data: {
           actual_finished_mt: finished,
@@ -447,6 +447,10 @@ export default function MillingBatchDetail() {
         },
       });
       addToast(`Yield output recorded for ${batch.id} — Yield: ${yieldPct}%`);
+      const k = yieldRes?.data?.katta || yieldRes?.data?.resync?.katta;
+      if (k && (k.rawBags || k.outputBags)) {
+        addToast(`Katta: ${k.rawBags} freed from raw · ${k.outputBags} packed into output · ${k.net >= 0 ? '+' : ''}${k.net} to store`, 'info');
+      }
       if (totalOutput > 0 && batch.status === 'In Progress') {
         addToast(`Batch ${batch.id} marked as Completed`, 'info');
       }

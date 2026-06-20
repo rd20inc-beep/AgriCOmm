@@ -31,6 +31,7 @@ export const millStoreApi = {
   // Packing (on milling routes — bag the batch's finished rice)
   packBatch: (batchId, data) => api.post(`/api/milling/batches/${batchId}/packing`, data),
   getPackingHistory: (batchId) => api.get(`/api/milling/batches/${batchId}/packing`),
+  getBatchKatta: (batchId) => api.get(`/api/milling/batches/${batchId}/katta`),
 
   // Adjustments
   listAdjustments: (params) => api.get('/api/mill-store/adjustments', params),
