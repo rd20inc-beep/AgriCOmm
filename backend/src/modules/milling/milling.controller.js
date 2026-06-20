@@ -850,11 +850,17 @@ const millingController = {
         .whereIn('type', ['finished', 'byproduct'])
         .count('id as c').first();
       if (parseInt(existingOutputLots.c) > 0 && batch.status === 'Completed') {
-        // Already recorded — update the batch numbers but don't create duplicate lots
+        // Already recorded — update the batch numbers but don't create duplicate lots.
+        // Persist EVERY output field (incl. powder/sweeping) so the stored totals
+        // match exactly what the over-yield guard above validated. Omitting
+        // powder_mt/sweeping_mt here let them keep stale values while the guard
+        // passed on the request body — producing an impossible >100% recovery
+        // (e.g. M-002: edited finished 67 + stale powder 5 + sweeping 10 = 87/80).
         await db('milling_batches').where({ id }).update({
           actual_finished_mt: finished,
           broken_mt: broken, b1_mt: b1, b2_mt: b2, b3_mt: b3, csr_mt: csr, short_grain_mt: shortGrain,
-          bran_mt: bran, husk_mt: husk, sortex_rejects_mt: sortex, wastage_mt: wastage,
+          bran_mt: bran, husk_mt: husk, sortex_rejects_mt: sortex,
+          powder_mt: powder, sweeping_mt: sweeping, wastage_mt: wastage,
           yield_pct: yieldPct, updated_at: db.fn.now(),
         });
         return res.json({
