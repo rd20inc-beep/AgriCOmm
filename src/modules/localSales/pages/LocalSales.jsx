@@ -724,6 +724,9 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
               {form.payment_mode === 'credit' && <p className="text-xs text-amber-600 mt-1">Leave empty or partial for credit sale</p>}
             </div>
           </div>
+          {(form.payment_mode === 'credit' || (form.paid_amount !== '' && parseFloat(form.paid_amount) < grandTotal)) && isWalkIn && (
+            <p className="text-[11px] text-violet-600 mt-2">A balance is owed, so “{form.buyer_name || 'this buyer'}” will be saved as a customer to track the receivable.</p>
+          )}
           <p className="text-[11px] text-gray-400 mt-2">The amount received is split across the items automatically; any balance becomes a receivable for this buyer.</p>
           <div className="grid grid-cols-1 gap-4 mt-4">
             <div>

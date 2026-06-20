@@ -122,8 +122,29 @@ module.exports = {
         if (i === lines.length - 1) l.paid = uc.round2(Math.max(0, totalPaid - allocated));
         else { l.paid = grandTotal > 0 ? uc.round2(totalPaid * (l.total / grandTotal)) : 0; allocated += l.paid; }
       });
+      // A credit / partial sale leaves a balance owed → a receivable, which needs
+      // a customer to chase. (receivables.customer_id is NOT NULL.)
+      const hasDue = totalPaid < grandTotal - 0.01;
 
       const result = await db.transaction(async (trx) => {
+        // Resolve the customer for any owed balance: use the selected one, else
+        // auto-register the walk-in buyer (dedupe by name) so credit sales work
+        // without a manual registration step. A fully-paid walk-in stays anonymous.
+        let resolvedCustomerId = customer_id || null;
+        if (hasDue && !resolvedCustomerId) {
+          const nm = (buyer_name || '').trim();
+          if (!nm) { const e = new Error('A credit or partial sale needs a buyer name (or a registered customer) so the balance can be tracked.'); e.status = 400; throw e; }
+          let cust = await trx('customers').whereRaw('LOWER(name) = LOWER(?)', [nm]).first();
+          if (!cust) {
+            [cust] = await trx('customers').insert({
+              name: nm, phone: buyer_phone || null, payment_terms: 'Credit', currency: 'PKR',
+              is_active: true, approval_status: 'pending',
+              submitted_by: req.user?.id || null, submitted_at: trx.fn.now(),
+            }).returning('*');
+          }
+          resolvedCustomerId = cust.id;
+        }
+
         let groupNo = null;
         const created = [];
 
@@ -163,7 +184,7 @@ module.exports = {
           const [sale] = await trx('local_sales').insert({
             sale_no: saleNo, sale_group_no: groupNo,
             sale_date: sale_date || new Date().toISOString().split('T')[0],
-            entity: 'mill', customer_id: customer_id || null,
+            entity: 'mill', customer_id: resolvedCustomerId,
             buyer_name: buyer_name || null, buyer_phone: buyer_phone || null, buyer_address: buyer_address || null,
             lot_id: l.lot_id, lot_no: lotNo,
             item_name: l.item_name, item_type: l.item_type,
@@ -200,7 +221,7 @@ module.exports = {
             const rcvCount = await trx('receivables').count('id as c').first();
             await trx('receivables').insert({
               recv_no: `RCV-LS-${(parseInt(rcvCount?.c) || 0) + 1}`, entity: 'mill',
-              customer_id: customer_id || null, local_sale_id: sale.id, type: 'Local Sale',
+              customer_id: resolvedCustomerId, local_sale_id: sale.id, type: 'Local Sale',
               expected_amount: l.total, received_amount: l.paid, outstanding: dueAmt,
               due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
               status: l.paid > 0 ? 'Partial' : 'Pending', currency: 'PKR', aging: 0,
