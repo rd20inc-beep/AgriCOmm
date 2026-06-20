@@ -88,8 +88,16 @@ function getMovementDirection(movementType) {
 
 async function generateLotTxnNo(trx) {
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const count = await trx('lot_transactions').count('id as c').first();
-  return `TXN-${today}-${String((count?.c || 0) + 1).padStart(4, '0')}`;
+  // Next number = max existing suffix for today + 1, NOT a row count. A count
+  // collides with surviving higher-numbered rows after any delete (re-recording
+  // a yield deletes & recreates output lots; count-based numbering then reused
+  // an in-use TXN-… and tripped the unique constraint).
+  const row = await trx('lot_transactions')
+    .whereRaw('transaction_no LIKE ?', [`TXN-${today}-%`])
+    .max(trx.raw("CAST(split_part(transaction_no, '-', 3) AS INTEGER) as m"))
+    .first();
+  const next = (parseInt(row && row.m, 10) || 0) + 1;
+  return `TXN-${today}-${String(next).padStart(4, '0')}`;
 }
 
 function resolveReferenceModule({ orderId, batchId, transferId, sourceEntity }) {
