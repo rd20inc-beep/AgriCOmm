@@ -1344,15 +1344,7 @@ module.exports = {
         const existingTp = await trx('payables').where({ source_table: 'lot_transport', source_id: lotId }).first();
         const paidSoFar = existingTp ? (parseFloat(existingTp.paid_amount) || 0) : 0;
         const wantBill = tc > 0 && haulerId;
-        // Only reconcile journals while nothing has been paid, so a settled payment is
-        // never orphaned. Reverse any prior posted transport bill for this lot first.
-        if (paidSoFar <= 0.01) {
-          const priorJournals = await trx('journal_entries')
-            .where({ ref_type: 'Lot Transport', ref_no: lot.lot_no, status: 'Posted' }).select('id');
-          for (const j of priorJournals) {
-            await accountingService.reverseJournal(trx, { journalId: j.id, reason: 'Transport cost / hauler updated', userId: req.user?.id });
-          }
-        }
+        // Upsert the stored hauler payable (settles via the Record Payment flow).
         if (wantBill) {
           if (existingTp) {
             await trx('payables').where({ id: existingTp.id }).update({
@@ -1371,16 +1363,58 @@ module.exports = {
               currency: 'PKR', notes: `Transport (hauler) for lot ${lot.lot_no}`,
             });
           }
-          if (paidSoFar <= 0.01) {
-            await accountingService.autoPost(trx, {
-              triggerEvent: 'expense_recorded', entity: 'mill', amount: tc, currency: 'PKR',
-              refType: 'Lot Transport', refNo: lot.lot_no,
-              description: `Transport (hauler) for lot ${lot.lot_no}`,
-              userId: req.user?.id, partyType: 'supplier', partyId: haulerId,
-            });
-          }
         } else if (existingTp && paidSoFar <= 0.01) {
-          await trx('payables').where({ id: existingTp.id }).del(); // cleared/unpaid → drop (journal already reversed)
+          await trx('payables').where({ id: existingTp.id }).del(); // cleared/unpaid → drop
+        }
+
+        // Re-accrue the GL with a single signed DELTA against the transport accrual
+        // (Dr Operating Expenses / Cr Supplier Payable, swapped when it drops) — NOT
+        // reverse+repost. The trial balance sums status='Posted' only while
+        // reverseJournal marks the original 'Reversed' AND posts a 'Posted' contra,
+        // so reverse+repost moves a Posted-only sum by -2x and piles up rows each
+        // edit (see setLotPurchaseRate). Only while nothing is paid, so a settled
+        // payment is never orphaned.
+        if (paidSoFar <= 0.01) {
+          const prevAp = await trx('journal_lines as jl')
+            .join('journal_entries as je', 'je.id', 'jl.journal_id')
+            .join('chart_of_accounts as coa', 'coa.id', 'jl.account_id')
+            .where({ 'je.ref_type': 'Lot Transport', 'je.ref_no': lot.lot_no, 'je.status': 'Posted' })
+            .whereRaw("coa.code like '2%'")
+            .sum(trx.raw('jl.credit - jl.debit as net'));
+          const oldBilled = parseFloat(prevAp?.[0]?.net) || 0;
+          const newBilled = wantBill ? tc : 0;
+          const tDelta = uc.round2(newBilled - oldBilled);
+          const tHauler = haulerId || lot.transport_vendor_id || null;
+          if (Math.abs(tDelta) > 0.01 && tHauler) {
+            const rule = await trx('posting_rules')
+              .where({ trigger_event: 'expense_recorded', is_active: true })
+              .where(function () { this.where({ entity: 'mill' }).orWhereNull('entity'); })
+              .first();
+            if (rule) {
+              const [expAcc, apAcc] = await Promise.all([
+                trx('chart_of_accounts').where({ id: rule.debit_account_id }).first(),
+                trx('chart_of_accounts').where({ id: rule.credit_account_id }).first(),
+              ]);
+              const amt = Math.abs(tDelta);
+              const up = tDelta > 0; // more expense + more payable
+              const lines = [
+                { account_id: rule.debit_account_id, account: expAcc?.name || '',
+                  debit: up ? amt : 0, credit: up ? 0 : amt,
+                  narration: `${up ? 'DR' : 'CR'} ${expAcc ? expAcc.code + ' ' + expAcc.name : ''} — transport adj` },
+                { account_id: rule.credit_account_id, account: apAcc?.name || '',
+                  debit: up ? 0 : amt, credit: up ? amt : 0,
+                  narration: `${up ? 'CR' : 'DR'} ${apAcc ? apAcc.code + ' ' + apAcc.name : ''} — transport adj` },
+              ];
+              const adj = await accountingService.createJournal(trx, {
+                date: new Date().toISOString().slice(0, 10), entity: 'mill',
+                refType: 'Lot Transport', refNo: lot.lot_no,
+                description: `Lot ${lot.lot_no} transport adjustment (Rs ${tDelta >= 0 ? '+' : ''}${tDelta})`,
+                lines, currency: 'PKR', isAuto: true, postingRuleId: rule.id,
+                userId: req.user?.id, partyType: 'supplier', partyId: tHauler,
+              });
+              await accountingService.postJournal(trx, adj.id);
+            }
+          }
         }
 
         // Cascade the corrected cost into any batch that already consumed this
