@@ -62,11 +62,38 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
             <div><p className="text-[11px] uppercase tracking-wide text-amber-700">Packed into output</p><p className="text-lg font-bold text-red-600">−{num(katta.packed).toLocaleString()}</p></div>
             <div><p className="text-[11px] uppercase tracking-wide text-amber-700">Net to store</p><p className="text-lg font-bold text-gray-900">{katta.net >= 0 ? '+' : ''}{num(katta.net).toLocaleString()}</p></div>
           </div>
+
+          {/* Per bag size — freed / packed / net */}
+          {katta.bySize?.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-amber-200">
+              <p className="text-[11px] uppercase tracking-wide text-amber-700 mb-1.5">By size</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-amber-700 text-left"><th className="py-1 pr-3 font-medium">Katta</th><th className="py-1 px-2 text-right font-medium">Freed</th><th className="py-1 px-2 text-right font-medium">Packed</th><th className="py-1 pl-2 text-right font-medium">In store</th></tr></thead>
+                  <tbody>
+                    {katta.bySize.map((s, i) => (
+                      <tr key={i} className="border-t border-amber-100">
+                        <td className="py-1 pr-3 font-medium text-gray-800">{s.size} kg</td>
+                        <td className="py-1 px-2 text-right text-emerald-700">+{num(s.freed).toLocaleString()}</td>
+                        <td className="py-1 px-2 text-right text-red-600">{s.packed > 0 ? `−${num(s.packed).toLocaleString()}` : '—'}</td>
+                        <td className="py-1 pl-2 text-right font-semibold text-gray-900">{num(s.net).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Katta packed per output */}
           {katta.lots?.some((l) => l.bags > 0) && (
-            <div className="mt-3 pt-3 border-t border-amber-200 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-amber-800">
-              {katta.lots.filter((l) => l.bags > 0).map((l, i) => (
-                <span key={i}>{l.item_name || l.lot_no}: <span className="font-semibold">{l.bags}</span></span>
-              ))}
+            <div className="mt-3 pt-3 border-t border-amber-200">
+              <p className="text-[11px] uppercase tracking-wide text-amber-700 mb-1.5">Packed per output</p>
+              <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-amber-800">
+                {katta.lots.filter((l) => l.bags > 0).map((l, i) => (
+                  <span key={i}>{l.item_name || l.lot_no}: <span className="font-semibold">{l.bags}</span>{l.sizeKg ? <span className="text-amber-600"> ×{l.sizeKg}kg</span> : null}</span>
+                ))}
+              </div>
             </div>
           )}
         </div>

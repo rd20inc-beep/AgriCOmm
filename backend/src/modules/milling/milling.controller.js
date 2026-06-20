@@ -1217,20 +1217,45 @@ const millingController = {
     try {
       const { id } = req.params;
       const veh = await db('milling_vehicle_arrivals').where('batch_id', id).sum({ bags: 'total_bags' }).first();
-      const freed = Math.round(parseFloat(veh && veh.bags) || 0);
-      if (freed <= 0) return res.json({ success: true, data: null }); // no katta intake (blend / lot-started)
+      const vehFreed = Math.round(parseFloat(veh && veh.bags) || 0);
+      if (vehFreed <= 0) return res.json({ success: true, data: null }); // no katta intake (blend / lot-started)
+
+      // Actual katta movements posted for this batch (the usage history).
+      const moves = await db('mill_stock_movements as m')
+        .join('mill_items as i', 'm.item_id', 'i.id')
+        .where({ 'm.reference_type': 'batch_katta', 'm.reference_id': id })
+        .select('i.code', 'i.name', 'i.capacity_kg', 'm.movement_type', 'm.quantity', 'm.reason', 'm.created_at')
+        .orderBy('i.capacity_kg').orderBy('m.id');
+
+      // Per-size freed (return) / packed (consumption) from the movements.
+      const sizeMap = new Map();
+      for (const mv of moves) {
+        const size = Math.round(parseFloat(mv.capacity_kg) || 0);
+        if (!sizeMap.has(size)) sizeMap.set(size, { size, freed: 0, packed: 0 });
+        const s = sizeMap.get(size);
+        const q = parseFloat(mv.quantity) || 0;
+        if (mv.movement_type === 'return') s.freed += q;
+        else if (mv.movement_type === 'consumption') s.packed += -q;
+      }
+      const bySize = [...sizeMap.values()].map((s) => ({ ...s, net: s.freed - s.packed }));
+
       const lots = await db('inventory_lots').where({ batch_ref: `batch-${id}` })
         .whereIn('type', ['finished', 'byproduct'])
         .select('lot_no', 'item_name', 'type', 'total_bags', 'bag_size_kg', 'qty')
         .orderByRaw("CASE WHEN type='finished' THEN 0 ELSE 1 END");
-      const packed = lots.reduce((s, l) => s + (parseInt(l.total_bags, 10) || 0), 0);
-      const cap = lots.find((l) => parseFloat(l.bag_size_kg) > 0);
+      const lotPacked = lots.reduce((s, l) => s + (parseInt(l.total_bags, 10) || 0), 0);
+
+      const freed = bySize.reduce((a, s) => a + s.freed, 0) || vehFreed;
+      const packed = bySize.length ? bySize.reduce((a, s) => a + s.packed, 0) : lotPacked;
+      const pred = bySize.reduce((a, s) => (s.freed > (a ? a.freed : -1) ? s : a), null);
       return res.json({
         success: true,
         data: {
           freed, packed, net: freed - packed,
-          capacityKg: cap ? Math.round(parseFloat(cap.bag_size_kg)) : null,
-          lots: lots.map((l) => ({ lot_no: l.lot_no, item_name: l.item_name, type: l.type, bags: parseInt(l.total_bags, 10) || 0 })),
+          capacityKg: pred ? pred.size : (lots.find((l) => parseFloat(l.bag_size_kg) > 0) ? Math.round(parseFloat(lots.find((l) => parseFloat(l.bag_size_kg) > 0).bag_size_kg)) : null),
+          bySize,
+          movements: moves.map((m) => ({ size: Math.round(parseFloat(m.capacity_kg) || 0), type: m.movement_type, qty: parseFloat(m.quantity) || 0, reason: m.reason, at: m.created_at })),
+          lots: lots.map((l) => ({ lot_no: l.lot_no, item_name: l.item_name, type: l.type, bags: parseInt(l.total_bags, 10) || 0, sizeKg: Math.round(parseFloat(l.bag_size_kg) || 0) })),
         },
       });
     } catch (err) {
