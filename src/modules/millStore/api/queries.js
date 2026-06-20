@@ -112,6 +112,16 @@ export function useBatchKatta(batchId) {
   });
 }
 
+export function useKattaSummary() {
+  return useQuery({
+    queryKey: ['mill-store', 'katta-summary'],
+    queryFn: async () => {
+      const res = await millStoreApi.getKattaSummary();
+      return unwrap(res, 'katta') || [];
+    },
+  });
+}
+
 // ─── Mutations ───
 export function useCreateMillStoreItem() {
   const qc = useQueryClient();

@@ -196,6 +196,13 @@ const millStoreController = {
     } catch (err) { next(err); }
   },
 
+  async getKattaSummary(req, res, next) {
+    try {
+      const katta = await service.getKattaSummary();
+      res.json({ success: true, data: { katta } });
+    } catch (err) { next(err); }
+  },
+
   async getForecast(req, res, next) {
     try {
       const forecast = await service.getForecast();

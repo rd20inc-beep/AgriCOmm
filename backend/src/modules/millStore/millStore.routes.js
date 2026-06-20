@@ -79,6 +79,7 @@ router.get('/items/:id/movements', authorize('mill_store', 'view'), ctrl.getItem
 
 // Summary / dashboard
 router.get('/summary', authorize('mill_store', 'view'), ctrl.getSummary);
+router.get('/katta-summary', authorize('mill_store', 'view'), ctrl.getKattaSummary);
 router.get('/forecast', authorize('mill_store', 'view'), ctrl.getForecast);
 
 // Adjustments (approval-gated)

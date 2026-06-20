@@ -4,7 +4,7 @@ import {
   Package, AlertTriangle, ShoppingCart, TrendingDown,
   Search, Pencil, Save, Loader2, Boxes,
 } from 'lucide-react';
-import { useMillStoreItems, useMillStoreSummary, useSetMillStock, useUpdateMillStoreItem } from '../api/queries';
+import { useMillStoreItems, useMillStoreSummary, useSetMillStock, useUpdateMillStoreItem, useKattaSummary } from '../api/queries';
 import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { useApp } from '../../../context/AppContext';
@@ -58,15 +58,9 @@ export default function StoreOverview() {
     [safeItems]
   );
 
-  // Per-size katta (KATTA-<kg>) — surfaced as its own card regardless of the
-  // current category/search filter. Auto-managed by milling yield.
-  const { data: pkgItems = [] } = useMillStoreItems({ category: 'packaging', limit: 200 });
-  const kattaItems = useMemo(
-    () => (Array.isArray(pkgItems) ? pkgItems : [])
-      .filter(i => /^KATTA-/i.test(i.code || ''))
-      .sort((a, b) => Number(a.capacity_kg) - Number(b.capacity_kg)),
-    [pkgItems]
-  );
+  // Per-size katta (KATTA-<kg>) breakdown — purchased / freed from milling /
+  // used to pack / sold / on-hand. Independent of the category/search filter.
+  const { data: kattaItems = [] } = useKattaSummary();
 
   return (
     <div className="p-6 space-y-6">
@@ -99,7 +93,7 @@ export default function StoreOverview() {
         </Link>
       </div>
 
-      {/* Katta stock by size — freed from milled raw, used to pack outputs or sold. */}
+      {/* Katta stock by size — where each size came from / went. */}
       {kattaItems.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-5">
           <div className="flex items-center justify-between mb-3">
@@ -107,21 +101,39 @@ export default function StoreOverview() {
               <Boxes size={16} className="text-amber-600" />
               <h2 className="text-sm font-semibold text-amber-900">Katta Stock <span className="font-normal text-amber-700/80">by size</span></h2>
             </div>
-            <span className="text-xs text-amber-700">{kattaItems.reduce((s, k) => s + (Number(k.quantity_available) || 0), 0).toLocaleString()} total</span>
+            <span className="text-xs text-amber-700">{kattaItems.reduce((s, k) => s + (Number(k.on_hand) || 0), 0).toLocaleString()} total pcs</span>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-            {kattaItems.map(k => {
-              const qty = Number(k.quantity_available) || 0;
-              const cost = Number(k.avg_cost_per_unit) || 0;
-              const low = qty <= Number(k.reorder_level) && Number(k.reorder_level) > 0;
-              return (
-                <div key={k.id} className="bg-white rounded-lg border border-amber-100 p-3">
-                  <p className="text-xs font-medium text-amber-700">{Math.round(Number(k.capacity_kg))} kg katta</p>
-                  <p className={`text-xl font-bold ${low ? 'text-red-600' : 'text-gray-900'}`}>{Math.round(qty).toLocaleString()}<span className="text-xs font-normal text-gray-400 ml-1">pcs</span></p>
-                  {cost > 0 && <p className="text-[11px] text-gray-400">{formatPKR(qty * cost)}</p>}
-                </div>
-              );
-            })}
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-[11px] uppercase text-amber-700">
+                  <th className="py-1.5 pr-3 font-semibold">Katta</th>
+                  <th className="py-1.5 px-2 text-right font-semibold">Purchased</th>
+                  <th className="py-1.5 px-2 text-right font-semibold">Freed (mill)</th>
+                  <th className="py-1.5 px-2 text-right font-semibold">Used (pack)</th>
+                  <th className="py-1.5 px-2 text-right font-semibold">Sold</th>
+                  <th className="py-1.5 px-2 text-right font-semibold">On hand</th>
+                  <th className="py-1.5 pl-2 text-right font-semibold">Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {kattaItems.map(k => {
+                  const onHand = Number(k.on_hand) || 0;
+                  const low = onHand <= Number(k.reorder_level) && Number(k.reorder_level) > 0;
+                  return (
+                    <tr key={k.id} className="border-t border-amber-100">
+                      <td className="py-1.5 pr-3 font-medium text-gray-800">{k.size} kg</td>
+                      <td className="py-1.5 px-2 text-right text-blue-700">{k.purchased > 0 ? `+${Math.round(k.purchased).toLocaleString()}` : '—'}</td>
+                      <td className="py-1.5 px-2 text-right text-emerald-700">{k.freed > 0 ? `+${Math.round(k.freed).toLocaleString()}` : '—'}</td>
+                      <td className="py-1.5 px-2 text-right text-red-600">{k.packed > 0 ? `−${Math.round(k.packed).toLocaleString()}` : '—'}</td>
+                      <td className="py-1.5 px-2 text-right text-red-600">{k.sold > 0 ? `−${Math.round(k.sold).toLocaleString()}` : '—'}</td>
+                      <td className={`py-1.5 px-2 text-right font-bold ${low ? 'text-red-600' : 'text-gray-900'}`}>{Math.round(onHand).toLocaleString()}</td>
+                      <td className="py-1.5 pl-2 text-right text-gray-700">{k.avg_cost > 0 ? formatPKR(onHand * k.avg_cost) : '—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

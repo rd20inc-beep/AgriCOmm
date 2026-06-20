@@ -132,6 +132,35 @@ const millStoreService = {
     return repo.getSummary();
   },
 
+  // Per-size katta breakdown: where each KATTA-<kg> item's stock came from /
+  // went — purchased, freed from milling, used to pack outputs, sold.
+  async getKattaSummary() {
+    const items = await db('mill_items as i')
+      .leftJoin('mill_stock as s', function () { this.on('s.item_id', 'i.id').andOnNull('s.warehouse_id'); })
+      .where('i.code', 'like', 'KATTA-%')
+      .select('i.id', 'i.code', 'i.name', 'i.capacity_kg', 'i.avg_cost_per_unit', 'i.reorder_level', 's.quantity_available')
+      .orderBy('i.capacity_kg');
+    const n = (v) => parseFloat(v) || 0;
+    const out = [];
+    for (const it of items) {
+      const movs = await db('mill_stock_movements').where('item_id', it.id).select('movement_type', 'reference_type', 'quantity');
+      let purchased = 0, freed = 0, packed = 0, sold = 0, adjusted = 0;
+      for (const m of movs) {
+        const q = n(m.quantity), rt = m.reference_type;
+        if (m.movement_type === 'purchase') purchased += q;
+        else if (rt === 'batch_katta') { if (m.movement_type === 'return') freed += q; else packed += -q; }
+        else if (rt === 'local_sale' || rt === 'local_sale_reversal') sold += -q; // consumption(−) sells, reversal(+) un-sells
+        else adjusted += q;
+      }
+      out.push({
+        id: it.id, code: it.code, size: Math.round(n(it.capacity_kg)),
+        on_hand: n(it.quantity_available), purchased, freed, packed, sold, adjusted,
+        avg_cost: n(it.avg_cost_per_unit), reorder_level: n(it.reorder_level),
+      });
+    }
+    return out;
+  },
+
   // ─── Adjustments ───
   async requestAdjustment(data, userId) {
     const item = await repo.getItemById(data.item_id);

@@ -32,6 +32,7 @@ export const millStoreApi = {
   packBatch: (batchId, data) => api.post(`/api/milling/batches/${batchId}/packing`, data),
   getPackingHistory: (batchId) => api.get(`/api/milling/batches/${batchId}/packing`),
   getBatchKatta: (batchId) => api.get(`/api/milling/batches/${batchId}/katta`),
+  getKattaSummary: () => api.get('/api/mill-store/katta-summary'),
 
   // Adjustments
   listAdjustments: (params) => api.get('/api/mill-store/adjustments', params),
