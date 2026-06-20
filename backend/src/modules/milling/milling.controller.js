@@ -1256,6 +1256,20 @@ const millingController = {
         return res.status(404).json({ success: false, message: 'Milling batch not found.' });
       }
 
+      // Lock the raw input once the batch has been milled & yielded. Adding a
+      // truck after yield is what corrupts everything downstream — it inflates
+      // raw_qty_mt above what was actually milled (so recorded output ends up
+      // exceeding the milled raw, e.g. 48 MT out of 40 milled), and the extra
+      // rice just sits as unmilled raw stock. New raw rice goes in a new batch.
+      const alreadyYielded = await db('inventory_lots')
+        .where({ batch_ref: `batch-${batchId}` }).whereIn('type', ['finished', 'byproduct']).first('id');
+      if (batch.status === 'Completed' || alreadyYielded) {
+        return res.status(409).json({
+          success: false,
+          message: 'This batch is already milled & yielded — its raw trucks are locked. Record the extra rice as a new batch (or reverse the yield first to change the raw input).',
+        });
+      }
+
       const vehicle = await db.transaction(async (trx) => {
         // Accept either weight_kg (canonical) or legacy weight_mt
         let parsedWeight = null;
