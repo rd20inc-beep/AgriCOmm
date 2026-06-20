@@ -1630,7 +1630,62 @@ const inventoryService = {
       )
       .where('lsm.child_lot_id', lotId)
       .orderBy('lsm.created_at');
+
+    // Fallback: milling/blend outputs record their inputs in batch_source_lots
+    // (not lot_source_mapping), so surface those source lots as parents too —
+    // otherwise a blended/re-milled output shows no lineage at all.
+    const lot = await db('inventory_lots').where({ id: lotId }).select('batch_ref').first();
+    const batchId = lot && lot.batch_ref && (/^batch-(\d+)$/.exec(lot.batch_ref) || [])[1];
+    if (batchId) {
+      const seen = new Set(mappings.map((m) => m.parent_lot_id));
+      const sources = await db('batch_source_lots as bsl')
+        .leftJoin('inventory_lots as src', 'bsl.lot_id', 'src.id')
+        .leftJoin('milling_batches as mb', 'bsl.batch_id', 'mb.id')
+        .where('bsl.batch_id', batchId)
+        .select(
+          'bsl.lot_id as parent_lot_id', 'bsl.qty_mt', 'bsl.cost_total_pkr',
+          'src.lot_no as parent_lot_no', 'src.item_name as parent_item', 'src.type as parent_type',
+          'mb.batch_no'
+        );
+      for (const s of sources) {
+        if (seen.has(s.parent_lot_id)) continue;
+        mappings.push({
+          parent_lot_id: s.parent_lot_id,
+          parent_lot_no: s.parent_lot_no,
+          parent_item: s.parent_item,
+          parent_type: s.parent_type,
+          batch_no: s.batch_no,
+          quantity_kg: (parseFloat(s.qty_mt) || 0) * 1000,
+          cost_share_amount: parseFloat(s.cost_total_pkr) || 0,
+          via_blend: true,
+        });
+      }
+    }
     return mappings;
+  },
+
+  /**
+   * Where this lot was CONSUMED as a source into a (re-mill / blend) batch.
+   * Blends record inputs in batch_source_lots, not lot_source_mapping, so this
+   * is how "where did this lot go" is answered for milled/blended stock.
+   */
+  async getLotConsumption(lotId) {
+    const rows = await db('batch_source_lots as bsl')
+      .join('milling_batches as mb', 'bsl.batch_id', 'mb.id')
+      .where('bsl.lot_id', lotId)
+      .select(
+        'bsl.batch_id', 'bsl.qty_mt', 'bsl.ratio_pct', 'bsl.notes', 'bsl.created_at',
+        'mb.batch_no', 'mb.status', 'mb.raw_qty_mt', 'mb.actual_finished_mt'
+      )
+      .orderBy('bsl.created_at');
+    for (const r of rows) {
+      r.outputs = await db('inventory_lots')
+        .where({ batch_ref: `batch-${r.batch_id}` })
+        .whereIn('type', ['finished', 'byproduct'])
+        .select('lot_no', 'item_name', 'type', 'qty')
+        .orderByRaw("CASE WHEN type='finished' THEN 0 ELSE 1 END");
+    }
+    return rows;
   },
 
   /**

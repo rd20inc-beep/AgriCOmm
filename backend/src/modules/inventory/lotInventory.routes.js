@@ -149,8 +149,12 @@ router.get('/lots/:id/ancestry', authorize('inventory', 'view'), async (req, res
 
 router.get('/lots/:id/descendants', authorize('inventory', 'view'), async (req, res) => {
   try {
-    const descendants = await inventoryService.getLotDescendants(parseInt(req.params.id));
-    return res.json({ success: true, data: { descendants } });
+    const id = parseInt(req.params.id);
+    const [descendants, consumption] = await Promise.all([
+      inventoryService.getLotDescendants(id),
+      inventoryService.getLotConsumption(id),
+    ]);
+    return res.json({ success: true, data: { descendants, consumption } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 

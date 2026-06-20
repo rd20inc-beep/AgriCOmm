@@ -1496,21 +1496,23 @@ function CostEditModal({ isOpen, onClose, lot, milled, suppliers = [], addToast,
 function LotLineage({ lotId, lotNo }) {
   const [ancestry, setAncestry] = useState([]);
   const [descendants, setDescendants] = useState([]);
+  const [consumption, setConsumption] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!lotId) return;
     Promise.all([
       lotInventoryApi.getLotAncestry(lotId).catch(() => ({ data: { ancestry: [] } })),
-      lotInventoryApi.getLotDescendants(lotId).catch(() => ({ data: { descendants: [] } })),
+      lotInventoryApi.getLotDescendants(lotId).catch(() => ({ data: { descendants: [], consumption: [] } })),
     ]).then(([aRes, dRes]) => {
       setAncestry(aRes?.data?.ancestry || []);
       setDescendants(dRes?.data?.descendants || []);
+      setConsumption(dRes?.data?.consumption || []);
     }).finally(() => setLoading(false));
   }, [lotId]);
 
   if (loading) return null;
-  if (ancestry.length === 0 && descendants.length === 0) return null;
+  if (ancestry.length === 0 && descendants.length === 0 && consumption.length === 0) return null;
 
   return (
     <div className="bg-white rounded-xl border border-gray-100 p-5">
@@ -1558,6 +1560,35 @@ function LotLineage({ lotId, lotNo }) {
                   <span className="text-gray-500">{parseFloat(d.qty).toFixed(2)} MT</span>
                   <span className={`ml-2 px-1.5 py-0.5 rounded text-xs ${d.entity === 'mill' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>{d.entity}</span>
                 </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {consumption.length > 0 && (
+        <div className={descendants.length > 0 ? 'mt-4' : ''}>
+          <p className="text-xs font-medium text-gray-500 mb-2">Consumed Into (Re-milled / Blended)</p>
+          <div className="space-y-2">
+            {consumption.map((c, i) => (
+              <div key={i} className="bg-purple-50 border border-purple-100 rounded-lg p-3 text-sm">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Link to={`/milling/${c.batch_no}`} className="font-medium text-blue-600 hover:underline">Batch {c.batch_no}</Link>
+                    <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{c.status}</span>
+                  </div>
+                  <span className="text-xs text-gray-600">{parseFloat(c.qty_mt).toFixed(2)} MT{c.ratio_pct ? ` · ${parseFloat(c.ratio_pct).toFixed(1)}% of blend` : ''}</span>
+                </div>
+                {c.outputs?.length > 0 && (
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {c.outputs.map((o, j) => (
+                      <Link key={j} to={`/lot-inventory/${o.lot_no}`}
+                        className={`text-[11px] px-1.5 py-0.5 rounded hover:underline ${o.type === 'finished' ? 'bg-green-100 text-green-700' : 'bg-purple-100 text-purple-700'}`}>
+                        {o.lot_no} ({parseFloat(o.qty).toFixed(1)} MT)
+                      </Link>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>
