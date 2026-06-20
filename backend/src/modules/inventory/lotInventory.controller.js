@@ -1446,24 +1446,46 @@ module.exports = {
             status: outstanding <= 0.01 ? 'Paid' : (paid > 0 ? 'Partial' : 'Pending'), updated_at: trx.fn.now(),
           });
           payableUpdated = true;
-          // Re-accrue the GL: reverse the prior purchase accrual, repost at new.
-          // Only reverse genuine purchase journals — reverseJournal copies our
-          // ref_type/ref_no onto its contra entries (reversal_of NOT NULL), and
-          // re-reversing those would spawn reversal-of-reversal rows each time.
-          const priorJournals = await trx('journal_entries')
-            .where({ ref_type: 'Purchase Lot', ref_no: lot.lot_no, status: 'Posted' })
-            .whereNull('reversal_of')
-            .select('id');
-          for (const j of priorJournals) {
-            await accountingService.reverseJournal(trx, { journalId: j.id, reason: 'Purchase price corrected', userId: req.user?.id });
-          }
-          if (landedTotal > 0 && lot.supplier_id) {
-            await accountingService.autoPost(trx, {
-              triggerEvent: 'purchase_invoice', entity: 'mill', amount: landedTotal, currency: 'PKR',
-              refType: 'Purchase Lot', refNo: lot.lot_no,
-              description: `Purchase lot ${lot.lot_no} — price corrected to Rs ${Math.round(newRate)}/kg`,
-              userId: req.user?.id, partyType: 'supplier', partyId: lot.supplier_id,
-            });
+          // Re-accrue the GL by posting a single DELTA adjustment journal for the
+          // change in landed cost — NOT reverse+repost. The trial balance sums
+          // status='Posted' only, while reverseJournal marks the original
+          // 'Reversed' AND posts a 'Posted' contra; that nets to -2× the accrual
+          // in a Posted-only sum (double reversal) and accumulates rows on every
+          // edit. A signed delta against the same purchase accounts leaves the
+          // original accrual intact and moves the GL by exactly the change.
+          const oldLanded = parseFloat(lot.landed_cost_total) || 0;
+          const delta = uc.round2(landedTotal - oldLanded);
+          if (Math.abs(delta) > 0.01 && lot.supplier_id) {
+            const rule = await trx('posting_rules')
+              .where({ trigger_event: 'purchase_invoice', is_active: true })
+              .where(function () { this.where({ entity: 'mill' }).orWhereNull('entity'); })
+              .first();
+            if (rule) {
+              const [stockAcc, apAcc] = await Promise.all([
+                trx('chart_of_accounts').where({ id: rule.debit_account_id }).first(),
+                trx('chart_of_accounts').where({ id: rule.credit_account_id }).first(),
+              ]);
+              const amt = Math.abs(delta);
+              // delta > 0 → more stock + more payable (Dr stock / Cr AP);
+              // delta < 0 → reverse direction (Dr AP / Cr stock).
+              const up = delta > 0;
+              const lines = [
+                { account_id: rule.debit_account_id, account: stockAcc?.name || '',
+                  debit: up ? amt : 0, credit: up ? 0 : amt,
+                  narration: `${up ? 'DR' : 'CR'} ${stockAcc ? stockAcc.code + ' ' + stockAcc.name : ''} — price adj` },
+                { account_id: rule.credit_account_id, account: apAcc?.name || '',
+                  debit: up ? 0 : amt, credit: up ? amt : 0,
+                  narration: `${up ? 'CR' : 'DR'} ${apAcc ? apAcc.code + ' ' + apAcc.name : ''} — price adj` },
+              ];
+              const adj = await accountingService.createJournal(trx, {
+                date: new Date().toISOString().slice(0, 10), entity: 'mill',
+                refType: 'Purchase Lot', refNo: lot.lot_no,
+                description: `Lot ${lot.lot_no} price adjustment to Rs ${Math.round(newRate)}/kg (Rs ${delta >= 0 ? '+' : ''}${delta})`,
+                lines, currency: 'PKR', isAuto: true, postingRuleId: rule.id,
+                userId: req.user?.id, partyType: 'supplier', partyId: lot.supplier_id,
+              });
+              await accountingService.postJournal(trx, adj.id);
+            }
           }
         }
 
