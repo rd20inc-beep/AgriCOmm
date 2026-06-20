@@ -903,6 +903,14 @@ const millingController = {
           .update(updateData)
           .returning('*');
 
+        // The `batch` snapshot was read at the top of recordYield, BEFORE this
+        // update — so its actual_finished_mt / by-product quantities are still
+        // the pre-yield values (0 for a fresh blend). computeResidualAllocation
+        // below reads those off `batch`; with finished=0 it returns cost/kg 0
+        // and EVERY output lot ends up valued at zero (e.g. a Rs 20M blend
+        // costing nothing). Refresh from the updated row so costing is correct.
+        Object.assign(batch, result);
+
         // Consume raw material
         await inventoryService.consumeForMilling(trx, {
           batchId: batch.id,
