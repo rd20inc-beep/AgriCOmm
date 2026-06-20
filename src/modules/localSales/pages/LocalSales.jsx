@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, Fragment } from 'react';
 import { Link } from 'react-router-dom';
 import PartyLink from '../../../shared/components/PartyLink';
 import {
@@ -38,6 +38,8 @@ export default function LocalSales() {
   const { data: sales = [], isLoading, error, refetch } = useLocalSales();
   const { data: summary = {} } = useLocalSalesSummary();
   const payMutation = useAcceptLocalSalePayment();
+  const [expandedGroups, setExpandedGroups] = useState(() => new Set());
+  const toggleGroup = (key) => setExpandedGroups(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
 
   const safeSales = Array.isArray(sales) ? sales : [];
 
@@ -60,6 +62,26 @@ export default function LocalSales() {
     }
     return list;
   }, [safeSales, searchTerm, statusFilter]);
+
+  // Group the line rows of a multi-item sale (shared sale_group_no) so one sale
+  // shows as a single expandable row. Single-item sales render as a plain row.
+  const grouped = useMemo(() => {
+    const map = new Map();
+    for (const s of filtered) {
+      const key = s.saleGroupNo || s.saleNo || String(s.id);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(s);
+    }
+    const n = (v) => parseFloat(v) || 0;
+    return Array.from(map.entries()).map(([key, items]) => {
+      const total = items.reduce((a, b) => a + n(b.totalAmount), 0);
+      const paid = items.reduce((a, b) => a + n(b.paidAmount), 0);
+      const due = items.reduce((a, b) => a + n(b.dueAmount), 0);
+      const qtyKg = items.reduce((a, b) => a + n(b.quantityKg), 0);
+      const status = due <= 0.01 ? 'Paid' : paid > 0 ? 'Partial' : (items[0]?.paymentStatus || 'Unpaid');
+      return { key, items, total, paid, due, qtyKg, status };
+    });
+  }, [filtered]);
 
   const today = summary.today || {};
   const month = summary.month || {};
@@ -167,21 +189,60 @@ export default function LocalSales() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {filtered.map(s => (
-                <tr key={s.id} onClick={() => openSaleDetail(s)} className="hover:bg-gray-50 cursor-pointer">
-                  <td className="py-2.5 px-4 font-medium text-blue-600">{s.saleNo}</td>
-                  <td className="py-2.5 px-4 text-gray-600 text-xs">{s.saleDate ? new Date(s.saleDate).toLocaleDateString('en-GB', { day:'2-digit', month:'short' }) : '—'}</td>
-                  <td className="py-2.5 px-4 text-gray-900"><PartyLink type="customer" id={s.customerId} name={s.customerName || s.buyerName} /></td>
-                  <td className="py-2.5 px-4 text-gray-700">{s.itemName}</td>
-                  <td className="py-2.5 px-4 text-right font-medium tabular-nums">
-                    {fromKg(parseFloat(s.quantityKg) || 0, displayUnit).toLocaleString()}
-                    <span className="text-xs text-gray-400 ml-1">{displayUnit === 'katta' ? 'kt' : displayUnit}</span>
-                  </td>
-                  <td className="py-2.5 px-4 text-right text-xs tabular-nums">{fmtPKR(s.ratePerKg)}/kg</td>
-                  <td className="py-2.5 px-4 text-right font-bold tabular-nums">{fmtPKR(s.totalAmount)}</td>
-                  <td className="py-2.5 px-4 text-center"><StatusBadge status={s.paymentStatus} /></td>
-                </tr>
-              ))}
+              {grouped.map(g => {
+                const qtyCell = (kg) => <>{fromKg(kg, displayUnit).toLocaleString()}<span className="text-xs text-gray-400 ml-1">{displayUnit === 'katta' ? 'kt' : displayUnit}</span></>;
+                // Single-item sale → plain row.
+                if (g.items.length === 1) {
+                  const s = g.items[0];
+                  return (
+                    <tr key={s.id} onClick={() => openSaleDetail(s)} className="hover:bg-gray-50 cursor-pointer">
+                      <td className="py-2.5 px-4 font-medium text-blue-600">{s.saleNo}</td>
+                      <td className="py-2.5 px-4 text-gray-600 text-xs">{s.saleDate ? new Date(s.saleDate).toLocaleDateString('en-GB', { day:'2-digit', month:'short' }) : '—'}</td>
+                      <td className="py-2.5 px-4 text-gray-900"><PartyLink type="customer" id={s.customerId} name={s.customerName || s.buyerName} /></td>
+                      <td className="py-2.5 px-4 text-gray-700">{s.itemName}</td>
+                      <td className="py-2.5 px-4 text-right font-medium tabular-nums">{qtyCell(parseFloat(s.quantityKg) || 0)}</td>
+                      <td className="py-2.5 px-4 text-right text-xs tabular-nums">{fmtPKR(s.ratePerKg)}/kg</td>
+                      <td className="py-2.5 px-4 text-right font-bold tabular-nums">{fmtPKR(s.totalAmount)}</td>
+                      <td className="py-2.5 px-4 text-center"><StatusBadge status={s.paymentStatus} /></td>
+                    </tr>
+                  );
+                }
+                // Multi-item sale → expandable group header + line rows.
+                const open = expandedGroups.has(g.key);
+                const head = g.items[0];
+                return (
+                  <Fragment key={g.key}>
+                    <tr onClick={() => toggleGroup(g.key)} className="hover:bg-gray-50 cursor-pointer bg-gray-50/40">
+                      <td className="py-2.5 px-4 font-medium text-blue-600">
+                        <span className="inline-flex items-center gap-1.5">
+                          <ChevronRight size={14} className={`text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`} />
+                          {g.key}
+                          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-700">{g.items.length} items</span>
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-4 text-gray-600 text-xs">{head.saleDate ? new Date(head.saleDate).toLocaleDateString('en-GB', { day:'2-digit', month:'short' }) : '—'}</td>
+                      <td className="py-2.5 px-4 text-gray-900"><PartyLink type="customer" id={head.customerId} name={head.customerName || head.buyerName} /></td>
+                      <td className="py-2.5 px-4 text-gray-500 italic">{g.items.map(i => i.itemName).slice(0, 2).join(', ')}{g.items.length > 2 ? ` +${g.items.length - 2}` : ''}</td>
+                      <td className="py-2.5 px-4 text-right font-medium tabular-nums">{qtyCell(g.qtyKg)}</td>
+                      <td className="py-2.5 px-4 text-right text-xs text-gray-400">—</td>
+                      <td className="py-2.5 px-4 text-right font-bold tabular-nums">{fmtPKR(g.total)}</td>
+                      <td className="py-2.5 px-4 text-center"><StatusBadge status={g.status} /></td>
+                    </tr>
+                    {open && g.items.map(s => (
+                      <tr key={s.id} onClick={() => openSaleDetail(s)} className="hover:bg-blue-50/40 cursor-pointer bg-white">
+                        <td className="py-2 px-4 pl-10 text-xs text-gray-400">{s.saleNo}</td>
+                        <td className="py-2 px-4"></td>
+                        <td className="py-2 px-4"></td>
+                        <td className="py-2 px-4 text-gray-700 text-sm">{s.itemName}</td>
+                        <td className="py-2 px-4 text-right text-sm tabular-nums">{qtyCell(parseFloat(s.quantityKg) || 0)}</td>
+                        <td className="py-2 px-4 text-right text-xs tabular-nums">{fmtPKR(s.ratePerKg)}/kg</td>
+                        <td className="py-2 px-4 text-right font-semibold text-sm tabular-nums">{fmtPKR(s.totalAmount)}</td>
+                        <td className="py-2 px-4 text-center"><StatusBadge status={s.paymentStatus} /></td>
+                      </tr>
+                    ))}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>
