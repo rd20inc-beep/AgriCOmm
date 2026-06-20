@@ -438,17 +438,37 @@ export default function MillHomeDashboard() {
             <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2 flex items-center gap-1.5">
               <Package size={14} /> Latest consumption events
             </p>
-            <div className="space-y-1">
-              {(storeSummary.recent_consumption || []).slice(0, 5).map(c => (
-                <div key={c.id} className="flex items-center justify-between text-xs py-1">
-                  <span className="text-gray-700">
-                    Batch #{c.reference_id || c.referenceId} · {Math.abs(Number(c.quantity || 0))} units
-                  </span>
-                  <span className="text-gray-500 tabular-nums">
-                    Rs {Math.round(Number(c.total_cost || c.totalCost || 0)).toLocaleString('en-PK')}
-                  </span>
-                </div>
-              ))}
+            <div className="divide-y divide-gray-50">
+              {(storeSummary.recent_consumption || []).slice(0, 6).map(c => {
+                const qty = Math.abs(Number(c.quantity ?? c.qty ?? 0));
+                const unit = c.item_unit || c.itemUnit || 'units';
+                const name = c.item_name || c.itemName || `Item #${c.item_id || c.itemId || '?'}`;
+                const category = c.item_category || c.itemCategory;
+                const ref = c.batch_no || c.batchNo || (c.reference_id ? `Batch #${c.reference_id}` : null);
+                const refType = c.reference_type || c.referenceType;
+                const cost = Math.round(Number(c.total_cost ?? c.totalCost ?? 0));
+                const rate = Number(c.cost_per_unit ?? c.costPerUnit ?? 0);
+                const dt = c.created_at || c.createdAt;
+                const dateStr = dt ? new Date(dt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : null;
+                return (
+                  <div key={c.id} className="flex items-start justify-between gap-2 text-xs py-1.5">
+                    <div className="min-w-0">
+                      <p className="text-gray-800 font-medium truncate">{name}</p>
+                      <p className="text-[11px] text-gray-400 truncate">
+                        {qty} {unit}
+                        {rate > 0 ? ` @ Rs ${Math.round(rate).toLocaleString('en-PK')}` : ''}
+                        {category ? ` · ${category}` : ''}
+                        {ref ? ` · ${ref}` : ''}
+                        {refType && refType !== 'milling' ? ` (${refType})` : ''}
+                        {dateStr ? ` · ${dateStr}` : ''}
+                      </p>
+                    </div>
+                    <span className={`tabular-nums flex-shrink-0 ${cost > 0 ? 'text-gray-700 font-medium' : 'text-gray-300'}`}>
+                      {cost > 0 ? `Rs ${cost.toLocaleString('en-PK')}` : 'no cost'}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}

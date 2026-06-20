@@ -426,10 +426,19 @@ const millStoreRepo = {
         .select(db.raw('COALESCE(SUM(ms.quantity_available * COALESCE(mi.avg_cost_per_unit, 0)), 0) as total'))
         .first(),
       db('mill_purchases').orderBy('created_at', 'desc').limit(5),
-      db('mill_stock_movements')
-        .where('movement_type', 'consumption')
-        .orderBy('created_at', 'desc')
-        .limit(5),
+      db('mill_stock_movements as msm')
+        .leftJoin('mill_items as mi', 'mi.id', 'msm.item_id')
+        .leftJoin('milling_batches as mb', 'mb.id', 'msm.reference_id')
+        .where('msm.movement_type', 'consumption')
+        .orderBy('msm.created_at', 'desc')
+        .limit(8)
+        .select(
+          'msm.*',
+          'mi.name as item_name',
+          'mi.unit as item_unit',
+          'mi.category as item_category',
+          'mb.batch_no',
+        ),
     ]);
 
     return {
