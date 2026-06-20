@@ -1457,6 +1457,7 @@ COL products.id:integer:NOT NULL
 COL products.is_active:boolean:NOT NULL
 COL products.is_byproduct:boolean:NOT NULL
 COL products.name:character varying:NOT NULL
+COL products.reorder_level:numeric:NOT NULL
 COL products.review_notes:text:NULL
 COL products.reviewed_at:timestamp with time zone:NULL
 COL products.reviewed_by:integer:NULL

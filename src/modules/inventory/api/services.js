@@ -27,6 +27,7 @@ export const lotInventoryApi = {
   transferLotToExport: (id, data) => api.post(`/api/lot-inventory/lots/${id}/transfer-to-export`, data),
   transferLotToMill: (id, data) => api.post(`/api/lot-inventory/lots/${id}/transfer-to-mill`, data),
   stockReport: (params) => api.get('/api/lot-inventory/reports/stock', params),
+  setReorderLevel: (productId, reorder_level) => api.put(`/api/lot-inventory/products/${productId}/reorder-level`, { reorder_level }),
   getLotAncestry: (id) => api.get(`/api/lot-inventory/lots/${id}/ancestry`),
   getLotDescendants: (id) => api.get(`/api/lot-inventory/lots/${id}/descendants`),
   getBatchTrace: (batchId) => api.get(`/api/lot-inventory/batch-trace/${batchId}`),
@@ -51,4 +52,13 @@ export const lotInventoryApi = {
   createTemplate: (data) => api.post('/api/lot-inventory/templates', data),
   updateTemplate: (id, data) => api.put(`/api/lot-inventory/templates/${id}`, data),
   deleteTemplate: (id) => api.delete(`/api/lot-inventory/templates/${id}`),
+};
+
+// Stock-take / physical count (backend: /api/control/stock-counts)
+export const stockCountApi = {
+  list: (params) => api.get('/api/control/stock-counts', params),
+  get: (id) => api.get(`/api/control/stock-counts/${id}`),
+  create: (data) => api.post('/api/control/stock-counts', data),
+  record: (id, data) => api.put(`/api/control/stock-counts/${id}/record`, data),
+  approve: (id) => api.put(`/api/control/stock-counts/${id}/approve`),
 };

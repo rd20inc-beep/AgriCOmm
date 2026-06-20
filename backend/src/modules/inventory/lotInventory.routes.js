@@ -136,6 +136,7 @@ router.post(
 
 // Reports
 router.get('/reports/stock', authorize('inventory', 'view'), controller.getStockReport);
+router.put('/products/:id/reorder-level', authorize('inventory', 'edit'), controller.setProductReorderLevel);
 
 // Phase 4: Lot lineage & traceability
 

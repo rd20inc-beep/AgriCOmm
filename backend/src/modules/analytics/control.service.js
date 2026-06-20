@@ -1044,10 +1044,14 @@ const controlService = {
         // Get lot details
         const lot = await knex('inventory_lots').where({ id: item.lot_id }).first();
 
-        // Update lot qty
+        // Update lot qty AND available_qty so a count correction actually moves
+        // sellable stock (clamp available so it never goes negative on a shortage).
         await knex('inventory_lots')
           .where({ id: item.lot_id })
           .increment('qty', varianceQty);
+        await knex('inventory_lots')
+          .where({ id: item.lot_id })
+          .update({ available_qty: knex.raw('GREATEST(COALESCE(available_qty, 0) + ?, 0)', [varianceQty]) });
 
         // Create inventory movement
         const movementType = varianceQty > 0 ? 'adjustment_plus' : 'adjustment_minus';

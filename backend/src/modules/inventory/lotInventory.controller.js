@@ -1231,10 +1231,13 @@ module.exports = {
       else if (group_by === 'product') { groupCol = 'l.product_id'; nameCol = 'p.name'; }
       else { groupCol = 'l.type'; nameCol = 'l.type'; }
 
+      const isProduct = group_by === 'product';
       const rows = await query
         .select(
           db.raw(`${nameCol} as group_name`),
           db.raw(`${groupCol} as group_id`),
+          // reorder_level only meaningful when grouping by product (the SKU view)
+          ...(isProduct ? [db.raw('MAX(COALESCE(p.reorder_level, 0)) as reorder_level')] : []),
           db.raw('COUNT(l.id) as lot_count'),
           db.raw('COALESCE(SUM(CASE WHEN l.net_weight_kg > 0 THEN l.net_weight_kg ELSE CAST(l.qty AS DECIMAL) * 1000 END), 0) as total_kg'),
           db.raw('COALESCE(SUM(CAST(l.available_qty AS DECIMAL) * 1000), 0) as available_kg'),
@@ -1256,6 +1259,22 @@ module.exports = {
       }));
 
       return res.json({ success: true, data: { report: enriched, group_by } });
+    } catch (err) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
+  // ─── Set Product Reorder Level (Stock Summary) ───
+  async setProductReorderLevel(req, res) {
+    try {
+      const { id } = req.params;
+      const level = parseFloat(req.body.reorder_level);
+      if (!Number.isFinite(level) || level < 0) {
+        return res.status(400).json({ success: false, message: 'reorder_level must be a non-negative number.' });
+      }
+      const updated = await db('products').where({ id }).update({ reorder_level: level, updated_at: new Date() });
+      if (!updated) return res.status(404).json({ success: false, message: 'Product not found.' });
+      return res.json({ success: true, data: { id: Number(id), reorder_level: level } });
     } catch (err) {
       return res.status(500).json({ success: false, message: err.message });
     }
