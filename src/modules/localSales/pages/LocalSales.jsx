@@ -273,6 +273,21 @@ export default function LocalSales() {
               <div><span className="text-gray-500">Rate:</span> <span className="font-medium">{fmtPKR(selectedSale.ratePerKg)}/KG</span></div>
               <div><span className="text-gray-500">Vehicle:</span> <span className="font-medium font-mono">{selectedSale.vehicleNo || '—'}</span></div>
               <div><span className="text-gray-500">Driver:</span> <span className="font-medium">{selectedSale.driverName || '—'}</span></div>
+              {(() => {
+                const mode = selectedSale.paymentMode || selectedSale.payment_mode;
+                const loc = selectedSale.collectionLocation || selectedSale.collection_location;
+                const ref = selectedSale.paymentReference || selectedSale.payment_reference;
+                const bp = (salePayments || []).find(p => p.bank_account_id);
+                const bn = bp ? (bankAccountsList.find(b => String(b.id) === String(bp.bank_account_id)) || {}).name : null;
+                return (
+                  <>
+                    <div><span className="text-gray-500">Payment:</span> <span className="font-medium">{({ cash: 'Cash', bank_transfer: 'Bank Transfer', cheque: 'Cheque', credit: 'Credit (Udhaar)' }[mode] || mode || '—')}</span></div>
+                    {loc && <div><span className="text-gray-500">Collected at:</span> <span className="font-medium">{loc}</span></div>}
+                    {bn && <div><span className="text-gray-500">Bank:</span> <span className="font-medium">{bn}</span></div>}
+                    {ref && <div><span className="text-gray-500">{mode === 'cheque' ? 'Cheque #' : 'Reference'}:</span> <span className="font-medium font-mono">{ref}</span></div>}
+                  </>
+                );
+              })()}
             </div>
 
             {parseFloat(selectedSale.dueAmount) > 0 && (
