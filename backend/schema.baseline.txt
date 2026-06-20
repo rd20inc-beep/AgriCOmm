@@ -913,6 +913,7 @@ COL local_sales.rate_input:numeric:NOT NULL
 COL local_sales.rate_per_kg:numeric:NOT NULL
 COL local_sales.rate_unit:character varying:NULL
 COL local_sales.sale_date:date:NOT NULL
+COL local_sales.sale_group_no:character varying:NULL
 COL local_sales.sale_no:character varying:NOT NULL
 COL local_sales.status:character varying:NOT NULL
 COL local_sales.total_amount:numeric:NOT NULL

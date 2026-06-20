@@ -296,90 +296,139 @@ export default function LocalSales() {
 }
 
 // ─── New Sale Modal (single form) ───
+// Map a lot to a sellable category tag from its type / grade / name. Blend
+// grades are stored prefixed (e.g. "M-002-B1"), so match with word boundaries.
+function lotCategory(lot) {
+  const type = lot.type;
+  const name = (lot.itemName || '').toLowerCase();
+  const s = `${lot.lotNo || ''} ${lot.itemName || ''} ${lot.grade || ''}`.toLowerCase();
+  if (type === 'finished') return 'Finished Rice';
+  if (type === 'raw') return 'Raw Rice';
+  if (type === 'packaging') return 'Packaging';
+  if (type === 'byproduct') {
+    if (name.includes('bran')) return 'Bran';
+    if (name.includes('husk')) return 'Husk';
+    if (name.includes('sortex')) return 'Sortex';
+    if (name.includes('powder')) return 'Powder';
+    if (name.includes('sweeping')) return 'Sweeping';
+    if (/\bb1\b/.test(s)) return 'B1';
+    if (/\bb2\b/.test(s)) return 'B2';
+    if (/\bb3\b/.test(s)) return 'B3';
+    if (/\bcsr\b/.test(s)) return 'CSR';
+    if (/short[\s-]?grain/.test(s)) return 'Short Grain';
+    return 'Broken';
+  }
+  return 'Other';
+}
+const CAT_ORDER = ['Finished Rice', 'B1', 'B2', 'B3', 'CSR', 'Short Grain', 'Broken', 'Powder', 'Sweeping', 'Bran', 'Husk', 'Sortex', 'Raw Rice', 'Packaging', 'Other'];
+const CAT_COLOR = {
+  'Finished Rice': 'bg-emerald-100 text-emerald-700', B1: 'bg-amber-100 text-amber-700', B2: 'bg-orange-100 text-orange-700',
+  B3: 'bg-yellow-100 text-yellow-700', CSR: 'bg-lime-100 text-lime-700', 'Short Grain': 'bg-amber-100 text-amber-700',
+  Broken: 'bg-amber-100 text-amber-700', Powder: 'bg-violet-100 text-violet-700', Sweeping: 'bg-pink-100 text-pink-700',
+  Bran: 'bg-stone-100 text-stone-600', Husk: 'bg-stone-100 text-stone-600', Sortex: 'bg-red-100 text-red-700',
+  'Raw Rice': 'bg-blue-100 text-blue-700', Packaging: 'bg-gray-100 text-gray-600', Other: 'bg-gray-100 text-gray-600',
+};
+
 function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromApi }) {
   const createMutation = useCreateLocalSale();
   const { data: lots = [] } = useLotInventory({ status: 'Available' });
-  const safeLots = Array.isArray(lots) ? lots : [];
+  const safeLots = useMemo(() => (Array.isArray(lots) ? lots : []).filter(l => (parseFloat(l.availableQty) || 0) > 0), [lots]);
 
   const [form, setForm] = useState({
     customer_id: '', buyer_name: '', buyer_phone: '',
-    lot_id: '', item_name: '', item_type: '',
-    quantity_input: '', quantity_unit: 'kg', bag_weight_kg: '50',
-    rate_input: '', rate_unit: 'kg',
     payment_mode: 'cash', paid_amount: '',
     vehicle_no: '', driver_name: '', notes: '',
   });
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
-  const [step, setStep] = useState(1); // 1=Buyer/Item, 2=Qty/Pricing/Payment
-  // Walk-in (no registered customer): offer to register the buyer as a customer,
-  // which queues an admin approval that adds them to the system.
+  const [step, setStep] = useState(1); // 1=Buyer & Items, 2=Payment
   const [registerCustomer, setRegisterCustomer] = useState(true);
   const isWalkIn = !form.customer_id;
 
-  const bagWt = parseFloat(form.bag_weight_kg) || 50;
-  const qtyKg = toKg(form.quantity_input, form.quantity_unit, bagWt);
-  const ratePerKg = rateToPerKg(form.rate_input, form.rate_unit, bagWt);
-  // Available stock for the selected lot (availableQty is in MT) → show under
-  // the Quantity field and live-subtract what's being sold.
-  const selectedLot = safeLots.find(l => String(l.id) === String(form.lot_id));
-  const availableKg = selectedLot ? (parseFloat(selectedLot.availableQty) || 0) * 1000 : null;
-  const remainingKg = availableKg != null ? availableKg - qtyKg : null;
-  // Block selling more than the selected lot holds.
-  const isOverSell = availableKg != null && qtyKg > availableKg;
-  const totalAmount = Math.round(qtyKg * ratePerKg);
-  const qtyEq = allEquivalents(qtyKg, bagWt);
-  const rateEq = allRateEquivalents(ratePerKg, bagWt);
+  // Cart of line items + the line currently being built.
+  const EMPTY_LINE = { lot_id: '', item_name: '', item_type: '', quantity_input: '', quantity_unit: 'katta', bag_weight_kg: '50', rate_input: '', rate_unit: 'katta' };
+  const [cart, setCart] = useState([]);
+  const [line, setLine] = useState(EMPTY_LINE);
+  const setL = (k, v) => setLine(p => ({ ...p, [k]: v }));
+  const [tag, setTag] = useState('All');
 
-  function handleLotSelect(lotId) {
-    set('lot_id', lotId);
+  // Tags are the categories actually present in sellable inventory.
+  const tags = useMemo(() => {
+    const present = new Set(safeLots.map(lotCategory));
+    return ['All', ...CAT_ORDER.filter(c => present.has(c))];
+  }, [safeLots]);
+  const filteredLots = useMemo(() => (tag === 'All' ? safeLots : safeLots.filter(l => lotCategory(l) === tag)), [safeLots, tag]);
+
+  const lineBagWt = parseFloat(line.bag_weight_kg) || 50;
+  const lineQtyKg = toKg(line.quantity_input, line.quantity_unit, lineBagWt);
+  const lineRatePerKg = rateToPerKg(line.rate_input, line.rate_unit, lineBagWt);
+  const lineTotal = Math.round(lineQtyKg * lineRatePerKg);
+  const selectedLot = safeLots.find(l => String(l.id) === String(line.lot_id));
+  const cartQtyForLot = (lotId) => cart.filter(c => lotId && String(c.lot_id) === String(lotId)).reduce((s, c) => s + c.qtyKg, 0);
+  const lineAvailKg = selectedLot ? (parseFloat(selectedLot.availableQty) || 0) * 1000 - cartQtyForLot(selectedLot.id) : null;
+  const lineOverSell = lineAvailKg != null && lineQtyKg > lineAvailKg + 0.01;
+
+  function pickLot(lotId) {
     const lot = safeLots.find(l => String(l.id) === String(lotId));
-    if (lot) { set('item_name', lot.itemName || ''); set('item_type', lot.type || ''); }
+    setLine(p => ({ ...p, lot_id: lotId, item_name: lot ? (lot.itemName || '') : p.item_name, item_type: lot ? (lot.type || '') : p.item_type }));
+  }
+
+  function addLine() {
+    if (!line.item_name || !(parseFloat(line.quantity_input) > 0) || !(parseFloat(line.rate_input) > 0)) { addToast('Item, quantity and rate are required', 'error'); return; }
+    if (lineOverSell) { addToast(`Only ${Math.round(lineAvailKg).toLocaleString()} kg left for this lot`, 'error'); return; }
+    setCart(c => [...c, { ...line, qtyKg: lineQtyKg, ratePerKg: lineRatePerKg, total: lineTotal, lotNo: selectedLot?.lotNo || null, category: selectedLot ? lotCategory(selectedLot) : (line.item_type || 'Other') }]);
+    setLine(EMPTY_LINE);
+  }
+  const removeLine = (i) => setCart(c => c.filter((_, idx) => idx !== i));
+
+  const grandTotal = cart.reduce((s, c) => s + c.total, 0);
+
+  function reset() {
+    setForm({ customer_id: '', buyer_name: '', buyer_phone: '', payment_mode: 'cash', paid_amount: '', vehicle_no: '', driver_name: '', notes: '' });
+    setCart([]); setLine(EMPTY_LINE); setTag('All'); setStep(1);
   }
 
   async function handleSubmit() {
-    if (!form.item_name || !form.quantity_input || !form.rate_input) { addToast('Item, quantity, and rate are required', 'error'); return; }
     if (!form.customer_id && !form.buyer_name) { addToast('Select a customer or enter buyer name', 'error'); return; }
-    if (isOverSell) { addToast(`Only ${Math.round(availableKg).toLocaleString()} kg in stock — reduce the quantity`, 'error'); return; }
+    if (cart.length === 0) { addToast('Add at least one item to the sale', 'error'); return; }
     try {
-      const payload = { ...form, paid_amount: parseFloat(form.paid_amount) || totalAmount };
+      const payload = {
+        customer_id: form.customer_id || null, buyer_name: form.buyer_name || null, buyer_phone: form.buyer_phone || null,
+        payment_mode: form.payment_mode, paid_amount: form.paid_amount === '' ? undefined : (parseFloat(form.paid_amount) || 0),
+        vehicle_no: form.vehicle_no || null, driver_name: form.driver_name || null, notes: form.notes || null,
+        items: cart.map(c => ({
+          lot_id: c.lot_id || null, item_name: c.item_name, item_type: c.item_type,
+          quantity_input: parseFloat(c.quantity_input), quantity_unit: c.quantity_unit, bag_weight_kg: parseFloat(c.bag_weight_kg),
+          rate_input: parseFloat(c.rate_input), rate_unit: c.rate_unit,
+        })),
+      };
       const res = await createMutation.mutateAsync(payload);
-      addToast(`Sale ${res?.data?.sale?.sale_no || ''} created — ${fmtPKR(totalAmount)}`, 'success');
-      // Walk-in buyer the operator chose to register → queue a customer for admin
-      // approval. Best-effort: the sale already succeeded, so don't fail on this.
+      const cnt = res?.data?.item_count || cart.length;
+      addToast(`Sale ${res?.data?.group_no || ''} created — ${cnt} item${cnt > 1 ? 's' : ''}, ${fmtPKR(grandTotal)}`, 'success');
       if (isWalkIn && registerCustomer && form.buyer_name.trim()) {
         try {
           const r = await adminApi.customersQuickAdd({ name: form.buyer_name.trim(), phone: form.buyer_phone || null });
-          addToast(r?.data?.deduped
-            ? `${form.buyer_name.trim()} is already a customer`
-            : `${form.buyer_name.trim()} sent for admin approval as a customer`, 'success');
+          addToast(r?.data?.deduped ? `${form.buyer_name.trim()} is already a customer` : `${form.buyer_name.trim()} sent for admin approval as a customer`, 'success');
         } catch { /* non-blocking */ }
       }
       refreshFromApi('local-sales');
       onClose();
-      setForm({ customer_id: '', buyer_name: '', buyer_phone: '', lot_id: '', item_name: '', item_type: '', quantity_input: '', quantity_unit: 'katta', bag_weight_kg: '50', rate_input: '', rate_unit: 'katta', payment_mode: 'cash', paid_amount: '', vehicle_no: '', driver_name: '', notes: '' });
+      reset();
     } catch (err) { addToast(err.message || 'Sale failed', 'error'); }
   }
 
-  // Step gating
-  const step1Valid = !!form.item_name && (!!form.customer_id || !!form.buyer_name);
-  const step2Valid = qtyKg > 0 && ratePerKg > 0 && !isOverSell;
+  const step1Valid = cart.length > 0 && (!!form.customer_id || !!form.buyer_name);
   function tryNext() {
-    if (step === 1 && !step1Valid) {
-      addToast(!form.item_name ? 'Item name is required' : 'Select a customer or enter buyer name', 'error');
-      return;
-    }
+    if (!form.customer_id && !form.buyer_name) { addToast('Select a customer or enter buyer name', 'error'); return; }
+    if (cart.length === 0) { addToast('Add at least one item to the sale', 'error'); return; }
     setStep(2);
   }
-  const STEPS = [
-    { n: 1, label: 'Buyer & Item' },
-    { n: 2, label: 'Quantity & Payment' },
-  ];
+  const STEPS = [{ n: 1, label: 'Buyer & Items' }, { n: 2, label: 'Payment' }];
 
   const footer = (
     <div className="flex items-center justify-between gap-3">
       <div className="text-xs text-gray-500 flex items-center gap-3 flex-wrap">
-        {qtyKg > 0 && <span><span className="font-medium text-gray-900">{qtyKg.toLocaleString()}</span> kg</span>}
-        {totalAmount > 0 && <span><span className="text-gray-400">Total</span> <span className="font-medium text-emerald-700">Rs {totalAmount.toLocaleString()}</span></span>}
+        {cart.length > 0 && <span><span className="font-medium text-gray-900">{cart.length}</span> item{cart.length > 1 ? 's' : ''}</span>}
+        {grandTotal > 0 && <span><span className="text-gray-400">Total</span> <span className="font-medium text-emerald-700">Rs {grandTotal.toLocaleString()}</span></span>}
       </div>
       <div className="flex items-center gap-2">
         <button onClick={onClose} className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-900">Cancel</button>
@@ -394,9 +443,9 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
             Next <ChevronRight size={14} />
           </button>
         ) : (
-          <button onClick={handleSubmit} disabled={createMutation.isPending || !step2Valid}
+          <button onClick={handleSubmit} disabled={createMutation.isPending || cart.length === 0}
             className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:bg-gray-300">
-            {createMutation.isPending ? 'Creating…' : totalAmount > 0 ? `Create Sale — Rs ${totalAmount.toLocaleString()}` : 'Create Sale'}
+            {createMutation.isPending ? 'Creating…' : grandTotal > 0 ? `Create Sale — Rs ${grandTotal.toLocaleString()}` : 'Create Sale'}
           </button>
         )}
       </div>
@@ -448,8 +497,6 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                 {(customers || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
-            {/* Buyer name + phone only apply to a walk-in / not-registered buyer;
-                a registered customer already carries these. */}
             {isWalkIn && (
               <>
                 <div>
@@ -463,7 +510,6 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
               </>
             )}
           </div>
-          {/* Walk-in → offer to register as a customer (admin approves) */}
           {isWalkIn && form.buyer_name.trim() && (
             <label className="mt-3 flex items-start gap-2.5 rounded-lg border border-violet-200 bg-violet-50/60 px-3 py-2.5 cursor-pointer">
               <input type="checkbox" checked={registerCustomer} onChange={e => setRegisterCustomer(e.target.checked)}
@@ -476,92 +522,129 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
           )}
         </div>
 
-        {/* Item */}
+        {/* Items — tag filter + lot picker + qty/rate, then Add to the cart */}
         <div>
-          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Item</h3>
-          <div className="grid grid-cols-1 gap-4">
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Add Items</h3>
+
+          {/* Category tags from inventory */}
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {tags.map(t => (
+              <button key={t} type="button" onClick={() => { setTag(t); setL('lot_id', ''); }}
+                className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${tag === t ? 'bg-gray-900 text-white border-gray-900' : `border-transparent ${t === 'All' ? 'bg-gray-100 text-gray-600' : CAT_COLOR[t] || 'bg-gray-100 text-gray-600'} hover:opacity-80`}`}>
+                {t}
+              </button>
+            ))}
+          </div>
+
+          <div className="rounded-xl border border-gray-200 p-3 space-y-3 bg-gray-50/40">
             <div>
-              <label className={LABEL}>Select from Inventory</label>
-              <select value={form.lot_id} onChange={e => handleLotSelect(e.target.value)} className={SELECT}>
+              <label className={LABEL}>Select from Inventory{tag !== 'All' ? ` — ${tag}` : ''}</label>
+              <select value={line.lot_id} onChange={e => pickLot(e.target.value)} className={SELECT}>
                 <option value="">No lot (manual entry)</option>
-                {safeLots.map(l => {
-                  const avail = (parseFloat(l.availableQty) || 0) * 1000;
-                  return <option key={l.id} value={l.id}>{l.lotNo} — {l.itemName} ({Math.round(avail).toLocaleString()} KG)</option>;
+                {filteredLots.map(l => {
+                  const avail = (parseFloat(l.availableQty) || 0) * 1000 - cartQtyForLot(l.id);
+                  return <option key={l.id} value={l.id} disabled={avail <= 0}>{l.lotNo} — {l.itemName} ({Math.round(avail).toLocaleString()} KG)</option>;
                 })}
               </select>
             </div>
             <div>
               <label className={LABEL}>Item Name *</label>
-              <input value={form.item_name} onChange={e => set('item_name', e.target.value)} className={INPUT} placeholder="e.g. Broken Rice, 1121 Sella" />
+              <input value={line.item_name} onChange={e => setL('item_name', e.target.value)} className={INPUT} placeholder="e.g. Broken Rice, 1121 Sella" />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className={LABEL}>Quantity *</label>
+                <div className="flex gap-1.5">
+                  <input type="number" value={line.quantity_input} onChange={e => setL('quantity_input', e.target.value)} className={INPUT} placeholder="Qty" />
+                  <select value={line.quantity_unit} onChange={e => setL('quantity_unit', e.target.value)} className="w-24 border border-gray-300 rounded-lg px-2 py-2.5 text-sm bg-white">
+                    <option value="katta">Katta</option><option value="maund">Maund</option><option value="kg">KG</option><option value="ton">Ton</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className={LABEL}>Rate *</label>
+                <div className="flex gap-1.5">
+                  <input type="number" value={line.rate_input} onChange={e => setL('rate_input', e.target.value)} className={INPUT} placeholder="Rate" />
+                  <select value={line.rate_unit} onChange={e => setL('rate_unit', e.target.value)} className="w-24 border border-gray-300 rounded-lg px-2 py-2.5 text-sm bg-white">
+                    <option value="katta">/Katta</option><option value="maund">/Maund</option><option value="kg">/KG</option><option value="ton">/Ton</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-end gap-2">
+              <div className="w-32">
+                <label className={LABEL}>Katta Wt (kg)</label>
+                <input type="number" value={line.bag_weight_kg} onChange={e => setL('bag_weight_kg', e.target.value)} className={INPUT} />
+              </div>
+              <div className="flex-1 text-xs">
+                {lineAvailKg != null && (
+                  <span className={lineOverSell ? 'text-red-600 font-semibold' : 'text-gray-500'}>
+                    {lineOverSell ? `Only ${Math.round(lineAvailKg).toLocaleString()} kg left` : `In stock: ${Math.round(lineAvailKg).toLocaleString()} kg`}
+                  </span>
+                )}
+                {lineTotal > 0 && <span className="block text-emerald-700 font-semibold mt-0.5">Line total: Rs {lineTotal.toLocaleString()}</span>}
+              </div>
+              <button type="button" onClick={addLine} disabled={lineOverSell}
+                className="px-3 py-2.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 inline-flex items-center gap-1 shrink-0">
+                <Plus size={15} /> Add
+              </button>
             </div>
           </div>
+
+          {/* Cart */}
+          {cart.length > 0 && (
+            <div className="mt-3 border border-gray-200 rounded-xl overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 text-left text-[11px] uppercase text-gray-500">
+                    <th className="px-3 py-2">Item</th><th className="px-3 py-2 text-right">Qty</th>
+                    <th className="px-3 py-2 text-right">Rate/kg</th><th className="px-3 py-2 text-right">Total</th><th className="px-3 py-2"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cart.map((c, i) => (
+                    <tr key={i} className="border-t border-gray-100">
+                      <td className="px-3 py-2">
+                        <div className="font-medium text-gray-900 flex items-center gap-1.5">
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${CAT_COLOR[c.category] || 'bg-gray-100 text-gray-600'}`}>{c.category}</span>
+                          {c.item_name}
+                        </div>
+                        {c.lotNo && <div className="text-[11px] text-gray-400">{c.lotNo}</div>}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums">{Math.round(c.qtyKg).toLocaleString()} kg</td>
+                      <td className="px-3 py-2 text-right tabular-nums">Rs {Math.round(c.ratePerKg).toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right font-semibold tabular-nums">Rs {c.total.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right"><button onClick={() => removeLine(i)} className="text-gray-300 hover:text-red-500"><X size={15} /></button></td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-gray-50 font-bold text-gray-900">
+                    <td className="px-3 py-2" colSpan={3}>Total ({cart.length})</td>
+                    <td className="px-3 py-2 text-right text-emerald-700 tabular-nums">Rs {grandTotal.toLocaleString()}</td><td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
         </div>
         </>}
 
         {step === 2 && <>
-        {/* Quantity & Rate — WIDE layout */}
-        <div>
-          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Quantity & Rate</h3>
-          <div className="grid grid-cols-1 gap-4">
-            <div>
-              <label className={LABEL}>Quantity *</label>
-              <div className="flex gap-2">
-                <input type="number" value={form.quantity_input} onChange={e => set('quantity_input', e.target.value)}
-                  className="flex-1 border border-gray-300 rounded-lg px-4 py-3 text-base outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                  placeholder="Enter quantity" />
-                <select value={form.quantity_unit} onChange={e => set('quantity_unit', e.target.value)}
-                  className="w-28 border border-gray-300 rounded-lg px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-                  <option value="katta">Katta</option><option value="maund">Maund</option><option value="kg">KG</option><option value="ton">Ton</option>
-                </select>
-              </div>
-              {availableKg != null && (
-                <div className="mt-1.5 flex items-center justify-between text-xs">
-                  <span className="text-gray-500">In stock: <span className="font-semibold text-gray-800">{Math.round(availableKg).toLocaleString()} kg</span></span>
-                  {qtyKg > 0 && (
-                    remainingKg < 0
-                      ? <span className="font-semibold text-red-600">Short by {Math.round(-remainingKg).toLocaleString()} kg</span>
-                      : <span className="font-semibold text-emerald-700">{Math.round(remainingKg).toLocaleString()} kg left after sale</span>
-                  )}
-                </div>
-              )}
+        {/* Order summary */}
+        <div className="border border-gray-200 rounded-xl overflow-hidden">
+          <div className="px-3 py-2 bg-gray-50 text-[11px] uppercase text-gray-500 font-semibold">{cart.length} item{cart.length > 1 ? 's' : ''}</div>
+          {cart.map((c, i) => (
+            <div key={i} className="flex items-center justify-between px-3 py-2 border-t border-gray-100 text-sm">
+              <span className="text-gray-700"><span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold mr-1.5 ${CAT_COLOR[c.category] || 'bg-gray-100 text-gray-600'}`}>{c.category}</span>{c.item_name} · {Math.round(c.qtyKg).toLocaleString()} kg</span>
+              <span className="font-semibold tabular-nums">Rs {c.total.toLocaleString()}</span>
             </div>
-            <div>
-              <label className={LABEL}>Sale Rate *</label>
-              <div className="flex gap-2">
-                <input type="number" value={form.rate_input} onChange={e => set('rate_input', e.target.value)}
-                  className="flex-1 border border-gray-300 rounded-lg px-4 py-3 text-base outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                  placeholder="Enter rate" />
-                <select value={form.rate_unit} onChange={e => set('rate_unit', e.target.value)}
-                  className="w-28 border border-gray-300 rounded-lg px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-                  <option value="katta">/ Katta</option><option value="maund">/ Maund</option><option value="kg">/ KG</option><option value="ton">/ Ton</option>
-                </select>
-              </div>
-            </div>
-          </div>
-          <div className="mt-3">
-            <label className={LABEL}>Katta Weight (KG per bag)</label>
-            <input type="number" value={form.bag_weight_kg} onChange={e => set('bag_weight_kg', e.target.value)}
-              className="w-32 border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+          ))}
+          <div className="flex items-center justify-between px-3 py-2.5 border-t border-gray-200 bg-emerald-50">
+            <span className="text-sm font-semibold text-emerald-800">Grand Total</span>
+            <span className="text-xl font-bold text-emerald-700">Rs {grandTotal.toLocaleString()}</span>
           </div>
         </div>
-
-        {/* Live preview */}
-        {(parseFloat(form.quantity_input) > 0 || parseFloat(form.rate_input) > 0) && (
-          <div className="bg-blue-50 rounded-xl border border-blue-200 p-4">
-            <div className="grid grid-cols-3 gap-3 text-sm">
-              <div><p className="text-[10px] text-blue-600 uppercase font-semibold">KG</p><p className="font-bold text-gray-900">{qtyEq.kg.toLocaleString()}</p></div>
-              <div><p className="text-[10px] text-blue-600 uppercase font-semibold">Katta</p><p className="font-bold text-gray-900">{qtyEq.katta.toLocaleString()}</p></div>
-              <div><p className="text-[10px] text-blue-600 uppercase font-semibold">Maund</p><p className="font-bold text-gray-900">{qtyEq.maund.toLocaleString()}</p></div>
-              <div><p className="text-[10px] text-blue-600 uppercase font-semibold">Rate/KG</p><p className="font-bold text-gray-900">Rs {rateEq.perKg}</p></div>
-              <div><p className="text-[10px] text-blue-600 uppercase font-semibold">Rate/Katta</p><p className="font-bold text-gray-900">Rs {rateEq.perKatta.toLocaleString()}</p></div>
-              <div><p className="text-[10px] text-blue-600 uppercase font-semibold">Rate/Maund</p><p className="font-bold text-gray-900">Rs {rateEq.perMaund.toLocaleString()}</p></div>
-            </div>
-            <div className="mt-3 pt-3 border-t border-blue-200 flex items-center justify-between">
-              <span className="text-sm font-semibold text-blue-800">Total Amount</span>
-              <span className="text-2xl font-bold text-green-700">Rs {totalAmount.toLocaleString()}</span>
-            </div>
-          </div>
-        )}
 
         {/* Payment & Dispatch */}
         <div>
@@ -576,10 +659,11 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
             <div>
               <label className={LABEL}>Amount Received</label>
               <input type="number" value={form.paid_amount} onChange={e => set('paid_amount', e.target.value)} className={INPUT}
-                placeholder={totalAmount > 0 ? `Rs ${totalAmount.toLocaleString()} (full)` : 'Rs'} />
+                placeholder={grandTotal > 0 ? `Rs ${grandTotal.toLocaleString()} (full)` : 'Rs'} />
               {form.payment_mode === 'credit' && <p className="text-xs text-amber-600 mt-1">Leave empty or partial for credit sale</p>}
             </div>
           </div>
+          <p className="text-[11px] text-gray-400 mt-2">The amount received is split across the items automatically; any balance becomes a receivable for this buyer.</p>
           <div className="grid grid-cols-1 gap-4 mt-4">
             <div>
               <label className={LABEL}>Vehicle No</label>
@@ -595,7 +679,6 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
             </div>
           </div>
         </div>
-
         </>}
         </div>
     </SlideDrawer>

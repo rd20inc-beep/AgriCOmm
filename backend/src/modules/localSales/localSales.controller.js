@@ -83,197 +83,151 @@ module.exports = {
     try {
       const {
         sale_date, customer_id, buyer_name, buyer_phone, buyer_address,
-        lot_id, item_name, item_type,
-        quantity_input, quantity_unit = 'kg', bag_weight_kg = 50,
-        rate_input, rate_unit = 'kg',
         payment_mode = 'cash', paid_amount, payment_reference,
-        vehicle_no, driver_name, dispatched = true,
-        notes,
+        vehicle_no, driver_name, dispatched = true, notes,
       } = req.body;
 
-      if (!item_name || !quantity_input || !rate_input) {
-        return res.status(400).json({ success: false, message: 'item_name, quantity_input, and rate_input are required.' });
-      }
+      // One sale can carry several inventory items (multi-item). Accept items[]
+      // or fall back to the legacy single top-level item fields (backward compat).
+      const rawItems = (Array.isArray(req.body.items) && req.body.items.length)
+        ? req.body.items
+        : [{
+            lot_id: req.body.lot_id, item_name: req.body.item_name, item_type: req.body.item_type,
+            quantity_input: req.body.quantity_input, quantity_unit: req.body.quantity_unit,
+            bag_weight_kg: req.body.bag_weight_kg, rate_input: req.body.rate_input, rate_unit: req.body.rate_unit,
+          }];
 
-      const bagWt = parseFloat(bag_weight_kg) || 50;
-      const qtyKg = uc.toKg(quantity_input, quantity_unit, bagWt);
-      const ratePerKg = uc.rateToPerKg(rate_input, rate_unit, bagWt);
-      const totalAmount = uc.round2(qtyKg * ratePerKg);
-      const paidAmt = parseFloat(paid_amount) ?? totalAmount;
-      const dueAmt = Math.max(0, uc.round2(totalAmount - paidAmt));
-      const bags = Math.round(qtyKg / bagWt);
-      const paymentStatus = dueAmt <= 0 ? 'Paid' : paidAmt > 0 ? 'Partial' : (payment_mode === 'credit' ? 'Credit' : 'Unpaid');
-
-      // Fetch lot cost data for profit calculation
-      let costPerKg = 0;
-      let landedCostTotal = 0;
-      let lotData = null;
-
-      if (lot_id) {
-        lotData = await db('inventory_lots').where({ id: lot_id }).first();
-        if (lotData) {
-          // Get landed cost — try landed_cost_per_kg first, fall back to cost_per_unit/1000
-          costPerKg = parseFloat(lotData.landed_cost_per_kg) || (parseFloat(lotData.cost_per_unit) || 0) / 1000 || (parseFloat(lotData.rate_per_kg) || 0);
-          landedCostTotal = uc.round2(qtyKg * costPerKg);
+      // Validate + price every line up front.
+      const lines = rawItems.map((it, i) => {
+        if (!it.item_name || !it.quantity_input || !it.rate_input) {
+          const e = new Error(`Item ${i + 1}: item_name, quantity and rate are required.`); e.status = 400; throw e;
         }
-      }
-      const grossProfit = uc.round2(totalAmount - landedCostTotal);
-      const profitPerKg = qtyKg > 0 ? uc.round4(grossProfit / qtyKg) : 0;
-      const marginPct = totalAmount > 0 ? uc.round2((grossProfit / totalAmount) * 100) : 0;
-
-      const result = await db.transaction(async (trx) => {
-        const saleNo = await generateSaleNo(trx);
-
-        // Deduct from inventory lot if specified
-        if (lot_id) {
-          const lot = lotData || await trx('inventory_lots').where({ id: lot_id }).first();
-          if (!lot) throw new Error('Inventory lot not found');
-
-          const availKg = (parseFloat(lot.available_qty) || 0) * 1000;
-          if (qtyKg > availKg + 0.01) {
-            throw new Error(`Insufficient stock: need ${qtyKg} kg but only ${availKg.toFixed(0)} kg available in ${lot.lot_no}`);
-          }
-
-          // Post the outbound stock movement — this is what actually draws the
-          // lot down (qty / available_qty) and writes the lot_transactions ledger
-          // entry. It runs INSIDE the sale transaction with NO try/catch: if the
-          // deduction can't be posted, the whole sale rolls back rather than
-          // recording a sale against stock that never moved.
-          await inventoryService.postMovement(trx, {
-            movementType: 'local_sale',
-            lotId: lot.id,
-            qty: qtyKg / 1000, // convert to MT for legacy
-            fromWarehouseId: lot.warehouse_id,
-            sourceEntity: lot.entity,
-            linkedRef: saleNo,
-            notes: `Local sale ${saleNo} to ${buyer_name || 'customer'}`,
-            costPerUnit: parseFloat(lot.cost_per_unit) || 0,
-            currency: 'PKR',
-            userId: req.user?.id,
-          });
-
-          // Track cumulative quantity sold off this lot (reporting field, separate
-          // from the qty/available_qty that postMovement already decremented).
-          await trx('inventory_lots').where({ id: lot_id }).update({
-            sold_weight_kg: (parseFloat(lot.sold_weight_kg) || 0) + qtyKg,
-          });
-        }
-
-        const [sale] = await trx('local_sales').insert({
-          sale_no: saleNo,
-          sale_date: sale_date || new Date().toISOString().split('T')[0],
-          entity: 'mill',
-          customer_id: customer_id || null,
-          buyer_name: buyer_name || null,
-          buyer_phone: buyer_phone || null,
-          buyer_address: buyer_address || null,
-          lot_id: lot_id || null,
-          lot_no: lot_id ? (await trx('inventory_lots').where({ id: lot_id }).select('lot_no').first())?.lot_no : null,
-          item_name,
-          item_type: item_type || null,
-          quantity_unit,
-          quantity_input: parseFloat(quantity_input),
-          quantity_kg: qtyKg,
-          quantity_bags: bags,
-          bag_weight_kg: bagWt,
-          rate_unit,
-          rate_input: parseFloat(rate_input),
-          rate_per_kg: ratePerKg,
-          total_amount: totalAmount,
-          currency: 'PKR',
-          payment_mode: payment_mode || 'cash',
-          payment_status: paymentStatus,
-          paid_amount: paidAmt,
-          due_amount: dueAmt,
-          payment_reference: payment_reference || null,
-          vehicle_no: vehicle_no || null,
-          driver_name: driver_name || null,
-          dispatched: !!dispatched,
-          dispatch_date: dispatched ? (sale_date || new Date().toISOString().split('T')[0]) : null,
-          notes: notes || null,
-          status: 'Completed',
-          created_by: req.user?.id || null,
-          // Costing fields (auto from lot)
-          cost_per_kg: costPerKg,
-          landed_cost_total: landedCostTotal,
-          gross_profit: grossProfit,
-          profit_per_kg: profitPerKg,
-          margin_pct: marginPct,
-        }).returning('*');
-
-        // Create payment record if paid
-        if (paidAmt > 0) {
-          const payCount = await trx('payments').count('id as c').first();
-          await trx('payments').insert({
-            payment_no: `PL-${(parseInt(payCount?.c) || 0) + 1}`,
-            type: 'receipt',
-            amount: paidAmt,
-            currency: 'PKR',
-            fx_rate: 1,
-            base_amount_pkr: paidAmt,
-            payment_method: payment_mode || 'cash',
-            bank_reference: payment_reference || null,
-            payment_date: sale_date || trx.fn.now(),
-            notes: `Local sale ${saleNo} — ${item_name}`,
-            local_sale_id: sale.id,
-            created_by: req.user?.id || null,
-          });
-        }
-
-        // Create receivable for credit/partial sales
-        if (dueAmt > 0) {
-          const rcvCount = await trx('receivables').count('id as c').first();
-          await trx('receivables').insert({
-            recv_no: `RCV-LS-${(parseInt(rcvCount?.c) || 0) + 1}`,
-            entity: 'mill',
-            customer_id: customer_id || null,
-            local_sale_id: sale.id,
-            type: 'Local Sale',
-            expected_amount: totalAmount,
-            received_amount: paidAmt,
-            outstanding: dueAmt,
-            due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-            status: paidAmt > 0 ? 'Partial' : 'Pending',
-            currency: 'PKR',
-            aging: 0,
-            notes: `Local sale ${saleNo} — ${buyer_name || 'walk-in'} — ${item_name}`,
-          });
-        }
-
-        // Phase 5: Lock COGS on sale
-        if (sale.id && lot_id) {
-          await inventoryService.lockSaleCOGS(trx, sale.id);
-        }
-
-        // Auto-post journal: local_sale_recorded — DR Local AR,
-        // CR Local Rice Sales. The cash receipt (when paid_amount > 0)
-        // would normally have its own DR Cash, CR Local AR entry; for
-        // now the running cash position is captured by the payments
-        // row + bank_accounts.current_balance update elsewhere, so the
-        // single revenue-recognition entry keeps the books balanced
-        // without double-counting.
-        try {
-          await accountingService.autoPost(trx, {
-            triggerEvent: 'local_sale_recorded',
-            entity: 'mill',
-            amount: totalAmount,
-            currency: 'PKR',
-            refType: 'Local Sale',
-            refNo: saleNo,
-            description: `Local sale ${saleNo} — ${buyer_name || 'walk-in'} — ${item_name}`.slice(0, 240),
-            userId: req.user?.id,
-          });
-        } catch (e) {
-          console.warn('Local sale journal post failed:', e.message);
-        }
-
-        return sale;
+        const bagWt = parseFloat(it.bag_weight_kg) || 50;
+        const qtyKg = uc.toKg(it.quantity_input, it.quantity_unit || 'kg', bagWt);
+        const ratePerKg = uc.rateToPerKg(it.rate_input, it.rate_unit || 'kg', bagWt);
+        return {
+          lot_id: it.lot_id || null, item_name: it.item_name, item_type: it.item_type || null,
+          quantity_input: parseFloat(it.quantity_input), quantity_unit: it.quantity_unit || 'kg',
+          rate_input: parseFloat(it.rate_input), rate_unit: it.rate_unit || 'kg',
+          bagWt, qtyKg, ratePerKg, total: uc.round2(qtyKg * ratePerKg),
+        };
       });
 
-      return res.status(201).json({ success: true, data: { sale: result } });
+      const grandTotal = uc.round2(lines.reduce((s, l) => s + l.total, 0));
+      const totalPaid = (paid_amount != null && paid_amount !== '') ? (parseFloat(paid_amount) || 0) : grandTotal;
+      // Allocate the single tendered amount across lines proportionally; the last
+      // line absorbs the rounding remainder so Σ(line paid) === totalPaid exactly.
+      let allocated = 0;
+      lines.forEach((l, i) => {
+        if (i === lines.length - 1) l.paid = uc.round2(Math.max(0, totalPaid - allocated));
+        else { l.paid = grandTotal > 0 ? uc.round2(totalPaid * (l.total / grandTotal)) : 0; allocated += l.paid; }
+      });
+
+      const result = await db.transaction(async (trx) => {
+        let groupNo = null;
+        const created = [];
+
+        for (const l of lines) {
+          const saleNo = await generateSaleNo(trx);
+          if (!groupNo) groupNo = saleNo; // first line's number identifies the group
+
+          let costPerKg = 0, landedCostTotal = 0, lotNo = null;
+          if (l.lot_id) {
+            const lot = await trx('inventory_lots').where({ id: l.lot_id }).first();
+            if (!lot) throw new Error('Inventory lot not found');
+            const availKg = (parseFloat(lot.available_qty) || 0) * 1000;
+            if (l.qtyKg > availKg + 0.01) {
+              const e = new Error(`Insufficient stock: ${l.item_name} needs ${Math.round(l.qtyKg)} kg but only ${availKg.toFixed(0)} kg available in ${lot.lot_no}`);
+              e.status = 400; throw e;
+            }
+            // Atomic outbound movement — draws the lot down + writes the ledger;
+            // no try/catch so a failed deduction rolls the whole sale back.
+            await inventoryService.postMovement(trx, {
+              movementType: 'local_sale', lotId: lot.id, qty: l.qtyKg / 1000,
+              fromWarehouseId: lot.warehouse_id, sourceEntity: lot.entity, linkedRef: saleNo,
+              notes: `Local sale ${saleNo} to ${buyer_name || 'customer'}`,
+              costPerUnit: parseFloat(lot.cost_per_unit) || 0, currency: 'PKR', userId: req.user?.id,
+            });
+            await trx('inventory_lots').where({ id: l.lot_id }).update({
+              sold_weight_kg: (parseFloat(lot.sold_weight_kg) || 0) + l.qtyKg,
+            });
+            costPerKg = parseFloat(lot.landed_cost_per_kg) || (parseFloat(lot.cost_per_unit) || 0) / 1000 || (parseFloat(lot.rate_per_kg) || 0);
+            landedCostTotal = uc.round2(l.qtyKg * costPerKg);
+            lotNo = lot.lot_no;
+          }
+
+          const dueAmt = Math.max(0, uc.round2(l.total - l.paid));
+          const paymentStatus = dueAmt <= 0 ? 'Paid' : l.paid > 0 ? 'Partial' : (payment_mode === 'credit' ? 'Credit' : 'Unpaid');
+          const grossProfit = uc.round2(l.total - landedCostTotal);
+
+          const [sale] = await trx('local_sales').insert({
+            sale_no: saleNo, sale_group_no: groupNo,
+            sale_date: sale_date || new Date().toISOString().split('T')[0],
+            entity: 'mill', customer_id: customer_id || null,
+            buyer_name: buyer_name || null, buyer_phone: buyer_phone || null, buyer_address: buyer_address || null,
+            lot_id: l.lot_id, lot_no: lotNo,
+            item_name: l.item_name, item_type: l.item_type,
+            quantity_unit: l.quantity_unit, quantity_input: l.quantity_input, quantity_kg: l.qtyKg,
+            quantity_bags: Math.round(l.qtyKg / l.bagWt), bag_weight_kg: l.bagWt,
+            rate_unit: l.rate_unit, rate_input: l.rate_input, rate_per_kg: l.ratePerKg,
+            total_amount: l.total, currency: 'PKR',
+            payment_mode: payment_mode || 'cash', payment_status: paymentStatus,
+            paid_amount: l.paid, due_amount: dueAmt, payment_reference: payment_reference || null,
+            vehicle_no: vehicle_no || null, driver_name: driver_name || null,
+            dispatched: !!dispatched, dispatch_date: dispatched ? (sale_date || new Date().toISOString().split('T')[0]) : null,
+            notes: notes || null, status: 'Completed', created_by: req.user?.id || null,
+            cost_per_kg: costPerKg, landed_cost_total: landedCostTotal, gross_profit: grossProfit,
+            profit_per_kg: l.qtyKg > 0 ? uc.round4(grossProfit / l.qtyKg) : 0,
+            margin_pct: l.total > 0 ? uc.round2((grossProfit / l.total) * 100) : 0,
+          }).returning('*');
+
+          if (l.paid > 0) {
+            const payCount = await trx('payments').count('id as c').first();
+            await trx('payments').insert({
+              payment_no: `PL-${(parseInt(payCount?.c) || 0) + 1}`, type: 'receipt',
+              amount: l.paid, currency: 'PKR', fx_rate: 1, base_amount_pkr: l.paid,
+              payment_method: payment_mode || 'cash', bank_reference: payment_reference || null,
+              payment_date: sale_date || trx.fn.now(), notes: `Local sale ${saleNo} — ${l.item_name}`,
+              local_sale_id: sale.id, created_by: req.user?.id || null,
+            });
+          }
+
+          if (dueAmt > 0) {
+            const rcvCount = await trx('receivables').count('id as c').first();
+            await trx('receivables').insert({
+              recv_no: `RCV-LS-${(parseInt(rcvCount?.c) || 0) + 1}`, entity: 'mill',
+              customer_id: customer_id || null, local_sale_id: sale.id, type: 'Local Sale',
+              expected_amount: l.total, received_amount: l.paid, outstanding: dueAmt,
+              due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+              status: l.paid > 0 ? 'Partial' : 'Pending', currency: 'PKR', aging: 0,
+              notes: `Local sale ${saleNo} — ${buyer_name || 'walk-in'} — ${l.item_name}`,
+            });
+          }
+
+          if (sale.id && l.lot_id) await inventoryService.lockSaleCOGS(trx, sale.id);
+
+          try {
+            await accountingService.autoPost(trx, {
+              triggerEvent: 'local_sale_recorded', entity: 'mill', amount: l.total, currency: 'PKR',
+              refType: 'Local Sale', refNo: saleNo,
+              description: `Local sale ${saleNo} — ${buyer_name || 'walk-in'} — ${l.item_name}`.slice(0, 240),
+              userId: req.user?.id,
+            });
+          } catch (e) { console.warn('Local sale journal post failed:', e.message); }
+
+          created.push(sale);
+        }
+
+        return { groupNo, sales: created };
+      });
+
+      return res.status(201).json({
+        success: true,
+        data: { sale: result.sales[0], sales: result.sales, group_no: result.groupNo, item_count: result.sales.length },
+      });
     } catch (err) {
       console.error('Local sale create error:', err);
-      const status = err.message.includes('Insufficient') ? 400 : 500;
+      const status = err.status || (String(err.message).includes('Insufficient') ? 400 : 500);
       return res.status(status).json({ success: false, message: err.message });
     }
   },
