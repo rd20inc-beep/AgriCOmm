@@ -76,6 +76,14 @@ router.put(
   controller.updateLotCosts
 );
 
+// Edit a raw lot's purchase rate (price differs at payment time)
+router.put(
+  '/lots/:id/purchase-rate',
+  authorize('inventory', 'edit'),
+  auditAction('update_lot_purchase_rate', 'inventory_lot'),
+  controller.setLotPurchaseRate
+);
+
 // Edit a lot's recorded quality after creation
 router.put(
   '/lots/:id/quality',

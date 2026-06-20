@@ -61,6 +61,7 @@ export default function LotDetail() {
   const [displayUnit, setDisplayUnit] = useState('katta');
   const [showTxnModal, setShowTxnModal] = useState(false);
   const [showCostModal, setShowCostModal] = useState(false);
+  const [showPriceModal, setShowPriceModal] = useState(false);
   const [showCostSheet, setShowCostSheet] = useState(false);
   const [showAllocateModal, setShowAllocateModal] = useState(false);
   const [showStartMilling, setShowStartMilling] = useState(false);
@@ -602,7 +603,12 @@ export default function LotDetail() {
 
           {/* Pricing Summary */}
           <div className="bg-blue-50 rounded-xl border border-blue-100 p-5 lg:col-span-2">
-            <h3 className="text-sm font-semibold text-blue-700 uppercase tracking-wider mb-3">Purchase Pricing</h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-blue-700 uppercase tracking-wider">Purchase Pricing</h3>
+              {lot.type === 'raw' && (
+                <button onClick={() => setShowPriceModal(true)} className="btn btn-sm btn-secondary"><Edit3 className="w-3.5 h-3.5" /> Edit Price</button>
+              )}
+            </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div>
                 <p className="text-xs text-blue-600">{isMilled ? 'Purchase Rate (raw rice)' : 'Original Rate'}</p>
@@ -1113,6 +1119,7 @@ export default function LotDetail() {
       {/* ─── Modals ─── */}
       <TransactionModal isOpen={showTxnModal} onClose={() => setShowTxnModal(false)} lotId={lot.id} lotNo={lot.lotNo} availableKg={availKg} bagWeightKg={bw} defaultRateKg={landedKg || rateKg} warehouses={warehousesList} addToast={addToast} refetch={refetch} mutation={txnMutation} />
       <CostEditModal isOpen={showCostModal} onClose={() => setShowCostModal(false)} lot={lot} milled={millingBatches.length > 0 || outboundTxns.length > 0} suppliers={suppliersList} addToast={addToast} refetch={refetch} />
+      <PriceEditModal isOpen={showPriceModal} onClose={() => setShowPriceModal(false)} lot={lot} addToast={addToast} refetch={refetch} />
       <AllocateToBatchModal isOpen={showAllocateModal} onClose={() => setShowAllocateModal(false)} lot={lot} addToast={addToast} refetch={refetch} />
       <AddLotVehicleModal
         isOpen={showAddVehicle}
@@ -1381,6 +1388,64 @@ const COST_FIELDS = [
   { k: 'other_cost', l: 'Other', icon: DollarSign, perBag: false },
   { k: 'bag_cost_per_bag', l: 'Bag Cost', icon: ShoppingBag, perBag: true },
 ];
+
+// Edit a raw lot's PURCHASE RATE — for when the agreed price differs at payment
+// time. Updates the lot cost, the supplier payable and any batch that used it.
+function PriceEditModal({ isOpen, onClose, lot, addToast, refetch }) {
+  const receivedKg = parseFloat(lot.receivedNetWeightKg) || parseFloat(lot.netWeightKg) || 0;
+  const currentRate = parseFloat(lot.ratePerKg) || 0;
+  const [rate, setRate] = useState(String(currentRate || ''));
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { if (isOpen) setRate(String(currentRate || '')); /* eslint-disable-next-line */ }, [isOpen]);
+
+  const newRate = parseFloat(rate) || 0;
+  const newAmount = receivedKg * newRate;
+  const delta = newAmount - receivedKg * currentRate;
+
+  async function handleSave() {
+    if (!(newRate > 0)) { addToast('Enter a valid rate', 'error'); return; }
+    setSaving(true);
+    try {
+      const res = await lotInventoryApi.setPurchaseRate(lot.id, newRate);
+      const prop = res?.data?.propagation;
+      const parts = [`Price set to Rs ${Math.round(newRate).toLocaleString()}/kg`];
+      if (res?.data?.payableUpdated) parts.push('payable adjusted');
+      if (prop?.affectedBatches > 0) parts.push(`${prop.affectedBatches} batch(es) re-costed`);
+      if (prop?.cogsLockedSkipped) parts.push(`${prop.cogsLockedSkipped} locked left as-is`);
+      addToast(parts.join(' · '), 'success'); refetch(); onClose();
+    } catch (err) { addToast(err?.data?.message || err.message || 'Failed', 'error'); } finally { setSaving(false); }
+  }
+
+  const footer = (
+    <div className="flex items-center justify-between gap-3">
+      <div className="text-xs text-gray-500">New rice cost <span className="font-bold text-gray-900 ml-1">{fmtPKR(newAmount)}</span></div>
+      <div className="flex gap-2">
+        <button onClick={onClose} className="btn btn-secondary btn-sm">Cancel</button>
+        <button onClick={handleSave} disabled={saving || !(newRate > 0)} className="btn btn-primary btn-sm"><Save className="w-4 h-4" /> {saving ? 'Saving…' : 'Save Price'}</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <SlideDrawer open={isOpen} onClose={onClose} title="Edit Purchase Price" subtitle={lot.lotNo} icon={DollarSign} size="md" footer={footer}>
+      <div className="space-y-5">
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800">
+          Re-prices on the lot's received weight ({Math.round(receivedKg).toLocaleString()} kg). The supplier payable and any batch that used this lot are updated to match; already-sold/dispatched output with locked COGS is left as-is.
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">New Rate (Rs / kg)</label>
+          <input type="number" step="0.01" value={rate} onChange={e => setRate(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm" autoFocus />
+          <p className="text-[11px] text-gray-400 mt-1">Current: Rs {currentRate.toLocaleString()}/kg</p>
+        </div>
+        <div className="bg-gray-50 rounded-lg p-3 space-y-1.5 text-sm">
+          <div className="flex justify-between"><span className="text-gray-500">Received weight</span><span className="font-medium">{Math.round(receivedKg).toLocaleString()} kg</span></div>
+          <div className="flex justify-between"><span className="text-gray-500">New rice cost</span><span className="font-medium">{fmtPKR(newAmount)}</span></div>
+          <div className="flex justify-between border-t pt-1.5"><span className="text-gray-600 font-semibold">Change</span><span className={`font-bold ${delta >= 0 ? 'text-red-600' : 'text-emerald-700'}`}>{delta >= 0 ? '+' : ''}{fmtPKR(delta)}</span></div>
+        </div>
+      </div>
+    </SlideDrawer>
+  );
+}
 
 function CostEditModal({ isOpen, onClose, lot, milled, suppliers = [], addToast, refetch }) {
   const blank = {

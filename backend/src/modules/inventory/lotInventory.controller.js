@@ -1400,6 +1400,82 @@ module.exports = {
     }
   },
 
+  // ─── Edit a raw lot's PURCHASE RATE (the rice price) after recording ───
+  // For when the agreed price differs at payment time. Re-prices on the lot's
+  // immutable received weight, recomputes landed cost, updates the supplier's
+  // Raw Material payable (so they owe the corrected amount), re-accrues the GL,
+  // and cascades the cost into any batch that consumed the lot.
+  async setLotPurchaseRate(req, res) {
+    try {
+      const { id } = req.params;
+      const newRate = parseFloat(req.body.rate_per_kg);
+      if (!Number.isFinite(newRate) || newRate <= 0) {
+        return res.status(400).json({ success: false, message: 'rate_per_kg must be a positive number.' });
+      }
+
+      const result = await db.transaction(async (trx) => {
+        const lot = await trx('inventory_lots').where({ id }).first();
+        if (!lot) { const e = new Error('Lot not found.'); e.status = 404; throw e; }
+        if (lot.type !== 'raw') { const e = new Error('Only raw purchase lots can be re-priced.'); e.status = 400; throw e; }
+
+        const receivedKg = parseFloat(lot.received_net_weight_kg) || parseFloat(lot.net_weight_kg) || 0;
+        if (receivedKg <= 0) { const e = new Error('Lot has no recorded weight to price.'); e.status = 400; throw e; }
+
+        const newPurchaseAmount = uc.round2(receivedKg * newRate);
+        const directCosts = (parseFloat(lot.labor_cost) || 0) + (parseFloat(lot.unloading_cost) || 0) + (parseFloat(lot.packing_cost) || 0) + (parseFloat(lot.other_cost) || 0);
+        const totalBagCost = parseFloat(lot.total_bag_cost) || 0;
+        const landedTotal = uc.round2(newPurchaseAmount + directCosts + totalBagCost);
+        const landedPerKg = uc.round4(landedTotal / receivedKg);
+
+        await trx('inventory_lots').where({ id }).update({
+          rate_per_kg: newRate, purchase_amount: newPurchaseAmount,
+          landed_cost_total: landedTotal, landed_cost_per_kg: landedPerKg,
+          total_value: landedTotal, cost_per_unit: landedPerKg * 1000, updated_at: trx.fn.now(),
+        });
+
+        // Update the rice (Raw Material) payable for this lot — transport is its
+        // own lot_transport payable and is left alone.
+        let payableUpdated = false;
+        const pay = await trx('payables').where({ linked_ref: lot.lot_no, category: 'Raw Material' })
+          .where(function () { this.whereNull('source_table').orWhereNot('source_table', 'lot_transport'); }).first();
+        if (pay) {
+          const paid = parseFloat(pay.paid_amount) || 0;
+          const outstanding = Math.max(0, uc.round2(landedTotal - paid));
+          await trx('payables').where({ id: pay.id }).update({
+            original_amount: landedTotal, outstanding,
+            status: outstanding <= 0.01 ? 'Paid' : (paid > 0 ? 'Partial' : 'Pending'), updated_at: trx.fn.now(),
+          });
+          payableUpdated = true;
+          // Re-accrue the GL: reverse the prior purchase accrual, repost at new.
+          const priorJournals = await trx('journal_entries').where({ ref_type: 'Purchase Lot', ref_no: lot.lot_no, status: 'Posted' }).select('id');
+          for (const j of priorJournals) {
+            await accountingService.reverseJournal(trx, { journalId: j.id, reason: 'Purchase price corrected', userId: req.user?.id });
+          }
+          if (landedTotal > 0 && lot.supplier_id) {
+            await accountingService.autoPost(trx, {
+              triggerEvent: 'purchase_invoice', entity: 'mill', amount: landedTotal, currency: 'PKR',
+              refType: 'Purchase Lot', refNo: lot.lot_no,
+              description: `Purchase lot ${lot.lot_no} — price corrected to Rs ${Math.round(newRate)}/kg`,
+              userId: req.user?.id, partyType: 'supplier', partyId: lot.supplier_id,
+            });
+          }
+        }
+
+        // Cascade into any batch that consumed this lot (batch_source_lots, raw
+        // cost pool, output-lot costs, non-locked COGS / derived payables).
+        const propagation = await inventoryService.propagateLotCostToBatches(trx, parseInt(id, 10), { userId: req.user?.id });
+        const updated = await trx('inventory_lots').where({ id }).first();
+        return { updated, payableUpdated, propagation };
+      });
+
+      return res.json({ success: true, data: { lot: enrichLot(result.updated), payableUpdated: result.payableUpdated, propagation: result.propagation } });
+    } catch (err) {
+      const status = err.status || 500;
+      if (status === 500) console.error('setLotPurchaseRate error:', err);
+      return res.status(status).json({ success: false, message: err.message });
+    }
+  },
+
   // ─── Edit a lot's recorded quality after creation ───
   //
   // Quality is an analysis record, not a cost input, so it can be corrected at
