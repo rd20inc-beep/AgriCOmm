@@ -252,5 +252,7 @@ router.delete('/danger/transactions/:type/:id', authorizeRole('Super Admin'),
   auditAction('hard_delete_txn', 'transaction', (req) => `${req.params.type}:${req.params.id}`), dangerZone.hardDeleteTransaction);
 router.post('/danger/bank-accounts/:id/balance', authorizeRole('Super Admin'),
   auditAction('adjust_bank_balance', 'bank_account', (req) => req.params.id), dangerZone.adjustBankBalance);
+router.post('/danger/reset', authorizeRole('Super Admin'),
+  auditAction('reset_transactional', 'system', () => 'all'), dangerZone.resetTransactional);
 
 module.exports = router;

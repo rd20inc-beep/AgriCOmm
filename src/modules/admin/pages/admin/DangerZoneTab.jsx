@@ -6,10 +6,15 @@ import { adminApi } from '../../api/services';
 
 const TXN_TYPES = [
   { value: 'local_sale',     label: 'Local Sale',     hint: 'restocks the lot, deletes its payment/receivable/journal' },
+  { value: 'export_order',   label: 'Export Order',   hint: 'frees reservations, restocks dispatch, deletes items/costs/journals' },
+  { value: 'milling_batch',  label: 'Milling Batch',  hint: 'deletes the batch + its raw/output lots, vehicles, costs & quality' },
   { value: 'payment',        label: 'Payment',        hint: 'restores the linked payable/receivable outstanding' },
   { value: 'mill_purchase',  label: 'Mill Purchase',  hint: 'reverses mill-store stock + deletes the payable' },
   { value: 'journal_entry',  label: 'Journal Entry',  hint: 'deletes the entry and its lines' },
   { value: 'lot_transaction',label: 'Lot Transaction',hint: 'deletes a single inventory-ledger row' },
+  { value: 'customer',       label: 'Customer (master)', hint: 'deletes a customer — refused if still referenced by live data' },
+  { value: 'supplier',       label: 'Supplier (master)', hint: 'deletes a supplier — refused if still referenced by live data' },
+  { value: 'product',        label: 'Product (master)',  hint: 'deletes a product — refused if still referenced by live data' },
 ];
 
 const errOf = (e) => e?.data?.message || e?.data?.errors?.[0]?.message || e?.message || 'Failed';
@@ -35,6 +40,22 @@ const LABEL = 'block text-[11px] font-semibold text-gray-600 uppercase mb-1';
 export default function DangerZoneTab() {
   const { addToast, bankAccountsList = [] } = useApp();
   const { data: lots = [] } = useLotInventory({ limit: 200 });
+
+  // ── Full reset ──
+  const [resetConfirm, setResetConfirm] = useState('');
+  const [resetBusy, setResetBusy] = useState(false);
+  async function resetSystem() {
+    if (resetConfirm !== 'RESET') { addToast('Type RESET to confirm', 'error'); return; }
+    if (!window.confirm('PERMANENTLY wipe ALL transactional data (lots, orders, batches, sales, finance)?\n\nMasters are kept and a backup schema is created, but this cannot be undone from the UI.\n\nProceed?')) return;
+    setResetBusy(true);
+    try {
+      const r = await adminApi.dangerReset({ confirm: 'RESET' });
+      addToast(r?.message || 'System reset complete', 'success');
+      setResetConfirm('');
+      setTimeout(() => window.location.reload(), 1200);
+    } catch (e) { addToast(errOf(e), 'error'); }
+    finally { setResetBusy(false); }
+  }
 
   // ── Lot deletion ──
   const [lotId, setLotId] = useState('');
@@ -203,6 +224,27 @@ export default function DangerZoneTab() {
           <Landmark size={15} /> {bankBusy ? 'Saving…' : 'Apply balance change'}
         </button>
       </Card>
+
+      {/* Reset to 0 */}
+      <div className="bg-white rounded-xl border-2 border-rose-400 overflow-hidden">
+        <div className="flex items-center gap-2 px-4 py-3 bg-rose-600 text-white">
+          <ShieldAlert size={16} />
+          <div>
+            <h3 className="text-sm font-bold">Reset system to 0</h3>
+            <p className="text-[11px] text-rose-100">Wipe ALL transactional data — lots, orders, batches, sales, finance. Masters (products, suppliers, customers, users, warehouses, bank accounts) are kept; bank balances are zeroed.</p>
+          </div>
+        </div>
+        <div className="p-4 space-y-3">
+          <p className="text-xs text-gray-600">A backup of every wiped table is created first (a <code className="text-rose-700">backup_reset_…</code> schema in the database), but this cannot be undone from the UI. Type <b>RESET</b> to enable the button.</p>
+          <div className="max-w-xs">
+            <input className={`${INPUT} font-mono`} value={resetConfirm} onChange={e => setResetConfirm(e.target.value)} placeholder="Type RESET" />
+          </div>
+          <button disabled={resetBusy || resetConfirm !== 'RESET'} onClick={resetSystem}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-rose-600 text-white text-sm font-bold rounded-lg hover:bg-rose-700 disabled:opacity-40">
+            <Trash2 size={15} /> {resetBusy ? 'Resetting…' : 'Reset system to 0'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

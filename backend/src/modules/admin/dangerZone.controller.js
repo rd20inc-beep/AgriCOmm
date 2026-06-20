@@ -27,6 +27,28 @@ async function auditDanger(trx, req, action, entityType, entityId, details) {
 
 const num = (v) => parseFloat(v) || 0;
 
+// Master / config / system tables KEPT by a "reset to 0" — everything else in the
+// public schema is transactional and gets wiped. Keep-list (not wipe-list) so a
+// NEW transactional table is wiped by default; a new MASTER must be added here.
+// The in-DB backup makes a mis-categorisation recoverable.
+const KEEP_TABLES = new Set([
+  // system / migrations
+  'knex_migrations', 'knex_migrations_lock',
+  // auth & user prefs
+  'users', 'roles', 'permissions', 'role_permissions', 'user_preferences',
+  // core masters
+  'products', 'suppliers', 'customers', 'warehouses', 'bag_types', 'mills', 'mill_workers',
+  'mill_items', 'mill_consumption_ratios', 'product_categories', 'expense_vendors',
+  // finance config / reference
+  'chart_of_accounts', 'posting_rules', 'accounting_periods', 'fx_rates',
+  'commodity_rate_master', 'bank_accounts', 'kpi_benchmarks', 'recovery_benchmarks',
+  // templates / document config
+  'document_templates', 'email_templates', 'whatsapp_templates',
+  'country_doc_requirements', 'purchase_lot_templates',
+  // app config / scheduling
+  'system_settings', 'scheduled_tasks', 'scheduled_reports', 'saved_reports', 'api_integrations',
+]);
+
 // ─────────────────────────── LOTS ───────────────────────────
 
 async function lotImpactCounts(q, lotId) {
@@ -128,6 +150,11 @@ const dangerZone = {
           case 'journal_entry':return deleteJournalEntry(trx, req, id);
           case 'lot_transaction': return deleteLotTransaction(trx, req, id);
           case 'mill_purchase':return deleteMillPurchase(trx, req, id);
+          case 'export_order': return deleteExportOrder(trx, req, id);
+          case 'milling_batch': return deleteMillingBatch(trx, req, id);
+          case 'customer':
+          case 'supplier':
+          case 'product': return deleteMaster(trx, req, type, id);
           default: { const e = new Error(`Unsupported transaction type: ${type}`); e.status = 400; throw e; }
         }
       });
@@ -189,6 +216,58 @@ const dangerZone = {
       return res.status(500).json({ success: false, message: err.message });
     }
   },
+
+  // ─────────────────────── RESET TO 0 ───────────────────────
+  // Wipe ALL transactional data (everything not in KEEP_TABLES), keep masters,
+  // zero bank balances. Backs every wiped table up into a backup_reset_<ts>
+  // schema FIRST (same transaction, so a failure rolls back with no data lost).
+  async resetTransactional(req, res) {
+    try {
+      if ((req.body?.confirm || '') !== 'RESET') {
+        return res.status(400).json({ success: false, message: 'Type RESET to confirm — this permanently wipes all transactional data.' });
+      }
+      const stamp = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14);
+      const backupSchema = `backup_reset_${stamp}`;
+
+      const result = await db.transaction(async (trx) => {
+        const allTables = await trx('information_schema.tables')
+          .where({ table_schema: 'public', table_type: 'BASE TABLE' })
+          .pluck('table_name');
+        const wipe = allTables.filter((t) => !KEEP_TABLES.has(t) && !t.startsWith('backup_'));
+
+        // 1. Backup each wipe table (rows only) into a fresh schema.
+        await trx.raw(`CREATE SCHEMA IF NOT EXISTS "${backupSchema}"`);
+        for (const t of wipe) {
+          await trx.raw(`CREATE TABLE "${backupSchema}"."${t}" AS TABLE public."${t}"`);
+        }
+
+        // 2. Wipe them all in one go (CASCADE resolves FKs among the set).
+        if (wipe.length) {
+          const list = wipe.map((t) => `public."${t}"`).join(', ');
+          await trx.raw(`TRUNCATE TABLE ${list} RESTART IDENTITY CASCADE`);
+        }
+
+        // 3. Zero bank/cash balances (accounts are kept masters).
+        await trx('bank_accounts').update({ current_balance: 0, updated_at: trx.fn.now() });
+
+        // 4. Audit (audit_logs was just wiped — write a fresh record).
+        await auditDanger(trx, req, 'reset_transactional', 'system', 'all', {
+          wiped_tables: wipe.length, kept_tables: allTables.length - wipe.length, backup_schema: backupSchema,
+        });
+
+        return { wiped: wipe.length, kept: allTables.length - wipe.length, backupSchema, wipedTables: wipe };
+      });
+
+      return res.json({
+        success: true,
+        message: `System reset complete — ${result.wiped} transactional tables wiped (backup: ${result.backupSchema}), ${result.kept} master/config tables kept, bank balances zeroed.`,
+        data: result,
+      });
+    } catch (err) {
+      console.error('resetTransactional error:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
 };
 
 // ───────────────────── transaction helpers ─────────────────────
@@ -222,6 +301,24 @@ async function describeTransaction(q, type, id) {
     return { type, row: mp, willReverse: 'reduce mill_stock by purchased quantities',
       children: { mill_purchase_items: await cnt(q, 'mill_purchase_items', 'purchase_id', id),
         payables: await q('payables').where({ source_table: 'mill_purchases', source_id: id }).count('id as c').first().then(r => parseInt(r?.c) || 0) } };
+  }
+  if (type === 'export_order') {
+    const o = await q('export_orders').where('id', id).first();
+    if (!o) return null;
+    return { type, row: o, willReverse: 'free reservations + restock any dispatch',
+      children: { items: await cnt(q, 'export_order_items', 'order_id', id), receivables: await cnt(q, 'receivables', 'order_id', id), reservations: await cnt(q, 'inventory_reservations', 'order_id', id) } };
+  }
+  if (type === 'milling_batch') {
+    const b = await q('milling_batches').where('id', id).first();
+    if (!b) return null;
+    return { type, row: b, willReverse: 'delete raw + output lots and their ledger',
+      children: { vehicles: await cnt(q, 'milling_vehicle_arrivals', 'batch_id', id), costs: await cnt(q, 'milling_costs', 'batch_id', id), lots: await q('inventory_lots').where('batch_ref', `batch-${id}`).count('id as c').first().then(r => parseInt(r?.c) || 0) } };
+  }
+  if (['customer', 'supplier', 'product'].includes(type)) {
+    const table = { customer: 'customers', supplier: 'suppliers', product: 'products' }[type];
+    const row = await q(table).where('id', id).first();
+    if (!row) return null;
+    return { type, row, willReverse: 'refuses if still referenced by live transactions' };
   }
   const e = new Error(`Unsupported transaction type: ${type}`); e.status = 400; throw e;
 }
@@ -337,6 +434,105 @@ async function deleteMillPurchase(trx, req, id) {
   await trx('mill_purchases').where('id', id).del(); // mill_purchase_items cascade
   await auditDanger(trx, req, 'hard_delete', 'mill_purchase', id, { purchase_no: mp.purchase_no, snapshot: mp });
   return { message: `Mill purchase ${mp.purchase_no} deleted and stock reversed.`, purchase_no: mp.purchase_no };
+}
+
+// Best-effort table delete that ignores "table does not exist" so the cascade
+// helpers below stay resilient to schema differences.
+async function delIfExists(trx, table, where) {
+  if (await trx.schema.hasTable(table)) await trx(table).where(where).del();
+}
+
+async function deleteExportOrder(trx, req, id) {
+  const order = await trx('export_orders').where('id', id).first();
+  if (!order) { const e = new Error('Export order not found.'); e.status = 404; throw e; }
+  const orderNo = order.order_no;
+
+  // Free reservations + restock anything already dispatched, so inventory stays right.
+  const reservations = await trx('inventory_reservations').where('order_id', id);
+  for (const r of reservations) {
+    const lot = await trx('inventory_lots').where('id', r.lot_id).first();
+    if (lot) {
+      const newReserved = Math.max(0, num(lot.reserved_qty) - num(r.reserved_qty));
+      await trx('inventory_lots').where('id', lot.id).update({ reserved_qty: newReserved, available_qty: num(lot.qty) - newReserved, updated_at: trx.fn.now() });
+    }
+  }
+  await trx('inventory_reservations').where('order_id', id).del();
+  const dispatched = await trx('inventory_movements').where({ order_id: id, movement_type: 'export_dispatch' });
+  for (const m of dispatched) {
+    const lot = await trx('inventory_lots').where('id', m.lot_id).first();
+    if (lot) await trx('inventory_lots').where('id', lot.id).update({ qty: num(lot.qty) + num(m.qty), available_qty: num(lot.available_qty) + num(m.qty), updated_at: trx.fn.now() });
+  }
+  await trx('inventory_movements').where({ order_id: id }).del();
+  await trx('lot_transactions').where('reference_no', orderNo).whereIn('transaction_type', ['export_dispatch_out', 'export_allocation', 'export_release']).del();
+
+  // Payments tied to this order's receivables (+ their bank trail), then the rest.
+  const recvIds = (await trx('receivables').where('order_id', id).select('id')).map((r) => r.id);
+  if (recvIds.length) {
+    const payIds = (await trx('payments').whereIn('linked_receivable_id', recvIds).select('id')).map((p) => p.id);
+    if (payIds.length) await delIfExists(trx, 'bank_transactions', (q) => q.whereIn('linked_payment_id', payIds));
+    await trx('payments').whereIn('linked_receivable_id', recvIds).del();
+  }
+  for (const t of ['export_order_items', 'export_order_status_history', 'export_order_costs', 'export_order_documents', 'order_packing_lines', 'shipment_containers', 'receivables', 'advance_allocations', 'advance_payments']) {
+    await delIfExists(trx, t, (q) => q.where('order_id', id));
+  }
+  await delIfExists(trx, 'internal_transfers', (q) => q.where('export_order_id', id));
+  await trx('journal_lines').whereIn('journal_id', trx('journal_entries').where('ref_no', orderNo).select('id')).del();
+  await trx('journal_entries').where('ref_no', orderNo).del();
+  await trx('export_orders').where('id', id).del();
+
+  await auditDanger(trx, req, 'hard_delete', 'export_order', id, { order_no: orderNo, snapshot: order });
+  return { message: `Export order ${orderNo} deleted (reservations freed, dispatch restocked).`, order_no: orderNo };
+}
+
+async function deleteMillingBatch(trx, req, id) {
+  const batch = await trx('milling_batches').where('id', id).first();
+  if (!batch) { const e = new Error('Milling batch not found.'); e.status = 404; throw e; }
+  const batchNo = batch.batch_no;
+  const batchRef = `batch-${id}`;
+
+  // Delete the batch's inventory lots (raw + outputs) and their ledger/movements.
+  const lots = await trx('inventory_lots').where('batch_ref', batchRef).select('id');
+  const lotIds = lots.map((l) => l.id);
+  if (lotIds.length) {
+    await delIfExists(trx, 'inventory_movements', (q) => q.whereIn('lot_id', lotIds));
+    await delIfExists(trx, 'lot_transactions', (q) => q.whereIn('lot_id', lotIds));
+    await delIfExists(trx, 'inventory_reservations', (q) => q.whereIn('lot_id', lotIds));
+    await delIfExists(trx, 'batch_source_lots', (q) => q.whereIn('lot_id', lotIds));
+    await delIfExists(trx, 'stock_adjustments', (q) => q.whereIn('lot_id', lotIds));
+    await delIfExists(trx, 'stock_count_items', (q) => q.whereIn('lot_id', lotIds));
+    await trx('inventory_lots').whereIn('id', lotIds).del();
+  }
+  for (const t of ['milling_vehicle_arrivals', 'milling_quality_samples', 'milling_quality_post', 'milling_costs', 'batch_source_lots', 'milling_output_market_prices']) {
+    await delIfExists(trx, t, (q) => q.where('batch_id', id));
+  }
+  await delIfExists(trx, 'internal_transfers', (q) => q.where('batch_id', id));
+  await trx('milling_batches').where('id', id).del();
+
+  await auditDanger(trx, req, 'hard_delete', 'milling_batch', id, { batch_no: batchNo, snapshot: batch });
+  return { message: `Milling batch ${batchNo} deleted (lots, vehicles, costs & quality removed).`, batch_no: batchNo };
+}
+
+// Delete a master record only if nothing live still references it.
+async function deleteMaster(trx, req, type, id) {
+  const table = { customer: 'customers', supplier: 'suppliers', product: 'products' }[type];
+  const refs = {
+    customer: [['export_orders', 'customer_id'], ['local_sales', 'customer_id'], ['receivables', 'customer_id']],
+    supplier: [['inventory_lots', 'supplier_id'], ['milling_batches', 'supplier_id'], ['payables', 'supplier_id'], ['mill_purchases', 'supplier_id']],
+    product: [['inventory_lots', 'product_id'], ['export_orders', 'product_id'], ['export_order_items', 'product_id'], ['milling_batches', 'product_id']],
+  }[type];
+  const row = await trx(table).where('id', id).first();
+  if (!row) { const e = new Error(`${type} not found.`); e.status = 404; throw e; }
+  for (const [t, col] of refs) {
+    if (!(await trx.schema.hasTable(t))) continue;
+    const used = await trx(t).where(col, id).count('id as c').first();
+    if (parseInt(used?.c) > 0) {
+      const e = new Error(`Cannot delete this ${type}: still referenced by ${used.c} ${t} row(s). Delete those first or reset the system.`);
+      e.status = 409; throw e;
+    }
+  }
+  await trx(table).where('id', id).del();
+  await auditDanger(trx, req, 'hard_delete', type, id, { name: row.name, snapshot: row });
+  return { message: `${type} "${row.name || id}" deleted.`, id };
 }
 
 module.exports = dangerZone;

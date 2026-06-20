@@ -51,6 +51,7 @@ export const adminApi = {
   dangerTxnImpact:  (type, id) => api.get(`/api/admin/danger/transactions/${type}/${id}/impact`),
   dangerDeleteTxn:  (type, id) => api.delete(`/api/admin/danger/transactions/${type}/${id}`),
   dangerAdjustBalance: (id, data) => api.post(`/api/admin/danger/bank-accounts/${id}/balance`, data),
+  dangerReset: (data) => api.post('/api/admin/danger/reset', data),
 };
 export const customersApi = {
   list: (params) => api.get('/api/customers', params),
