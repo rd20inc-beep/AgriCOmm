@@ -1,5 +1,6 @@
 const db = require('../../config/database');
 const accountingService = require('../accounting/accounting.service');
+const inventoryService = require('../inventory/inventory.service');
 const { NotFoundError, ValidationError } = require('../../shared/errors');
 
 // Packing a milling batch's finished rice into bags. Consumes bags from store
@@ -146,6 +147,25 @@ const packingService = {
           }
         } catch (jeErr) {
           console.error('Packing journal post failed (packing still recorded):', jeErr.message);
+        }
+      }
+
+      // Fold the bag cost into the batch as a 'packaging' milling_cost so it shows
+      // in Mill Finance (Operating / Costs) and rolls into the residual finished-
+      // rice cost. This is OPERATIONAL only (milling_costs is not a GL posting):
+      // the GL recognises the bag expense once via the 6000/1250 journal above,
+      // and local-sale COGS isn't GL-posted, so there's no GL double-count.
+      if (totalCost > 0) {
+        await trx('milling_costs').insert({
+          batch_id: batchId, category: 'packaging', amount: totalCost, currency: 'PKR',
+          notes: `Packing: ${bagsCount} × ${item.name} (log #${log.id})`,
+          created_by: userId || null,
+        });
+        // Re-cost the batch's outputs so the finished cost/kg includes the bags
+        // (no-op if the batch hasn't yielded yet).
+        if ((Number(batch.actual_finished_mt) || 0) > 0) {
+          try { await inventoryService.recomputeBatchOutputsAfterPriceChange(trx, batchId, { userId }); }
+          catch (e) { console.error('Packing cost reallocation failed:', e.message); }
         }
       }
 
