@@ -4,7 +4,7 @@ import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
 import {
   Factory, Wheat, FlaskConical, Gauge, Clock, AlertTriangle,
   Plus, ArrowRight, CheckCircle2, TrendingUp, Truck, Activity,
-  Package, Boxes, PackageX,
+  Package, Boxes, PackageX, ClipboardCheck,
 } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -67,6 +67,26 @@ function ActionRow({ icon: Icon, label, count, to, accent = 'amber' }) {
         <span className="px-2 py-0.5 bg-white rounded-full text-xs font-bold">{count}</span>
         <ArrowRight size={14} />
       </div>
+    </Link>
+  );
+}
+
+function QuickLink({ icon: Icon, label, sub, to, accent = 'blue' }) {
+  const colors = {
+    blue: 'text-blue-600 bg-blue-50',
+    emerald: 'text-emerald-600 bg-emerald-50',
+    violet: 'text-violet-600 bg-violet-50',
+  };
+  return (
+    <Link to={to} className="flex items-center justify-between p-4 bg-white rounded-xl border border-gray-200 hover:border-blue-400 hover:shadow-sm transition-all">
+      <div className="flex items-center gap-3 min-w-0">
+        <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${colors[accent]}`}><Icon size={18} /></span>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-gray-900 truncate">{label}</p>
+          <p className="text-xs text-gray-500 truncate">{sub}</p>
+        </div>
+      </div>
+      <ArrowRight size={16} className="text-gray-300 shrink-0" />
     </Link>
   );
 }
@@ -256,6 +276,13 @@ export default function MillHomeDashboard() {
         >
           <Plus size={16} /> New Batch
         </button>
+      </div>
+
+      {/* Quick links */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <QuickLink icon={Boxes} label="Stock Summary" sub="On-hand & value by product" to="/stock-summary" accent="emerald" />
+        <QuickLink icon={ClipboardCheck} label="Stock Take" sub="Count & reconcile inventory" to="/stock-count" accent="violet" />
+        <QuickLink icon={Package} label="Inventory" sub="Browse every lot" to="/lot-inventory" accent="blue" />
       </div>
 
       {/* Action Queue */}
