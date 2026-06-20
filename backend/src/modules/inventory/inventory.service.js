@@ -666,6 +666,24 @@ const inventoryService = {
       lot = await trx('inventory_lots').where('id', lot.id).first();
     }
 
+    // Sync the per-kg cost / landed value fields from what postMovement set
+    // (cost_per_unit is per MT, total_value = cost_per_unit × qty). receiveRice
+    // creates the lot with these at 0 and postMovement only updates
+    // cost_per_unit / total_value — so without this a raw rice lot showed
+    // "Lot Value", rate/kg and landed cost all as 0 despite a real cost.
+    if (lot) {
+      const cpu = parseFloat(lot.cost_per_unit) || 0; // per MT
+      const tv = parseFloat(lot.total_value) || 0;
+      await trx('inventory_lots').where('id', lot.id).update({
+        rate_per_kg: cpu / 1000,
+        landed_cost_per_kg: cpu / 1000,
+        landed_cost_total: tv,
+        purchase_amount: tv,
+        updated_at: trx.fn.now(),
+      });
+      lot = await trx('inventory_lots').where('id', lot.id).first();
+    }
+
     return { lot, movement };
   },
 
