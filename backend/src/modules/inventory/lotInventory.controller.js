@@ -1380,7 +1380,7 @@ module.exports = {
             .join('chart_of_accounts as coa', 'coa.id', 'jl.account_id')
             .where({ 'je.ref_type': 'Lot Transport', 'je.ref_no': lot.lot_no, 'je.status': 'Posted' })
             .whereRaw("coa.code like '2%'")
-            .sum(trx.raw('jl.credit - jl.debit as net'));
+            .select(trx.raw('coalesce(sum(jl.credit - jl.debit), 0) as net'));
           const oldBilled = parseFloat(prevAp?.[0]?.net) || 0;
           const newBilled = wantBill ? tc : 0;
           const tDelta = uc.round2(newBilled - oldBilled);
