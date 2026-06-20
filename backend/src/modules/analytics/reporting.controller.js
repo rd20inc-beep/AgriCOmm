@@ -967,7 +967,13 @@ const reportingController = {
           db.raw('COALESCE(SUM(CASE WHEN l.net_weight_kg > 0 THEN l.net_weight_kg ELSE CAST(l.qty AS DECIMAL) * 1000 END), 0)::numeric as total_kg'),
           db.raw('COALESCE(SUM(CAST(l.available_qty AS DECIMAL) * 1000), 0)::numeric as available_kg'),
           db.raw('COALESCE(SUM(CAST(l.reserved_qty AS DECIMAL) * 1000), 0)::numeric as reserved_kg'),
-          db.raw('COALESCE(SUM(CASE WHEN l.landed_cost_total > 0 THEN l.landed_cost_total ELSE l.total_value END), 0)::numeric as total_value_pkr'),
+          db.raw('COALESCE(SUM(l.total_bags), 0)::int as total_bags'),
+          // Value of what's on hand = on-hand kg × cost/kg (NOT the stale
+          // landed_cost_total, which carries the original intake value).
+          db.raw(`COALESCE(SUM(
+            (CASE WHEN l.net_weight_kg > 0 THEN l.net_weight_kg ELSE CAST(l.qty AS DECIMAL) * 1000 END)
+            * COALESCE(NULLIF(l.landed_cost_per_kg, 0), NULLIF(l.rate_per_kg, 0), CAST(l.cost_per_unit AS DECIMAL) / 1000.0, 0)
+          ), 0)::numeric as total_value_pkr`),
         )
         // Subtype groups by the raw CASE expression itself — passing the long
         // SQL string as a second groupBy arg makes Knex quote it as a column
@@ -983,10 +989,12 @@ const reportingController = {
           totalKg: a.totalKg + num(r.total_kg),
           availableKg: a.availableKg + num(r.available_kg),
           reservedKg: a.reservedKg + num(r.reserved_kg),
+          bags: a.bags + (parseInt(r.total_bags, 10) || 0),
           valuePkr: a.valuePkr + num(r.total_value_pkr),
         }),
-        { lotCount: 0, totalKg: 0, availableKg: 0, reservedKg: 0, valuePkr: 0 }
+        { lotCount: 0, totalKg: 0, availableKg: 0, reservedKg: 0, bags: 0, valuePkr: 0 }
       );
+      grand.perKg = grand.totalKg > 0 ? grand.valuePkr / grand.totalKg : 0;
 
       return res.json({
         success: true,
@@ -999,6 +1007,8 @@ const reportingController = {
             totalKg:     num(r.total_kg),
             availableKg: num(r.available_kg),
             reservedKg:  num(r.reserved_kg),
+            bags:        parseInt(r.total_bags, 10) || 0,
+            perKg:       num(r.total_kg) > 0 ? num(r.total_value_pkr) / num(r.total_kg) : 0,
             valuePkr:    num(r.total_value_pkr),
           })),
           grand,

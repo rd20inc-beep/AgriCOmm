@@ -14,7 +14,7 @@ import {
 import { LotReportView } from './LotReportViews';
 
 const STOCK_GROUP_OPTIONS = [
-  { key: 'product',   label: 'By Product' },
+  { key: 'product',   label: 'Products' },
   { key: 'supplier',  label: 'By Supplier' },
   { key: 'warehouse', label: 'By Warehouse' },
   { key: 'variety',   label: 'By Variety' },

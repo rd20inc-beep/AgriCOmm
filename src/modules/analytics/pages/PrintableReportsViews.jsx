@@ -100,20 +100,21 @@ export function StockReportView({ data, companyName, groupLabel }) {
       <SummaryRow items={[
         { label: 'Lots', value: grand.lotCount },
         { label: 'Total', value: `${fmtKg(grand.totalKg)} kg` },
+        { label: 'Katta', value: fmtKg(grand.bags) },
         { label: 'Available', value: `${fmtKg(grand.availableKg)} kg` },
-        { label: 'Reserved', value: `${fmtKg(grand.reservedKg)} kg` },
+        { label: 'Per kg', value: fmtPkr(grand.perKg) },
         { label: 'Value', value: fmtPkr(grand.valuePkr) },
       ]} />
 
       <Section title="Stock Breakdown">
         <Table
-          head={[groupLabel || 'Group', 'Lots', 'Total (kg)', 'Available (kg)', 'Reserved (kg)', 'Value (PKR)']}
-          align={['left', 'right', 'right', 'right', 'right', 'right']}
+          head={[groupLabel || 'Group', 'Lots', 'Total (kg)', 'Katta', 'Available (kg)', 'Reserved (kg)', 'Per kg', 'Value (PKR)']}
+          align={['left', 'right', 'right', 'right', 'right', 'right', 'right', 'right']}
           rows={rows.map(r => [
-            r.name, r.lotCount, fmtKg(r.totalKg), fmtKg(r.availableKg), fmtKg(r.reservedKg), fmtPkr(r.valuePkr),
+            r.name, r.lotCount, fmtKg(r.totalKg), fmtKg(r.bags), fmtKg(r.availableKg), fmtKg(r.reservedKg), fmtPkr(r.perKg), fmtPkr(r.valuePkr),
           ])}
           empty="No stock to report."
-          totalRow={['TOTAL', grand.lotCount, fmtKg(grand.totalKg), fmtKg(grand.availableKg), fmtKg(grand.reservedKg), fmtPkr(grand.valuePkr)]}
+          totalRow={['TOTAL', grand.lotCount, fmtKg(grand.totalKg), fmtKg(grand.bags), fmtKg(grand.availableKg), fmtKg(grand.reservedKg), fmtPkr(grand.perKg), fmtPkr(grand.valuePkr)]}
         />
       </Section>
 
