@@ -442,6 +442,15 @@ async function delIfExists(trx, table, where) {
   if (await trx.schema.hasTable(table)) await trx(table).where(where).del();
 }
 
+// Delete rows by a column value, skipping the table if it (or the column)
+// doesn't exist — so a child table missing the expected FK column never 500s
+// the whole cascade.
+async function delByCol(trx, table, col, id) {
+  if (!(await trx.schema.hasTable(table))) return;
+  if (!(await trx.schema.hasColumn(table, col))) return;
+  await trx(table).where(col, id).del();
+}
+
 async function deleteExportOrder(trx, req, id) {
   const order = await trx('export_orders').where('id', id).first();
   if (!order) { const e = new Error('Export order not found.'); e.status = 404; throw e; }
@@ -473,9 +482,9 @@ async function deleteExportOrder(trx, req, id) {
     await trx('payments').whereIn('linked_receivable_id', recvIds).del();
   }
   for (const t of ['export_order_items', 'export_order_status_history', 'export_order_costs', 'export_order_documents', 'order_packing_lines', 'shipment_containers', 'receivables', 'advance_allocations', 'advance_payments']) {
-    await delIfExists(trx, t, (q) => q.where('order_id', id));
+    await delByCol(trx, t, 'order_id', id); // skips tables without an order_id column
   }
-  await delIfExists(trx, 'internal_transfers', (q) => q.where('export_order_id', id));
+  await delByCol(trx, 'internal_transfers', 'export_order_id', id);
   await trx('journal_lines').whereIn('journal_id', trx('journal_entries').where('ref_no', orderNo).select('id')).del();
   await trx('journal_entries').where('ref_no', orderNo).del();
   await trx('export_orders').where('id', id).del();
@@ -503,9 +512,9 @@ async function deleteMillingBatch(trx, req, id) {
     await trx('inventory_lots').whereIn('id', lotIds).del();
   }
   for (const t of ['milling_vehicle_arrivals', 'milling_quality_samples', 'milling_quality_post', 'milling_costs', 'batch_source_lots', 'milling_output_market_prices']) {
-    await delIfExists(trx, t, (q) => q.where('batch_id', id));
+    await delByCol(trx, t, 'batch_id', id);
   }
-  await delIfExists(trx, 'internal_transfers', (q) => q.where('batch_id', id));
+  await delByCol(trx, 'internal_transfers', 'batch_id', id);
   await trx('milling_batches').where('id', id).del();
 
   await auditDanger(trx, req, 'hard_delete', 'milling_batch', id, { batch_no: batchNo, snapshot: batch });
