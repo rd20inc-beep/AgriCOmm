@@ -185,7 +185,7 @@ const millingController = {
       const batchesEnriched = batches.map(b => {
         const batchCosts = allCosts.filter(c => c.batch_id === b.id);
         const costs = {};
-        batchCosts.forEach(c => { costs[c.category] = parseFloat(c.amount) || 0; });
+        batchCosts.forEach(c => { costs[c.category] = (costs[c.category] || 0) + (parseFloat(c.amount) || 0); });
         const vehicleArrivals = allArrivals.filter(a => a.batch_id === b.id);
         const arrivalSample = allArrivalSamples.find(q => q.batch_id === b.id) || null;
         return {
