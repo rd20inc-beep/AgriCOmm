@@ -879,6 +879,7 @@ COL local_sales.buyer_name:character varying:NULL
 COL local_sales.buyer_phone:character varying:NULL
 COL local_sales.cogs_per_kg:numeric:NULL
 COL local_sales.cogs_total_pkr:numeric:NULL
+COL local_sales.collection_location:character varying:NULL
 COL local_sales.cost_locked_at_dispatch:boolean:NOT NULL
 COL local_sales.cost_per_kg:numeric:NULL
 COL local_sales.created_at:timestamp with time zone:NOT NULL

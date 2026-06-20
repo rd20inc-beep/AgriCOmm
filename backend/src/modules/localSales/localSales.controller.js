@@ -84,6 +84,7 @@ module.exports = {
       const {
         sale_date, customer_id, buyer_name, buyer_phone, buyer_address,
         payment_mode = 'cash', paid_amount, payment_reference,
+        collection_location, bank_account_id,
         vehicle_no, driver_name, dispatched = true, notes,
       } = req.body;
 
@@ -198,6 +199,7 @@ module.exports = {
             total_amount: l.total, currency: 'PKR',
             payment_mode: payment_mode || 'cash', payment_status: paymentStatus,
             paid_amount: l.paid, due_amount: dueAmt, payment_reference: payment_reference || null,
+            collection_location: collection_location || null,
             vehicle_no: vehicle_no || null, driver_name: driver_name || null,
             dispatched: !!dispatched, dispatch_date: dispatched ? (sale_date || new Date().toISOString().split('T')[0]) : null,
             notes: notes || null, status: 'Completed', created_by: req.user?.id || null,
@@ -216,6 +218,7 @@ module.exports = {
               payment_no: `PL-${(parseInt(payCount?.c) || 0) + 1}`, type: 'receipt',
               amount: l.paid, currency: 'PKR', fx_rate: 1, base_amount_pkr: l.paid,
               payment_method: payMethod, bank_reference: payment_reference || null,
+              bank_account_id: bank_account_id || null,
               payment_date: sale_date || trx.fn.now(), notes: `Local sale ${saleNo} — ${l.item_name}`,
               local_sale_id: sale.id, created_by: req.user?.id || null,
             });

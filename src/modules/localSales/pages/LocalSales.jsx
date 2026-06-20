@@ -394,10 +394,13 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   const createMutation = useCreateLocalSale();
   const { data: lots = [] } = useLotInventory({ status: 'Available' });
   const safeLots = useMemo(() => (Array.isArray(lots) ? lots : []).filter(l => (parseFloat(l.availableQty) || 0) > 0), [lots]);
+  const { bankAccountsList = [] } = useApp();
+  const bankOptions = useMemo(() => (Array.isArray(bankAccountsList) ? bankAccountsList : [])
+    .filter(b => (b.type || '') !== 'cash' && (b.isActive ?? b.is_active ?? true)), [bankAccountsList]);
 
   const [form, setForm] = useState({
     customer_id: '', buyer_name: '', buyer_phone: '',
-    payment_mode: 'cash', paid_amount: '',
+    payment_mode: 'cash', paid_amount: '', collection_location: 'Mill', bank_account_id: '', cheque_no: '',
     vehicle_no: '', driver_name: '', notes: '',
   });
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
@@ -444,17 +447,23 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   const grandTotal = cart.reduce((s, c) => s + c.total, 0);
 
   function reset() {
-    setForm({ customer_id: '', buyer_name: '', buyer_phone: '', payment_mode: 'cash', paid_amount: '', vehicle_no: '', driver_name: '', notes: '' });
+    setForm({ customer_id: '', buyer_name: '', buyer_phone: '', payment_mode: 'cash', paid_amount: '', collection_location: 'Mill', bank_account_id: '', cheque_no: '', vehicle_no: '', driver_name: '', notes: '' });
     setCart([]); setLine(EMPTY_LINE); setTag('All'); setStep(1);
   }
 
   async function handleSubmit() {
     if (!form.customer_id && !form.buyer_name) { addToast('Select a customer or enter buyer name', 'error'); return; }
     if (cart.length === 0) { addToast('Add at least one item to the sale', 'error'); return; }
+    if (form.payment_mode === 'bank_transfer' && !form.bank_account_id) { addToast('Select the bank account that received the payment', 'error'); return; }
+    if (form.payment_mode === 'cheque' && !form.cheque_no.trim()) { addToast('Enter the cheque number', 'error'); return; }
+    const isCashy = form.payment_mode === 'cash' || form.payment_mode === 'credit';
     try {
       const payload = {
         customer_id: form.customer_id || null, buyer_name: form.buyer_name || null, buyer_phone: form.buyer_phone || null,
         payment_mode: form.payment_mode, paid_amount: form.paid_amount === '' ? undefined : (parseFloat(form.paid_amount) || 0),
+        collection_location: isCashy ? (form.collection_location || 'Mill') : null,
+        bank_account_id: form.payment_mode === 'bank_transfer' && form.bank_account_id ? Number(form.bank_account_id) : null,
+        payment_reference: form.payment_mode === 'cheque' ? (form.cheque_no.trim() || null) : null,
         vehicle_no: form.vehicle_no || null, driver_name: form.driver_name || null, notes: form.notes || null,
         items: cart.map(c => ({
           lot_id: c.lot_id || null, item_name: c.item_name, item_type: c.item_type,
@@ -738,6 +747,37 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
           {(form.payment_mode === 'credit' || (form.paid_amount !== '' && parseFloat(form.paid_amount) < grandTotal)) && isWalkIn && (
             <p className="text-[11px] text-violet-600 mt-2">A balance is owed, so “{form.buyer_name || 'this buyer'}” will be saved as a customer to track the receivable.</p>
           )}
+
+          {/* Where collected / how — depends on the payment mode */}
+          {(form.payment_mode === 'cash' || form.payment_mode === 'credit') && (
+            <div className="mt-3">
+              <label className={LABEL}>{form.payment_mode === 'credit' ? 'Tracked / collected at' : 'Cash collected at'}</label>
+              <div className="flex gap-2">
+                {['Mill', 'Head Office'].map(loc => (
+                  <button key={loc} type="button" onClick={() => set('collection_location', loc)}
+                    className={`px-3 py-2 text-sm font-medium rounded-lg border ${form.collection_location === loc ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>{loc}</button>
+                ))}
+              </div>
+            </div>
+          )}
+          {form.payment_mode === 'bank_transfer' && (
+            <div className="mt-3">
+              <label className={LABEL}>Bank Account *</label>
+              <select value={form.bank_account_id} onChange={e => set('bank_account_id', e.target.value)} className={SELECT}>
+                <option value="">Select bank account…</option>
+                {bankOptions.map(b => (
+                  <option key={b.id} value={b.id}>{b.name}{(b.bankName || b.bank_name) ? ` — ${b.bankName || b.bank_name}` : ''}{b.currency && b.currency !== 'PKR' ? ` (${b.currency})` : ''}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          {form.payment_mode === 'cheque' && (
+            <div className="mt-3">
+              <label className={LABEL}>Cheque Number *</label>
+              <input value={form.cheque_no} onChange={e => set('cheque_no', e.target.value)} className={INPUT} placeholder="e.g. 0012345" />
+            </div>
+          )}
+
           <p className="text-[11px] text-gray-400 mt-2">The amount received is split across the items automatically; any balance becomes a receivable for this buyer.</p>
           <div className="grid grid-cols-1 gap-4 mt-4">
             <div>
