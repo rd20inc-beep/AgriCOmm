@@ -23,6 +23,7 @@ export default function StockSummary() {
   const [lowOnly, setLowOnly] = useState(false);
   const [editId, setEditId] = useState(null);
   const [editVal, setEditVal] = useState('');
+  const [detailRow, setDetailRow] = useState(null);
 
   const queryKey = ['stock-summary', entity, status];
   const { data = [], isLoading } = useQuery({
@@ -129,10 +130,10 @@ export default function StockSummary() {
                   return (
                     <tr key={r.group_id || r.group_name} className="border-b border-gray-50 last:border-0 hover:bg-blue-50/30">
                       <td className="px-4 py-2.5 font-medium text-gray-900">
-                        <span className="inline-flex items-center gap-2">
-                          {r.group_name || 'Unspecified'}
+                        <button onClick={() => setDetailRow(r)} className="inline-flex items-center gap-2 text-left hover:text-blue-600 group/name">
+                          <span className="group-hover/name:underline">{r.group_name || 'Unspecified'}</span>
                           {r.isLow && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-700 inline-flex items-center gap-0.5"><AlertTriangle size={10} /> LOW</span>}
-                        </span>
+                        </button>
                       </td>
                       <td className="px-4 py-2.5 text-right text-gray-500 tabular-nums">{n(r.lot_count)}</td>
                       <td className={`px-4 py-2.5 text-right font-medium tabular-nums ${r.isLow ? 'text-red-600' : 'text-gray-900'}`}>
@@ -159,7 +160,7 @@ export default function StockSummary() {
                       </td>
                       <td className="px-4 py-2.5 text-right font-semibold text-gray-900 tabular-nums">{fmtPKR(r.total_value)}</td>
                       <td className="px-4 py-2.5 text-right">
-                        <button onClick={() => navigate('/lot-inventory')} title="View lots"><ArrowRight className="w-4 h-4 text-gray-300 hover:text-blue-500 inline" /></button>
+                        <button onClick={() => setDetailRow(r)} title="See what's in stock"><ArrowRight className="w-4 h-4 text-gray-300 hover:text-blue-500 inline" /></button>
                       </td>
                     </tr>
                   );
@@ -188,6 +189,107 @@ export default function StockSummary() {
           <span className="ml-2"><span className="px-1 py-0.5 rounded bg-red-100 text-red-700 font-semibold">LOW</span> means on hand has dropped below the reorder level you set.</span>
         </p>
       )}
+
+      {detailRow && (
+        <ProductStockDrawer row={detailRow} entity={entity} status={status} onClose={() => setDetailRow(null)} onOpenLot={(id) => navigate(`/lot-inventory/${id}`)} />
+      )}
+    </div>
+  );
+}
+
+const LOT_STATUS_STYLE = {
+  Available: 'bg-emerald-100 text-emerald-700',
+  Reserved: 'bg-amber-100 text-amber-700',
+  Depleted: 'bg-gray-100 text-gray-500',
+  Sold: 'bg-gray-100 text-gray-500',
+};
+
+// Drill-down: every stock batch (lot) sitting behind a product, so "what's in
+// stock of this heading" is one click away — without leaving the summary.
+function ProductStockDrawer({ row, entity, status, onClose, onOpenLot }) {
+  const { data: lots = [], isLoading } = useQuery({
+    queryKey: ['product-lots', row.group_id, entity, status],
+    queryFn: async () => {
+      const res = await lotInventoryApi.listLots({
+        product_id: row.group_id,
+        limit: 200,
+        sort_by: 'created_at',
+        sort_dir: 'desc',
+        ...(status && status !== 'all' ? { status } : {}),
+        ...(entity ? { entity } : {}),
+      });
+      return res?.data?.lots || [];
+    },
+    enabled: !!row.group_id,
+    staleTime: 10 * 1000,
+  });
+
+  const onHandKg = (l) => (n(l.net_weight_kg) > 0 ? n(l.net_weight_kg) : n(l.qty) * 1000);
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end">
+      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
+      <div className="relative bg-white h-full shadow-xl flex flex-col w-full max-w-xl">
+        <div className="flex items-start justify-between px-5 py-4 border-b border-gray-200">
+          <div>
+            <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+              <Boxes size={17} className="text-blue-600" /> {row.group_name || 'Unspecified'}
+            </h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {fmtMTnum(row.onHandMT)} on hand · {fmtMT(row.available_kg)} free to sell · {fmtPKR(row.total_value)}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-2">
+          {isLoading ? (
+            <p className="text-sm text-gray-400 py-12 text-center">Loading stock batches…</p>
+          ) : lots.length === 0 ? (
+            <p className="text-sm text-gray-400 py-12 text-center">No stock batches for this filter.</p>
+          ) : (
+            lots.map((l) => {
+              const value = n(l.landed_cost_total) > 0 ? n(l.landed_cost_total) : n(l.total_value);
+              const bags = Math.round(n(l.total_bags));
+              return (
+                <button key={l.id} onClick={() => onOpenLot(l.id)}
+                  className="w-full text-left border border-gray-200 rounded-lg p-3 hover:border-blue-400 hover:bg-blue-50/30 transition-colors">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-gray-900 text-sm truncate">{l.lot_no || `Lot ${l.id}`}</span>
+                    <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium shrink-0 ${LOT_STATUS_STYLE[l.status] || 'bg-gray-100 text-gray-600'}`}>{l.status || '—'}</span>
+                  </div>
+                  <div className="text-[11px] text-gray-500 mt-0.5 flex flex-wrap gap-x-2">
+                    {(l.variety || l.grade) && <span>{[l.variety, l.grade].filter(Boolean).join(' · ')}</span>}
+                    <span className="capitalize">{l.entity || 'mill'}{l.warehouse_name ? ` · ${l.warehouse_name}` : ''}</span>
+                    {l.supplier_name && <span>· {l.supplier_name}</span>}
+                  </div>
+                  <div className="grid grid-cols-4 gap-2 mt-2 text-xs">
+                    <Stat label="On hand" value={fmtMT(onHandKg(l))} sub={bags > 0 ? `${bags.toLocaleString()} bags` : null} />
+                    <Stat label="Free" value={fmtMT(n(l.available_qty) * 1000)} tone="emerald" />
+                    <Stat label="Committed" value={n(l.reserved_qty) > 0 ? fmtMT(n(l.reserved_qty) * 1000) : '—'} tone={n(l.reserved_qty) > 0 ? 'amber' : null} />
+                    <Stat label="Value" value={fmtPKR(value)} align="right" />
+                  </div>
+                </button>
+              );
+            })
+          )}
+        </div>
+
+        <div className="border-t border-gray-200 px-5 py-3 text-[11px] text-gray-400 text-center">
+          Tap any batch to open its full lot detail.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Stat({ label, value, sub, tone, align }) {
+  const tones = { emerald: 'text-emerald-700', amber: 'text-amber-700' };
+  return (
+    <div className={align === 'right' ? 'text-right' : ''}>
+      <div className="text-[10px] uppercase tracking-wide text-gray-400">{label}</div>
+      <div className={`font-medium tabular-nums ${tones[tone] || 'text-gray-800'}`}>{value}</div>
+      {sub && <div className="text-[10px] text-gray-400">{sub}</div>}
     </div>
   );
 }

@@ -267,7 +267,7 @@ module.exports = {
   // ─── List Lots ───
   async listLots(req, res) {
     try {
-      const { page = 1, limit = 50, type, entity, warehouse_id, status, supplier_id, variety, search, sort_by = 'created_at', sort_dir = 'desc' } = req.query;
+      const { page = 1, limit = 50, type, entity, warehouse_id, status, supplier_id, product_id, variety, search, sort_by = 'created_at', sort_dir = 'desc' } = req.query;
       const offset = (page - 1) * limit;
 
       let query = db('inventory_lots as l')
@@ -287,6 +287,7 @@ module.exports = {
       if (warehouse_id) query = query.where('l.warehouse_id', warehouse_id);
       if (status) query = query.where('l.status', status);
       if (supplier_id) query = query.where('l.supplier_id', supplier_id);
+      if (product_id) query = query.where('l.product_id', product_id);
       if (variety) query = query.where('l.variety', 'ilike', `%${variety}%`);
       if (search) {
         query = query.where(function () {
