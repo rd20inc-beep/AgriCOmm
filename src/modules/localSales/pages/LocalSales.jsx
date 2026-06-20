@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useLocalSales, useLocalSalesSummary, useCreateLocalSale, useAcceptLocalSalePayment, useLotInventory } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
+import { useMillStoreItems } from '../../millStore/api/queries';
 import { LoadingSpinner, ErrorState, EmptyState } from '../../../components/LoadingState';
 import StatusBadge from '../../../components/StatusBadge';
 import Modal from '../../../components/Modal';
@@ -192,6 +193,10 @@ export default function LocalSales() {
             <tbody className="divide-y divide-gray-100">
               {grouped.map(g => {
                 const qtyCell = (kg) => <>{fromKg(kg, displayUnit).toLocaleString()}<span className="text-xs text-gray-400 ml-1">{displayUnit === 'katta' ? 'kt' : displayUnit}</span></>;
+                const isPkgRow = (s) => s.quantityUnit === 'pcs' || s.itemType === 'packaging' || !!s.millItemId;
+                const rowQty = (s) => isPkgRow(s)
+                  ? <>{Math.round(parseFloat(s.quantityKg) || 0).toLocaleString()}<span className="text-xs text-gray-400 ml-1">pcs</span></>
+                  : qtyCell(parseFloat(s.quantityKg) || 0);
                 // Single-item sale → plain row.
                 if (g.items.length === 1) {
                   const s = g.items[0];
@@ -201,7 +206,7 @@ export default function LocalSales() {
                       <td className="py-2.5 px-4 text-gray-600 text-xs">{s.saleDate ? new Date(s.saleDate).toLocaleDateString('en-GB', { day:'2-digit', month:'short' }) : '—'}</td>
                       <td className="py-2.5 px-4 text-gray-900"><PartyLink type="customer" id={s.customerId} name={s.customerName || s.buyerName} /></td>
                       <td className="py-2.5 px-4 text-gray-700">{s.itemName}</td>
-                      <td className="py-2.5 px-4 text-right font-medium tabular-nums">{qtyCell(parseFloat(s.quantityKg) || 0)}</td>
+                      <td className="py-2.5 px-4 text-right font-medium tabular-nums">{rowQty(s)}</td>
                       <td className="py-2.5 px-4 text-right text-xs tabular-nums">{fmtPKR(s.ratePerKg)}/kg</td>
                       <td className="py-2.5 px-4 text-right font-bold tabular-nums">{fmtPKR(s.totalAmount)}</td>
                       <td className="py-2.5 px-4 text-center"><StatusBadge status={s.paymentStatus} /></td>
@@ -235,7 +240,7 @@ export default function LocalSales() {
                         <td className="py-2 px-4"></td>
                         <td className="py-2 px-4"></td>
                         <td className="py-2 px-4 text-gray-700 text-sm">{s.itemName}</td>
-                        <td className="py-2 px-4 text-right text-sm tabular-nums">{qtyCell(parseFloat(s.quantityKg) || 0)}</td>
+                        <td className="py-2 px-4 text-right text-sm tabular-nums">{rowQty(s)}</td>
                         <td className="py-2 px-4 text-right text-xs tabular-nums">{fmtPKR(s.ratePerKg)}/kg</td>
                         <td className="py-2 px-4 text-right font-semibold text-sm tabular-nums">{fmtPKR(s.totalAmount)}</td>
                         <td className="py-2 px-4 text-center"><StatusBadge status={s.paymentStatus} /></td>
@@ -269,7 +274,7 @@ export default function LocalSales() {
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div><span className="text-gray-500">Buyer:</span> <span className="font-medium"><PartyLink type="customer" id={selectedSale.customerId} name={selectedSale.customerName || selectedSale.buyerName} /></span></div>
               <div><span className="text-gray-500">Item:</span> <span className="font-medium">{selectedSale.itemName}</span></div>
-              <div><span className="text-gray-500">Qty:</span> <span className="font-medium">{Math.round(parseFloat(selectedSale.quantityKg) || 0).toLocaleString()} KG</span></div>
+              <div><span className="text-gray-500">Qty:</span> <span className="font-medium">{Math.round(parseFloat(selectedSale.quantityKg) || 0).toLocaleString()} {(selectedSale.quantityUnit === 'pcs' || selectedSale.itemType === 'packaging' || selectedSale.millItemId) ? 'pcs' : 'KG'}</span></div>
               <div><span className="text-gray-500">Rate:</span> <span className="font-medium">{fmtPKR(selectedSale.ratePerKg)}/KG</span></div>
               <div><span className="text-gray-500">Vehicle:</span> <span className="font-medium font-mono">{selectedSale.vehicleNo || '—'}</span></div>
               <div><span className="text-gray-500">Driver:</span> <span className="font-medium">{selectedSale.driverName || '—'}</span></div>
@@ -424,6 +429,9 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   const { bankAccountsList = [] } = useApp();
   const bankOptions = useMemo(() => (Array.isArray(bankAccountsList) ? bankAccountsList : [])
     .filter(b => (b.type || '') !== 'cash' && (b.isActive ?? b.is_active ?? true)), [bankAccountsList]);
+  // Mill-store packaging items (e.g. empty katta) are sellable too — count-based.
+  const { data: pkgItemsRaw = [] } = useMillStoreItems({ category: 'packaging', limit: 200 });
+  const pkgItems = useMemo(() => (Array.isArray(pkgItemsRaw) ? pkgItemsRaw : []).filter(i => Number(i.quantity_available) > 0), [pkgItemsRaw]);
 
   const [form, setForm] = useState({
     customer_id: '', buyer_name: '', buyer_phone: '',
@@ -436,37 +444,57 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   const isWalkIn = !form.customer_id;
 
   // Cart of line items + the line currently being built.
-  const EMPTY_LINE = { lot_id: '', item_name: '', item_type: '', quantity_input: '', quantity_unit: 'katta', bag_weight_kg: '50', rate_input: '', rate_unit: 'katta' };
+  const EMPTY_LINE = { lot_id: '', mill_item_id: '', item_name: '', item_type: '', quantity_input: '', quantity_unit: 'katta', bag_weight_kg: '50', rate_input: '', rate_unit: 'katta' };
   const [cart, setCart] = useState([]);
   const [line, setLine] = useState(EMPTY_LINE);
   const setL = (k, v) => setLine(p => ({ ...p, [k]: v }));
   const [tag, setTag] = useState('All');
 
-  // Tags are the categories actually present in sellable inventory.
+  // Tags = product categories in stock, plus "Packaging" for sellable mill-store
+  // items (empty katta) when any are on hand.
   const tags = useMemo(() => {
     const present = new Set(safeLots.map(lotCategory));
-    return ['All', ...CAT_ORDER.filter(c => present.has(c))];
-  }, [safeLots]);
+    const base = ['All', ...CAT_ORDER.filter(c => present.has(c))];
+    if (pkgItems.length) base.push('Packaging');
+    return base;
+  }, [safeLots, pkgItems]);
+  const isPkg = tag === 'Packaging' || !!line.mill_item_id; // count-based line
   const filteredLots = useMemo(() => (tag === 'All' ? safeLots : safeLots.filter(l => lotCategory(l) === tag)), [safeLots, tag]);
 
   const lineBagWt = parseFloat(line.bag_weight_kg) || 50;
-  const lineQtyKg = toKg(line.quantity_input, line.quantity_unit, lineBagWt);
-  const lineRatePerKg = rateToPerKg(line.rate_input, line.rate_unit, lineBagWt);
-  const lineTotal = Math.round(lineQtyKg * lineRatePerKg);
+  const lineCount = parseFloat(line.quantity_input) || 0;
+  const lineRate = parseFloat(line.rate_input) || 0;
+  const lineQtyKg = isPkg ? lineCount : toKg(line.quantity_input, line.quantity_unit, lineBagWt);
+  const lineRatePerKg = isPkg ? lineRate : rateToPerKg(line.rate_input, line.rate_unit, lineBagWt);
+  const lineTotal = Math.round(isPkg ? lineCount * lineRate : lineQtyKg * lineRatePerKg);
   const selectedLot = safeLots.find(l => String(l.id) === String(line.lot_id));
+  const selectedPkg = pkgItems.find(i => String(i.id) === String(line.mill_item_id));
   const cartQtyForLot = (lotId) => cart.filter(c => lotId && String(c.lot_id) === String(lotId)).reduce((s, c) => s + c.qtyKg, 0);
+  const cartCountForPkg = (mid) => cart.filter(c => mid && String(c.mill_item_id) === String(mid)).reduce((s, c) => s + (c.count || 0), 0);
   const lineAvailKg = selectedLot ? (parseFloat(selectedLot.availableQty) || 0) * 1000 - cartQtyForLot(selectedLot.id) : null;
-  const lineOverSell = lineAvailKg != null && lineQtyKg > lineAvailKg + 0.01;
+  const lineAvailCount = selectedPkg ? Number(selectedPkg.quantity_available) - cartCountForPkg(selectedPkg.id) : null;
+  const lineOverSell = isPkg
+    ? (lineAvailCount != null && lineCount > lineAvailCount + 0.01)
+    : (lineAvailKg != null && lineQtyKg > lineAvailKg + 0.01);
 
   function pickLot(lotId) {
     const lot = safeLots.find(l => String(l.id) === String(lotId));
-    setLine(p => ({ ...p, lot_id: lotId, item_name: lot ? (lot.itemName || '') : p.item_name, item_type: lot ? (lot.type || '') : p.item_type }));
+    setLine(p => ({ ...p, lot_id: lotId, mill_item_id: '', item_name: lot ? (lot.itemName || '') : p.item_name, item_type: lot ? (lot.type || '') : p.item_type }));
+  }
+  function pickPkg(itemId) {
+    const it = pkgItems.find(i => String(i.id) === String(itemId));
+    setLine(p => ({ ...p, mill_item_id: itemId, lot_id: '', item_name: it ? it.name : p.item_name, item_type: 'packaging' }));
   }
 
   function addLine() {
     if (!line.item_name || !(parseFloat(line.quantity_input) > 0) || !(parseFloat(line.rate_input) > 0)) { addToast('Item, quantity and rate are required', 'error'); return; }
-    if (lineOverSell) { addToast(`Only ${Math.round(lineAvailKg).toLocaleString()} kg left for this lot`, 'error'); return; }
-    setCart(c => [...c, { ...line, qtyKg: lineQtyKg, ratePerKg: lineRatePerKg, total: lineTotal, lotNo: selectedLot?.lotNo || null, category: selectedLot ? lotCategory(selectedLot) : (line.item_type || 'Other') }]);
+    if (lineOverSell) { addToast(isPkg ? `Only ${Math.round(lineAvailCount).toLocaleString()} in stock` : `Only ${Math.round(lineAvailKg).toLocaleString()} kg left for this lot`, 'error'); return; }
+    setCart(c => [...c, {
+      ...line, qtyKg: lineQtyKg, ratePerKg: lineRatePerKg, total: lineTotal,
+      isMillItem: isPkg, count: isPkg ? lineCount : undefined,
+      lotNo: isPkg ? null : (selectedLot?.lotNo || null),
+      category: isPkg ? 'Packaging' : (selectedLot ? lotCategory(selectedLot) : (line.item_type || 'Other')),
+    }]);
     setLine(EMPTY_LINE);
   }
   const removeLine = (i) => setCart(c => c.filter((_, idx) => idx !== i));
@@ -492,7 +520,10 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
         bank_account_id: form.payment_mode === 'bank_transfer' && form.bank_account_id ? Number(form.bank_account_id) : null,
         payment_reference: form.payment_mode === 'cheque' ? (form.cheque_no.trim() || null) : null,
         vehicle_no: form.vehicle_no || null, driver_name: form.driver_name || null, notes: form.notes || null,
-        items: cart.map(c => ({
+        items: cart.map(c => c.isMillItem ? ({
+          mill_item_id: Number(c.mill_item_id), item_name: c.item_name,
+          quantity_input: c.count, rate_input: parseFloat(c.rate_input),
+        }) : ({
           lot_id: c.lot_id || null, item_name: c.item_name, item_type: c.item_type,
           quantity_input: parseFloat(c.quantity_input), quantity_unit: c.quantity_unit, bag_weight_kg: parseFloat(c.bag_weight_kg),
           rate_input: parseFloat(c.rate_input), rate_unit: c.rate_unit,
@@ -626,7 +657,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
           {/* Category tags from inventory */}
           <div className="flex flex-wrap gap-1.5 mb-3">
             {tags.map(t => (
-              <button key={t} type="button" onClick={() => { setTag(t); setL('lot_id', ''); }}
+              <button key={t} type="button" onClick={() => { setTag(t); setLine(p => ({ ...p, lot_id: '', mill_item_id: '' })); }}
                 className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${tag === t ? 'bg-gray-900 text-white border-gray-900' : `border-transparent ${t === 'All' ? 'bg-gray-100 text-gray-600' : CAT_COLOR[t] || 'bg-gray-100 text-gray-600'} hover:opacity-80`}`}>
                 {t}
               </button>
@@ -635,16 +666,27 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
 
           <div className="rounded-xl border border-gray-200 p-3 space-y-3 bg-gray-50/40">
             <div>
-              <label className={LABEL}>Select from Inventory{tag !== 'All' ? ` — ${tag}` : ''}</label>
-              <select value={line.lot_id} onChange={e => pickLot(e.target.value)} className={SELECT}>
-                <option value="">No lot (manual entry)</option>
-                {filteredLots.map(l => {
-                  const avail = (parseFloat(l.availableQty) || 0) * 1000 - cartQtyForLot(l.id);
-                  const costKg = parseFloat(l.landedCostPerKg) || parseFloat(l.ratePerKg) || (parseFloat(l.costPerUnit) || 0) / 1000;
-                  const costLabel = costKg > 0 ? ` · Rs ${Math.round(costKg).toLocaleString()}/kg cost` : '';
-                  return <option key={l.id} value={l.id} disabled={avail <= 0}>{l.lotNo} — {l.itemName} ({Math.round(avail).toLocaleString()} KG){costLabel}</option>;
-                })}
-              </select>
+              <label className={LABEL}>{tag === 'Packaging' ? 'Select Packaging Item' : `Select from Inventory${tag !== 'All' ? ` — ${tag}` : ''}`}</label>
+              {tag === 'Packaging' ? (
+                <select value={line.mill_item_id} onChange={e => pickPkg(e.target.value)} className={SELECT}>
+                  <option value="">Select item…</option>
+                  {pkgItems.map(i => {
+                    const avail = Number(i.quantity_available) - cartCountForPkg(i.id);
+                    const cost = Number(i.avg_cost_per_unit) || 0;
+                    return <option key={i.id} value={i.id} disabled={avail <= 0}>{i.name} ({Math.round(avail).toLocaleString()} {i.unit || 'pcs'}){cost > 0 ? ` · Rs ${Math.round(cost).toLocaleString()}/${i.unit || 'pc'} cost` : ''}</option>;
+                  })}
+                </select>
+              ) : (
+                <select value={line.lot_id} onChange={e => pickLot(e.target.value)} className={SELECT}>
+                  <option value="">No lot (manual entry)</option>
+                  {filteredLots.map(l => {
+                    const avail = (parseFloat(l.availableQty) || 0) * 1000 - cartQtyForLot(l.id);
+                    const costKg = parseFloat(l.landedCostPerKg) || parseFloat(l.ratePerKg) || (parseFloat(l.costPerUnit) || 0) / 1000;
+                    const costLabel = costKg > 0 ? ` · Rs ${Math.round(costKg).toLocaleString()}/kg cost` : '';
+                    return <option key={l.id} value={l.id} disabled={avail <= 0}>{l.lotNo} — {l.itemName} ({Math.round(avail).toLocaleString()} KG){costLabel}</option>;
+                  })}
+                </select>
+              )}
             </div>
             <div>
               <label className={LABEL}>Item Name *</label>
@@ -652,31 +694,42 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className={LABEL}>Quantity *</label>
+                <label className={LABEL}>Quantity *{isPkg ? ' (pcs)' : ''}</label>
                 <div className="flex gap-1.5">
-                  <input type="number" value={line.quantity_input} onChange={e => setL('quantity_input', e.target.value)} className={INPUT} placeholder="Qty" />
-                  <select value={line.quantity_unit} onChange={e => setLine(p => ({ ...p, quantity_unit: e.target.value, rate_unit: e.target.value }))} className="w-24 border border-gray-300 rounded-lg px-2 py-2.5 text-sm bg-white">
-                    <option value="katta">Katta</option><option value="maund">Maund</option><option value="kg">KG</option><option value="ton">Ton</option>
-                  </select>
+                  <input type="number" value={line.quantity_input} onChange={e => setL('quantity_input', e.target.value)} className={INPUT} placeholder={isPkg ? 'No. of katta' : 'Qty'} />
+                  {!isPkg && (
+                    <select value={line.quantity_unit} onChange={e => setLine(p => ({ ...p, quantity_unit: e.target.value, rate_unit: e.target.value }))} className="w-24 border border-gray-300 rounded-lg px-2 py-2.5 text-sm bg-white">
+                      <option value="katta">Katta</option><option value="maund">Maund</option><option value="kg">KG</option><option value="ton">Ton</option>
+                    </select>
+                  )}
                 </div>
               </div>
               <div>
-                <label className={LABEL}>Rate *</label>
+                <label className={LABEL}>Rate *{isPkg ? ' (Rs each)' : ''}</label>
                 <div className="flex gap-1.5">
                   <input type="number" value={line.rate_input} onChange={e => setL('rate_input', e.target.value)} className={INPUT} placeholder="Rate" />
-                  <select value={line.rate_unit} onChange={e => setL('rate_unit', e.target.value)} className="w-24 border border-gray-300 rounded-lg px-2 py-2.5 text-sm bg-white">
-                    <option value="katta">/Katta</option><option value="maund">/Maund</option><option value="kg">/KG</option><option value="ton">/Ton</option>
-                  </select>
+                  {!isPkg && (
+                    <select value={line.rate_unit} onChange={e => setL('rate_unit', e.target.value)} className="w-24 border border-gray-300 rounded-lg px-2 py-2.5 text-sm bg-white">
+                      <option value="katta">/Katta</option><option value="maund">/Maund</option><option value="kg">/KG</option><option value="ton">/Ton</option>
+                    </select>
+                  )}
                 </div>
               </div>
             </div>
             <div className="flex items-end gap-2">
-              <div className="w-32">
-                <label className={LABEL}>Katta Wt (kg)</label>
-                <input type="number" value={line.bag_weight_kg} onChange={e => setL('bag_weight_kg', e.target.value)} className={INPUT} />
-              </div>
+              {!isPkg && (
+                <div className="w-32">
+                  <label className={LABEL}>Katta Wt (kg)</label>
+                  <input type="number" value={line.bag_weight_kg} onChange={e => setL('bag_weight_kg', e.target.value)} className={INPUT} />
+                </div>
+              )}
               <div className="flex-1 text-xs">
-                {lineAvailKg != null && (
+                {isPkg && lineAvailCount != null && (
+                  <span className={lineOverSell ? 'text-red-600 font-semibold' : 'text-gray-500'}>
+                    {lineOverSell ? `Only ${Math.round(lineAvailCount).toLocaleString()} in stock` : `In stock: ${Math.round(lineAvailCount).toLocaleString()} ${selectedPkg?.unit || 'pcs'}`}
+                  </span>
+                )}
+                {!isPkg && lineAvailKg != null && (
                   <span className={lineOverSell ? 'text-red-600 font-semibold' : 'text-gray-500'}>
                     {lineOverSell ? `Only ${Math.round(lineAvailKg).toLocaleString()} kg left` : `In stock: ${Math.round(lineAvailKg).toLocaleString()} kg`}
                   </span>
@@ -706,7 +759,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                 <thead>
                   <tr className="bg-gray-50 text-left text-[11px] uppercase text-gray-500">
                     <th className="px-3 py-2">Item</th><th className="px-3 py-2 text-right">Qty</th>
-                    <th className="px-3 py-2 text-right">Rate/kg</th><th className="px-3 py-2 text-right">Total</th><th className="px-3 py-2"></th>
+                    <th className="px-3 py-2 text-right">Rate</th><th className="px-3 py-2 text-right">Total</th><th className="px-3 py-2"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -719,8 +772,8 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                         </div>
                         {c.lotNo && <div className="text-[11px] text-gray-400">{c.lotNo}</div>}
                       </td>
-                      <td className="px-3 py-2 text-right tabular-nums">{Math.round(c.qtyKg).toLocaleString()} kg</td>
-                      <td className="px-3 py-2 text-right tabular-nums">Rs {Math.round(c.ratePerKg).toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{Math.round(c.qtyKg).toLocaleString()} {c.isMillItem ? 'pcs' : 'kg'}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">Rs {Math.round(c.ratePerKg).toLocaleString()}{c.isMillItem ? ' ea' : '/kg'}</td>
                       <td className="px-3 py-2 text-right font-semibold tabular-nums">Rs {c.total.toLocaleString()}</td>
                       <td className="px-3 py-2 text-right"><button onClick={() => removeLine(i)} className="text-gray-300 hover:text-red-500"><X size={15} /></button></td>
                     </tr>
@@ -744,7 +797,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
           <div className="px-3 py-2 bg-gray-50 text-[11px] uppercase text-gray-500 font-semibold">{cart.length} item{cart.length > 1 ? 's' : ''}</div>
           {cart.map((c, i) => (
             <div key={i} className="flex items-center justify-between px-3 py-2 border-t border-gray-100 text-sm">
-              <span className="text-gray-700"><span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold mr-1.5 ${CAT_COLOR[c.category] || 'bg-gray-100 text-gray-600'}`}>{c.category}</span>{c.item_name} · {Math.round(c.qtyKg).toLocaleString()} kg</span>
+              <span className="text-gray-700"><span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold mr-1.5 ${CAT_COLOR[c.category] || 'bg-gray-100 text-gray-600'}`}>{c.category}</span>{c.item_name} · {Math.round(c.qtyKg).toLocaleString()} {c.isMillItem ? 'pcs' : 'kg'}</span>
               <span className="font-semibold tabular-nums">Rs {c.total.toLocaleString()}</span>
             </div>
           ))}

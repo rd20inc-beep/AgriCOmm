@@ -347,6 +347,16 @@ async function deleteLocalSale(trx, req, id) {
       });
     }
   }
+  // Packaging (e.g. katta) sale → restock mill_stock by the count sold.
+  if (sale.mill_item_id) {
+    const count = num(sale.quantity_kg); // count stored in quantity_kg for mill-item lines
+    const ms = await trx('mill_stock').where({ item_id: sale.mill_item_id, warehouse_id: null }).first();
+    if (ms) await trx('mill_stock').where('id', ms.id).update({ quantity_available: num(ms.quantity_available) + count, updated_at: trx.fn.now() });
+    await trx('mill_stock_movements').insert({
+      item_id: sale.mill_item_id, warehouse_id: null, movement_type: 'return', quantity: count,
+      reference_type: 'local_sale_reversal', reference_id: id, reason: `Reversed sale ${sale.sale_no}`, performed_by: req.user?.id || null,
+    });
+  }
   // Delete the sale's stock movement + ledger rows.
   await trx('inventory_movements').where('linked_ref', sale.sale_no).whereIn('movement_type', ['local_sale', 'export_dispatch']).del();
   await trx('lot_transactions').where('reference_no', sale.sale_no).whereIn('transaction_type', ['local_sale_out', 'export_dispatch_out']).del();

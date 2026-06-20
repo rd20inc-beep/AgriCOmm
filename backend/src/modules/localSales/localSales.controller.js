@@ -130,6 +130,18 @@ module.exports = {
         if (!it.item_name || !it.quantity_input || !it.rate_input) {
           const e = new Error(`Item ${i + 1}: item_name, quantity and rate are required.`); e.status = 400; throw e;
         }
+        // A mill-store packaging line (e.g. empty katta) is COUNT-based: pieces ×
+        // rate, deducting mill_stock — no weight/unit conversion.
+        if (it.mill_item_id) {
+          const count = parseFloat(it.quantity_input) || 0;
+          const rate = parseFloat(it.rate_input) || 0;
+          return {
+            isMillItem: true, mill_item_id: it.mill_item_id, lot_id: null,
+            item_name: it.item_name, item_type: 'packaging', count,
+            quantity_input: count, quantity_unit: 'pcs', rate_input: rate, rate_unit: 'pcs',
+            bagWt: 0, qtyKg: count, ratePerKg: rate, total: uc.round2(count * rate),
+          };
+        }
         const bagWt = parseFloat(it.bag_weight_kg) || 50;
         const qtyKg = uc.toKg(it.quantity_input, it.quantity_unit || 'kg', bagWt);
         const ratePerKg = uc.rateToPerKg(it.rate_input, it.rate_unit || 'kg', bagWt);
@@ -188,7 +200,25 @@ module.exports = {
           if (!groupNo) groupNo = saleNo; // first line's number identifies the group
 
           let costPerKg = 0, landedCostTotal = 0, lotNo = null;
-          if (l.lot_id) {
+          if (l.isMillItem) {
+            // Sell a mill-store packaging item (empty katta) — deduct mill_stock.
+            const mi = await trx('mill_items').where({ id: l.mill_item_id }).first();
+            if (!mi) throw new Error('Packaging item not found');
+            const ms = await trx('mill_stock').where({ item_id: l.mill_item_id, warehouse_id: null }).first();
+            const avail = parseFloat(ms && ms.quantity_available) || 0;
+            if (l.count > avail + 0.01) {
+              const e = new Error(`Insufficient ${mi.name}: ${Math.round(avail)} in stock, ${l.count} needed.`); e.status = 400; throw e;
+            }
+            await trx('mill_stock').where({ id: ms.id }).update({
+              quantity_available: trx.raw('GREATEST(quantity_available - ?, 0)', [l.count]), updated_at: trx.fn.now(),
+            });
+            await trx('mill_stock_movements').insert({
+              item_id: l.mill_item_id, warehouse_id: null, movement_type: 'consumption', quantity: -l.count,
+              reference_type: 'local_sale', reference_id: null, reason: `Sold ${l.count} ${mi.unit || 'pcs'} — ${saleNo}`, performed_by: req.user?.id || null,
+            });
+            costPerKg = parseFloat(mi.avg_cost_per_unit) || 0; // per piece
+            landedCostTotal = uc.round2(l.count * costPerKg);
+          } else if (l.lot_id) {
             const lot = await trx('inventory_lots').where({ id: l.lot_id }).first();
             if (!lot) throw new Error('Inventory lot not found');
             const availKg = (parseFloat(lot.available_qty) || 0) * 1000;
@@ -221,10 +251,10 @@ module.exports = {
             sale_date: sale_date || new Date().toISOString().split('T')[0],
             entity: 'mill', customer_id: resolvedCustomerId,
             buyer_name: buyer_name || null, buyer_phone: buyer_phone || null, buyer_address: buyer_address || null,
-            lot_id: l.lot_id, lot_no: lotNo,
+            lot_id: l.lot_id, lot_no: lotNo, mill_item_id: l.mill_item_id || null,
             item_name: l.item_name, item_type: l.item_type,
             quantity_unit: l.quantity_unit, quantity_input: l.quantity_input, quantity_kg: l.qtyKg,
-            quantity_bags: Math.round(l.qtyKg / l.bagWt), bag_weight_kg: l.bagWt,
+            quantity_bags: l.isMillItem ? l.count : (l.bagWt > 0 ? Math.round(l.qtyKg / l.bagWt) : 0), bag_weight_kg: l.isMillItem ? null : l.bagWt,
             rate_unit: l.rate_unit, rate_input: l.rate_input, rate_per_kg: l.ratePerKg,
             total_amount: l.total, currency: 'PKR',
             payment_mode: payment_mode || 'cash', payment_status: paymentStatus,

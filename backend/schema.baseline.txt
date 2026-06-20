@@ -900,6 +900,7 @@ COL local_sales.landed_cost_total:numeric:NULL
 COL local_sales.lot_id:integer:NULL
 COL local_sales.lot_no:character varying:NULL
 COL local_sales.margin_pct:numeric:NULL
+COL local_sales.mill_item_id:integer:NULL
 COL local_sales.notes:text:NULL
 COL local_sales.paid_amount:numeric:NOT NULL
 COL local_sales.payment_mode:character varying:NULL
@@ -2233,6 +2234,7 @@ CON local_sales.chk_local_sales_total_amount_nonneg(c)
 CON local_sales.local_sales_created_by_foreign(f)
 CON local_sales.local_sales_customer_id_foreign(f)
 CON local_sales.local_sales_lot_id_foreign(f)
+CON local_sales.local_sales_mill_item_id_foreign(f)
 CON local_sales.local_sales_pkey(p)
 CON local_sales.local_sales_sale_no_unique(u)
 CON lot_source_mapping.chk_lot_source_mapping_cost_share_amount_nn(c)
