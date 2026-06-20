@@ -2550,6 +2550,68 @@ const inventoryService = {
   },
 
   /**
+   * Katta (bag) accounting for a milled batch. The raw rice arrives in katta;
+   * milling FREES those empty katta into packaging stock, and the outputs
+   * (finished + by-products) are PACKED into katta, consuming them back. One
+   * generic "Katta" mill_item holds the running count; the per-katta capacity is
+   * the raw's effective bag size (Σ raw kg ÷ Σ raw bags). Idempotent: re-running
+   * (a re-recorded yield) reverses the batch's prior katta movements first, so it
+   * always reconciles to the current output quantities. No-op for batches with no
+   * vehicle-bag intake (blends / lot-started).
+   */
+  async reconcileBatchKatta(trx, batchId, userId) {
+    const num = (v) => parseFloat(v) || 0;
+    const veh = await trx('milling_vehicle_arrivals').where('batch_id', batchId)
+      .select(trx.raw('COALESCE(SUM(total_bags),0) as bags'), trx.raw('COALESCE(SUM(weight_mt),0) as mt')).first();
+    const rawBags = Math.round(num(veh && veh.bags));
+    const rawKg = num(veh && veh.mt) * 1000;
+    if (rawBags <= 0 || rawKg <= 0) return null; // no katta intake → nothing to account
+    const capacity = rawKg / rawBags; // effective kg per katta
+
+    // Find / create the single generic Katta packaging item + its stock row.
+    let katta = await trx('mill_items').where('code', 'KATTA').first();
+    if (!katta) {
+      [katta] = await trx('mill_items').insert({
+        code: 'KATTA', name: 'Katta', category: 'packaging', unit: 'pcs',
+        capacity_kg: Math.round(capacity), reorder_level: 0, is_active: true,
+        notes: 'Auto-managed: empty bags freed from milled raw, consumed to pack output.',
+        created_by: userId || null,
+      }).returning('*');
+    }
+    let stock = await trx('mill_stock').where({ item_id: katta.id, warehouse_id: null }).first();
+    if (!stock) [stock] = await trx('mill_stock').insert({ item_id: katta.id, warehouse_id: null, quantity_available: 0, quantity_reserved: 0 }).returning('*');
+
+    // Reverse this batch's prior auto-katta movements (idempotent re-yield).
+    const prior = await trx('mill_stock_movements')
+      .where({ item_id: katta.id, reference_type: 'batch_katta', reference_id: batchId })
+      .sum({ q: 'quantity' }).first();
+    const priorNet = num(prior && prior.q);
+    if (priorNet !== 0) {
+      await trx('mill_stock').where('id', stock.id).update({ quantity_available: trx.raw('quantity_available - ?', [priorNet]), updated_at: trx.fn.now() });
+    }
+    await trx('mill_stock_movements').where({ item_id: katta.id, reference_type: 'batch_katta', reference_id: batchId }).del();
+
+    // Output katta = Σ ceil(output kg ÷ capacity); also stamp count + size on lots.
+    const outLots = await trx('inventory_lots').where({ batch_ref: `batch-${batchId}` }).whereIn('type', ['finished', 'byproduct']);
+    let outputBags = 0;
+    for (const l of outLots) {
+      const kg = num(l.net_weight_kg) > 0 ? num(l.net_weight_kg) : num(l.qty) * 1000;
+      const bags = Math.ceil(kg / capacity);
+      outputBags += bags;
+      await trx('inventory_lots').where('id', l.id).update({ total_bags: bags, bag_size_kg: Math.round(capacity), updated_at: trx.fn.now() });
+    }
+
+    const net = rawBags - outputBags; // freed in, packed out
+    await trx('mill_stock').where('id', stock.id).update({ quantity_available: trx.raw('quantity_available + ?', [net]), updated_at: trx.fn.now() });
+    await trx('mill_stock_movements').insert([
+      { item_id: katta.id, warehouse_id: null, movement_type: 'return', quantity: rawBags, reference_type: 'batch_katta', reference_id: batchId, reason: `Empty katta freed from milled raw (batch ${batchId})`, performed_by: userId || null },
+      { item_id: katta.id, warehouse_id: null, movement_type: 'consumption', quantity: -outputBags, reference_type: 'batch_katta', reference_id: batchId, reason: `Katta used to pack outputs (batch ${batchId})`, performed_by: userId || null },
+    ]);
+
+    return { kattaItemId: katta.id, capacityKg: Math.round(capacity), rawBags, outputBags, net };
+  },
+
+  /**
    * Re-sync a yielded batch's OUTPUT lots to its current quantity fields.
    * Editing yield on an already-completed batch updates the batch `_mt` summary
    * columns but historically left the output lots untouched, so they drifted
@@ -2635,7 +2697,10 @@ const inventoryService = {
       } : null,
     });
 
-    return { resynced: true, recreatedFrom: outIds.length, finishedCostPerKg: a.finishedCostPerKg, netPurchase: a.netPurchase, byproductValue: a.byproductValue };
+    // Re-account katta (freed from raw / consumed packing the new outputs).
+    const katta = await inventoryService.reconcileBatchKatta(trx, batchId, userId);
+
+    return { resynced: true, recreatedFrom: outIds.length, finishedCostPerKg: a.finishedCostPerKg, netPurchase: a.netPurchase, byproductValue: a.byproductValue, katta };
   },
 };
 

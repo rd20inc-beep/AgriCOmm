@@ -1070,6 +1070,11 @@ const millingController = {
           } : null,
         });
 
+        // Katta accounting: the raw arrived in katta — milling frees those empty
+        // bags into packaging stock, and the outputs are packed into katta,
+        // consuming them back. Stamps each output lot's bag count too.
+        await inventoryService.reconcileBatchKatta(trx, batch.id, req.user?.id);
+
         // Recognize the supplier payable for the raw rice purchase so the
         // supplier's GL party ledger / statement reflects what we owe. Only for
         // single-source batches: a blend re-mills already-owned finished stock,
