@@ -41,7 +41,7 @@ export default function StockCount() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2"><ClipboardCheck className="w-5 h-5 text-blue-600" /> Stock Take</h1>
-          <p className="text-sm text-gray-500">Count what's physically on the floor and reconcile it against the system.</p>
+          <p className="text-sm text-gray-500">Count what's physically on the floor, then let the system fix any difference for you.</p>
         </div>
         <button onClick={() => setShowNew(true)}
           className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3.5 py-2 rounded-lg">
@@ -124,7 +124,7 @@ function NewCountDrawer({ onClose, onCreated }) {
             <option value="">All warehouses</option>
             {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
           </select>
-          <p className="text-[11px] text-gray-400 mt-1">Every lot with stock here becomes a count line.</p>
+          <p className="text-[11px] text-gray-400 mt-1">Every stock batch here becomes a line for you to count.</p>
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1.5">Planned date (optional)</label>
@@ -180,17 +180,22 @@ function CountDetailDrawer({ countId, onClose, onChanged }) {
         <div className="space-y-4">
           <div className="flex items-center gap-2">
             <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[count.status] || 'bg-gray-100 text-gray-600'}`}>{count.status}</span>
-            <span className="text-xs text-gray-500">{items.length} lines · {pendingCount} to count · {varianceCount} with variance</span>
+            <span className="text-xs text-gray-500">{items.length} items · {pendingCount} left to count · {varianceCount} with a difference</span>
           </div>
+          {!completed && (
+            <p className="text-xs text-gray-500 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+              Type what you physically counted for each item and hit <span className="font-medium">Save</span>. When every item is counted, hit <span className="font-medium">Approve</span> and the system corrects each product's stock for you.
+            </p>
+          )}
 
           <div className="border border-gray-200 rounded-lg overflow-hidden">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 text-left text-xs uppercase text-gray-500 bg-gray-50">
                   <th className="px-3 py-2">Item</th>
-                  <th className="px-3 py-2 text-right">System</th>
-                  <th className="px-3 py-2 text-right">Counted</th>
-                  <th className="px-3 py-2 text-right">Variance</th>
+                  <th className="px-3 py-2 text-right" title="What our records currently show">On record</th>
+                  <th className="px-3 py-2 text-right" title="What you physically counted">You counted</th>
+                  <th className="px-3 py-2 text-right" title="Counted minus on record">Difference</th>
                   <th className="px-3 py-2"></th>
                 </tr>
               </thead>
@@ -240,9 +245,9 @@ function CountDetailDrawer({ countId, onClose, onChanged }) {
               <button onClick={() => approve.mutate()} disabled={pendingCount > 0 || approve.isPending}
                 className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-medium py-2.5 rounded-lg inline-flex items-center justify-center gap-2">
                 {approve.isPending ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={16} />}
-                Approve &amp; apply adjustments
+                Approve &amp; update stock
               </button>
-              <p className="text-[11px] text-gray-400 text-center">Variances post inventory adjustments and correct each lot's stock.</p>
+              <p className="text-[11px] text-gray-400 text-center">Any differences are written off or added so your stock matches the count.</p>
             </div>
           )}
           {completed && count.completed_at && (

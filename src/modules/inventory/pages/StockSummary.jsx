@@ -45,7 +45,8 @@ export default function StockSummary() {
       .map((r) => {
         const onHandMT = toMT(r.total_kg);
         const reorder = n(r.reorder_level);
-        return { ...r, onHandMT, reorder, isLow: reorder > 0 && onHandMT < reorder };
+        const bags = Math.round(n(r.total_bags));
+        return { ...r, onHandMT, reorder, bags, isLow: reorder > 0 && onHandMT < reorder };
       })
       .sort((a, b) => Number(b.isLow) - Number(a.isLow) || n(b.total_value) - n(a.total_value)),
     [data],
@@ -56,9 +57,10 @@ export default function StockSummary() {
     () => rows.reduce((a, r) => ({
       onHand: a.onHand + n(r.total_kg),
       available: a.available + n(r.available_kg),
+      reserved: a.reserved + n(r.reserved_kg),
       value: a.value + n(r.total_value),
       lots: a.lots + n(r.lot_count),
-    }), { onHand: 0, available: 0, value: 0, lots: 0 }),
+    }), { onHand: 0, available: 0, reserved: 0, value: 0, lots: 0 }),
     [rows],
   );
 
@@ -71,7 +73,7 @@ export default function StockSummary() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2"><Boxes className="w-5 h-5 text-blue-600" /> Stock Summary</h1>
-          <p className="text-sm text-gray-500">What you have on hand, by product — and what it's worth.</p>
+          <p className="text-sm text-gray-500">How much of each product you have, how much is free to sell, and what it's worth.</p>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex bg-gray-100 rounded-lg p-0.5">
@@ -93,8 +95,8 @@ export default function StockSummary() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Kpi icon={Package} tone="blue" label="Products in stock" value={allRows.length.toLocaleString()} />
         <button onClick={() => setLowOnly((v) => !v)} className="text-left">
-          <Kpi icon={AlertTriangle} tone={lowCount ? 'red' : 'emerald'} label="Below reorder"
-            value={lowCount.toLocaleString()} sub={lowOnly ? 'Showing low only — click to clear' : lowCount ? 'Click to filter' : 'All stocked'} active={lowOnly} />
+          <Kpi icon={AlertTriangle} tone={lowCount ? 'red' : 'emerald'} label="Running low"
+            value={lowCount.toLocaleString()} sub={lowOnly ? 'Showing low only — click to clear' : lowCount ? 'Click to see them' : 'All well stocked'} active={lowOnly} />
         </button>
         <Kpi icon={Boxes} tone="emerald" label="On hand" value={fmtMT(totals.onHand)} sub={`${fmtMT(totals.available)} available`} />
         <Kpi icon={Wallet} tone="amber" label="Stock value" value={fmtPKR(totals.value)} />
@@ -112,11 +114,12 @@ export default function StockSummary() {
               <thead>
                 <tr className="border-b border-gray-200 text-left text-xs uppercase text-gray-500 bg-gray-50">
                   <th className="px-4 py-2.5">Product</th>
-                  <th className="px-4 py-2.5 text-right">Lots</th>
-                  <th className="px-4 py-2.5 text-right">On hand</th>
-                  <th className="px-4 py-2.5 text-right">Available</th>
-                  <th className="px-4 py-2.5 text-right">Reorder at</th>
-                  <th className="px-4 py-2.5 text-right">Stock value</th>
+                  <th className="px-4 py-2.5 text-right" title="Number of separate stock batches (lots)">Batches</th>
+                  <th className="px-4 py-2.5 text-right" title="Total quantity physically in stock">On hand</th>
+                  <th className="px-4 py-2.5 text-right" title="Free to sell — on hand minus what's committed to orders">Free to sell</th>
+                  <th className="px-4 py-2.5 text-right" title="Reserved against export orders">Committed</th>
+                  <th className="px-4 py-2.5 text-right" title="Warn me when on-hand drops below this">Reorder at</th>
+                  <th className="px-4 py-2.5 text-right" title="What this stock cost (landed)">Stock value</th>
                   <th className="px-4 py-2.5"></th>
                 </tr>
               </thead>
@@ -132,8 +135,12 @@ export default function StockSummary() {
                         </span>
                       </td>
                       <td className="px-4 py-2.5 text-right text-gray-500 tabular-nums">{n(r.lot_count)}</td>
-                      <td className={`px-4 py-2.5 text-right font-medium tabular-nums ${r.isLow ? 'text-red-600' : 'text-gray-900'}`}>{fmtMTnum(r.onHandMT)}</td>
+                      <td className={`px-4 py-2.5 text-right font-medium tabular-nums ${r.isLow ? 'text-red-600' : 'text-gray-900'}`}>
+                        {fmtMTnum(r.onHandMT)}
+                        {r.bags > 0 && <div className="text-[11px] font-normal text-gray-400">{r.bags.toLocaleString()} bags</div>}
+                      </td>
                       <td className="px-4 py-2.5 text-right text-emerald-700 tabular-nums">{fmtMT(r.available_kg)}</td>
+                      <td className="px-4 py-2.5 text-right text-amber-700 tabular-nums">{n(r.reserved_kg) > 0 ? fmtMT(r.reserved_kg) : '—'}</td>
                       <td className="px-4 py-2.5 text-right tabular-nums">
                         {editing ? (
                           <span className="inline-flex items-center gap-1">
@@ -164,6 +171,7 @@ export default function StockSummary() {
                   <td className="px-4 py-2.5 text-right tabular-nums">{totals.lots}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums">{fmtMT(totals.onHand)}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums">{fmtMT(totals.available)}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">{totals.reserved > 0 ? fmtMT(totals.reserved) : '—'}</td>
                   <td className="px-4 py-2.5"></td>
                   <td className="px-4 py-2.5 text-right tabular-nums">{fmtPKR(totals.value)}</td>
                   <td></td>
@@ -173,6 +181,13 @@ export default function StockSummary() {
           </div>
         )}
       </div>
+
+      {rows.length > 0 && (
+        <p className="text-[11px] text-gray-400 px-1">
+          <span className="font-medium text-gray-500">Free to sell</span> = on hand minus what's committed to orders.
+          <span className="ml-2"><span className="px-1 py-0.5 rounded bg-red-100 text-red-700 font-semibold">LOW</span> means on hand has dropped below the reorder level you set.</span>
+        </p>
+      )}
     </div>
   );
 }

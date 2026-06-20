@@ -1244,6 +1244,7 @@ module.exports = {
           db.raw('COALESCE(SUM(CAST(l.reserved_qty AS DECIMAL) * 1000), 0) as reserved_kg'),
           db.raw('COALESCE(SUM(l.sold_weight_kg), 0) as sold_kg'),
           db.raw('COALESCE(SUM(l.damaged_weight_kg), 0) as damaged_kg'),
+          db.raw('COALESCE(SUM(l.total_bags), 0) as total_bags'),
           db.raw('COALESCE(SUM(CASE WHEN l.landed_cost_total > 0 THEN l.landed_cost_total ELSE l.total_value END), 0) as total_value'),
         )
         .groupBy(groupCol, nameCol)
