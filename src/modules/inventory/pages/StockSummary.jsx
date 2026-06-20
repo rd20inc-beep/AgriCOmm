@@ -152,8 +152,9 @@ export default function StockSummary() {
                             <button onClick={() => setEditId(null)} className="text-gray-400 hover:text-gray-600"><X size={14} /></button>
                           </span>
                         ) : (
-                          <button onClick={() => beginEdit(r)} className="inline-flex items-center gap-1 text-gray-500 hover:text-blue-600 group">
-                            {r.reorder > 0 ? fmtMTnum(r.reorder) : <span className="text-gray-300">set</span>}
+                          <button onClick={() => beginEdit(r)} title="Set a minimum — you'll be warned when on-hand drops below it"
+                            className="inline-flex items-center gap-1 text-gray-500 hover:text-blue-600 group">
+                            {r.reorder > 0 ? fmtMTnum(r.reorder) : <span className="text-blue-500/70">Set min</span>}
                             <Pencil size={11} className="opacity-0 group-hover:opacity-100" />
                           </button>
                         )}
@@ -249,8 +250,12 @@ function ProductStockDrawer({ row, entity, status, onClose, onOpenLot }) {
             <p className="text-sm text-gray-400 py-12 text-center">No stock batches for this filter.</p>
           ) : (
             lots.map((l) => {
-              const value = n(l.landed_cost_total) > 0 ? n(l.landed_cost_total) : n(l.total_value);
+              const onHand = onHandKg(l);
+              const perKg = n(l.landed_cost_per_kg) || n(l.rate_per_kg) || n(l.cost_per_unit) / 1000 || 0;
+              const value = onHand * perKg; // value of what's on hand now, not the original intake
               const bags = Math.round(n(l.total_bags));
+              const receivedKg = n(l.received_net_weight_kg);
+              const usedKg = receivedKg > 0 ? Math.max(receivedKg - onHand, 0) : 0;
               return (
                 <button key={l.id} onClick={() => onOpenLot(l.id)}
                   className="w-full text-left border border-gray-200 rounded-lg p-3 hover:border-blue-400 hover:bg-blue-50/30 transition-colors">
@@ -264,10 +269,16 @@ function ProductStockDrawer({ row, entity, status, onClose, onOpenLot }) {
                     {l.supplier_name && <span>· {l.supplier_name}</span>}
                   </div>
                   <div className="grid grid-cols-4 gap-2 mt-2 text-xs">
-                    <Stat label="On hand" value={fmtMT(onHandKg(l))} sub={bags > 0 ? `${bags.toLocaleString()} bags` : null} />
+                    <Stat label="On hand" value={fmtMT(onHand)} sub={bags > 0 ? `${bags.toLocaleString()} bags` : null} />
                     <Stat label="Free" value={fmtMT(n(l.available_qty) * 1000)} tone="emerald" />
                     <Stat label="Committed" value={n(l.reserved_qty) > 0 ? fmtMT(n(l.reserved_qty) * 1000) : '—'} tone={n(l.reserved_qty) > 0 ? 'amber' : null} />
                     <Stat label="Value" value={fmtPKR(value)} align="right" />
+                  </div>
+                  <div className="mt-2 pt-2 border-t border-gray-100 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-gray-500">
+                    <span>Cost <span className="font-medium text-gray-700">Rs {Math.round(perKg).toLocaleString('en-PK')}/kg</span></span>
+                    {receivedKg > 0 && <span>Intake {fmtMTnum(receivedKg / 1000)} <span className="text-gray-400">({fmtMTnum(usedKg / 1000)} used)</span></span>}
+                    {l.batch_ref && <span>Batch {l.batch_ref}</span>}
+                    {l.created_at && <span>Added {String(l.created_at).slice(0, 10)}</span>}
                   </div>
                 </button>
               );
@@ -275,8 +286,10 @@ function ProductStockDrawer({ row, entity, status, onClose, onOpenLot }) {
           )}
         </div>
 
-        <div className="border-t border-gray-200 px-5 py-3 text-[11px] text-gray-400 text-center">
-          Tap any batch to open its full lot detail.
+        <div className="border-t border-gray-200 px-5 py-2.5 text-[11px] text-gray-400 leading-relaxed">
+          <span className="font-medium text-gray-500">Free</span> = ready to sell ·
+          <span className="font-medium text-gray-500"> Committed</span> = reserved for an export order ·
+          <span className="font-medium text-gray-500"> Value</span> = on-hand × cost/kg. Tap any batch for its full lot detail.
         </div>
       </div>
     </div>

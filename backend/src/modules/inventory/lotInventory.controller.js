@@ -1246,7 +1246,14 @@ module.exports = {
           db.raw('COALESCE(SUM(l.sold_weight_kg), 0) as sold_kg'),
           db.raw('COALESCE(SUM(l.damaged_weight_kg), 0) as damaged_kg'),
           db.raw('COALESCE(SUM(l.total_bags), 0) as total_bags'),
-          db.raw('COALESCE(SUM(CASE WHEN l.landed_cost_total > 0 THEN l.landed_cost_total ELSE l.total_value END), 0) as total_value'),
+          // Value of what's ACTUALLY on hand = on-hand kg × cost/kg. Using the
+          // stored landed_cost_total would carry the original received value even
+          // after a lot is milled/sold down (e.g. 3 MT left still showing the full
+          // 33 MT cost). Compute it so value always tracks current quantity.
+          db.raw(`COALESCE(SUM(
+            (CASE WHEN l.net_weight_kg > 0 THEN l.net_weight_kg ELSE CAST(l.qty AS DECIMAL) * 1000 END)
+            * COALESCE(NULLIF(l.landed_cost_per_kg, 0), NULLIF(l.rate_per_kg, 0), CAST(l.cost_per_unit AS DECIMAL) / 1000.0, 0)
+          ), 0) as total_value`),
         )
         .groupBy(groupCol, nameCol)
         .orderBy('total_kg', 'desc');
