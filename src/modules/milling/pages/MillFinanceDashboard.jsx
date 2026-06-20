@@ -204,6 +204,8 @@ export default function MillFinanceDashboard() {
     const totalOtherCosts = completed.reduce((s, b) => {
       return s + Object.entries(b.costs || {}).reduce((cs, [k, v]) => RAW_KEYS.has(k) ? cs : cs + (parseFloat(v) || 0), 0);
     }, 0);
+    // Packing / bags is part of Other costs — split out so it's visible.
+    const totalPacking = completed.reduce((s, b) => s + (parseFloat(b.costs?.packaging) || 0), 0);
     // Milling cost = the processing/milling fee (Rs/kg × raw qty). It lives on the
     // batch (milling_fee_per_kg), not as a milling_costs row, so the batch-cost
     // sums above miss it. Own production only — a service-milled batch's fee is
@@ -221,7 +223,7 @@ export default function MillFinanceDashboard() {
     const totalCost = totalRaw + totalMilling + totalOtherCosts + totalOverhead;
     const totalFinishedKg = completed.reduce((s, b) => s + sellableFinishedMT(b) * 1000, 0);
     const costPerKg = totalFinishedKg > 0 ? totalCost / totalFinishedKg : 0;
-    return { totalRev, totalRaw, totalMilling, totalOtherCosts, totalCost, netProfit: totalRev - totalCost, costPerKg, finishedRev, byproductRev };
+    return { totalRev, totalRaw, totalMilling, totalOtherCosts, totalPacking, totalCost, netProfit: totalRev - totalCost, costPerKg, finishedRev, byproductRev };
   }, [completed, totalOverhead]);
 
   const efficiency = useMemo(() => {
@@ -490,8 +492,11 @@ export default function MillFinanceDashboard() {
                 <div className="flex justify-between text-sm font-semibold text-gray-900"><span>Costs</span><span className="tabular-nums text-red-600">{PKR(kpis.totalCost)}</span></div>
                 <div className="flex justify-between text-xs text-gray-500 pl-3"><span>Raw material</span><span className="tabular-nums">−{PKR(kpis.totalRaw)}</span></div>
                 <div className="flex justify-between text-xs text-gray-500 pl-3"><span>Milling cost</span><span className="tabular-nums">−{PKR(kpis.totalMilling)}</span></div>
-                {kpis.totalOtherCosts > 0 && (
-                  <div className="flex justify-between text-xs text-gray-500 pl-3"><span>Batch costs</span><span className="tabular-nums">−{PKR(kpis.totalOtherCosts)}</span></div>
+                {(kpis.totalOtherCosts - kpis.totalPacking) > 0 && (
+                  <div className="flex justify-between text-xs text-gray-500 pl-3"><span>Batch costs</span><span className="tabular-nums">−{PKR(kpis.totalOtherCosts - kpis.totalPacking)}</span></div>
+                )}
+                {kpis.totalPacking > 0 && (
+                  <div className="flex justify-between text-xs text-gray-500 pl-3"><span>Packing / bags</span><span className="tabular-nums">−{PKR(kpis.totalPacking)}</span></div>
                 )}
                 <div className="flex justify-between text-xs text-gray-500 pl-3"><span>Overhead</span><span className="tabular-nums">−{PKR(totalOverhead)}</span></div>
               </div>
