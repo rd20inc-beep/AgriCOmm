@@ -114,7 +114,11 @@ module.exports = {
       });
 
       const grandTotal = uc.round2(lines.reduce((s, l) => s + l.total, 0));
-      const totalPaid = (paid_amount != null && paid_amount !== '') ? (parseFloat(paid_amount) || 0) : grandTotal;
+      // Explicit amount wins; otherwise credit mode defaults to UNPAID (the whole
+      // amount is owed), every other mode defaults to fully paid.
+      const totalPaid = (paid_amount != null && paid_amount !== '')
+        ? (parseFloat(paid_amount) || 0)
+        : (payment_mode === 'credit' ? 0 : grandTotal);
       // Allocate the single tendered amount across lines proportionally; the last
       // line absorbs the rounding remainder so Σ(line paid) === totalPaid exactly.
       let allocated = 0;
