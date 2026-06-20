@@ -12,6 +12,33 @@ async function generateSaleNo(trx) {
   return `LS-${String((parseInt(count?.c) || 0) + 1).padStart(4, '0')}`;
 }
 
+// Which account a receipt lands in: cash → the cash-type account; bank transfer
+// → the chosen bank account; cheque (uncleared) / credit (unpaid) → none.
+async function resolveReceiptAccountId(trx, { paymentMode, bankAccountId, amount }) {
+  if (!(amount > 0)) return null;
+  if (paymentMode === 'bank_transfer') return bankAccountId || null;
+  if (paymentMode === 'cash') {
+    const cashAcct = await trx('bank_accounts').where({ type: 'cash', is_active: true }).orderBy('id').first();
+    return cashAcct ? cashAcct.id : null;
+  }
+  return null;
+}
+
+// Move a receiving account's balance by the amount received and drop a Cash &
+// Bank sub-ledger row (linked to the payment so a delete can reverse it).
+async function postReceiptToAccount(trx, { accountId, amount, paymentId, reference, notes, date, userId }) {
+  if (!accountId || !(amount > 0)) return;
+  await trx('bank_accounts').where({ id: accountId }).increment('current_balance', amount);
+  const lastBt = await trx('bank_transactions').where('transaction_no', 'like', 'BT-%').orderBy('id', 'desc').first('transaction_no');
+  const seq = lastBt ? (parseInt(String(lastBt.transaction_no).replace(/^BT-/, ''), 10) || 0) + 1 : 1;
+  await trx('bank_transactions').insert({
+    transaction_no: `BT-${String(seq).padStart(4, '0')}`, bank_account_id: accountId,
+    type: 'credit', amount, currency: 'PKR', status: 'posted',
+    transaction_date: date || new Date(), reference: reference || null,
+    notes: notes || null, source: 'local_sale', linked_payment_id: paymentId, created_by: userId || null,
+  });
+}
+
 module.exports = {
 
   // List all local sales
@@ -150,18 +177,8 @@ module.exports = {
           resolvedCustomerId = cust.id;
         }
 
-        // Which account a cash / bank receipt lands in (so its balance moves with
-        // the money actually received). Cash → the cash-type account; bank
-        // transfer → the chosen bank account. Cheque (uncleared) and credit
-        // (unpaid) move no balance.
-        let receiptAccountId = null;
-        if (totalPaid > 0) {
-          if (payment_mode === 'bank_transfer') receiptAccountId = bank_account_id || null;
-          else if (payment_mode === 'cash') {
-            const cashAcct = await trx('bank_accounts').where({ type: 'cash', is_active: true }).orderBy('id').first();
-            receiptAccountId = cashAcct ? cashAcct.id : null;
-          }
-        }
+        // Cash / bank receipts move the receiving account's balance with the money.
+        const receiptAccountId = await resolveReceiptAccountId(trx, { paymentMode: payment_mode, bankAccountId: bank_account_id, amount: totalPaid });
 
         let groupNo = null;
         const created = [];
@@ -236,21 +253,11 @@ module.exports = {
               local_sale_id: sale.id, created_by: req.user?.id || null,
             }).returning('id');
 
-            // Move the receiving account's balance by the cash/bank received and
-            // drop a Cash & Bank sub-ledger row (reversed on sale delete by its
-            // linked_payment_id).
-            if (receiptAccountId) {
-              await trx('bank_accounts').where({ id: receiptAccountId }).increment('current_balance', l.paid);
-              const lastBt = await trx('bank_transactions').where('transaction_no', 'like', 'BT-%').orderBy('id', 'desc').first('transaction_no');
-              const seq = lastBt ? (parseInt(String(lastBt.transaction_no).replace(/^BT-/, ''), 10) || 0) + 1 : 1;
-              await trx('bank_transactions').insert({
-                transaction_no: `BT-${String(seq).padStart(4, '0')}`, bank_account_id: receiptAccountId,
-                type: 'credit', amount: l.paid, currency: 'PKR', status: 'posted',
-                transaction_date: sale_date || new Date(), reference: payment_reference || saleNo,
-                notes: `Local sale ${saleNo} receipt — ${l.item_name}`, source: 'local_sale',
-                linked_payment_id: payRow.id, created_by: req.user?.id || null,
-              });
-            }
+            await postReceiptToAccount(trx, {
+              accountId: receiptAccountId, amount: l.paid, paymentId: payRow.id,
+              reference: payment_reference || saleNo, notes: `Local sale ${saleNo} receipt — ${l.item_name}`,
+              date: sale_date, userId: req.user?.id,
+            });
           }
 
           if (dueAmt > 0) {
@@ -297,7 +304,7 @@ module.exports = {
   async acceptPayment(req, res) {
     try {
       const { id } = req.params;
-      const { amount, payment_method = 'cash', payment_date, reference, notes } = req.body;
+      const { amount, payment_method = 'cash', payment_date, reference, notes, bank_account_id } = req.body;
 
       if (!amount || parseFloat(amount) <= 0) {
         return res.status(400).json({ success: false, message: 'A positive amount is required.' });
@@ -327,8 +334,9 @@ module.exports = {
         });
 
         // Create payment record
+        const receiptAccountId = await resolveReceiptAccountId(trx, { paymentMode: payment_method, bankAccountId: bank_account_id, amount: payAmount });
         const payCount = await trx('payments').count('id as c').first();
-        await trx('payments').insert({
+        const [payRow] = await trx('payments').insert({
           payment_no: `PL-${(parseInt(payCount?.c) || 0) + 1}`,
           type: 'receipt',
           amount: payAmount,
@@ -337,10 +345,18 @@ module.exports = {
           base_amount_pkr: payAmount,
           payment_method: payment_method,
           bank_reference: reference || null,
+          bank_account_id: receiptAccountId || bank_account_id || null,
           payment_date: payment_date || trx.fn.now(),
           notes: notes || `Payment for local sale ${sale.sale_no}`,
           local_sale_id: parseInt(id),
           created_by: req.user?.id || null,
+        }).returning('id');
+
+        // Cash / bank receipt → move the receiving account's balance.
+        await postReceiptToAccount(trx, {
+          accountId: receiptAccountId, amount: payAmount, paymentId: payRow.id,
+          reference: reference || sale.sale_no, notes: `Payment for local sale ${sale.sale_no}`,
+          date: payment_date, userId: req.user?.id,
         });
 
         // Update linked receivable — prefer FK, fall back to notes search

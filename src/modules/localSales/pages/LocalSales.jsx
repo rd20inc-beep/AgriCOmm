@@ -24,7 +24,8 @@ const SELECT = INPUT;
 const LABEL = "block text-xs font-semibold text-gray-600 uppercase mb-1";
 
 export default function LocalSales() {
-  const { addToast, customersList, refreshFromApi } = useApp();
+  const { addToast, customersList, refreshFromApi, bankAccountsList = [] } = useApp();
+  const bankOpts = (Array.isArray(bankAccountsList) ? bankAccountsList : []).filter(b => (b.type || '') !== 'cash' && (b.isActive ?? b.is_active ?? true));
   const [showSaleModal, setShowSaleModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [displayUnit, setDisplayUnit] = useState('kg');
@@ -32,7 +33,7 @@ export default function LocalSales() {
   const [selectedSale, setSelectedSale] = useState(null);
   const [salePayments, setSalePayments] = useState([]);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [payForm, setPayForm] = useState({ amount: '', payment_method: 'cash', payment_date: new Date().toISOString().split('T')[0], reference: '', notes: '' });
+  const [payForm, setPayForm] = useState({ amount: '', payment_method: 'cash', bank_account_id: '', payment_date: new Date().toISOString().split('T')[0], reference: '', notes: '' });
   const [payLoading, setPayLoading] = useState(false);
 
   const { data: sales = [], isLoading, error, refetch } = useLocalSales();
@@ -325,14 +326,25 @@ export default function LocalSales() {
               <input type="date" value={payForm.payment_date} onChange={e => setPayForm(p => ({...p, payment_date: e.target.value}))} className={INPUT} />
             </div>
           </div>
+          {payForm.payment_method === 'bank_transfer' && (
+            <div>
+              <label className={LABEL}>Bank Account *</label>
+              <select value={payForm.bank_account_id} onChange={e => setPayForm(p => ({...p, bank_account_id: e.target.value}))} className={SELECT}>
+                <option value="">Select bank account…</option>
+                {bankOpts.map(b => <option key={b.id} value={b.id}>{b.name}{(b.bankName || b.bank_name) ? ` — ${b.bankName || b.bank_name}` : ''}</option>)}
+              </select>
+            </div>
+          )}
           <div>
             <label className={LABEL}>Reference</label>
             <input value={payForm.reference} onChange={e => setPayForm(p => ({...p, reference: e.target.value}))} className={INPUT} placeholder="Receipt / cheque #" />
           </div>
+          <p className="text-[11px] text-gray-400">Cash and bank receipts update the account balance.</p>
           <div className="flex justify-end gap-3 pt-3 border-t">
             <button onClick={() => setShowPaymentModal(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
             <button onClick={async () => {
               if (!payForm.amount || parseFloat(payForm.amount) <= 0) { addToast('Enter a valid amount', 'error'); return; }
+              if (payForm.payment_method === 'bank_transfer' && !payForm.bank_account_id) { addToast('Select the bank account that received the payment', 'error'); return; }
               setPayLoading(true);
               try {
                 await payMutation.mutateAsync({ saleId: selectedSale.id, data: payForm });
@@ -342,7 +354,7 @@ export default function LocalSales() {
                 const payRes = await localSalesApi.getPayments(selectedSale.id);
                 setSalePayments(payRes?.data?.payments || []);
                 setShowPaymentModal(false);
-                setPayForm({ amount: '', payment_method: 'cash', payment_date: new Date().toISOString().split('T')[0], reference: '', notes: '' });
+                setPayForm({ amount: '', payment_method: 'cash', bank_account_id: '', payment_date: new Date().toISOString().split('T')[0], reference: '', notes: '' });
               } catch (err) { addToast(err.message || 'Payment failed', 'error'); }
               setPayLoading(false);
             }} disabled={payLoading}
