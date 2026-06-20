@@ -2540,6 +2540,95 @@ const inventoryService = {
     });
     return summary;
   },
+
+  /**
+   * Re-sync a yielded batch's OUTPUT lots to its current quantity fields.
+   * Editing yield on an already-completed batch updates the batch `_mt` summary
+   * columns but historically left the output lots untouched, so they drifted
+   * (e.g. batch says 67 MT finished while the lot still holds 32). This deletes
+   * the existing output lots and recreates them from the batch's (just-updated)
+   * quantities via the SAME recordMillingOutput used at first yield — so lots,
+   * grades and residual costs all match. It touches ONLY the output side: raw
+   * consumption and accounting journals already happened and are left alone.
+   *
+   * Refuses (409) if any output lot has been reserved, sold or re-milled — you
+   * can't silently resize stock that has already moved.
+   */
+  async resyncBatchOutputsFromBatch(trx, batchId, { userId } = {}) {
+    const p = (v) => parseFloat(v) || 0;
+    const batch = await trx('milling_batches').where({ id: batchId }).first();
+    if (!batch) { const e = new Error('Milling batch not found.'); e.status = 404; throw e; }
+
+    const finished = p(batch.actual_finished_mt);
+    const b1 = p(batch.b1_mt), b2 = p(batch.b2_mt), b3 = p(batch.b3_mt), csr = p(batch.csr_mt), shortGrain = p(batch.short_grain_mt);
+    const broken = (b1 + b2 + b3 + csr + shortGrain) || p(batch.broken_mt);
+    const bran = p(batch.bran_mt), husk = p(batch.husk_mt), sortex = p(batch.sortex_rejects_mt);
+    const powder = p(batch.powder_mt), sweeping = p(batch.sweeping_mt);
+
+    // 1. Existing output lots + safety: must be untouched (not reserved/sold/consumed).
+    const outLots = await trx('inventory_lots')
+      .where({ batch_ref: `batch-${batchId}` }).whereIn('type', ['finished', 'byproduct'])
+      .select('id', 'reserved_qty', 'sold_weight_kg');
+    const outIds = outLots.map((l) => l.id);
+    if (outIds.length) {
+      const cnt = async (t) => parseInt((await trx(t).whereIn('lot_id', outIds).count('id as c').first()).c, 10) || 0;
+      const touched = outLots.some((l) => p(l.reserved_qty) > 0 || p(l.sold_weight_kg) > 0);
+      const refd = (await cnt('inventory_reservations')) + (await cnt('local_sales')) + (await cnt('batch_source_lots'));
+      if (touched || refd > 0) {
+        const e = new Error('This batch\'s output has already been reserved, sold or re-milled, so its yield can\'t be re-recorded. Reverse those movements first, or use a stock adjustment.');
+        e.status = 409; throw e;
+      }
+      // 2. Delete output lots + their ledger/lineage (raw lots stay consumed).
+      await trx('lot_source_mapping').where((q) => q.whereIn('parent_lot_id', outIds).orWhereIn('child_lot_id', outIds)).del();
+      await trx('inventory_movements').whereIn('lot_id', outIds).del();
+      await trx('lot_transactions').whereIn('lot_id', outIds).del();
+      await trx('stock_adjustments').whereIn('lot_id', outIds).del();
+      await trx('stock_count_items').whereIn('lot_id', outIds).del();
+      await trx('inventory_lots').whereIn('id', outIds).del();
+    }
+
+    // 3. Residual allocation from the batch's current state (same as fresh yield).
+    await inventoryService.ensureRawCostFromSourceLots(trx, batchId);
+    const rawCostTotal = p((await trx('milling_costs').where({ batch_id: batchId }).where('category', 'raw_rice').sum('amount as t').first())?.t);
+    const processingCosts = p((await trx('milling_costs').where({ batch_id: batchId }).whereNot('category', 'raw_rice').sum('amount as t').first())?.t);
+    const a = inventoryService.computeResidualAllocation(batch, rawCostTotal, processingCosts);
+    const alloc = {};
+    for (const [k, perKg] of Object.entries(a.byCostPerKg)) alloc[k] = perKg;
+
+    await trx('milling_batches').where({ id: batchId }).update({
+      raw_cost_total: rawCostTotal,
+      raw_cost_per_kg_finished: a.finishedCostPerKg * a.rawFrac,
+      milling_cost_per_kg_finished: a.finishedCostPerKg * a.millFrac,
+      total_cost_per_kg_finished: a.finishedCostPerKg,
+      finished_price_per_mt: a.finishedCostPerKg * 1000,
+    });
+
+    // 4. Recreate output lots (finished + by-products) with the allocated costs.
+    const batchProduct = batch.product_id
+      ? await trx('products').where('id', batch.product_id).select('name').first() : null;
+    const riceTypeName = batchProduct?.name || null;
+    const arrivalQuality = await trx('milling_quality_samples').where({ batch_id: batchId, analysis_type: 'arrival' }).first();
+    await inventoryService.recordMillingOutput(trx, {
+      batchId, finishedMT: finished, brokenMT: broken, branMT: bran, huskMT: husk,
+      sortexMT: sortex, powderMT: powder, sweepingMT: sweeping,
+      productName: riceTypeName || 'Finished Rice', costPerMT: a.finishedCostPerKg * 1000,
+      rawCostComponent: a.finishedCostPerKg * a.rawFrac, millingCostComponent: a.finishedCostPerKg * a.millFrac,
+      byproductCosts: {
+        broken: alloc.broken || 0, b1: alloc.b1 || 0, b2: alloc.b2 || 0, b3: alloc.b3 || 0,
+        csr: alloc.csr || 0, short_grain: alloc.short_grain || 0, bran: alloc.bran || 0,
+        husk: alloc.husk || 0, sortex: alloc.sortex || 0, powder: alloc.powder || 0, sweeping: alloc.sweeping || 0,
+      },
+      brokenGrades: { b1, b2, b3, csr, shortGrain },
+      userId, supplierInfo: { supplierId: batch.supplier_id },
+      qualityInfo: arrivalQuality ? {
+        variety: riceTypeName, grade: batch.post_milling_grade || null,
+        moisture: arrivalQuality.moisture ? parseFloat(arrivalQuality.moisture) : null,
+        broken: arrivalQuality.broken ? parseFloat(arrivalQuality.broken) : null,
+      } : null,
+    });
+
+    return { resynced: true, recreatedFrom: outIds.length, finishedCostPerKg: a.finishedCostPerKg, netPurchase: a.netPurchase, byproductValue: a.byproductValue };
+  },
 };
 
 module.exports = inventoryService;

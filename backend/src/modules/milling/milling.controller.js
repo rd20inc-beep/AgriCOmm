@@ -850,25 +850,34 @@ const millingController = {
         .whereIn('type', ['finished', 'byproduct'])
         .count('id as c').first();
       if (parseInt(existingOutputLots.c) > 0 && batch.status === 'Completed') {
-        // Already recorded — update the batch numbers but don't create duplicate lots.
-        // Persist EVERY output field (incl. powder/sweeping) so the stored totals
-        // match exactly what the over-yield guard above validated. Omitting
-        // powder_mt/sweeping_mt here let them keep stale values while the guard
-        // passed on the request body — producing an impossible >100% recovery
-        // (e.g. M-002: edited finished 67 + stale powder 5 + sweeping 10 = 87/80).
-        await db('milling_batches').where({ id }).update({
-          actual_finished_mt: finished,
-          broken_mt: broken, b1_mt: b1, b2_mt: b2, b3_mt: b3, csr_mt: csr, short_grain_mt: shortGrain,
-          bran_mt: bran, husk_mt: husk, sortex_rejects_mt: sortex,
-          powder_mt: powder, sweeping_mt: sweeping, wastage_mt: wastage,
-          yield_pct: yieldPct, updated_at: db.fn.now(),
-        });
-        return res.json({
-          success: true,
-          data: { batch: await db('milling_batches').where({ id }).first() },
-          warning: yieldWarning,
-          message: 'Yield updated (output lots already exist)',
-        });
+        // Already recorded — re-record the yield. Persist EVERY output field (incl.
+        // powder/sweeping, so the stored totals match what the over-yield guard
+        // validated) AND re-sync the output LOTS to the new quantities. Previously
+        // only the batch summary fields were updated while the lots kept their old
+        // quantities, so the two drifted (batch said 67 MT finished while the lot
+        // still held 32). resyncBatchOutputsFromBatch deletes + recreates the
+        // output lots from the updated batch state (raw consumption & journals are
+        // untouched); it refuses if any output was already reserved/sold/re-milled.
+        try {
+          const resync = await db.transaction(async (trx) => {
+            await trx('milling_batches').where({ id }).update({
+              actual_finished_mt: finished,
+              broken_mt: broken, b1_mt: b1, b2_mt: b2, b3_mt: b3, csr_mt: csr, short_grain_mt: shortGrain,
+              bran_mt: bran, husk_mt: husk, sortex_rejects_mt: sortex,
+              powder_mt: powder, sweeping_mt: sweeping, wastage_mt: wastage,
+              yield_pct: yieldPct, updated_at: trx.fn.now(),
+            });
+            return inventoryService.resyncBatchOutputsFromBatch(trx, parseInt(id, 10), { userId: req.user?.id });
+          });
+          return res.json({
+            success: true,
+            data: { batch: await db('milling_batches').where({ id }).first(), resync },
+            warning: yieldWarning,
+            message: 'Yield updated — output lots re-synced to the new quantities.',
+          });
+        } catch (err) {
+          return res.status(err.status || 500).json({ success: false, message: err.message });
+        }
       }
 
       const updateData = {
