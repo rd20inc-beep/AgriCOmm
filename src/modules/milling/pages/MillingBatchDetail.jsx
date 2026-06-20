@@ -164,8 +164,10 @@ export default function MillingBatchDetail() {
   // saved manual values, else fall back to the milling fee total and the recorded
   // processing costs (consumption/packing). Editable in the modal.
   function defaultCostInputs() {
+    // Exclude raw_rice (its own line) AND packaging (a separate always-added
+    // line) — Other Expenses is everything else.
     const proc = Object.entries(batch?.costs || {}).reduce(
-      (s, [k, v]) => (k === 'raw_rice' ? s : s + (parseFloat(v) || 0)), 0);
+      (s, [k, v]) => (k === 'raw_rice' || k === 'packaging' ? s : s + (parseFloat(v) || 0)), 0);
     // Milling Cost defaults to 0 until entered (no auto milling fee). Other
     // Expenses prefills from recorded processing costs.
     const milling = batch?.manualMillingCostPkr != null ? parseFloat(batch.manualMillingCostPkr) : 0;
@@ -1471,11 +1473,14 @@ export default function MillingBatchDetail() {
           // the residual after crediting by-products, and is read off the batch's
           // stored total_cost_per_kg_finished (the authoritative engine value), so
           // the three figures reconcile: NetPurchase − ByProduct = ReadyRiceCost.
+          // Packing (bags) is its own always-added Net Purchase line; everything
+          // else non-raw is "Other Expenses".
+          const packingCostVal = parseFloat(batch.costs?.packaging) || 0;
           const procCosts = Object.entries(batch.costs || {}).reduce(
-            (s, [k, v]) => (k === 'raw_rice' ? s : s + (parseFloat(v) || 0)), 0);
+            (s, [k, v]) => (k === 'raw_rice' || k === 'packaging' ? s : s + (parseFloat(v) || 0)), 0);
           const millingCostVal = batch.manualMillingCostPkr != null ? parseFloat(batch.manualMillingCostPkr) : 0;
           const otherExpVal = batch.manualOtherExpensesPkr != null ? parseFloat(batch.manualOtherExpensesPkr) : procCosts;
-          const netPurchase = effectiveRawCost + millingCostVal + otherExpVal;
+          const netPurchase = effectiveRawCost + millingCostVal + otherExpVal + packingCostVal;
           const finishedKG = (parseFloat(batch.actualFinishedMT)||0) * 1000;
           const netCostPerKG = parseFloat(batch.totalCostPerKgFinished) || 0;
           const readyRiceCost = netCostPerKG * finishedKG;
@@ -1510,7 +1515,7 @@ export default function MillingBatchDetail() {
               <div className="bg-white rounded-xl border border-gray-100 p-4">
                 <p className="text-xs font-medium text-gray-500 uppercase">Net Purchase</p>
                 <p className="text-xl font-bold text-gray-900 mt-1">{formatPKR(netPurchase)}</p>
-                <p className="text-[10px] text-gray-400 mt-0.5">Raw + Milling + Other</p>
+                <p className="text-[10px] text-gray-400 mt-0.5">Raw + Milling + Other{packingCostVal > 0 ? ' + Packing' : ''}</p>
               </div>
               <div className="bg-amber-50 rounded-xl border border-amber-100 p-4">
                 <p className="text-xs font-medium text-amber-600 uppercase">Finished Cost/KG</p>
@@ -2322,7 +2327,8 @@ export default function MillingBatchDetail() {
           const rawPurchase = num(batch?.costs?.raw_rice);
           const millingCost = num(priceForm.millingCost);
           const otherExpenses = num(priceForm.otherExpenses);
-          const netPurchase = rawPurchase + millingCost + otherExpenses;
+          const packingCost = num(batch?.costs?.packaging); // auto from packing logs, always added
+          const netPurchase = rawPurchase + millingCost + otherExpenses + packingCost;
           const byproductValue = byFields.reduce((s, f) => s + f.qty * num(priceForm[f.key]), 0);
           const readyRiceCost = Math.max(0, netPurchase - byproductValue);
           const clamped = netPurchase - byproductValue < 0;
@@ -2352,8 +2358,14 @@ export default function MillingBatchDetail() {
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
                   </div>
                 </div>
+                {packingCost > 0 && (
+                  <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
+                    <span>Packing / Bags <span className="text-gray-400">(auto from packing)</span></span>
+                    <span className="font-medium text-gray-700">{Rs(packingCost)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between mt-2 text-sm border-t pt-1.5">
-                  <span className="text-gray-600">Raw {Rs(rawPurchase)} + Milling {Rs(millingCost)} + Other {Rs(otherExpenses)}</span>
+                  <span className="text-gray-600">Raw {Rs(rawPurchase)} + Milling {Rs(millingCost)} + Other {Rs(otherExpenses)}{packingCost > 0 ? ` + Packing ${Rs(packingCost)}` : ''}</span>
                   <span className="font-bold text-gray-900">Net Purchase {Rs(netPurchase)}</span>
                 </div>
               </div>

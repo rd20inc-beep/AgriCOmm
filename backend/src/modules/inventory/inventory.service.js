@@ -2221,14 +2221,17 @@ const inventoryService = {
   // By-products are costed at price/1000 (NRV → zero gain on sale). Pure function
   // of the batch row + the two cost sums, so recordYield and the price-confirm
   // reallocation produce identical numbers.
-  computeResidualAllocation(batch, rawCostTotal, processingCosts) {
+  computeResidualAllocation(batch, rawCostTotal, processingCosts, packingCost = 0) {
     const p = (v) => parseFloat(v) || 0;
     // Milling Cost is operator-entered; until they enter it, it's 0 (the milling
     // fee is NOT auto-added). Other Expenses falls back to recorded processing
-    // costs (consumption/packing) so those real costs still count.
+    // costs (consumption etc.) so those real costs still count. Packing (bag) cost
+    // is a SEPARATE always-added term — it stands even when a manual Other figure
+    // overrides the auto processing costs, so bagging always loads the finished cost.
     const millingCost = batch.manual_milling_cost_pkr != null ? p(batch.manual_milling_cost_pkr) : 0;
     const otherExpenses = batch.manual_other_expenses_pkr != null ? p(batch.manual_other_expenses_pkr) : processingCosts;
-    const netPurchase = rawCostTotal + millingCost + otherExpenses;
+    const packing = p(packingCost);
+    const netPurchase = rawCostTotal + millingCost + otherExpenses + packing;
 
     const finished = p(batch.actual_finished_mt);
     const broken = p(batch.broken_mt), bran = p(batch.bran_mt), husk = p(batch.husk_mt), sortex = p(batch.sortex_rejects_mt);
@@ -2259,14 +2262,14 @@ const inventoryService = {
     const finishedKg = finished * 1000;
     const finishedCostPerKg = finishedKg > 0 ? finishedTotal / finishedKg : 0;
     const rawFrac = netPurchase > 0 ? rawCostTotal / netPurchase : 0;
-    const millFrac = netPurchase > 0 ? (millingCost + otherExpenses) / netPurchase : 0;
+    const millFrac = netPurchase > 0 ? (millingCost + otherExpenses + packing) / netPurchase : 0;
     // Aggregate broken-tier rate for a generic "Broken Rice" lot when the batch
     // recorded per-grade quantities (qty-weighted average sale price).
     const gradeQty = b1 + b2 + b3 + csr + shortGrain;
     const brokenTierCostPerKg = gradeQty > 0
       ? (b1 * price.b1 + b2 * price.b2 + b3 * price.b3 + csr * price.csr + shortGrain * price.short_grain) / gradeQty / 1000
       : brokenPrice / 1000;
-    return { netPurchase, millingCost, otherExpenses, byproductValue, finishedTotal,
+    return { netPurchase, millingCost, otherExpenses, packing, byproductValue, finishedTotal,
       finishedCostPerKg, byCostPerKg, brokenTierCostPerKg, hasPerGradeBroken, rawFrac, millFrac, clamped, finished };
   },
 
@@ -2318,10 +2321,13 @@ const inventoryService = {
       (await trx('milling_costs').where({ batch_id: batchId }).where('category', 'raw_rice').sum('amount as t').first())?.t
     ) || 0;
     const processingCosts = parseFloat(
-      (await trx('milling_costs').where({ batch_id: batchId }).whereNot('category', 'raw_rice').sum('amount as t').first())?.t
+      (await trx('milling_costs').where({ batch_id: batchId }).whereNotIn('category', ['raw_rice', 'packaging']).sum('amount as t').first())?.t
+    ) || 0;
+    const packingCost = parseFloat(
+      (await trx('milling_costs').where({ batch_id: batchId, category: 'packaging' }).sum('amount as t').first())?.t
     ) || 0;
 
-    const a = inventoryService.computeResidualAllocation(batch, rawCostTotal, processingCosts);
+    const a = inventoryService.computeResidualAllocation(batch, rawCostTotal, processingCosts, packingCost);
     const alloc = { finished: { qty: finished, costPerKg: a.finishedCostPerKg } };
     for (const [k, perKg] of Object.entries(a.byCostPerKg)) alloc[k] = { qty: 1, costPerKg: perKg };
     const brokenTierCostPerKg = a.brokenTierCostPerKg;
@@ -2681,8 +2687,9 @@ const inventoryService = {
     // 3. Residual allocation from the batch's current state (same as fresh yield).
     await inventoryService.ensureRawCostFromSourceLots(trx, batchId);
     const rawCostTotal = p((await trx('milling_costs').where({ batch_id: batchId }).where('category', 'raw_rice').sum('amount as t').first())?.t);
-    const processingCosts = p((await trx('milling_costs').where({ batch_id: batchId }).whereNot('category', 'raw_rice').sum('amount as t').first())?.t);
-    const a = inventoryService.computeResidualAllocation(batch, rawCostTotal, processingCosts);
+    const processingCosts = p((await trx('milling_costs').where({ batch_id: batchId }).whereNotIn('category', ['raw_rice', 'packaging']).sum('amount as t').first())?.t);
+    const packingCost = p((await trx('milling_costs').where({ batch_id: batchId, category: 'packaging' }).sum('amount as t').first())?.t);
+    const a = inventoryService.computeResidualAllocation(batch, rawCostTotal, processingCosts, packingCost);
     const alloc = {};
     for (const [k, perKg] of Object.entries(a.byCostPerKg)) alloc[k] = perKg;
 

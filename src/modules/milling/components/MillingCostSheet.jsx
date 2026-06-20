@@ -139,7 +139,10 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
   // match the engine's Net Purchase.
   const millingCostVal = batch.manualMillingCostPkr != null ? pf(batch.manualMillingCostPkr) : 0;
   const otherExpVal = batch.manualOtherExpensesPkr != null ? pf(batch.manualOtherExpensesPkr) : (processCostTotal + overheadCostTotal);
-  const totalBatchCost = effectiveRawRiceCost + millingCostVal + otherExpVal;
+  // Packing (bags) is a separate always-added line so it loads the finished cost
+  // even when a manual Other figure overrides the auto process/overhead costs.
+  const packingCostVal = pf(safeCosts.packaging);
+  const totalBatchCost = effectiveRawRiceCost + millingCostVal + otherExpVal + packingCostVal;
 
   // ═══ SECTION D: Yield Output ═══
   const finishedMT = pf(batch.actualFinishedMT);
@@ -392,6 +395,14 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
                 <td className="px-6 py-1.5 text-right text-gray-500">{otherExpVal > 0 && rawQtyMT > 0 ? fmtPKR(otherExpVal / rawQtyMT) : '—'}</td>
                 <td className="px-6 py-1.5 text-right text-gray-500">{otherExpVal > 0 && totalBatchCost > 0 ? ((otherExpVal / totalBatchCost) * 100).toFixed(1) + '%' : '—'}</td>
               </tr>
+              {packingCostVal > 0 && (
+                <tr className="bg-gray-50">
+                  <td className="px-6 py-1.5 text-gray-900">Packing / Bags</td>
+                  <td className="px-6 py-1.5 text-right text-gray-700">{fmtPKR(packingCostVal)}</td>
+                  <td className="px-6 py-1.5 text-right text-gray-500">{rawQtyMT > 0 ? fmtPKR(packingCostVal / rawQtyMT) : '—'}</td>
+                  <td className="px-6 py-1.5 text-right text-gray-500">{totalBatchCost > 0 ? ((packingCostVal / totalBatchCost) * 100).toFixed(1) + '%' : '—'}</td>
+                </tr>
+              )}
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-gray-300 bg-gray-100">

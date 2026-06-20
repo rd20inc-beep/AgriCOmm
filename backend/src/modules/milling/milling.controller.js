@@ -979,10 +979,13 @@ const millingController = {
         ) || 0;
         const processingCosts = parseFloat(
           (await trx('milling_costs').where({ batch_id: batch.id })
-            .whereNot('category', 'raw_rice').sum('amount as total').first())?.total
+            .whereNotIn('category', ['raw_rice', 'packaging']).sum('amount as total').first())?.total
+        ) || 0;
+        const packingCost = parseFloat(
+          (await trx('milling_costs').where({ batch_id: batch.id, category: 'packaging' }).sum('amount as total').first())?.total
         ) || 0;
 
-        const a = inventoryService.computeResidualAllocation(batch, rawCostTotal, processingCosts);
+        const a = inventoryService.computeResidualAllocation(batch, rawCostTotal, processingCosts, packingCost);
         const finAlloc = { qty: finished, costPerKg: a.finishedCostPerKg, costPerMT: a.finishedCostPerKg * 1000 };
         const allocations = {};
         for (const [k, perKg] of Object.entries(a.byCostPerKg)) allocations[k] = { costPerKg: perKg };
