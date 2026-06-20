@@ -619,7 +619,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                 <label className={LABEL}>Quantity *</label>
                 <div className="flex gap-1.5">
                   <input type="number" value={line.quantity_input} onChange={e => setL('quantity_input', e.target.value)} className={INPUT} placeholder="Qty" />
-                  <select value={line.quantity_unit} onChange={e => setL('quantity_unit', e.target.value)} className="w-24 border border-gray-300 rounded-lg px-2 py-2.5 text-sm bg-white">
+                  <select value={line.quantity_unit} onChange={e => setLine(p => ({ ...p, quantity_unit: e.target.value, rate_unit: e.target.value }))} className="w-24 border border-gray-300 rounded-lg px-2 py-2.5 text-sm bg-white">
                     <option value="katta">Katta</option><option value="maund">Maund</option><option value="kg">KG</option><option value="ton">Ton</option>
                   </select>
                 </div>
@@ -647,7 +647,12 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                 )}
                 {selectedLot && (() => {
                   const ck = parseFloat(selectedLot.landedCostPerKg) || parseFloat(selectedLot.ratePerKg) || (parseFloat(selectedLot.costPerUnit) || 0) / 1000;
-                  return ck > 0 ? <span className="block text-gray-500">Cost: <span className="font-semibold text-gray-700">Rs {Math.round(ck).toLocaleString()}/kg</span></span> : null;
+                  if (!(ck > 0)) return null;
+                  const eq = allRateEquivalents(ck, lineBagWt);
+                  const u = line.rate_unit;
+                  const val = u === 'katta' ? eq.perKatta : u === 'maund' ? eq.perMaund : u === 'ton' ? ck * 1000 : ck;
+                  const ul = u === 'katta' ? 'katta' : u === 'maund' ? 'maund' : u === 'ton' ? 'ton' : 'kg';
+                  return <span className="block text-gray-500">Cost: <span className="font-semibold text-gray-700">Rs {Math.round(val).toLocaleString()}/{ul}</span>{u !== 'kg' && <span className="text-gray-400"> (Rs {Math.round(ck).toLocaleString()}/kg)</span>}</span>;
                 })()}
                 {lineTotal > 0 && <span className="block text-emerald-700 font-semibold mt-0.5">Line total: Rs {lineTotal.toLocaleString()}</span>}
               </div>
