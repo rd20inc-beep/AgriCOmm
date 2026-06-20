@@ -1211,11 +1211,15 @@ module.exports = {
     try {
       const { group_by = 'supplier', status = 'Available' } = req.query;
 
+      const { entity, type } = req.query;
       let query = db('inventory_lots as l')
         .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
-        .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id');
+        .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
+        .leftJoin('products as p', 'l.product_id', 'p.id');
 
       if (status && status !== 'all') query = query.where('l.status', status);
+      if (entity) query = query.where('l.entity', entity);
+      if (type) query = query.where('l.type', type);
 
       let groupCol, nameCol;
       if (group_by === 'supplier') { groupCol = 'l.supplier_id'; nameCol = 's.name'; }
@@ -1223,11 +1227,14 @@ module.exports = {
       else if (group_by === 'variety') { groupCol = 'l.variety'; nameCol = 'l.variety'; }
       else if (group_by === 'grade') { groupCol = 'l.grade'; nameCol = 'l.grade'; }
       else if (group_by === 'processing_type') { groupCol = 'l.processing_type'; nameCol = 'l.processing_type'; }
+      // Item/SKU view — each product with its on-hand stock & value across all lots.
+      else if (group_by === 'product') { groupCol = 'l.product_id'; nameCol = 'p.name'; }
       else { groupCol = 'l.type'; nameCol = 'l.type'; }
 
       const rows = await query
         .select(
           db.raw(`${nameCol} as group_name`),
+          db.raw(`${groupCol} as group_id`),
           db.raw('COUNT(l.id) as lot_count'),
           db.raw('COALESCE(SUM(CASE WHEN l.net_weight_kg > 0 THEN l.net_weight_kg ELSE CAST(l.qty AS DECIMAL) * 1000 END), 0) as total_kg'),
           db.raw('COALESCE(SUM(CAST(l.available_qty AS DECIMAL) * 1000), 0) as available_kg'),

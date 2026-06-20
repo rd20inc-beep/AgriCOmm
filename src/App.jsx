@@ -66,6 +66,7 @@ const StandalonePrintReport = lazyWithReload(() => import('./modules/analytics/p
 const Approvals = lazyWithReload(() => import('./modules/admin/pages/Approvals'));
 const AuditLog = lazyWithReload(() => import('./modules/admin/pages/AuditLog'));
 const LotInventory = lazyWithReload(() => import('./modules/inventory/pages/LotInventory'));
+const StockSummary = lazyWithReload(() => import('./modules/inventory/pages/StockSummary'));
 const LocalSales = lazyWithReload(() => import('./modules/localSales/pages/LocalSales'));
 const LotDetail = lazyWithReload(() => import('./modules/inventory/pages/LotDetail'));
 const ExceptionDashboard = lazyWithReload(() => import('./modules/analytics/pages/ExceptionDashboard'));
@@ -161,6 +162,7 @@ function MillRoutes() {
         <Route path="/stock-adjustments" element={<StockAdjustments />} />
         <Route path="/transfer" element={<InternalTransfer />} />
         <Route path="/lot-inventory" element={<LotInventory />} />
+        <Route path="/stock-summary" element={<StockSummary />} />
         <Route path="/lot-inventory/:id" element={<LotDetail />} />
         <Route path="/local-sales" element={<LocalSales />} />
         <Route path="/local-sales/:id" element={<LocalSaleDetail />} />
@@ -192,6 +194,7 @@ function StandardRoutes() {
         <Route path="/transfer" element={<ProtectedRoute module="finance" action="view"><InternalTransfer /></ProtectedRoute>} />
         <Route path="/inventory" element={<ProtectedRoute module="inventory" action="view"><Inventory /></ProtectedRoute>} />
         <Route path="/lot-inventory" element={<ProtectedRoute module="inventory" action="view"><LotInventory /></ProtectedRoute>} />
+        <Route path="/stock-summary" element={<ProtectedRoute module="inventory" action="view"><StockSummary /></ProtectedRoute>} />
         <Route path="/local-sales" element={<ProtectedRoute module="inventory" action="view"><LocalSales /></ProtectedRoute>} />
         <Route path="/local-sales/:id" element={<ProtectedRoute module="inventory" action="view"><LocalSaleDetail /></ProtectedRoute>} />
         <Route path="/lot-inventory/:id" element={<ProtectedRoute module="inventory" action="view"><LotDetail /></ProtectedRoute>} />

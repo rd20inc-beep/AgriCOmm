@@ -6,7 +6,7 @@ import {
   User, Users, Plus, X, LogOut, AlertTriangle, AlertCircle, Info, CreditCard,
   ArrowRightLeft, FlaskConical, Menu, ShieldCheck, Shield,
   ChevronsLeft, ChevronsRight, Sun, Moon,
-  Zap, Brain, Beaker, Printer,
+  Zap, Brain, Beaker, Printer, Boxes,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
@@ -32,6 +32,7 @@ const sidebarNav = [
     children: [
       { label: 'Operations', to: '/milling', permission: { module: 'milling', action: 'view' } },
       { label: 'Finance', to: '/milling/finance', icon: DollarSign, permission: { module: 'milling', action: 'view' } },
+      { label: 'Stock Summary', to: '/stock-summary', icon: Boxes, permission: { module: 'inventory', action: 'view' } },
       { label: 'Inventory', to: '/lot-inventory', icon: Package, permission: { module: 'inventory', action: 'view' } },
       { label: 'Quality', to: '/quality', icon: FlaskConical, permission: { module: 'milling', action: 'view' } },
       { label: 'Adjustments', to: '/stock-adjustments', icon: AlertTriangle, permission: { module: 'inventory', action: 'view' } },
