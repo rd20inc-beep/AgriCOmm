@@ -1447,7 +1447,13 @@ module.exports = {
           });
           payableUpdated = true;
           // Re-accrue the GL: reverse the prior purchase accrual, repost at new.
-          const priorJournals = await trx('journal_entries').where({ ref_type: 'Purchase Lot', ref_no: lot.lot_no, status: 'Posted' }).select('id');
+          // Only reverse genuine purchase journals — reverseJournal copies our
+          // ref_type/ref_no onto its contra entries (reversal_of NOT NULL), and
+          // re-reversing those would spawn reversal-of-reversal rows each time.
+          const priorJournals = await trx('journal_entries')
+            .where({ ref_type: 'Purchase Lot', ref_no: lot.lot_no, status: 'Posted' })
+            .whereNull('reversal_of')
+            .select('id');
           for (const j of priorJournals) {
             await accountingService.reverseJournal(trx, { journalId: j.id, reason: 'Purchase price corrected', userId: req.user?.id });
           }
