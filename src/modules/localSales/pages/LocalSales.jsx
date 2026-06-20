@@ -604,7 +604,9 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                 <option value="">No lot (manual entry)</option>
                 {filteredLots.map(l => {
                   const avail = (parseFloat(l.availableQty) || 0) * 1000 - cartQtyForLot(l.id);
-                  return <option key={l.id} value={l.id} disabled={avail <= 0}>{l.lotNo} — {l.itemName} ({Math.round(avail).toLocaleString()} KG)</option>;
+                  const costKg = parseFloat(l.landedCostPerKg) || parseFloat(l.ratePerKg) || (parseFloat(l.costPerUnit) || 0) / 1000;
+                  const costLabel = costKg > 0 ? ` · Rs ${Math.round(costKg).toLocaleString()}/kg cost` : '';
+                  return <option key={l.id} value={l.id} disabled={avail <= 0}>{l.lotNo} — {l.itemName} ({Math.round(avail).toLocaleString()} KG){costLabel}</option>;
                 })}
               </select>
             </div>
@@ -643,6 +645,10 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                     {lineOverSell ? `Only ${Math.round(lineAvailKg).toLocaleString()} kg left` : `In stock: ${Math.round(lineAvailKg).toLocaleString()} kg`}
                   </span>
                 )}
+                {selectedLot && (() => {
+                  const ck = parseFloat(selectedLot.landedCostPerKg) || parseFloat(selectedLot.ratePerKg) || (parseFloat(selectedLot.costPerUnit) || 0) / 1000;
+                  return ck > 0 ? <span className="block text-gray-500">Cost: <span className="font-semibold text-gray-700">Rs {Math.round(ck).toLocaleString()}/kg</span></span> : null;
+                })()}
                 {lineTotal > 0 && <span className="block text-emerald-700 font-semibold mt-0.5">Line total: Rs {lineTotal.toLocaleString()}</span>}
               </div>
               <button type="button" onClick={addLine} disabled={lineOverSell}
