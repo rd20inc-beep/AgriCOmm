@@ -94,7 +94,7 @@ async function generateLotTxnNo(trx) {
   // an in-use TXN-… and tripped the unique constraint).
   const row = await trx('lot_transactions')
     .whereRaw('transaction_no LIKE ?', [`TXN-${today}-%`])
-    .max(trx.raw("CAST(split_part(transaction_no, '-', 3) AS INTEGER) as m"))
+    .select(trx.raw("MAX(CAST(split_part(transaction_no, '-', 3) AS INTEGER)) as m"))
     .first();
   const next = (parseInt(row && row.m, 10) || 0) + 1;
   return `TXN-${today}-${String(next).padStart(4, '0')}`;
