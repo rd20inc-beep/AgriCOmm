@@ -1533,6 +1533,16 @@ const millingController = {
               batchId,
               userId: req.user?.id,
             });
+            // received_net_weight_kg is the immutable intake total (kept through
+            // milling so a lot remembers what it started with). But a DELETED
+            // truck is a data correction, not consumption — roll its receipt back
+            // out of the intake too, else "Total received" keeps counting trucks
+            // that no longer exist (e.g. showed 114 MT / 2280 bags for a lot that
+            // really received 54 MT).
+            await trx('inventory_lots').where('id', lot.id).update({
+              received_net_weight_kg: trx.raw('GREATEST(0, COALESCE(received_net_weight_kg, 0) - ?)', [wt * 1000]),
+              updated_at: trx.fn.now(),
+            });
           }
         }
 
