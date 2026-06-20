@@ -2550,65 +2550,86 @@ const inventoryService = {
   },
 
   /**
-   * Katta (bag) accounting for a milled batch. The raw rice arrives in katta;
-   * milling FREES those empty katta into packaging stock, and the outputs
-   * (finished + by-products) are PACKED into katta, consuming them back. One
-   * generic "Katta" mill_item holds the running count; the per-katta capacity is
-   * the raw's effective bag size (Σ raw kg ÷ Σ raw bags). Idempotent: re-running
-   * (a re-recorded yield) reverses the batch's prior katta movements first, so it
-   * always reconciles to the current output quantities. No-op for batches with no
-   * vehicle-bag intake (blends / lot-started).
+   * Katta (bag) accounting for a milled batch — PER SIZE. The raw arrives in
+   * katta of a given bag size; milling FREES those empty bags into packaging
+   * stock (one mill_item per size, code `KATTA-<kg>`), and the outputs are PACKED
+   * into katta of the batch's PREDOMINANT raw size, consuming them back. Freed
+   * bags are grouped by each vehicle's bag_size_kg (fallback = its kg ÷ bags).
+   * Idempotent: reverses ALL of the batch's prior katta movements (across any
+   * size item) first, so re-recording reconciles cleanly. No-op for batches with
+   * no vehicle-bag intake (blends / lot-started).
    */
   async reconcileBatchKatta(trx, batchId, userId) {
     const num = (v) => parseFloat(v) || 0;
-    const veh = await trx('milling_vehicle_arrivals').where('batch_id', batchId)
-      .select(trx.raw('COALESCE(SUM(total_bags),0) as bags'), trx.raw('COALESCE(SUM(weight_mt),0) as mt')).first();
-    const rawBags = Math.round(num(veh && veh.bags));
-    const rawKg = num(veh && veh.mt) * 1000;
-    if (rawBags <= 0 || rawKg <= 0) return null; // no katta intake → nothing to account
-    const capacity = rawKg / rawBags; // effective kg per katta
+    const vehs = await trx('milling_vehicle_arrivals').where('batch_id', batchId)
+      .select('total_bags', 'bag_size_kg', 'weight_mt');
 
-    // Find / create the single generic Katta packaging item + its stock row.
-    let katta = await trx('mill_items').where('code', 'KATTA').first();
-    if (!katta) {
-      [katta] = await trx('mill_items').insert({
-        code: 'KATTA', name: 'Katta', category: 'packaging', unit: 'pcs',
-        capacity_kg: Math.round(capacity), reorder_level: 0, is_active: true,
-        notes: 'Auto-managed: empty bags freed from milled raw, consumed to pack output.',
-        created_by: userId || null,
-      }).returning('*');
+    // Freed katta grouped by bag size.
+    const bySize = new Map(); // sizeKg → bags
+    for (const v of vehs) {
+      const bags = Math.round(num(v.total_bags));
+      if (bags <= 0) continue;
+      const wKg = num(v.weight_mt) * 1000;
+      let size = Math.round(num(v.bag_size_kg));
+      if (size <= 0) size = wKg > 0 ? Math.round(wKg / bags) : 0;
+      if (size <= 0) continue;
+      bySize.set(size, (bySize.get(size) || 0) + bags);
     }
-    let stock = await trx('mill_stock').where({ item_id: katta.id, warehouse_id: null }).first();
-    if (!stock) [stock] = await trx('mill_stock').insert({ item_id: katta.id, warehouse_id: null, quantity_available: 0, quantity_reserved: 0 }).returning('*');
+    let freed = 0; bySize.forEach((b) => { freed += b; });
+    if (freed <= 0) return null; // no katta intake
 
-    // Reverse this batch's prior auto-katta movements (idempotent re-yield).
-    const prior = await trx('mill_stock_movements')
-      .where({ item_id: katta.id, reference_type: 'batch_katta', reference_id: batchId })
-      .sum({ q: 'quantity' }).first();
-    const priorNet = num(prior && prior.q);
-    if (priorNet !== 0) {
-      await trx('mill_stock').where('id', stock.id).update({ quantity_available: trx.raw('quantity_available - ?', [priorNet]), updated_at: trx.fn.now() });
+    // Predominant size (most bags) — what the outputs are packed in.
+    let predSize = 0, predBags = -1;
+    for (const [s, b] of bySize) if (b > predBags) { predBags = b; predSize = s; }
+
+    // find/create a Katta packaging item + stock row for a given size.
+    const itemForSize = async (size) => {
+      const code = `KATTA-${size}`;
+      let it = await trx('mill_items').where('code', code).first();
+      if (!it) {
+        [it] = await trx('mill_items').insert({
+          code, name: `Katta ${size}kg`, category: 'packaging', unit: 'pcs',
+          capacity_kg: size, reorder_level: 0, is_active: true,
+          notes: 'Auto-managed: empty bags freed from milled raw, consumed to pack output.',
+          created_by: userId || null,
+        }).returning('*');
+      }
+      let st = await trx('mill_stock').where({ item_id: it.id, warehouse_id: null }).first();
+      if (!st) [st] = await trx('mill_stock').insert({ item_id: it.id, warehouse_id: null, quantity_available: 0, quantity_reserved: 0 }).returning('*');
+      return { it, st };
+    };
+
+    // Reverse the batch's prior katta movements on whatever item(s) they hit.
+    const prior = await trx('mill_stock_movements').where({ reference_type: 'batch_katta', reference_id: batchId }).select('item_id', 'quantity');
+    const reverseByItem = new Map();
+    for (const m of prior) reverseByItem.set(m.item_id, (reverseByItem.get(m.item_id) || 0) + num(m.quantity));
+    for (const [itemId, q] of reverseByItem) {
+      await trx('mill_stock').where({ item_id: itemId, warehouse_id: null }).update({ quantity_available: trx.raw('quantity_available - ?', [q]), updated_at: trx.fn.now() });
     }
-    await trx('mill_stock_movements').where({ item_id: katta.id, reference_type: 'batch_katta', reference_id: batchId }).del();
+    await trx('mill_stock_movements').where({ reference_type: 'batch_katta', reference_id: batchId }).del();
 
-    // Output katta = Σ ceil(output kg ÷ capacity); also stamp count + size on lots.
+    // Output katta = Σ ceil(output kg ÷ predominant size); stamp count + size on lots.
     const outLots = await trx('inventory_lots').where({ batch_ref: `batch-${batchId}` }).whereIn('type', ['finished', 'byproduct']);
-    let outputBags = 0;
+    let packed = 0;
     for (const l of outLots) {
       const kg = num(l.net_weight_kg) > 0 ? num(l.net_weight_kg) : num(l.qty) * 1000;
-      const bags = Math.ceil(kg / capacity);
-      outputBags += bags;
-      await trx('inventory_lots').where('id', l.id).update({ total_bags: bags, bag_size_kg: Math.round(capacity), updated_at: trx.fn.now() });
+      const bags = Math.ceil(kg / predSize);
+      packed += bags;
+      await trx('inventory_lots').where('id', l.id).update({ total_bags: bags, bag_size_kg: predSize, updated_at: trx.fn.now() });
     }
 
-    const net = rawBags - outputBags; // freed in, packed out
-    await trx('mill_stock').where('id', stock.id).update({ quantity_available: trx.raw('quantity_available + ?', [net]), updated_at: trx.fn.now() });
-    await trx('mill_stock_movements').insert([
-      { item_id: katta.id, warehouse_id: null, movement_type: 'return', quantity: rawBags, reference_type: 'batch_katta', reference_id: batchId, reason: `Empty katta freed from milled raw (batch ${batchId})`, performed_by: userId || null },
-      { item_id: katta.id, warehouse_id: null, movement_type: 'consumption', quantity: -outputBags, reference_type: 'batch_katta', reference_id: batchId, reason: `Katta used to pack outputs (batch ${batchId})`, performed_by: userId || null },
-    ]);
+    // Apply per size: +freed (return); the predominant size also -packed (consumption).
+    const movements = [];
+    for (const [size, bags] of bySize) {
+      const { it, st } = await itemForSize(size);
+      const consume = size === predSize ? packed : 0;
+      await trx('mill_stock').where({ id: st.id }).update({ quantity_available: trx.raw('quantity_available + ?', [bags - consume]), updated_at: trx.fn.now() });
+      movements.push({ item_id: it.id, warehouse_id: null, movement_type: 'return', quantity: bags, reference_type: 'batch_katta', reference_id: batchId, reason: `Empty ${size}kg katta freed from milled raw (batch ${batchId})`, performed_by: userId || null });
+      if (consume > 0) movements.push({ item_id: it.id, warehouse_id: null, movement_type: 'consumption', quantity: -consume, reference_type: 'batch_katta', reference_id: batchId, reason: `${size}kg katta used to pack outputs (batch ${batchId})`, performed_by: userId || null });
+    }
+    await trx('mill_stock_movements').insert(movements);
 
-    return { kattaItemId: katta.id, capacityKg: Math.round(capacity), rawBags, outputBags, net };
+    return { capacityKg: predSize, rawBags: freed, freed, outputBags: packed, packed, net: freed - packed, sizes: [...bySize.keys()] };
   },
 
   /**
