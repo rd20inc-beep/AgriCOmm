@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Package, AlertTriangle, ShoppingCart, TrendingDown,
-  Search, Pencil, Save, Loader2,
+  Search, Pencil, Save, Loader2, Boxes,
 } from 'lucide-react';
 import { useMillStoreItems, useMillStoreSummary, useSetMillStock, useUpdateMillStoreItem } from '../api/queries';
 import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
@@ -58,6 +58,16 @@ export default function StoreOverview() {
     [safeItems]
   );
 
+  // Per-size katta (KATTA-<kg>) — surfaced as its own card regardless of the
+  // current category/search filter. Auto-managed by milling yield.
+  const { data: pkgItems = [] } = useMillStoreItems({ category: 'packaging', limit: 200 });
+  const kattaItems = useMemo(
+    () => (Array.isArray(pkgItems) ? pkgItems : [])
+      .filter(i => /^KATTA-/i.test(i.code || ''))
+      .sort((a, b) => Number(a.capacity_kg) - Number(b.capacity_kg)),
+    [pkgItems]
+  );
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -88,6 +98,33 @@ export default function StoreOverview() {
           <KPI icon={AlertTriangle} label="View Alerts" value="→" sub="Low stock & reorder" accent="amber" />
         </Link>
       </div>
+
+      {/* Katta stock by size — freed from milled raw, used to pack outputs or sold. */}
+      {kattaItems.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Boxes size={16} className="text-amber-600" />
+              <h2 className="text-sm font-semibold text-amber-900">Katta Stock <span className="font-normal text-amber-700/80">by size</span></h2>
+            </div>
+            <span className="text-xs text-amber-700">{kattaItems.reduce((s, k) => s + (Number(k.quantity_available) || 0), 0).toLocaleString()} total</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+            {kattaItems.map(k => {
+              const qty = Number(k.quantity_available) || 0;
+              const cost = Number(k.avg_cost_per_unit) || 0;
+              const low = qty <= Number(k.reorder_level) && Number(k.reorder_level) > 0;
+              return (
+                <div key={k.id} className="bg-white rounded-lg border border-amber-100 p-3">
+                  <p className="text-xs font-medium text-amber-700">{Math.round(Number(k.capacity_kg))} kg katta</p>
+                  <p className={`text-xl font-bold ${low ? 'text-red-600' : 'text-gray-900'}`}>{Math.round(qty).toLocaleString()}<span className="text-xs font-normal text-gray-400 ml-1">pcs</span></p>
+                  {cost > 0 && <p className="text-[11px] text-gray-400">{formatPKR(qty * cost)}</p>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="bg-white rounded-xl border border-gray-200 p-5">
