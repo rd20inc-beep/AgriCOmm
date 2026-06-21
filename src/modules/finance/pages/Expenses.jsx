@@ -422,7 +422,13 @@ export default function Expenses() {
         return (
           <SlideDrawer open={!!detailExpense} onClose={() => setDetailExpense(null)}
             title={e.expense_no || 'Expense'} subtitle={e.created_by_name ? `Created by ${e.created_by_name}` : undefined}
-            icon={Receipt} size="md">
+            icon={Receipt} size="md"
+            footer={e.payment_status === 'Unpaid' ? (
+              <button onClick={() => { setDetailExpense(null); setPayId(e.id); setPayForm({ bank_account_id: '', payment_method: 'bank', payment_reference: '' }); }}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700">
+                <CreditCard size={16} /> Record Payment
+              </button>
+            ) : undefined}>
             <div className="space-y-4">
               <div className="bg-gray-50 rounded-lg p-3 text-center">
                 <p className="text-xs text-gray-500">Amount</p>

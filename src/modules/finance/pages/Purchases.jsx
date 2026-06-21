@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ShoppingCart, Package, Factory, Ship, Receipt,
-  Search, Download, RefreshCw, CheckCircle, Clock, X, Plus, ChevronDown, Printer, Eye, User,
+  Search, Download, RefreshCw, CheckCircle, Clock, X, Plus, ChevronDown, Printer, Eye, User, DollarSign,
 } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { usePurchases, usePayPurchase, useBankAccounts } from '../../../api/queries';
@@ -495,10 +495,17 @@ export default function Purchases() {
             <span className="text-sm font-medium text-gray-900 text-right">{value || '—'}</span>
           </div>
         );
+        const isPaid = String(p.paymentStatus || 'pending').toLowerCase() === 'paid';
         return (
           <SlideDrawer open={!!detailPurchase} onClose={() => setDetailPurchase(null)}
             title={shortenRef(p.ref) || p.ref || p.refId || 'Purchase'}
-            subtitle={p.createdByName ? `Created by ${p.createdByName}` : undefined} icon={Receipt} size="md">
+            subtitle={p.createdByName ? `Created by ${p.createdByName}` : undefined} icon={Receipt} size="md"
+            footer={!isPaid ? (
+              <button onClick={() => { setDetailPurchase(null); setPayTarget(p); }}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700">
+                <DollarSign size={16} /> Record Payment
+              </button>
+            ) : undefined}>
             <div className="space-y-4">
               <div className="bg-gray-50 rounded-lg p-3 text-center">
                 <p className="text-xs text-gray-500">Amount</p>
