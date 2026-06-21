@@ -2,9 +2,10 @@ import { useState, useMemo, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Package, AlertTriangle, ShoppingCart, TrendingDown,
-  Search, Pencil, Save, Loader2, Boxes,
+  Search, Pencil, Save, Loader2, Boxes, Wallet, DollarSign, CheckCircle,
 } from 'lucide-react';
-import { useMillStoreItems, useMillStoreSummary, useSetMillStock, useUpdateMillStoreItem, useKattaSummary } from '../api/queries';
+import { useMillStoreItems, useMillStoreSummary, useSetMillStock, useUpdateMillStoreItem, useKattaSummary, useMillStorePurchases, usePayMillPurchase } from '../api/queries';
+import { useBankAccounts } from '../../../api/queries';
 import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { useApp } from '../../../context/AppContext';
@@ -92,6 +93,9 @@ export default function StoreOverview() {
           <KPI icon={AlertTriangle} label="View Alerts" value="→" sub="Low stock & reorder" accent="amber" />
         </Link>
       </div>
+
+      {/* Unpaid purchases — record payment (captures method + account). */}
+      <PurchasePaymentsCard />
 
       {/* Katta stock by size — where each size came from / went. */}
       {kattaItems.length > 0 && (
@@ -241,6 +245,118 @@ export default function StoreOverview() {
 
       {/* Edit stock + bag weights — right slide-over */}
       <StockEditDrawer item={editItem} onClose={() => setEditItem(null)} />
+    </div>
+  );
+}
+
+// Lists unpaid mill-store purchases and records a payment (method + account)
+// so the Finance payment-trail shows where/how each was paid.
+function PurchasePaymentsCard() {
+  const { addToast } = useApp();
+  const { data: purchasesRaw = [] } = useMillStorePurchases({ limit: 200 });
+  const { data: bankAccounts = [] } = useBankAccounts();
+  const pay = usePayMillPurchase();
+  const [target, setTarget] = useState(null);
+  const [form, setForm] = useState({ amount: '', method: 'cash', bankAccountId: '', reference: '' });
+
+  const purchases = Array.isArray(purchasesRaw) ? purchasesRaw : (purchasesRaw.purchases || purchasesRaw.data || []);
+  const unpaid = purchases.filter(p => String(p.payment_status || '').toLowerCase() !== 'paid');
+  if (unpaid.length === 0) return null;
+
+  const due = (p) => Math.max(0, (Number(p.total_amount) || 0) - (Number(p.paid_amount) || 0));
+  function open(p) {
+    setTarget(p);
+    setForm({ amount: String(due(p)), method: 'cash', bankAccountId: '', reference: '' });
+  }
+  async function submit() {
+    const amount = parseFloat(form.amount);
+    if (!amount || amount <= 0) { addToast('Enter a valid amount', 'error'); return; }
+    try {
+      await pay.mutateAsync({ id: target.id, data: {
+        amount, payment_method: form.method,
+        bank_account_id: form.method === 'cash' ? (form.bankAccountId || null) : (form.bankAccountId || null),
+        payment_reference: form.reference || null,
+      } });
+      addToast(`Payment of Rs ${Math.round(amount).toLocaleString()} recorded for ${target.purchase_no}`, 'success');
+      setTarget(null);
+    } catch (err) {
+      addToast(err?.data?.errors?.[0]?.message || err?.data?.message || err.message || 'Failed to record payment', 'error');
+    }
+  }
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl p-5">
+      <div className="flex items-center gap-2 mb-3">
+        <Wallet size={16} className="text-blue-600" />
+        <h2 className="text-sm font-semibold text-gray-900">Unpaid Purchases <span className="font-normal text-gray-500">({unpaid.length})</span></h2>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead><tr className="text-left text-[11px] text-gray-500 uppercase border-b border-gray-200">
+            <th className="py-2 px-2">Purchase</th><th className="py-2 px-2">Date</th>
+            <th className="py-2 px-2 text-right">Total</th><th className="py-2 px-2 text-right">Paid</th>
+            <th className="py-2 px-2 text-right">Due</th><th className="py-2 px-2">Status</th><th className="py-2 px-2"></th>
+          </tr></thead>
+          <tbody className="divide-y divide-gray-100">
+            {unpaid.map(p => (
+              <tr key={p.id} className="hover:bg-gray-50">
+                <td className="py-2 px-2 font-medium text-gray-900">{p.purchase_no}</td>
+                <td className="py-2 px-2 text-gray-600 text-xs">{p.purchase_date ? new Date(p.purchase_date).toLocaleDateString('en-GB') : '—'}</td>
+                <td className="py-2 px-2 text-right tabular-nums">{formatPKR(p.total_amount)}</td>
+                <td className="py-2 px-2 text-right tabular-nums text-emerald-700">{formatPKR(p.paid_amount)}</td>
+                <td className="py-2 px-2 text-right tabular-nums text-red-600 font-medium">{formatPKR(due(p))}</td>
+                <td className="py-2 px-2"><span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">{p.payment_status || 'Pending'}</span></td>
+                <td className="py-2 px-2 text-right">
+                  <button onClick={() => open(p)} className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded hover:bg-emerald-100 inline-flex items-center gap-1">
+                    <DollarSign size={12} /> Pay
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <SlideDrawer open={!!target} onClose={() => setTarget(null)} title={target ? `Pay — ${target.purchase_no}` : ''}
+        subtitle={target ? `Due ${formatPKR(due(target))}` : undefined} icon={Wallet} size="md"
+        footer={target && (
+          <button onClick={submit} disabled={pay.isPending}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50">
+            <CheckCircle size={16} /> {pay.isPending ? 'Recording…' : `Record Payment — Rs ${Math.round(parseFloat(form.amount) || 0).toLocaleString()}`}
+          </button>
+        )}>
+        {target && (
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Amount</label>
+              <input type="number" min="0" step="0.01" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Method</label>
+              <select value={form.method} onChange={e => setForm({ ...form, method: e.target.value, bankAccountId: '' })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
+                <option value="cash">Cash</option><option value="bank_transfer">Bank Transfer</option><option value="cheque">Cheque</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">{form.method === 'cash' ? 'Cash account' : 'Bank account'}</label>
+              <select value={form.bankAccountId} onChange={e => setForm({ ...form, bankAccountId: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
+                <option value="">Select account…</option>
+                {bankAccounts.filter(a => form.method === 'cash' ? a.type === 'cash' : a.type !== 'cash').map(a => (
+                  <option key={a.id} value={a.id}>{a.name}{a.bankName ? ` — ${a.bankName}` : ''}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Reference / Cheque #</label>
+              <input type="text" value={form.reference} onChange={e => setForm({ ...form, reference: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" placeholder="optional" />
+            </div>
+          </div>
+        )}
+      </SlideDrawer>
     </div>
   );
 }

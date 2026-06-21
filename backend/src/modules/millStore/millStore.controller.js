@@ -155,7 +155,7 @@ const millStoreController = {
   async updatePurchasePayment(req, res, next) {
     try {
       const data = validate(updatePaymentSchema, req.body);
-      const purchase = await service.updatePurchasePayment(req.params.id, data.payment_status);
+      const purchase = await service.recordPurchasePayment(req.params.id, data, req.user?.id);
       res.json({ success: true, data: { purchase } });
     } catch (err) { next(err); }
   },

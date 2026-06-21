@@ -84,8 +84,15 @@ const createPurchaseSchema = Joi.object({
 });
 
 const updatePaymentSchema = Joi.object({
-  payment_status: Joi.string().valid('Pending', 'Partial', 'Paid').required(),
-});
+  // Status-only toggle stays valid (legacy). Passing an amount records a real
+  // payment (a payments row + bank movement) instead.
+  payment_status: Joi.string().valid('Unpaid', 'Pending', 'Partial', 'Paid').optional(),
+  amount: Joi.number().greater(0).optional(),
+  bank_account_id: Joi.number().integer().allow(null).optional(),
+  payment_method: Joi.string().valid('cash', 'bank_transfer', 'cheque', 'online').optional(),
+  payment_reference: Joi.string().max(100).allow(null, '').optional(),
+  payment_date: Joi.date().optional(),
+}).or('payment_status', 'amount');
 
 const ADJUSTMENT_TYPES = ['damage', 'correction', 'wastage', 'count'];
 

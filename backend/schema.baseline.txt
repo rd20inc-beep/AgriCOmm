@@ -1100,6 +1100,7 @@ COL mill_purchase_items.purchase_id:integer:NOT NULL
 COL mill_purchase_items.quantity:numeric:NOT NULL
 COL mill_purchase_items.total_cost:numeric:NOT NULL
 COL mill_purchase_items.warehouse_id:integer:NULL
+COL mill_purchases.bank_account_id:integer:NULL
 COL mill_purchases.created_at:timestamp with time zone:NULL
 COL mill_purchases.created_by:integer:NULL
 COL mill_purchases.currency:character varying:NOT NULL
@@ -1107,6 +1108,9 @@ COL mill_purchases.id:integer:NOT NULL
 COL mill_purchases.invoice_number:character varying:NULL
 COL mill_purchases.notes:text:NULL
 COL mill_purchases.paid_amount:numeric:NOT NULL
+COL mill_purchases.paid_date:date:NULL
+COL mill_purchases.payment_method:character varying:NULL
+COL mill_purchases.payment_reference:character varying:NULL
 COL mill_purchases.payment_status:character varying:NOT NULL
 COL mill_purchases.purchase_date:date:NOT NULL
 COL mill_purchases.purchase_no:character varying:NOT NULL

@@ -163,6 +163,18 @@ export function useCreatePurchase() {
   });
 }
 
+export function usePayMillPurchase() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => millStoreApi.updatePayment(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['mill-store'] });
+      qc.invalidateQueries({ queryKey: ['purchases'] });
+      qc.invalidateQueries({ queryKey: ['payables'] });
+    },
+  });
+}
+
 export function useConfirmConsumption() {
   const qc = useQueryClient();
   return useMutation({

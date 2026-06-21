@@ -93,12 +93,85 @@ const millStoreService = {
     return purchase;
   },
 
-  async updatePurchasePayment(id, paymentStatus) {
-    const valid = ['Unpaid', 'Partial', 'Paid'];
-    if (!valid.includes(paymentStatus)) throw new ValidationError(`Payment status must be one of: ${valid.join(', ')}`);
+  // Record a mill-store purchase payment. With an `amount` it books a real
+  // payment — a canonical `payments` row linked to the purchase's payable, the
+  // method/account stamped on the purchase, and (for a bank/cash account) a
+  // bank-balance movement + `bank_transactions` row — so the Finance payment
+  // trail shows where/how it was paid. Status-only calls keep the legacy flip.
+  async recordPurchasePayment(id, data, userId) {
     const purchase = await repo.getPurchaseById(id);
     if (!purchase) throw new NotFoundError('Purchase not found.');
-    return repo.updatePurchasePayment(id, paymentStatus);
+
+    const amount = data.amount != null ? parseFloat(data.amount) : 0;
+    // Legacy: status-only toggle (no amount) — just set the status.
+    if (!amount) {
+      const status = data.payment_status;
+      const valid = ['Unpaid', 'Pending', 'Partial', 'Paid'];
+      if (!valid.includes(status)) throw new ValidationError(`Payment status must be one of: ${valid.join(', ')}`);
+      return repo.updatePurchasePayment(id, status);
+    }
+
+    return db.transaction(async (trx) => {
+      const total = parseFloat(purchase.total_amount) || 0;
+      const already = parseFloat(purchase.paid_amount) || 0;
+      const outstanding = Math.max(0, total - already);
+      if (amount > outstanding + 0.01) throw new ValidationError(`Amount exceeds the outstanding ${outstanding}.`);
+      const newPaid = already + amount;
+      const fullyPaid = total - newPaid <= 0.01;
+      const status = fullyPaid ? 'Paid' : 'Partial';
+      const method = data.payment_method || 'cash';
+      const bankId = method === 'cash' ? (data.bank_account_id || null) : (data.bank_account_id || null);
+      const payDate = data.payment_date || new Date();
+
+      // Stamp the purchase with the latest payment + running paid_amount.
+      await trx('mill_purchases').where({ id }).update({
+        paid_amount: newPaid, payment_status: status,
+        bank_account_id: bankId, payment_method: method,
+        payment_reference: data.payment_reference || null, paid_date: fullyPaid ? payDate : null,
+        updated_at: trx.fn.now(),
+      });
+
+      // Mirror to the linked payable (Money-Out reflects the same).
+      const payable = await trx('payables').where(function () {
+        this.where({ source_table: 'mill_purchases', source_id: parseInt(id, 10) })
+          .orWhere('linked_ref', purchase.purchase_no);
+      }).first();
+      if (payable) {
+        const pPaid = (parseFloat(payable.paid_amount) || 0) + amount;
+        const pOrig = parseFloat(payable.original_amount) || 0;
+        await trx('payables').where({ id: payable.id }).update({
+          paid_amount: pPaid, outstanding: Math.max(0, pOrig - pPaid),
+          status: pPaid >= pOrig - 0.01 ? 'Paid' : 'Partial', updated_at: trx.fn.now(),
+        });
+      }
+
+      // Canonical payment record (this is what the trail reads via the payable).
+      const payCount = await trx('payments').count('id as c').first();
+      const [pay] = await trx('payments').insert({
+        payment_no: `MP-PAY-${(parseInt(payCount?.c) || 0) + 1}`,
+        type: 'payment', amount, currency: 'PKR', fx_rate: 1, base_amount_pkr: amount,
+        payment_method: method, bank_account_id: bankId,
+        bank_reference: data.payment_reference || null,
+        linked_payable_id: payable ? payable.id : null,
+        payment_date: payDate, notes: `Payment for ${purchase.purchase_no}`, created_by: userId || null,
+      }).returning('*');
+
+      // Move the bank/cash account balance + sub-ledger row.
+      if (bankId) {
+        await trx('bank_accounts').where({ id: bankId }).decrement('current_balance', amount);
+        const lastBt = await trx('bank_transactions').where('transaction_no', 'like', 'BT-%').orderBy('id', 'desc').first('transaction_no');
+        const seq = lastBt ? (parseInt(String(lastBt.transaction_no).replace(/^BT-/, ''), 10) || 0) + 1 : 1;
+        await trx('bank_transactions').insert({
+          transaction_no: `BT-${String(seq).padStart(4, '0')}`, bank_account_id: bankId,
+          type: 'debit', amount, currency: 'PKR', status: 'posted',
+          transaction_date: payDate, reference: data.payment_reference || null,
+          notes: `Payment for mill_store ${purchase.purchase_no}`, source: 'mill_purchase_payment',
+          linked_payment_id: pay.id, created_by: userId || null,
+        });
+      }
+
+      return trx('mill_purchases').where({ id }).first();
+    });
   },
 
   // ─── Stock ───
