@@ -198,6 +198,11 @@ export default function MoneyIn() {
       }
       addToast(`Payment of ${fmt(amount)} recorded for ${recv.recvNo}`, 'success');
       setDrawer(null);
+      // Force the list (and Due Dates / overview) to refresh so a now-settled
+      // row drops out immediately.
+      qc.invalidateQueries({ queryKey: ['receivables'] });
+      qc.invalidateQueries({ queryKey: ['local-sales'] });
+      qc.invalidateQueries({ queryKey: ['finance'] });
     } catch (err) {
       addToast(`Failed: ${err?.data?.message || err.message}`, 'error');
     }
