@@ -170,6 +170,33 @@ const financeController = {
     }
   },
 
+  // Payment history for one Money-Out row — shows WHERE/HOW each partial was paid
+  // (amount, date, method, the bank/cash account it left, cheque/reference).
+  // Only STORED payables (numeric id) carry payments via payments.linked_payable_id;
+  // cost-derived rows (id like MC-/EC-/ME-) are unpaid by definition → empty.
+  async getPayablePayments(req, res) {
+    try {
+      const { id } = req.params;
+      if (!/^\d+$/.test(String(id))) return res.json({ success: true, data: { payments: [] } });
+
+      const payments = await db('payments as p')
+        .leftJoin('bank_accounts as ba', 'ba.id', 'p.bank_account_id')
+        .where('p.linked_payable_id', id)
+        .select(
+          'p.id', 'p.payment_no', 'p.amount', 'p.currency', 'p.payment_method',
+          'p.payment_date', 'p.bank_reference', 'p.notes', 'p.bank_account_id', 'p.type',
+          'ba.name as account_name', 'ba.bank_name as bank_name', 'ba.type as account_type'
+        )
+        .orderBy('p.payment_date', 'desc')
+        .orderBy('p.id', 'desc');
+
+      return res.json({ success: true, data: { payments } });
+    } catch (err) {
+      console.error('getPayablePayments error:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
   // Traceability breakdown of lot additional costs (transport / labor / unloading /
   // packing / bag / other) for Mill Finance — itemised by category, each carrying
   // the source lots so the figure can be traced back to where it was incurred.

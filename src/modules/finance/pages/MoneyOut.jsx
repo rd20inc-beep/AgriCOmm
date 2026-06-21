@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowUpRight, AlertTriangle, CheckCircle, Clock, Eye, X, DollarSign, Landmark, Printer } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceFilterBar } from '../../../components/finance';
-import { usePayables, useRecordPayment, useBankAccounts, useReceivables } from '../../../api/queries';
+import { usePayables, useRecordPayment, useBankAccounts, useReceivables, usePayablePayments } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
 import StatusBadge from '../../../components/StatusBadge';
@@ -27,6 +27,11 @@ function fmtCur(n, currency = 'PKR') {
 // Backwards-compat helpers
 function fmtPKR(n) { return fmtCur(n, 'PKR'); }
 function fmtAmount(v, currency) { return fmtCur(v, currency || 'PKR'); }
+// Human-readable payment method label.
+function methodLabel(m) {
+  const map = { bank_transfer: 'Bank Transfer / TT', cash: 'Cash', cheque: 'Cheque', lc: 'Letter of Credit', online: 'Online' };
+  return map[m] || (m ? m.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '—');
+}
 // PKR equivalent of any payable row — prefers locked base_amount_pkr, falls back to amount × fx_rate, finally amount as-is for PKR rows.
 function pkrOf(row, key = 'outstanding') {
   const amount = parseFloat(row?.[key]) || 0;
@@ -48,6 +53,8 @@ export default function MoneyOut() {
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
   const [drawer, setDrawer] = useState(null);
+  // Payment history for the open drawer row — where/how each partial was paid.
+  const { data: payHistory, isLoading: payHistLoading } = usePayablePayments(drawer?.id, !!drawer);
 
   function handlePrint() {
     document.body.classList.add('app-print-mask');
@@ -295,6 +302,37 @@ export default function MoneyOut() {
                 ) : <p>—</p>}</div>
                 <div><p className="text-xs text-gray-500">Currency</p><p>{drawer.currency || 'PKR'}</p></div>
                 <div><p className="text-xs text-gray-500">Status</p><StatusBadge status={drawer.status} /></div>
+              </div>
+
+              {/* Payments Made — where & how each partial payment went out. */}
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 mb-2">Payments Made</h3>
+                {payHistLoading ? (
+                  <p className="text-xs text-gray-400 py-2">Loading payments…</p>
+                ) : (payHistory?.payments?.length ? (
+                  <div className="space-y-2">
+                    {payHistory.payments.map((p) => {
+                      let from = [p.accountName, p.bankName].filter(Boolean).join(' · ');
+                      if (!from) from = p.paymentMethod === 'cash' ? 'Cash (in hand)' : '—';
+                      return (
+                        <div key={p.id} className="border border-gray-200 rounded-lg px-3 py-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-semibold text-emerald-700">{fmtAmount(p.amount, p.currency || drawer.currency)}</span>
+                            <span className="text-xs text-gray-500">{p.paymentDate ? new Date(p.paymentDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</span>
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500">
+                            <span>Method: <span className="font-medium text-gray-700">{methodLabel(p.paymentMethod)}</span></span>
+                            <span>From: <span className="font-medium text-gray-700">{from}</span></span>
+                            {p.bankReference && <span>Ref/Cheque: <span className="font-medium text-gray-700">{p.bankReference}</span></span>}
+                          </div>
+                          {p.notes && <p className="mt-0.5 text-[11px] text-gray-400 truncate" title={p.notes}>{p.notes}</p>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-400 py-2">No payments recorded yet.</p>
+                ))}
               </div>
             </div>
 

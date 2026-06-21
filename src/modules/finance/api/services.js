@@ -3,6 +3,7 @@ export const financeApi = {
   overview: () => api.get('/api/finance/overview'),
   receivables: (params) => api.get('/api/finance/receivables', params),
   receivableReceipts: (id, source) => api.get(`/api/finance/receivables/${id}/receipts`, { source }),
+  payablePayments: (id) => api.get(`/api/finance/payables/${id}/payments`),
   payables: (params) => api.get('/api/finance/payables', params),
   recordPayment: (data) => api.post('/api/finance/payments', data),
   payments: (params) => api.get('/api/finance/payments', params),

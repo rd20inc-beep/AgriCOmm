@@ -505,6 +505,20 @@ export function useReceivableReceipts(id, source, enabled = true) {
   });
 }
 
+// Payment history (where/how each partial was paid) for one Money-Out row.
+export function usePayablePayments(id, enabled = true) {
+  return useQuery({
+    queryKey: ['payables', 'payments', id],
+    queryFn: async () => {
+      const res = await financeApi.payablePayments(id);
+      const data = unwrap(res) || res?.data || {};
+      return { payments: transformKeys(data.payments || []) };
+    },
+    enabled: !!id && enabled,
+    staleTime: 5 * 1000,
+  });
+}
+
 export function usePayables(params = {}) {
   return useQuery({
     queryKey: queryKeys.payables.list(params),
