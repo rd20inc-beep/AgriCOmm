@@ -297,6 +297,7 @@ const recordPayment = Joi.object({
   payment_method: Joi.string().valid('bank_transfer', 'cash', 'cheque', 'lc', 'tt', 'wire', 'online', 'mobile').required(),
   bank_account_id: Joi.number().integer().positive().allow(null),
   bank_reference: Joi.string().allow('', null),
+  due_date: Joi.date().iso().allow(null),
   payment_date: Joi.date().iso().required(),
   linked_receivable_id: Joi.number().integer().allow(null),
   linked_payable_id: Joi.number().integer().allow(null),
