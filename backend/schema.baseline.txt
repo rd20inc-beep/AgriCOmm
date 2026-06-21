@@ -1060,9 +1060,15 @@ COL mill_packing_logs.cost_per_bag:numeric:NULL
 COL mill_packing_logs.created_at:timestamp with time zone:NOT NULL
 COL mill_packing_logs.gross_weight_kg:numeric:NOT NULL
 COL mill_packing_logs.id:integer:NOT NULL
+COL mill_packing_logs.master_bag_item_id:integer:NULL
+COL mill_packing_logs.master_bags_count:numeric:NULL
+COL mill_packing_logs.master_cost:numeric:NULL
 COL mill_packing_logs.notes:text:NULL
 COL mill_packing_logs.packed_by:integer:NULL
 COL mill_packing_logs.packed_weight_kg:numeric:NOT NULL
+COL mill_packing_logs.poly_cost:numeric:NULL
+COL mill_packing_logs.poly_count:numeric:NULL
+COL mill_packing_logs.poly_item_id:integer:NULL
 COL mill_packing_logs.tare_kg_per_bag:numeric:NOT NULL
 COL mill_packing_logs.tare_weight_kg:numeric:NOT NULL
 COL mill_packing_logs.total_cost:numeric:NULL

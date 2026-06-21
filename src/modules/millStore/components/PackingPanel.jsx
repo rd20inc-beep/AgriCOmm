@@ -18,6 +18,12 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
 
   const [bagItemId, setBagItemId] = useState('');
   const [bags, setBags] = useState('');
+  // Optional outer master bag + polythene sheet (shown for small bags ≤15 kg).
+  const [addMP, setAddMP] = useState(false);
+  const [masterId, setMasterId] = useState('');
+  const [masterQtyManual, setMasterQtyManual] = useState('');
+  const [polyId, setPolyId] = useState('');
+  const [polyQtyManual, setPolyQtyManual] = useState('');
 
   const logs = data.logs || [];
   const finishedKg = num(data.finishedKg);
@@ -32,14 +38,38 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
   const projPacked = bagsN * capacity;
   const projTare = bagsN * tare;
 
+  // Master bag + polythene: only relevant when the small bag is ≤15 kg. Master
+  // qty auto = packed weight ÷ master capacity (rounded up, editable); polythene
+  // auto = one per small bag (editable). Both are stocked packaging items.
+  const needsMP = capacity > 0 && capacity <= 15;
+  const masterSel = useMemo(() => bagItems.find((b) => String(b.id) === String(masterId)), [bagItems, masterId]);
+  const masterCap = num(masterSel?.capacity_kg);
+  const masterAvail = num(masterSel?.quantity_available);
+  const masterAuto = masterCap > 0 ? Math.ceil(projPacked / masterCap) : 0;
+  const masterQty = masterQtyManual !== '' ? num(masterQtyManual) : masterAuto;
+  const masterCost = masterQty * num(masterSel?.avg_cost_per_unit);
+
+  const polySel = useMemo(() => bagItems.find((b) => String(b.id) === String(polyId)), [bagItems, polyId]);
+  const polyAvail = num(polySel?.quantity_available);
+  const polyAuto = bagsN; // one sheet per small bag
+  const polyQty = polyQtyManual !== '' ? num(polyQtyManual) : polyAuto;
+  const polyCost = polyQty * num(polySel?.avg_cost_per_unit);
+
+  const mpActive = needsMP && addMP;
+  const masterOk = !mpActive || !masterId || (masterQty > 0 && masterQty <= masterAvail);
+  const polyOk = !mpActive || !polyId || (polyQty > 0 && polyQty <= polyAvail);
+
   const canPack =
-    !!selected && capacity > 0 && bagsN > 0 && bagsN <= available && batchStatus !== 'Closed';
+    !!selected && capacity > 0 && bagsN > 0 && bagsN <= available && batchStatus !== 'Closed' && masterOk && polyOk;
 
   async function submit() {
     try {
-      await pack.mutateAsync({ batchId, data: { bag_item_id: Number(bagItemId), bags_count: bagsN } });
-      addToast?.('Packed — bags deducted, weight recorded', 'success');
-      setBags('');
+      const payload = { bag_item_id: Number(bagItemId), bags_count: bagsN };
+      if (mpActive && masterId && masterQty > 0) { payload.master_bag_item_id = Number(masterId); payload.master_bags_count = masterQty; }
+      if (mpActive && polyId && polyQty > 0) { payload.poly_item_id = Number(polyId); payload.poly_count = polyQty; }
+      await pack.mutateAsync({ batchId, data: payload });
+      addToast?.('Packed — stock deducted, weight & cost recorded', 'success');
+      setBags(''); setMasterQtyManual(''); setPolyQtyManual('');
     } catch (err) {
       addToast?.(err?.data?.errors?.[0]?.message || err?.data?.message || err.message || 'Failed to pack', 'error');
     }
@@ -214,6 +244,79 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
               {bagsN > available && <span className="text-red-600">Not enough bags in stock.</span>}
             </div>
           )}
+
+          {/* Master (outer) bag + polythene — small bags ≤15 kg are collected into
+              a larger sack lined with a polythene sheet; their cost folds in. */}
+          {needsMP && (
+            <div className="mt-4 pt-4 border-t border-gray-200">
+              <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
+                <input type="checkbox" checked={addMP} onChange={(e) => setAddMP(e.target.checked)}
+                  className="rounded border-gray-300 text-blue-600" />
+                Add master bag &amp; polythene sheet
+                <span className="text-xs font-normal text-gray-400">(bag is {capacity} kg ≤ 15)</span>
+              </label>
+
+              {addMP && (
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Master bag */}
+                  <div className="bg-white border border-gray-200 rounded-lg p-3">
+                    <p className="text-xs font-semibold text-gray-600 mb-2">Master (outer) bag</p>
+                    <select value={masterId} onChange={(e) => { setMasterId(e.target.value); setMasterQtyManual(''); }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white mb-2">
+                      <option value="">Select master bag…</option>
+                      {bagItems.filter((b) => String(b.id) !== String(bagItemId)).map((b) => (
+                        <option key={b.id} value={b.id}>{b.name} {b.capacity_kg ? `(${Number(b.capacity_kg)}kg)` : ''}</option>
+                      ))}
+                    </select>
+                    {masterId && (
+                      <>
+                        <div className="flex items-center gap-2">
+                          <input type="number" min="0" step="1"
+                            value={masterQtyManual !== '' ? masterQtyManual : String(masterAuto)}
+                            onChange={(e) => setMasterQtyManual(e.target.value)}
+                            className="w-24 px-2 py-1.5 border border-gray-300 rounded-lg text-sm" />
+                          <span className="text-xs text-gray-500">bags{masterCap > 0 ? ` · auto ${masterAuto} (${fmtKg(projPacked)} ÷ ${masterCap}kg)` : ''}</span>
+                        </div>
+                        <div className="mt-1.5 text-xs text-gray-500 flex flex-wrap gap-x-3">
+                          <span>In stock: <b className={masterQty > masterAvail ? 'text-red-600' : ''}>{masterAvail}</b></span>
+                          {num(masterSel?.avg_cost_per_unit) > 0 && <span>Cost: <b>Rs {Math.round(masterCost).toLocaleString()}</b></span>}
+                        </div>
+                        {masterQty > masterAvail && <p className="text-xs text-red-600 mt-1">Not enough master bags in stock.</p>}
+                      </>
+                    )}
+                  </div>
+
+                  {/* Polythene sheet */}
+                  <div className="bg-white border border-gray-200 rounded-lg p-3">
+                    <p className="text-xs font-semibold text-gray-600 mb-2">Polythene sheet</p>
+                    <select value={polyId} onChange={(e) => { setPolyId(e.target.value); setPolyQtyManual(''); }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white mb-2">
+                      <option value="">Select polythene…</option>
+                      {bagItems.filter((b) => String(b.id) !== String(bagItemId)).map((b) => (
+                        <option key={b.id} value={b.id}>{b.name}</option>
+                      ))}
+                    </select>
+                    {polyId && (
+                      <>
+                        <div className="flex items-center gap-2">
+                          <input type="number" min="0" step="1"
+                            value={polyQtyManual !== '' ? polyQtyManual : String(polyAuto)}
+                            onChange={(e) => setPolyQtyManual(e.target.value)}
+                            className="w-24 px-2 py-1.5 border border-gray-300 rounded-lg text-sm" />
+                          <span className="text-xs text-gray-500">sheets · auto {polyAuto} (1 per bag)</span>
+                        </div>
+                        <div className="mt-1.5 text-xs text-gray-500 flex flex-wrap gap-x-3">
+                          <span>In stock: <b className={polyQty > polyAvail ? 'text-red-600' : ''}>{polyAvail}</b></span>
+                          {num(polySel?.avg_cost_per_unit) > 0 && <span>Cost: <b>Rs {Math.round(polyCost).toLocaleString()}</b></span>}
+                        </div>
+                        {polyQty > polyAvail && <p className="text-xs text-red-600 mt-1">Not enough polythene in stock.</p>}
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -240,7 +343,16 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
                 {logs.map((l) => (
                   <tr key={l.id} className="hover:bg-gray-50">
                     <td className="py-2 px-3 text-gray-600">{l.created_at ? new Date(l.created_at).toLocaleDateString() : '—'}</td>
-                    <td className="py-2 px-3 text-gray-900 inline-flex items-center gap-1.5"><Package size={13} className="text-gray-400" />{l.bag_item_name || l.bag_item_code || '—'}</td>
+                    <td className="py-2 px-3 text-gray-900">
+                      <span className="inline-flex items-center gap-1.5"><Package size={13} className="text-gray-400" />{l.bag_item_name || l.bag_item_code || '—'}</span>
+                      {(num(l.master_bags_count) > 0 || num(l.poly_count) > 0) && (
+                        <div className="text-[11px] text-gray-400 mt-0.5">
+                          {num(l.master_bags_count) > 0 ? `+${num(l.master_bags_count)} ${l.master_bag_name || 'master'}` : ''}
+                          {num(l.master_bags_count) > 0 && num(l.poly_count) > 0 ? ', ' : ''}
+                          {num(l.poly_count) > 0 ? `${num(l.poly_count)} ${l.poly_name || 'poly'}` : ''}
+                        </div>
+                      )}
+                    </td>
                     <td className="py-2 px-3 text-right font-medium">{num(l.bags_count)}</td>
                     <td className="py-2 px-3 text-right">{fmtKg(l.packed_weight_kg)}</td>
                     <td className="py-2 px-3 text-right text-gray-500">{fmtKg(l.tare_weight_kg)}</td>

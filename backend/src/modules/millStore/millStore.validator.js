@@ -47,6 +47,12 @@ const packSchema = Joi.object({
   bags_count: Joi.number().greater(0).required(),
   warehouse_id: Joi.number().integer().allow(null).optional(),
   notes: Joi.string().trim().max(500).allow(null, '').optional(),
+  // Optional outer "master" bag + polythene sheet used when small bags (≤15 kg)
+  // are collected into a larger sack. Each is a stocked packaging item.
+  master_bag_item_id: Joi.number().integer().allow(null).optional(),
+  master_bags_count: Joi.number().min(0).allow(null).optional(),
+  poly_item_id: Joi.number().integer().allow(null).optional(),
+  poly_count: Joi.number().min(0).allow(null).optional(),
 });
 
 const createRatioSchema = Joi.object({
