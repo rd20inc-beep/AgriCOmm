@@ -128,6 +128,48 @@ const financeController = {
     }
   },
 
+  // Receipt history for one Money-In row — shows WHERE/HOW each partial was
+  // received (amount, date, method, the bank/cash account it landed in, cheque/
+  // reference). Export rows link via payments.linked_receivable_id; local-sale
+  // rows via payments.local_sale_id (plus the sale's collection location).
+  async getReceivableReceipts(req, res) {
+    try {
+      const { id } = req.params;
+      const source = req.query.source === 'local_sale' ? 'local_sale' : 'export';
+
+      const base = () => db('payments as p')
+        .leftJoin('bank_accounts as ba', 'ba.id', 'p.bank_account_id')
+        .select(
+          'p.id', 'p.payment_no', 'p.amount', 'p.currency', 'p.payment_method',
+          'p.payment_date', 'p.bank_reference', 'p.notes', 'p.bank_account_id', 'p.type',
+          'ba.name as account_name', 'ba.bank_name as bank_name', 'ba.type as account_type'
+        )
+        .orderBy('p.payment_date', 'desc')
+        .orderBy('p.id', 'desc');
+
+      let payments = [];
+      let collectionLocation = null;
+
+      if (source === 'local_sale') {
+        const sale = await db('local_sales').where({ id }).first();
+        if (sale) {
+          collectionLocation = sale.collection_location || null;
+          payments = await base().where('p.local_sale_id', id);
+          if (payments.length === 0) {
+            payments = await base().where('p.notes', 'ilike', `%${sale.sale_no}%`);
+          }
+        }
+      } else {
+        payments = await base().where('p.linked_receivable_id', id);
+      }
+
+      return res.json({ success: true, data: { payments, collectionLocation } });
+    } catch (err) {
+      console.error('getReceivableReceipts error:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
   // Traceability breakdown of lot additional costs (transport / labor / unloading /
   // packing / bag / other) for Mill Finance — itemised by category, each carrying
   // the source lots so the figure can be traced back to where it was incurred.

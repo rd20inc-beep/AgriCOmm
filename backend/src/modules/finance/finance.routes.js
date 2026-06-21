@@ -7,6 +7,7 @@ const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
 
 router.get('/receivables', authorize('finance', 'view'), controller.getReceivables);
+router.get('/receivables/:id/receipts', authorize('finance', 'view'), controller.getReceivableReceipts);
 router.get('/payables', authorize('finance', 'view'), controller.getPayables);
 router.get('/mill-lot-costs', authorize('finance', 'view'), controller.getMillLotCosts);
 router.get('/journal-entries', authorize('finance', 'view'), controller.getJournalEntries);

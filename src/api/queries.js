@@ -487,6 +487,24 @@ export function useReceivables(params = {}) {
   });
 }
 
+// Receipt history (where/how each partial was received) for one Money-In row.
+// source: 'local_sale' for domestic sales, else 'export' for export receivables.
+export function useReceivableReceipts(id, source, enabled = true) {
+  return useQuery({
+    queryKey: ['receivables', 'receipts', id, source],
+    queryFn: async () => {
+      const res = await financeApi.receivableReceipts(id, source);
+      const data = unwrap(res) || res?.data || {};
+      return {
+        payments: transformKeys(data.payments || []),
+        collectionLocation: data.collectionLocation || data.collection_location || null,
+      };
+    },
+    enabled: !!id && enabled,
+    staleTime: 5 * 1000,
+  });
+}
+
 export function usePayables(params = {}) {
   return useQuery({
     queryKey: queryKeys.payables.list(params),

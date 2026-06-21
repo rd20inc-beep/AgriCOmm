@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowDownLeft, DollarSign, AlertTriangle, CheckCircle, Clock, Eye, X, Printer } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart, FinanceFilterBar } from '../../../components/finance';
-import { useReceivables, useRecordPayment, useBankAccounts } from '../../../api/queries';
+import { useReceivables, useRecordPayment, useBankAccounts, useReceivableReceipts } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
 import StatusBadge from '../../../components/StatusBadge';
@@ -40,6 +40,11 @@ function pkrOf(row, key = 'outstanding') {
 // Backwards-compat helper kept for existing call sites that don't yet
 // pass a currency (treats input as already-formatted number in PKR).
 function fmt(n) { return fmtCur(n, 'USD'); }
+// Human-readable payment method label.
+function methodLabel(m) {
+  const map = { bank_transfer: 'Bank Transfer / TT', cash: 'Cash', cheque: 'Cheque', lc: 'Letter of Credit', online: 'Online' };
+  return map[m] || (m ? m.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '—');
+}
 
 export default function MoneyIn() {
   const { addToast, companyProfileData } = useApp();
@@ -137,6 +142,12 @@ export default function MoneyIn() {
   ];
 
   const { data: bankAccounts = [] } = useBankAccounts();
+  // Receipt history for the open drawer row — where/how each partial was received.
+  const { data: receiptData, isLoading: receiptsLoading } = useReceivableReceipts(
+    drawer?.id,
+    drawer?.type === 'Local Sale' ? 'local_sale' : 'export',
+    !!drawer,
+  );
   const [recvForm, setRecvForm] = useState({ amount: '', bankAccountId: '', paymentMethod: 'bank_transfer', paymentDate: new Date().toISOString().split('T')[0], notes: '' });
 
   function openDrawer(row) {
@@ -268,6 +279,43 @@ export default function MoneyIn() {
                 <div><p className="text-xs text-gray-500">Due Date</p><p>{drawer.dueDate ? new Date(drawer.dueDate).toLocaleDateString() : '—'}</p></div>
                 <div><p className="text-xs text-gray-500">Currency</p><p>{drawer.currency || 'USD'}</p></div>
                 <div><p className="text-xs text-gray-500">Order</p>{drawer.orderId ? <Link to={`/export/${drawer.orderId}`} className="text-blue-600 hover:underline font-medium">View Order →</Link> : <p>—</p>}</div>
+              </div>
+
+              {/* Receipts received — where & how each partial payment came in. */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-semibold text-gray-700">Receipts Received</h3>
+                  {receiptData?.collectionLocation && (
+                    <span className="text-xs text-gray-500">Collection: <span className="font-medium text-gray-700 capitalize">{receiptData.collectionLocation}</span></span>
+                  )}
+                </div>
+                {receiptsLoading ? (
+                  <p className="text-xs text-gray-400 py-2">Loading receipts…</p>
+                ) : (receiptData?.payments?.length ? (
+                  <div className="space-y-2">
+                    {receiptData.payments.map((p) => {
+                      const into = p.accountType === 'cash'
+                        ? (p.accountName || 'Cash')
+                        : [p.accountName, p.bankName].filter(Boolean).join(' · ');
+                      return (
+                        <div key={p.id} className="border border-gray-200 rounded-lg px-3 py-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-semibold text-emerald-700">{fmtCur(p.amount, p.currency || drawer.currency)}</span>
+                            <span className="text-xs text-gray-500">{p.paymentDate ? new Date(p.paymentDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</span>
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500">
+                            <span>Method: <span className="font-medium text-gray-700">{methodLabel(p.paymentMethod)}</span></span>
+                            <span>Into: <span className="font-medium text-gray-700">{into || '—'}</span></span>
+                            {p.bankReference && <span>Ref/Cheque: <span className="font-medium text-gray-700">{p.bankReference}</span></span>}
+                          </div>
+                          {p.notes && <p className="mt-0.5 text-[11px] text-gray-400 truncate" title={p.notes}>{p.notes}</p>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-400 py-2">No receipts recorded yet.</p>
+                ))}
               </div>
             </div>
             {drawer.status !== 'Paid' && parseFloat(drawer.outstanding) > 0 && (
