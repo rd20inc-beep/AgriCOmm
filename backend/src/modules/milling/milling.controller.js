@@ -237,32 +237,44 @@ const millingController = {
         db('milling_costs').where({ batch_id: batchId }).orderBy('created_at', 'asc'),
         db('milling_vehicle_arrivals').where({ batch_id: batchId }).orderBy('created_at', 'asc'),
         db('mill_packing_logs as pl')
+          .leftJoin('mill_items as bg', 'bg.id', 'pl.bag_item_id')
           .leftJoin('mill_items as mb', 'mb.id', 'pl.master_bag_item_id')
           .leftJoin('mill_items as po', 'po.id', 'pl.poly_item_id')
           .where('pl.batch_id', batchId)
-          .select('pl.bags_count', 'pl.total_cost', 'pl.master_bags_count', 'pl.master_cost',
-            'pl.poly_count', 'pl.poly_cost', 'mb.name as master_bag_name', 'po.name as poly_name'),
+          .select('pl.bag_item_id', 'bg.name as bag_name', 'pl.bags_count', 'pl.total_cost',
+            'pl.master_bag_item_id', 'mb.name as master_name', 'pl.master_bags_count', 'pl.master_cost',
+            'pl.poly_item_id', 'po.name as poly_name', 'pl.poly_count', 'pl.poly_cost'),
       ]);
 
-      // Itemise the packaging cost (= sum of packing-log total_cost) into bags /
-      // master bags / polythene so the costing sheet can show each line. The bag
-      // portion is total_cost minus the master + polythene parts (legacy logs have
-      // no master/poly, so they fall entirely into bags).
+      // Itemise the packaging cost PER ITEM — each bag / master size / polythene
+      // gets its own line, so a batch packed with more than one master size shows
+      // a line each (not collapsed under one name). A log's bag portion is
+      // total_cost − master_cost − poly_cost (legacy logs have no master/poly, so
+      // they fall entirely into bags).
       const pf = (v) => parseFloat(v) || 0;
-      const pb = { bags: 0, master: 0, polythene: 0, bagCount: 0, masterCount: 0, polyCount: 0, masterName: null, polyName: null };
+      const r2 = (v) => Math.round(v * 100) / 100;
+      const grp = new Map(); // `${kind}:${itemId}` → { kind, itemId, name, count, cost }
+      const addLine = (kind, itemId, name, count, cost) => {
+        if (cost === 0 && count === 0) return;
+        const key = `${kind}:${itemId == null ? 'na' : itemId}`;
+        const g = grp.get(key) || { kind, itemId: itemId == null ? null : itemId, name: name || null, count: 0, cost: 0 };
+        g.count += count; g.cost += cost;
+        if (!g.name && name) g.name = name;
+        grp.set(key, g);
+      };
       for (const l of packLogs) {
         const m = pf(l.master_cost), p = pf(l.poly_cost);
-        pb.bags += pf(l.total_cost) - m - p;
-        pb.master += m; pb.polythene += p;
-        pb.bagCount += pf(l.bags_count); pb.masterCount += pf(l.master_bags_count); pb.polyCount += pf(l.poly_count);
-        if (m > 0 && !pb.masterName) pb.masterName = l.master_bag_name;
-        if (p > 0 && !pb.polyName) pb.polyName = l.poly_name;
+        addLine('bag', l.bag_item_id, l.bag_name, pf(l.bags_count), pf(l.total_cost) - m - p);
+        if (m > 0 || pf(l.master_bags_count) > 0) addLine('master', l.master_bag_item_id, l.master_name, pf(l.master_bags_count), m);
+        if (p > 0 || pf(l.poly_count) > 0) addLine('poly', l.poly_item_id, l.poly_name, pf(l.poly_count), p);
       }
-      const r2 = (v) => Math.round(v * 100) / 100;
-      const packingBreakdown = (pb.master > 0 || pb.polythene > 0)
-        ? { bags: r2(pb.bags), master: r2(pb.master), polythene: r2(pb.polythene),
-            bagCount: pb.bagCount, masterCount: pb.masterCount, polyCount: pb.polyCount,
-            masterName: pb.masterName, polyName: pb.polyName }
+      const lines = [...grp.values()].map((g) => ({ kind: g.kind, itemId: g.itemId, name: g.name, count: r2(g.count), cost: r2(g.cost) }));
+      const bags = lines.filter((l) => l.kind === 'bag');
+      const masters = lines.filter((l) => l.kind === 'master');
+      const polythene = lines.filter((l) => l.kind === 'poly');
+      const sum = (arr) => r2(arr.reduce((s, i) => s + i.cost, 0));
+      const packingBreakdown = (masters.length || polythene.length)
+        ? { bags, masters, polythene, bagsTotal: sum(bags), mastersTotal: sum(masters), polytheneTotal: sum(polythene) }
         : null;
 
       // Separate quality samples by type

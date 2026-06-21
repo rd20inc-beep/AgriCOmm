@@ -409,9 +409,9 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
                   shown only when master bag or polythene were used. */}
               {packingCostVal > 0 && packBreakdown && (
                 [
-                  { label: `Bags${packBreakdown.bagCount ? ` (${packBreakdown.bagCount})` : ''}`, val: packBreakdown.bags },
-                  { label: `${packBreakdown.masterName || 'Master bags'}${packBreakdown.masterCount ? ` (${packBreakdown.masterCount})` : ''}`, val: packBreakdown.master },
-                  { label: `${packBreakdown.polyName || 'Polythene'}${packBreakdown.polyCount ? ` (${packBreakdown.polyCount})` : ''}`, val: packBreakdown.polythene },
+                  ...(packBreakdown.bags || []).map((i) => ({ label: `${i.name || 'Bags'}${i.count ? ` (${i.count})` : ''}`, val: i.cost })),
+                  ...(packBreakdown.masters || []).map((i) => ({ label: `${i.name || 'Master bag'}${i.count ? ` (${i.count})` : ''}`, val: i.cost })),
+                  ...(packBreakdown.polythene || []).map((i) => ({ label: `${i.name || 'Polythene'}${i.count ? ` (${i.count})` : ''}`, val: i.cost })),
                 ].filter((r) => r.val > 0).map((r, i) => (
                   <tr key={`pb-${i}`} className="bg-white text-xs text-gray-500">
                     <td className="pl-12 pr-6 py-1">↳ {r.label}</td>

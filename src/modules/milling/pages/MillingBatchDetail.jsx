@@ -1636,9 +1636,9 @@ export default function MillingBatchDetail() {
                         // (mirrors the costing sheet) when master/poly were used.
                         const pbk = cat.key === 'packaging' ? (batch.packingBreakdown || null) : null;
                         const subRows = pbk ? [
-                          { label: `Bags${pbk.bagCount ? ` (${pbk.bagCount})` : ''}`, val: pbk.bags },
-                          { label: `${pbk.masterName || 'Master bags'}${pbk.masterCount ? ` (${pbk.masterCount})` : ''}`, val: pbk.master },
-                          { label: `${pbk.polyName || 'Polythene'}${pbk.polyCount ? ` (${pbk.polyCount})` : ''}`, val: pbk.polythene },
+                          ...(pbk.bags || []).map(i => ({ label: `${i.name || 'Bags'}${i.count ? ` (${i.count})` : ''}`, val: i.cost })),
+                          ...(pbk.masters || []).map(i => ({ label: `${i.name || 'Master bag'}${i.count ? ` (${i.count})` : ''}`, val: i.cost })),
+                          ...(pbk.polythene || []).map(i => ({ label: `${i.name || 'Polythene'}${i.count ? ` (${i.count})` : ''}`, val: i.cost })),
                         ].filter(r => r.val > 0) : [];
                         return [
                           <tr key={cat.key} className={`border-b border-gray-50 hover:bg-gray-50 ${isRaw ? 'bg-amber-50/50' : ''}`}>
