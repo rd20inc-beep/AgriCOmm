@@ -294,9 +294,8 @@ export default function MoneyIn() {
                 ) : (receiptData?.payments?.length ? (
                   <div className="space-y-2">
                     {receiptData.payments.map((p) => {
-                      const into = p.accountType === 'cash'
-                        ? (p.accountName || 'Cash')
-                        : [p.accountName, p.bankName].filter(Boolean).join(' · ');
+                      let into = [p.accountName, p.bankName].filter(Boolean).join(' · ');
+                      if (!into) into = p.paymentMethod === 'cash' ? 'Cash (in hand)' : '—';
                       return (
                         <div key={p.id} className="border border-gray-200 rounded-lg px-3 py-2">
                           <div className="flex items-center justify-between">
