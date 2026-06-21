@@ -211,7 +211,7 @@ const financeController = {
         .leftJoin('suppliers as s', 's.id', 'pa.supplier_id')
         .where('p.payment_method', 'cheque').whereNotNull('p.due_date')
         .select('p.type', 'p.amount', 'p.due_date', 'p.bank_reference',
-          db.raw("COALESCE(c.name, s.name, ls.buyer_name, pa.supplier_name, 'Counterparty') as party"));
+          db.raw("COALESCE(c.name, s.name, ls.buyer_name, 'Counterparty') as party"));
 
       const recv = await db('receivables as r').leftJoin('customers as c', 'c.id', 'r.customer_id')
         .whereNot('r.status', 'Paid').whereNotNull('r.due_date').where('r.outstanding', '>', 0)
@@ -221,7 +221,7 @@ const financeController = {
         .select('ls.due_amount as amount', 'ls.due_date', 'ls.sale_no as ref', db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as party"));
       const pay = await db('payables as pa').leftJoin('suppliers as s', 's.id', 'pa.supplier_id')
         .whereNot('pa.status', 'Paid').whereNotNull('pa.due_date').where('pa.outstanding', '>', 0)
-        .select('pa.outstanding as amount', 'pa.due_date', 'pa.linked_ref as ref', db.raw("COALESCE(s.name, pa.supplier_name, 'Supplier') as party"));
+        .select('pa.outstanding as amount', 'pa.due_date', 'pa.linked_ref as ref', db.raw("COALESCE(s.name, 'Supplier') as party"));
 
       const chq = (t) => cheques.filter((x) => x.type === t).map((x) => ({ kind: 'cheque', label: 'Cheque', dueDate: x.due_date, amount: parseFloat(x.amount) || 0, party: x.party, reference: x.bank_reference }));
       const receiving = [
