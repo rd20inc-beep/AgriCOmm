@@ -505,7 +505,9 @@ export default function Purchases() {
                 className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700">
                 <DollarSign size={16} /> Record Payment
               </button>
-            ) : undefined}>
+            ) : (
+              <p className="w-full text-center text-sm text-gray-500 inline-flex items-center justify-center gap-1.5"><CheckCircle size={15} className="text-emerald-600" /> Paid in full</p>
+            )}>
             <div className="space-y-4">
               <div className="bg-gray-50 rounded-lg p-3 text-center">
                 <p className="text-xs text-gray-500">Amount</p>
