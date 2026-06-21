@@ -346,56 +346,51 @@ export default function MoneyOut() {
                   <Landmark size={15} /> Record Payment
                 </h3>
 
-                {/* Fund Source Toggle */}
+                {/* Payment Method — first; it drives whether an account is needed. */}
                 <div>
-                  <label className="text-xs text-gray-500 block mb-1.5">Pay From</label>
-                  <div className="flex bg-gray-100 rounded-lg p-0.5">
-                    <button type="button" onClick={() => setPayForm({ ...payForm, fundSource: 'bank', bankAccountId: '' })}
-                      className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${payForm.fundSource === 'bank' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}>
-                      Bank Account
-                    </button>
-                    <button type="button" onClick={() => setPayForm({ ...payForm, fundSource: 'cash', bankAccountId: '' })}
-                      className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${payForm.fundSource === 'cash' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}>
-                      Cash
-                    </button>
-                  </div>
+                  <label className="text-xs text-gray-500 block mb-1">Payment Method</label>
+                  <select value={payForm.paymentMethod}
+                    onChange={e => { const m = e.target.value; setPayForm({ ...payForm, paymentMethod: m, bankAccountId: (m === 'cash' || m === 'cheque') ? '' : payForm.bankAccountId }); }}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="bank_transfer">Bank Transfer</option>
+                    <option value="cheque">Cheque</option>
+                    <option value="cash">Cash</option>
+                    <option value="online">Online Payment</option>
+                    <option value="mobile">Mobile Transfer</option>
+                  </select>
                 </div>
 
-                {/* Bank Account Dropdown — non-cash accounts only */}
-                {payForm.fundSource === 'bank' && (
+                {/* Cheque details — number (optional) + clearing date for Due Dates.
+                    No account picked. */}
+                {payForm.paymentMethod === 'cheque' && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-gray-500 block mb-1">Cheque # <span className="text-gray-300">(optional)</span></label>
+                      <input type="text" value={payForm.chequeNo} onChange={e => setPayForm({ ...payForm, chequeNo: e.target.value })}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="e.g. 004512" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500 block mb-1">Cheque date</label>
+                      <input type="date" value={payForm.dueDate} onChange={e => setPayForm({ ...payForm, dueDate: e.target.value })}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+                    </div>
+                  </div>
+                )}
+
+                {/* Pay From Account — only account-based methods; Cash & Cheque
+                    don't need one. */}
+                {payForm.paymentMethod !== 'cash' && payForm.paymentMethod !== 'cheque' && (
                   <div>
-                    <label className="text-xs text-gray-500 block mb-1">Bank Account</label>
+                    <label className="text-xs text-gray-500 block mb-1">Pay From Account</label>
                     <select required value={payForm.bankAccountId} onChange={e => setPayForm({ ...payForm, bankAccountId: e.target.value })}
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                      <option value="">Select bank account...</option>
+                      <option value="">Select account...</option>
                       {bankOnlyAccounts.map(a => (
                         <option key={a.id} value={a.id}>
                           {a.name} — {a.bankName || ''} ({a.currency || 'PKR'} {Math.round(parseFloat(a.currentBalance) || 0).toLocaleString()})
                         </option>
                       ))}
                     </select>
-                  </div>
-                )}
-
-                {/* Cash Account Dropdown — type='cash' rows on bank_accounts */}
-                {payForm.fundSource === 'cash' && (
-                  <div>
-                    <label className="text-xs text-gray-500 block mb-1">Cash Account</label>
-                    {cashAccounts.length === 0 ? (
-                      <div className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                        No cash accounts configured. Add one in Admin → Bank Accounts (type: cash).
-                      </div>
-                    ) : (
-                      <select required value={payForm.bankAccountId} onChange={e => setPayForm({ ...payForm, bankAccountId: e.target.value })}
-                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                        <option value="">Select cash account...</option>
-                        {cashAccounts.map(a => (
-                          <option key={a.id} value={a.id}>
-                            {a.name} ({a.currency || 'PKR'} {Math.round(parseFloat(a.currentBalance) || 0).toLocaleString()})
-                          </option>
-                        ))}
-                      </select>
-                    )}
                   </div>
                 )}
 
@@ -415,35 +410,6 @@ export default function MoneyOut() {
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                 </div>
-
-                {/* Payment Method */}
-                <div>
-                  <label className="text-xs text-gray-500 block mb-1">Payment Method</label>
-                  <select value={payForm.paymentMethod} onChange={e => setPayForm({ ...payForm, paymentMethod: e.target.value })}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <option value="bank_transfer">Bank Transfer</option>
-                    <option value="cheque">Cheque</option>
-                    <option value="cash">Cash</option>
-                    <option value="online">Online Payment</option>
-                    <option value="mobile">Mobile Transfer</option>
-                  </select>
-                </div>
-
-                {/* Cheque details — number (optional) + clearing date for Due Dates. */}
-                {payForm.paymentMethod === 'cheque' && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-xs text-gray-500 block mb-1">Cheque # <span className="text-gray-300">(optional)</span></label>
-                      <input type="text" value={payForm.chequeNo} onChange={e => setPayForm({ ...payForm, chequeNo: e.target.value })}
-                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="e.g. 004512" />
-                    </div>
-                    <div>
-                      <label className="text-xs text-gray-500 block mb-1">Cheque date</label>
-                      <input type="date" value={payForm.dueDate} onChange={e => setPayForm({ ...payForm, dueDate: e.target.value })}
-                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-                    </div>
-                  </div>
-                )}
 
                 {/* Notes */}
                 <div>
