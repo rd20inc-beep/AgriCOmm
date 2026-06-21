@@ -227,13 +227,19 @@ const financeController = {
       const outstanding = Math.max(0, total - paid);
       const refToken = cfg.refCol ? row[cfg.refCol] : null;
 
-      // (1) payments via the linked payable
-      const payable = await db('payables').where({ source_table: cfg.table, source_id: id }).first();
+      // (1) payments via the linked payable(s). Match BOTH keying schemes:
+      // source_table+source_id (payPurchase) AND linked_ref=token (a lot's Raw
+      // Material payable is keyed by lot_no), excluding the separate transport
+      // payable.
+      const payableIds = (await db('payables').where(function () {
+        this.where({ source_table: cfg.table, source_id: id });
+        if (refToken) this.orWhere(function () { this.where('linked_ref', refToken).whereNot('source_table', 'lot_transport'); });
+      }).select('id')).map((r) => r.id);
       let viaPayments = [];
-      if (payable) {
+      if (payableIds.length) {
         viaPayments = await db('payments as p')
           .leftJoin('bank_accounts as ba', 'ba.id', 'p.bank_account_id')
-          .where('p.linked_payable_id', payable.id)
+          .whereIn('p.linked_payable_id', payableIds)
           .select('p.amount', 'p.payment_method', 'p.payment_date', 'p.bank_reference',
             'ba.name as account_name', 'ba.bank_name', 'ba.type as account_type');
       }
@@ -266,11 +272,14 @@ const financeController = {
         if (seen.has(k)) return false; seen.add(k); return true;
       });
 
-      // (3) fallback — paid but nothing itemisable → one synthesized line
-      if (payments.length === 0 && paid > 0) {
+      // (3) fallback — settled but nothing itemisable → one synthesized line.
+      // Gate on paid_amount>0 OR payment_status='Paid' (some rows mark Paid
+      // without ever setting paid_amount), using total when paid is 0.
+      const isPaidStatus = String(row.payment_status || '').toLowerCase() === 'paid';
+      if (payments.length === 0 && (paid > 0 || isPaidStatus)) {
         const acct = row.bank_account_id ? await db('bank_accounts').where({ id: row.bank_account_id }).first() : null;
         payments.push({
-          amount: paid, date: row.paid_date || row.paid_at || row.updated_at,
+          amount: paid > 0 ? paid : total, date: row.paid_date || row.paid_at || row.updated_at,
           method: row.payment_method || (acct?.type === 'cash' ? 'cash' : null),
           account_name: acct?.name || null, bank_name: acct?.bank_name || null,
           account_type: acct?.type || null, reference: row.payment_reference || null, synthesized: true,
