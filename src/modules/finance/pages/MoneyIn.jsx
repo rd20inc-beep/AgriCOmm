@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowDownLeft, DollarSign, AlertTriangle, CheckCircle, Clock, Eye, X, Printer } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart, FinanceFilterBar } from '../../../components/finance';
-import { useReceivables, useRecordPayment, useBankAccounts, useReceivableReceipts } from '../../../api/queries';
+import { useReceivables, useRecordPayment, useBankAccounts, useReceivableReceipts, useAcceptLocalSalePayment } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
 import StatusBadge from '../../../components/StatusBadge';
@@ -52,6 +52,7 @@ export default function MoneyIn() {
   const { queryParams: rangeParams } = useFinanceDateRange();
   const { data: receivables = [], isLoading } = useReceivables(rangeParams);
   const recordPaymentMut = useRecordPayment();
+  const acceptLocalSaleMut = useAcceptLocalSalePayment();
   const [statusFilter, setStatusFilter] = useState('All');
   const [typeFilter, setTypeFilter] = useState('All');
   const [drawer, setDrawer] = useState(null);
@@ -168,21 +169,37 @@ export default function MoneyIn() {
     const amount = parseFloat(recvForm.amount);
     if (!amount || amount <= 0) { addToast('Enter a valid amount', 'error'); return; }
     try {
-      await recordPaymentMut.mutateAsync({
-        type: 'receipt', amount,
-        currency: recv.currency || 'USD',
-        payment_method: recvForm.paymentMethod,
-        payment_date: recvForm.paymentDate,
-        bank_account_id: recvForm.bankAccountId || null,
-        bank_reference: recvForm.chequeNo || null,
-        due_date: recvForm.dueDate || null,
-        linked_receivable_id: recv.dbId || recv.id,
-        notes: recvForm.notes || `Payment for ${recv.recvNo}`,
-      });
+      if (recv.type === 'Local Sale') {
+        // Local-sale rows carry a local_sales id (NOT a receivables id), so they
+        // settle via the local-sale accept-payment endpoint, not recordPayment.
+        await acceptLocalSaleMut.mutateAsync({
+          saleId: recv.id,
+          data: {
+            amount,
+            payment_method: recvForm.paymentMethod,
+            payment_date: recvForm.paymentDate,
+            bank_account_id: recvForm.bankAccountId || null,
+            reference: recvForm.chequeNo || null,
+            due_date: recvForm.dueDate || null,
+          },
+        });
+      } else {
+        await recordPaymentMut.mutateAsync({
+          type: 'receipt', amount,
+          currency: recv.currency || 'USD',
+          payment_method: recvForm.paymentMethod,
+          payment_date: recvForm.paymentDate,
+          bank_account_id: recvForm.bankAccountId || null,
+          bank_reference: recvForm.chequeNo || null,
+          due_date: recvForm.dueDate || null,
+          linked_receivable_id: recv.dbId || recv.id,
+          notes: recvForm.notes || `Payment for ${recv.recvNo}`,
+        });
+      }
       addToast(`Payment of ${fmt(amount)} recorded for ${recv.recvNo}`, 'success');
       setDrawer(null);
     } catch (err) {
-      addToast(`Failed: ${err.message}`, 'error');
+      addToast(`Failed: ${err?.data?.message || err.message}`, 'error');
     }
   }
 
