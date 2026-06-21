@@ -324,19 +324,53 @@ export default function MoneyIn() {
               <form onSubmit={handleRecordPayment} className="px-6 py-4 border-t border-gray-200 space-y-3">
                 <h3 className="text-sm font-semibold text-gray-700">Record Receipt</h3>
 
-                {/* Bank Account */}
+                {/* Payment Method — first; it drives whether an account is needed. */}
                 <div>
-                  <label className="text-xs text-gray-500 block mb-1">Receive Into Account</label>
-                  <select value={recvForm.bankAccountId} onChange={e => setRecvForm({ ...recvForm, bankAccountId: e.target.value })}
+                  <label className="text-xs text-gray-500 block mb-1">Payment Method</label>
+                  <select value={recvForm.paymentMethod}
+                    onChange={e => { const m = e.target.value; setRecvForm({ ...recvForm, paymentMethod: m, bankAccountId: (m === 'cash' || m === 'cheque') ? '' : recvForm.bankAccountId }); }}
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <option value="">Select bank account...</option>
-                    {bankAccounts.map(a => (
-                      <option key={a.id} value={a.id}>
-                        {a.name} — {a.bankName || ''} ({a.currency || 'PKR'} {Math.round(parseFloat(a.currentBalance) || 0).toLocaleString()})
-                      </option>
-                    ))}
+                    <option value="bank_transfer">Bank Transfer / TT</option>
+                    <option value="lc">Letter of Credit</option>
+                    <option value="cheque">Cheque</option>
+                    <option value="cash">Cash</option>
+                    <option value="online">Online</option>
                   </select>
                 </div>
+
+                {/* Cheque details — number (optional) + the date it clears, so
+                    Due Dates knows when to expect the money. No account picked. */}
+                {recvForm.paymentMethod === 'cheque' && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-gray-500 block mb-1">Cheque # <span className="text-gray-300">(optional)</span></label>
+                      <input type="text" value={recvForm.chequeNo} onChange={e => setRecvForm({ ...recvForm, chequeNo: e.target.value })}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="e.g. 004512" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500 block mb-1">Cheque date</label>
+                      <input type="date" value={recvForm.dueDate} onChange={e => setRecvForm({ ...recvForm, dueDate: e.target.value })}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+                    </div>
+                  </div>
+                )}
+
+                {/* Receive Into Account — only for account-based methods; Cash &
+                    Cheque don't need one. */}
+                {recvForm.paymentMethod !== 'cash' && recvForm.paymentMethod !== 'cheque' && (
+                  <div>
+                    <label className="text-xs text-gray-500 block mb-1">Receive Into Account</label>
+                    <select value={recvForm.bankAccountId} onChange={e => setRecvForm({ ...recvForm, bankAccountId: e.target.value })}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      <option value="">Select bank account...</option>
+                      {bankAccounts.map(a => (
+                        <option key={a.id} value={a.id}>
+                          {a.name} — {a.bankName || ''} ({a.currency || 'PKR'} {Math.round(parseFloat(a.currentBalance) || 0).toLocaleString()})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 {/* Amount + Date */}
                 <div className="grid grid-cols-2 gap-3">
@@ -353,36 +387,6 @@ export default function MoneyIn() {
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                 </div>
-
-                {/* Method */}
-                <div>
-                  <label className="text-xs text-gray-500 block mb-1">Payment Method</label>
-                  <select value={recvForm.paymentMethod} onChange={e => setRecvForm({ ...recvForm, paymentMethod: e.target.value })}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <option value="bank_transfer">Bank Transfer / TT</option>
-                    <option value="lc">Letter of Credit</option>
-                    <option value="cheque">Cheque</option>
-                    <option value="cash">Cash</option>
-                    <option value="online">Online</option>
-                  </select>
-                </div>
-
-                {/* Cheque details — number (optional) + the date it clears, so
-                    Due Dates knows when to expect the money. */}
-                {recvForm.paymentMethod === 'cheque' && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-xs text-gray-500 block mb-1">Cheque # <span className="text-gray-300">(optional)</span></label>
-                      <input type="text" value={recvForm.chequeNo} onChange={e => setRecvForm({ ...recvForm, chequeNo: e.target.value })}
-                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="e.g. 004512" />
-                    </div>
-                    <div>
-                      <label className="text-xs text-gray-500 block mb-1">Cheque date</label>
-                      <input type="date" value={recvForm.dueDate} onChange={e => setRecvForm({ ...recvForm, dueDate: e.target.value })}
-                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-                    </div>
-                  </div>
-                )}
 
                 {/* Notes */}
                 <div>
