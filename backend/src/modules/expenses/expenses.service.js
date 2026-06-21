@@ -186,12 +186,15 @@ const expensesService = {
       .leftJoin('users as u', 'u.id', 'e.created_by')
       .leftJoin('milling_batches as mb', 'mb.id', 'e.batch_id')
       .leftJoin('export_orders as eo', 'eo.id', 'e.order_id')
+      .leftJoin('bank_accounts as ba', 'ba.id', 'e.bank_account_id')
       .select(
         'e.*',
         's.name as supplier_name_joined',
         'u.full_name as created_by_name',
         'mb.batch_no',
-        'eo.order_no'
+        'eo.order_no',
+        'ba.name as bank_name',
+        'ba.type as bank_type'
       );
 
     if (expense_type) q.where('e.expense_type', expense_type);

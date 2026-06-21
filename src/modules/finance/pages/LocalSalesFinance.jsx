@@ -5,7 +5,7 @@ import {
   Search, Download, ExternalLink, Eye, User, ShoppingCart, DollarSign, CheckCircle,
 } from 'lucide-react';
 import { FinanceKPI } from '../../../components/finance';
-import { useLocalSales, useLocalSalesSummary, useAcceptLocalSalePayment, useBankAccounts } from '../../../api/queries';
+import { useLocalSales, useLocalSalesSummary, useAcceptLocalSalePayment, useBankAccounts, useReceivableReceipts } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { downloadCSV } from '../../../utils/csvExport';
 import { useApp } from '../../../context/AppContext';
@@ -20,6 +20,7 @@ function fmtPKR(n) {
 }
 const fmtFull = (n) => `Rs ${Math.round(parseFloat(n) || 0).toLocaleString()}`;
 const fmtDate = (s) => s ? new Date(s).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '—';
+const methodLabel = (m) => ({ cash: 'Cash', bank_transfer: 'Bank Transfer', cheque: 'Cheque', lc: 'Letter of Credit', online: 'Online' }[m] || (m ? m.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '—'));
 
 const STATUS_TONE = {
   Paid:     'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -40,6 +41,8 @@ export default function LocalSalesFinance() {
   const [searchTerm, setSearchTerm] = useState('');
   const [detailSale, setDetailSale] = useState(null);
   const [payForm, setPayForm] = useState({ amount: '', method: 'cash', bankAccountId: '' });
+  // Where each payment was received (account/cash) + type, for the open sale.
+  const { data: receiptData, isLoading: receiptsLoading } = useReceivableReceipts(detailSale?.id, 'local_sale', !!detailSale);
 
   function openDetail(s) {
     setDetailSale(s);
@@ -316,6 +319,41 @@ export default function LocalSalesFinance() {
                 <Row label="Status" value={s.paymentStatus || 'Pending'} />
                 <Row label="Created by" value={<span className="inline-flex items-center gap-1.5"><User size={13} className="text-gray-400" />{s.createdByName || '—'}</span>} />
                 <Row label="Created at" value={s.createdAt ? new Date(s.createdAt).toLocaleString('en-GB') : '—'} />
+              </div>
+
+              {/* Payments received — where & how each came in. */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-semibold text-gray-700">Payments Received</h3>
+                  {receiptData?.collectionLocation && (
+                    <span className="text-xs text-gray-500">Collection: <span className="font-medium text-gray-700 capitalize">{receiptData.collectionLocation}</span></span>
+                  )}
+                </div>
+                {receiptsLoading ? (
+                  <p className="text-xs text-gray-400 py-1">Loading…</p>
+                ) : (receiptData?.payments?.length ? (
+                  <div className="space-y-2">
+                    {receiptData.payments.map((p) => {
+                      let into = [p.accountName, p.bankName].filter(Boolean).join(' · ');
+                      if (!into) into = p.paymentMethod === 'cash' ? 'Cash (in hand)' : '—';
+                      return (
+                        <div key={p.id} className="border border-gray-200 rounded-lg px-3 py-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-semibold text-emerald-700">{fmtFull(p.amount)}</span>
+                            <span className="text-xs text-gray-500">{p.paymentDate ? new Date(p.paymentDate).toLocaleDateString('en-GB') : '—'}</span>
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500">
+                            <span>Type: <span className="font-medium text-gray-700">{methodLabel(p.paymentMethod)}</span></span>
+                            <span>Into: <span className="font-medium text-gray-700">{into}</span></span>
+                            {p.bankReference && <span>Ref: <span className="font-medium text-gray-700">{p.bankReference}</span></span>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-400 py-1">No payments recorded yet.</p>
+                ))}
               </div>
             </div>
           </SlideDrawer>

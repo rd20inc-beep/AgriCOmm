@@ -444,7 +444,18 @@ export default function Expenses() {
                 <Row label="Description" value={e.description} />
                 <Row label="Linked to" value={e.batch_no || e.order_no} />
                 <Row label="Payment status" value={e.payment_status} />
-                {e.bank_name && <Row label="Paid from" value={e.bank_name} />}
+                {e.payment_status === 'Paid' && (() => {
+                  const method = { cash: 'Cash', bank: 'Bank Transfer', bank_transfer: 'Bank Transfer', cheque: 'Cheque', online: 'Online' }[e.payment_method] || e.payment_method;
+                  const where = e.bank_type === 'cash' ? (e.bank_name || 'Cash') : (e.bank_name || (e.payment_method === 'cash' ? 'Cash (in hand)' : '—'));
+                  return (
+                    <>
+                      <Row label="Paid via" value={method} />
+                      <Row label="Paid from" value={where} />
+                      {e.payment_reference && <Row label="Reference / Cheque" value={e.payment_reference} />}
+                      {e.paid_date && <Row label="Paid on" value={new Date(e.paid_date).toLocaleDateString('en-GB')} />}
+                    </>
+                  );
+                })()}
                 <Row label="Created by" value={<span className="inline-flex items-center gap-1.5"><User size={13} className="text-gray-400" />{e.created_by_name || '—'}</span>} />
                 <Row label="Created at" value={e.created_at ? new Date(e.created_at).toLocaleString('en-GB') : '—'} />
               </div>
