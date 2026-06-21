@@ -232,11 +232,38 @@ const millingController = {
       }
 
       const batchId = batch.id; // resolved numeric ID
-      const [qualitySamples, costs, vehicles] = await Promise.all([
+      const [qualitySamples, costs, vehicles, packLogs] = await Promise.all([
         db('milling_quality_samples').where({ batch_id: batchId }).orderBy('created_at', 'asc'),
         db('milling_costs').where({ batch_id: batchId }).orderBy('created_at', 'asc'),
         db('milling_vehicle_arrivals').where({ batch_id: batchId }).orderBy('created_at', 'asc'),
+        db('mill_packing_logs as pl')
+          .leftJoin('mill_items as mb', 'mb.id', 'pl.master_bag_item_id')
+          .leftJoin('mill_items as po', 'po.id', 'pl.poly_item_id')
+          .where('pl.batch_id', batchId)
+          .select('pl.bags_count', 'pl.total_cost', 'pl.master_bags_count', 'pl.master_cost',
+            'pl.poly_count', 'pl.poly_cost', 'mb.name as master_bag_name', 'po.name as poly_name'),
       ]);
+
+      // Itemise the packaging cost (= sum of packing-log total_cost) into bags /
+      // master bags / polythene so the costing sheet can show each line. The bag
+      // portion is total_cost minus the master + polythene parts (legacy logs have
+      // no master/poly, so they fall entirely into bags).
+      const pf = (v) => parseFloat(v) || 0;
+      const pb = { bags: 0, master: 0, polythene: 0, bagCount: 0, masterCount: 0, polyCount: 0, masterName: null, polyName: null };
+      for (const l of packLogs) {
+        const m = pf(l.master_cost), p = pf(l.poly_cost);
+        pb.bags += pf(l.total_cost) - m - p;
+        pb.master += m; pb.polythene += p;
+        pb.bagCount += pf(l.bags_count); pb.masterCount += pf(l.master_bags_count); pb.polyCount += pf(l.poly_count);
+        if (m > 0 && !pb.masterName) pb.masterName = l.master_bag_name;
+        if (p > 0 && !pb.polyName) pb.polyName = l.poly_name;
+      }
+      const r2 = (v) => Math.round(v * 100) / 100;
+      const packingBreakdown = (pb.master > 0 || pb.polythene > 0)
+        ? { bags: r2(pb.bags), master: r2(pb.master), polythene: r2(pb.polythene),
+            bagCount: pb.bagCount, masterCount: pb.masterCount, polyCount: pb.polyCount,
+            masterName: pb.masterName, polyName: pb.polyName }
+        : null;
 
       // Separate quality samples by type
       const sampleAnalysis = qualitySamples.filter((q) => q.analysis_type === 'sample');
@@ -252,6 +279,7 @@ const millingController = {
           },
           costs,
           vehicles,
+          packingBreakdown,
         },
       });
     } catch (err) {

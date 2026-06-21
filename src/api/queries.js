@@ -250,6 +250,8 @@ export function useMillingBatch(id) {
           });
           raw.costs = costsObj;
         }
+        // Packing cost itemised into bags / master bags / polythene (or null).
+        raw.packingBreakdown = res?.data?.packingBreakdown || null;
         const quality = res?.data?.quality || {};
         const pf = (v) => v != null ? parseFloat(v) || null : null;
         // Backend now upserts one row per (batch, type), but historic

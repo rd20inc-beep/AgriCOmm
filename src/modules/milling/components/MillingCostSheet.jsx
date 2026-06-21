@@ -142,6 +142,8 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
   // Packing (bags) is a separate always-added line so it loads the finished cost
   // even when a manual Other figure overrides the auto process/overhead costs.
   const packingCostVal = pf(safeCosts.packaging);
+  // Itemised packing breakdown (bags / master bags / polythene), when present.
+  const packBreakdown = batch.packingBreakdown || null;
   const totalBatchCost = effectiveRawRiceCost + millingCostVal + otherExpVal + packingCostVal;
 
   // ═══ SECTION D: Yield Output ═══
@@ -402,6 +404,22 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
                   <td className="px-6 py-1.5 text-right text-gray-500">{rawQtyMT > 0 ? fmtPKR(packingCostVal / rawQtyMT) : '—'}</td>
                   <td className="px-6 py-1.5 text-right text-gray-500">{totalBatchCost > 0 ? ((packingCostVal / totalBatchCost) * 100).toFixed(1) + '%' : '—'}</td>
                 </tr>
+              )}
+              {/* Itemised packing breakdown — bags / master bags / polythene —
+                  shown only when master bag or polythene were used. */}
+              {packingCostVal > 0 && packBreakdown && (
+                [
+                  { label: `Bags${packBreakdown.bagCount ? ` (${packBreakdown.bagCount})` : ''}`, val: packBreakdown.bags },
+                  { label: `${packBreakdown.masterName || 'Master bags'}${packBreakdown.masterCount ? ` (${packBreakdown.masterCount})` : ''}`, val: packBreakdown.master },
+                  { label: `${packBreakdown.polyName || 'Polythene'}${packBreakdown.polyCount ? ` (${packBreakdown.polyCount})` : ''}`, val: packBreakdown.polythene },
+                ].filter((r) => r.val > 0).map((r, i) => (
+                  <tr key={`pb-${i}`} className="bg-white text-xs text-gray-500">
+                    <td className="pl-12 pr-6 py-1">↳ {r.label}</td>
+                    <td className="px-6 py-1 text-right">{fmtPKR(r.val)}</td>
+                    <td className="px-6 py-1 text-right">{rawQtyMT > 0 ? fmtPKR(r.val / rawQtyMT) : '—'}</td>
+                    <td className="px-6 py-1 text-right">{totalBatchCost > 0 ? ((r.val / totalBatchCost) * 100).toFixed(1) + '%' : '—'}</td>
+                  </tr>
+                ))
               )}
             </tbody>
             <tfoot>
