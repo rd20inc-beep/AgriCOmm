@@ -233,7 +233,10 @@ const financeController = {
       // payable.
       const payableIds = (await db('payables').where(function () {
         this.where({ source_table: cfg.table, source_id: id });
-        if (refToken) this.orWhere(function () { this.where('linked_ref', refToken).whereNot('source_table', 'lot_transport'); });
+        if (refToken) this.orWhere(function () {
+          this.where('linked_ref', refToken)
+            .andWhere(function () { this.whereNull('source_table').orWhereNot('source_table', 'lot_transport'); });
+        });
       }).select('id')).map((r) => r.id);
       let viaPayments = [];
       if (payableIds.length) {
