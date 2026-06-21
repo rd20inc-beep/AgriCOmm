@@ -34,7 +34,7 @@ export default function LocalSales() {
   const [selectedSale, setSelectedSale] = useState(null);
   const [salePayments, setSalePayments] = useState([]);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [payForm, setPayForm] = useState({ amount: '', payment_method: 'cash', bank_account_id: '', payment_date: new Date().toISOString().split('T')[0], reference: '', notes: '' });
+  const [payForm, setPayForm] = useState({ amount: '', payment_method: 'cash', bank_account_id: '', payment_date: new Date().toISOString().split('T')[0], reference: '', notes: '', due_date: '' });
   const [payLoading, setPayLoading] = useState(false);
 
   const { data: sales = [], isLoading, error, refetch } = useLocalSales();
@@ -366,6 +366,12 @@ export default function LocalSales() {
             <label className={LABEL}>Reference</label>
             <input value={payForm.reference} onChange={e => setPayForm(p => ({...p, reference: e.target.value}))} className={INPUT} placeholder="Receipt / cheque #" />
           </div>
+          {payForm.payment_method === 'cheque' && (
+            <div>
+              <label className={LABEL}>Cheque date <span className="text-gray-400 font-normal">(when it clears)</span></label>
+              <input type="date" value={payForm.due_date} onChange={e => setPayForm(p => ({...p, due_date: e.target.value}))} className={INPUT} />
+            </div>
+          )}
           <p className="text-[11px] text-gray-400">Cash and bank receipts update the account balance.</p>
           <div className="flex justify-end gap-3 pt-3 border-t">
             <button onClick={() => setShowPaymentModal(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
@@ -381,7 +387,7 @@ export default function LocalSales() {
                 const payRes = await localSalesApi.getPayments(selectedSale.id);
                 setSalePayments(payRes?.data?.payments || []);
                 setShowPaymentModal(false);
-                setPayForm({ amount: '', payment_method: 'cash', bank_account_id: '', payment_date: new Date().toISOString().split('T')[0], reference: '', notes: '' });
+                setPayForm({ amount: '', payment_method: 'cash', bank_account_id: '', payment_date: new Date().toISOString().split('T')[0], reference: '', notes: '', due_date: '' });
               } catch (err) { addToast(err.message || 'Payment failed', 'error'); }
               setPayLoading(false);
             }} disabled={payLoading}

@@ -248,7 +248,7 @@ export default function Expenses() {
 
   // ─── Pay modal ───
   const [payId, setPayId] = useState(null);
-  const [payForm, setPayForm] = useState({ bank_account_id: '', payment_method: 'bank', payment_reference: '' });
+  const [payForm, setPayForm] = useState({ bank_account_id: '', payment_method: 'bank', payment_reference: '', due_date: '' });
 
   async function handleCreate(e) {
     e.preventDefault();
@@ -405,7 +405,7 @@ export default function Expenses() {
       <ExpenseTable
         loading={isLoading}
         rows={filtered}
-        onPay={(e) => { setPayId(e.id); setPayForm({ bank_account_id: '', payment_method: 'bank', payment_reference: '' }); }}
+        onPay={(e) => { setPayId(e.id); setPayForm({ bank_account_id: '', payment_method: 'bank', payment_reference: '', due_date: '' }); }}
         onView={setDetailExpense}
       />
 
@@ -424,7 +424,7 @@ export default function Expenses() {
             title={e.expense_no || 'Expense'} subtitle={e.created_by_name ? `Created by ${e.created_by_name}` : undefined}
             icon={Receipt} size="md"
             footer={e.payment_status !== 'Paid' ? (
-              <button onClick={() => { setDetailExpense(null); setPayId(e.id); setPayForm({ bank_account_id: '', payment_method: 'bank', payment_reference: '' }); }}
+              <button onClick={() => { setDetailExpense(null); setPayId(e.id); setPayForm({ bank_account_id: '', payment_method: 'bank', payment_reference: '', due_date: '' }); }}
                 className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700">
                 <CreditCard size={16} /> Record Payment
               </button>
@@ -477,6 +477,30 @@ export default function Expenses() {
                 {(bankAccountsList || []).map(b => <option key={b.id} value={b.id}>{b.name} ({b.currency})</option>)}
               </select>
             </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Method</label>
+              <select value={payForm.payment_method} onChange={e => setPayForm(p => ({ ...p, payment_method: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none bg-white">
+                <option value="bank">Bank Transfer</option>
+                <option value="cheque">Cheque</option>
+                <option value="cash">Cash</option>
+                <option value="online">Online</option>
+              </select>
+            </div>
+            {payForm.payment_method === 'cheque' && (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Cheque # <span className="text-gray-300 normal-case">(optional)</span></label>
+                  <input type="text" value={payForm.payment_reference} onChange={e => setPayForm(p => ({ ...p, payment_reference: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Cheque date</label>
+                  <input type="date" value={payForm.due_date} onChange={e => setPayForm(p => ({ ...p, due_date: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none" />
+                </div>
+              </div>
+            )}
             <div className="flex gap-2 justify-end">
               <button onClick={() => setPayId(null)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
               <button onClick={handlePay} disabled={payMut.isPending}

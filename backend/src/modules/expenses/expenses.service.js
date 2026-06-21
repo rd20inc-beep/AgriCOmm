@@ -222,25 +222,38 @@ const expensesService = {
     return row;
   },
 
-  async markPaid(id, { bank_account_id, payment_method, payment_reference, paid_date }, userId) {
+  async markPaid(id, { bank_account_id, payment_method, payment_reference, paid_date, due_date }, userId) {
     const expense = await db('business_expenses').where('id', id).first();
     if (!expense) throw new NotFoundError('Expense not found.');
     if (expense.payment_status === 'Paid') throw new ValidationError('Already paid.');
 
+    const payDate = paid_date || new Date().toISOString().split('T')[0];
     return db.transaction(async (trx) => {
       const [updated] = await trx('business_expenses').where('id', id).update({
         payment_status: 'Paid',
         bank_account_id: bank_account_id || null,
         payment_method: payment_method || 'bank',
         payment_reference: payment_reference || null,
-        paid_date: paid_date || new Date().toISOString().split('T')[0],
+        paid_date: payDate,
         updated_at: trx.fn.now(),
       }).returning('*');
 
       // Update payable
-      await trx('payables')
-        .where({ source_table: 'business_expenses', source_id: id })
-        .update({ paid_amount: expense.amount_pkr, outstanding: 0, status: 'Paid' });
+      const payable = await trx('payables').where({ source_table: 'business_expenses', source_id: id }).first();
+      if (payable) {
+        await trx('payables').where({ id: payable.id }).update({ paid_amount: expense.amount_pkr, outstanding: 0, status: 'Paid' });
+      }
+
+      // Canonical payment row (so the payment-trail + dashboard cheque view see it).
+      const payCount = await trx('payments').count('id as c').first();
+      await trx('payments').insert({
+        payment_no: `EXP-PAY-${(parseInt(payCount?.c) || 0) + 1}`,
+        type: 'payment', amount: expense.amount_pkr, currency: 'PKR', fx_rate: 1, base_amount_pkr: expense.amount_pkr,
+        payment_method: payment_method || 'bank', bank_account_id: bank_account_id || null,
+        bank_reference: payment_reference || null, due_date: due_date || null,
+        linked_payable_id: payable ? payable.id : null,
+        payment_date: payDate, notes: `Payment for ${expense.expense_no}`, created_by: userId || null,
+      });
 
       // Debit bank
       if (bank_account_id) {
