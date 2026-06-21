@@ -92,6 +92,7 @@ const updatePaymentSchema = Joi.object({
   payment_method: Joi.string().valid('cash', 'bank_transfer', 'cheque', 'online').optional(),
   payment_reference: Joi.string().max(100).allow(null, '').optional(),
   payment_date: Joi.date().optional(),
+  due_date: Joi.date().allow(null).optional(),
 }).or('payment_status', 'amount');
 
 const ADJUSTMENT_TYPES = ['damage', 'correction', 'wastage', 'count'];

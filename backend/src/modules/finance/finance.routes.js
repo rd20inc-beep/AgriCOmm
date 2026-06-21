@@ -15,6 +15,7 @@ router.get('/mill-lot-costs', authorize('finance', 'view'), controller.getMillLo
 router.get('/journal-entries', authorize('finance', 'view'), controller.getJournalEntries);
 router.get('/alerts', authorize('finance', 'view'), controller.getAlerts);
 router.get('/overview', authorize('finance', 'view'), controller.getOverview);
+router.get('/upcoming', authorize('finance', 'view'), controller.getUpcoming);
 router.post(
   '/payments',
   authorize('finance', 'confirm_payment'),

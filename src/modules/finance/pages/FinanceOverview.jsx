@@ -5,11 +5,11 @@ import {
   TrendingUp, TrendingDown, AlertTriangle,
   Bell, Clock, Lock, Wallet, Activity,
   Plus, Receipt, ArrowRightLeft, RefreshCw, ExternalLink,
-  CheckCircle2, AlertCircle,
+  CheckCircle2, AlertCircle, CalendarClock,
 } from 'lucide-react';
 import {
   useReceivables, usePayables, useFinanceAlerts, useJournalEntries,
-  useFinanceOverviewSummary,
+  useFinanceOverviewSummary, useUpcoming,
 } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import {
@@ -38,6 +38,7 @@ function fmtUSD(n) {
 // ─── Page ─────────────────────────────────────────────────────────────
 export default function FinanceOverview() {
   const navigate = useNavigate();
+  const { data: upcoming } = useUpcoming();
   const { queryParams: rangeParams } = useFinanceDateRange();
   const { data: summary = {}, isLoading, refetch } = useFinanceOverviewSummary();
   const { data: receivables = [] } = useReceivables(rangeParams);
@@ -127,6 +128,31 @@ export default function FinanceOverview() {
           </div>
         )}
       </div>
+
+      {/* ─── UPCOMING CHEQUES & DUES ──────────────────────────────── */}
+      {((upcoming?.receiving?.length || 0) + (upcoming?.giving?.length || 0)) > 0 && (
+        <Link to="/finance/due-dates" className="block bg-white rounded-xl border border-gray-200 p-4 hover:border-blue-300 transition-colors">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <CalendarClock size={16} className="text-blue-600" />
+              <h2 className="text-sm font-semibold text-gray-900">Upcoming Cheques &amp; Dues</h2>
+            </div>
+            <span className="text-xs text-blue-600 inline-flex items-center gap-1">View all <ExternalLink size={12} /></span>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-emerald-50 rounded-lg p-3">
+              <p className="text-[11px] text-emerald-600 uppercase tracking-wide flex items-center gap-1"><ArrowDownLeft size={11} /> Receiving</p>
+              <p className="text-lg font-bold text-emerald-700">{fmtPKR(upcoming?.totalReceiving || 0)}</p>
+              <p className="text-[11px] text-emerald-600/80">{upcoming?.receiving?.length || 0} cheque(s) / due(s)</p>
+            </div>
+            <div className="bg-red-50 rounded-lg p-3">
+              <p className="text-[11px] text-red-600 uppercase tracking-wide flex items-center gap-1"><ArrowUpRight size={11} /> Giving</p>
+              <p className="text-lg font-bold text-red-700">{fmtPKR(upcoming?.totalGiving || 0)}</p>
+              <p className="text-[11px] text-red-600/80">{upcoming?.giving?.length || 0} cheque(s) / due(s)</p>
+            </div>
+          </div>
+        </Link>
+      )}
 
       {/* ─── PRIMARY KPI ROW ──────────────────────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">

@@ -148,7 +148,7 @@ export default function MoneyIn() {
     drawer?.type === 'Local Sale' ? 'local_sale' : 'export',
     !!drawer,
   );
-  const [recvForm, setRecvForm] = useState({ amount: '', bankAccountId: '', paymentMethod: 'bank_transfer', paymentDate: new Date().toISOString().split('T')[0], notes: '' });
+  const [recvForm, setRecvForm] = useState({ amount: '', bankAccountId: '', paymentMethod: 'bank_transfer', paymentDate: new Date().toISOString().split('T')[0], chequeNo: '', dueDate: '', notes: '' });
 
   function openDrawer(row) {
     setDrawer(row);
@@ -157,6 +157,7 @@ export default function MoneyIn() {
       bankAccountId: '',
       paymentMethod: 'bank_transfer',
       paymentDate: new Date().toISOString().split('T')[0],
+      chequeNo: '', dueDate: '',
       notes: '',
     });
   }
@@ -173,6 +174,8 @@ export default function MoneyIn() {
         payment_method: recvForm.paymentMethod,
         payment_date: recvForm.paymentDate,
         bank_account_id: recvForm.bankAccountId || null,
+        bank_reference: recvForm.chequeNo || null,
+        due_date: recvForm.dueDate || null,
         linked_receivable_id: recv.dbId || recv.id,
         notes: recvForm.notes || `Payment for ${recv.recvNo}`,
       });
@@ -363,6 +366,23 @@ export default function MoneyIn() {
                     <option value="online">Online</option>
                   </select>
                 </div>
+
+                {/* Cheque details — number (optional) + the date it clears, so
+                    Due Dates knows when to expect the money. */}
+                {recvForm.paymentMethod === 'cheque' && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-gray-500 block mb-1">Cheque # <span className="text-gray-300">(optional)</span></label>
+                      <input type="text" value={recvForm.chequeNo} onChange={e => setRecvForm({ ...recvForm, chequeNo: e.target.value })}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="e.g. 004512" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500 block mb-1">Cheque date</label>
+                      <input type="date" value={recvForm.dueDate} onChange={e => setRecvForm({ ...recvForm, dueDate: e.target.value })}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+                    </div>
+                  </div>
+                )}
 
                 {/* Notes */}
                 <div>

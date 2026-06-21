@@ -197,6 +197,54 @@ const financeController = {
     }
   },
 
+  // Upcoming money: post-dated cheques (payments.due_date) + credit dues
+  // (unpaid receivables/payables/local-sale-credit with a due_date), split into
+  // RECEIVING (money expected in) vs GIVING (money due out), sorted by date —
+  // so the dashboard shows when each payment is expected/due.
+  async getUpcoming(req, res) {
+    try {
+      const cheques = await db('payments as p')
+        .leftJoin('receivables as r', 'r.id', 'p.linked_receivable_id')
+        .leftJoin('payables as pa', 'pa.id', 'p.linked_payable_id')
+        .leftJoin('local_sales as ls', 'ls.id', 'p.local_sale_id')
+        .leftJoin('customers as c', 'c.id', 'r.customer_id')
+        .leftJoin('suppliers as s', 's.id', 'pa.supplier_id')
+        .where('p.payment_method', 'cheque').whereNotNull('p.due_date')
+        .select('p.type', 'p.amount', 'p.due_date', 'p.bank_reference',
+          db.raw("COALESCE(c.name, s.name, ls.buyer_name, pa.supplier_name, 'Counterparty') as party"));
+
+      const recv = await db('receivables as r').leftJoin('customers as c', 'c.id', 'r.customer_id')
+        .whereNot('r.status', 'Paid').whereNotNull('r.due_date').where('r.outstanding', '>', 0)
+        .select('r.outstanding as amount', 'r.due_date', db.raw("COALESCE(c.name, 'Customer') as party"), 'r.recv_no as ref');
+      const lsCredit = await db('local_sales as ls').leftJoin('customers as c', 'c.id', 'ls.customer_id')
+        .where('ls.due_amount', '>', 0).whereNotNull('ls.due_date')
+        .select('ls.due_amount as amount', 'ls.due_date', 'ls.sale_no as ref', db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as party"));
+      const pay = await db('payables as pa').leftJoin('suppliers as s', 's.id', 'pa.supplier_id')
+        .whereNot('pa.status', 'Paid').whereNotNull('pa.due_date').where('pa.outstanding', '>', 0)
+        .select('pa.outstanding as amount', 'pa.due_date', 'pa.linked_ref as ref', db.raw("COALESCE(s.name, pa.supplier_name, 'Supplier') as party"));
+
+      const chq = (t) => cheques.filter((x) => x.type === t).map((x) => ({ kind: 'cheque', label: 'Cheque', dueDate: x.due_date, amount: parseFloat(x.amount) || 0, party: x.party, reference: x.bank_reference }));
+      const receiving = [
+        ...chq('receipt'),
+        ...recv.map((x) => ({ kind: 'credit', label: 'Receivable', dueDate: x.due_date, amount: parseFloat(x.amount) || 0, party: x.party, reference: x.ref })),
+        ...lsCredit.map((x) => ({ kind: 'credit', label: 'Local sale (credit)', dueDate: x.due_date, amount: parseFloat(x.amount) || 0, party: x.party, reference: x.ref })),
+      ].sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+      const giving = [
+        ...chq('payment'),
+        ...pay.map((x) => ({ kind: 'credit', label: 'Payable', dueDate: x.due_date, amount: parseFloat(x.amount) || 0, party: x.party, reference: x.ref })),
+      ].sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+
+      return res.json({ success: true, data: {
+        receiving, giving,
+        totalReceiving: receiving.reduce((s, x) => s + x.amount, 0),
+        totalGiving: giving.reduce((s, x) => s + x.amount, 0),
+      } });
+    } catch (err) {
+      console.error('getUpcoming error:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
   // Payment trail for one Money-Out PURCHASE row (Finance → Purchases). The data
   // is fragmented across flows, so we merge two disjoint settlement ledgers:
   //  (1) `payments` linked to the row's payable (Money-Out / statement flow), and
@@ -799,6 +847,7 @@ const financeController = {
         payment_method,
         bank_account_id,
         bank_reference,
+        due_date,
         notes,
       } = req.body;
 
@@ -850,6 +899,7 @@ const financeController = {
             payment_method: payment_method || null,
             bank_account_id: bank_account_id || null,
             bank_reference: bank_reference || null,
+            due_date: due_date || null,
             payment_date: payment_date || trx.fn.now(),
             notes: notes || null,
             created_by: req.user.id,
@@ -1596,7 +1646,7 @@ financeController.listPurchases = async (req, res) => {
 // account the money came out of, decrementing its balance.
 financeController.payPurchase = async (req, res) => {
   try {
-    const { source, source_id, amount, bank_account_id, payment_method, payment_date, payment_reference, notes } = req.body;
+    const { source, source_id, amount, bank_account_id, payment_method, payment_date, payment_reference, due_date, notes } = req.body;
     if (!source || !source_id) {
       return res.status(400).json({ success: false, message: 'source and source_id are required.' });
     }
@@ -1701,6 +1751,18 @@ financeController.payPurchase = async (req, res) => {
           outstanding: Math.max(0, original - newPayablePaid),
           status: newPayablePaid >= original - 0.01 ? 'Paid' : 'Partial',
           updated_at: trx.fn.now(),
+        });
+        // Canonical payment row (so the payment-trail + dashboard cheque view
+        // see it uniformly). Deduped against the bank_transaction by the trail.
+        const payCount = await trx('payments').count('id as c').first();
+        await trx('payments').insert({
+          payment_no: `PP-${(parseInt(payCount?.c) || 0) + 1}`,
+          type: 'payment', amount: amountPkr, currency: 'PKR', fx_rate: 1, base_amount_pkr: amountPkr,
+          payment_method: payment_method || null, bank_account_id: bank_account_id || null,
+          bank_reference: payment_reference || null, due_date: due_date || null,
+          linked_payable_id: linkedPayable.id, payment_date: paidAt,
+          notes: `Payment for ${source} ${row.lot_no || row.purchase_no || row.expense_no || `#${id}`}`,
+          created_by: req.user?.id || null,
         });
       }
 

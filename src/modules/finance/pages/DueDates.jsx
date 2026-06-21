@@ -1,0 +1,75 @@
+import { ArrowDownLeft, ArrowUpRight, CalendarClock, AlertTriangle } from 'lucide-react';
+import { useUpcoming } from '../../../api/queries';
+
+const fmtPKR = (n) => `Rs ${Math.round(parseFloat(n) || 0).toLocaleString()}`;
+const fmtDate = (s) => s ? new Date(s).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+const isOverdue = (s) => s && new Date(s) < new Date(new Date().toDateString());
+
+function List({ title, icon: Icon, tone, items, total }) {
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className={`px-5 py-3 border-b border-gray-100 flex items-center justify-between ${tone === 'in' ? 'bg-emerald-50' : 'bg-red-50'}`}>
+        <div className="flex items-center gap-2">
+          <Icon size={16} className={tone === 'in' ? 'text-emerald-600' : 'text-red-600'} />
+          <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
+          <span className="text-xs text-gray-500">({items.length})</span>
+        </div>
+        <span className={`text-sm font-bold ${tone === 'in' ? 'text-emerald-700' : 'text-red-700'}`}>{fmtPKR(total)}</span>
+      </div>
+      {items.length === 0 ? (
+        <p className="text-sm text-gray-400 text-center py-10">Nothing upcoming.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead><tr className="text-left text-[11px] text-gray-500 uppercase border-b border-gray-100">
+              <th className="py-2 px-4">Due</th><th className="py-2 px-4">Party</th>
+              <th className="py-2 px-4">Type</th><th className="py-2 px-4 text-right">Amount</th>
+            </tr></thead>
+            <tbody className="divide-y divide-gray-50">
+              {items.map((x, i) => (
+                <tr key={i} className={`hover:bg-gray-50 ${isOverdue(x.dueDate) ? 'bg-red-50/40' : ''}`}>
+                  <td className="py-2 px-4 whitespace-nowrap">
+                    <span className={isOverdue(x.dueDate) ? 'text-red-600 font-medium' : 'text-gray-700'}>{fmtDate(x.dueDate)}</span>
+                    {isOverdue(x.dueDate) && <span className="ml-1.5 text-[10px] text-red-500 inline-flex items-center gap-0.5"><AlertTriangle size={10} /> overdue</span>}
+                  </td>
+                  <td className="py-2 px-4 text-gray-900">{x.party}</td>
+                  <td className="py-2 px-4">
+                    <span className={`text-[11px] px-2 py-0.5 rounded-full ${x.kind === 'cheque' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>{x.label}</span>
+                    {x.reference && <span className="ml-1.5 text-[11px] text-gray-400 font-mono">{x.reference}</span>}
+                  </td>
+                  <td className="py-2 px-4 text-right tabular-nums font-medium text-gray-900">{fmtPKR(x.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function DueDates() {
+  const { data, isLoading } = useUpcoming();
+  const receiving = data?.receiving || [];
+  const giving = data?.giving || [];
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-2">
+        <CalendarClock size={20} className="text-blue-600" />
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">Due Dates</h1>
+          <p className="text-sm text-gray-500">Post-dated cheques &amp; credit (udhaar) dues — when money is expected or due.</p>
+        </div>
+      </div>
+      {isLoading ? (
+        <p className="text-sm text-gray-400">Loading…</p>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <List title="Receiving (money in)" icon={ArrowDownLeft} tone="in" items={receiving} total={data?.totalReceiving || 0} />
+          <List title="Giving (money out)" icon={ArrowUpRight} tone="out" items={giving} total={data?.totalGiving || 0} />
+        </div>
+      )}
+    </div>
+  );
+}

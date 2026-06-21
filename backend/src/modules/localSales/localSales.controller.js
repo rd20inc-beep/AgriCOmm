@@ -114,7 +114,7 @@ module.exports = {
       const {
         sale_date, customer_id, buyer_name, buyer_phone, buyer_address,
         payment_mode = 'cash', paid_amount, payment_reference,
-        collection_location, bank_account_id,
+        collection_location, bank_account_id, due_date,
         vehicle_no, driver_name, dispatched = true, notes,
       } = req.body;
 
@@ -262,7 +262,7 @@ module.exports = {
             total_amount: l.total, currency: 'PKR',
             payment_mode: payment_mode || 'cash', payment_status: paymentStatus,
             paid_amount: l.paid, due_amount: dueAmt, payment_reference: payment_reference || null,
-            collection_location: collection_location || null,
+            collection_location: collection_location || null, due_date: due_date || null,
             vehicle_no: vehicle_no || null, driver_name: driver_name || null,
             dispatched: !!dispatched, dispatch_date: dispatched ? (sale_date || new Date().toISOString().split('T')[0]) : null,
             notes: notes || null, status: 'Completed', created_by: req.user?.id || null,
@@ -281,7 +281,7 @@ module.exports = {
               payment_no: `PL-${(parseInt(payCount?.c) || 0) + 1}`, type: 'receipt',
               amount: l.paid, currency: 'PKR', fx_rate: 1, base_amount_pkr: l.paid,
               payment_method: payMethod, bank_reference: payment_reference || null,
-              bank_account_id: receiptAccountId || bank_account_id || null,
+              bank_account_id: receiptAccountId || bank_account_id || null, due_date: due_date || null,
               payment_date: sale_date || trx.fn.now(), notes: `Local sale ${saleNo} — ${l.item_name}`,
               local_sale_id: sale.id, created_by: req.user?.id || null,
             }).returning('id');
@@ -337,7 +337,7 @@ module.exports = {
   async acceptPayment(req, res) {
     try {
       const { id } = req.params;
-      const { amount, payment_method = 'cash', payment_date, reference, notes, bank_account_id } = req.body;
+      const { amount, payment_method = 'cash', payment_date, reference, notes, bank_account_id, due_date } = req.body;
 
       if (!amount || parseFloat(amount) <= 0) {
         return res.status(400).json({ success: false, message: 'A positive amount is required.' });
@@ -377,6 +377,7 @@ module.exports = {
           fx_rate: 1,
           base_amount_pkr: payAmount,
           payment_method: payment_method,
+          due_date: due_date || null,
           bank_reference: reference || null,
           bank_account_id: receiptAccountId || bank_account_id || null,
           payment_date: payment_date || trx.fn.now(),

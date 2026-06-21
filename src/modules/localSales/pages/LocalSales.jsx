@@ -442,7 +442,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
 
   const [form, setForm] = useState({
     customer_id: '', buyer_name: '', buyer_phone: '',
-    payment_mode: 'cash', paid_amount: '', collection_location: 'Mill', bank_account_id: '', cheque_no: '',
+    payment_mode: 'cash', paid_amount: '', collection_location: 'Mill', bank_account_id: '', cheque_no: '', due_date: '',
     vehicle_no: '', driver_name: '', notes: '',
   });
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
@@ -509,7 +509,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   const grandTotal = cart.reduce((s, c) => s + c.total, 0);
 
   function reset() {
-    setForm({ customer_id: '', buyer_name: '', buyer_phone: '', payment_mode: 'cash', paid_amount: '', collection_location: 'Mill', bank_account_id: '', cheque_no: '', vehicle_no: '', driver_name: '', notes: '' });
+    setForm({ customer_id: '', buyer_name: '', buyer_phone: '', payment_mode: 'cash', paid_amount: '', collection_location: 'Mill', bank_account_id: '', cheque_no: '', due_date: '', vehicle_no: '', driver_name: '', notes: '' });
     setCart([]); setLine(EMPTY_LINE); setTag('All'); setStep(1);
   }
 
@@ -526,6 +526,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
         collection_location: isCashy ? (form.collection_location || 'Mill') : null,
         bank_account_id: form.payment_mode === 'bank_transfer' && form.bank_account_id ? Number(form.bank_account_id) : null,
         payment_reference: form.payment_mode === 'cheque' ? (form.cheque_no.trim() || null) : null,
+        due_date: (form.payment_mode === 'cheque' || form.payment_mode === 'credit') ? (form.due_date || null) : null,
         vehicle_no: form.vehicle_no || null, driver_name: form.driver_name || null, notes: form.notes || null,
         items: cart.map(c => c.isMillItem ? ({
           mill_item_id: Number(c.mill_item_id), item_name: c.item_name,
@@ -862,6 +863,12 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
             <div className="mt-3">
               <label className={LABEL}>Cheque Number *</label>
               <input value={form.cheque_no} onChange={e => set('cheque_no', e.target.value)} className={INPUT} placeholder="e.g. 0012345" />
+            </div>
+          )}
+          {(form.payment_mode === 'cheque' || form.payment_mode === 'credit') && (
+            <div className="mt-3">
+              <label className={LABEL}>{form.payment_mode === 'cheque' ? 'Cheque date (when it clears)' : 'Expected payment date'}</label>
+              <input type="date" value={form.due_date} onChange={e => set('due_date', e.target.value)} className={INPUT} />
             </div>
           )}
 

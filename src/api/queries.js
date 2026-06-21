@@ -519,6 +519,24 @@ export function usePayablePayments(id, enabled = true) {
   });
 }
 
+// Upcoming money — post-dated cheques + credit dues, receiving vs giving.
+export function useUpcoming() {
+  return useQuery({
+    queryKey: ['finance', 'upcoming'],
+    queryFn: async () => {
+      const res = await financeApi.upcoming();
+      const data = unwrap(res) || res?.data || {};
+      return {
+        receiving: transformKeys(data.receiving || []),
+        giving: transformKeys(data.giving || []),
+        totalReceiving: data.totalReceiving || 0,
+        totalGiving: data.totalGiving || 0,
+      };
+    },
+    staleTime: 30 * 1000,
+  });
+}
+
 // Merged payment trail (where/how each was paid) for one Finance→Purchases row.
 export function usePurchasePaymentTrail(source, sourceId, enabled = true) {
   return useQuery({

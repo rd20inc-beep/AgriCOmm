@@ -3,7 +3,7 @@ import { NavLink, useSearchParams } from 'react-router-dom';
 import { RouteErrorBoundary } from '../../../components/ErrorBoundary';
 import {
   LayoutDashboard, ArrowDownLeft, ArrowUpRight, DollarSign,
-  TrendingUp, Landmark, BookOpen, BookUser, Bell, Clock, Settings, ShoppingCart, Store, Printer,
+  TrendingUp, Landmark, BookOpen, BookUser, Bell, Clock, Settings, ShoppingCart, Store, Printer, CalendarClock,
 } from 'lucide-react';
 
 const tabs = [
@@ -12,6 +12,7 @@ const tabs = [
   { label: 'Expenses',     path: '/finance/expenses',     icon: DollarSign },
   { label: 'Money In',     path: '/finance/money-in',     icon: ArrowDownLeft },
   { label: 'Money Out',    path: '/finance/money-out',    icon: ArrowUpRight },
+  { label: 'Due Dates',    path: '/finance/due-dates',    icon: CalendarClock },
   { label: 'Local Sales',  path: '/finance/local-sales',  icon: Store },
   { label: 'Cash',         path: '/finance/cash',         icon: Landmark },
   { label: 'Profit',       path: '/finance/profit',       icon: TrendingUp },

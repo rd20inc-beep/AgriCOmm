@@ -477,6 +477,7 @@ export default function Purchases() {
                 payment_method: form.paymentMethod,
                 payment_date: form.paymentDate,
                 payment_reference: form.reference || null,
+                due_date: form.dueDate || null,
                 notes: form.notes || null,
               });
               addToast(`Payment of Rs ${Number(form.amount).toLocaleString()} recorded`, 'success');
@@ -586,6 +587,7 @@ function PayPurchaseDrawer({ purchase, bankAccounts, isPending, onClose, onSubmi
   const [bankAccountId, setBankAccountId] = useState(bankAccounts.find(a => (a.currency || 'PKR') === 'PKR')?.id || '');
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
   const [reference, setReference] = useState('');
+  const [dueDate, setDueDate] = useState('');
   const [notes, setNotes] = useState('');
 
   useEffect(() => {
@@ -617,7 +619,7 @@ function PayPurchaseDrawer({ purchase, bankAccounts, isPending, onClose, onSubmi
             e.preventDefault();
             const n = parseFloat(amount);
             if (!n || n <= 0) return;
-            onSubmit({ amount: n, paymentMethod, bankAccountId, paymentDate, reference, notes });
+            onSubmit({ amount: n, paymentMethod, bankAccountId, paymentDate, reference, dueDate, notes });
           }}
           className="flex-1 overflow-y-auto p-5 space-y-4"
         >
@@ -686,6 +688,14 @@ function PayPurchaseDrawer({ purchase, bankAccounts, isPending, onClose, onSubmi
                 placeholder="Cheque/TXN #" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
             </div>
           </div>
+
+          {paymentMethod === 'cheque' && (
+            <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1">Cheque date <span className="text-gray-400">(when it clears)</span></label>
+              <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+            </div>
+          )}
 
           <div>
             <label className="text-xs font-medium text-gray-600 block mb-1">Notes</label>

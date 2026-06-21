@@ -257,7 +257,7 @@ function PurchasePaymentsCard() {
   const { data: bankAccounts = [] } = useBankAccounts();
   const pay = usePayMillPurchase();
   const [target, setTarget] = useState(null);
-  const [form, setForm] = useState({ amount: '', method: 'cash', bankAccountId: '', reference: '' });
+  const [form, setForm] = useState({ amount: '', method: 'cash', bankAccountId: '', reference: '', dueDate: '' });
 
   const purchases = Array.isArray(purchasesRaw) ? purchasesRaw : (purchasesRaw.purchases || purchasesRaw.data || []);
   const unpaid = purchases.filter(p => String(p.payment_status || '').toLowerCase() !== 'paid');
@@ -266,7 +266,7 @@ function PurchasePaymentsCard() {
   const due = (p) => Math.max(0, (Number(p.total_amount) || 0) - (Number(p.paid_amount) || 0));
   function open(p) {
     setTarget(p);
-    setForm({ amount: String(due(p)), method: 'cash', bankAccountId: '', reference: '' });
+    setForm({ amount: String(due(p)), method: 'cash', bankAccountId: '', reference: '', dueDate: '' });
   }
   async function submit() {
     const amount = parseFloat(form.amount);
@@ -276,6 +276,7 @@ function PurchasePaymentsCard() {
         amount, payment_method: form.method,
         bank_account_id: form.method === 'cash' ? (form.bankAccountId || null) : (form.bankAccountId || null),
         payment_reference: form.reference || null,
+        due_date: form.dueDate || null,
       } });
       addToast(`Payment of Rs ${Math.round(amount).toLocaleString()} recorded for ${target.purchase_no}`, 'success');
       setTarget(null);
@@ -354,6 +355,13 @@ function PurchasePaymentsCard() {
               <input type="text" value={form.reference} onChange={e => setForm({ ...form, reference: e.target.value })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" placeholder="optional" />
             </div>
+            {form.method === 'cheque' && (
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Cheque date <span className="text-gray-400 font-normal">(when it clears)</span></label>
+                <input type="date" value={form.dueDate} onChange={e => setForm({ ...form, dueDate: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+              </div>
+            )}
           </div>
         )}
       </SlideDrawer>

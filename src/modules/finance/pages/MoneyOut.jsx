@@ -68,7 +68,7 @@ export default function MoneyOut() {
   }
 
   // Payment form state
-  const [payForm, setPayForm] = useState({ amount: '', bankAccountId: '', paymentMethod: 'bank_transfer', paymentDate: new Date().toISOString().split('T')[0], notes: '', fundSource: 'bank' });
+  const [payForm, setPayForm] = useState({ amount: '', bankAccountId: '', paymentMethod: 'bank_transfer', paymentDate: new Date().toISOString().split('T')[0], chequeNo: '', dueDate: '', notes: '', fundSource: 'bank' });
 
   function openDrawer(row) {
     setDrawer(row);
@@ -77,6 +77,7 @@ export default function MoneyOut() {
       bankAccountId: '',
       paymentMethod: 'bank_transfer',
       paymentDate: new Date().toISOString().split('T')[0],
+      chequeNo: '', dueDate: '',
       notes: '',
       fundSource: 'bank',
     });
@@ -178,6 +179,8 @@ export default function MoneyOut() {
         payment_method: payForm.paymentMethod,
         payment_date: payForm.paymentDate,
         bank_account_id: payForm.bankAccountId || null,
+        bank_reference: payForm.chequeNo || null,
+        due_date: payForm.dueDate || null,
         linked_payable_id: pay.dbId || pay.id,
         notes: payForm.notes || `Payment for ${pay.payNo} - ${pay.supplierName || pay.category}`,
       });
@@ -425,6 +428,22 @@ export default function MoneyOut() {
                     <option value="mobile">Mobile Transfer</option>
                   </select>
                 </div>
+
+                {/* Cheque details — number (optional) + clearing date for Due Dates. */}
+                {payForm.paymentMethod === 'cheque' && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-gray-500 block mb-1">Cheque # <span className="text-gray-300">(optional)</span></label>
+                      <input type="text" value={payForm.chequeNo} onChange={e => setPayForm({ ...payForm, chequeNo: e.target.value })}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="e.g. 004512" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500 block mb-1">Cheque date</label>
+                      <input type="date" value={payForm.dueDate} onChange={e => setPayForm({ ...payForm, dueDate: e.target.value })}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+                    </div>
+                  </div>
+                )}
 
                 {/* Notes */}
                 <div>

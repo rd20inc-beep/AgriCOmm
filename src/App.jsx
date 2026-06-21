@@ -80,6 +80,7 @@ const FinanceLayout = lazyWithReload(() => import('./modules/finance/pages/Finan
 const FinanceOverview = lazyWithReload(() => import('./modules/finance/pages/FinanceOverview'));
 const MoneyIn = lazyWithReload(() => import('./modules/finance/pages/MoneyIn'));
 const MoneyOut = lazyWithReload(() => import('./modules/finance/pages/MoneyOut'));
+const DueDates = lazyWithReload(() => import('./modules/finance/pages/DueDates'));
 const Cash = lazyWithReload(() => import('./modules/finance/pages/Cash'));
 const Profit = lazyWithReload(() => import('./modules/finance/pages/Profit'));
 const Accounting = lazyWithReload(() => import('./modules/finance/pages/Accounting'));
@@ -104,6 +105,7 @@ function FinanceRoutes() {
         <Route path="expenses" element={<Expenses />} />
         <Route path="money-in" element={<MoneyIn />} />
         <Route path="money-out" element={<MoneyOut />} />
+        <Route path="due-dates" element={<DueDates />} />
         <Route path="purchases" element={<Purchases />} />
         <Route path="local-sales" element={<LocalSalesFinance />} />
         <Route path="cash" element={<Cash />} />

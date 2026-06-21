@@ -151,7 +151,7 @@ const millStoreService = {
         payment_no: `MP-PAY-${(parseInt(payCount?.c) || 0) + 1}`,
         type: 'payment', amount, currency: 'PKR', fx_rate: 1, base_amount_pkr: amount,
         payment_method: method, bank_account_id: bankId,
-        bank_reference: data.payment_reference || null,
+        bank_reference: data.payment_reference || null, due_date: data.due_date || null,
         linked_payable_id: payable ? payable.id : null,
         payment_date: payDate, notes: `Payment for ${purchase.purchase_no}`, created_by: userId || null,
       }).returning('*');

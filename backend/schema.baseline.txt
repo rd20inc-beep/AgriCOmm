@@ -890,6 +890,7 @@ COL local_sales.dispatch_date:date:NULL
 COL local_sales.dispatched:boolean:NOT NULL
 COL local_sales.driver_name:character varying:NULL
 COL local_sales.due_amount:numeric:NOT NULL
+COL local_sales.due_date:date:NULL
 COL local_sales.entity:character varying:NOT NULL
 COL local_sales.gross_profit:numeric:NULL
 COL local_sales.gross_profit_pkr:numeric:NULL
@@ -1378,6 +1379,7 @@ COL payments.base_amount_pkr:numeric:NOT NULL
 COL payments.created_at:timestamp with time zone:NOT NULL
 COL payments.created_by:integer:NULL
 COL payments.currency:character varying:NOT NULL
+COL payments.due_date:date:NULL
 COL payments.fx_rate:numeric:NOT NULL
 COL payments.id:integer:NOT NULL
 COL payments.linked_payable_id:integer:NULL
