@@ -539,6 +539,7 @@ export default function Purchases() {
                     {payTrail.payments.map((pm, i) => {
                       let from = [pm.accountName, pm.bankName].filter(Boolean).join(' · ');
                       if (!from) from = pm.method === 'cash' ? 'Cash (in hand)' : '—';
+                      const noDetail = pm.synthesized && !pm.method && !pm.accountName;
                       return (
                         <div key={i} className="border border-gray-200 rounded-lg px-3 py-2">
                           <div className="flex items-center justify-between">
@@ -546,9 +547,15 @@ export default function Purchases() {
                             <span className="text-xs text-gray-500">{pm.date ? new Date(pm.date).toLocaleDateString('en-GB') : '—'}</span>
                           </div>
                           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500">
-                            <span>Type: <span className="font-medium text-gray-700">{methodLabel(pm.method)}</span></span>
-                            <span>From: <span className="font-medium text-gray-700">{from}</span></span>
-                            {pm.reference && <span>Ref: <span className="font-medium text-gray-700">{pm.reference}</span></span>}
+                            {noDetail ? (
+                              <span className="italic text-gray-400">Settled — payment account/method not recorded</span>
+                            ) : (
+                              <>
+                                <span>Type: <span className="font-medium text-gray-700">{methodLabel(pm.method)}</span></span>
+                                <span>From: <span className="font-medium text-gray-700">{from}</span></span>
+                                {pm.reference && <span>Ref: <span className="font-medium text-gray-700">{pm.reference}</span></span>}
+                              </>
+                            )}
                           </div>
                         </div>
                       );
