@@ -1632,14 +1632,30 @@ export default function MillingBatchDetail() {
                         const isRaw = cat.key === 'rawRice' || cat.key === 'raw_rice';
                         const displayValue = isRaw && value === 0 && rawMaterialCostFromQuality > 0 ? rawMaterialCostFromQuality : value;
                         if (displayValue <= 0) return null;
-                        return (
+                        // Itemise packaging into bags / master bags / polythene
+                        // (mirrors the costing sheet) when master/poly were used.
+                        const pbk = cat.key === 'packaging' ? (batch.packingBreakdown || null) : null;
+                        const subRows = pbk ? [
+                          { label: `Bags${pbk.bagCount ? ` (${pbk.bagCount})` : ''}`, val: pbk.bags },
+                          { label: `${pbk.masterName || 'Master bags'}${pbk.masterCount ? ` (${pbk.masterCount})` : ''}`, val: pbk.master },
+                          { label: `${pbk.polyName || 'Polythene'}${pbk.polyCount ? ` (${pbk.polyCount})` : ''}`, val: pbk.polythene },
+                        ].filter(r => r.val > 0) : [];
+                        return [
                           <tr key={cat.key} className={`border-b border-gray-50 hover:bg-gray-50 ${isRaw ? 'bg-amber-50/50' : ''}`}>
                             <td className="py-2 px-3 font-medium text-gray-900">{cat.label}{isRaw && value === 0 && rawMaterialCostFromQuality > 0 ? <span className="text-xs text-amber-600 ml-1">(auto)</span> : ''}</td>
                             <td className="py-2 px-3 text-right text-gray-700">{formatPKR(displayValue)}</td>
                             <td className="py-2 px-3 text-right text-gray-500">{batch.rawQtyMT > 0 ? formatPKR(displayValue / batch.rawQtyMT) : '—'}</td>
                             <td className="py-2 px-3 text-right text-gray-500">{total > 0 ? ((displayValue / total) * 100).toFixed(1) + '%' : '—'}</td>
-                          </tr>
-                        );
+                          </tr>,
+                          ...subRows.map((r, i) => (
+                            <tr key={`${cat.key}-pb-${i}`} className="border-b border-gray-50 text-xs text-gray-500">
+                              <td className="py-1 px-3 pl-8">↳ {r.label}</td>
+                              <td className="py-1 px-3 text-right">{formatPKR(r.val)}</td>
+                              <td className="py-1 px-3 text-right">{batch.rawQtyMT > 0 ? formatPKR(r.val / batch.rawQtyMT) : '—'}</td>
+                              <td className="py-1 px-3 text-right">{total > 0 ? ((r.val / total) * 100).toFixed(1) + '%' : '—'}</td>
+                            </tr>
+                          )),
+                        ];
                       });
                     })()}
                   </tbody>
