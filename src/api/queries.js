@@ -519,6 +519,23 @@ export function usePayablePayments(id, enabled = true) {
   });
 }
 
+// Merged payment trail (where/how each was paid) for one Finance→Purchases row.
+export function usePurchasePaymentTrail(source, sourceId, enabled = true) {
+  return useQuery({
+    queryKey: ['purchases', 'payments', source, sourceId],
+    queryFn: async () => {
+      const res = await financeApi.purchasePaymentTrail(source, sourceId);
+      const data = unwrap(res) || res?.data || {};
+      return {
+        payments: transformKeys(data.payments || []),
+        paidAmount: data.paidAmount, outstanding: data.outstanding, total: data.total,
+      };
+    },
+    enabled: !!source && !!sourceId && enabled,
+    staleTime: 5 * 1000,
+  });
+}
+
 export function usePayables(params = {}) {
   return useQuery({
     queryKey: queryKeys.payables.list(params),

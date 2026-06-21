@@ -197,6 +197,94 @@ const financeController = {
     }
   },
 
+  // Payment trail for one Money-Out PURCHASE row (Finance → Purchases). The data
+  // is fragmented across flows, so we merge two disjoint settlement ledgers:
+  //  (1) `payments` linked to the row's payable (Money-Out / statement flow), and
+  //  (2) `bank_transactions` with source='pay_purchase' (the Purchases-tab flow;
+  //      method inferred from the account type since it isn't stored on the txn).
+  // Deduped by amount+date+account. Falls back to one synthesized line from the
+  // source row's own payment fields when paid>0 but nothing is itemisable.
+  async getPurchasePayments(req, res) {
+    try {
+      const { source, sourceId } = req.params;
+      const id = parseInt(sourceId, 10);
+      if (!id) return res.status(400).json({ success: false, message: 'sourceId must be numeric.' });
+
+      const MAP = {
+        lot:         { table: 'inventory_lots',    totalCol: 'landed_cost_total', refCol: 'lot_no' },
+        mill_store:  { table: 'mill_purchases',    totalCol: 'total_amount',      refCol: 'purchase_no' },
+        export_cost: { table: 'export_order_costs', totalCol: null,               refCol: null },
+        expense:     { table: 'business_expenses', totalCol: 'amount_pkr',        refCol: 'expense_no' },
+      };
+      const cfg = MAP[source];
+      if (!cfg) return res.status(400).json({ success: false, message: `Unknown source "${source}".` });
+      const row = await db(cfg.table).where({ id }).first();
+      if (!row) return res.status(404).json({ success: false, message: 'Purchase not found.' });
+
+      const total = cfg.totalCol ? (parseFloat(row[cfg.totalCol]) || 0)
+        : (parseFloat(row.base_amount_pkr) || (parseFloat(row.amount) || 0) * (parseFloat(row.fx_rate) || 1));
+      const paid = parseFloat(row.paid_amount) || 0;
+      const outstanding = Math.max(0, total - paid);
+      const refToken = cfg.refCol ? row[cfg.refCol] : null;
+
+      // (1) payments via the linked payable
+      const payable = await db('payables').where({ source_table: cfg.table, source_id: id }).first();
+      let viaPayments = [];
+      if (payable) {
+        viaPayments = await db('payments as p')
+          .leftJoin('bank_accounts as ba', 'ba.id', 'p.bank_account_id')
+          .where('p.linked_payable_id', payable.id)
+          .select('p.amount', 'p.payment_method', 'p.payment_date', 'p.bank_reference',
+            'ba.name as account_name', 'ba.bank_name', 'ba.type as account_type');
+      }
+
+      // (2) bank_transactions from the Purchases-tab payPurchase flow
+      let viaBank = [];
+      if (refToken) {
+        viaBank = await db('bank_transactions as bt')
+          .leftJoin('bank_accounts as ba', 'ba.id', 'bt.bank_account_id')
+          .where({ 'bt.source': 'pay_purchase', 'bt.type': 'debit' })
+          .where('bt.notes', 'ilike', `%${refToken}%`)
+          .select('bt.amount', 'bt.transaction_date', 'bt.reference',
+            'ba.name as account_name', 'ba.bank_name', 'ba.type as account_type');
+      }
+
+      const norm = [];
+      for (const p of viaPayments) norm.push({
+        amount: parseFloat(p.amount) || 0, date: p.payment_date, method: p.payment_method,
+        account_name: p.account_name, bank_name: p.bank_name, account_type: p.account_type, reference: p.bank_reference,
+      });
+      for (const b of viaBank) norm.push({
+        amount: parseFloat(b.amount) || 0, date: b.transaction_date,
+        method: b.account_type === 'cash' ? 'cash' : 'bank_transfer',
+        account_name: b.account_name, bank_name: b.bank_name, account_type: b.account_type, reference: b.reference,
+      });
+
+      const seen = new Set();
+      let payments = norm.filter((x) => {
+        const k = `${Math.round(x.amount)}|${x.date ? String(x.date).slice(0, 10) : ''}|${x.account_name || ''}`;
+        if (seen.has(k)) return false; seen.add(k); return true;
+      });
+
+      // (3) fallback — paid but nothing itemisable → one synthesized line
+      if (payments.length === 0 && paid > 0) {
+        const acct = row.bank_account_id ? await db('bank_accounts').where({ id: row.bank_account_id }).first() : null;
+        payments.push({
+          amount: paid, date: row.paid_date || row.paid_at || row.updated_at,
+          method: row.payment_method || (acct?.type === 'cash' ? 'cash' : null),
+          account_name: acct?.name || null, bank_name: acct?.bank_name || null,
+          account_type: acct?.type || null, reference: row.payment_reference || null, synthesized: true,
+        });
+      }
+
+      payments.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+      return res.json({ success: true, data: { payments, paidAmount: paid, outstanding, total } });
+    } catch (err) {
+      console.error('getPurchasePayments error:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
   // Traceability breakdown of lot additional costs (transport / labor / unloading /
   // packing / bag / other) for Mill Finance — itemised by category, each carrying
   // the source lots so the figure can be traced back to where it was incurred.

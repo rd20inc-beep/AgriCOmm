@@ -5,7 +5,7 @@ import {
   Search, Download, RefreshCw, CheckCircle, Clock, X, Plus, ChevronDown, Printer, Eye, User, DollarSign,
 } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
-import { usePurchases, usePayPurchase, useBankAccounts } from '../../../api/queries';
+import { usePurchases, usePayPurchase, useBankAccounts, usePurchasePaymentTrail } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 import { downloadCSV } from '../../../utils/csvExport';
@@ -21,6 +21,7 @@ function fmtPKR(n) {
   return `Rs ${Math.round(v).toLocaleString()}`;
 }
 const fmtFull = (n) => `Rs ${Math.round(parseFloat(n) || 0).toLocaleString()}`;
+const methodLabel = (m) => ({ cash: 'Cash', bank_transfer: 'Bank Transfer', bank: 'Bank Transfer', cheque: 'Cheque', lc: 'Letter of Credit', online: 'Online' }[m] || (m ? String(m).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '—'));
 
 const SOURCES = [
   { value: 'all',         label: 'All',        icon: ShoppingCart, accent: 'gray' },
@@ -83,6 +84,7 @@ export default function Purchases() {
   // Payment drawer state — opens when user clicks the status pill on a row.
   const [payTarget, setPayTarget] = useState(null);
   const [detailPurchase, setDetailPurchase] = useState(null);
+  const { data: payTrail, isLoading: payTrailLoading } = usePurchasePaymentTrail(detailPurchase?.source, detailPurchase?.refId, !!detailPurchase);
   const { data: bankAccounts = [] } = useBankAccounts();
   const payMut = usePayPurchase();
 
@@ -525,6 +527,36 @@ export default function Purchases() {
                 <Row label="Payment status" value={p.paymentStatus || 'Pending'} />
                 <Row label="Created by" value={<span className="inline-flex items-center gap-1.5"><User size={13} className="text-gray-400" />{p.createdByName || '—'}</span>} />
                 <Row label="Approved by" value={p.approvedByName} />
+              </div>
+
+              {/* Payments made — where & how each was given. */}
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 mb-2">Payments Made</h3>
+                {payTrailLoading ? (
+                  <p className="text-xs text-gray-400 py-1">Loading…</p>
+                ) : (payTrail?.payments?.length ? (
+                  <div className="space-y-2">
+                    {payTrail.payments.map((pm, i) => {
+                      let from = [pm.accountName, pm.bankName].filter(Boolean).join(' · ');
+                      if (!from) from = pm.method === 'cash' ? 'Cash (in hand)' : '—';
+                      return (
+                        <div key={i} className="border border-gray-200 rounded-lg px-3 py-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-semibold text-emerald-700">{fmtFull(pm.amount)}</span>
+                            <span className="text-xs text-gray-500">{pm.date ? new Date(pm.date).toLocaleDateString('en-GB') : '—'}</span>
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500">
+                            <span>Type: <span className="font-medium text-gray-700">{methodLabel(pm.method)}</span></span>
+                            <span>From: <span className="font-medium text-gray-700">{from}</span></span>
+                            {pm.reference && <span>Ref: <span className="font-medium text-gray-700">{pm.reference}</span></span>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-400 py-1">No payments recorded yet.</p>
+                ))}
               </div>
             </div>
           </SlideDrawer>
