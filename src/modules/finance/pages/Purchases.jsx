@@ -2,8 +2,9 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ShoppingCart, Package, Factory, Ship, Receipt,
-  Search, Download, RefreshCw, CheckCircle, Clock, X, Plus, ChevronDown, Printer,
+  Search, Download, RefreshCw, CheckCircle, Clock, X, Plus, ChevronDown, Printer, Eye, User,
 } from 'lucide-react';
+import SlideDrawer from '../../../components/SlideDrawer';
 import { usePurchases, usePayPurchase, useBankAccounts } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
@@ -81,6 +82,7 @@ export default function Purchases() {
 
   // Payment drawer state — opens when user clicks the status pill on a row.
   const [payTarget, setPayTarget] = useState(null);
+  const [detailPurchase, setDetailPurchase] = useState(null);
   const { data: bankAccounts = [] } = useBankAccounts();
   const payMut = usePayPurchase();
 
@@ -365,12 +367,13 @@ export default function Purchases() {
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Created</th>
                 <th className="px-4 py-3">Approved</th>
+                <th className="px-4 py-3 w-10"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-12 text-center text-sm">
+                  <td colSpan={10} className="px-4 py-12 text-center text-sm">
                     {purchases.length === 0 ? (
                       <div className="text-gray-400 space-y-3">
                         <p>No purchases recorded {rangeKey ? <>in <span className="font-semibold text-gray-600">{RANGE_LABEL[rangeKey] || rangeKey}</span>.</> : 'yet.'}</p>
@@ -442,6 +445,11 @@ export default function Purchases() {
                         <span className="text-gray-300">—</span>
                       )}
                     </td>
+                    <td className="px-4 py-2.5 text-center">
+                      <button onClick={() => setDetailPurchase(p)} className="text-blue-600 hover:text-blue-800" title="View details">
+                        <Eye size={15} />
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
@@ -477,6 +485,42 @@ export default function Purchases() {
           }}
         />
       )}
+
+      {/* Purchase detail — right slide-over */}
+      {detailPurchase && (() => {
+        const p = detailPurchase;
+        const Row = ({ label, value }) => (
+          <div className="flex justify-between gap-3 py-1.5 border-b border-gray-50 last:border-0">
+            <span className="text-xs text-gray-500">{label}</span>
+            <span className="text-sm font-medium text-gray-900 text-right">{value || '—'}</span>
+          </div>
+        );
+        return (
+          <SlideDrawer open={!!detailPurchase} onClose={() => setDetailPurchase(null)}
+            title={shortenRef(p.ref) || p.ref || p.refId || 'Purchase'}
+            subtitle={p.createdByName ? `Created by ${p.createdByName}` : undefined} icon={Receipt} size="md">
+            <div className="space-y-4">
+              <div className="bg-gray-50 rounded-lg p-3 text-center">
+                <p className="text-xs text-gray-500">Amount</p>
+                <p className="text-xl font-bold text-gray-900">{fmtFull(p.amountPkr)}</p>
+                {(p.currency || 'PKR') !== 'PKR' && parseFloat(p.amount) > 0 && (
+                  <p className="text-xs text-gray-400">{p.currency} {Math.round(parseFloat(p.amount)).toLocaleString()}</p>
+                )}
+              </div>
+              <div>
+                <Row label="Source" value={SOURCE_META[p.source]?.label || p.source} />
+                <Row label="Date" value={p.date ? new Date(p.date).toLocaleDateString('en-GB') : '—'} />
+                <Row label="Supplier" value={p.supplierName} />
+                <Row label="Category" value={p.category ? <span className="capitalize">{String(p.category).replace(/_/g, ' ')}</span> : '—'} />
+                <Row label="Reference" value={p.ref} />
+                <Row label="Payment status" value={p.paymentStatus || 'Pending'} />
+                <Row label="Created by" value={<span className="inline-flex items-center gap-1.5"><User size={13} className="text-gray-400" />{p.createdByName || '—'}</span>} />
+                <Row label="Approved by" value={p.approvedByName} />
+              </div>
+            </div>
+          </SlideDrawer>
+        );
+      })()}
     </div>
   );
 }

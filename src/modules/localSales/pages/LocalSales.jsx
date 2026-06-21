@@ -4,7 +4,7 @@ import PartyLink from '../../../shared/components/PartyLink';
 import {
   ShoppingCart, Plus, Search, DollarSign, Package, Truck,
   CreditCard, X, Clock, CheckCircle, RefreshCw, Download,
-  Check, ChevronLeft, ChevronRight, UserPlus,
+  Check, ChevronLeft, ChevronRight, UserPlus, Eye, User,
 } from 'lucide-react';
 import { useLocalSales, useLocalSalesSummary, useCreateLocalSale, useAcceptLocalSalePayment, useLotInventory } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
@@ -188,6 +188,7 @@ export default function LocalSales() {
                 <th className="text-right py-2.5 px-4 font-semibold text-gray-600">Rate</th>
                 <th className="text-right py-2.5 px-4 font-semibold text-gray-600">Total</th>
                 <th className="text-center py-2.5 px-4 font-semibold text-gray-600">Payment</th>
+                <th className="text-center py-2.5 px-4 font-semibold text-gray-600 w-10"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -210,6 +211,7 @@ export default function LocalSales() {
                       <td className="py-2.5 px-4 text-right text-xs tabular-nums">{fmtPKR(s.ratePerKg)}/kg</td>
                       <td className="py-2.5 px-4 text-right font-bold tabular-nums">{fmtPKR(s.totalAmount)}</td>
                       <td className="py-2.5 px-4 text-center"><StatusBadge status={s.paymentStatus} /></td>
+                      <td className="py-2.5 px-4 text-center"><button onClick={(e) => { e.stopPropagation(); openSaleDetail(s); }} className="text-blue-600 hover:text-blue-800" title="View details"><Eye size={15} /></button></td>
                     </tr>
                   );
                 }
@@ -233,6 +235,7 @@ export default function LocalSales() {
                       <td className="py-2.5 px-4 text-right text-xs text-gray-400">—</td>
                       <td className="py-2.5 px-4 text-right font-bold tabular-nums">{fmtPKR(g.total)}</td>
                       <td className="py-2.5 px-4 text-center"><StatusBadge status={g.status} /></td>
+                      <td className="py-2.5 px-4"></td>
                     </tr>
                     {open && g.items.map(s => (
                       <tr key={s.id} onClick={() => openSaleDetail(s)} className="hover:bg-blue-50/40 cursor-pointer bg-white">
@@ -244,6 +247,7 @@ export default function LocalSales() {
                         <td className="py-2 px-4 text-right text-xs tabular-nums">{fmtPKR(s.ratePerKg)}/kg</td>
                         <td className="py-2 px-4 text-right font-semibold text-sm tabular-nums">{fmtPKR(s.totalAmount)}</td>
                         <td className="py-2 px-4 text-center"><StatusBadge status={s.paymentStatus} /></td>
+                        <td className="py-2 px-4 text-center"><button onClick={(e) => { e.stopPropagation(); openSaleDetail(s); }} className="text-blue-600 hover:text-blue-800" title="View details"><Eye size={15} /></button></td>
                       </tr>
                     ))}
                   </Fragment>
@@ -257,9 +261,10 @@ export default function LocalSales() {
       {/* New Sale Modal */}
       <SaleModal isOpen={showSaleModal} onClose={() => setShowSaleModal(false)} customers={customersList} addToast={addToast} refetch={refetch} refreshFromApi={refreshFromApi} />
 
-      {/* Sale Detail Modal */}
+      {/* Sale Detail — right slide-over */}
       {selectedSale && (
-        <Modal isOpen={!!selectedSale} onClose={() => setSelectedSale(null)} title={`Sale — ${selectedSale.saleNo || ''}`} size="lg">
+        <SlideDrawer open={!!selectedSale} onClose={() => setSelectedSale(null)} title={`Sale — ${selectedSale.saleNo || ''}`}
+          subtitle={selectedSale.createdByName ? `Created by ${selectedSale.createdByName}` : undefined} icon={ShoppingCart} size="lg">
           <div className="space-y-5">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="bg-white rounded-lg border p-3"><p className="text-xs text-gray-500">Total</p><p className="text-lg font-bold text-gray-900">{fmtPKR(selectedSale.totalAmount)}</p></div>
@@ -293,6 +298,8 @@ export default function LocalSales() {
                   </>
                 );
               })()}
+              <div className="inline-flex items-center gap-1.5"><User size={13} className="text-gray-400" /><span className="text-gray-500">Created by:</span> <span className="font-medium">{selectedSale.createdByName || '—'}</span></div>
+              <div><span className="text-gray-500">Created:</span> <span className="font-medium">{selectedSale.createdAt ? new Date(selectedSale.createdAt).toLocaleString('en-GB') : '—'}</span></div>
             </div>
 
             {parseFloat(selectedSale.dueAmount) > 0 && (
@@ -321,7 +328,7 @@ export default function LocalSales() {
               )}
             </div>
           </div>
-        </Modal>
+        </SlideDrawer>
       )}
 
       {/* Payment Modal */}

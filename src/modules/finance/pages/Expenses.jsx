@@ -3,8 +3,9 @@ import { useSearchParams } from 'react-router-dom';
 import {
   Plus, DollarSign, Search, Check, Loader2, CreditCard, Download,
   Wallet, Building2, Zap, Truck, Receipt, Briefcase, Coins, Ship,
-  Factory, User, FileText, Calendar, X,
+  Factory, User, FileText, Calendar, X, Eye,
 } from 'lucide-react';
+import SlideDrawer from '../../../components/SlideDrawer';
 import { downloadCSV } from '../../../utils/csvExport';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useApp } from '../../../context/AppContext';
@@ -160,6 +161,7 @@ export default function Expenses() {
   const [typeFilter, setTypeFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [search, setSearch] = useState('');
+  const [detailExpense, setDetailExpense] = useState(null);
   const { data: expenses = [], isLoading } = useExpenses({
     ...(typeFilter ? { expense_type: typeFilter } : {}),
     ...(statusFilter ? { payment_status: statusFilter } : {}),
@@ -404,7 +406,44 @@ export default function Expenses() {
         loading={isLoading}
         rows={filtered}
         onPay={(e) => { setPayId(e.id); setPayForm({ bank_account_id: '', payment_method: 'bank', payment_reference: '' }); }}
+        onView={setDetailExpense}
       />
+
+      {/* Expense detail — right slide-over */}
+      {detailExpense && (() => {
+        const e = detailExpense;
+        const Row = ({ label, value }) => (
+          <div className="flex justify-between gap-3 py-1.5 border-b border-gray-50 last:border-0">
+            <span className="text-xs text-gray-500">{label}</span>
+            <span className="text-sm font-medium text-gray-900 text-right">{value || '—'}</span>
+          </div>
+        );
+        const amt = e.currency === 'PKR' ? fmtPKR(e.amount) : `${e.currency} ${Number(e.amount).toLocaleString()}`;
+        return (
+          <SlideDrawer open={!!detailExpense} onClose={() => setDetailExpense(null)}
+            title={e.expense_no || 'Expense'} subtitle={e.created_by_name ? `Created by ${e.created_by_name}` : undefined}
+            icon={Receipt} size="md">
+            <div className="space-y-4">
+              <div className="bg-gray-50 rounded-lg p-3 text-center">
+                <p className="text-xs text-gray-500">Amount</p>
+                <p className="text-xl font-bold text-gray-900">{amt}</p>
+              </div>
+              <div>
+                <Row label="Type" value={<span className="capitalize">{e.expense_type}</span>} />
+                <Row label="Category" value={<span className="capitalize">{(e.category || '').replace(/_/g, ' ')}</span>} />
+                <Row label="Date" value={e.expense_date ? new Date(e.expense_date).toLocaleDateString('en-GB') : '—'} />
+                <Row label="Vendor" value={e.vendor_name || e.supplier_name_joined} />
+                <Row label="Description" value={e.description} />
+                <Row label="Linked to" value={e.batch_no || e.order_no} />
+                <Row label="Payment status" value={e.payment_status} />
+                {e.bank_name && <Row label="Paid from" value={e.bank_name} />}
+                <Row label="Created by" value={<span className="inline-flex items-center gap-1.5"><User size={13} className="text-gray-400" />{e.created_by_name || '—'}</span>} />
+                <Row label="Created at" value={e.created_at ? new Date(e.created_at).toLocaleString('en-GB') : '—'} />
+              </div>
+            </div>
+          </SlideDrawer>
+        );
+      })()}
 
       {/* Pay modal */}
       {payId && (
@@ -773,7 +812,7 @@ function VendorSection({ vendorKind, apiVendors, apiCategory, form, setF, suppli
   );
 }
 
-function ExpenseTable({ loading, rows, onPay }) {
+function ExpenseTable({ loading, rows, onPay, onView }) {
   if (loading) {
     return <div className="animate-pulse space-y-2">{[0,1,2,3].map(i => <div key={i} className="h-12 bg-gray-100 rounded" />)}</div>;
   }
@@ -834,12 +873,17 @@ function ExpenseTable({ loading, rows, onPay }) {
                 </span>
               </td>
               <td className="py-2.5 px-4 text-right">
-                {e.payment_status === 'Unpaid' && (
-                  <button onClick={() => onPay(e)}
-                    className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded hover:bg-emerald-100 inline-flex items-center gap-1">
-                    <CreditCard size={12} /> Pay
+                <div className="inline-flex items-center gap-1.5">
+                  {e.payment_status === 'Unpaid' && (
+                    <button onClick={() => onPay(e)}
+                      className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded hover:bg-emerald-100 inline-flex items-center gap-1">
+                      <CreditCard size={12} /> Pay
+                    </button>
+                  )}
+                  <button onClick={() => onView?.(e)} className="text-blue-600 hover:text-blue-800 p-1" title="View details">
+                    <Eye size={15} />
                   </button>
-                )}
+                </div>
               </td>
             </tr>
           ))}

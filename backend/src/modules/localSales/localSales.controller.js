@@ -50,10 +50,12 @@ module.exports = {
       let query = db('local_sales as ls')
         .leftJoin('customers as c', 'ls.customer_id', 'c.id')
         .leftJoin('inventory_lots as il', 'ls.lot_id', 'il.id')
+        .leftJoin('users as u', 'u.id', 'ls.created_by')
         .select(
           'ls.*', 'c.name as customer_name', 'il.lot_no as lot_ref',
           'il.landed_cost_per_kg as lot_cost_per_kg', 'il.landed_cost_total as lot_landed_total',
-          'il.item_name as lot_item_name', 'il.variety as lot_variety', 'il.grade as lot_grade'
+          'il.item_name as lot_item_name', 'il.variety as lot_variety', 'il.grade as lot_grade',
+          'u.full_name as created_by_name'
         );
 
       if (status && status !== 'all') query = query.where('ls.status', status);
@@ -90,11 +92,12 @@ module.exports = {
       const sale = await db('local_sales as ls')
         .leftJoin('customers as c', 'ls.customer_id', 'c.id')
         .leftJoin('inventory_lots as il', 'ls.lot_id', 'il.id')
+        .leftJoin('users as u', 'u.id', 'ls.created_by')
         .select(
           'ls.*', 'c.name as customer_name', 'il.lot_no as lot_ref',
           'il.landed_cost_per_kg as lot_cost_per_kg', 'il.landed_cost_total as lot_landed_total',
           'il.item_name as lot_item_name', 'il.variety as lot_variety', 'il.grade as lot_grade',
-          'il.supplier_id as lot_supplier_id'
+          'il.supplier_id as lot_supplier_id', 'u.full_name as created_by_name'
         )
         .where(where).first();
 
