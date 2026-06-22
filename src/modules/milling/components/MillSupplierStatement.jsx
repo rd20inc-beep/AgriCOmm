@@ -139,13 +139,13 @@ export default function MillSupplierStatement({ supplierId, supplierName, params
                     <td className="px-3 py-1.5 whitespace-nowrap text-xs">
                       {link ? <Link to={link} className="text-blue-600 hover:underline">{t.vch_no || t.ref_no}</Link> : (t.vch_no || t.ref_no || '—')}
                     </td>
-                    <td className="px-3 py-1.5 max-w-[260px]">
-                      <span className="block truncate text-gray-700" title={t.description}>{t.description || '—'}</span>
+                    <td className="px-3 py-1.5 min-w-[200px] max-w-[420px]">
+                      <span className="block text-gray-700 whitespace-normal break-words">{t.description || '—'}</span>
                       {(t.account_code || t.account_name) && (
-                        <span className="block truncate text-[10px] text-gray-400">{t.account_code} {t.account_name}</span>
+                        <span className="block text-[10px] text-gray-400 whitespace-normal break-words">{t.account_code} {t.account_name}</span>
                       )}
                       {t.paid_via && (
-                        <span className="block truncate text-[10px] text-emerald-600">
+                        <span className="block text-[10px] text-emerald-600 whitespace-normal break-words">
                           Paid via {t.paid_via}{t.payment_method && t.payment_method !== 'cash' ? ` · ${methodLabel(t.payment_method)}` : ''}
                         </span>
                       )}

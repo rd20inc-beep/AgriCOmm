@@ -326,9 +326,9 @@ export default function PartyLedger() {
                                     : <span className="text-gray-700">{t.vch_no || t.ref_no}</span>)
                                 : <span className="text-gray-400">—</span>}
                             </td>
-                            <td className="py-2.5 px-3 text-gray-700" style={{ maxWidth: 260 }}>
-                              <span className="block truncate" title={t.description || ''}>{t.description || '—'}</span>
-                              {t.account_name && <span className="block text-[10px] text-gray-400">{t.account_code} · {t.account_name}</span>}
+                            <td className="py-2.5 px-3 text-gray-700 min-w-[220px]" style={{ maxWidth: 420 }}>
+                              <span className="block whitespace-normal break-words">{t.description || '—'}</span>
+                              {t.account_name && <span className="block text-[10px] text-gray-400 whitespace-normal break-words">{t.account_code} · {t.account_name}</span>}
                             </td>
                             <td className="py-2.5 px-3 text-right tabular-nums whitespace-nowrap">
                               {dr > 0 ? fmtCur(dr, cur) : '—'}

@@ -1044,7 +1044,8 @@ const accountingService = {
           });
         }
       })
-      .select('id', 'sale_no', 'total_amount', 'created_at', 'item_name', 'quantity_kg', 'notes', 'collection_location');
+      .select('id', 'sale_no', 'total_amount', 'created_at', 'item_name', 'item_type',
+        'quantity_kg', 'quantity_bags', 'bag_weight_kg', 'lot_no', 'notes', 'collection_location');
     const lsIds = localSalesRows.map((s) => s.id);
     const lsPays = lsIds.length
       ? await db('payments').whereIn('local_sale_id', lsIds).select('amount', 'payment_date', 'payment_no', 'payment_method', 'bank_reference')
@@ -1053,8 +1054,20 @@ const accountingService = {
     const localRaw = [
       ...localSalesRows.map((s) => {
         const qty = parseFloat(s.quantity_kg) || 0;
-        const detail = [s.item_name, qty > 0 ? `${Math.round(qty).toLocaleString()} kg` : '', s.collection_location].filter(Boolean).join(' · ');
-        return { date: s.created_at, ref_no: s.sale_no, description: `Local sale${detail ? ` — ${detail}` : ''}${s.notes ? ` (${s.notes})` : ''}`, d: parseFloat(s.total_amount) || 0, c: 0 };
+        const total = parseFloat(s.total_amount) || 0;
+        const rate = qty > 0 ? total / qty : 0;
+        // Full sale narration: item (+ type) · quantity (kg + bags) · rate/kg ·
+        // source lot · pickup location, then any free-text note.
+        const detail = [
+          s.item_name,
+          s.item_type && s.item_type.toLowerCase() !== String(s.item_name || '').toLowerCase() ? s.item_type : '',
+          qty > 0 ? `${Math.round(qty).toLocaleString()} kg` : '',
+          s.quantity_bags ? `${s.quantity_bags} bag${s.quantity_bags === 1 ? '' : 's'}${parseFloat(s.bag_weight_kg) > 0 ? ` × ${parseFloat(s.bag_weight_kg)}kg` : ''}` : '',
+          rate > 0 ? `@ Rs ${rate.toLocaleString(undefined, { maximumFractionDigits: 2 })}/kg` : '',
+          s.lot_no ? `Lot ${s.lot_no}` : '',
+          s.collection_location,
+        ].filter(Boolean).join(' · ');
+        return { date: s.created_at, ref_no: s.sale_no, description: `Local sale${detail ? ` — ${detail}` : ''}${s.notes ? ` (${s.notes})` : ''}`, d: total, c: 0 };
       }),
       ...lsPays.map((p) => {
         const bits = [methodLbl[p.payment_method] || p.payment_method, p.bank_reference].filter(Boolean).join(' · ');

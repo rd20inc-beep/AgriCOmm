@@ -127,8 +127,8 @@ export default function MillCustomerStatement({ customerId, customerName, params
                     <td className="px-3 py-1.5 whitespace-nowrap text-xs">
                       {link ? <Link to={link} className="text-blue-600 hover:underline">{t.vch_no || t.ref_no}</Link> : (t.vch_no || t.ref_no || '—')}
                     </td>
-                    <td className="px-3 py-1.5 max-w-[280px]">
-                      <span className="block truncate text-gray-700" title={t.description}>{t.description || '—'}</span>
+                    <td className="px-3 py-1.5 min-w-[200px] max-w-[420px]">
+                      <span className="block text-gray-700 whitespace-normal break-words">{t.description || '—'}</span>
                     </td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-gray-800">{parseFloat(t.debit) ? fmtCur(t.debit, cur) : ''}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-emerald-600">{parseFloat(t.credit) ? fmtCur(t.credit, cur) : ''}</td>
