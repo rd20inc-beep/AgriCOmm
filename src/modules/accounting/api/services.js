@@ -8,6 +8,7 @@ export const accountingApi = {
   balanceSheet: (params) => api.get('/api/accounting/statements/balance-sheet', params),
   customerStatement: (id, params) => api.get(`/api/accounting/statements/customer/${id}`, params),
   supplierStatement: (id, params) => api.get(`/api/accounting/statements/supplier/${id}`, params),
+  partyAllocation: (type, id) => api.get(`/api/accounting/statements/allocation/${type}/${id}`),
   fxRates: () => api.get('/api/accounting/fx-rates'),
   setFxRate: (data) => api.post('/api/accounting/fx-rates', data),
   createReconciliation: (data) => api.post('/api/accounting/reconciliations', data),

@@ -1,8 +1,9 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { X, ArrowDownLeft, ArrowUpRight, Scale, ExternalLink } from 'lucide-react';
 import { accountingApi } from '../../accounting/api/services';
+import PartyAllocationLedger from './PartyAllocationLedger';
 
 // Inline customer statement (charges/receipts + running balance) for the Mill
 // Finance "Customers" tab — mirrors MillSupplierStatement but for local-sales
@@ -28,6 +29,7 @@ const fmtDate = (d) => {
 };
 
 export default function MillCustomerStatement({ customerId, customerName, params = {}, onClose }) {
+  const [view, setView] = useState('statement'); // 'statement' | 'allocation'
   const { data: statement, isLoading, isError, error } = useQuery({
     queryKey: ['mill-customer-statement', customerId, params],
     enabled: !!customerId,
@@ -52,6 +54,10 @@ export default function MillCustomerStatement({ customerId, customerName, params
           <p className="text-sm font-semibold truncate">{customerName}</p>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
+          <div className="inline-flex rounded-lg bg-white/10 p-0.5 text-xs">
+            <button onClick={() => setView('statement')} className={`px-2 py-1 rounded-md ${view === 'statement' ? 'bg-white text-slate-800 font-medium' : 'text-slate-200'}`}>Statement</button>
+            <button onClick={() => setView('allocation')} className={`px-2 py-1 rounded-md ${view === 'allocation' ? 'bg-white text-slate-800 font-medium' : 'text-slate-200'}`}>Allocation</button>
+          </div>
           <Link
             to={`/milling/statements?type=customer&id=${customerId}&scope=local`}
             className="inline-flex items-center gap-1 rounded-lg bg-white/10 hover:bg-white/20 px-2.5 py-1.5 text-xs"
@@ -67,6 +73,10 @@ export default function MillCustomerStatement({ customerId, customerName, params
         </div>
       </div>
 
+      {view === 'allocation' ? (
+        <div className="p-3"><PartyAllocationLedger partyType="customer" partyId={customerId} /></div>
+      ) : (
+      <>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-gray-100">
         <Tile label="Opening" value={fmtCur(opening, cur)} icon={Scale} tone="text-gray-400" />
         <Tile label="Charged" value={fmtCur(totalDebit, cur)} icon={ArrowUpRight} tone="text-gray-500" />
@@ -125,6 +135,8 @@ export default function MillCustomerStatement({ customerId, customerName, params
           </table>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }

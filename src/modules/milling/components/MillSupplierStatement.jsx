@@ -1,8 +1,9 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { X, Printer, ArrowDownLeft, ArrowUpRight, Scale, ExternalLink } from 'lucide-react';
 import { accountingApi } from '../../accounting/api/services';
+import PartyAllocationLedger from './PartyAllocationLedger';
 
 // Statements are shown in the party's transaction currency (mill suppliers are
 // PKR), as returned by the backend. Mirrors finance/PartyLedger formatting.
@@ -37,6 +38,7 @@ const fmtDate = (d) => {
  * endpoint the main Finance > Statements page uses, so the numbers reconcile.
  */
 export default function MillSupplierStatement({ supplierId, supplierName, params = {}, onClose }) {
+  const [view, setView] = useState('statement'); // 'statement' | 'allocation'
   const { data: statement, isLoading, isError, error } = useQuery({
     queryKey: ['mill-supplier-statement', supplierId, params],
     enabled: !!supplierId,
@@ -62,6 +64,10 @@ export default function MillSupplierStatement({ supplierId, supplierName, params
           <p className="text-sm font-semibold truncate">{supplierName}</p>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
+          <div className="inline-flex rounded-lg bg-white/10 p-0.5 text-xs">
+            <button onClick={() => setView('statement')} className={`px-2 py-1 rounded-md ${view === 'statement' ? 'bg-white text-slate-800 font-medium' : 'text-slate-200'}`}>Statement</button>
+            <button onClick={() => setView('allocation')} className={`px-2 py-1 rounded-md ${view === 'allocation' ? 'bg-white text-slate-800 font-medium' : 'text-slate-200'}`}>Allocation</button>
+          </div>
           <Link
             to={`/finance/statements?type=supplier&id=${supplierId}`}
             className="inline-flex items-center gap-1 rounded-lg bg-white/10 hover:bg-white/20 px-2.5 py-1.5 text-xs"
@@ -77,6 +83,10 @@ export default function MillSupplierStatement({ supplierId, supplierName, params
         </div>
       </div>
 
+      {view === 'allocation' ? (
+        <div className="p-3"><PartyAllocationLedger partyType="supplier" partyId={supplierId} /></div>
+      ) : (
+      <>
       {/* KPI strip */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-gray-100">
         <Tile label="Opening" value={fmtCur(opening, cur)} icon={Scale} tone="text-gray-400" />
@@ -147,6 +157,8 @@ export default function MillSupplierStatement({ supplierId, supplierName, params
           </table>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }

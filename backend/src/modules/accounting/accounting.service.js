@@ -1307,6 +1307,82 @@ const accountingService = {
     };
   },
 
+  /**
+   * Invoice ↔ payment allocation ledger (the LedgerReport.pdf format): every
+   * invoice with the payments applied to it + its outstanding, plus a footer of
+   * totals & counts. Customer invoices = local sales (payments by local_sale_id);
+   * supplier invoices = payables (payments by linked_payable_id).
+   */
+  async getPartyAllocation(partyType, partyId) {
+    const id = parseInt(partyId);
+    const num = (v) => parseFloat(v) || 0;
+    const isCustomer = partyType === 'customer';
+
+    let partyName = '';
+    let invoiceRows = [];   // { id, ref, supplierRef, date, particulars, notes, amount }
+    let payRows = [];       // { ref, date, amount, method, reference, invId }
+
+    if (isCustomer) {
+      const cust = await db('customers').where({ id }).first();
+      partyName = cust ? cust.name : '';
+      const sales = await db('local_sales')
+        .where(function () {
+          this.where('customer_id', id);
+          if (cust && cust.name) this.orWhere(function () { this.whereNull('customer_id').whereRaw('LOWER(buyer_name) = LOWER(?)', [cust.name]); });
+        })
+        .orderBy('created_at')
+        .select('id', 'sale_no', 'total_amount', 'created_at', 'item_name', 'quantity_kg', 'collection_location', 'notes');
+      invoiceRows = sales.map((s) => ({
+        id: s.id, ref: s.sale_no, supplierRef: null, date: s.created_at,
+        particulars: [s.item_name, num(s.quantity_kg) > 0 ? `${Math.round(num(s.quantity_kg)).toLocaleString()} kg` : '', s.collection_location].filter(Boolean).join(' · '),
+        notes: s.notes || null, amount: num(s.total_amount),
+      }));
+      const saleIds = sales.map((s) => s.id);
+      const pays = saleIds.length ? await db('payments').whereIn('local_sale_id', saleIds).orderBy('payment_date')
+        .select('payment_no', 'amount', 'payment_date', 'payment_method', 'bank_reference', 'local_sale_id') : [];
+      payRows = pays.map((p) => ({ ref: p.payment_no, date: p.payment_date, amount: num(p.amount), method: p.payment_method, reference: p.bank_reference || null, invId: p.local_sale_id }));
+    } else {
+      const sup = await db('suppliers').where({ id }).first();
+      partyName = sup ? sup.name : '';
+      const payables = await db('payables').where({ supplier_id: id }).orderBy('created_at')
+        .select('id', 'pay_no', 'linked_ref', 'category', 'original_amount', 'created_at', 'due_date', 'notes');
+      invoiceRows = payables.map((p) => ({
+        id: p.id, ref: p.linked_ref || p.pay_no, supplierRef: p.linked_ref || null, date: p.created_at || p.due_date,
+        particulars: p.category || '', notes: p.notes || null, amount: num(p.original_amount),
+      }));
+      const payIds = payables.map((p) => p.id);
+      const pays = payIds.length ? await db('payments').whereIn('linked_payable_id', payIds).orderBy('payment_date')
+        .select('payment_no', 'amount', 'payment_date', 'payment_method', 'bank_reference', 'linked_payable_id') : [];
+      payRows = pays.map((p) => ({ ref: p.payment_no, date: p.payment_date, amount: num(p.amount), method: p.payment_method, reference: p.bank_reference || null, invId: p.linked_payable_id }));
+    }
+
+    const paysByInv = {};
+    payRows.forEach((p) => { (paysByInv[p.invId] ||= []).push(p); });
+
+    const invoices = invoiceRows.map((inv) => {
+      const ps = (paysByInv[inv.id] || []).slice().sort((a, b) => new Date(a.date) - new Date(b.date));
+      const paid = ps.reduce((s, p) => s + p.amount, 0);
+      const outstanding = Math.max(0, inv.amount - paid);
+      return {
+        ref: inv.ref, supplier_ref: inv.supplierRef, date: inv.date, particulars: inv.particulars, notes: inv.notes,
+        amount: parseFloat(inv.amount.toFixed(2)), paid: parseFloat(paid.toFixed(2)), outstanding: parseFloat(outstanding.toFixed(2)),
+        status: outstanding <= 0.01 ? 'Paid' : (paid > 0 ? 'Partial' : 'Unpaid'),
+        payments: ps.map((p) => ({ ref: p.ref, date: p.date, amount: parseFloat(p.amount.toFixed(2)), method: p.method, reference: p.reference })),
+      };
+    });
+
+    const totals = {
+      billed: parseFloat(invoices.reduce((s, i) => s + i.amount, 0).toFixed(2)),
+      paid: parseFloat(invoices.reduce((s, i) => s + i.paid, 0).toFixed(2)),
+      outstanding: parseFloat(invoices.reduce((s, i) => s + i.outstanding, 0).toFixed(2)),
+    };
+    return {
+      party_type: partyType, name: partyName, currency: 'PKR',
+      invoices, totals,
+      counts: { invoices: invoices.length, payments: payRows.length },
+    };
+  },
+
   // ═══════════════════════════════════════════════════════════════════
   // Account Queries
   // ═══════════════════════════════════════════════════════════════════

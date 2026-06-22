@@ -138,6 +138,7 @@ router.get('/statements/balance-sheet', authorize('finance', 'view'), controller
 router.get('/statements/cash-flow', authorize('finance', 'view'), controller.cashFlow);
 router.get('/statements/customer/:id', authorize('finance', 'view'), controller.customerStatement);
 router.get('/statements/supplier/:id', authorize('finance', 'view'), controller.supplierStatement);
+router.get('/statements/allocation/:type/:id', authorize('finance', 'view'), controller.partyAllocation);
 
 // ═══════════════════════════════════════════════════════════════════
 // Account Queries

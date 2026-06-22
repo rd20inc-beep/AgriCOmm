@@ -673,6 +673,21 @@ const accountingController = {
     }
   },
 
+  // Invoice↔payment allocation ledger for a party (customer | supplier).
+  async partyAllocation(req, res) {
+    try {
+      const { type, id } = req.params;
+      if (type !== 'customer' && type !== 'supplier') {
+        return res.status(400).json({ success: false, message: 'type must be customer or supplier.' });
+      }
+      const result = await accountingService.getPartyAllocation(type, parseInt(id));
+      return res.json({ success: true, data: result });
+    } catch (err) {
+      console.error('Party allocation error:', err);
+      return res.status(500).json({ success: false, message: err.message || 'Internal server error.' });
+    }
+  },
+
   // ═══════════════════════════════════════════════════════════════════
   // Account Queries
   // ═══════════════════════════════════════════════════════════════════
