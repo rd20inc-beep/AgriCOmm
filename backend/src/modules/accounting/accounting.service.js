@@ -996,7 +996,19 @@ const accountingService = {
     // receivables but NOT party-stamped AR journals, so the journal scan above
     // misses them. Pull them in directly: each sale is a debit (charge), each
     // receipt against it a credit. (Export customers have no local sales → no-op.)
-    const localSalesRows = await db('local_sales').where('customer_id', cid)
+    // Match sales linked to the customer, AND walk-in sales (customer_id NULL)
+    // recorded under the same buyer name — a cash walk-in often isn't linked to
+    // the customer record that was registered later.
+    const custRow = await db('customers').where({ id: cid }).first();
+    const localSalesRows = await db('local_sales')
+      .where(function () {
+        this.where('customer_id', cid);
+        if (custRow && custRow.name) {
+          this.orWhere(function () {
+            this.whereNull('customer_id').whereRaw('LOWER(buyer_name) = LOWER(?)', [custRow.name]);
+          });
+        }
+      })
       .select('id', 'sale_no', 'total_amount', 'created_at');
     const lsIds = localSalesRows.map((s) => s.id);
     const lsPays = lsIds.length
