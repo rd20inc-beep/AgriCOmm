@@ -228,6 +228,24 @@ const expensesService = {
     if (expense.payment_status === 'Paid') throw new ValidationError('Already paid.');
 
     const payDate = paid_date || new Date().toISOString().split('T')[0];
+    // A post-dated cheque records but does NOT mark the expense paid until it
+    // clears — insert the uncleared payment and stop.
+    const isPostDated = payment_method === 'cheque' && due_date && new Date(due_date) > new Date(new Date().toDateString());
+    if (isPostDated) {
+      return db.transaction(async (trx) => {
+        const payable = await trx('payables').where({ source_table: 'business_expenses', source_id: id }).first();
+        const payCount = await trx('payments').count('id as c').first();
+        await trx('payments').insert({
+          payment_no: `EXP-PAY-${(parseInt(payCount?.c) || 0) + 1}`,
+          type: 'payment', amount: expense.amount_pkr, currency: 'PKR', fx_rate: 1, base_amount_pkr: expense.amount_pkr,
+          payment_method, bank_account_id: bank_account_id || null, bank_reference: payment_reference || null,
+          due_date: due_date || null, cleared: false,
+          linked_payable_id: payable ? payable.id : null, payment_date: payDate,
+          notes: `Pending cheque for ${expense.expense_no}`, created_by: userId || null,
+        });
+        return expense;
+      });
+    }
     return db.transaction(async (trx) => {
       const [updated] = await trx('business_expenses').where('id', id).update({
         payment_status: 'Paid',

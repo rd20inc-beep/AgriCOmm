@@ -123,6 +123,25 @@ const millStoreService = {
       const bankId = method === 'cash' ? (data.bank_account_id || null) : (data.bank_account_id || null);
       const payDate = data.payment_date || new Date();
 
+      // A post-dated cheque records but does NOT settle the purchase until it
+      // clears — insert the uncleared payment and stop.
+      const isPostDated = method === 'cheque' && data.due_date && new Date(data.due_date) > new Date(new Date().toDateString());
+      if (isPostDated) {
+        const payable = await trx('payables').where(function () {
+          this.where({ source_table: 'mill_purchases', source_id: parseInt(id, 10) }).orWhere('linked_ref', purchase.purchase_no);
+        }).first();
+        const payCount = await trx('payments').count('id as c').first();
+        await trx('payments').insert({
+          payment_no: `MP-PAY-${(parseInt(payCount?.c) || 0) + 1}`,
+          type: 'payment', amount, currency: 'PKR', fx_rate: 1, base_amount_pkr: amount,
+          payment_method: method, bank_account_id: bankId, bank_reference: data.payment_reference || null,
+          due_date: data.due_date || null, cleared: false,
+          linked_payable_id: payable ? payable.id : null, payment_date: payDate,
+          notes: `Pending cheque for ${purchase.purchase_no}`, created_by: userId || null,
+        });
+        return trx('mill_purchases').where({ id }).first();
+      }
+
       // Stamp the purchase with the latest payment + running paid_amount.
       await trx('mill_purchases').where({ id }).update({
         paid_amount: newPaid, payment_status: status,
