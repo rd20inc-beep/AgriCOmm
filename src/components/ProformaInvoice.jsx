@@ -134,14 +134,14 @@ export default function ProformaInvoice({ order, companyProfile }) {
       + 'document.getElementById("pi-page").style.height=(ch*s)+"px";'
       + 'window.focus();window.print();'
       + '},300);});';
-    // Lay the invoice out WIDE (1040px) so the table doesn't wrap tall, then the
-    // fit-script scales it down to FILL the 194mm portrait page width (s =
-    // pageW/cw) while staying one page — instead of laying out narrow and
-    // shrinking by height, which left it small and not filling the page.
+    // Lay the invoice out at a 900px base so the table doesn't wrap tall, then the
+    // fit-script scales it to FILL the 194mm portrait page width (s = pageW/cw)
+    // while staying one page. Narrower base ⇒ less downscale ⇒ bigger fonts; the
+    // min(...) with pageH keeps it to one page if content ever runs tall.
     w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${title}</title>${links}`
       + `<style>@page{size:A4 portrait;margin:8mm}html,body{margin:0;padding:0;background:#fff}`
       + `#pi-page{width:194mm;overflow:hidden}`
-      + `#pi-scale{transform-origin:top left;width:1040px}`
+      + `#pi-scale{transform-origin:top left;width:900px}`
       + `.proforma-invoice{max-width:none!important;width:100%!important;box-shadow:none!important;margin:0!important;`
       + `-webkit-print-color-adjust:exact;print-color-adjust:exact}</style></head><body>`
       + `<div id="pi-page"><div id="pi-scale">${node.outerHTML}</div></div>`
