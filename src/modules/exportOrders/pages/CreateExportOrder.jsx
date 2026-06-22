@@ -12,7 +12,7 @@ import { validateForm, required, positiveNonZero } from '../../../utils/validati
 import { toKg, fromKg, allEquivalents, UNITS } from '../../../utils/unitConversion';
 import SearchSelect from '../../../components/SearchSelect';
 import RiceTypePicker from '../../../components/RiceTypePicker';
-import { INCOTERMS, incotermHint } from '../../../shared/constants/incoterms';
+import { INCOTERMS, incotermHint, advancePctForIncoterm } from '../../../shared/constants/incoterms';
 import { PAYMENT_TERMS } from '../../../shared/constants/paymentTerms';
 
 const RECEIVING_MODES = [
@@ -154,8 +154,12 @@ export default function CreateExportOrder() {
     const totalEstimatedCost = riceCost + bagsCost + loadingCost + clearingCost + freightCost;
     const estimatedGrossProfit = contractValue - totalEstimatedCost;
     const marginPct = contractValue > 0 ? ((estimatedGrossProfit / contractValue) * 100) : 0;
-    return { estimatedRawQty, bagsCost, riceCost, loadingCost, clearingCost, freightCost, totalEstimatedCost, contractValue, estimatedGrossProfit, marginPct };
-  }, [qtyMT, pricePerMT, form.incoterm, form.receivingMode, contractValue]);
+    // Advance / balance split — driven by the (incoterm-derived) advance %.
+    const advPct = parseFloat(form.advancePct) || 0;
+    const advanceExpected = contractValue * (advPct / 100);
+    const balanceExpected = contractValue - advanceExpected;
+    return { estimatedRawQty, bagsCost, riceCost, loadingCost, clearingCost, freightCost, totalEstimatedCost, contractValue, estimatedGrossProfit, marginPct, advPct, advanceExpected, balanceExpected };
+  }, [qtyMT, pricePerMT, form.incoterm, form.receivingMode, form.advancePct, contractValue]);
 
   const fmtUSD = (v) => '$' + Math.round(v).toLocaleString();
 
@@ -472,7 +476,9 @@ export default function CreateExportOrder() {
           </div>
           <div className="form-group">
             <label className="form-label">Incoterm</label>
-            <select value={form.incoterm} onChange={e => set('incoterm', e.target.value)} className="form-input">
+            <select value={form.incoterm}
+              onChange={e => { const v = e.target.value; set('incoterm', v); set('advancePct', advancePctForIncoterm(v)); }}
+              className="form-input">
               {INCOTERMS.map(it => (
                 <option key={it.code} value={it.code}>{it.code} — {it.name}</option>
               ))}
@@ -484,6 +490,7 @@ export default function CreateExportOrder() {
           <div className="form-group">
             <label className="form-label">Advance %</label>
             <input type="number" value={form.advancePct} onChange={e => set('advancePct', e.target.value)} className="form-input" min="0" max="100" />
+            <p className="text-[11px] text-gray-500 mt-1 leading-snug">Auto-set from {form.incoterm || 'incoterm'} ({advancePctForIncoterm(form.incoterm)}%) — edit if the buyer agreed otherwise.</p>
           </div>
           <div className="form-group">
             <label className="form-label">Payment Terms</label>
@@ -870,6 +877,9 @@ export default function CreateExportOrder() {
                 <span>Margin</span>
                 <span className={costing.marginPct >= 15 ? 'text-emerald-600' : costing.marginPct >= 5 ? 'text-amber-600' : 'text-red-600'}>{costing.marginPct.toFixed(1)}%</span>
               </div>
+              {/* Advance / balance split, driven by the incoterm-derived advance % */}
+              <div className="border-t pt-2 flex justify-between text-sm"><span className="text-gray-600">Advance ({costing.advPct}%)</span><span className="font-medium">{fmtUSD(costing.advanceExpected)}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-gray-600">Balance ({Math.max(0, 100 - costing.advPct)}%)</span><span className="font-medium">{fmtUSD(costing.balanceExpected)}</span></div>
               <div className={`mt-2 p-2.5 rounded-lg text-xs font-medium ${costing.marginPct >= 15 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : costing.marginPct >= 5 ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
                 {costing.marginPct >= 15 ? 'Healthy margin' : costing.marginPct >= 5 ? 'Low margin — review costs' : 'Negative/very low margin — reconsider pricing'}
               </div>

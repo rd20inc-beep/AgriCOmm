@@ -124,7 +124,7 @@ export function transformOrder(dbOrder) {
     currency: dbOrder.currency || 'USD',
     contractValue: parseFloat(dbOrder.contract_value) || 0,
     incoterm: dbOrder.incoterm || '',
-    advancePct: parseFloat(dbOrder.advance_pct) || 20,
+    advancePct: dbOrder.advance_pct != null && dbOrder.advance_pct !== '' ? parseFloat(dbOrder.advance_pct) : 20,
     advanceExpected: parseFloat(dbOrder.advance_expected) || 0,
     advanceReceived: parseFloat(dbOrder.advance_received) || 0,
     advanceDate: dbOrder.advance_date,

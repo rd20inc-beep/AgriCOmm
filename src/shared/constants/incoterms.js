@@ -130,3 +130,18 @@ export function incotermHint(code) {
   if (!entry) return '';
   return `${entry.name} · ${entry.description} Payment: ${entry.payment}.`;
 }
+
+// Risk-tiered default advance % per incoterm — more seller cost/risk → higher
+// advance. Used to auto-fill the Create-Order advance % when the incoterm
+// changes (stays editable per order). EXW 100 · FCA/FAS/FOB 20 ·
+// CFR/CNF/CIF/CPT/CIP 30 · DAP/DPU/DDP 50.
+export const ADVANCE_PCT_BY_INCOTERM = {
+  EXW: 100,
+  FCA: 20, FAS: 20, FOB: 20,
+  CFR: 30, CNF: 30, CIF: 30, CPT: 30, CIP: 30,
+  DAP: 50, DPU: 50, DDP: 50,
+};
+
+export function advancePctForIncoterm(code) {
+  return ADVANCE_PCT_BY_INCOTERM[code] != null ? ADVANCE_PCT_BY_INCOTERM[code] : 20;
+}
