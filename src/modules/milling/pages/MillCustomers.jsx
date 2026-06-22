@@ -94,7 +94,7 @@ export default function MillCustomers() {
                     {c.port && <div className="text-xs text-gray-500 flex items-center gap-1 mt-0.5"><Anchor className="w-3 h-3" />{c.port}</div>}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <Link to={`/milling/statements?type=customer&id=${c.id}&scope=local`}
+                    <Link to={`/milling/finance?tab=customers&customer=${c.id}`}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
                       <FileText className="w-3.5 h-3.5" /> View Statement
                     </Link>

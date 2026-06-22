@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useMemo, useEffect } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   DollarSign, Users, Zap, Shield, TrendingUp, TrendingDown, AlertTriangle,
   Plus, UserPlus, Package, Factory, Wallet, ArrowUpRight, ArrowDownRight, Printer,
@@ -182,6 +182,17 @@ export default function MillFinanceDashboard() {
   const payrollTotal = payrollData?.grandTotal || 0;
 
   const [activeTab, setActiveTab] = useState('overview');
+  // Deep-link from the Mill Customers/Suppliers pages: ?tab=customers&customer=ID
+  // (or tab=suppliers&supplier=ID) opens the right tab with the party selected.
+  const [searchParams] = useSearchParams();
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab && tabs.some(t => t.key === tab)) setActiveTab(tab);
+    const cid = searchParams.get('customer');
+    if (cid) { const c = localCustomers.find(x => String(x.id) === String(cid)); if (c) setSelectedCustomer({ id: c.id, name: c.name }); }
+    const sid = searchParams.get('supplier');
+    if (sid) { const s = suppliers.find(x => String(x.id) === String(sid)); if (s) setSelectedSupplier({ id: s.id, name: s.name }); }
+  }, [searchParams, localCustomers, suppliers]);
   const [showExpDrawer, setShowExpDrawer] = useState(false);
   const [showWorkerDrawer, setShowWorkerDrawer] = useState(false);
   const [expForm, setExpForm] = useState({ category: 'salaries', vendor_preset: '', vendor_name: '', description: '', amount: '', expense_date: new Date().toISOString().split('T')[0], reference: '', notes: '' });

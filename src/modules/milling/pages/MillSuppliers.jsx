@@ -90,7 +90,7 @@ export default function MillSuppliers() {
                     {s.country ? <span className="inline-flex items-center gap-1"><Globe className="w-3.5 h-3.5 text-gray-400" />{s.country}</span> : <span className="text-gray-400">—</span>}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <Link to={`/milling/statements?type=supplier&id=${s.id}`}
+                    <Link to={`/milling/finance?tab=suppliers&supplier=${s.id}`}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100">
                       <FileText className="w-3.5 h-3.5" /> View Statement
                     </Link>
