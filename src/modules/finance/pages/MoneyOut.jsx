@@ -314,11 +314,11 @@ export default function MoneyOut() {
                   <p className="text-xs text-gray-400 py-2">Loading payments…</p>
                 ) : (payHistory?.payments?.length ? (
                   <div className="space-y-2">
-                    {payHistory.payments.map((p) => {
+                    {payHistory.payments.map((p, idx) => {
                       let from = [p.accountName, p.bankName].filter(Boolean).join(' · ');
-                      if (!from) from = p.paymentMethod === 'cash' ? 'Cash (in hand)' : '—';
+                      if (!from) from = p.paymentMethod === 'cash' ? 'Cash (in hand)' : (p.synthesized ? 'Recorded — account not captured' : '—');
                       return (
-                        <div key={p.id} className="border border-gray-200 rounded-lg px-3 py-2">
+                        <div key={p.id || idx} className="border border-gray-200 rounded-lg px-3 py-2">
                           <div className="flex items-center justify-between">
                             <span className="text-sm font-semibold text-emerald-700">{fmtAmount(p.amount, p.currency || drawer.currency)}</span>
                             <span className="text-xs text-gray-500">{p.paymentDate ? new Date(p.paymentDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</span>

@@ -191,17 +191,49 @@ const financeController = {
     try {
       const { id } = req.params;
       if (!/^\d+$/.test(String(id))) return res.json({ success: true, data: { payments: [] } });
+      const payable = await db('payables').where({ id }).first();
 
-      const payments = await db('payments as p')
+      // (1) payments linked to this payable
+      const viaPayments = await db('payments as p')
         .leftJoin('bank_accounts as ba', 'ba.id', 'p.bank_account_id')
         .where('p.linked_payable_id', id)
-        .select(
-          'p.id', 'p.payment_no', 'p.amount', 'p.currency', 'p.payment_method',
-          'p.payment_date', 'p.bank_reference', 'p.notes', 'p.bank_account_id', 'p.type',
-          'ba.name as account_name', 'ba.bank_name as bank_name', 'ba.type as account_type'
-        )
-        .orderBy('p.payment_date', 'desc')
-        .orderBy('p.id', 'desc');
+        .select('p.amount', 'p.payment_method', 'p.payment_date', 'p.bank_reference',
+          'ba.name as account_name', 'ba.bank_name', 'ba.type as account_type');
+
+      // (2) bank_transactions from the Purchases-tab payPurchase flow (no
+      // payments row), matched by the payable's linked_ref.
+      let viaBank = [];
+      if (payable && payable.linked_ref) {
+        viaBank = await db('bank_transactions as bt')
+          .leftJoin('bank_accounts as ba', 'ba.id', 'bt.bank_account_id')
+          .where({ 'bt.source': 'pay_purchase', 'bt.type': 'debit' })
+          .where('bt.notes', 'ilike', `%${payable.linked_ref}%`)
+          .select('bt.amount', 'bt.transaction_date', 'bt.reference',
+            'ba.name as account_name', 'ba.bank_name', 'ba.type as account_type');
+      }
+
+      const norm = [];
+      for (const p of viaPayments) norm.push({
+        amount: parseFloat(p.amount) || 0, payment_method: p.payment_method, payment_date: p.payment_date,
+        bank_reference: p.bank_reference, account_name: p.account_name, bank_name: p.bank_name, account_type: p.account_type,
+      });
+      for (const b of viaBank) norm.push({
+        amount: parseFloat(b.amount) || 0, payment_method: b.account_type === 'cash' ? 'cash' : 'bank_transfer',
+        payment_date: b.transaction_date, bank_reference: b.reference,
+        account_name: b.account_name, bank_name: b.bank_name, account_type: b.account_type,
+      });
+      const seen = new Set();
+      let payments = norm.filter((x) => {
+        const k = `${Math.round(x.amount)}|${x.payment_date ? String(x.payment_date).slice(0, 10) : ''}|${x.account_name || ''}`;
+        if (seen.has(k)) return false; seen.add(k); return true;
+      });
+
+      // (3) fallback — payable shows paid but nothing itemisable → one synth line
+      const paid = parseFloat(payable?.paid_amount) || 0;
+      if (payments.length === 0 && paid > 0) {
+        payments.push({ amount: paid, payment_method: null, payment_date: payable.updated_at, bank_reference: null, account_name: null, bank_name: null, account_type: null, synthesized: true });
+      }
+      payments.sort((a, b) => new Date(b.payment_date || 0) - new Date(a.payment_date || 0));
 
       return res.json({ success: true, data: { payments } });
     } catch (err) {
