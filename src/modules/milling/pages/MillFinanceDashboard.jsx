@@ -10,13 +10,14 @@ import { useAuth } from '../../../context/AuthContext';
 import {
   useMillExpenses, useCreateMillExpense, useMillWorkers, useCreateMillWorker,
   usePayrollSummary, useRecordAttendance, useInventory, useExpenseVendors,
-  usePayables, useSuppliers, usePurchases, useLocalSalesSummary, useMillCashFlow,
+  usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow,
   useMillLotCosts,
 } from '../../../api/queries';
 import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import SlideDrawer from '../../../components/SlideDrawer';
 import SearchSelect from '../../../shared/components/SearchSelect';
 import MillSupplierStatement from '../components/MillSupplierStatement';
+import MillCustomerStatement from '../components/MillCustomerStatement';
 import StatementPayDrawer from '../../finance/components/StatementPayDrawer';
 
 const PKR = (v) => 'Rs ' + Math.round(v || 0).toLocaleString('en-PK');
@@ -47,6 +48,7 @@ const tabs = [
   { key: 'overview',   label: 'Overview',     icon: DollarSign },
   { key: 'moneyflow',  label: 'Money In/Out', icon: Wallet },
   { key: 'suppliers',  label: 'Suppliers',    icon: Building2 },
+  { key: 'customers',  label: 'Customers',    icon: Users },
   { key: 'expenses',   label: 'Expenses',     icon: TrendingDown },
   { key: 'addcosts',   label: 'Add. Costs',   icon: Layers },
   { key: 'efficiency', label: 'Efficiency',   icon: TrendingUp },
@@ -141,6 +143,8 @@ export default function MillFinanceDashboard() {
   const { data: storePurchaseData } = usePurchases();
   const { data: localSalesSummary } = useLocalSalesSummary();
   const [selectedSupplier, setSelectedSupplier] = useState(null);
+  const { data: localCustomers = [] } = useCustomers({ type: 'local' });
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
   // Pay a supplier with the same drawer the Finance dashboard uses.
   const { hasPermission } = useAuth();
   const canPay = hasPermission('finance', 'confirm_payment');
@@ -782,6 +786,73 @@ export default function MillFinanceDashboard() {
                           )}
                           {r.id && <span className="text-blue-500 text-xs">View →</span>}
                         </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── CUSTOMERS (local sales) ────────────────────────────────── */}
+      {activeTab === 'customers' && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <Stat label="Local customers" value={localCustomers.length} sub="local-sales buyers" tone="slate" icon={Users} />
+            <Stat label="Pick a customer" value="↓" sub="to view their statement" tone="blue" icon={Receipt} />
+          </div>
+
+          {/* Pick any customer to view their statement */}
+          <div className="rounded-xl border border-gray-200 bg-white p-3">
+            <p className="text-[11px] uppercase tracking-wide text-gray-500 mb-1.5">View any customer statement</p>
+            <SearchSelect
+              value={selectedCustomer?.id || ''}
+              onChange={(val) => {
+                const c = localCustomers.find((x) => String(x.id) === String(val));
+                setSelectedCustomer(c ? { id: c.id, name: c.name } : null);
+              }}
+              options={localCustomers.map((c) => ({ value: c.id, label: c.name, sub: c.country || c.port || '' }))}
+              placeholder="Search customers…"
+            />
+          </div>
+
+          {/* Inline statement */}
+          {selectedCustomer?.id && (
+            <MillCustomerStatement
+              customerId={selectedCustomer.id}
+              customerName={selectedCustomer.name}
+              onClose={() => setSelectedCustomer(null)}
+            />
+          )}
+
+          {/* Directory */}
+          <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-gray-100">
+              <h3 className="text-sm font-semibold text-gray-700">Local customer directory</h3>
+              <p className="text-[11px] text-gray-400">Click a customer to see their statement of sales & receipts.</p>
+            </div>
+            <div className="overflow-x-auto">
+              {localCustomers.length === 0 ? (
+                <div className="p-6 text-center text-sm text-gray-400">No local customers yet.</div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500">
+                      <th className="text-left font-medium px-4 py-2">Customer</th>
+                      <th className="text-left font-medium px-4 py-2">Contact</th>
+                      <th className="text-left font-medium px-4 py-2">Country</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {localCustomers.map((c) => (
+                      <tr key={c.id}
+                        className={`cursor-pointer hover:bg-blue-50/40 ${selectedCustomer?.id === c.id ? 'bg-blue-50/60' : ''}`}
+                        onClick={() => setSelectedCustomer({ id: c.id, name: c.name })}>
+                        <td className="px-4 py-2 font-medium text-gray-900">{c.name}</td>
+                        <td className="px-4 py-2 text-gray-600">{c.contact || c.phone || '—'}</td>
+                        <td className="px-4 py-2 text-gray-600">{c.country || '—'}</td>
                       </tr>
                     ))}
                   </tbody>
