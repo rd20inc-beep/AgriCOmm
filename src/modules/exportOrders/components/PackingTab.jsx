@@ -2,6 +2,34 @@ import { useState } from 'react';
 import { Package, Edit3, Save, X, Plus, Trash2 } from 'lucide-react';
 import api from '../../../api/client';
 
+const BAG_TYPE_OPTIONS = ['PP Bag', 'BOPP Bag', 'Jute Bag', 'Non-Woven', 'Paper Bag', 'Custom'];
+
+// Map an order item (camelCase from transformOrder, or raw snake_case) to a full
+// export_order_items row. The order-update endpoint DELETES + re-inserts items,
+// so every field must be sent or it would be lost on save.
+function itemToPayload(it) {
+  return {
+    product_id: it.productId ?? it.product_id ?? null,
+    product_name: it.productName || it.product_name || null,
+    qty_mt: it.qtyMT ?? it.qty_mt ?? 0,
+    price_per_mt: it.pricePerMT ?? it.price_per_mt ?? 0,
+    hs_code: it.hsCode || it.hs_code || null,
+    packing: it.packing || null,
+    bag_size_kg: it.bagSizeKg ?? it.bag_size_kg ?? null,
+    bag_count: it.bagCount ?? it.bag_count ?? null,
+    bag_type: it.bagType || it.bag_type || null,
+    bag_quality: it.bagQuality || it.bag_quality || null,
+    bag_brand: it.bagBrand || it.bag_brand || null,
+    bag_color: it.bagColor || it.bag_color || null,
+    bag_printing: it.bagPrinting || it.bag_printing || null,
+    master_bag_size_kg: it.masterBagSizeKg ?? it.master_bag_size_kg ?? null,
+    master_bag_type: it.masterBagType || it.master_bag_type || null,
+    quality_description: it.qualityDescription || it.quality_description || null,
+    broken_pct_target: it.brokenPctTarget ?? it.broken_pct_target ?? null,
+    notes: it.notes || null,
+  };
+}
+
 export default function PackingTab({ order, onUpdated }) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -43,8 +71,16 @@ export default function PackingTab({ order, onUpdated }) {
       packing_lines: packingLines.length > 0
         ? packingLines.map(l => ({ bag_type: l.bagType || l.bag_type || '', bag_quality: l.bagQuality || l.bag_quality || '', fill_weight_kg: l.fillWeightKg || l.fill_weight_kg || 25, bag_count: l.bagCount || l.bag_count || '', bag_printing: l.bagPrinting || l.bag_printing || '', notes: l.notes || '' }))
         : [],
+      // Full per-item rows so editing one field (bag type) doesn't drop the rest
+      // on the delete+reinsert update. Omitted entirely when there are no items
+      // (single-product order) so the endpoint keeps its single-product path.
+      items: items.length > 0 ? items.map(itemToPayload) : undefined,
     });
     setEditing(true);
+  }
+
+  function updateItem(idx, field, value) {
+    setForm(f => ({ ...f, items: f.items.map((r, i) => i === idx ? { ...r, [field]: value } : r) }));
   }
 
   function addLine() {
@@ -287,6 +323,31 @@ export default function PackingTab({ order, onUpdated }) {
                 className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
             </div>
           </div>
+
+          {/* Per-item Bag Type — operator picks the bag type for each P.I. line */}
+          {form.items && form.items.length > 0 && (
+            <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
+              <h4 className="text-sm font-semibold text-gray-700">Per-item Bag Type</h4>
+              <p className="text-xs text-gray-500">Choose the bag type for each line. Size & master bag are shown for context.</p>
+              <div className="space-y-2">
+                {form.items.map((it, i) => (
+                  <div key={i} className="grid grid-cols-12 gap-2 items-center">
+                    <div className="col-span-5 text-sm text-gray-800 truncate">{it.product_name || `Item ${i + 1}`}</div>
+                    <div className="col-span-3 text-xs text-gray-500">
+                      {it.bag_size_kg ? `${it.bag_size_kg} KG` : '—'}{it.master_bag_size_kg ? ` · master ${it.master_bag_size_kg} KG` : ''}
+                    </div>
+                    <div className="col-span-4">
+                      <select value={it.bag_type || ''} onChange={e => updateItem(i, 'bag_type', e.target.value)}
+                        className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm">
+                        <option value="">Select bag type…</option>
+                        {BAG_TYPE_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Packing Lines Editor */}
           <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
