@@ -141,7 +141,7 @@ export default function ProformaInvoice({ order, companyProfile }) {
     w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${title}</title>${links}`
       + `<style>@page{size:A4 portrait;margin:8mm}html,body{margin:0;padding:0;background:#fff}`
       + `#pi-page{width:194mm;overflow:hidden}`
-      + `#pi-scale{transform-origin:top left;width:900px}`
+      + `#pi-scale{transform-origin:top left;width:800px}`
       + `.proforma-invoice{max-width:none!important;width:100%!important;box-shadow:none!important;margin:0!important;`
       + `-webkit-print-color-adjust:exact;print-color-adjust:exact}</style></head><body>`
       + `<div id="pi-page"><div id="pi-scale">${node.outerHTML}</div></div>`
