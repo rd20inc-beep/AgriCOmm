@@ -515,15 +515,19 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
     if (cart.length === 0) { addToast('Add at least one item to the sale', 'error'); return; }
     if (form.payment_mode === 'bank_transfer' && !form.bank_account_id) { addToast('Select the bank account that received the payment', 'error'); return; }
     if (form.payment_mode === 'cheque' && !form.cheque_no.trim()) { addToast('Enter the cheque number', 'error'); return; }
-    const isCashy = form.payment_mode === 'cash' || form.payment_mode === 'credit';
+    // A cash sale submitted with no amount entered is an unpaid sale → record it
+    // as Credit (Udhaar) automatically (so the user doesn't have to switch mode).
+    const noAmount = form.paid_amount === '' || parseFloat(form.paid_amount) === 0;
+    const effectiveMode = (form.payment_mode === 'cash' && noAmount) ? 'credit' : form.payment_mode;
+    const isCashy = effectiveMode === 'cash' || effectiveMode === 'credit';
     try {
       const payload = {
         customer_id: form.customer_id || null, buyer_name: form.buyer_name || null, buyer_phone: form.buyer_phone || null,
-        payment_mode: form.payment_mode, paid_amount: form.paid_amount === '' ? undefined : (parseFloat(form.paid_amount) || 0),
+        payment_mode: effectiveMode, paid_amount: form.paid_amount === '' ? undefined : (parseFloat(form.paid_amount) || 0),
         collection_location: isCashy ? (form.collection_location || 'Mill') : null,
-        bank_account_id: form.payment_mode === 'bank_transfer' && form.bank_account_id ? Number(form.bank_account_id) : null,
-        payment_reference: form.payment_mode === 'cheque' ? (form.cheque_no.trim() || null) : null,
-        due_date: (form.payment_mode === 'cheque' || form.payment_mode === 'credit') ? (form.due_date || null) : null,
+        bank_account_id: effectiveMode === 'bank_transfer' && form.bank_account_id ? Number(form.bank_account_id) : null,
+        payment_reference: effectiveMode === 'cheque' ? (form.cheque_no.trim() || null) : null,
+        due_date: (effectiveMode === 'cheque' || effectiveMode === 'credit') ? (form.due_date || null) : null,
         vehicle_no: form.vehicle_no || null, driver_name: form.driver_name || null, notes: form.notes || null,
         items: cart.map(c => c.isMillItem ? ({
           mill_item_id: Number(c.mill_item_id), item_name: c.item_name,
@@ -827,9 +831,10 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
               <input type="number" value={form.paid_amount} onChange={e => set('paid_amount', e.target.value)} className={INPUT}
                 placeholder={grandTotal > 0 ? `Rs ${grandTotal.toLocaleString()} (full)` : 'Rs'} />
               {form.payment_mode === 'credit' && <p className="text-xs text-amber-600 mt-1">Leave empty or partial for credit sale</p>}
+              {form.payment_mode === 'cash' && (form.paid_amount === '' || parseFloat(form.paid_amount) === 0) && <p className="text-xs text-amber-600 mt-1">Left empty → recorded as Credit (Udhaar)</p>}
             </div>
           </div>
-          {(form.payment_mode === 'credit' || (form.paid_amount !== '' && parseFloat(form.paid_amount) < grandTotal)) && isWalkIn && (
+          {(form.payment_mode === 'credit' || (form.payment_mode === 'cash' && (form.paid_amount === '' || parseFloat(form.paid_amount) === 0)) || (form.paid_amount !== '' && parseFloat(form.paid_amount) < grandTotal)) && isWalkIn && (
             <p className="text-[11px] text-violet-600 mt-2">A balance is owed, so “{form.buyer_name || 'this buyer'}” will be saved as a customer to track the receivable.</p>
           )}
 
