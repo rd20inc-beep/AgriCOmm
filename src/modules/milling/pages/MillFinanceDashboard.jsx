@@ -18,6 +18,7 @@ import SlideDrawer from '../../../components/SlideDrawer';
 import SearchSelect from '../../../shared/components/SearchSelect';
 import MillSupplierStatement from '../components/MillSupplierStatement';
 import MillCustomerStatement from '../components/MillCustomerStatement';
+import MillCustomerPayDrawer from '../components/MillCustomerPayDrawer';
 import StatementPayDrawer from '../../finance/components/StatementPayDrawer';
 
 const PKR = (v) => 'Rs ' + Math.round(v || 0).toLocaleString('en-PK');
@@ -145,6 +146,7 @@ export default function MillFinanceDashboard() {
   const [selectedSupplier, setSelectedSupplier] = useState(null);
   const { data: localCustomers = [] } = useCustomers({ type: 'local' });
   const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [payCustomer, setPayCustomer] = useState(null);
   // Pay a supplier with the same drawer the Finance dashboard uses.
   const { hasPermission } = useAuth();
   const canPay = hasPermission('finance', 'confirm_payment');
@@ -831,11 +833,23 @@ export default function MillFinanceDashboard() {
 
           {/* Inline statement */}
           {selectedCustomer?.id && (
-            <MillCustomerStatement
-              customerId={selectedCustomer.id}
-              customerName={selectedCustomer.name}
-              onClose={() => setSelectedCustomer(null)}
-            />
+            <div className="space-y-2">
+              {canPay && (
+                <div className="flex justify-end">
+                  <button
+                    onClick={() => setPayCustomer({ id: selectedCustomer.id, name: selectedCustomer.name })}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 text-sm font-medium"
+                  >
+                    <Banknote size={14} /> Record Payment
+                  </button>
+                </div>
+              )}
+              <MillCustomerStatement
+                customerId={selectedCustomer.id}
+                customerName={selectedCustomer.name}
+                onClose={() => setSelectedCustomer(null)}
+              />
+            </div>
           )}
 
           {/* Directory */}
@@ -1381,6 +1395,14 @@ export default function MillFinanceDashboard() {
           mode="supplier"
           party={payParty}
           onClose={() => setPayParty(null)}
+        />
+      )}
+
+      {/* Record a customer receipt against a specific invoice. */}
+      {payCustomer && (
+        <MillCustomerPayDrawer
+          customer={payCustomer}
+          onClose={() => setPayCustomer(null)}
         />
       )}
     </div>
