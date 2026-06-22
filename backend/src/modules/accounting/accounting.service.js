@@ -1100,25 +1100,46 @@ const accountingService = {
     // export_orders row with the product, quantity, price and incoterm. Append
     // that summary so the ledger carries the full sale, not just "Adv rcpt EX-1".
     const exRefs = [...new Set(journalTxns.map((t) => t.ref_no).filter((r) => r && /^EX-/i.test(r)))];
-    const exOrders = exRefs.length
-      ? await db('export_orders').whereIn('order_no', exRefs)
-        .select('order_no', 'product_name', 'qty_mt', 'quantity_unit', 'price_per_mt', 'incoterm', 'total_bags')
+    // A PAY- line settles a receivable that links back to an export order, so
+    // resolve payment_no → receivable → order to enrich those lines too (else a
+    // receipt against an export sale reads as a bare "Payment PAY-003").
+    const exPayRefs = [...new Set(journalTxns.map((t) => t.ref_no).filter((r) => r && /^PAY-/i.test(r)))];
+    const exPayRows = exPayRefs.length
+      ? await db('payments').whereIn('payment_no', exPayRefs).select('payment_no', 'linked_receivable_id')
+      : [];
+    const exRecvIds = [...new Set(exPayRows.map((p) => p.linked_receivable_id).filter(Boolean))];
+    const exRecvRows = exRecvIds.length
+      ? await db('receivables').whereIn('id', exRecvIds).select('id', 'order_id')
+      : [];
+    const recvOrderId = Object.fromEntries(exRecvRows.map((r) => [r.id, r.order_id]));
+    const payOrderId = Object.fromEntries(exPayRows.map((p) => [p.payment_no, recvOrderId[p.linked_receivable_id]]));
+    const orderIds = [...new Set(Object.values(payOrderId).filter(Boolean))];
+    const exOrders = (exRefs.length || orderIds.length)
+      ? await db('export_orders')
+        .where(function () {
+          if (exRefs.length) this.whereIn('order_no', exRefs);
+          if (orderIds.length) this.orWhereIn('id', orderIds);
+        })
+        .select('id', 'order_no', 'product_name', 'qty_mt', 'quantity_unit', 'price_per_mt', 'incoterm', 'total_bags')
       : [];
     const exByNo = Object.fromEntries(exOrders.map((o) => [o.order_no, o]));
-    const enrichExport = (refNo, desc) => {
-      const o = refNo && exByNo[refNo];
-      if (!o) return desc;
+    const exById = Object.fromEntries(exOrders.map((o) => [o.id, o]));
+    const orderSummary = (o) => {
       const qty = parseFloat(o.qty_mt) || 0;
       const price = parseFloat(o.price_per_mt) || 0;
-      const bits = [
+      return [
         o.product_name,
         qty > 0 ? `${qty} ${o.quantity_unit || 'MT'}` : '',
         price > 0 ? `@ ${price.toLocaleString()}/MT` : '',
         o.incoterm,
         o.total_bags ? `${o.total_bags} bags` : '',
-      ].filter(Boolean);
-      if (!bits.length) return desc;
-      const summary = bits.join(' · ');
+      ].filter(Boolean).join(' · ');
+    };
+    const enrichExport = (refNo, desc) => {
+      const o = (refNo && exByNo[refNo]) || (refNo && exById[payOrderId[refNo]]);
+      if (!o) return desc;
+      const summary = orderSummary(o);
+      if (!summary) return desc;
       // Don't double up if the product name is already in the description.
       return (desc && o.product_name && desc.includes(o.product_name)) ? desc : `${desc || refNo} — ${summary}`;
     };
