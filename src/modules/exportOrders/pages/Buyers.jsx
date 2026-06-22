@@ -20,7 +20,7 @@ const emptyForm = {
 export default function Buyers() {
   const { addToast } = useApp();
   const navigate = useNavigate();
-  const { data: buyers = [], isLoading: loading } = useBuyers();
+  const { data: buyers = [], isLoading: loading } = useBuyers({ type: 'export' });
   const saveBuyerMut = useSaveBuyer();
   const deleteBuyerMut = useDeleteBuyer();
 

@@ -5,7 +5,7 @@ import {
   BarChart3, Search, Bell, ChevronDown,
   User, Settings, X, LogOut, AlertTriangle, AlertCircle, Info,
   FlaskConical, Menu, ArrowRightLeft, ShoppingCart, ClipboardEdit, Gauge,
-  ChevronsLeft, ChevronsRight, Sun, Moon, Truck, Printer,
+  ChevronsLeft, ChevronsRight, Sun, Moon, Truck, Printer, Users,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
@@ -28,6 +28,8 @@ const millNav = [
   { label: 'Transfers', icon: ArrowRightLeft, to: '/transfer' },
   { section: 'Sales' },
   { label: 'Local Sales', icon: ShoppingCart, to: '/local-sales' },
+  { label: 'Customers', icon: Users, to: '/milling/customers' },
+  { label: 'Suppliers', icon: Truck, to: '/milling/suppliers' },
   { section: 'Finance' },
   { label: 'Mill Finance', icon: DollarSign, to: '/milling/finance' },
   { section: 'Reports' },

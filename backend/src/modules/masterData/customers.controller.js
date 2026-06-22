@@ -5,8 +5,8 @@ const customersController = {
   async list(req, res, next) {
     try {
       const { page, limit, offset } = parsePagination(req.query);
-      const { search, country, active } = req.query;
-      const result = await masterDataService.listCustomers({ page, limit, offset, search, country, active });
+      const { search, country, active, type } = req.query;
+      const result = await masterDataService.listCustomers({ page, limit, offset, search, country, active, type });
       return res.json({
         success: true,
         data: {

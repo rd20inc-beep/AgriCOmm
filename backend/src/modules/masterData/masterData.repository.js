@@ -2,9 +2,11 @@ const db = require('../../config/database');
 
 const masterDataRepository = {
   // ===================== CUSTOMERS =====================
-  async listCustomers({ page = 1, limit = 50, offset = 0, search, country, active } = {}) {
+  async listCustomers({ page = 1, limit = 50, offset = 0, search, country, active, type } = {}) {
     let query = db('customers').where('archived', false);
     if (active === 'true') query = query.where('is_active', true);
+    // 'local' | 'export' segment — the Mill only ever requests 'local'.
+    if (type === 'local' || type === 'export') query = query.where('customer_type', type);
     if (search) {
       query = query.where(function () {
         this.whereILike('name', `%${search}%`)

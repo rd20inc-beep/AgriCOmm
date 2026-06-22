@@ -185,7 +185,7 @@ module.exports = {
           if (!cust) {
             [cust] = await trx('customers').insert({
               name: nm, phone: buyer_phone || null, payment_terms: 'Credit', currency: 'PKR',
-              is_active: true, approval_status: 'pending',
+              customer_type: 'local', is_active: true, approval_status: 'pending',
               submitted_by: req.user?.id || null, submitted_at: trx.fn.now(),
             }).returning('*');
           }

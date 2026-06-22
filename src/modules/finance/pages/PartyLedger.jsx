@@ -55,6 +55,9 @@ export default function PartyLedger() {
   const [searchParams, setSearchParams] = useSearchParams();
   const mode = searchParams.get('type') === 'supplier' ? 'supplier' : 'customer';
   const partyId = searchParams.get('id') || '';
+  // When the mill links in with ?scope=local, the customer dropdown is limited
+  // to local-sales customers (export buyers stay hidden from the mill).
+  const scope = searchParams.get('scope') === 'local' ? 'local' : null;
   const [payOpen, setPayOpen] = useState(false);
 
   // Merge a patch into the query string, preserving unrelated params
@@ -69,7 +72,7 @@ export default function PartyLedger() {
     }, { replace: true });
   };
 
-  const { data: customers = [], isLoading: custLoading } = useCustomers();
+  const { data: customers = [], isLoading: custLoading } = useCustomers(scope === 'local' ? { type: 'local' } : {});
   const { data: suppliers = [], isLoading: suppLoading } = useSuppliers();
   const parties = mode === 'customer' ? customers : suppliers;
   const partiesLoading = mode === 'customer' ? custLoading : suppLoading;

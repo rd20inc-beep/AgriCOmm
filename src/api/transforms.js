@@ -318,6 +318,7 @@ export function transformCustomer(db) {
     country: db.country || '',
     address: db.address || '',
     port: db.port || '',
+    customerType: db.customer_type || 'local',
     isFavorite: !!db.is_favorite,
   };
 }

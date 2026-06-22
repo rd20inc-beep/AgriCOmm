@@ -54,6 +54,8 @@ const StoreRatios = lazyWithReload(() => import('./modules/millStore/pages/Store
 const MillingBatchDetail = lazyWithReload(() => import('./modules/milling/pages/MillingBatchDetail'));
 const MillFinanceDashboard = lazyWithReload(() => import('./modules/milling/pages/MillFinanceDashboard'));
 const RicePurchasesLedger = lazyWithReload(() => import('./modules/milling/pages/RicePurchasesLedger'));
+const MillCustomers = lazyWithReload(() => import('./modules/milling/pages/MillCustomers'));
+const MillSuppliers = lazyWithReload(() => import('./modules/milling/pages/MillSuppliers'));
 const QualityComparison = lazyWithReload(() => import('./modules/milling/pages/QualityComparison'));
 const StockAdjustments = lazyWithReload(() => import('./modules/inventory/pages/StockAdjustments'));
 const InternalTransfer = lazyWithReload(() => import('./modules/inventory/pages/InternalTransfer'));
@@ -155,6 +157,9 @@ function MillRoutes() {
         <Route path="/milling" element={<MillingDashboard />} />
         <Route path="/milling/finance" element={<MillFinanceDashboard />} />
         <Route path="/milling/rice-purchases" element={<RicePurchasesLedger />} />
+        <Route path="/milling/customers" element={<MillCustomers />} />
+        <Route path="/milling/suppliers" element={<MillSuppliers />} />
+        <Route path="/milling/statements" element={<PartyLedger />} />
         <Route path="/milling/:id" element={<MillingBatchDetail />} />
         <Route path="/quality" element={<QualityComparison />} />
         <Route path="/mill-store" element={<StoreOverview />} />

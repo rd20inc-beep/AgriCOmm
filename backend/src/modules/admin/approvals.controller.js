@@ -101,6 +101,7 @@ const approvalsController = {
         address: address || null,
         country: country || null,
         port: port || null,
+        customer_type: 'local', // quick-add is the local-sales registration path
         payment_terms: 'Cash',
         currency: 'PKR',
         is_active: true,

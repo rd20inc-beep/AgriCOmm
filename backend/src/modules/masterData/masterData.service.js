@@ -26,6 +26,9 @@ const masterDataService = {
       phone: data.phone || null,
       address: data.address || null,
       port: data.port || null,
+      // POST /api/customers is the EXPORT path (New Buyer drawer + Buyers page);
+      // local-sales paths use quick-add (→ 'local'). Caller can still override.
+      customer_type: data.customer_type === 'local' ? 'local' : 'export',
       payment_terms: data.payment_terms || 'Advance',
       currency: data.currency || 'USD',
       credit_limit: data.credit_limit ? parseFloat(data.credit_limit) : 0,
