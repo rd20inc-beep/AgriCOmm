@@ -12,8 +12,10 @@ import { validateForm, required, positiveNonZero } from '../../../utils/validati
 import { toKg, fromKg, allEquivalents, UNITS } from '../../../utils/unitConversion';
 import SearchSelect from '../../../components/SearchSelect';
 import RiceTypePicker from '../../../components/RiceTypePicker';
+import SlideDrawer from '../../../components/SlideDrawer';
 import { INCOTERMS, incotermHint, advancePctForIncoterm } from '../../../shared/constants/incoterms';
 import { PAYMENT_TERMS } from '../../../shared/constants/paymentTerms';
+import { COUNTRY_OPTIONS } from '../../../shared/constants/countries';
 
 const RECEIVING_MODES = [
   { value: 'bags', label: 'In Bags', desc: 'Standard packed bags', icon: ShoppingBag },
@@ -64,7 +66,7 @@ export default function CreateExportOrder() {
 
   // Quick-add customer
   const [showAddCustomer, setShowAddCustomer] = useState(false);
-  const [newCust, setNewCust] = useState({ name: '', country: '', email: '', phone: '', contact_person: '' });
+  const [newCust, setNewCust] = useState({ name: '', country: '', address: '', email: '', phone: '', contact_person: '' });
 
   const [form, setForm] = useState({
     // Section 1: Buyer
@@ -935,67 +937,78 @@ export default function CreateExportOrder() {
       })()}
 
       {/* Quick Add Customer Modal */}
-      {showAddCustomer && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowAddCustomer(false)}>
-          <div className="bg-white rounded-xl p-6 w-full max-w-md space-y-4" onClick={e => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold text-gray-900">Add New Buyer</h3>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Company Name *</label>
-                <input type="text" value={newCust.name} onChange={e => setNewCust(p => ({ ...p, name: e.target.value }))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="Buyer company name" autoFocus />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Country *</label>
-                  <input type="text" value={newCust.country} onChange={e => setNewCust(p => ({ ...p, country: e.target.value }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="e.g. UAE" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Contact Person</label>
-                  <input type="text" value={newCust.contact_person} onChange={e => setNewCust(p => ({ ...p, contact_person: e.target.value }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="Name" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Email</label>
-                  <input type="email" value={newCust.email} onChange={e => setNewCust(p => ({ ...p, email: e.target.value }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Phone</label>
-                  <input type="text" value={newCust.phone} onChange={e => setNewCust(p => ({ ...p, phone: e.target.value }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
-                </div>
-              </div>
+      <SlideDrawer
+        open={showAddCustomer}
+        onClose={() => setShowAddCustomer(false)}
+        title="Add New Buyer"
+        icon={Plus}
+        size="md"
+        footer={(
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => setShowAddCustomer(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+            <button
+              onClick={async () => {
+                if (!newCust.name.trim()) { addToast('Company name is required', 'error'); return; }
+                try {
+                  const res = await api.post('/api/customers', newCust);
+                  const created = res?.data?.data?.customer || res?.data?.customer || res?.data;
+                  if (created?.id) {
+                    set('customerId', created.id);
+                    set('country', created.country || newCust.country || '');
+                    qc.invalidateQueries({ queryKey: ['customers'] });
+                    addToast(`Buyer "${newCust.name}" added`, 'success');
+                  }
+                  setShowAddCustomer(false);
+                  setNewCust({ name: '', country: '', address: '', email: '', phone: '', contact_person: '' });
+                } catch (err) { addToast(err?.response?.data?.message || 'Failed to add buyer', 'error'); }
+              }}
+              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
+            >
+              Add Buyer
+            </button>
+          </div>
+        )}
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Company Name *</label>
+            <input type="text" value={newCust.name} onChange={e => setNewCust(p => ({ ...p, name: e.target.value }))}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="Buyer company name" autoFocus />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Country *</label>
+            <SearchSelect
+              value={newCust.country}
+              onChange={val => setNewCust(p => ({ ...p, country: val }))}
+              options={COUNTRY_OPTIONS}
+              placeholder="Search country…"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Address</label>
+            <textarea value={newCust.address} onChange={e => setNewCust(p => ({ ...p, address: e.target.value }))}
+              rows={2} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Street, city, postal code…" />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Contact Person</label>
+            <input type="text" value={newCust.contact_person} onChange={e => setNewCust(p => ({ ...p, contact_person: e.target.value }))}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="Name" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Email</label>
+              <input type="email" value={newCust.email} onChange={e => setNewCust(p => ({ ...p, email: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
-            <div className="flex gap-2 justify-end pt-2">
-              <button onClick={() => setShowAddCustomer(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-              <button
-                onClick={async () => {
-                  if (!newCust.name.trim()) { addToast('Company name is required', 'error'); return; }
-                  try {
-                    const res = await api.post('/api/customers', newCust);
-                    const created = res?.data?.data?.customer || res?.data?.customer || res?.data;
-                    if (created?.id) {
-                      set('customerId', created.id);
-                      set('country', created.country || newCust.country || '');
-                      qc.invalidateQueries({ queryKey: ['customers'] });
-                      addToast(`Buyer "${newCust.name}" added`, 'success');
-                    }
-                    setShowAddCustomer(false);
-                    setNewCust({ name: '', country: '', email: '', phone: '', contact_person: '' });
-                  } catch (err) { addToast(err?.response?.data?.message || 'Failed to add buyer', 'error'); }
-                }}
-                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
-              >
-                Add Buyer
-              </button>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Phone</label>
+              <input type="text" value={newCust.phone} onChange={e => setNewCust(p => ({ ...p, phone: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
           </div>
         </div>
-      )}
+      </SlideDrawer>
     </div>
   );
 }
