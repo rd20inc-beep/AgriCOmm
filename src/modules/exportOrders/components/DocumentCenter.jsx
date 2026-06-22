@@ -33,7 +33,11 @@ function buildLineItems(doc) {
   // Returns a packing string that appends master-bag info when the
   // retail bag is small enough to require an outer.
   const composePacking = (bagSize, bagType, masterBagSize) => {
-    const base = `PACKED IN ${bagSize} KG${bagSize === 1 ? '' : 'S'} ${bagType} BAG`;
+    // Only append "BAG" when the type doesn't already include it ("PP Bag" →
+    // "PP BAG", not "PP BAG BAG").
+    const t = (bagType || 'PP').toString().trim().toUpperCase();
+    const phrase = /\bBAG\b/.test(t) ? t : `${t} BAG`;
+    const base = `PACKED IN ${bagSize} KG${bagSize === 1 ? '' : 'S'} ${phrase}`;
     return masterBagSize > 0 ? `${base}, MASTER ${masterBagSize} KG OUTER` : base;
   };
 

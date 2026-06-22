@@ -56,7 +56,11 @@ export default function ProformaInvoice({ order, companyProfile }) {
   // Packing string for a line — uses the line's own packing when stored,
   // else composes it from the per-item bag size / type (+ master outer).
   const composePacking = (size, type, master) => {
-    const base = `PACKED IN ${size} KG${size === 1 ? '' : 'S'} ${type || 'PP'} BAG`;
+    // Uppercase the type and only append "BAG" when it isn't already part of
+    // the type (so "PP Bag" → "PP BAG", not "PP BAG BAG").
+    const t = (type || 'PP').toString().trim().toUpperCase();
+    const phrase = /\bBAG\b/.test(t) ? t : `${t} BAG`;
+    const base = `PACKED IN ${size} KG${size === 1 ? '' : 'S'} ${phrase}`;
     return master > 0 ? `${base}, MASTER ${master} KG OUTER` : base;
   };
 
