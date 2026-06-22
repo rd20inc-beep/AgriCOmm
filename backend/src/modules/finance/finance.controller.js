@@ -160,7 +160,18 @@ const financeController = {
           }
         }
       } else {
-        payments = await base().where('p.linked_receivable_id', id);
+        // A receivable derived from a local sale carries local_sale_id — its
+        // receipts are linked via payments.local_sale_id, not linked_receivable_id.
+        const recv = await db('receivables').where({ id }).first();
+        if (recv && recv.local_sale_id) {
+          payments = await base().where(function () {
+            this.where('p.linked_receivable_id', id).orWhere('p.local_sale_id', recv.local_sale_id);
+          });
+          const sale = await db('local_sales').where({ id: recv.local_sale_id }).first();
+          collectionLocation = sale?.collection_location || null;
+        } else {
+          payments = await base().where('p.linked_receivable_id', id);
+        }
       }
 
       return res.json({ success: true, data: { payments, collectionLocation } });

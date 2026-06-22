@@ -196,7 +196,7 @@ export default function MoneyIn() {
           notes: recvForm.notes || `Payment for ${recv.recvNo}`,
         });
       }
-      addToast(`Payment of ${fmt(amount)} recorded for ${recv.recvNo}`, 'success');
+      addToast(`Payment of ${fmtCur(amount, recv.currency)} recorded for ${recv.recvNo}`, 'success');
       setDrawer(null);
       // Force the list (and Due Dates / overview) to refresh so a now-settled
       // row drops out immediately.
@@ -288,15 +288,15 @@ export default function MoneyIn() {
               <div className="grid grid-cols-3 gap-3">
                 <div className="bg-gray-50 rounded-lg p-3 text-center">
                   <p className="text-xs text-gray-500">Expected</p>
-                  <p className="text-sm font-semibold">{fmt(drawer.expectedAmount)}</p>
+                  <p className="text-sm font-semibold">{fmtCur(drawer.expectedAmount, drawer.currency)}</p>
                 </div>
                 <div className="bg-emerald-50 rounded-lg p-3 text-center">
                   <p className="text-xs text-emerald-600">Received</p>
-                  <p className="text-sm font-semibold text-emerald-700">{fmt(drawer.receivedAmount)}</p>
+                  <p className="text-sm font-semibold text-emerald-700">{fmtCur(drawer.receivedAmount, drawer.currency)}</p>
                 </div>
                 <div className="bg-red-50 rounded-lg p-3 text-center">
                   <p className="text-xs text-red-600">Outstanding</p>
-                  <p className="text-sm font-semibold text-red-700">{fmt(drawer.outstanding)}</p>
+                  <p className="text-sm font-semibold text-red-700">{fmtCur(drawer.outstanding, drawer.currency)}</p>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3 text-sm">
@@ -431,7 +431,7 @@ export default function MoneyIn() {
                 <button type="submit" disabled={recordPaymentMut.isPending}
                   className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium text-sm disabled:opacity-50">
                   <CheckCircle size={16} />
-                  {recordPaymentMut.isPending ? 'Processing...' : `Record Receipt — ${fmt(parseFloat(recvForm.amount) || 0)}`}
+                  {recordPaymentMut.isPending ? 'Processing...' : `Record Receipt — ${fmtCur(parseFloat(recvForm.amount) || 0, drawer.currency)}`}
                 </button>
               </form>
             )}
