@@ -41,6 +41,7 @@ export const adminApi = {
   auditLogs: (params) => api.get('/api/admin/audit-logs', params),
   // Master-data approvals (quick-add review queue)
   customersQuickAdd: (data) => api.post('/api/admin/customers/quick-add', data),
+  suppliersQuickAdd: (data) => api.post('/api/admin/suppliers/quick-add', data),
   approvalsList:  (params) => api.get('/api/admin/approvals', params),
   approvalsCount: () => api.get('/api/admin/approvals/count'),
   approvalApprove: (type, id) => api.post(`/api/admin/approvals/${type}/${id}/approve`),

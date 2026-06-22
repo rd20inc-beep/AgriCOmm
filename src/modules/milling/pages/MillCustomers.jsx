@@ -1,14 +1,41 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { Users, Search, Globe, Phone, FileText, Anchor } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { Users, Search, Globe, Phone, FileText, Anchor, Plus } from 'lucide-react';
 import { useCustomers } from '../../../api/queries';
+import { useApp } from '../../../context/AppContext';
+import { adminApi } from '../../admin/api/services';
+import SlideDrawer from '../../../components/SlideDrawer';
 import { LoadingSpinner, EmptyState } from '../../../components/LoadingState';
+
+const EMPTY_CUST = { name: '', contact_person: '', phone: '', email: '', country: '', address: '' };
 
 // Mill-side customers = LOCAL-sales customers only (export buyers are hidden).
 // Each row links to that customer's statement/ledger (scoped to local).
 export default function MillCustomers() {
   const { data: customers = [], isLoading } = useCustomers({ type: 'local' });
+  const { addToast } = useApp();
+  const qc = useQueryClient();
   const [search, setSearch] = useState('');
+  const [showAdd, setShowAdd] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [draft, setDraft] = useState({ ...EMPTY_CUST });
+  const setD = (k, v) => setDraft(p => ({ ...p, [k]: v }));
+
+  async function saveCustomer() {
+    if (!draft.name.trim()) { addToast('Customer name is required', 'error'); return; }
+    setSaving(true);
+    try {
+      // quick-add tags the customer 'local' (and uses inventory permission).
+      const res = await adminApi.customersQuickAdd(draft);
+      const created = res?.data?.data?.customer;
+      qc.invalidateQueries({ queryKey: ['customers'] });
+      addToast(created?.deduped ? `"${draft.name}" already exists` : `Customer "${draft.name}" added`, 'success');
+      setShowAdd(false);
+      setDraft({ ...EMPTY_CUST });
+    } catch (err) { addToast(err?.response?.data?.message || 'Failed to add customer', 'error'); }
+    setSaving(false);
+  }
 
   const rows = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -23,9 +50,15 @@ export default function MillCustomers() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex items-center gap-2 mb-1">
-        <Users className="w-6 h-6 text-blue-600" />
-        <h1 className="text-xl font-bold text-gray-900">Customers</h1>
+      <div className="flex items-start justify-between mb-1">
+        <div className="flex items-center gap-2">
+          <Users className="w-6 h-6 text-blue-600" />
+          <h1 className="text-xl font-bold text-gray-900">Customers</h1>
+        </div>
+        <button onClick={() => { setDraft({ ...EMPTY_CUST }); setShowAdd(true); }}
+          className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">
+          <Plus className="w-4 h-4" /> Add Customer
+        </button>
       </div>
       <p className="text-sm text-gray-500 mb-5">Local-sales customers. Click a customer to view their statement.</p>
 
@@ -72,6 +105,60 @@ export default function MillCustomers() {
           </table>
         </div>
       )}
+
+      <SlideDrawer
+        open={showAdd}
+        onClose={() => setShowAdd(false)}
+        title="Add Customer"
+        icon={Plus}
+        size="md"
+        footer={(
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => setShowAdd(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+            <button onClick={saveCustomer} disabled={saving} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              {saving ? 'Saving…' : 'Add Customer'}
+            </button>
+          </div>
+        )}
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Name *</label>
+            <input type="text" value={draft.name} onChange={e => setD('name', e.target.value)} autoFocus
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="Customer / buyer name" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Contact Person</label>
+              <input type="text" value={draft.contact_person} onChange={e => setD('contact_person', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Phone</label>
+              <input type="text" value={draft.phone} onChange={e => setD('phone', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Email</label>
+              <input type="email" value={draft.email} onChange={e => setD('email', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Country</label>
+              <input type="text" value={draft.country} onChange={e => setD('country', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Address</label>
+            <textarea value={draft.address} onChange={e => setD('address', e.target.value)} rows={2}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="Optional" />
+          </div>
+          <p className="text-[11px] text-gray-400">Added as a local customer; sent to admin for approval unless you have approval rights.</p>
+        </div>
+      </SlideDrawer>
     </div>
   );
 }
