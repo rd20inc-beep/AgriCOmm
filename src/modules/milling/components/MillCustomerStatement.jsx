@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { X, ArrowDownLeft, ArrowUpRight, Scale, ExternalLink } from 'lucide-react';
+import { X, ArrowDownLeft, ArrowUpRight, Scale, ExternalLink, Printer, Download } from 'lucide-react';
 import { accountingApi } from '../../accounting/api/services';
 import PartyAllocationLedger from './PartyAllocationLedger';
 import LedgerTypeCounts from './LedgerTypeCounts';
+import { printStatement } from './printStatement';
 
 // Inline customer statement (charges/receipts + running balance) for the Mill
 // Finance "Customers" tab — mirrors MillSupplierStatement but for local-sales
@@ -31,6 +32,7 @@ const fmtDate = (d) => {
 
 export default function MillCustomerStatement({ customerId, customerName, params = {}, onClose }) {
   const [view, setView] = useState('statement'); // 'statement' | 'allocation'
+  const cardRef = useRef(null);
   const { data: statement, isLoading, isError, error } = useQuery({
     queryKey: ['mill-customer-statement', customerId, params],
     enabled: !!customerId,
@@ -48,17 +50,23 @@ export default function MillCustomerStatement({ customerId, customerName, params
   const totalCredit = useMemo(() => transactions.reduce((s, t) => s + (parseFloat(t.credit) || 0), 0), [transactions]);
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+    <div ref={cardRef} className="rounded-xl border border-gray-200 bg-white overflow-hidden">
       <div className="flex items-center justify-between gap-3 px-4 py-3 bg-slate-800 text-white">
         <div className="min-w-0">
           <p className="text-[11px] uppercase tracking-wide text-slate-300">Customer statement</p>
           <p className="text-sm font-semibold truncate">{customerName}</p>
         </div>
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="statement-actions flex items-center gap-1.5 shrink-0">
           <div className="inline-flex rounded-lg bg-white/10 p-0.5 text-xs">
             <button onClick={() => setView('statement')} className={`px-2 py-1 rounded-md ${view === 'statement' ? 'bg-white text-slate-800 font-medium' : 'text-slate-200'}`}>Statement</button>
             <button onClick={() => setView('allocation')} className={`px-2 py-1 rounded-md ${view === 'allocation' ? 'bg-white text-slate-800 font-medium' : 'text-slate-200'}`}>Allocation</button>
           </div>
+          <button onClick={() => printStatement(cardRef.current, `Statement - ${customerName || 'Customer'}`)} className="inline-flex items-center gap-1 rounded-lg bg-white/10 hover:bg-white/20 px-2.5 py-1.5 text-xs" title="Print">
+            <Printer size={13} /> Print
+          </button>
+          <button onClick={() => printStatement(cardRef.current, `Statement - ${customerName || 'Customer'}`)} className="inline-flex items-center gap-1 rounded-lg bg-white/10 hover:bg-white/20 px-2.5 py-1.5 text-xs" title="Download PDF">
+            <Download size={13} /> PDF
+          </button>
           <Link
             to={`/milling/statements?type=customer&id=${customerId}&scope=local`}
             className="inline-flex items-center gap-1 rounded-lg bg-white/10 hover:bg-white/20 px-2.5 py-1.5 text-xs"
