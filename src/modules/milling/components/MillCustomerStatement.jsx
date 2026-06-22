@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { X, ArrowDownLeft, ArrowUpRight, Scale, ExternalLink } from 'lucide-react';
 import { accountingApi } from '../../accounting/api/services';
 import PartyAllocationLedger from './PartyAllocationLedger';
+import LedgerTypeCounts from './LedgerTypeCounts';
 
 // Inline customer statement (charges/receipts + running balance) for the Mill
 // Finance "Customers" tab — mirrors MillSupplierStatement but for local-sales
@@ -96,7 +97,8 @@ export default function MillCustomerStatement({ customerId, customerName, params
             <thead>
               <tr className="bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500">
                 <th className="text-left font-medium px-3 py-2">Date</th>
-                <th className="text-left font-medium px-3 py-2">Reference</th>
+                <th className="text-left font-medium px-3 py-2">Vch Type</th>
+                <th className="text-left font-medium px-3 py-2">Vch No</th>
                 <th className="text-left font-medium px-3 py-2">Description</th>
                 <th className="text-right font-medium px-3 py-2">Charge (Dr)</th>
                 <th className="text-right font-medium px-3 py-2">Received (Cr)</th>
@@ -105,7 +107,7 @@ export default function MillCustomerStatement({ customerId, customerName, params
             </thead>
             <tbody className="divide-y divide-gray-100">
               <tr className="bg-gray-50/60 text-gray-500">
-                <td className="px-3 py-1.5" colSpan={5}>Opening balance</td>
+                <td className="px-3 py-1.5" colSpan={6}>Opening balance</td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{fmtCur(opening, cur)}</td>
               </tr>
               {transactions.map((t, i) => {
@@ -113,8 +115,9 @@ export default function MillCustomerStatement({ customerId, customerName, params
                 return (
                   <tr key={i} className="hover:bg-gray-50/60">
                     <td className="px-3 py-1.5 whitespace-nowrap text-gray-600">{fmtDate(t.date)}</td>
+                    <td className="px-3 py-1.5 whitespace-nowrap text-xs text-gray-500">{t.vch_type || '—'}</td>
                     <td className="px-3 py-1.5 whitespace-nowrap text-xs">
-                      {link ? <Link to={link} className="text-blue-600 hover:underline">{t.ref_no}</Link> : (t.ref_no || '—')}
+                      {link ? <Link to={link} className="text-blue-600 hover:underline">{t.vch_no || t.ref_no}</Link> : (t.vch_no || t.ref_no || '—')}
                     </td>
                     <td className="px-3 py-1.5 max-w-[280px]">
                       <span className="block truncate text-gray-700" title={t.description}>{t.description || '—'}</span>
@@ -126,7 +129,7 @@ export default function MillCustomerStatement({ customerId, customerName, params
                 );
               })}
               <tr className="bg-gray-50 font-semibold border-t-2 border-gray-200">
-                <td className="px-3 py-2" colSpan={3}>Closing balance</td>
+                <td className="px-3 py-2" colSpan={4}>Closing balance</td>
                 <td className="px-3 py-2 text-right tabular-nums text-gray-700">{fmtCur(totalDebit, cur)}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{fmtCur(totalCredit, cur)}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{fmtCur(closing, cur)}</td>
@@ -135,6 +138,7 @@ export default function MillCustomerStatement({ customerId, customerName, params
           </table>
         )}
       </div>
+      {transactions.length > 0 && <LedgerTypeCounts counts={statement?.type_counts} />}
       </>
       )}
     </div>

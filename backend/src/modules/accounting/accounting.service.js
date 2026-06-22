@@ -33,6 +33,41 @@ async function currencyMode() {
   return { factorSql, pkrFactorSql, conv, convPkr, statementCurrency };
 }
 
+// ── Voucher-type classification for party ledgers (LedgerReport.pdf footer) ──
+// The PDF tallies every ledger line by voucher type. We mirror the same nine
+// buckets; for our data a debtor's charges are Sales / receipts are Receipt,
+// and a creditor's bills are Purchase / settlements are Payment. A line whose
+// reference looks like a manual journal/contra is bucketed accordingly.
+const VCH_TYPES = ['Sales', 'Receipt', 'Sales Return', 'Purchase', 'Payment', 'Purchases Return', 'Manufacturing', 'Journal', 'Contra'];
+const vchKey = (s) => s.toLowerCase().replace(/\s+/g, '_');
+const emptyTypeCounts = () => {
+  const o = {};
+  VCH_TYPES.forEach((t) => { o[vchKey(t)] = 0; });
+  o.total = 0;
+  return o;
+};
+// Short voucher number for the VCH NO column: the trailing numeric segment of
+// a document ref (LS-0005 → 0005, PAY-004 → 004); the full ref if none.
+const vchNoOf = (ref) => {
+  if (!ref) return '';
+  const m = String(ref).match(/(\d+)(?!.*\d)/);
+  return m ? m[1] : String(ref);
+};
+// party: 'customer' (AR, debit = charge) | 'supplier' (AP, credit = bill).
+const classifyVch = (party, ref, debit, credit) => {
+  const r = (ref || '').toUpperCase();
+  if (/^(JE|JV|JNL)/.test(r)) return 'Journal';
+  if (/^(CN|CV)/.test(r)) return 'Contra';
+  if (party === 'customer') {
+    if (debit > 0) return /(RET|CN-)/.test(r) ? 'Sales Return' : 'Sales';
+    if (credit > 0) return 'Receipt';
+  } else {
+    if (credit > 0) return /(RET|DN-)/.test(r) ? 'Purchases Return' : 'Purchase';
+    if (debit > 0) return 'Payment';
+  }
+  return 'Journal';
+};
+
 /**
  * Accounting Engine — Core double-entry bookkeeping service
  * All monetary operations produce balanced journal entries.
@@ -1078,6 +1113,9 @@ const accountingService = {
     // Closing balance
     let runningBalance = openingBalance;
     let runningBalanceUsd = openingBalanceUsd;
+    const typeCounts = emptyTypeCounts();
+    let totalDebit = 0;
+    let totalCredit = 0;
     const formattedTxns = merged.map((t) => {
       const debit = conv(t.nd, t.currency, t.fx_rate);
       const credit = conv(t.nc, t.currency, t.fx_rate);
@@ -1085,10 +1123,17 @@ const accountingService = {
       const creditUsd = usdOf(t.nc, t.currency, t.fx_rate, t.orig_fx_rate, t.orig_currency);
       runningBalance += (debit - credit);
       runningBalanceUsd += (debitUsd - creditUsd);
+      totalDebit += debit;
+      totalCredit += credit;
+      const vchType = classifyVch('customer', t.ref_no, debit, credit);
+      typeCounts[vchKey(vchType)] += 1;
+      typeCounts.total += 1;
       return {
         date: t.date,
         journal_no: t.journal_no,
         ref_no: t.ref_no,
+        vch_type: vchType,
+        vch_no: vchNoOf(t.ref_no),
         description: t.description,
         account_code: t.account_code,
         account_name: t.account_name,
@@ -1109,6 +1154,9 @@ const accountingService = {
       opening_balance: parseFloat(openingBalance.toFixed(2)),
       opening_balance_usd: parseFloat(openingBalanceUsd.toFixed(2)),
       transactions: formattedTxns,
+      type_counts: typeCounts,
+      total_debit: parseFloat(totalDebit.toFixed(2)),
+      total_credit: parseFloat(totalCredit.toFixed(2)),
       closing_balance: parseFloat(runningBalance.toFixed(2)),
       closing_balance_usd: parseFloat(runningBalanceUsd.toFixed(2)),
     };
@@ -1272,13 +1320,23 @@ const accountingService = {
 
     let runningBalance = openingBalance;
     let runningBalanceUsd = openingBalanceUsd;
+    const typeCounts = emptyTypeCounts();
+    let totalDebit = 0;
+    let totalCredit = 0;
     const formattedTxns = merged.map((n) => {
       runningBalance += (n.credit - n.debit);
       runningBalanceUsd += (n.credit_usd - n.debit_usd);
+      totalDebit += n.debit;
+      totalCredit += n.credit;
+      const vchType = classifyVch('supplier', n.ref_no, n.debit, n.credit);
+      typeCounts[vchKey(vchType)] += 1;
+      typeCounts.total += 1;
       return {
         date: n.date,
         journal_no: n.journal_no,
         ref_no: n.ref_no,
+        vch_type: vchType,
+        vch_no: vchNoOf(n.ref_no),
         description: n.description,
         account_code: n.account_code,
         account_name: n.account_name,
@@ -1302,6 +1360,9 @@ const accountingService = {
       opening_balance: parseFloat(openingBalance.toFixed(2)),
       opening_balance_usd: parseFloat(openingBalanceUsd.toFixed(2)),
       transactions: formattedTxns,
+      type_counts: typeCounts,
+      total_debit: parseFloat(totalDebit.toFixed(2)),
+      total_credit: parseFloat(totalCredit.toFixed(2)),
       closing_balance: parseFloat(runningBalance.toFixed(2)),
       closing_balance_usd: parseFloat(runningBalanceUsd.toFixed(2)),
     };

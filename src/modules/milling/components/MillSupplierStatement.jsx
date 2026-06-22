@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { X, Printer, ArrowDownLeft, ArrowUpRight, Scale, ExternalLink } from 'lucide-react';
 import { accountingApi } from '../../accounting/api/services';
 import PartyAllocationLedger from './PartyAllocationLedger';
+import LedgerTypeCounts from './LedgerTypeCounts';
 
 // Statements are shown in the party's transaction currency (mill suppliers are
 // PKR), as returned by the backend. Mirrors finance/PartyLedger formatting.
@@ -108,8 +109,8 @@ export default function MillSupplierStatement({ supplierId, supplierName, params
             <thead>
               <tr className="bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500">
                 <th className="text-left font-medium px-3 py-2">Date</th>
-                <th className="text-left font-medium px-3 py-2">Journal</th>
-                <th className="text-left font-medium px-3 py-2">Reference</th>
+                <th className="text-left font-medium px-3 py-2">Vch Type</th>
+                <th className="text-left font-medium px-3 py-2">Vch No</th>
                 <th className="text-left font-medium px-3 py-2">Description</th>
                 <th className="text-right font-medium px-3 py-2">Paid (Dr)</th>
                 <th className="text-right font-medium px-3 py-2">Billed (Cr)</th>
@@ -126,9 +127,9 @@ export default function MillSupplierStatement({ supplierId, supplierName, params
                 return (
                   <tr key={i} className="hover:bg-gray-50/60">
                     <td className="px-3 py-1.5 whitespace-nowrap text-gray-600">{fmtDate(t.date)}</td>
-                    <td className="px-3 py-1.5 whitespace-nowrap text-gray-500 text-xs">{t.journal_no || '—'}</td>
+                    <td className="px-3 py-1.5 whitespace-nowrap text-gray-500 text-xs">{t.vch_type || '—'}</td>
                     <td className="px-3 py-1.5 whitespace-nowrap text-xs">
-                      {link ? <Link to={link} className="text-blue-600 hover:underline">{t.ref_no}</Link> : (t.ref_no || '—')}
+                      {link ? <Link to={link} className="text-blue-600 hover:underline">{t.vch_no || t.ref_no}</Link> : (t.vch_no || t.ref_no || '—')}
                     </td>
                     <td className="px-3 py-1.5 max-w-[260px]">
                       <span className="block truncate text-gray-700" title={t.description}>{t.description || '—'}</span>
@@ -157,6 +158,7 @@ export default function MillSupplierStatement({ supplierId, supplierName, params
           </table>
         )}
       </div>
+      {transactions.length > 0 && <LedgerTypeCounts counts={statement?.type_counts} />}
       </>
       )}
     </div>
