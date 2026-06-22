@@ -1009,14 +1009,22 @@ const accountingService = {
           });
         }
       })
-      .select('id', 'sale_no', 'total_amount', 'created_at');
+      .select('id', 'sale_no', 'total_amount', 'created_at', 'item_name', 'quantity_kg', 'notes', 'collection_location');
     const lsIds = localSalesRows.map((s) => s.id);
     const lsPays = lsIds.length
-      ? await db('payments').whereIn('local_sale_id', lsIds).select('amount', 'payment_date', 'payment_no', 'payment_method')
+      ? await db('payments').whereIn('local_sale_id', lsIds).select('amount', 'payment_date', 'payment_no', 'payment_method', 'bank_reference')
       : [];
+    const methodLbl = { cash: 'Cash', cheque: 'Cheque', bank_transfer: 'Bank transfer', online: 'Online', mobile: 'Mobile' };
     const localRaw = [
-      ...localSalesRows.map((s) => ({ date: s.created_at, ref_no: s.sale_no, description: 'Local sale', d: parseFloat(s.total_amount) || 0, c: 0 })),
-      ...lsPays.map((p) => ({ date: p.payment_date, ref_no: p.payment_no, description: `Receipt${p.payment_method ? ` (${p.payment_method})` : ''}`, d: 0, c: parseFloat(p.amount) || 0 })),
+      ...localSalesRows.map((s) => {
+        const qty = parseFloat(s.quantity_kg) || 0;
+        const detail = [s.item_name, qty > 0 ? `${Math.round(qty).toLocaleString()} kg` : '', s.collection_location].filter(Boolean).join(' · ');
+        return { date: s.created_at, ref_no: s.sale_no, description: `Local sale${detail ? ` — ${detail}` : ''}${s.notes ? ` (${s.notes})` : ''}`, d: parseFloat(s.total_amount) || 0, c: 0 };
+      }),
+      ...lsPays.map((p) => {
+        const bits = [methodLbl[p.payment_method] || p.payment_method, p.bank_reference].filter(Boolean).join(' · ');
+        return { date: p.payment_date, ref_no: p.payment_no, description: `Receipt${bits ? ` — ${bits}` : ''}`, d: 0, c: parseFloat(p.amount) || 0 };
+      }),
     ];
     // Local rows before the window add to the opening balance.
     for (const t of localRaw) {

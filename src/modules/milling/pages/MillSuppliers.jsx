@@ -1,11 +1,13 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Truck, Search, Globe, Phone, FileText, Plus } from 'lucide-react';
+import { Truck, Search, Globe, Phone, FileText, Plus, Banknote } from 'lucide-react';
 import { useSuppliers } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
+import { useAuth } from '../../../context/AuthContext';
 import { adminApi } from '../../admin/api/services';
 import SlideDrawer from '../../../components/SlideDrawer';
+import MillSupplierPayDrawer from '../components/MillSupplierPayDrawer';
 import { LoadingSpinner, EmptyState } from '../../../components/LoadingState';
 
 const EMPTY_SUP = { name: '', contact_person: '', phone: '', email: '', country: '', address: '' };
@@ -14,8 +16,11 @@ const EMPTY_SUP = { name: '', contact_person: '', phone: '', email: '', country:
 export default function MillSuppliers() {
   const { data: suppliers = [], isLoading } = useSuppliers();
   const { addToast } = useApp();
+  const { hasPermission } = useAuth();
+  const canPay = hasPermission('finance', 'confirm_payment');
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
+  const [paySupplier, setPaySupplier] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState({ ...EMPTY_SUP });
@@ -75,7 +80,7 @@ export default function MillSuppliers() {
                 <th className="px-4 py-3">Supplier</th>
                 <th className="px-4 py-3">Contact</th>
                 <th className="px-4 py-3">Country</th>
-                <th className="px-4 py-3 text-right">Statement</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -89,11 +94,19 @@ export default function MillSuppliers() {
                   <td className="px-4 py-3 text-gray-700">
                     {s.country ? <span className="inline-flex items-center gap-1"><Globe className="w-3.5 h-3.5 text-gray-400" />{s.country}</span> : <span className="text-gray-400">—</span>}
                   </td>
-                  <td className="px-4 py-3 text-right">
-                    <Link to={`/milling/finance?tab=suppliers&supplier=${s.id}`}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100">
-                      <FileText className="w-3.5 h-3.5" /> View Statement
-                    </Link>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center justify-end gap-1.5">
+                      {canPay && (
+                        <button onClick={() => setPaySupplier({ id: s.id, name: s.name })}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700">
+                          <Banknote className="w-3.5 h-3.5" /> Record Payment
+                        </button>
+                      )}
+                      <Link to={`/milling/finance?tab=suppliers&supplier=${s.id}`}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100">
+                        <FileText className="w-3.5 h-3.5" /> View Statement
+                      </Link>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -155,6 +168,10 @@ export default function MillSuppliers() {
           <p className="text-[11px] text-gray-400">Sent to admin for approval unless you have approval rights.</p>
         </div>
       </SlideDrawer>
+
+      {paySupplier && (
+        <MillSupplierPayDrawer supplier={paySupplier} onClose={() => setPaySupplier(null)} />
+      )}
     </div>
   );
 }

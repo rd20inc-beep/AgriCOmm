@@ -17,6 +17,7 @@ import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import SlideDrawer from '../../../components/SlideDrawer';
 import SearchSelect from '../../../shared/components/SearchSelect';
 import MillSupplierStatement from '../components/MillSupplierStatement';
+import MillSupplierPayDrawer from '../components/MillSupplierPayDrawer';
 import MillCustomerStatement from '../components/MillCustomerStatement';
 import MillCustomerPayDrawer from '../components/MillCustomerPayDrawer';
 import StatementPayDrawer from '../../finance/components/StatementPayDrawer';
@@ -151,6 +152,7 @@ export default function MillFinanceDashboard() {
   const { hasPermission } = useAuth();
   const canPay = hasPermission('finance', 'confirm_payment');
   const [payParty, setPayParty] = useState(null);
+  const [paySupplier, setPaySupplier] = useState(null);
 
   // ── Cash account: actual money in/out ledger with a period filter ──
   const [cashRange, setCashRange] = useState('all'); // all | month | quarter | ytd
@@ -740,7 +742,7 @@ export default function MillFinanceDashboard() {
               {canPay && (
                 <div className="flex justify-end">
                   <button
-                    onClick={() => setPayParty({ id: selectedSupplier.id, name: selectedSupplier.name })}
+                    onClick={() => setPaySupplier({ id: selectedSupplier.id, name: selectedSupplier.name })}
                     className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 text-sm font-medium"
                   >
                     <Banknote size={14} /> Record Payment
@@ -791,7 +793,7 @@ export default function MillFinanceDashboard() {
                         <td className="px-2 py-2 text-right whitespace-nowrap">
                           {canPay && r.id && r.outstanding > 0 && (
                             <button
-                              onClick={(e) => { e.stopPropagation(); setPayParty({ id: r.id, name: r.name }); }}
+                              onClick={(e) => { e.stopPropagation(); setPaySupplier({ id: r.id, name: r.name }); }}
                               className="inline-flex items-center gap-1 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1 text-[11px] font-medium mr-2"
                             >
                               <Banknote size={12} /> Pay
@@ -1403,6 +1405,14 @@ export default function MillFinanceDashboard() {
         <MillCustomerPayDrawer
           customer={payCustomer}
           onClose={() => setPayCustomer(null)}
+        />
+      )}
+
+      {/* Pay a supplier against a specific invoice. */}
+      {paySupplier && (
+        <MillSupplierPayDrawer
+          supplier={paySupplier}
+          onClose={() => setPaySupplier(null)}
         />
       )}
     </div>
