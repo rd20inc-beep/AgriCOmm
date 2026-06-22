@@ -11,7 +11,7 @@ import {
   useMillExpenses, useCreateMillExpense, useMillWorkers, useCreateMillWorker,
   usePayrollSummary, useRecordAttendance, useInventory, useExpenseVendors,
   usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow,
-  useMillLotCosts,
+  useMillLotCosts, useLocalSales,
 } from '../../../api/queries';
 import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import SlideDrawer from '../../../components/SlideDrawer';
@@ -146,6 +146,7 @@ export default function MillFinanceDashboard() {
   const { data: localSalesSummary } = useLocalSalesSummary();
   const [selectedSupplier, setSelectedSupplier] = useState(null);
   const { data: localCustomers = [] } = useCustomers({ type: 'local' });
+  const { data: allLocalSales = [] } = useLocalSales({ limit: 1000 });
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [payCustomer, setPayCustomer] = useState(null);
   // Pay a supplier with the same drawer the Finance dashboard uses.
@@ -331,6 +332,43 @@ export default function MillFinanceDashboard() {
     (acc, r) => ({ billed: acc.billed + r.billed, paid: acc.paid + r.paid, outstanding: acc.outstanding + r.outstanding }),
     { billed: 0, paid: 0, outstanding: 0 },
   ), [supplierRows]);
+
+  // ── Customer directory (sales billed / received / outstanding per buyer) ──
+  // Mirrors supplierRows from the local-sales list: each registered local
+  // customer gets their billed (sales), paid (received) and outstanding (due)
+  // totals so the directory shows the money picture without drilling in. Sales
+  // are matched by customer_id, or by buyer name for walk-ins that were never
+  // linked (same rule the statement uses). Invoice count is distinct sale
+  // groups (multi-item sales share one group).
+  const customerRows = useMemo(() => {
+    const byId = {};
+    const byName = {};
+    for (const c of localCustomers) {
+      const row = { id: c.id, name: c.name, contact: c.contact || c.phone || '', country: c.country || '', billed: 0, paid: 0, outstanding: 0, _inv: new Set() };
+      byId[c.id] = row;
+      if (c.name) byName[c.name.trim().toLowerCase()] = row;
+    }
+    for (const s of allLocalSales) {
+      const total = parseFloat(s.totalAmount) || 0;
+      const due = parseFloat(s.dueAmount) || 0;
+      let row = null;
+      if (s.customerId != null) row = byId[s.customerId];
+      if (!row && s.buyerName) row = byName[s.buyerName.trim().toLowerCase()];
+      if (!row) continue; // unregistered walk-in — not in the directory
+      row.billed += total;
+      row.paid += (total - due);
+      row.outstanding += due;
+      row._inv.add(s.saleGroupNo || s.saleNo || s.id);
+    }
+    return Object.values(byId)
+      .map((r) => ({ ...r, count: r._inv.size }))
+      .sort((a, b) => b.outstanding - a.outstanding || b.billed - a.billed);
+  }, [localCustomers, allLocalSales]);
+
+  const customerTotals = useMemo(() => customerRows.reduce(
+    (acc, r) => ({ billed: acc.billed + r.billed, paid: acc.paid + r.paid, outstanding: acc.outstanding + r.outstanding }),
+    { billed: 0, paid: 0, outstanding: 0 },
+  ), [customerRows]);
 
   function openExpDrawer(prefill) {
     setExpForm({
@@ -814,9 +852,10 @@ export default function MillFinanceDashboard() {
       {/* ─── CUSTOMERS (local sales) ────────────────────────────────── */}
       {activeTab === 'customers' && (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <Stat label="Local customers" value={localCustomers.length} sub="local-sales buyers" tone="slate" icon={Users} />
-            <Stat label="Pick a customer" value="↓" sub="to view their statement" tone="blue" icon={Receipt} />
+            <Stat label="Total billed" value={COMPACT_PKR(customerTotals.billed)} sub={`${COMPACT_PKR(customerTotals.paid)} received`} tone="blue" icon={Receipt} />
+            <Stat label="Outstanding" value={COMPACT_PKR(customerTotals.outstanding)} sub="owed to mill" tone={customerTotals.outstanding > 0 ? 'amber' : 'green'} icon={Wallet} />
           </div>
 
           {/* Pick any customer to view their statement */}
@@ -861,25 +900,46 @@ export default function MillFinanceDashboard() {
               <p className="text-[11px] text-gray-400">Click a customer to see their statement of sales & receipts.</p>
             </div>
             <div className="overflow-x-auto">
-              {localCustomers.length === 0 ? (
+              {customerRows.length === 0 ? (
                 <div className="p-6 text-center text-sm text-gray-400">No local customers yet.</div>
               ) : (
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500">
                       <th className="text-left font-medium px-4 py-2">Customer</th>
-                      <th className="text-left font-medium px-4 py-2">Contact</th>
-                      <th className="text-left font-medium px-4 py-2">Country</th>
+                      <th className="text-right font-medium px-4 py-2">Invoices</th>
+                      <th className="text-right font-medium px-4 py-2">Billed</th>
+                      <th className="text-right font-medium px-4 py-2">Received</th>
+                      <th className="text-right font-medium px-4 py-2">Outstanding</th>
+                      <th className="px-2 py-2" />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {localCustomers.map((c) => (
-                      <tr key={c.id}
-                        className={`cursor-pointer hover:bg-blue-50/40 ${selectedCustomer?.id === c.id ? 'bg-blue-50/60' : ''}`}
-                        onClick={() => setSelectedCustomer({ id: c.id, name: c.name })}>
-                        <td className="px-4 py-2 font-medium text-gray-900">{c.name}</td>
-                        <td className="px-4 py-2 text-gray-600">{c.contact || c.phone || '—'}</td>
-                        <td className="px-4 py-2 text-gray-600">{c.country || '—'}</td>
+                    {customerRows.map((r) => (
+                      <tr key={r.id}
+                        className={`cursor-pointer hover:bg-blue-50/40 ${selectedCustomer?.id === r.id ? 'bg-blue-50/60' : ''}`}
+                        onClick={() => setSelectedCustomer({ id: r.id, name: r.name })}>
+                        <td className="px-4 py-2 font-medium text-gray-900">
+                          {r.name}
+                          {(r.contact || r.country) && (
+                            <span className="block text-[10px] text-gray-400 font-normal">{[r.contact, r.country].filter(Boolean).join(' · ')}</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 text-right tabular-nums text-gray-500">{r.count}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-gray-700">{PKR(r.billed)}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-emerald-600">{PKR(r.paid)}</td>
+                        <td className={`px-4 py-2 text-right tabular-nums font-medium ${r.outstanding > 0 ? 'text-amber-600' : 'text-gray-400'}`}>{PKR(r.outstanding)}</td>
+                        <td className="px-2 py-2 text-right whitespace-nowrap">
+                          {canPay && r.outstanding > 0 && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setPayCustomer({ id: r.id, name: r.name }); }}
+                              className="inline-flex items-center gap-1 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1 text-[11px] font-medium mr-2"
+                            >
+                              <Banknote size={12} /> Pay
+                            </button>
+                          )}
+                          <span className="text-blue-500 text-xs">View →</span>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
