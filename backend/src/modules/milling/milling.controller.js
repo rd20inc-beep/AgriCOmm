@@ -5,6 +5,20 @@ const automationService = require('../../services/automationService');
 const workflowService = require('../../services/exportOrderWorkflowService');
 const { publishExportOrderUpdate } = require('../../services/exportOrderEventBus');
 
+// Can this inventory lot be fed into a milling/blend batch? Mirrors the
+// frontend NON_MILLABLE_CATEGORIES (src/utils/lotCategory.js): any rice form is
+// millable — raw paddy, finished rice, and re-blendable byproduct fractions
+// (broken grades / powder / sweeping / sortex) — but NOT non-rice residue
+// (bran, husk) or packaging.
+function isMillableLot(lot) {
+  if (lot.type === 'raw' || lot.type === 'finished') return true;
+  if (lot.type === 'byproduct') {
+    const name = (lot.item_name || '').toLowerCase();
+    return !(name.includes('bran') || name.includes('husk'));
+  }
+  return false; // packaging / unknown
+}
+
 /** Resolve batch param to numeric ID (supports both "9" and "M-226") */
 async function resolveBatchId(idParam) {
   if (/^\d+$/.test(idParam)) return parseInt(idParam);
@@ -407,7 +421,7 @@ const millingController = {
             const lot = await trx('inventory_lots').where({ id: parseInt(s.lot_id) }).first();
             if (!lot) { const e = new Error(`Source lot ${s.lot_id} not found.`); e.statusCode = 400; throw e; }
             if (lot.entity !== 'mill') { const e = new Error(`Lot ${lot.lot_no || s.lot_id} is not a mill lot.`); e.statusCode = 400; throw e; }
-            if (!['raw', 'finished'].includes(lot.type)) { const e = new Error(`Lot ${lot.lot_no || s.lot_id} (type ${lot.type}) can't be milled.`); e.statusCode = 400; throw e; }
+            if (!isMillableLot(lot)) { const e = new Error(`Lot ${lot.lot_no || s.lot_id} (${lot.item_name || lot.type}) is non-rice residue and can't be milled.`); e.statusCode = 400; throw e; }
             const qty = parseFloat(s.qty_mt);
             const avail = parseFloat(lot.available_qty) || 0;
             if (qty > avail + 1e-6) { const e = new Error(`Lot ${lot.lot_no || s.lot_id}: only ${avail} MT available, requested ${qty}.`); e.statusCode = 400; throw e; }
