@@ -62,6 +62,7 @@ const financeController = {
           'r.outstanding', 'r.currency', 'r.fx_rate', 'r.base_amount_pkr',
           'r.due_date', 'r.status', 'r.aging', 'r.order_id', 'r.customer_id',
           'r.created_at',
+          db.raw(`'receivable'::text as kind`),
           'c.name as customer_name'
         );
       if (status)        exportQ = exportQ.where('r.status', status);
@@ -94,6 +95,7 @@ const financeController = {
           db.raw(`NULL::int as order_id`),
           'ls.customer_id',
           db.raw(`ls.sale_date::timestamptz as created_at`),
+          db.raw(`'local_sale'::text as kind`),
           db.raw(`COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer_name`)
         );
       if (status)       localQ = localQ.where('ls.payment_status', status);

@@ -146,7 +146,7 @@ export default function MoneyIn() {
   // Receipt history for the open drawer row — where/how each partial was received.
   const { data: receiptData, isLoading: receiptsLoading } = useReceivableReceipts(
     drawer?.id,
-    drawer?.type === 'Local Sale' ? 'local_sale' : 'export',
+    drawer?.kind === 'local_sale' ? 'local_sale' : 'export',
     !!drawer,
   );
   const [recvForm, setRecvForm] = useState({ amount: '', bankAccountId: '', paymentMethod: 'bank_transfer', paymentDate: new Date().toISOString().split('T')[0], chequeNo: '', dueDate: '', notes: '' });
@@ -169,9 +169,11 @@ export default function MoneyIn() {
     const amount = parseFloat(recvForm.amount);
     if (!amount || amount <= 0) { addToast('Enter a valid amount', 'error'); return; }
     try {
-      if (recv.type === 'Local Sale') {
+      if (recv.kind === 'local_sale') {
         // Local-sale rows carry a local_sales id (NOT a receivables id), so they
         // settle via the local-sale accept-payment endpoint, not recordPayment.
+        // (A derived receivable RCV-LS-N has type 'Local Sale' but kind
+        // 'receivable' + a receivables id — it goes the recordPayment route.)
         await acceptLocalSaleMut.mutateAsync({
           saleId: recv.id,
           data: {
