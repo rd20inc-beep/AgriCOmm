@@ -118,7 +118,7 @@ function renderProformaInvoice(doc) {
   const totalQty = lines.reduce((s, l) => s + (l.qtyMT || 0), 0);
   const totalAmt = lines.reduce((s, l) => s + (l.amount || 0), 0);
   return `
-    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:800px; margin:0 auto; padding:20px;">
+    <div style="font-family: Arial, sans-serif; font-size:12px; width:100%; max-width:1040px; margin:0 auto; padding:16px;">
       ${renderHeader(company)}
       <h2 style="text-align:center; font-size:16px; margin:10px 0;">PROFORMA INVOICE</h2>
 
@@ -158,35 +158,37 @@ function renderProformaInvoice(doc) {
       <table style="width:100%; border-collapse:collapse; margin-top:15px;">
         <thead>
           <tr style="background:#1e3a5f; color:white;">
-            <th style="border:1px solid #333; padding:8px;">S.No.</th>
-            <th style="border:1px solid #333; padding:8px;">Brand</th>
-            <th style="border:1px solid #333; padding:8px;">Description</th>
-            <th style="border:1px solid #333; padding:8px;">Unit Bag<br/>in Kgs</th>
-            <th style="border:1px solid #333; padding:8px;">No. of Bags</th>
-            <th style="border:1px solid #333; padding:8px;">Weight in MT<br/>(Approx.)</th>
-            <th style="border:1px solid #333; padding:8px;">FOB<br/>Price Per MT<br/>(${order.currency})</th>
-            <th style="border:1px solid #333; padding:8px;">Total Amount<br/>(${order.currency})</th>
+            <th style="border:1px solid #333; padding:6px;">S.No.</th>
+            <th style="border:1px solid #333; padding:6px;">Brand</th>
+            <th style="border:1px solid #333; padding:6px;">Description</th>
+            <th style="border:1px solid #333; padding:6px;">Packing</th>
+            <th style="border:1px solid #333; padding:6px;">Bag Size<br/>(Kgs)</th>
+            <th style="border:1px solid #333; padding:6px;">Bag (Qty)</th>
+            <th style="border:1px solid #333; padding:6px;">Weight in MT<br/>(Approx.)</th>
+            <th style="border:1px solid #333; padding:6px;">FOB<br/>Price Per MT<br/>(${order.currency})</th>
+            <th style="border:1px solid #333; padding:6px;">Total Amount<br/>(${order.currency})</th>
           </tr>
         </thead>
         <tbody>
           ${lines.map((l) => `
             <tr>
-              <td style="border:1px solid #333; padding:8px; text-align:center;">${l.sno}</td>
-              <td style="border:1px solid #333; padding:8px; text-align:center; font-weight:bold; color:#d4a017;">${l.brand}</td>
-              <td style="border:1px solid #333; padding:8px;">${l.description}</td>
-              <td style="border:1px solid #333; padding:8px; text-align:center;">${l.bagSizeKg}</td>
-              <td style="border:1px solid #333; padding:8px; text-align:center;">${(l.bagCount || 0).toLocaleString()}</td>
-              <td style="border:1px solid #333; padding:8px; text-align:center;">${fmtMt(l.qtyMT)}</td>
-              <td style="border:1px solid #333; padding:8px; text-align:center;">${fmtMoney(l.pricePerMT)}</td>
-              <td style="border:1px solid #333; padding:8px; text-align:right;">${fmtMoney(l.amount)}</td>
+              <td style="border:1px solid #333; padding:6px; text-align:center;">${l.sno}</td>
+              <td style="border:1px solid #333; padding:6px; text-align:center; font-weight:bold; color:#d4a017;">${l.brand}</td>
+              <td style="border:1px solid #333; padding:6px;">${l.description}</td>
+              <td style="border:1px solid #333; padding:6px; text-align:center;">${l.packing || '—'}</td>
+              <td style="border:1px solid #333; padding:6px; text-align:center;">${l.bagSizeKg}</td>
+              <td style="border:1px solid #333; padding:6px; text-align:center;">${(l.bagCount || 0).toLocaleString()}</td>
+              <td style="border:1px solid #333; padding:6px; text-align:center;">${fmtMt(l.qtyMT)}</td>
+              <td style="border:1px solid #333; padding:6px; text-align:center;">${fmtMoney(l.pricePerMT)}</td>
+              <td style="border:1px solid #333; padding:6px; text-align:right;">${fmtMoney(l.amount)}</td>
             </tr>
           `).join('')}
           <tr style="font-weight:bold;">
-            <td colspan="4" style="border:1px solid #333; padding:8px; text-align:center;">Total</td>
-            <td style="border:1px solid #333; padding:8px; text-align:center;">${totalBags.toLocaleString()}</td>
-            <td style="border:1px solid #333; padding:8px; text-align:center;">${totalQty.toFixed(2)}</td>
-            <td style="border:1px solid #333; padding:8px; text-align:center;">${order.currency}</td>
-            <td style="border:1px solid #333; padding:8px; text-align:right;">${fmtMoney(totalAmt)}</td>
+            <td colspan="5" style="border:1px solid #333; padding:6px; text-align:center;">Total</td>
+            <td style="border:1px solid #333; padding:6px; text-align:center;">${totalBags.toLocaleString()}</td>
+            <td style="border:1px solid #333; padding:6px; text-align:center;">${totalQty.toFixed(2)}</td>
+            <td style="border:1px solid #333; padding:6px; text-align:center;">${order.currency}</td>
+            <td style="border:1px solid #333; padding:6px; text-align:right;">${fmtMoney(totalAmt)}</td>
           </tr>
         </tbody>
       </table>
@@ -1428,16 +1430,21 @@ export default function DocumentCenter({ order }) {
     // Use the edited DOM content (user may have edited text inline)
     const editedHtml = printRef.current ? printRef.current.innerHTML : previewHtml;
     const printWindow = window.open('', '_blank');
+    // The Proforma Invoice carries the most columns (incl. per-item packing),
+    // so it prints LANDSCAPE on A4 to use the full width; everything else stays
+    // portrait.
+    const landscape = previewDoc?._docType === 'proforma-invoice';
+    const pageRule = landscape ? '@page { size: A4 landscape; margin: 10mm; }' : '@page { size: A4; margin: 12mm; }';
     // Setting an explicit @page margin suppresses Chrome/Edge/Safari's
     // default print header (date, page title, URL) and footer (page numbers,
-    // URL). Firefox honors the same rule. The 1cm margin keeps the document
+    // URL). Firefox honors the same rule. The margin keeps the document
     // visually well-padded without the browser-rendered chrome.
     printWindow.document.write(`
       <html>
         <head>
           <title>${previewDoc?.type || 'Document'} — ${order.id}</title>
           <style>
-            @page { size: A4; margin: 12mm; }
+            ${pageRule}
             html, body { margin: 0; padding: 0; }
             @media print {
               html, body { margin: 0; padding: 0; }

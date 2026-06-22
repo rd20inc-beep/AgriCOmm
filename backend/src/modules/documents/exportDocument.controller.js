@@ -244,6 +244,8 @@ const exportDocumentController = {
           bagBrand: it.bag_brand || '',
           bagColor: it.bag_color || '',
           bagPrinting: it.bag_printing || '',
+          masterBagSizeKg: it.master_bag_size_kg != null ? parseFloat(it.master_bag_size_kg) : null,
+          masterBagType: it.master_bag_type || '',
           qualityDescription: it.quality_description || '',
           brokenPctTarget: it.broken_pct_target != null ? parseFloat(it.broken_pct_target) : null,
           notes: it.notes || '',
