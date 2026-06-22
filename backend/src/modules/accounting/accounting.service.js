@@ -1102,18 +1102,27 @@ const accountingService = {
     const exRefs = [...new Set(journalTxns.map((t) => t.ref_no).filter((r) => r && /^EX-/i.test(r)))];
     // A PAY- line settles a receivable that links back to an export order, so
     // resolve payment_no → receivable → order to enrich those lines too (else a
-    // receipt against an export sale reads as a bare "Payment PAY-003").
+    // receipt against an export sale reads as a bare "Payment PAY-003"). Two
+    // paths to the receivable: the payment row's linked_receivable_id, and —
+    // when that link is missing — the "receivable #N" the journal stamps into
+    // its own description.
     const exPayRefs = [...new Set(journalTxns.map((t) => t.ref_no).filter((r) => r && /^PAY-/i.test(r)))];
     const exPayRows = exPayRefs.length
       ? await db('payments').whereIn('payment_no', exPayRefs).select('payment_no', 'linked_receivable_id')
       : [];
-    const exRecvIds = [...new Set(exPayRows.map((p) => p.linked_receivable_id).filter(Boolean))];
+    const descRecvIds = journalTxns
+      .map((t) => { const m = /receivable #(\d+)/i.exec(t.description || ''); return m ? parseInt(m[1]) : null; })
+      .filter(Boolean);
+    const exRecvIds = [...new Set([
+      ...exPayRows.map((p) => p.linked_receivable_id),
+      ...descRecvIds,
+    ].filter(Boolean))];
     const exRecvRows = exRecvIds.length
       ? await db('receivables').whereIn('id', exRecvIds).select('id', 'order_id')
       : [];
     const recvOrderId = Object.fromEntries(exRecvRows.map((r) => [r.id, r.order_id]));
     const payOrderId = Object.fromEntries(exPayRows.map((p) => [p.payment_no, recvOrderId[p.linked_receivable_id]]));
-    const orderIds = [...new Set(Object.values(payOrderId).filter(Boolean))];
+    const orderIds = [...new Set(Object.values(recvOrderId).filter(Boolean))];
     const exOrders = (exRefs.length || orderIds.length)
       ? await db('export_orders')
         .where(function () {
@@ -1136,7 +1145,11 @@ const accountingService = {
       ].filter(Boolean).join(' · ');
     };
     const enrichExport = (refNo, desc) => {
-      const o = (refNo && exByNo[refNo]) || (refNo && exById[payOrderId[refNo]]);
+      let o = (refNo && exByNo[refNo]) || (refNo && exById[payOrderId[refNo]]);
+      if (!o && desc) {
+        const m = /receivable #(\d+)/i.exec(desc);
+        if (m) o = exById[recvOrderId[parseInt(m[1])]];
+      }
       if (!o) return desc;
       const summary = orderSummary(o);
       if (!summary) return desc;
