@@ -116,13 +116,18 @@ export default function ProformaInvoice({ order, companyProfile }) {
         @media print {
           body * { visibility: hidden; }
           .proforma-invoice, .proforma-invoice * { visibility: visible; }
+          /* fixed (not absolute) so it anchors to the PAGE — when opened inside a
+             centered modal card (position:relative), absolute would offset the
+             print to the card's corner. max-width reset so it fills the sheet. */
           .proforma-invoice {
-            position: absolute;
+            position: fixed;
             left: 0;
             top: 0;
             width: 100%;
+            max-width: none;
             margin: 0;
             padding: 0;
+            box-shadow: none;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
           }

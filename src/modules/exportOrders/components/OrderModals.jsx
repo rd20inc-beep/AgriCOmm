@@ -3,7 +3,7 @@ import Modal from '../../../components/Modal';
 import ProformaInvoice from '../../../components/ProformaInvoice';
 import EmailComposer from '../../../components/EmailComposer';
 import SearchSelect from '../../../components/SearchSelect';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Printer, Download } from 'lucide-react';
 
 export function AdvancePaymentModal({
   isOpen, onClose, order, formatCurrency,
@@ -791,9 +791,36 @@ export function ExpenseModal({
 }
 
 export function InvoicePreviewModal({ isOpen, onClose, order, companyProfile }) {
+  // The ProformaInvoice injects @media-print CSS that isolates `.proforma-invoice`
+  // (and forces A4 landscape), so window.print() renders just the invoice with
+  // the in-page Tailwind styles intact.
+  const handlePrint = () => window.print();
+  const handleDownload = () => {
+    // Name the saved file via the document title (browser uses it as the
+    // default "Save as PDF" filename), then open the print dialog.
+    const prev = document.title;
+    document.title = `Proforma Invoice - ${order?.id || order?.orderNo || order?.order_no || ''}`.trim();
+    window.print();
+    setTimeout(() => { document.title = prev; }, 1500);
+  };
+
+  const footer = (
+    <>
+      <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg">Close</button>
+      <button onClick={handleDownload} className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
+        <Download size={15} /> Download PDF
+      </button>
+      <button onClick={handlePrint} className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">
+        <Printer size={15} /> Print
+      </button>
+    </>
+  );
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Proforma Invoice Preview" size="lg">
-      <ProformaInvoice order={order} companyProfile={companyProfile} />
+    <Modal isOpen={isOpen} onClose={onClose} title="Proforma Invoice Preview" size="full" footer={footer}>
+      <div className="overflow-x-auto">
+        <ProformaInvoice order={order} companyProfile={companyProfile} />
+      </div>
     </Modal>
   );
 }
