@@ -1045,10 +1045,15 @@ const accountingService = {
         account_code: '1120', account_name: 'Local Sales A/R',
         nd: t.d, nc: t.c, currency: 'PKR', fx_rate: 1, orig_fx_rate: null, orig_currency: null,
       })),
-    ].sort((a, b) => (new Date(a.date) - new Date(b.date))
+    ].sort((a, b) => {
+      // Compare by DAY (a sale's created_at carries a time, a payment_date is
+      // midnight — so they're never "equal" without truncating to the day).
+      const dayA = new Date(a.date).setHours(0, 0, 0, 0);
+      const dayB = new Date(b.date).setHours(0, 0, 0, 0);
       // Same day: charges (debits) before receipts (credits) so the running
       // balance doesn't dip negative when a sale and its payment share a date.
-      || ((a.nc > 0 ? 1 : 0) - (b.nc > 0 ? 1 : 0)));
+      return (dayA - dayB) || ((a.nc > 0 ? 1 : 0) - (b.nc > 0 ? 1 : 0));
+    });
 
     // Closing balance
     let runningBalance = openingBalance;
