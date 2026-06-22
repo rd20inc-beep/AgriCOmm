@@ -1267,18 +1267,30 @@ const accountingService = {
         .select('lot_no', 'product_id', 'variety', 'grade', 'net_weight_kg', 'received_net_weight_kg',
           'gross_weight_kg', 'rate_per_kg', 'total_bags', 'moisture_pct')
       : [];
-    const lotProdIds = [...new Set(lotRows.map((l) => l.product_id).filter(Boolean))];
+    // Some raw-rice payables are keyed by a milling BATCH (source milling_raw_rice,
+    // linked_ref = batch_no like "M-003") rather than an inventory lot — the buy
+    // detail (raw qty, cost, product) lives on milling_batches instead.
+    const batchRows = lotRefs.length
+      ? await db('milling_batches').whereIn('batch_no', lotRefs)
+        .select('batch_no', 'product_id', 'raw_qty_mt', 'raw_cost_total', 'purchase_price_per_kg')
+      : [];
+    const lotProdIds = [...new Set([
+      ...lotRows.map((l) => l.product_id),
+      ...batchRows.map((b) => b.product_id),
+    ].filter(Boolean))];
     const lotProds = lotProdIds.length
       ? await db('products').whereIn('id', lotProdIds).select('id', 'name')
       : [];
     const lotProdName = Object.fromEntries(lotProds.map((p) => [p.id, p.name]));
     const lotByNo = {};
     lotRows.forEach((l) => { lotByNo[l.lot_no] = l; });
+    const batchByNo = {};
+    batchRows.forEach((b) => { batchByNo[b.batch_no] = b; });
     const num0 = (v) => parseFloat(v) || 0;
     // Full purchase narration for a lot: rice type · variety · grade · weight
     // (purchased net, falling back through received/gross) · rate/kg · bags ·
     // moisture. Empty string when the ref isn't a known lot.
-    const lotNarration = (lotNo) => {
+    const lotNarration = (lotNo, includeName = true) => {
       const lot = lotNo && lotByNo[lotNo];
       if (!lot) return '';
       const kg = num0(lot.received_net_weight_kg) || num0(lot.net_weight_kg) || num0(lot.gross_weight_kg);
@@ -1290,8 +1302,8 @@ const accountingService = {
       const variety = lot.variety && lot.variety.trim().toLowerCase() !== name.trim().toLowerCase()
         ? lot.variety : '';
       return [
-        name,
-        variety,
+        includeName ? name : '',
+        includeName ? variety : '',
         lot.grade ? `Grade ${lot.grade}` : '',
         kg > 0 ? `${Math.round(kg).toLocaleString()} kg${mt >= 1 ? ` (${mt.toFixed(2)} MT)` : ''}` : '',
         rate > 0 ? `@ Rs ${rate.toLocaleString()}/kg` : '',
@@ -1299,22 +1311,45 @@ const accountingService = {
         num0(lot.moisture_pct) > 0 ? `${lot.moisture_pct}% moisture` : '',
       ].filter(Boolean).join(' · ');
     };
+    // Same shape for a milling-batch raw-rice buy (no lot): qty/rate derived from
+    // the batch's raw_qty_mt + raw_cost_total.
+    const batchNarration = (batchNo, includeName = true) => {
+      const b = batchNo && batchByNo[batchNo];
+      if (!b) return '';
+      const mt = num0(b.raw_qty_mt);
+      const kg = mt * 1000;
+      const total = num0(b.raw_cost_total);
+      const rate = num0(b.purchase_price_per_kg) || (kg > 0 ? total / kg : 0);
+      const name = lotProdName[b.product_id] || 'Raw rice';
+      return [
+        includeName ? name : '',
+        kg > 0 ? `${Math.round(kg).toLocaleString()} kg${mt >= 1 ? ` (${mt.toFixed(2)} MT)` : ''}` : '',
+        rate > 0 ? `@ Rs ${rate.toLocaleString(undefined, { maximumFractionDigits: 2 })}/kg` : '',
+      ].filter(Boolean).join(' · ');
+    };
+    const purchaseNarration = (ref, includeName = true) =>
+      lotNarration(ref, includeName) || batchNarration(ref, includeName);
     const describePurchase = (p) => {
       const ref = p.linked_ref || p.pay_no || '';
-      const nar = lotNarration(p.linked_ref) || lotNarration(p.pay_no);
+      const nar = purchaseNarration(p.linked_ref) || purchaseNarration(p.pay_no);
       if (nar) return `Purchase ${ref} — ${nar}`;
       const tail = [p.category, p.notes].filter(Boolean).join(' · ');
       return `Purchase ${ref}${tail ? ` — ${tail}` : ''}`.trim();
     };
     // GL-backed purchase lines carry a terse journal description ("Purchase lot
-    // X (GL reconciled)"); append the lot narration so they read in full too —
-    // unless the variety is already present.
+    // X (GL reconciled)" / "Rice purchase — <product> (batch M-003)"); append the
+    // quantity/rate/bags narration so they read in full too. If the product name
+    // (or variety) is already in the description, append the metrics WITHOUT
+    // repeating the name — never skip the whole narration.
     const enrichGlPurchase = (refNo, desc, isCredit) => {
       if (!isCredit) return desc;
-      const nar = lotNarration(refNo);
+      const src = lotByNo[refNo] || batchByNo[refNo];
+      if (!src) return desc;
+      const name = lotProdName[src.product_id] || '';
+      const variety = src.variety || '';
+      const hasName = desc && ((name && desc.includes(name)) || (variety && desc.includes(variety)));
+      const nar = purchaseNarration(refNo, !hasName);
       if (!nar) return desc;
-      const variety = lotByNo[refNo]?.variety;
-      if (desc && variety && desc.includes(variety)) return desc;
       return `${desc || `Purchase ${refNo}`} — ${nar}`;
     };
     const payableIds = payables.map((p) => p.id);
