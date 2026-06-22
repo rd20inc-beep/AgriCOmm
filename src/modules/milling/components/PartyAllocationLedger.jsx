@@ -85,7 +85,7 @@ export default function PartyAllocationLedger({ partyType, partyId }) {
 
       {/* Totals footer */}
       <div className="grid grid-cols-3 gap-px bg-gray-100 border-t border-gray-200">
-        <Foot label={`Total ${billLabel.toLowerCase()}d`} value={PKR(totals.billed)} />
+        <Foot label={`Total ${billLabel.toLowerCase()}s`} value={PKR(totals.billed)} />
         <Foot label="Paid" value={PKR(totals.paid)} tone="text-emerald-700" />
         <Foot label="Outstanding" value={PKR(totals.outstanding)} tone={totals.outstanding > 0 ? 'text-amber-700' : 'text-emerald-700'} bold />
       </div>
