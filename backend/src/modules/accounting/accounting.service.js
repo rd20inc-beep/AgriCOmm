@@ -1048,8 +1048,9 @@ const accountingService = {
         'quantity_kg', 'quantity_bags', 'bag_weight_kg', 'lot_no', 'notes', 'collection_location');
     const lsIds = localSalesRows.map((s) => s.id);
     const lsPays = lsIds.length
-      ? await db('payments').whereIn('local_sale_id', lsIds).select('amount', 'payment_date', 'payment_no', 'payment_method', 'bank_reference')
+      ? await db('payments').whereIn('local_sale_id', lsIds).select('amount', 'payment_date', 'payment_no', 'payment_method', 'bank_reference', 'local_sale_id')
       : [];
+    const saleById = Object.fromEntries(localSalesRows.map((s) => [s.id, s]));
     const methodLbl = { cash: 'Cash', cheque: 'Cheque', bank_transfer: 'Bank transfer', online: 'Online', mobile: 'Mobile' };
     const localRaw = [
       ...localSalesRows.map((s) => {
@@ -1070,7 +1071,15 @@ const accountingService = {
         return { date: s.created_at, ref_no: s.sale_no, description: `Local sale${detail ? ` — ${detail}` : ''}${s.notes ? ` (${s.notes})` : ''}`, d: total, c: 0 };
       }),
       ...lsPays.map((p) => {
-        const bits = [methodLbl[p.payment_method] || p.payment_method, p.bank_reference].filter(Boolean).join(' · ');
+        // Reference the sale this receipt settles (which item/lot), so a receipt
+        // line isn't just "Receipt — Cash" with no context.
+        const sale = saleById[p.local_sale_id];
+        const saleDesc = sale ? [sale.item_name, sale.lot_no ? `Lot ${sale.lot_no}` : ''].filter(Boolean).join(' ') : '';
+        const bits = [
+          methodLbl[p.payment_method] || p.payment_method,
+          p.bank_reference,
+          sale?.sale_no ? `for ${sale.sale_no}${saleDesc ? ` (${saleDesc})` : ''}` : '',
+        ].filter(Boolean).join(' · ');
         return { date: p.payment_date, ref_no: p.payment_no, description: `Receipt${bits ? ` — ${bits}` : ''}`, d: 0, c: parseFloat(p.amount) || 0 };
       }),
     ];
