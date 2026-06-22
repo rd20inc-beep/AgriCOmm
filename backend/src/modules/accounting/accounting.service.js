@@ -1210,10 +1210,14 @@ const accountingService = {
     // grade, net weight, rate/kg, bags, moisture. Pull them once so each
     // purchase line in the ledger reads like the PDF narration rather than a
     // bare "Payable PAY-001".
-    const lotRefs = [...new Set(payables.map((p) => p.linked_ref).filter(Boolean))];
+    const lotRefs = [...new Set([
+      ...payables.map((p) => p.linked_ref),
+      ...payables.map((p) => p.pay_no),
+    ].filter(Boolean))];
     const lotRows = lotRefs.length
       ? await db('inventory_lots').whereIn('lot_no', lotRefs)
-        .select('lot_no', 'product_id', 'variety', 'grade', 'net_weight_kg', 'rate_per_kg', 'total_bags', 'moisture_pct')
+        .select('lot_no', 'product_id', 'variety', 'grade', 'net_weight_kg', 'received_net_weight_kg',
+          'gross_weight_kg', 'rate_per_kg', 'total_bags', 'moisture_pct')
       : [];
     const lotProdIds = [...new Set(lotRows.map((l) => l.product_id).filter(Boolean))];
     const lotProds = lotProdIds.length
@@ -1223,18 +1227,16 @@ const accountingService = {
     const lotByNo = {};
     lotRows.forEach((l) => { lotByNo[l.lot_no] = l; });
     const num0 = (v) => parseFloat(v) || 0;
-    const describePurchase = (p) => {
-      const lot = p.linked_ref && lotByNo[p.linked_ref];
-      const ref = p.linked_ref || p.pay_no || '';
-      if (!lot) {
-        // No lot link — fall back to the payable's own notes / category.
-        const tail = [p.category, p.notes].filter(Boolean).join(' · ');
-        return `Purchase ${ref}${tail ? ` — ${tail}` : ''}`.trim();
-      }
-      const kg = num0(lot.net_weight_kg);
+    // Full purchase narration for a lot: rice type · variety · grade · weight
+    // (purchased net, falling back through received/gross) · rate/kg · bags ·
+    // moisture. Empty string when the ref isn't a known lot.
+    const lotNarration = (lotNo) => {
+      const lot = lotNo && lotByNo[lotNo];
+      if (!lot) return '';
+      const kg = num0(lot.received_net_weight_kg) || num0(lot.net_weight_kg) || num0(lot.gross_weight_kg);
       const mt = kg / 1000;
       const rate = num0(lot.rate_per_kg);
-      const bits = [
+      return [
         lotProdName[lot.product_id] || 'Raw rice',
         lot.variety,
         lot.grade ? `Grade ${lot.grade}` : '',
@@ -1242,8 +1244,25 @@ const accountingService = {
         rate > 0 ? `@ Rs ${rate.toLocaleString()}/kg` : '',
         lot.total_bags ? `${lot.total_bags} bags` : '',
         num0(lot.moisture_pct) > 0 ? `${lot.moisture_pct}% moisture` : '',
-      ].filter(Boolean);
-      return `Purchase ${ref} — ${bits.join(' · ')}`;
+      ].filter(Boolean).join(' · ');
+    };
+    const describePurchase = (p) => {
+      const ref = p.linked_ref || p.pay_no || '';
+      const nar = lotNarration(p.linked_ref) || lotNarration(p.pay_no);
+      if (nar) return `Purchase ${ref} — ${nar}`;
+      const tail = [p.category, p.notes].filter(Boolean).join(' · ');
+      return `Purchase ${ref}${tail ? ` — ${tail}` : ''}`.trim();
+    };
+    // GL-backed purchase lines carry a terse journal description ("Purchase lot
+    // X (GL reconciled)"); append the lot narration so they read in full too —
+    // unless the variety is already present.
+    const enrichGlPurchase = (refNo, desc, isCredit) => {
+      if (!isCredit) return desc;
+      const nar = lotNarration(refNo);
+      if (!nar) return desc;
+      const variety = lotByNo[refNo]?.variety;
+      if (desc && variety && desc.includes(variety)) return desc;
+      return `${desc || `Purchase ${refNo}`} — ${nar}`;
     };
     const payableIds = payables.map((p) => p.id);
     const payments = payableIds.length
@@ -1380,7 +1399,12 @@ const accountingService = {
       (!dateFrom || (s.date && s.date >= dateFrom)) && (!dateTo || (s.date && s.date <= dateTo)));
 
     // Merge GL + synthetic, normalize, stable-sort by date, one balance pass.
-    const merged = [...glTxns, ...synthInPeriod]
+    // GL purchase lines get the lot narration appended before normalizing.
+    const glEnriched = glTxns.map((t) => ({
+      ...t,
+      description: enrichGlPurchase(t.ref_no, t.description, (parseFloat(t.credit) || 0) > 0),
+    }));
+    const merged = [...glEnriched, ...synthInPeriod]
       .map(normalize)
       .sort((a, b) => String(a.date).localeCompare(String(b.date)));
 
