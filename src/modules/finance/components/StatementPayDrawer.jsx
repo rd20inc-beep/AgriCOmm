@@ -68,8 +68,13 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
   const [curOverride, setCurOverride] = useState('');
   const activeCur = curOverride || currencies[0] || 'PKR';
 
-  // Items of the active currency, oldest-first — FIFO settles these in order.
-  const queue = useMemo(() => {
+  // Which invoice to settle: '' = all open (oldest-first FIFO), or a specific
+  // invoice id so the user pays ONE bill instead of the whole balance.
+  const [targetId, setTargetId] = useState('');
+
+  // Items of the active currency, oldest-first. The full sorted list drives the
+  // picker; the FIFO queue is this list narrowed to the chosen target.
+  const sortedItems = useMemo(() => {
     const rows = [...(byCurrency[activeCur] || [])];
     rows.sort((a, b) => {
       const da = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
@@ -79,6 +84,10 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
     });
     return rows;
   }, [byCurrency, activeCur]);
+  const queue = useMemo(
+    () => (targetId ? sortedItems.filter((r) => String(r.dbId || r.id) === String(targetId)) : sortedItems),
+    [sortedItems, targetId],
+  );
   const totalOut = useMemo(() => sumOut(queue), [queue]);
 
   const [form, setForm] = useState({
@@ -194,12 +203,35 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
                 <label className="text-[11px] text-gray-500 block mb-1">Currency</label>
                 <select
                   value={activeCur}
-                  onChange={(e) => { setCurOverride(e.target.value); setAmountTouched(false); }}
+                  onChange={(e) => { setCurOverride(e.target.value); setTargetId(''); setAmountTouched(false); }}
                   className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                   {currencies.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
             )}
+          </div>
+
+          {/* Which invoice to pay — default "All open (FIFO)" or pick ONE bill */}
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">
+              {isCustomer ? 'Apply receipt to' : 'Apply payment to'}
+            </label>
+            <select
+              value={targetId}
+              onChange={(e) => { setTargetId(e.target.value); setAmountTouched(false); }}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="">All open — oldest first ({sortedItems.length} invoice{sortedItems.length === 1 ? '' : 's'}, {fmt(sumOut(sortedItems), activeCur)})</option>
+              {sortedItems.map((it) => (
+                <option key={it.dbId || it.id} value={it.dbId || it.id}>
+                  {refOf(it)} — {fmt(it.outstanding, activeCur)}{it.dueDate ? ` · due ${new Date(it.dueDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}` : ''}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-gray-400 mt-1">
+              {targetId
+                ? 'Only this invoice will be settled.'
+                : 'The amount is spread across open invoices, oldest first — it may settle more than one.'}
+            </p>
           </div>
 
           {/* Bank account */}
@@ -289,7 +321,7 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
 
           {/* FIFO allocation preview */}
           <div>
-            <p className="text-xs font-semibold text-gray-600 mb-1.5">Applies to (oldest first)</p>
+            <p className="text-xs font-semibold text-gray-600 mb-1.5">{targetId ? 'Applies to' : 'Applies to (oldest first)'}</p>
             <div className="rounded-xl border border-gray-200 divide-y divide-gray-100 max-h-44 overflow-y-auto">
               {allocation.length === 0 ? (
                 <p className="px-3 py-3 text-xs text-gray-400">Enter an amount to see how it’s applied.</p>
