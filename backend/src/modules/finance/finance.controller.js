@@ -1798,7 +1798,11 @@ financeController.payPurchase = async (req, res) => {
       // and stop. Cleared later via POST /payments/:id/clear.
       const isPostDated = payment_method === 'cheque' && due_date && new Date(due_date) > new Date(new Date().toDateString());
       if (isPostDated) {
-        const payable = await trx('payables').where({ source_table: sourceTable, source_id: id }).first();
+        const natRef = row.lot_no || row.purchase_no || row.expense_no || null;
+        const payable = await trx('payables').where(function () {
+          this.where({ source_table: sourceTable, source_id: id });
+          if (natRef) this.orWhere(function () { this.where('linked_ref', natRef).andWhere(function () { this.whereNull('source_table').orWhereNot('source_table', 'lot_transport'); }); });
+        }).first();
         const payCount = await trx('payments').count('id as c').first();
         await trx('payments').insert({
           payment_no: `PP-${(parseInt(payCount?.c) || 0) + 1}`,
