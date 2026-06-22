@@ -16,6 +16,7 @@ import SlideDrawer from '../../../components/SlideDrawer';
 import { INCOTERMS, incotermHint, advancePctForIncoterm } from '../../../shared/constants/incoterms';
 import { PAYMENT_TERMS } from '../../../shared/constants/paymentTerms';
 import { COUNTRY_OPTIONS } from '../../../shared/constants/countries';
+import { PORTS } from '../../../shared/constants/ports';
 
 const RECEIVING_MODES = [
   { value: 'bags', label: 'In Bags', desc: 'Standard packed bags', icon: ShoppingBag },
@@ -66,7 +67,7 @@ export default function CreateExportOrder() {
 
   // Quick-add customer
   const [showAddCustomer, setShowAddCustomer] = useState(false);
-  const [newCust, setNewCust] = useState({ name: '', country: '', address: '', email: '', phone: '', contact_person: '' });
+  const [newCust, setNewCust] = useState({ name: '', country: '', port: '', address: '', email: '', phone: '', contact_person: '' });
 
   const [form, setForm] = useState({
     // Section 1: Buyer
@@ -391,7 +392,7 @@ export default function CreateExportOrder() {
                     onClick={() => {
                       const c = customers.find(x => String(x.id) === String(form.customerId));
                       if (!c) return;
-                      setNewCust({ id: c.id, name: c.name || '', country: c.country || '', address: c.address || '', email: c.email || '', phone: c.phone || '', contact_person: c.contact || '' });
+                      setNewCust({ id: c.id, name: c.name || '', country: c.country || '', port: c.port || '', address: c.address || '', email: c.email || '', phone: c.phone || '', contact_person: c.contact || '' });
                       setShowAddCustomer(true);
                     }}
                     className="text-xs text-amber-600 hover:text-amber-800 font-medium flex items-center gap-1">
@@ -399,7 +400,7 @@ export default function CreateExportOrder() {
                   </button>
                 )}
                 <button type="button"
-                  onClick={() => { setNewCust({ name: '', country: '', address: '', email: '', phone: '', contact_person: '' }); setShowAddCustomer(true); }}
+                  onClick={() => { setNewCust({ name: '', country: '', port: '', address: '', email: '', phone: '', contact_person: '' }); setShowAddCustomer(true); }}
                   className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1">
                   <Plus className="w-3 h-3" /> New Buyer
                 </button>
@@ -521,9 +522,11 @@ export default function CreateExportOrder() {
             <label className="form-label">Buyer Details on Documents</label>
             <select value={form.docAddressMode} onChange={e => set('docAddressMode', e.target.value)} className="form-input">
               <option value="country">Country only</option>
+              <option value="port">Port only</option>
+              <option value="country_port">Country + port</option>
               <option value="full">Full address + country</option>
             </select>
-            <p className="text-[11px] text-gray-500 mt-1 leading-snug">Controls how much of the buyer's address prints on the proforma & export docs.</p>
+            <p className="text-[11px] text-gray-500 mt-1 leading-snug">Controls which buyer location lines print on the proforma &amp; export docs.</p>
           </div>
         </div>
 
@@ -992,7 +995,7 @@ export default function CreateExportOrder() {
                     }
                   }
                   setShowAddCustomer(false);
-                  setNewCust({ name: '', country: '', address: '', email: '', phone: '', contact_person: '' });
+                  setNewCust({ name: '', country: '', port: '', address: '', email: '', phone: '', contact_person: '' });
                 } catch (err) { addToast(err?.response?.data?.message || 'Failed to save buyer', 'error'); }
               }}
               className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
@@ -1022,6 +1025,17 @@ export default function CreateExportOrder() {
             <textarea value={newCust.address} onChange={e => setNewCust(p => ({ ...p, address: e.target.value }))}
               rows={2} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="Street, city, postal code…" />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Port</label>
+            <input type="text" list="buyer-port-list" value={newCust.port}
+              onChange={e => setNewCust(p => ({ ...p, port: e.target.value }))}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Select a port or type a new one…" />
+            <datalist id="buyer-port-list">
+              {PORTS.map(p => <option key={p} value={p} />)}
+            </datalist>
+            <p className="text-[11px] text-gray-400 mt-1">Buyer's discharge/destination port — pick from the list or enter your own.</p>
           </div>
           <div>
             <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Contact Person</label>

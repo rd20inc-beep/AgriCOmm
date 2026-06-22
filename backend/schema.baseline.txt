@@ -346,6 +346,7 @@ COL customers.is_favorite:boolean:NOT NULL
 COL customers.name:character varying:NOT NULL
 COL customers.payment_terms:character varying:NULL
 COL customers.phone:character varying:NULL
+COL customers.port:character varying:NULL
 COL customers.review_notes:text:NULL
 COL customers.reviewed_at:timestamp with time zone:NULL
 COL customers.reviewed_by:integer:NULL

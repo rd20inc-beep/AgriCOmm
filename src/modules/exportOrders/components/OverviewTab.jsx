@@ -180,7 +180,7 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">Buyer on Docs</span>
-              <span className="font-medium text-gray-900">{order.docAddressMode === 'full' ? 'Full address + country' : 'Country only'}</span>
+              <span className="font-medium text-gray-900">{({ country: 'Country only', port: 'Port only', country_port: 'Country + port', full: 'Full address + country' }[order.docAddressMode] || 'Country only')}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">Created</span>
@@ -241,6 +241,8 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
                 <label className="block text-xs font-medium text-gray-600 mb-1">Buyer Details on Documents</label>
                 <select value={contract.doc_address_mode} onChange={e => setContract(c => ({ ...c, doc_address_mode: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
                   <option value="country">Country only</option>
+                  <option value="port">Port only</option>
+                  <option value="country_port">Country + port</option>
                   <option value="full">Full address + country</option>
                 </select>
               </div>

@@ -25,6 +25,7 @@ const masterDataService = {
       email: data.email || null,
       phone: data.phone || null,
       address: data.address || null,
+      port: data.port || null,
       payment_terms: data.payment_terms || 'Advance',
       currency: data.currency || 'USD',
       credit_limit: data.credit_limit ? parseFloat(data.credit_limit) : 0,

@@ -15,6 +15,7 @@ async function gatherOrderData(orderId) {
     .leftJoin('customers as c', 'eo.customer_id', 'c.id')
     .leftJoin('products as p', 'eo.product_id', 'p.id')
     .select('eo.*', 'c.name as customer_name', 'c.address as customer_address',
+      'c.port as customer_port',
       'c.country as customer_country', 'c.contact_person', 'c.email as customer_email',
       'c.phone as customer_phone', 'c.vat_number as customer_vat',
       'c.bank_name as customer_bank', 'c.bank_account as customer_account',
@@ -122,10 +123,13 @@ const exportDocumentController = {
         // Buyer
         buyer: {
           name: order.customer_name || '',
-          // Buyer address only printed when the order opts into 'full' mode;
-          // otherwise documents show name + country only.
+          // Which buyer location lines print is set per-order by doc_address_mode:
+          // country | port | full (address+country) | country_port (country+port).
           address: order.doc_address_mode === 'full' ? (order.customer_address || '') : '',
-          country: order.customer_country || order.country || '',
+          country: ['country', 'full', 'country_port'].includes(order.doc_address_mode || 'country')
+            ? (order.customer_country || order.country || '') : '',
+          port: ['port', 'country_port'].includes(order.doc_address_mode)
+            ? (order.customer_port || '') : '',
           contact: order.contact_person || '',
           email: order.customer_email || '',
           phone: order.customer_phone || '',

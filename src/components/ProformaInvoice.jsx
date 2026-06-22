@@ -217,14 +217,25 @@ export default function ProformaInvoice({ order, companyProfile }) {
             <p className="font-bold text-base" style={{ color: '#1e3a5f' }}>
               {order.customerName}
             </p>
-            {order.docAddressMode === 'full' && order.customerAddress && (
-              <p className="text-sm mt-1 whitespace-pre-line" style={{ color: '#64748b' }}>
-                {order.customerAddress}
-              </p>
-            )}
-            <p className="text-sm mt-1" style={{ color: '#64748b' }}>
-              {order.country}
-            </p>
+            {(() => {
+              const m = order.docAddressMode || 'country';
+              const showAddr = m === 'full';
+              const showCtry = m === 'country' || m === 'full' || m === 'country_port';
+              const showPort = m === 'port' || m === 'country_port';
+              return (
+                <>
+                  {showAddr && order.customerAddress && (
+                    <p className="text-sm mt-1 whitespace-pre-line" style={{ color: '#64748b' }}>{order.customerAddress}</p>
+                  )}
+                  {showCtry && order.country && (
+                    <p className="text-sm mt-1" style={{ color: '#64748b' }}>{order.country}</p>
+                  )}
+                  {showPort && order.customerPort && (
+                    <p className="text-sm mt-1" style={{ color: '#64748b' }}>Port: {order.customerPort}</p>
+                  )}
+                </>
+              );
+            })()}
           </div>
 
           {/* Bank Details */}

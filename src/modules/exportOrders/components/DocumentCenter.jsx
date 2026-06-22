@@ -131,7 +131,7 @@ function renderProformaInvoice(doc) {
           <td style="vertical-align:top; width:55%;">
             <strong>Name & Address of Consignee:</strong><br/>
             <div style="border:1px solid #333; padding:8px; margin-top:4px;">
-              ${buyer.name}<br/>${buyer.address ? `${buyer.address}<br/>` : ''}${buyer.country}
+              ${[buyer.name, buyer.address, buyer.country, buyer.port ? `Port: ${buyer.port}` : ''].filter(Boolean).join('<br/>')}
               ${buyer.vatNumber ? `<br/>VAT Number: ${buyer.vatNumber}` : ''}
             </div>
             <div style="margin-top:10px;">

@@ -384,6 +384,7 @@ const exportOrderController = {
           'c.name as customer_name',
           'c.country as customer_country',
           'c.address as customer_address',
+          'c.port as customer_port',
           'c.email as customer_email',
           'p.name as product_name'
         )
@@ -675,8 +676,9 @@ const exportOrderController = {
             master_bag_size_kg: master_bag_size_kg ? parseFloat(master_bag_size_kg) : null,
             master_bag_type: master_bag_type || null,
             payment_terms: payment_terms || null,
-            // How much buyer address to print on documents ('country' | 'full')
-            doc_address_mode: req.body.doc_address_mode === 'full' ? 'full' : 'country',
+            // Which buyer location lines print on documents
+            doc_address_mode: ['country', 'port', 'full', 'country_port'].includes(req.body.doc_address_mode)
+              ? req.body.doc_address_mode : 'country',
             // Packing / receiving mode
             receiving_mode: receiving_mode || null,
             quantity_unit: quantity_unit || null,

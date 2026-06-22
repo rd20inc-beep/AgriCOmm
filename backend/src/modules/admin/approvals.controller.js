@@ -80,7 +80,7 @@ const approvalsController = {
   // ─────────────── Quick-add: customer ───────────────
   async quickAddCustomer(req, res) {
     try {
-      const { name, contact_person, phone, email, address, country } = req.body || {};
+      const { name, contact_person, phone, email, address, country, port } = req.body || {};
       if (!name || !String(name).trim()) {
         return res.status(400).json({ success: false, message: 'Customer name is required.' });
       }
@@ -100,6 +100,7 @@ const approvalsController = {
         email: email || null,
         address: address || null,
         country: country || null,
+        port: port || null,
         payment_terms: 'Cash',
         currency: 'PKR',
         is_active: true,
@@ -125,7 +126,7 @@ const approvalsController = {
       const { id } = req.params;
       const cust = await db('customers').where({ id }).first();
       if (!cust) return res.status(404).json({ success: false, message: 'Customer not found.' });
-      const { name, contact_person, phone, email, address, country } = req.body || {};
+      const { name, contact_person, phone, email, address, country, port } = req.body || {};
       if (name != null && !String(name).trim()) {
         return res.status(400).json({ success: false, message: 'Customer name cannot be empty.' });
       }
@@ -138,6 +139,7 @@ const approvalsController = {
         email: email !== undefined ? (email || null) : cust.email,
         address: address !== undefined ? (address || null) : cust.address,
         country: country !== undefined ? (country || null) : cust.country,
+        port: port !== undefined ? (port || null) : cust.port,
         approval_status: autoApprove ? 'approved' : 'pending',
         submitted_by: req.user?.id || null,
         submitted_at: now,

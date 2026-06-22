@@ -7,6 +7,7 @@ const createCustomerSchema = Joi.object({
   email: Joi.string().email().allow(null, '').optional(),
   phone: Joi.string().allow(null, '').optional(),
   address: Joi.string().allow(null, '').optional(),
+  port: Joi.string().allow(null, '').optional(),
   payment_terms: Joi.string().default('Advance'),
   currency: Joi.string().default('USD'),
   credit_limit: Joi.number().min(0).default(0),

@@ -117,6 +117,7 @@ export function transformOrder(dbOrder) {
     customerId: dbOrder.customer_id,
     customerName: dbOrder.customer_name || '',
     customerAddress: dbOrder.customer_address || '',
+    customerPort: dbOrder.customer_port || '',
     country: dbOrder.customer_country || dbOrder.country || '',
     docAddressMode: dbOrder.doc_address_mode || 'country',
     productId: dbOrder.product_id,
@@ -316,6 +317,7 @@ export function transformCustomer(db) {
     phone: db.phone || '',
     country: db.country || '',
     address: db.address || '',
+    port: db.port || '',
     isFavorite: !!db.is_favorite,
   };
 }
