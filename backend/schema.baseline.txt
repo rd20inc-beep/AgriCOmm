@@ -1390,6 +1390,8 @@ COL payments.notes:text:NULL
 COL payments.payment_date:date:NOT NULL
 COL payments.payment_method:character varying:NULL
 COL payments.payment_no:character varying:NOT NULL
+COL payments.source_id:integer:NULL
+COL payments.source_table:character varying:NULL
 COL payments.type:character varying:NOT NULL
 COL permissions.action:character varying:NOT NULL
 COL permissions.created_at:timestamp with time zone:NULL

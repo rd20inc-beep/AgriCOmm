@@ -272,38 +272,40 @@ const financeController = {
         } else if (p.linked_receivable_id) {
           const r = await trx('receivables').where({ id: p.linked_receivable_id }).first();
           if (r) { const rp = (parseFloat(r.received_amount) || 0) + amount; const ro = Math.max(0, (parseFloat(r.expected_amount) || 0) - rp); await trx('receivables').where({ id: r.id }).update({ received_amount: rp, outstanding: ro, status: ro <= 0 ? 'Paid' : 'Partial', updated_at: trx.fn.now() }); }
-        } else if (p.linked_payable_id) {
-          const pa = await trx('payables').where({ id: p.linked_payable_id }).first();
+        } else if (p.linked_payable_id || (p.source_table && p.source_id)) {
+          // Settle the payable balance (if linked).
+          const pa = p.linked_payable_id ? await trx('payables').where({ id: p.linked_payable_id }).first() : null;
           if (pa) {
             const pp = (parseFloat(pa.paid_amount) || 0) + amount;
             const orig = parseFloat(pa.original_amount) || 0;
             await trx('payables').where({ id: pa.id }).update({ paid_amount: pp, outstanding: Math.max(0, orig - pp), status: pp >= orig - 0.01 ? 'Paid' : 'Partial', updated_at: trx.fn.now() });
-            // Mirror to the source row (Purchases / Mill Store / Expenses tabs).
-            // Resolve it by source_table+source_id when set, else by linked_ref
-            // against each table's natural key (lot's Raw Material payable is
-            // keyed by lot_no with source_table NULL).
-            const SRC = ['inventory_lots', 'mill_purchases', 'export_order_costs', 'business_expenses'];
-            let srcTable = null; let src = null;
-            if (SRC.includes(pa.source_table) && pa.source_id) {
-              srcTable = pa.source_table; src = await trx(srcTable).where({ id: pa.source_id }).first();
-            } else if (pa.linked_ref) {
-              for (const [t, col] of [['inventory_lots', 'lot_no'], ['mill_purchases', 'purchase_no'], ['business_expenses', 'expense_no']]) {
-                const r = await trx(t).where(col, pa.linked_ref).first();
-                if (r) { srcTable = t; src = r; break; }
-              }
+          }
+          // Settle the source row (Purchases / Mill Store / Expenses tabs) —
+          // prefer the payment's own source ref, else resolve from the payable
+          // (source_table+source_id, or linked_ref against each natural key).
+          const SRC = ['inventory_lots', 'mill_purchases', 'export_order_costs', 'business_expenses'];
+          let srcTable = null; let src = null;
+          if (SRC.includes(p.source_table) && p.source_id) {
+            srcTable = p.source_table; src = await trx(srcTable).where({ id: p.source_id }).first();
+          } else if (pa && SRC.includes(pa.source_table) && pa.source_id) {
+            srcTable = pa.source_table; src = await trx(srcTable).where({ id: pa.source_id }).first();
+          } else if (pa && pa.linked_ref) {
+            for (const [t, col] of [['inventory_lots', 'lot_no'], ['mill_purchases', 'purchase_no'], ['business_expenses', 'expense_no']]) {
+              const r = await trx(t).where(col, pa.linked_ref).first();
+              if (r) { srcTable = t; src = r; break; }
             }
-            if (srcTable && src) {
-              const srcPaid = (parseFloat(src.paid_amount) || 0) + amount;
-              const srcTotal = srcTable === 'inventory_lots' ? (parseFloat(src.landed_cost_total) || 0)
-                : srcTable === 'mill_purchases' ? (parseFloat(src.total_amount) || 0)
-                : srcTable === 'business_expenses' ? (parseFloat(src.amount_pkr) || 0)
-                : (parseFloat(src.base_amount_pkr) || (parseFloat(src.amount) || 0) * (parseFloat(src.fx_rate) || 1));
-              const srcFully = srcTotal - srcPaid <= 0.01;
-              const upd = { payment_status: srcFully ? 'Paid' : 'Partial', paid_amount: srcPaid, updated_at: trx.fn.now() };
-              if (srcTable === 'inventory_lots') upd.due_amount = Math.max(0, srcTotal - srcPaid);
-              if (srcTable === 'business_expenses') upd.paid_date = srcFully ? new Date() : null;
-              await trx(srcTable).where({ id: src.id }).update(upd);
-            }
+          }
+          if (srcTable && src) {
+            const srcPaid = (parseFloat(src.paid_amount) || 0) + amount;
+            const srcTotal = srcTable === 'inventory_lots' ? (parseFloat(src.landed_cost_total) || 0)
+              : srcTable === 'mill_purchases' ? (parseFloat(src.total_amount) || 0)
+              : srcTable === 'business_expenses' ? (parseFloat(src.amount_pkr) || 0)
+              : (parseFloat(src.base_amount_pkr) || (parseFloat(src.amount) || 0) * (parseFloat(src.fx_rate) || 1));
+            const srcFully = srcTotal - srcPaid <= 0.01;
+            const upd = { payment_status: srcFully ? 'Paid' : 'Partial', paid_amount: srcPaid, updated_at: trx.fn.now() };
+            if (srcTable === 'inventory_lots') upd.due_amount = Math.max(0, srcTotal - srcPaid);
+            if (srcTable === 'business_expenses') upd.paid_date = srcFully ? new Date() : null;
+            await trx(srcTable).where({ id: src.id }).update(upd);
           }
         }
 
@@ -1809,7 +1811,8 @@ financeController.payPurchase = async (req, res) => {
           type: 'payment', amount: amountPkr, currency: 'PKR', fx_rate: 1, base_amount_pkr: amountPkr,
           payment_method, bank_account_id: bank_account_id || null,
           bank_reference: payment_reference || null, due_date, cleared: false,
-          linked_payable_id: payable ? payable.id : null, payment_date: paidAt,
+          linked_payable_id: payable ? payable.id : null,
+          source_table: sourceTable, source_id: id, payment_date: paidAt,
           notes: `Pending cheque for ${source} ${row.lot_no || row.purchase_no || row.expense_no || `#${id}`}`,
           created_by: req.user?.id || null,
         });

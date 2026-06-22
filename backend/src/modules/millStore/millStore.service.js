@@ -136,7 +136,8 @@ const millStoreService = {
           type: 'payment', amount, currency: 'PKR', fx_rate: 1, base_amount_pkr: amount,
           payment_method: method, bank_account_id: bankId, bank_reference: data.payment_reference || null,
           due_date: data.due_date || null, cleared: false,
-          linked_payable_id: payable ? payable.id : null, payment_date: payDate,
+          linked_payable_id: payable ? payable.id : null,
+          source_table: 'mill_purchases', source_id: parseInt(id, 10), payment_date: payDate,
           notes: `Pending cheque for ${purchase.purchase_no}`, created_by: userId || null,
         });
         return trx('mill_purchases').where({ id }).first();

@@ -240,7 +240,8 @@ const expensesService = {
           type: 'payment', amount: expense.amount_pkr, currency: 'PKR', fx_rate: 1, base_amount_pkr: expense.amount_pkr,
           payment_method, bank_account_id: bank_account_id || null, bank_reference: payment_reference || null,
           due_date: due_date || null, cleared: false,
-          linked_payable_id: payable ? payable.id : null, payment_date: payDate,
+          linked_payable_id: payable ? payable.id : null,
+          source_table: 'business_expenses', source_id: parseInt(id, 10), payment_date: payDate,
           notes: `Pending cheque for ${expense.expense_no}`, created_by: userId || null,
         });
         return expense;
