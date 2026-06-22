@@ -123,25 +123,30 @@ export default function ProformaInvoice({ order, companyProfile }) {
     const title = `Proforma Invoice - ${order?.id || order?.orderNo || order?.order_no || ''}`.trim();
     const w = window.open('', '_blank', 'width=900,height=1100');
     if (!w) { window.print(); return; } // popup blocked → fall back
-    // A4 portrait printable area at 8mm margins ≈ 194mm × 281mm.
+    // A4 portrait printable area at 8mm margins ≈ 194mm × 281mm. Auto-pick the
+    // base layout width: scan from narrow (big fonts) to wide and take the FIRST
+    // width where filling the page width (s = pageW/cw) still fits one page
+    // height. That fills the page AND maximizes font size, adapting to however
+    // many line items the invoice has.
     const fitScript =
       'window.addEventListener("load",function(){setTimeout(function(){'
       + 'var mm=96/25.4,pageW=194*mm,pageH=281*mm;'
       + 'var box=document.getElementById("pi-scale");'
-      + 'var cw=box.scrollWidth,ch=box.scrollHeight;'
-      + 'var s=Math.min(pageW/cw,pageH/ch,1);'
-      + 'box.style.transform="scale("+s+")";'
-      + 'document.getElementById("pi-page").style.height=(ch*s)+"px";'
+      + 'var bestW=1280,bestS=null;'
+      + 'for(var W=700;W<=1280;W+=20){box.style.width=W+"px";'
+      + 'var cw=box.scrollWidth,ch=box.scrollHeight,s=pageW/cw;'
+      + 'if(ch*s<=pageH){bestW=W;bestS=s;break;}}'
+      + 'box.style.width=bestW+"px";'
+      + 'var cw2=box.scrollWidth,ch2=box.scrollHeight;'
+      + 'var s2=bestS!=null?bestS:Math.min(pageW/cw2,pageH/ch2);'
+      + 'box.style.transform="scale("+s2+")";'
+      + 'document.getElementById("pi-page").style.height=Math.ceil(ch2*s2)+"px";'
       + 'window.focus();window.print();'
       + '},300);});';
-    // Lay the invoice out at a 900px base so the table doesn't wrap tall, then the
-    // fit-script scales it to FILL the 194mm portrait page width (s = pageW/cw)
-    // while staying one page. Narrower base ⇒ less downscale ⇒ bigger fonts; the
-    // min(...) with pageH keeps it to one page if content ever runs tall.
     w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${title}</title>${links}`
       + `<style>@page{size:A4 portrait;margin:8mm}html,body{margin:0;padding:0;background:#fff}`
       + `#pi-page{width:194mm;overflow:hidden}`
-      + `#pi-scale{transform-origin:top left;width:800px}`
+      + `#pi-scale{transform-origin:top left;width:900px}`
       + `.proforma-invoice{max-width:none!important;width:100%!important;box-shadow:none!important;margin:0!important;`
       + `-webkit-print-color-adjust:exact;print-color-adjust:exact}</style></head><body>`
       + `<div id="pi-page"><div id="pi-scale">${node.outerHTML}</div></div>`
