@@ -209,8 +209,8 @@ const financeController = {
         .leftJoin('local_sales as ls', 'ls.id', 'p.local_sale_id')
         .leftJoin('customers as c', 'c.id', 'r.customer_id')
         .leftJoin('suppliers as s', 's.id', 'pa.supplier_id')
-        .where('p.payment_method', 'cheque').whereNotNull('p.due_date')
-        .select('p.type', 'p.amount', 'p.due_date', 'p.bank_reference',
+        .where('p.payment_method', 'cheque').whereNotNull('p.due_date').where('p.cleared', false)
+        .select('p.id', 'p.type', 'p.amount', 'p.due_date', 'p.bank_reference',
           db.raw("COALESCE(c.name, s.name, ls.buyer_name, 'Counterparty') as party"));
 
       const recv = await db('receivables as r').leftJoin('customers as c', 'c.id', 'r.customer_id')
@@ -223,7 +223,7 @@ const financeController = {
         .whereNot('pa.status', 'Paid').whereNotNull('pa.due_date').where('pa.outstanding', '>', 0)
         .select('pa.outstanding as amount', 'pa.due_date', 'pa.linked_ref as ref', db.raw("COALESCE(s.name, 'Supplier') as party"));
 
-      const chq = (t) => cheques.filter((x) => x.type === t).map((x) => ({ kind: 'cheque', label: 'Cheque', dueDate: x.due_date, amount: parseFloat(x.amount) || 0, party: x.party, reference: x.bank_reference }));
+      const chq = (t) => cheques.filter((x) => x.type === t).map((x) => ({ kind: 'cheque', label: 'Cheque (pending)', dueDate: x.due_date, amount: parseFloat(x.amount) || 0, party: x.party, reference: x.bank_reference, paymentId: x.id }));
       const receiving = [
         ...chq('receipt'),
         ...recv.map((x) => ({ kind: 'credit', label: 'Receivable', dueDate: x.due_date, amount: parseFloat(x.amount) || 0, party: x.party, reference: x.ref })),
@@ -242,6 +242,60 @@ const financeController = {
     } catch (err) {
       console.error('getUpcoming error:', err);
       return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
+  // Clear a post-dated cheque — applies the (until-now deferred) payment to its
+  // linked sale/receivable/payable and (optionally) moves the bank account it
+  // cleared into/out of. Idempotent: a cleared cheque is a no-op.
+  async clearCheque(req, res) {
+    try {
+      const { id } = req.params;
+      const { bank_account_id } = req.body || {};
+      const result = await db.transaction(async (trx) => {
+        const p = await trx('payments').where({ id }).first();
+        if (!p) { const e = new Error('Payment not found.'); e.status = 404; throw e; }
+        if (p.cleared) return { alreadyCleared: true };
+        const amount = parseFloat(p.amount) || 0;
+        const acctId = bank_account_id || p.bank_account_id || null;
+        await trx('payments').where({ id }).update({ cleared: true, bank_account_id: acctId, updated_at: trx.fn.now() });
+
+        if (p.local_sale_id) {
+          const s = await trx('local_sales').where({ id: p.local_sale_id }).first();
+          if (s) {
+            const np = (parseFloat(s.paid_amount) || 0) + amount;
+            const nd = Math.max(0, (parseFloat(s.total_amount) || 0) - np);
+            await trx('local_sales').where({ id: s.id }).update({ paid_amount: np, due_amount: nd, payment_status: nd <= 0 ? 'Paid' : 'Partial', updated_at: trx.fn.now() });
+            const r = await trx('receivables').where('local_sale_id', s.id).first();
+            if (r) { const rp = (parseFloat(r.received_amount) || 0) + amount; const ro = Math.max(0, (parseFloat(r.expected_amount) || 0) - rp); await trx('receivables').where({ id: r.id }).update({ received_amount: rp, outstanding: ro, status: ro <= 0 ? 'Paid' : 'Partial', updated_at: trx.fn.now() }); }
+          }
+        } else if (p.linked_receivable_id) {
+          const r = await trx('receivables').where({ id: p.linked_receivable_id }).first();
+          if (r) { const rp = (parseFloat(r.received_amount) || 0) + amount; const ro = Math.max(0, (parseFloat(r.expected_amount) || 0) - rp); await trx('receivables').where({ id: r.id }).update({ received_amount: rp, outstanding: ro, status: ro <= 0 ? 'Paid' : 'Partial', updated_at: trx.fn.now() }); }
+        } else if (p.linked_payable_id) {
+          const pa = await trx('payables').where({ id: p.linked_payable_id }).first();
+          if (pa) { const pp = (parseFloat(pa.paid_amount) || 0) + amount; const orig = parseFloat(pa.original_amount) || 0; await trx('payables').where({ id: pa.id }).update({ paid_amount: pp, outstanding: Math.max(0, orig - pp), status: pp >= orig - 0.01 ? 'Paid' : 'Partial', updated_at: trx.fn.now() }); }
+        }
+
+        if (acctId) {
+          const dir = p.type === 'receipt' ? 'increment' : 'decrement';
+          await trx('bank_accounts').where({ id: acctId })[dir]('current_balance', amount);
+          const lastBt = await trx('bank_transactions').where('transaction_no', 'like', 'BT-%').orderBy('id', 'desc').first('transaction_no');
+          const seq = lastBt ? (parseInt(String(lastBt.transaction_no).replace(/^BT-/, ''), 10) || 0) + 1 : 1;
+          await trx('bank_transactions').insert({
+            transaction_no: `BT-${String(seq).padStart(4, '0')}`, bank_account_id: acctId,
+            type: p.type === 'receipt' ? 'credit' : 'debit', amount, currency: 'PKR', status: 'posted',
+            transaction_date: new Date(), reference: p.bank_reference || null,
+            notes: `Cheque cleared (${p.payment_no})`, source: 'cheque_clear', linked_payment_id: p.id, created_by: req.user?.id || null,
+          });
+        }
+        return { cleared: true };
+      });
+      return res.json({ success: true, data: result });
+    } catch (err) {
+      const s = err.status || 500;
+      if (s === 500) console.error('clearCheque error:', err);
+      return res.status(s).json({ success: false, message: err.message });
     }
   },
 
@@ -861,6 +915,11 @@ const financeController = {
         });
       }
 
+      // A post-dated cheque records but does NOT settle the receivable/payable
+      // (or move the bank) until it clears — it stays Pending/Partial.
+      const _today = new Date(new Date().toDateString());
+      const isPostDated = payment_method === 'cheque' && due_date && new Date(due_date) > _today;
+
       const result = await db.transaction(async (trx) => {
         const paymentNo = await generatePaymentNo(trx);
 
@@ -900,14 +959,15 @@ const financeController = {
             bank_account_id: bank_account_id || null,
             bank_reference: bank_reference || null,
             due_date: due_date || null,
+            cleared: !isPostDated,
             payment_date: payment_date || trx.fn.now(),
             notes: notes || null,
             created_by: req.user.id,
           })
           .returning('*');
 
-        // Update receivable or payable
-        if (type === 'receipt' && linked_receivable_id) {
+        // Update receivable or payable (skipped for an uncleared post-dated cheque)
+        if (!isPostDated && type === 'receipt' && linked_receivable_id) {
           const receivable = await trx('receivables').where({ id: linked_receivable_id }).first();
           if (receivable) {
             const newPaid = parseFloat(receivable.received_amount || 0) + parseFloat(amount);
@@ -951,7 +1011,7 @@ const financeController = {
               });
             }
           }
-        } else if (type === 'payment' && linked_payable_id) {
+        } else if (!isPostDated && type === 'payment' && linked_payable_id) {
           const payable = await trx('payables').where({ id: linked_payable_id }).first();
           if (payable) {
             const newPaid = parseFloat(payable.paid_amount || 0) + parseFloat(amount);

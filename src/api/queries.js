@@ -537,6 +537,20 @@ export function useUpcoming() {
   });
 }
 
+// Clear a post-dated cheque — applies the deferred payment to its balance.
+export function useClearCheque() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => financeApi.clearCheque(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['finance'] });
+      qc.invalidateQueries({ queryKey: ['receivables'] });
+      qc.invalidateQueries({ queryKey: ['payables'] });
+      qc.invalidateQueries({ queryKey: ['local-sales'] });
+    },
+  });
+}
+
 // Merged payment trail (where/how each was paid) for one Finance→Purchases row.
 export function usePurchasePaymentTrail(source, sourceId, enabled = true) {
   return useQuery({

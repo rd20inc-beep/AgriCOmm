@@ -353,21 +353,27 @@ module.exports = {
         return res.status(400).json({ success: false, message: `Cannot pay Rs ${payAmount} — only Rs ${currentDue.toFixed(2)} remaining.` });
       }
 
+      // A post-dated cheque (cheque with a future due_date) is recorded but does
+      // NOT settle the sale until it clears — the sale stays Partial/Unpaid.
+      const today = new Date(new Date().toDateString());
+      const isPostDated = payment_method === 'cheque' && due_date && new Date(due_date) > today;
+
       const newPaid = (parseFloat(sale.paid_amount) || 0) + payAmount;
       const newDue = Math.max(0, (parseFloat(sale.total_amount) || 0) - newPaid);
       const newStatus = newDue <= 0 ? 'Paid' : 'Partial';
 
       await db.transaction(async (trx) => {
-        // Update sale
-        await trx('local_sales').where({ id }).update({
-          paid_amount: uc.round2(newPaid),
-          due_amount: uc.round2(newDue),
-          payment_status: newStatus,
-          updated_at: trx.fn.now(),
-        });
+        if (!isPostDated) {
+          await trx('local_sales').where({ id }).update({
+            paid_amount: uc.round2(newPaid),
+            due_amount: uc.round2(newDue),
+            payment_status: newStatus,
+            updated_at: trx.fn.now(),
+          });
+        }
 
-        // Create payment record
-        const receiptAccountId = await resolveReceiptAccountId(trx, { paymentMode: payment_method, bankAccountId: bank_account_id, amount: payAmount });
+        // Create payment record (cleared=false for an uncleared post-dated cheque).
+        const receiptAccountId = isPostDated ? null : await resolveReceiptAccountId(trx, { paymentMode: payment_method, bankAccountId: bank_account_id, amount: payAmount });
         const payCount = await trx('payments').count('id as c').first();
         const [payRow] = await trx('payments').insert({
           payment_no: `PL-${(parseInt(payCount?.c) || 0) + 1}`,
@@ -378,6 +384,7 @@ module.exports = {
           base_amount_pkr: payAmount,
           payment_method: payment_method,
           due_date: due_date || null,
+          cleared: !isPostDated,
           bank_reference: reference || null,
           bank_account_id: receiptAccountId || bank_account_id || null,
           payment_date: payment_date || trx.fn.now(),
@@ -386,29 +393,31 @@ module.exports = {
           created_by: req.user?.id || null,
         }).returning('id');
 
-        // Cash / bank receipt → move the receiving account's balance.
-        await postReceiptToAccount(trx, {
-          accountId: receiptAccountId, amount: payAmount, paymentId: payRow.id,
-          reference: reference || sale.sale_no, notes: `Payment for local sale ${sale.sale_no}`,
-          date: payment_date, userId: req.user?.id,
-        });
-
-        // Update linked receivable — prefer FK, fall back to notes search
-        const receivable = await trx('receivables')
-          .where('local_sale_id', id)
-          .first()
-          || await trx('receivables')
-            .where('notes', 'ilike', `%${sale.sale_no}%`)
-            .first();
-        if (receivable) {
-          const rcvNewReceived = (parseFloat(receivable.received_amount) || 0) + payAmount;
-          const rcvNewOutstanding = Math.max(0, (parseFloat(receivable.expected_amount) || 0) - rcvNewReceived);
-          await trx('receivables').where({ id: receivable.id }).update({
-            received_amount: uc.round2(rcvNewReceived),
-            outstanding: uc.round2(rcvNewOutstanding),
-            status: rcvNewOutstanding <= 0 ? 'Paid' : 'Partial',
-            updated_at: trx.fn.now(),
+        if (!isPostDated) {
+          // Cash / bank receipt → move the receiving account's balance.
+          await postReceiptToAccount(trx, {
+            accountId: receiptAccountId, amount: payAmount, paymentId: payRow.id,
+            reference: reference || sale.sale_no, notes: `Payment for local sale ${sale.sale_no}`,
+            date: payment_date, userId: req.user?.id,
           });
+
+          // Update linked receivable — prefer FK, fall back to notes search
+          const receivable = await trx('receivables')
+            .where('local_sale_id', id)
+            .first()
+            || await trx('receivables')
+              .where('notes', 'ilike', `%${sale.sale_no}%`)
+              .first();
+          if (receivable) {
+            const rcvNewReceived = (parseFloat(receivable.received_amount) || 0) + payAmount;
+            const rcvNewOutstanding = Math.max(0, (parseFloat(receivable.expected_amount) || 0) - rcvNewReceived);
+            await trx('receivables').where({ id: receivable.id }).update({
+              received_amount: uc.round2(rcvNewReceived),
+              outstanding: uc.round2(rcvNewOutstanding),
+              status: rcvNewOutstanding <= 0 ? 'Paid' : 'Partial',
+              updated_at: trx.fn.now(),
+            });
+          }
         }
       });
 

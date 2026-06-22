@@ -16,6 +16,7 @@ router.get('/journal-entries', authorize('finance', 'view'), controller.getJourn
 router.get('/alerts', authorize('finance', 'view'), controller.getAlerts);
 router.get('/overview', authorize('finance', 'view'), controller.getOverview);
 router.get('/upcoming', authorize('finance', 'view'), controller.getUpcoming);
+router.post('/payments/:id/clear', authorize('finance', 'confirm_payment'), controller.clearCheque);
 router.post(
   '/payments',
   authorize('finance', 'confirm_payment'),

@@ -1376,6 +1376,7 @@ COL payments.amount:numeric:NOT NULL
 COL payments.bank_account_id:integer:NULL
 COL payments.bank_reference:character varying:NULL
 COL payments.base_amount_pkr:numeric:NOT NULL
+COL payments.cleared:boolean:NOT NULL
 COL payments.created_at:timestamp with time zone:NOT NULL
 COL payments.created_by:integer:NULL
 COL payments.currency:character varying:NOT NULL
