@@ -519,6 +519,12 @@ async function deleteMillingBatch(trx, req, id) {
   const batchNo = batch.batch_no;
   const batchRef = `batch-${id}`;
 
+  // Source lots fed into this batch (blends / byproduct re-mills). They belong
+  // to their OWN origin batch (different batch_ref), so the output-lot cleanup
+  // below never touches them — capture them now so their consumed stock can be
+  // handed back before the source links are deleted.
+  const sources = await trx('batch_source_lots').where('batch_id', id);
+
   // Delete the batch's inventory lots (raw + outputs) and their ledger/movements.
   const lots = await trx('inventory_lots').where('batch_ref', batchRef).select('id');
   const lotIds = lots.map((l) => l.id);
@@ -531,14 +537,62 @@ async function deleteMillingBatch(trx, req, id) {
     await delIfExists(trx, 'stock_count_items', (q) => q.whereIn('lot_id', lotIds));
     await trx('inventory_lots').whereIn('id', lotIds).del();
   }
+
+  // Hand consumed source-lot stock back. A Completed blend issued each source
+  // lot via a production_issue movement (lot_id = source, linked_ref = batchRef)
+  // that decremented qty / available_qty / net_weight_kg — reverse that exactly,
+  // then drop the consumption ledger. A pre-yield batch has no such movement
+  // (its lots were only flagged 'In Milling'), so we just release the flag.
+  // Without this the source lots stay Consumed/'In Milling' with their stock
+  // written off and invisible to the New-Batch picker.
+  for (const s of sources) {
+    const srcLot = await trx('inventory_lots').where('id', s.lot_id).first();
+    const consumed = await trx('inventory_movements')
+      .where({ linked_ref: batchRef, lot_id: s.lot_id, movement_type: 'production_issue' })
+      .sum('qty as q').first();
+    const consumedQty = num(consumed?.q);
+    if (srcLot) {
+      const restore = { status: 'Available', milling_status: null, updated_at: trx.fn.now() };
+      if (consumedQty > 0) {
+        restore.qty = num(srcLot.qty) + consumedQty;
+        restore.available_qty = num(srcLot.available_qty) + consumedQty;
+        restore.net_weight_kg = num(srcLot.net_weight_kg) + consumedQty * 1000;
+      }
+      await trx('inventory_lots').where('id', s.lot_id).update(restore);
+    }
+    await delIfExists(trx, 'inventory_movements', (q) => q.where({ linked_ref: batchRef, lot_id: s.lot_id }));
+    await delIfExists(trx, 'lot_transactions', (q) => q.where({ lot_id: s.lot_id, reference_no: batchRef }));
+  }
+
   for (const t of ['milling_vehicle_arrivals', 'milling_quality_samples', 'milling_quality_post', 'milling_costs', 'batch_source_lots', 'milling_output_market_prices']) {
     await delByCol(trx, t, 'batch_id', id);
   }
   await delByCol(trx, 'internal_transfers', 'batch_id', id);
+
+  // Reverse the batch's GL journals — the milling-completion entry and any
+  // rice-purchase accrual are both keyed by ref_no = batch_no. Deleting both
+  // legs keeps the trial balance balanced (Posted-only basis).
+  await trx('journal_lines').whereIn('journal_id', trx('journal_entries').where('ref_no', batchNo).select('id')).del();
+  await trx('journal_entries').where('ref_no', batchNo).del();
+
+  // Drop the raw-rice purchase payable a procurement-fed batch accrues
+  // (MILL-RICE-<batchNo>, source_table 'milling_raw_rice') plus its payment trail
+  // — otherwise it dangles after the batch is gone.
+  const payableIds = (await trx('payables').where({ source_table: 'milling_raw_rice', source_id: id }).select('id')).map((p) => p.id);
+  if (payableIds.length) {
+    const payIds = (await trx('payments').whereIn('linked_payable_id', payableIds).select('id')).map((p) => p.id);
+    if (payIds.length) {
+      await delIfExists(trx, 'bank_transactions', (q) => q.whereIn('linked_payment_id', payIds));
+      await trx('payments').whereIn('linked_payable_id', payableIds).del();
+    }
+    await trx('payables').whereIn('id', payableIds).del();
+  }
+
   await trx('milling_batches').where('id', id).del();
 
   await auditDanger(trx, req, 'hard_delete', 'milling_batch', id, { batch_no: batchNo, snapshot: batch });
-  return { message: `Milling batch ${batchNo} deleted (lots, vehicles, costs & quality removed).`, batch_no: batchNo };
+  const restored = sources.length ? ` ${sources.length} source lot(s) restored.` : '';
+  return { message: `Milling batch ${batchNo} deleted (lots, vehicles, costs, journals & payables removed).${restored}`, batch_no: batchNo };
 }
 
 // Delete a master record only if nothing live still references it.
