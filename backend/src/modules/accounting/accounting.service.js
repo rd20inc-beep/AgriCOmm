@@ -1136,10 +1136,11 @@ const accountingService = {
     const orderSummary = (o) => {
       const qty = parseFloat(o.qty_mt) || 0;
       const price = parseFloat(o.price_per_mt) || 0;
+      const perKg = price > 0 ? price / 1000 : 0;
       return [
         o.product_name,
         qty > 0 ? `${qty} ${o.quantity_unit || 'MT'}` : '',
-        price > 0 ? `@ ${price.toLocaleString()}/MT` : '',
+        price > 0 ? `@ ${price.toLocaleString()}/MT (${perKg.toLocaleString(undefined, { maximumFractionDigits: 3 })}/kg)` : '',
         o.incoterm,
         o.total_bags ? `${o.total_bags} bags` : '',
       ].filter(Boolean).join(' · ');
