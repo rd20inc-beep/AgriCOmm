@@ -277,7 +277,7 @@ const ALLOWED_UPDATE_FIELDS = [
   'bag_printing', 'bag_color', 'bag_brand', 'bag_notes',
   'master_bag_size_kg', 'master_bag_type',
   'receiving_mode', 'quantity_unit', 'packing_notes',
-  'packing_lines',
+  'packing_lines', 'doc_address_mode',
   // Document generation fields
   'hs_code', 'brand_marking', 'broken_pct_target', 'quality_description',
   'production_date', 'expiry_date', 'freight_terms', 'fi_number', 'fi_date',
@@ -383,6 +383,7 @@ const exportOrderController = {
           'eo.*',
           'c.name as customer_name',
           'c.country as customer_country',
+          'c.address as customer_address',
           'c.email as customer_email',
           'p.name as product_name'
         )
@@ -674,6 +675,8 @@ const exportOrderController = {
             master_bag_size_kg: master_bag_size_kg ? parseFloat(master_bag_size_kg) : null,
             master_bag_type: master_bag_type || null,
             payment_terms: payment_terms || null,
+            // How much buyer address to print on documents ('country' | 'full')
+            doc_address_mode: req.body.doc_address_mode === 'full' ? 'full' : 'country',
             // Packing / receiving mode
             receiving_mode: receiving_mode || null,
             quantity_unit: quantity_unit || null,

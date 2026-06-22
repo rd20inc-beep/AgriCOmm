@@ -6,7 +6,7 @@ import { useCreateExportOrder } from '../../../api/queries';
 import api from '../../../api/client';
 import {
   Save, Send, DollarSign, Calculator, ArrowLeft, Package, Truck,
-  User, ShoppingBag, ChevronRight, ChevronDown, ChevronLeft, Plus, Trash2, Info, FileText, Check,
+  User, ShoppingBag, ChevronRight, ChevronDown, ChevronLeft, Plus, Trash2, Info, FileText, Check, Edit3,
 } from 'lucide-react';
 import { validateForm, required, positiveNonZero } from '../../../utils/validation';
 import { toKg, fromKg, allEquivalents, UNITS } from '../../../utils/unitConversion';
@@ -77,7 +77,7 @@ export default function CreateExportOrder() {
     qtyMT: '', quantityUnit: 'ton', pricePerMT: '',
     // Section 4: Order terms
     currency: 'USD', incoterm: 'FOB', advancePct: 20, source: 'Internal Mill',
-    paymentTerms: 'CAD',
+    paymentTerms: 'CAD', docAddressMode: 'country',
     // Section 5: Receiving mode (shown after qty entered)
     receivingMode: '',
     // Section 6: Bag spec (shown only when receiving mode needs it)
@@ -218,6 +218,7 @@ export default function CreateExportOrder() {
       currency: form.currency,
       contract_value: contractValue,
       incoterm: form.incoterm,
+      doc_address_mode: form.docAddressMode || 'country',
       advance_pct: advPct,
       advance_expected: advExpected,
       balance_expected: contractValue - advExpected,
@@ -384,10 +385,25 @@ export default function CreateExportOrder() {
           <div className="form-group">
             <label className="form-label flex items-center justify-between">
               <span>Customer *</span>
-              <button type="button" onClick={() => setShowAddCustomer(true)}
-                className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1">
-                <Plus className="w-3 h-3" /> New Buyer
-              </button>
+              <span className="flex items-center gap-3">
+                {form.customerId && (
+                  <button type="button"
+                    onClick={() => {
+                      const c = customers.find(x => String(x.id) === String(form.customerId));
+                      if (!c) return;
+                      setNewCust({ id: c.id, name: c.name || '', country: c.country || '', address: c.address || '', email: c.email || '', phone: c.phone || '', contact_person: c.contact || '' });
+                      setShowAddCustomer(true);
+                    }}
+                    className="text-xs text-amber-600 hover:text-amber-800 font-medium flex items-center gap-1">
+                    <Edit3 className="w-3 h-3" /> Edit Buyer
+                  </button>
+                )}
+                <button type="button"
+                  onClick={() => { setNewCust({ name: '', country: '', address: '', email: '', phone: '', contact_person: '' }); setShowAddCustomer(true); }}
+                  className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1">
+                  <Plus className="w-3 h-3" /> New Buyer
+                </button>
+              </span>
             </label>
             <SearchSelect
               value={form.customerId}
@@ -500,6 +516,14 @@ export default function CreateExportOrder() {
               <option value="">Select…</option>
               {PAYMENT_TERMS.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Buyer Details on Documents</label>
+            <select value={form.docAddressMode} onChange={e => set('docAddressMode', e.target.value)} className="form-input">
+              <option value="country">Country only</option>
+              <option value="full">Full address + country</option>
+            </select>
+            <p className="text-[11px] text-gray-500 mt-1 leading-snug">Controls how much of the buyer's address prints on the proforma & export docs.</p>
           </div>
         </div>
 
@@ -936,12 +960,12 @@ export default function CreateExportOrder() {
         );
       })()}
 
-      {/* Quick Add Customer Modal */}
+      {/* Add / Edit Buyer drawer (edit mode when newCust.id is set) */}
       <SlideDrawer
         open={showAddCustomer}
         onClose={() => setShowAddCustomer(false)}
-        title="Add New Buyer"
-        icon={Plus}
+        title={newCust.id ? 'Edit Buyer' : 'Add New Buyer'}
+        icon={newCust.id ? Edit3 : Plus}
         size="md"
         footer={(
           <div className="flex gap-2 justify-end">
@@ -950,21 +974,30 @@ export default function CreateExportOrder() {
               onClick={async () => {
                 if (!newCust.name.trim()) { addToast('Company name is required', 'error'); return; }
                 try {
-                  const res = await api.post('/api/customers', newCust);
-                  const created = res?.data?.data?.customer || res?.data?.customer || res?.data;
-                  if (created?.id) {
-                    set('customerId', created.id);
-                    set('country', created.country || newCust.country || '');
+                  if (newCust.id) {
+                    // Edit existing buyer → applies now + flagged for admin review.
+                    const res = await api.put(`/api/admin/customers/${newCust.id}/submit-edit`, newCust);
+                    const c = res?.data?.data?.customer;
+                    set('country', (c?.country) || newCust.country || '');
                     qc.invalidateQueries({ queryKey: ['customers'] });
-                    addToast(`Buyer "${newCust.name}" added`, 'success');
+                    addToast(res?.data?.data?.pending ? `Changes to "${newCust.name}" sent for admin review` : `Buyer "${newCust.name}" updated`, 'success');
+                  } else {
+                    const res = await api.post('/api/customers', newCust);
+                    const created = res?.data?.data?.customer || res?.data?.customer || res?.data;
+                    if (created?.id) {
+                      set('customerId', created.id);
+                      set('country', created.country || newCust.country || '');
+                      qc.invalidateQueries({ queryKey: ['customers'] });
+                      addToast(`Buyer "${newCust.name}" added`, 'success');
+                    }
                   }
                   setShowAddCustomer(false);
                   setNewCust({ name: '', country: '', address: '', email: '', phone: '', contact_person: '' });
-                } catch (err) { addToast(err?.response?.data?.message || 'Failed to add buyer', 'error'); }
+                } catch (err) { addToast(err?.response?.data?.message || 'Failed to save buyer', 'error'); }
               }}
               className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
             >
-              Add Buyer
+              {newCust.id ? 'Save Changes' : 'Add Buyer'}
             </button>
           </div>
         )}

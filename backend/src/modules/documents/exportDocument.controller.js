@@ -122,7 +122,9 @@ const exportDocumentController = {
         // Buyer
         buyer: {
           name: order.customer_name || '',
-          address: order.customer_address || '',
+          // Buyer address only printed when the order opts into 'full' mode;
+          // otherwise documents show name + country only.
+          address: order.doc_address_mode === 'full' ? (order.customer_address || '') : '',
           country: order.customer_country || order.country || '',
           contact: order.contact_person || '',
           email: order.customer_email || '',

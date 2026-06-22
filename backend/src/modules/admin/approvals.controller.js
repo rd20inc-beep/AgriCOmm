@@ -116,6 +116,42 @@ const approvalsController = {
     }
   },
 
+  // ─────────────── Edit an existing customer (apply + flag for review) ───────────────
+  // An order-taker can edit a customer inline; the change applies immediately
+  // but the customer is flagged 'pending' so an admin reviews it (auto-approved
+  // when the caller already has approval rights).
+  async submitCustomerEdit(req, res) {
+    try {
+      const { id } = req.params;
+      const cust = await db('customers').where({ id }).first();
+      if (!cust) return res.status(404).json({ success: false, message: 'Customer not found.' });
+      const { name, contact_person, phone, email, address, country } = req.body || {};
+      if (name != null && !String(name).trim()) {
+        return res.status(400).json({ success: false, message: 'Customer name cannot be empty.' });
+      }
+      const autoApprove = await callerCanAutoApprove(req);
+      const now = db.fn.now();
+      const [customer] = await db('customers').where({ id }).update({
+        name: name != null ? String(name).trim() : cust.name,
+        contact_person: contact_person !== undefined ? (contact_person || null) : cust.contact_person,
+        phone: phone !== undefined ? (phone || null) : cust.phone,
+        email: email !== undefined ? (email || null) : cust.email,
+        address: address !== undefined ? (address || null) : cust.address,
+        country: country !== undefined ? (country || null) : cust.country,
+        approval_status: autoApprove ? 'approved' : 'pending',
+        submitted_by: req.user?.id || null,
+        submitted_at: now,
+        reviewed_by: autoApprove ? (req.user?.id || null) : null,
+        reviewed_at: autoApprove ? now : null,
+        updated_at: now,
+      }).returning('*');
+      return res.json({ success: true, data: { customer, pending: !autoApprove } });
+    } catch (err) {
+      console.error('submitCustomerEdit error:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
   // ─────────────── Quick-add: product (rice type) ───────────────
   async quickAddProduct(req, res) {
     try {

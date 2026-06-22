@@ -26,6 +26,7 @@ const createExportOrder = Joi.object({
     'EXW', 'FCA', 'FAS', 'FOB', 'CFR', 'CNF', 'CIF', 'CPT', 'CIP', 'DAP', 'DPU', 'DDP'
   ).required(),
   advance_pct: Joi.number().min(0).max(100).default(20),
+  doc_address_mode: Joi.string().valid('country', 'full').default('country'),
   advance_expected: Joi.number().min(0).default(0),
   balance_expected: Joi.number().min(0).default(0),
   shipment_eta: Joi.date().iso().allow(null, ''),

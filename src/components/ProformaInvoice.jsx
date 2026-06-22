@@ -217,6 +217,11 @@ export default function ProformaInvoice({ order, companyProfile }) {
             <p className="font-bold text-base" style={{ color: '#1e3a5f' }}>
               {order.customerName}
             </p>
+            {order.docAddressMode === 'full' && order.customerAddress && (
+              <p className="text-sm mt-1 whitespace-pre-line" style={{ color: '#64748b' }}>
+                {order.customerAddress}
+              </p>
+            )}
             <p className="text-sm mt-1" style={{ color: '#64748b' }}>
               {order.country}
             </p>
