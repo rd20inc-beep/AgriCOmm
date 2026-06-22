@@ -11,7 +11,6 @@ import { useApp } from '../../../context/AppContext';
 import { useMillStoreItems } from '../../millStore/api/queries';
 import { LoadingSpinner, ErrorState, EmptyState } from '../../../components/LoadingState';
 import StatusBadge from '../../../components/StatusBadge';
-import Modal from '../../../components/Modal';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { adminApi } from '../../admin/api/services';
 import { localSalesApi } from '../../../api/services';
@@ -35,7 +34,7 @@ export default function LocalSales() {
   const [selectedSale, setSelectedSale] = useState(null);
   const [salePayments, setSalePayments] = useState([]);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [payForm, setPayForm] = useState({ amount: '', payment_method: 'cash', bank_account_id: '', payment_date: new Date().toISOString().split('T')[0], reference: '', notes: '', due_date: '' });
+  const [payForm, setPayForm] = useState({ amount: '', payment_method: 'cash', bank_account_id: '', payment_date: new Date().toISOString().split('T')[0], reference: '', notes: '', due_date: '', collection_location: 'Mill' });
   const [payLoading, setPayLoading] = useState(false);
 
   const { data: sales = [], isLoading, error, refetch } = useLocalSales();
@@ -304,7 +303,7 @@ export default function LocalSales() {
             </div>
 
             {parseFloat(selectedSale.dueAmount) > 0 && (
-              <button onClick={() => { setPayForm(p => ({ ...p, amount: String(parseFloat(selectedSale.dueAmount) || 0) })); setShowPaymentModal(true); }}
+              <button onClick={() => { setPayForm(p => ({ ...p, amount: String(parseFloat(selectedSale.dueAmount) || 0), collection_location: selectedSale.collectionLocation || selectedSale.collection_location || 'Mill' })); setShowPaymentModal(true); }}
                 className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700">
                 <CreditCard size={16} /> Accept Payment ({fmtPKR(selectedSale.dueAmount)})
               </button>
@@ -332,8 +331,39 @@ export default function LocalSales() {
         </SlideDrawer>
       )}
 
-      {/* Payment Modal */}
-      <Modal isOpen={showPaymentModal} onClose={() => setShowPaymentModal(false)} title="Accept Payment" size="sm">
+      {/* Accept Payment — right slide-over (SlideDrawer convention) */}
+      <SlideDrawer
+        open={showPaymentModal}
+        onClose={() => setShowPaymentModal(false)}
+        title="Accept Payment"
+        subtitle={selectedSale?.saleNo ? `Sale ${selectedSale.saleNo}` : undefined}
+        icon={CreditCard}
+        size="md"
+        footer={(
+          <div className="flex justify-end gap-3">
+            <button onClick={() => setShowPaymentModal(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+            <button onClick={async () => {
+              if (!payForm.amount || parseFloat(payForm.amount) <= 0) { addToast('Enter a valid amount', 'error'); return; }
+              if (payForm.payment_method === 'bank_transfer' && !payForm.bank_account_id) { addToast('Select the bank account that received the payment', 'error'); return; }
+              setPayLoading(true);
+              try {
+                await payMutation.mutateAsync({ saleId: selectedSale.id, data: payForm });
+                addToast(`Payment of ${fmtPKR(payForm.amount)} accepted`, 'success');
+                const updated = await localSalesApi.get(selectedSale.id);
+                setSelectedSale(updated?.data?.sale || selectedSale);
+                const payRes = await localSalesApi.getPayments(selectedSale.id);
+                setSalePayments(payRes?.data?.payments || []);
+                setShowPaymentModal(false);
+                setPayForm({ amount: '', payment_method: 'cash', bank_account_id: '', payment_date: new Date().toISOString().split('T')[0], reference: '', notes: '', due_date: '', collection_location: 'Mill' });
+              } catch (err) { addToast(err.message || 'Payment failed', 'error'); }
+              setPayLoading(false);
+            }} disabled={payLoading}
+              className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50">
+              {payLoading ? 'Processing...' : 'Confirm Payment'}
+            </button>
+          </div>
+        )}
+      >
         <div className="space-y-4">
           <div className="bg-blue-50 rounded-lg p-3 text-sm">
             <span className="text-blue-600">Remaining:</span> <span className="font-bold text-blue-900">{fmtPKR(selectedSale?.dueAmount)}</span>
@@ -354,6 +384,18 @@ export default function LocalSales() {
               <input type="date" value={payForm.payment_date} onChange={e => setPayForm(p => ({...p, payment_date: e.target.value}))} className={INPUT} />
             </div>
           </div>
+          {/* Where the cash / udhaar was collected (cash receipts only) */}
+          {payForm.payment_method === 'cash' && (
+            <div>
+              <label className={LABEL}>Collected at</label>
+              <div className="grid grid-cols-2 gap-2">
+                {['Mill', 'Head Office'].map(loc => (
+                  <button key={loc} type="button" onClick={() => setPayForm(p => ({ ...p, collection_location: loc }))}
+                    className={`px-3 py-2 text-sm font-medium rounded-lg border ${payForm.collection_location === loc ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>{loc}</button>
+                ))}
+              </div>
+            </div>
+          )}
           {payForm.payment_method === 'bank_transfer' && (
             <div>
               <label className={LABEL}>Bank Account *</label>
@@ -374,30 +416,8 @@ export default function LocalSales() {
             </div>
           )}
           <p className="text-[11px] text-gray-400">Cash and bank receipts update the account balance.</p>
-          <div className="flex justify-end gap-3 pt-3 border-t">
-            <button onClick={() => setShowPaymentModal(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-            <button onClick={async () => {
-              if (!payForm.amount || parseFloat(payForm.amount) <= 0) { addToast('Enter a valid amount', 'error'); return; }
-              if (payForm.payment_method === 'bank_transfer' && !payForm.bank_account_id) { addToast('Select the bank account that received the payment', 'error'); return; }
-              setPayLoading(true);
-              try {
-                await payMutation.mutateAsync({ saleId: selectedSale.id, data: payForm });
-                addToast(`Payment of ${fmtPKR(payForm.amount)} accepted`, 'success');
-                const updated = await localSalesApi.get(selectedSale.id);
-                setSelectedSale(updated?.data?.sale || selectedSale);
-                const payRes = await localSalesApi.getPayments(selectedSale.id);
-                setSalePayments(payRes?.data?.payments || []);
-                setShowPaymentModal(false);
-                setPayForm({ amount: '', payment_method: 'cash', bank_account_id: '', payment_date: new Date().toISOString().split('T')[0], reference: '', notes: '', due_date: '' });
-              } catch (err) { addToast(err.message || 'Payment failed', 'error'); }
-              setPayLoading(false);
-            }} disabled={payLoading}
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50">
-              {payLoading ? 'Processing...' : 'Confirm Payment'}
-            </button>
-          </div>
         </div>
-      </Modal>
+      </SlideDrawer>
     </div>
   );
 }

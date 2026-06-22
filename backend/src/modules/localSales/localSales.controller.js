@@ -337,7 +337,7 @@ module.exports = {
   async acceptPayment(req, res) {
     try {
       const { id } = req.params;
-      const { amount, payment_method = 'cash', payment_date, reference, notes, bank_account_id, due_date } = req.body;
+      const { amount, payment_method = 'cash', payment_date, reference, notes, bank_account_id, due_date, collection_location } = req.body;
 
       if (!amount || parseFloat(amount) <= 0) {
         return res.status(400).json({ success: false, message: 'A positive amount is required.' });
@@ -368,6 +368,8 @@ module.exports = {
             paid_amount: uc.round2(newPaid),
             due_amount: uc.round2(newDue),
             payment_status: newStatus,
+            // Record WHERE this cash/udhaar was collected (Mill / Head Office).
+            ...(collection_location ? { collection_location } : {}),
             updated_at: trx.fn.now(),
           });
         }
@@ -388,7 +390,7 @@ module.exports = {
           bank_reference: reference || null,
           bank_account_id: receiptAccountId || bank_account_id || null,
           payment_date: payment_date || trx.fn.now(),
-          notes: notes || `Payment for local sale ${sale.sale_no}`,
+          notes: notes || `Payment for local sale ${sale.sale_no}${collection_location && payment_method === 'cash' ? ` (collected at ${collection_location})` : ''}`,
           local_sale_id: parseInt(id),
           created_by: req.user?.id || null,
         }).returning('id');
