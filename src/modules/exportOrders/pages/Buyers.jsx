@@ -7,11 +7,12 @@ import { useBuyers, useSaveBuyer, useDeleteBuyer } from '../../../api/queries';
 import Modal from '../../../components/Modal';
 import StatusBadge from '../../../components/StatusBadge';
 import { PAYMENT_TERMS } from '../../../shared/constants/paymentTerms';
+import { PORTS } from '../../../shared/constants/ports';
 
 const CURRENCIES = ['USD', 'PKR', 'EUR', 'GBP', 'AED'];
 
 const emptyForm = {
-  name: '', country: '', contact_person: '', email: '', phone: '', address: '',
+  name: '', country: '', port: '', contact_person: '', email: '', phone: '', address: '',
   payment_terms: 'CAD', currency: 'USD', credit_limit: '',
   bank_name: '', bank_account: '', bank_swift: '', bank_iban: '',
 };
@@ -60,6 +61,7 @@ export default function Buyers() {
     setForm({
       name: buyer.name || '',
       country: buyer.country || '',
+      port: buyer.port || '',
       contact_person: buyer.contact_person || '',
       email: buyer.email || '',
       phone: buyer.phone || '',
@@ -174,6 +176,7 @@ export default function Buyers() {
                     {b.country ? (
                       <span className="inline-flex items-center gap-1 text-gray-700"><Globe className="w-3.5 h-3.5 text-gray-400" />{b.country}</span>
                     ) : <span className="text-gray-400">—</span>}
+                    {b.port && <div className="text-xs text-gray-500 mt-0.5">Port: {b.port}</div>}
                   </td>
                   <td className="px-4 py-3">
                     <div className="text-gray-900">{b.contact_person || '—'}</div>
@@ -220,6 +223,13 @@ export default function Buyers() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
               <input type="text" value={form.country} onChange={e => set('country', e.target.value)} placeholder="e.g. UAE" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Port</label>
+              <input type="text" list="buyers-port-list" value={form.port} onChange={e => set('port', e.target.value)} placeholder="Select or type a port…" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              <datalist id="buyers-port-list">
+                {PORTS.map(p => <option key={p} value={p} />)}
+              </datalist>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Contact Person</label>
