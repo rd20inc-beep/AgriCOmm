@@ -1760,6 +1760,22 @@ const millingController = {
           await trx('inventory_lots').where('id', lot.id).del();
         }
 
+        // Release blend/byproduct source lots: they were flagged 'In Milling'
+        // when the batch was created but (for a non-Completed batch) never
+        // consumed — so reset them to Available, otherwise they'd stay reserved
+        // and vanish from the New-Batch picker forever. The status check above
+        // already blocks Completed batches, so nothing here was drawn down.
+        const sourceLots = await trx('batch_source_lots').where({ batch_id: batchId });
+        for (const s of sourceLots) {
+          const srcLot = await trx('inventory_lots').where({ id: s.lot_id }).first();
+          if (srcLot && srcLot.milling_status === 'In Milling') {
+            await trx('inventory_lots').where({ id: s.lot_id }).update({
+              milling_status: null, status: 'Available', updated_at: trx.fn.now(),
+            });
+          }
+        }
+        await trx('batch_source_lots').where({ batch_id: batchId }).del();
+
         await trx('milling_vehicle_arrivals').where({ batch_id: batchId }).del();
         await trx('milling_quality_samples').where({ batch_id: batchId }).del();
         try { await trx('milling_costs').where({ batch_id: batchId }).del(); } catch (_) { /* table may differ */ }
