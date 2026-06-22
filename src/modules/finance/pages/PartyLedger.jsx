@@ -5,6 +5,8 @@ import { Users, Truck, BookUser, Scale, ArrowDownLeft, ArrowUpRight, Printer, Fi
 import { FinanceKPI } from '../../../components/finance';
 import StatementPayDrawer from '../components/StatementPayDrawer';
 import SearchSelect from '../../../shared/components/SearchSelect';
+import LedgerTypeCounts from '../../milling/components/LedgerTypeCounts';
+import PartyAllocationLedger from '../../milling/components/PartyAllocationLedger';
 import { accountingApi } from '../../accounting/api/services';
 import { useCustomers, useSuppliers } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
@@ -59,6 +61,7 @@ export default function PartyLedger() {
   // to local-sales customers (export buyers stay hidden from the mill).
   const scope = searchParams.get('scope') === 'local' ? 'local' : null;
   const [payOpen, setPayOpen] = useState(false);
+  const [view, setView] = useState('statement'); // 'statement' | 'allocation'
 
   // Merge a patch into the query string, preserving unrelated params
   // (e.g. FinanceLayout's ?range=). Null/'' values delete the key.
@@ -249,13 +252,25 @@ export default function PartyLedger() {
               subtitle={showUsd ? `${balanceLabel} · ≈ ${fmtCurCompact(closingUsd, 'USD')}` : balanceLabel} status={closing > 0 ? 'warning' : 'good'} loading={stmtLoading} />
           </div>
 
-          {/* Section heading */}
-          <div className="flex items-center gap-2 text-sm text-gray-700 pt-1">
-            <FileText size={15} className="text-blue-500" />
-            <span className="font-semibold">Transactions</span>
-            <span className="text-xs text-gray-400 hidden sm:inline">— posted journal lines, oldest first.</span>
+          {/* Section heading + Statement | Allocation toggle */}
+          <div className="flex items-center justify-between gap-2 pt-1">
+            <div className="flex items-center gap-2 text-sm text-gray-700">
+              <FileText size={15} className="text-blue-500" />
+              <span className="font-semibold">{view === 'allocation' ? 'Invoice allocation' : 'Transactions'}</span>
+              <span className="text-xs text-gray-400 hidden sm:inline">
+                {view === 'allocation' ? '— each invoice with the payments applied.' : '— posted journal lines, oldest first.'}
+              </span>
+            </div>
+            <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5 text-xs no-print">
+              <button onClick={() => setView('statement')} className={`px-2.5 py-1 rounded-md font-medium ${view === 'statement' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Statement</button>
+              <button onClick={() => setView('allocation')} className={`px-2.5 py-1 rounded-md font-medium ${view === 'allocation' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Allocation</button>
+            </div>
           </div>
 
+          {view === 'allocation' ? (
+            <PartyAllocationLedger partyType={mode} partyId={partyId} />
+          ) : (
+          <>
           {/* Ledger table */}
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
             {stmtLoading ? (
@@ -270,8 +285,8 @@ export default function PartyLedger() {
                   <thead>
                     <tr className="border-b border-gray-200 bg-gray-50 text-xs uppercase text-gray-500">
                       <th className="text-left py-2.5 px-3 font-semibold">Date</th>
-                      <th className="text-left py-2.5 px-3 font-semibold">Journal #</th>
-                      <th className="text-left py-2.5 px-3 font-semibold">Reference</th>
+                      <th className="text-left py-2.5 px-3 font-semibold">Vch Type</th>
+                      <th className="text-left py-2.5 px-3 font-semibold">Vch No</th>
                       <th className="text-left py-2.5 px-3 font-semibold">Description</th>
                       <th className="text-right py-2.5 px-3 font-semibold">Debit</th>
                       <th className="text-right py-2.5 px-3 font-semibold">Credit</th>
@@ -303,12 +318,12 @@ export default function PartyLedger() {
                             <td className="py-2.5 px-3 text-gray-600 whitespace-nowrap text-xs">
                               {t.date ? new Date(t.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '—'}
                             </td>
-                            <td className="py-2.5 px-3 font-mono text-xs text-gray-700 whitespace-nowrap">{t.journal_no || '—'}</td>
+                            <td className="py-2.5 px-3 text-xs text-gray-600 whitespace-nowrap">{t.vch_type || '—'}</td>
                             <td className="py-2.5 px-3 text-xs whitespace-nowrap">
                               {t.ref_no
                                 ? (href
-                                    ? <Link to={href} className="text-blue-600 hover:underline font-medium">{t.ref_no}</Link>
-                                    : <span className="text-gray-700">{t.ref_no}</span>)
+                                    ? <Link to={href} className="text-blue-600 hover:underline font-medium">{t.vch_no || t.ref_no}</Link>
+                                    : <span className="text-gray-700">{t.vch_no || t.ref_no}</span>)
                                 : <span className="text-gray-400">—</span>}
                             </td>
                             <td className="py-2.5 px-3 text-gray-700" style={{ maxWidth: 260 }}>
@@ -352,6 +367,11 @@ export default function PartyLedger() {
               </div>
             )}
           </div>
+
+          {/* Transaction-type-count footer (LedgerReport.pdf style) */}
+          {transactions.length > 0 && <LedgerTypeCounts counts={statement?.type_counts} />}
+          </>
+          )}
         </div>
       )}
 

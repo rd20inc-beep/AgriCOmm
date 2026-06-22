@@ -1083,10 +1083,37 @@ const accountingService = {
       )
       .orderBy(['je.date', 'je.id']);
 
+    // Detailed sale narration for export lines: an EX- journal line links to an
+    // export_orders row with the product, quantity, price and incoterm. Append
+    // that summary so the ledger carries the full sale, not just "Adv rcpt EX-1".
+    const exRefs = [...new Set(journalTxns.map((t) => t.ref_no).filter((r) => r && /^EX-/i.test(r)))];
+    const exOrders = exRefs.length
+      ? await db('export_orders').whereIn('order_no', exRefs)
+        .select('order_no', 'product_name', 'qty_mt', 'quantity_unit', 'price_per_mt', 'incoterm', 'total_bags')
+      : [];
+    const exByNo = Object.fromEntries(exOrders.map((o) => [o.order_no, o]));
+    const enrichExport = (refNo, desc) => {
+      const o = refNo && exByNo[refNo];
+      if (!o) return desc;
+      const qty = parseFloat(o.qty_mt) || 0;
+      const price = parseFloat(o.price_per_mt) || 0;
+      const bits = [
+        o.product_name,
+        qty > 0 ? `${qty} ${o.quantity_unit || 'MT'}` : '',
+        price > 0 ? `@ ${price.toLocaleString()}/MT` : '',
+        o.incoterm,
+        o.total_bags ? `${o.total_bags} bags` : '',
+      ].filter(Boolean);
+      if (!bits.length) return desc;
+      const summary = bits.join(' · ');
+      // Don't double up if the product name is already in the description.
+      return (desc && o.product_name && desc.includes(o.product_name)) ? desc : `${desc || refNo} — ${summary}`;
+    };
+
     // Merge journal + local-sales rows into one date-sorted ledger.
     const merged = [
       ...journalTxns.map((t) => ({
-        date: t.date, journal_no: t.journal_no, ref_no: t.ref_no, description: t.description,
+        date: t.date, journal_no: t.journal_no, ref_no: t.ref_no, description: enrichExport(t.ref_no, t.description),
         account_code: t.account_code, account_name: t.account_name,
         nd: parseFloat(t.debit), nc: parseFloat(t.credit),
         currency: t.currency, fx_rate: t.fx_rate, orig_fx_rate: t.orig_fx_rate, orig_currency: t.orig_currency,
@@ -1176,7 +1203,48 @@ const accountingService = {
     const payables = await db('payables')
       .where({ supplier_id: sid })
       .select('id', 'pay_no', 'linked_ref', 'original_amount', 'paid_amount',
-        'currency', 'due_date', 'created_at', 'category', 'source_table');
+        'currency', 'due_date', 'created_at', 'category', 'source_table', 'notes');
+
+    // Detailed purchase narration: raw-rice payables link to an inventory_lots
+    // row (by lot_no = linked_ref) carrying the full buy — rice type, variety,
+    // grade, net weight, rate/kg, bags, moisture. Pull them once so each
+    // purchase line in the ledger reads like the PDF narration rather than a
+    // bare "Payable PAY-001".
+    const lotRefs = [...new Set(payables.map((p) => p.linked_ref).filter(Boolean))];
+    const lotRows = lotRefs.length
+      ? await db('inventory_lots').whereIn('lot_no', lotRefs)
+        .select('lot_no', 'product_id', 'variety', 'grade', 'net_weight_kg', 'rate_per_kg', 'total_bags', 'moisture_pct')
+      : [];
+    const lotProdIds = [...new Set(lotRows.map((l) => l.product_id).filter(Boolean))];
+    const lotProds = lotProdIds.length
+      ? await db('products').whereIn('id', lotProdIds).select('id', 'name')
+      : [];
+    const lotProdName = Object.fromEntries(lotProds.map((p) => [p.id, p.name]));
+    const lotByNo = {};
+    lotRows.forEach((l) => { lotByNo[l.lot_no] = l; });
+    const num0 = (v) => parseFloat(v) || 0;
+    const describePurchase = (p) => {
+      const lot = p.linked_ref && lotByNo[p.linked_ref];
+      const ref = p.linked_ref || p.pay_no || '';
+      if (!lot) {
+        // No lot link — fall back to the payable's own notes / category.
+        const tail = [p.category, p.notes].filter(Boolean).join(' · ');
+        return `Purchase ${ref}${tail ? ` — ${tail}` : ''}`.trim();
+      }
+      const kg = num0(lot.net_weight_kg);
+      const mt = kg / 1000;
+      const rate = num0(lot.rate_per_kg);
+      const bits = [
+        lotProdName[lot.product_id] || 'Raw rice',
+        lot.variety,
+        lot.grade ? `Grade ${lot.grade}` : '',
+        kg > 0 ? `${Math.round(kg).toLocaleString()} kg${mt >= 1 ? ` (${mt.toFixed(2)} MT)` : ''}` : '',
+        rate > 0 ? `@ Rs ${rate.toLocaleString()}/kg` : '',
+        lot.total_bags ? `${lot.total_bags} bags` : '',
+        num0(lot.moisture_pct) > 0 ? `${lot.moisture_pct}% moisture` : '',
+      ].filter(Boolean);
+      return `Purchase ${ref} — ${bits.join(' · ')}`;
+    };
     const payableIds = payables.map((p) => p.id);
     const payments = payableIds.length
       ? await db('payments').whereIn('linked_payable_id', payableIds).select('payment_no')
@@ -1242,13 +1310,11 @@ const accountingService = {
       const paid = parseFloat(p.paid_amount) || 0;
       const date = dayOf(p.due_date) || dayOf(p.created_at);
       const refNo = p.pay_no || p.linked_ref || null;
-      const label = `Payable ${refNo || ''}`.trim()
-        + (p.category ? ` · ${p.category}` : '')
-        + (p.source_table ? ` (${p.source_table})` : '');
+      const label = describePurchase(p);
       const base = { date, journal_no: null, ref_no: refNo, account_code: '2000',
         account_name: 'Accounts Payable', currency: cur, fx_rate: 1, orig_currency: cur, orig_fx_rate: 0 };
       if (billed) synthetic.push({ ...base, description: label, debit: 0, credit: billed });
-      if (paid) synthetic.push({ ...base, description: `Payment against ${refNo || 'payable'}`, debit: paid, credit: 0 });
+      if (paid) synthetic.push({ ...base, description: `Payment against ${p.linked_ref || refNo || 'payable'}`, debit: paid, credit: 0 });
     }
 
     // Normalize one raw line (GL or synthetic) into PKR/USD figures.
