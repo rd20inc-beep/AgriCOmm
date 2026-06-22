@@ -992,41 +992,69 @@ const accountingService = {
         .first();
       openingBalance = parseFloat(openingResult.balance);
     }
+    // Local-sales (mill) transactions — credit/cash local sales create
+    // receivables but NOT party-stamped AR journals, so the journal scan above
+    // misses them. Pull them in directly: each sale is a debit (charge), each
+    // receipt against it a credit. (Export customers have no local sales → no-op.)
+    const localSalesRows = await db('local_sales').where('customer_id', cid)
+      .select('id', 'sale_no', 'total_amount', 'created_at');
+    const lsIds = localSalesRows.map((s) => s.id);
+    const lsPays = lsIds.length
+      ? await db('payments').whereIn('local_sale_id', lsIds).select('amount', 'payment_date', 'payment_no', 'payment_method')
+      : [];
+    const localRaw = [
+      ...localSalesRows.map((s) => ({ date: s.created_at, ref_no: s.sale_no, description: 'Local sale', d: parseFloat(s.total_amount) || 0, c: 0 })),
+      ...lsPays.map((p) => ({ date: p.payment_date, ref_no: p.payment_no, description: `Receipt${p.payment_method ? ` (${p.payment_method})` : ''}`, d: 0, c: parseFloat(p.amount) || 0 })),
+    ];
+    // Local rows before the window add to the opening balance.
+    for (const t of localRaw) {
+      if (dateFrom && t.date && new Date(t.date) < new Date(dateFrom)) openingBalance += (t.d - t.c);
+    }
     const openingBalanceUsd = usdRate ? openingBalance / usdRate : 0;
 
-    // Transactions within period
+    // Transactions within period (journal lines)
     let txnQuery = lineBase()
       .join('chart_of_accounts as coa', 'jl.account_id', 'coa.id');
 
     if (dateFrom) txnQuery = txnQuery.where('je.date', '>=', dateFrom);
     if (dateTo) txnQuery = txnQuery.where('je.date', '<=', dateTo);
 
-    const transactions = await txnQuery
+    const journalTxns = await txnQuery
       .select(
-        'je.date',
-        'je.journal_no',
-        'je.ref_no',
-        'je.description',
-        'coa.code as account_code',
-        'coa.name as account_name',
-        'jl.debit',
-        'jl.credit',
-        'je.currency',
-        'je.fx_rate',
-        'je.orig_currency',
-        'je.orig_fx_rate'
+        'je.date', 'je.journal_no', 'je.ref_no', 'je.description',
+        'coa.code as account_code', 'coa.name as account_name',
+        'jl.debit', 'jl.credit', 'je.currency', 'je.fx_rate',
+        'je.orig_currency', 'je.orig_fx_rate'
       )
       .orderBy(['je.date', 'je.id']);
+
+    // Merge journal + local-sales rows into one date-sorted ledger.
+    const merged = [
+      ...journalTxns.map((t) => ({
+        date: t.date, journal_no: t.journal_no, ref_no: t.ref_no, description: t.description,
+        account_code: t.account_code, account_name: t.account_name,
+        nd: parseFloat(t.debit), nc: parseFloat(t.credit),
+        currency: t.currency, fx_rate: t.fx_rate, orig_fx_rate: t.orig_fx_rate, orig_currency: t.orig_currency,
+      })),
+      ...localRaw.filter((t) => {
+        if (dateFrom && t.date && new Date(t.date) < new Date(dateFrom)) return false;
+        if (dateTo && t.date && new Date(t.date) > new Date(dateTo)) return false;
+        return true;
+      }).map((t) => ({
+        date: t.date, journal_no: null, ref_no: t.ref_no, description: t.description,
+        account_code: '1120', account_name: 'Local Sales A/R',
+        nd: t.d, nc: t.c, currency: 'PKR', fx_rate: 1, orig_fx_rate: null, orig_currency: null,
+      })),
+    ].sort((a, b) => new Date(a.date) - new Date(b.date));
 
     // Closing balance
     let runningBalance = openingBalance;
     let runningBalanceUsd = openingBalanceUsd;
-    const formattedTxns = transactions.map((t) => {
-      const nd = parseFloat(t.debit), nc = parseFloat(t.credit);
-      const debit = conv(nd, t.currency, t.fx_rate);
-      const credit = conv(nc, t.currency, t.fx_rate);
-      const debitUsd = usdOf(nd, t.currency, t.fx_rate, t.orig_fx_rate, t.orig_currency);
-      const creditUsd = usdOf(nc, t.currency, t.fx_rate, t.orig_fx_rate, t.orig_currency);
+    const formattedTxns = merged.map((t) => {
+      const debit = conv(t.nd, t.currency, t.fx_rate);
+      const credit = conv(t.nc, t.currency, t.fx_rate);
+      const debitUsd = usdOf(t.nd, t.currency, t.fx_rate, t.orig_fx_rate, t.orig_currency);
+      const creditUsd = usdOf(t.nc, t.currency, t.fx_rate, t.orig_fx_rate, t.orig_currency);
       runningBalance += (debit - credit);
       runningBalanceUsd += (debitUsd - creditUsd);
       return {
