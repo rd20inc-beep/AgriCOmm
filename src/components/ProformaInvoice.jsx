@@ -112,24 +112,36 @@ export default function ProformaInvoice({ order, companyProfile }) {
   const invoiceRef = useRef(null);
 
   // Open the invoice in a clean new window with the app's stylesheets, then
-  // print. This (vs in-page window.print()) prints the WHOLE document flowing
-  // across pages instead of clipping to the modal's first screenful, and uses a
-  // plain `@page { size: A4 }` so the browser's portrait/landscape toggle stays
-  // enabled (forcing `landscape` locked it).
+  // print it as a SINGLE A4 landscape page. The whole sheet is laid out at full
+  // page width and then uniformly scaled down (transform) so its height fits one
+  // page — i.e. fonts shrink as needed, never spilling onto a 2nd page.
   const openPrintable = () => {
     const node = invoiceRef.current;
     if (!node) return;
     const links = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
       .map((l) => l.outerHTML).join('');
     const title = `Proforma Invoice - ${order?.id || order?.orderNo || order?.order_no || ''}`.trim();
-    const w = window.open('', '_blank', 'width=1100,height=850');
+    const w = window.open('', '_blank', 'width=1200,height=860');
     if (!w) { window.print(); return; } // popup blocked → fall back
+    // A4 landscape printable area at 8mm margins ≈ 281mm × 194mm.
+    const fitScript =
+      'window.addEventListener("load",function(){setTimeout(function(){'
+      + 'var mm=96/25.4,pageW=281*mm,pageH=194*mm;'
+      + 'var box=document.getElementById("pi-scale");'
+      + 'var cw=box.scrollWidth,ch=box.scrollHeight;'
+      + 'var s=Math.min(pageW/cw,pageH/ch,1);'
+      + 'box.style.transform="scale("+s+")";'
+      + 'document.getElementById("pi-page").style.height=(ch*s)+"px";'
+      + 'window.focus();window.print();'
+      + '},300);});';
     w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${title}</title>${links}`
-      + `<style>@page{size:A4;margin:10mm}html,body{margin:0;padding:0;background:#fff}`
+      + `<style>@page{size:A4 landscape;margin:8mm}html,body{margin:0;padding:0;background:#fff}`
+      + `#pi-page{width:281mm;overflow:hidden}`
+      + `#pi-scale{transform-origin:top left;width:281mm}`
       + `.proforma-invoice{max-width:none!important;width:100%!important;box-shadow:none!important;margin:0!important;`
       + `-webkit-print-color-adjust:exact;print-color-adjust:exact}</style></head><body>`
-      + node.outerHTML
-      + `<script>window.addEventListener('load',function(){setTimeout(function(){window.focus();window.print();},250)});</script>`
+      + `<div id="pi-page"><div id="pi-scale">${node.outerHTML}</div></div>`
+      + `<script>${fitScript}</script>`
       + `</body></html>`);
     w.document.close();
   };
