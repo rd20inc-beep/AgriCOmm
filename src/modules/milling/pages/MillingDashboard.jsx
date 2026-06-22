@@ -14,6 +14,7 @@ import {
   Eye,
   Plus,
   ShoppingCart,
+  Check,
 } from 'lucide-react';
 import {
   LineChart,
@@ -36,6 +37,7 @@ import StatusBadge from '../../../components/StatusBadge';
 import Modal from '../../../components/Modal';
 import SlideDrawer from '../../../components/SlideDrawer';
 import RiceTypePicker from '../../../components/RiceTypePicker';
+import { lotCategory, CAT_ORDER, CAT_COLOR, NON_MILLABLE_CATEGORIES } from '../../../utils/lotCategory';
 import SupplierPicker from '../../../components/SupplierPicker';
 import MillExpenseDrawer from '../../../components/MillExpenseDrawer';
 // Chart data computed from real batch data below (no mock imports)
@@ -82,16 +84,27 @@ export default function MillingDashboard() {
   // varieties = blend). false = direct supplier + quantity (rice not yet a lot).
   const [useBlend, setUseBlend] = useState(true);
   const [blendProductId, setBlendProductId] = useState('');
-  const [blendRows, setBlendRows] = useState([{ lotId: '', qtyMt: '' }]);
+  const [blendRows, setBlendRows] = useState([]);
+  const [blendTag, setBlendTag] = useState('All'); // category filter for the lot picker
   const { data: products = [] } = useProducts();
-  // Available mill lots that can be fed to a batch (raw paddy + leftover
-  // finished rice), excluding ones already committed to milling.
+  // Available mill lots that can be fed to a batch — any rice form (raw paddy,
+  // finished rice, and re-blendable byproduct fractions like broken grades /
+  // powder / sweeping), excluding non-rice residue (bran/husk/packaging) and
+  // lots already committed to milling.
   const blendableLots = useMemo(() => (directInv || []).filter(l =>
     l.entity === 'mill'
-    && ['raw', 'finished'].includes(l.type)
     && parseFloat(l.availableQty) > 0
     && !['In Milling', 'Consumed'].includes(l.millingStatus)
+    && !NON_MILLABLE_CATEGORIES.includes(lotCategory(l))
   ), [directInv]);
+  // Category tags present among the millable lots (SaleModal-style filter).
+  const blendTags = useMemo(() => {
+    const present = new Set(blendableLots.map(lotCategory));
+    return ['All', ...CAT_ORDER.filter(c => present.has(c))];
+  }, [blendableLots]);
+  const filteredBlendLots = useMemo(() => (
+    blendTag === 'All' ? blendableLots : blendableLots.filter(l => lotCategory(l) === blendTag)
+  ), [blendableLots, blendTag]);
   const blendTotals = useMemo(() => {
     let mt = 0, cost = 0;
     for (const r of blendRows) {
@@ -131,7 +144,7 @@ export default function MillingDashboard() {
       millingFeePerKg: '5',
       millId: '', shift: 'Day', notes: '', clientName: '', clientContact: '', millingFeePerMT: '',
     });
-    setUseBlend(true); setBlendProductId(''); setBlendRows([{ lotId: '', qtyMt: '' }]);
+    setUseBlend(true); setBlendProductId(''); setBlendRows([]); setBlendTag('All');
   };
 
   // Deep-link: the Mill home dashboard's "New Batch" button navigates here with
@@ -1111,30 +1124,66 @@ export default function MillingDashboard() {
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="block text-sm font-medium text-gray-700">Stock Lot(s)</label>
-                  <span className="text-xs text-gray-400">{blendableLots.length} available</span>
+                  <span className="text-xs text-gray-400">
+                    {blendRows.filter(r => r.lotId).length} selected · {blendableLots.length} available
+                  </span>
                 </div>
-                {blendRows.map((row, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <select value={row.lotId}
-                      onChange={e => setBlendRows(rs => rs.map((r, j) => j === i ? { ...r, lotId: e.target.value } : r))}
-                      className="flex-1 min-w-0 border border-gray-300 rounded-lg px-2 py-2 text-sm outline-none bg-white">
-                      <option value="">Select lot…</option>
-                      {blendableLots.map(l => (
-                        <option key={l.id} value={l.id}>
-                          {(l.lotNo || l.itemName)} · {l.type === 'finished' ? 'Finished' : (l.variety || 'Raw')} · {parseFloat(l.availableQty).toFixed(1)}MT · Rs{Math.round(parseFloat(l.landedCostPerKg) || parseFloat(l.ratePerKg) || 0)}/kg
-                        </option>
-                      ))}
-                    </select>
-                    <input type="number" value={row.qtyMt} placeholder="MT" min="0"
-                      onChange={e => setBlendRows(rs => rs.map((r, j) => j === i ? { ...r, qtyMt: e.target.value } : r))}
-                      className="w-20 border border-gray-300 rounded-lg px-2 py-2 text-sm outline-none" />
-                    <button type="button" title="Remove"
-                      onClick={() => setBlendRows(rs => rs.length > 1 ? rs.filter((_, j) => j !== i) : [{ lotId: '', qtyMt: '' }])}
-                      className="p-1.5 text-gray-400 hover:text-red-600">✕</button>
+
+                {/* Category tags — filter the millable lots (SaleModal-style) */}
+                {blendTags.length > 1 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {blendTags.map(t => (
+                      <button key={t} type="button" onClick={() => setBlendTag(t)}
+                        className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${blendTag === t ? 'bg-gray-900 text-white border-gray-900' : `border-transparent ${t === 'All' ? 'bg-gray-100 text-gray-600' : CAT_COLOR[t] || 'bg-gray-100 text-gray-600'} hover:opacity-80`}`}>
+                        {t}
+                      </button>
+                    ))}
                   </div>
-                ))}
-                <button type="button" onClick={() => setBlendRows(rs => [...rs, { lotId: '', qtyMt: '' }])}
-                  className="text-xs font-medium text-blue-600 hover:text-blue-800">+ Add lot</button>
+                )}
+
+                {/* Multi-select lot list — click to add/remove; set MT per lot */}
+                <div className="max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white divide-y divide-gray-100">
+                  {filteredBlendLots.length === 0 ? (
+                    <p className="px-3 py-4 text-xs text-gray-400 text-center">No millable lots{blendTag !== 'All' ? ` in "${blendTag}"` : ''}.</p>
+                  ) : filteredBlendLots.map(l => {
+                    const sel = blendRows.find(r => String(r.lotId) === String(l.id));
+                    const cat = lotCategory(l);
+                    const avail = parseFloat(l.availableQty) || 0;
+                    const costKg = Math.round(parseFloat(l.landedCostPerKg) || parseFloat(l.ratePerKg) || 0);
+                    const over = sel && parseFloat(sel.qtyMt) > avail + 1e-6;
+                    return (
+                      <div key={l.id} className={`px-2.5 py-2 ${sel ? 'bg-blue-50/60' : 'hover:bg-gray-50'}`}>
+                        <div className="flex items-center gap-2">
+                          <button type="button"
+                            onClick={() => setBlendRows(rs => sel
+                              ? rs.filter(r => String(r.lotId) !== String(l.id))
+                              : [...rs, { lotId: String(l.id), qtyMt: '' }])}
+                            className="flex-1 min-w-0 flex items-center gap-2 text-left">
+                            <span className={`shrink-0 w-4 h-4 rounded border flex items-center justify-center ${sel ? 'bg-blue-600 border-blue-600' : 'border-gray-300 bg-white'}`}>
+                              {sel && <Check className="w-3 h-3 text-white" />}
+                            </span>
+                            <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${CAT_COLOR[cat] || 'bg-gray-100 text-gray-600'}`}>{cat}</span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-sm text-gray-800 truncate">{l.lotNo || l.itemName}</span>
+                              <span className="block text-[11px] text-gray-400 truncate">{l.variety || (l.type === 'finished' ? 'Finished' : 'Raw')} · {avail.toFixed(1)} MT{costKg > 0 ? ` · Rs${costKg.toLocaleString()}/kg` : ''}</span>
+                            </span>
+                          </button>
+                          {sel && (
+                            <div className="shrink-0 flex items-center gap-1">
+                              <input type="number" value={sel.qtyMt} placeholder="MT" min="0" max={avail} step="0.01" autoFocus
+                                onChange={e => setBlendRows(rs => rs.map(r => String(r.lotId) === String(l.id) ? { ...r, qtyMt: e.target.value } : r))}
+                                className={`w-20 border rounded-lg px-2 py-1.5 text-sm outline-none ${over ? 'border-red-400 bg-red-50' : 'border-gray-300'}`} />
+                              <button type="button" title="Use all"
+                                onClick={() => setBlendRows(rs => rs.map(r => String(r.lotId) === String(l.id) ? { ...r, qtyMt: String(avail) } : r))}
+                                className="text-[10px] font-medium text-blue-600 hover:text-blue-800 px-1">all</button>
+                            </div>
+                          )}
+                        </div>
+                        {over && <p className="ml-6 mt-0.5 text-[11px] text-red-600">Only {avail.toFixed(2)} MT available</p>}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
               {blendTotals.mt > 0 && (
                 <div className="flex justify-between text-sm border-t border-blue-200 pt-2">
