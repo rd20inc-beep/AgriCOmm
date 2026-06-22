@@ -53,6 +53,13 @@ export default function ProformaInvoice({ order, companyProfile }) {
   const currency = order.currency || 'USD';
   const currencySymbol = currency === 'USD' ? '$' : currency === 'EUR' ? '\u20AC' : currency;
 
+  // Packing string for a line — uses the line's own packing when stored,
+  // else composes it from the per-item bag size / type (+ master outer).
+  const composePacking = (size, type, master) => {
+    const base = `PACKED IN ${size} KG${size === 1 ? '' : 'S'} ${type || 'PP'} BAG`;
+    return master > 0 ? `${base}, MASTER ${master} KG OUTER` : base;
+  };
+
   // Build line-item rows. Multi-line P.I.s use order.items[]; legacy single-
   // product orders synthesize one row from the summary fields.
   const lineRows = (Array.isArray(order.items) && order.items.length > 0)
@@ -60,11 +67,14 @@ export default function ProformaInvoice({ order, companyProfile }) {
         const itemQty = parseFloat(it.qtyMT) || 0;
         const itemPrice = parseFloat(it.pricePerMT) || 0;
         const itemBagSize = parseFloat(it.bagSizeKg) || bagSizeKg;
+        const itemBagType = it.bagType || order.bagType || 'PP';
+        const itemMaster = parseFloat(it.masterBagSizeKg) || parseFloat(order.masterBagSizeKg) || 0;
         const itemBags = parseInt(it.bagCount, 10)
           || (itemQty > 0 && itemBagSize > 0 ? Math.round((itemQty * 1000) / itemBagSize) : 0);
         return {
           sno: idx + 1,
           description: it.productName || `Item ${idx + 1}`,
+          packing: it.packing || composePacking(itemBagSize, itemBagType, itemMaster),
           bagSizeKg: itemBagSize,
           bags: itemBags,
           qtyMT: itemQty,
@@ -75,6 +85,7 @@ export default function ProformaInvoice({ order, companyProfile }) {
     : [{
         sno: 1,
         description: order.productName || '',
+        packing: order.packing || composePacking(bagSizeKg, order.bagType, parseFloat(order.masterBagSizeKg) || 0),
         bagSizeKg,
         bags,
         qtyMT,
@@ -101,7 +112,7 @@ export default function ProformaInvoice({ order, companyProfile }) {
         /* Setting an explicit @page margin suppresses the browser-injected
            print header (date/time/URL) and footer (page numbers/URL) on
            Chrome/Edge/Safari/Firefox. */
-        @page { size: A4; margin: 12mm; }
+        @page { size: A4 landscape; margin: 10mm; }
         @media print {
           body * { visibility: hidden; }
           .proforma-invoice, .proforma-invoice * { visibility: visible; }
@@ -118,7 +129,7 @@ export default function ProformaInvoice({ order, companyProfile }) {
         }
       `}</style>
 
-      <div className="proforma-invoice bg-white max-w-4xl mx-auto shadow-lg" style={{ fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif" }}>
+      <div className="proforma-invoice bg-white max-w-6xl mx-auto shadow-lg" style={{ fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif" }}>
 
         {/* ===== 1. HEADER BAR ===== */}
         <div className="flex items-center justify-between px-8 py-5" style={{ backgroundColor: '#1e3a5f' }}>
@@ -234,13 +245,14 @@ export default function ProformaInvoice({ order, companyProfile }) {
           <table className="w-full text-sm border-collapse">
             <thead>
               <tr style={{ backgroundColor: '#1e3a5f' }}>
-                <th className="text-white text-left py-3 px-4 rounded-tl-lg font-semibold" style={{ width: '6%' }}>S.No</th>
-                <th className="text-white text-left py-3 px-4 font-semibold" style={{ width: '30%' }}>Description</th>
-                <th className="text-white text-center py-3 px-4 font-semibold" style={{ width: '10%' }}>Bag</th>
-                <th className="text-white text-center py-3 px-4 font-semibold" style={{ width: '12%' }}>Bags</th>
-                <th className="text-white text-center py-3 px-4 font-semibold" style={{ width: '12%' }}>Wt (MT)</th>
-                <th className="text-white text-right py-3 px-4 font-semibold" style={{ width: '14%' }}>Rate/MT</th>
-                <th className="text-white text-right py-3 px-4 rounded-tr-lg font-semibold" style={{ width: '16%' }}>Amount</th>
+                <th className="text-white text-left py-3 px-4 rounded-tl-lg font-semibold" style={{ width: '5%' }}>S.No</th>
+                <th className="text-white text-left py-3 px-4 font-semibold" style={{ width: '24%' }}>Description</th>
+                <th className="text-white text-left py-3 px-4 font-semibold" style={{ width: '20%' }}>Packing</th>
+                <th className="text-white text-center py-3 px-4 font-semibold" style={{ width: '9%' }}>Bag Size</th>
+                <th className="text-white text-center py-3 px-4 font-semibold" style={{ width: '10%' }}>Bag (Qty)</th>
+                <th className="text-white text-center py-3 px-4 font-semibold" style={{ width: '10%' }}>Wt (MT)</th>
+                <th className="text-white text-right py-3 px-4 font-semibold" style={{ width: '10%' }}>Rate/MT</th>
+                <th className="text-white text-right py-3 px-4 rounded-tr-lg font-semibold" style={{ width: '12%' }}>Amount</th>
               </tr>
             </thead>
             <tbody>
@@ -251,6 +263,7 @@ export default function ProformaInvoice({ order, companyProfile }) {
                   <td className="py-3 px-4 border-b font-semibold" style={{ borderColor: '#e2e8f0', color: '#1e3a5f' }}>
                     {row.description}
                   </td>
+                  <td className="py-3 px-4 border-b text-xs" style={{ borderColor: '#e2e8f0', color: '#334155' }}>{row.packing}</td>
                   <td className="py-3 px-4 border-b text-center" style={{ borderColor: '#e2e8f0', color: '#334155' }}>{row.bagSizeKg} KG</td>
                   <td className="py-3 px-4 border-b text-center font-medium" style={{ borderColor: '#e2e8f0', color: '#334155' }}>
                     {row.bags.toLocaleString()}
@@ -269,7 +282,7 @@ export default function ProformaInvoice({ order, companyProfile }) {
 
               {/* Subtotal Row */}
               <tr>
-                <td colSpan={5} />
+                <td colSpan={6} />
                 <td className="py-3 px-4 text-right font-bold border-b" style={{ borderColor: '#e2e8f0', color: '#1e3a5f' }}>
                   Subtotal:
                 </td>
@@ -280,7 +293,7 @@ export default function ProformaInvoice({ order, companyProfile }) {
 
               {/* Advance Payment Row */}
               <tr>
-                <td colSpan={5} />
+                <td colSpan={6} />
                 <td
                   className="py-3 px-4 text-right font-bold text-white rounded-bl-lg"
                   style={{ backgroundColor: '#10b981' }}
