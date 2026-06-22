@@ -85,6 +85,7 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
       advance_pct: order.advancePct ?? '',
       destination_port: order.destinationPort || '',
       shipment_eta: order.shipmentETA || '',
+      doc_address_mode: order.docAddressMode || 'country',
     });
     setContractEditing(true);
   };
@@ -97,6 +98,7 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
       advance_pct: parseFloat(contract.advance_pct) || 0,
       destination_port: contract.destination_port || null,
       shipment_eta: contract.shipment_eta || null,
+      doc_address_mode: contract.doc_address_mode || 'country',
     };
     // Only send qty/price when they're actually editable, so the server's
     // recompute path doesn't fire for an order that's locked them out.
@@ -177,6 +179,10 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
               <span className="font-medium text-gray-900">{order.destinationPort || '\u2014'}</span>
             </div>
             <div className="flex justify-between text-sm">
+              <span className="text-gray-500">Buyer on Docs</span>
+              <span className="font-medium text-gray-900">{order.docAddressMode === 'full' ? 'Full address + country' : 'Country only'}</span>
+            </div>
+            <div className="flex justify-between text-sm">
               <span className="text-gray-500">Created</span>
               <span className="font-medium text-gray-900">{order.createdAt}</span>
             </div>
@@ -230,6 +236,13 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
               <div className="col-span-2">
                 <label className="block text-xs font-medium text-gray-600 mb-1">Destination Port</label>
                 <input type="text" value={contract.destination_port} onChange={e => setContract(c => ({ ...c, destination_port: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-xs font-medium text-gray-600 mb-1">Buyer Details on Documents</label>
+                <select value={contract.doc_address_mode} onChange={e => setContract(c => ({ ...c, doc_address_mode: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                  <option value="country">Country only</option>
+                  <option value="full">Full address + country</option>
+                </select>
               </div>
             </div>
             <p className="text-xs text-gray-500">
