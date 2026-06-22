@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useRef } from 'react';
+import { Printer, Download } from 'lucide-react';
 
 /**
  * Number-to-words converter for currency amounts (USD).
@@ -108,37 +109,46 @@ export default function ProformaInvoice({ order, companyProfile }) {
     : 'PROMPT';
 
   const bank = companyProfile?.bank || {};
+  const invoiceRef = useRef(null);
+
+  // Open the invoice in a clean new window with the app's stylesheets, then
+  // print. This (vs in-page window.print()) prints the WHOLE document flowing
+  // across pages instead of clipping to the modal's first screenful, and uses a
+  // plain `@page { size: A4 }` so the browser's portrait/landscape toggle stays
+  // enabled (forcing `landscape` locked it).
+  const openPrintable = () => {
+    const node = invoiceRef.current;
+    if (!node) return;
+    const links = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
+      .map((l) => l.outerHTML).join('');
+    const title = `Proforma Invoice - ${order?.id || order?.orderNo || order?.order_no || ''}`.trim();
+    const w = window.open('', '_blank', 'width=1100,height=850');
+    if (!w) { window.print(); return; } // popup blocked → fall back
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${title}</title>${links}`
+      + `<style>@page{size:A4;margin:10mm}html,body{margin:0;padding:0;background:#fff}`
+      + `.proforma-invoice{max-width:none!important;width:100%!important;box-shadow:none!important;margin:0!important;`
+      + `-webkit-print-color-adjust:exact;print-color-adjust:exact}</style></head><body>`
+      + node.outerHTML
+      + `<script>window.addEventListener('load',function(){setTimeout(function(){window.focus();window.print();},250)});</script>`
+      + `</body></html>`);
+    w.document.close();
+  };
 
   return (
     <>
-      {/* Print-specific styles */}
-      <style>{`
-        /* Setting an explicit @page margin suppresses the browser-injected
-           print header (date/time/URL) and footer (page numbers/URL) on
-           Chrome/Edge/Safari/Firefox. */
-        @page { size: A4 landscape; margin: 10mm; }
-        @media print {
-          body * { visibility: hidden; }
-          .proforma-invoice, .proforma-invoice * { visibility: visible; }
-          /* fixed (not absolute) so it anchors to the PAGE — when opened inside a
-             centered modal card (position:relative), absolute would offset the
-             print to the card's corner. max-width reset so it fills the sheet. */
-          .proforma-invoice {
-            position: fixed;
-            left: 0;
-            top: 0;
-            width: 100%;
-            max-width: none;
-            margin: 0;
-            padding: 0;
-            box-shadow: none;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-          }
-        }
-      `}</style>
+      {/* Screen-only action bar (not part of the printed sheet) */}
+      <div className="flex justify-end gap-2 mb-3 print:hidden">
+        <button onClick={openPrintable}
+          className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
+          <Download size={15} /> Download PDF
+        </button>
+        <button onClick={openPrintable}
+          className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">
+          <Printer size={15} /> Print
+        </button>
+      </div>
 
-      <div className="proforma-invoice bg-white max-w-6xl mx-auto shadow-lg" style={{ fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif" }}>
+      <div ref={invoiceRef} className="proforma-invoice bg-white max-w-6xl mx-auto shadow-lg" style={{ fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif" }}>
 
         {/* ===== 1. HEADER BAR ===== */}
         <div className="flex items-center justify-between px-8 py-5" style={{ backgroundColor: '#1e3a5f' }}>

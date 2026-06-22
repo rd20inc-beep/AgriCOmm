@@ -297,8 +297,8 @@ export default function ExportOrders() {
       </div>
 
       {/* Proforma Invoice Modal */}
-      <Modal isOpen={!!piOrder} onClose={() => setPiOrder(null)} title={piOrder ? `Proforma Invoice — ${piOrder.id}` : ''} size="lg">
-        {piOrder && <ProformaInvoice order={piOrder} companyProfile={companyProfileData} />}
+      <Modal isOpen={!!piOrder} onClose={() => setPiOrder(null)} title={piOrder ? `Proforma Invoice — ${piOrder.id}` : ''} size="full">
+        {piOrder && <div className="overflow-x-auto"><ProformaInvoice order={piOrder} companyProfile={companyProfileData} /></div>}
       </Modal>
 
       {/* Email Composer */}
