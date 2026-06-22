@@ -1,11 +1,13 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Users, Search, Globe, Phone, FileText, Anchor, Plus } from 'lucide-react';
+import { Users, Search, Globe, Phone, FileText, Anchor, Plus, Banknote } from 'lucide-react';
 import { useCustomers } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
+import { useAuth } from '../../../context/AuthContext';
 import { adminApi } from '../../admin/api/services';
 import SlideDrawer from '../../../components/SlideDrawer';
+import MillCustomerPayDrawer from '../components/MillCustomerPayDrawer';
 import { LoadingSpinner, EmptyState } from '../../../components/LoadingState';
 
 const EMPTY_CUST = { name: '', contact_person: '', phone: '', email: '', country: '', address: '' };
@@ -15,8 +17,11 @@ const EMPTY_CUST = { name: '', contact_person: '', phone: '', email: '', country
 export default function MillCustomers() {
   const { data: customers = [], isLoading } = useCustomers({ type: 'local' });
   const { addToast } = useApp();
+  const { hasPermission } = useAuth();
+  const canPay = hasPermission('finance', 'confirm_payment');
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
+  const [payCustomer, setPayCustomer] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState({ ...EMPTY_CUST });
@@ -78,7 +83,7 @@ export default function MillCustomers() {
                 <th className="px-4 py-3">Customer</th>
                 <th className="px-4 py-3">Contact</th>
                 <th className="px-4 py-3">Country / Port</th>
-                <th className="px-4 py-3 text-right">Statement</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -93,11 +98,19 @@ export default function MillCustomers() {
                     {c.country ? <span className="inline-flex items-center gap-1"><Globe className="w-3.5 h-3.5 text-gray-400" />{c.country}</span> : <span className="text-gray-400">—</span>}
                     {c.port && <div className="text-xs text-gray-500 flex items-center gap-1 mt-0.5"><Anchor className="w-3 h-3" />{c.port}</div>}
                   </td>
-                  <td className="px-4 py-3 text-right">
-                    <Link to={`/milling/finance?tab=customers&customer=${c.id}`}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
-                      <FileText className="w-3.5 h-3.5" /> View Statement
-                    </Link>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center justify-end gap-1.5">
+                      {canPay && (
+                        <button onClick={() => setPayCustomer({ id: c.id, name: c.name })}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700">
+                          <Banknote className="w-3.5 h-3.5" /> Record Payment
+                        </button>
+                      )}
+                      <Link to={`/milling/finance?tab=customers&customer=${c.id}`}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
+                        <FileText className="w-3.5 h-3.5" /> View Statement
+                      </Link>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -159,6 +172,10 @@ export default function MillCustomers() {
           <p className="text-[11px] text-gray-400">Added as a local customer; sent to admin for approval unless you have approval rights.</p>
         </div>
       </SlideDrawer>
+
+      {payCustomer && (
+        <MillCustomerPayDrawer customer={payCustomer} onClose={() => setPayCustomer(null)} />
+      )}
     </div>
   );
 }
