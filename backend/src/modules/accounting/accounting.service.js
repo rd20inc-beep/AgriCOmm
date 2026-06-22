@@ -1236,9 +1236,14 @@ const accountingService = {
       const kg = num0(lot.received_net_weight_kg) || num0(lot.net_weight_kg) || num0(lot.gross_weight_kg);
       const mt = kg / 1000;
       const rate = num0(lot.rate_per_kg);
+      const name = lotProdName[lot.product_id] || 'Raw rice';
+      // Variety is often identical to the product name — only show it if it adds
+      // information.
+      const variety = lot.variety && lot.variety.trim().toLowerCase() !== name.trim().toLowerCase()
+        ? lot.variety : '';
       return [
-        lotProdName[lot.product_id] || 'Raw rice',
-        lot.variety,
+        name,
+        variety,
         lot.grade ? `Grade ${lot.grade}` : '',
         kg > 0 ? `${Math.round(kg).toLocaleString()} kg${mt >= 1 ? ` (${mt.toFixed(2)} MT)` : ''}` : '',
         rate > 0 ? `@ Rs ${rate.toLocaleString()}/kg` : '',
