@@ -245,6 +245,10 @@ const expensesService = {
       .leftJoin('milling_batches as mb', 'mb.id', 'e.batch_id')
       .leftJoin('export_orders as eo', 'eo.id', 'e.order_id')
       .leftJoin('bank_accounts as ba', 'ba.id', 'e.bank_account_id')
+      // The payable carries running paid/outstanding for partial payments.
+      .leftJoin('payables as pe', function () {
+        this.on('pe.source_id', '=', 'e.id').andOnVal('pe.source_table', '=', 'business_expenses');
+      })
       .select(
         'e.*',
         's.name as supplier_name_joined',
@@ -252,7 +256,9 @@ const expensesService = {
         'mb.batch_no',
         'eo.order_no',
         'ba.name as bank_name',
-        'ba.type as bank_type'
+        'ba.type as bank_type',
+        'pe.paid_amount as paid_pkr',
+        'pe.outstanding as outstanding_pkr'
       );
 
     if (expense_type) q.where('e.expense_type', expense_type);
@@ -273,14 +279,18 @@ const expensesService = {
       .leftJoin('suppliers as s', 's.id', 'e.supplier_id')
       .leftJoin('users as u', 'u.id', 'e.created_by')
       .leftJoin('bank_accounts as ba', 'ba.id', 'e.bank_account_id')
-      .select('e.*', 's.name as supplier_name_joined', 'u.full_name as created_by_name', 'ba.name as bank_name')
+      .leftJoin('payables as pe', function () {
+        this.on('pe.source_id', '=', 'e.id').andOnVal('pe.source_table', '=', 'business_expenses');
+      })
+      .select('e.*', 's.name as supplier_name_joined', 'u.full_name as created_by_name', 'ba.name as bank_name',
+        'pe.paid_amount as paid_pkr', 'pe.outstanding as outstanding_pkr')
       .where('e.id', id)
       .first();
     if (!row) throw new NotFoundError('Expense not found.');
     return row;
   },
 
-  async markPaid(id, { bank_account_id, payment_method, payment_reference, paid_date, due_date, notes }, userId) {
+  async markPaid(id, { amount, bank_account_id, payment_method, payment_reference, paid_date, due_date, notes }, userId) {
     const expense = await db('business_expenses').where('id', id).first();
     if (!expense) throw new NotFoundError('Expense not found.');
     if (expense.payment_status === 'Paid') throw new ValidationError('Already paid.');
@@ -289,8 +299,26 @@ const expensesService = {
     // GL journal's date math (createJournal does string ops) doesn't choke.
     const rawPayDate = paid_date || new Date().toISOString().split('T')[0];
     const payDate = rawPayDate instanceof Date ? rawPayDate.toISOString().slice(0, 10) : rawPayDate;
-    // A post-dated cheque records but does NOT mark the expense paid until it
-    // clears — insert the uncleared payment and stop.
+
+    // Partial payments: the payable (source_table=business_expenses) tracks
+    // paid_amount/outstanding. `amount` (PKR) is this installment; if omitted it
+    // settles the full remaining. Cap at the outstanding so it never overpays.
+    const totalPkr = parseFloat(expense.amount_pkr) || 0;
+    const payableRow = await db('payables').where({ source_table: 'business_expenses', source_id: id }).first();
+    const alreadyPaid = payableRow ? (parseFloat(payableRow.paid_amount) || 0) : 0;
+    const remaining = payableRow ? (parseFloat(payableRow.outstanding) || 0) : totalPkr;
+    const payAmt = (amount !== undefined && amount !== null && amount !== '')
+      ? parseFloat(amount)
+      : remaining;
+    if (!(payAmt > 0)) throw new ValidationError('Payment amount must be greater than zero.');
+    if (payAmt > remaining + 0.01) {
+      throw new ValidationError(`Payment (Rs ${Math.round(payAmt).toLocaleString()}) exceeds the outstanding balance (Rs ${Math.round(remaining).toLocaleString()}).`);
+    }
+    const newPaid = alreadyPaid + payAmt;
+    const fullyPaid = newPaid >= totalPkr - 0.01;
+
+    // A post-dated cheque records but does NOT settle until it clears — insert
+    // the uncleared payment (for this installment) and stop.
     const isPostDated = payment_method === 'cheque' && due_date && new Date(due_date) > new Date(new Date().toDateString());
     if (isPostDated) {
       return db.transaction(async (trx) => {
@@ -298,7 +326,7 @@ const expensesService = {
         const payCount = await trx('payments').count('id as c').first();
         await trx('payments').insert({
           payment_no: `EXP-PAY-${(parseInt(payCount?.c) || 0) + 1}`,
-          type: 'payment', amount: expense.amount_pkr, currency: 'PKR', fx_rate: 1, base_amount_pkr: expense.amount_pkr,
+          type: 'payment', amount: payAmt, currency: 'PKR', fx_rate: 1, base_amount_pkr: payAmt,
           payment_method, bank_account_id: bank_account_id || null, bank_reference: payment_reference || null,
           due_date: due_date || null, cleared: false,
           linked_payable_id: payable ? payable.id : null,
@@ -310,7 +338,7 @@ const expensesService = {
     }
     return db.transaction(async (trx) => {
       const [updated] = await trx('business_expenses').where('id', id).update({
-        payment_status: 'Paid',
+        payment_status: fullyPaid ? 'Paid' : 'Partial',
         bank_account_id: bank_account_id || null,
         payment_method: payment_method || 'bank',
         payment_reference: payment_reference || null,
@@ -318,34 +346,38 @@ const expensesService = {
         updated_at: trx.fn.now(),
       }).returning('*');
 
-      // Update payable
+      // Update payable — running paid/outstanding (Partial until fully settled).
       const payable = await trx('payables').where({ source_table: 'business_expenses', source_id: id }).first();
       if (payable) {
-        await trx('payables').where({ id: payable.id }).update({ paid_amount: expense.amount_pkr, outstanding: 0, status: 'Paid' });
+        await trx('payables').where({ id: payable.id }).update({
+          paid_amount: newPaid,
+          outstanding: Math.max(0, totalPkr - newPaid),
+          status: fullyPaid ? 'Paid' : 'Partial',
+        });
       }
 
-      // Canonical payment row (so the payment-trail + dashboard cheque view see it).
+      // Canonical payment row for this installment.
       const payCount = await trx('payments').count('id as c').first();
       const paymentNo = `EXP-PAY-${(parseInt(payCount?.c) || 0) + 1}`;
       await trx('payments').insert({
         payment_no: paymentNo,
-        type: 'payment', amount: expense.amount_pkr, currency: 'PKR', fx_rate: 1, base_amount_pkr: expense.amount_pkr,
+        type: 'payment', amount: payAmt, currency: 'PKR', fx_rate: 1, base_amount_pkr: payAmt,
         payment_method: payment_method || 'bank', bank_account_id: bank_account_id || null,
         bank_reference: payment_reference || null, due_date: due_date || null,
         linked_payable_id: payable ? payable.id : null,
         payment_date: payDate, notes: notes || `Payment for ${expense.expense_no}`, created_by: userId || null,
       });
 
-      // Debit bank
+      // Debit bank for this installment
       if (bank_account_id) {
         await trx('bank_accounts').where('id', bank_account_id).update({
-          current_balance: trx.raw('current_balance - ?', [expense.amount_pkr]),
+          current_balance: trx.raw('current_balance - ?', [payAmt]),
           updated_at: trx.fn.now(),
         });
       }
 
-      // GL settlement at pay time: DR Supplier Payable / CR Cash & Bank.
-      await postExpenseSettlement(trx, { expense, paymentNo, payDate, userId });
+      // GL settlement for this installment: DR Supplier Payable / CR Cash & Bank.
+      await postExpenseSettlement(trx, { expense: { ...expense, amount_pkr: payAmt }, paymentNo, payDate, userId });
 
       return updated;
     });

@@ -58,6 +58,15 @@ function usePayExpense() {
   });
 }
 
+// Remaining outstanding (PKR) for an expense — the payable's outstanding, else
+// the PKR amount. Drives the default payment amount (partial payments allowed).
+const remainingOf = (e) => Math.round(parseFloat(e?.outstanding_pkr ?? e?.amount_pkr ?? e?.amount) || 0);
+const mkPayForm = (e) => ({
+  amount: e ? String(remainingOf(e)) : '',
+  bank_account_id: '', payment_method: 'bank', payment_reference: '',
+  due_date: '', paid_date: new Date().toISOString().split('T')[0], notes: '',
+});
+
 // ─── Category catalogue ─────────────────────────────────────────────
 // Each category declares the *kind* of vendor it usually has so the
 // form can show the right suggestions instead of always offering the
@@ -150,6 +159,7 @@ const UTILITY_VENDORS = [
 
 const STATUS_COLORS = {
   Unpaid: 'bg-rose-100 text-rose-800',
+  Pending: 'bg-rose-100 text-rose-800',
   Partial: 'bg-amber-100 text-amber-800',
   Paid: 'bg-emerald-100 text-emerald-800',
 };
@@ -248,7 +258,7 @@ export default function Expenses() {
 
   // ─── Pay modal ───
   const [payId, setPayId] = useState(null);
-  const [payForm, setPayForm] = useState({ bank_account_id: '', payment_method: 'bank', payment_reference: '', due_date: '', paid_date: new Date().toISOString().split('T')[0], notes: '' });
+  const [payForm, setPayForm] = useState(mkPayForm());
 
   async function handleCreate(e) {
     e.preventDefault();
@@ -286,9 +296,14 @@ export default function Expenses() {
     // Cash & Cheque don't draw from a tracked account (same as Money In/Out).
     const needsAccount = payForm.payment_method !== 'cash' && payForm.payment_method !== 'cheque';
     if (needsAccount && !payForm.bank_account_id) { addToast('Select bank account', 'error'); return; }
+    const pe = filtered.find((x) => String(x.id) === String(payId));
+    const remaining = pe ? remainingOf(pe) : 0;
+    const payNum = parseFloat(payForm.amount) || 0;
+    if (!(payNum > 0)) { addToast('Enter a payment amount', 'error'); return; }
+    if (payNum > remaining + 0.01) { addToast(`Amount exceeds the outstanding (Rs ${remaining.toLocaleString()})`, 'error'); return; }
     try {
       await payMut.mutateAsync({ id: payId, data: payForm });
-      addToast('Payment recorded', 'success');
+      addToast(payNum >= remaining - 0.01 ? 'Payment recorded — fully paid' : 'Partial payment recorded', 'success');
       setPayId(null);
     } catch (err) { addToast(err?.response?.data?.message || err.message, 'error'); }
   }
@@ -407,7 +422,7 @@ export default function Expenses() {
       <ExpenseTable
         loading={isLoading}
         rows={filtered}
-        onPay={(e) => { setPayId(e.id); setPayForm({ bank_account_id: '', payment_method: 'bank', payment_reference: '', due_date: '', paid_date: new Date().toISOString().split('T')[0], notes: '' }); }}
+        onPay={(e) => { setPayId(e.id); setPayForm(mkPayForm(e)); }}
         onView={setDetailExpense}
       />
 
@@ -426,7 +441,7 @@ export default function Expenses() {
             title={e.expense_no || 'Expense'} subtitle={e.created_by_name ? `Created by ${e.created_by_name}` : undefined}
             icon={Receipt} size="md"
             footer={e.payment_status !== 'Paid' ? (
-              <button onClick={() => { setDetailExpense(null); setPayId(e.id); setPayForm({ bank_account_id: '', payment_method: 'bank', payment_reference: '', due_date: '', paid_date: new Date().toISOString().split('T')[0], notes: '' }); }}
+              <button onClick={() => { setDetailExpense(null); setPayId(e.id); setPayForm(mkPayForm(e)); }}
                 className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700">
                 <CreditCard size={16} /> Record Payment
               </button>
@@ -471,13 +486,17 @@ export default function Expenses() {
       {payId && (() => {
         const pe = filtered.find((x) => String(x.id) === String(payId));
         const amt = pe ? (pe.currency === 'PKR' ? fmtPKR(pe.amount) : `${pe.currency} ${Number(pe.amount).toLocaleString()}`) : '';
+        const remaining = pe ? remainingOf(pe) : 0;
+        const alreadyPaid = pe ? Math.round(parseFloat(pe.paid_pkr) || 0) : 0;
+        const payNum = parseFloat(payForm.amount) || 0;
+        const overPay = payNum > remaining + 0.01;
         return (
           <SlideDrawer open={!!payId} onClose={() => setPayId(null)}
             title="Record Payment" subtitle={pe?.expense_no} icon={CreditCard} size="md"
             footer={
-              <button onClick={handlePay} disabled={payMut.isPending}
+              <button onClick={handlePay} disabled={payMut.isPending || payNum <= 0 || overPay}
                 className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50">
-                {payMut.isPending ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Confirm Payment
+                {payMut.isPending ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Confirm Payment{payNum > 0 ? ` — ${fmtPKR(payNum)}` : ''}
               </button>
             }>
             <div className="space-y-4">
@@ -485,8 +504,27 @@ export default function Expenses() {
                 <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-center">
                   <p className="text-xs text-gray-500">Paying{pe.vendor_name || pe.supplier_name_joined ? ` ${pe.vendor_name || pe.supplier_name_joined}` : ''}</p>
                   <p className="text-lg font-semibold text-gray-900 tabular-nums">{amt}</p>
+                  {alreadyPaid > 0 && <p className="text-[11px] text-gray-400">Rs {alreadyPaid.toLocaleString()} paid · Rs {remaining.toLocaleString()} outstanding</p>}
                 </div>
               )}
+
+              {/* Amount — defaults to the outstanding; enter a smaller figure for
+                  a partial / installment payment. */}
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Amount (PKR){remaining > 0 ? ` · outstanding Rs ${remaining.toLocaleString()}` : ''}</label>
+                <input type="number" step="0.01" min="0" value={payForm.amount}
+                  onChange={e => setPayForm(p => ({ ...p, amount: e.target.value }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <div className="flex gap-2 mt-2">
+                  <button type="button" onClick={() => setPayForm(p => ({ ...p, amount: String(remaining) }))}
+                    className="text-xs px-3 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">Full</button>
+                  <button type="button" onClick={() => setPayForm(p => ({ ...p, amount: String(Math.round(remaining / 2)) }))}
+                    className="text-xs px-3 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">Half</button>
+                  <button type="button" onClick={() => setPayForm(p => ({ ...p, amount: '' }))}
+                    className="text-xs px-3 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">Custom</button>
+                </div>
+                {overPay && <p className="text-[11px] text-rose-500 mt-1">Amount exceeds the outstanding (Rs {remaining.toLocaleString()}).</p>}
+              </div>
 
               {/* Payment Method — first; it drives whether an account is needed
                   (mirrors the Money In / Money Out drawers). Cash & Cheque don't

@@ -26,6 +26,8 @@ const createSchema = Joi.object({
 });
 
 const paySchema = Joi.object({
+  // Installment amount (PKR). Omit/blank settles the full remaining balance.
+  amount: Joi.number().positive().allow(null, '').optional(),
   // Cash & cheque don't draw from a tracked account; account-based methods do.
   bank_account_id: Joi.number().integer().allow(null, '').when('payment_method', {
     is: Joi.valid('cash', 'cheque'),
