@@ -589,6 +589,71 @@ router.post('/expenses', authorize('milling', 'create'),
 );
 
 // =============================================================================
+// Recurring expenses — a recurring business_expense is a template; the next
+// occurrence is due at last_date + cadence. The Recurring tab lists each series
+// with its next-due date and lets you materialize (post) the due ones.
+// =============================================================================
+function addInterval(dateStr, recurrence) {
+  const dt = new Date(`${String(dateStr).slice(0, 10)}T00:00:00Z`);
+  if (recurrence === 'weekly') dt.setUTCDate(dt.getUTCDate() + 7);
+  else if (recurrence === 'quarterly') dt.setUTCMonth(dt.getUTCMonth() + 3);
+  else if (recurrence === 'yearly') dt.setUTCFullYear(dt.getUTCFullYear() + 1);
+  else dt.setUTCMonth(dt.getUTCMonth() + 1); // monthly (default)
+  return dt.toISOString().slice(0, 10);
+}
+const seriesKey = (e) => `${e.category}|${e.employee_id || e.vendor_name || ''}|${e.recurrence || 'monthly'}`;
+
+router.get('/expenses/recurring', authorize('milling', 'view'), async (req, res) => {
+  try {
+    const rows = await db('business_expenses as e')
+      .leftJoin('mill_workers as w', 'w.id', 'e.employee_id')
+      .where('e.expense_type', 'mill').where('e.is_recurring', true)
+      .select('e.id', 'e.expense_no', 'e.category', 'e.subcategory', 'e.vendor_name', 'e.employee_id',
+        'w.name as employee_name', 'e.recurrence', db.raw('e.amount_pkr as amount'), 'e.expense_date', 'e.description')
+      .orderBy('e.expense_date', 'desc');
+    // Latest occurrence per series (rows are date-desc, so first seen wins).
+    const latest = {}; const counts = {};
+    for (const e of rows) {
+      const k = seriesKey(e);
+      counts[k] = (counts[k] || 0) + 1;
+      if (!latest[k]) latest[k] = e;
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    const recurring = Object.entries(latest).map(([k, e]) => {
+      const nextDue = addInterval(e.expense_date, e.recurrence);
+      return {
+        ...e, last_date: String(e.expense_date).slice(0, 10), next_due: nextDue,
+        due: nextDue <= today, occurrences: counts[k],
+        payee: e.employee_name || e.vendor_name || null,
+      };
+    }).sort((a, b) => (a.next_due < b.next_due ? -1 : 1));
+    return res.json({ success: true, data: { recurring, dueCount: recurring.filter((r) => r.due).length } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Materialize the next occurrence of a recurring series (the :id is its latest
+// occurrence / template). Copies its fields with expense_date = next due date.
+router.post('/expenses/recurring/:id/materialize', authorize('milling', 'create'), async (req, res) => {
+  try {
+    const tmpl = await db('business_expenses').where('id', req.params.id).where('expense_type', 'mill').first();
+    if (!tmpl) return res.status(404).json({ success: false, message: 'Recurring expense not found.' });
+    if (!tmpl.is_recurring) return res.status(400).json({ success: false, message: 'That expense is not recurring.' });
+    const nextDue = addInterval(tmpl.expense_date, tmpl.recurrence);
+    const expense = await expensesService.create({
+      expense_type: 'mill', category: tmpl.category, subcategory: tmpl.subcategory,
+      amount: parseFloat(tmpl.amount), currency: 'PKR', expense_date: nextDue,
+      description: tmpl.description || null, vendor_name: tmpl.vendor_name || null,
+      supplier_id: tmpl.supplier_id || null, employee_id: tmpl.employee_id || null,
+      is_recurring: true, recurrence: tmpl.recurrence,
+      notes: `Recurring (${tmpl.recurrence}) from ${tmpl.expense_no}`,
+      pay_now: !!req.body.pay_now, bank_account_id: req.body.bank_account_id || null,
+      payment_method: req.body.payment_method || null, payment_reference: req.body.reference || null,
+    }, req.user?.id);
+    return res.json({ success: true, data: { expense, next_due: nextDue } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// =============================================================================
 // Mill Workers & Payroll
 // =============================================================================
 

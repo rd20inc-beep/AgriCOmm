@@ -9,7 +9,7 @@ import {
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import {
-  useMillExpenses, useCreateMillExpense, useMillWorkers, useCreateMillWorker,
+  useMillExpenses, useCreateMillExpense, useRecurringExpenses, useMaterializeRecurring, useMillWorkers, useCreateMillWorker,
   useUpdateMillWorker, useDeleteMillWorker, useCreateWorkerAdvance, useWorkerAdvances,
   useDeleteWorkerAdvance,
   usePayrollSummary, useRecordAttendance, useAttendance, useBulkAttendance, useAttendanceHolidays, useInventory, useExpenseVendors,
@@ -71,6 +71,7 @@ const tabs = [
   { key: 'suppliers',  label: 'Suppliers',    icon: Building2 },
   { key: 'customers',  label: 'Customers',    icon: Users },
   { key: 'expenses',   label: 'Expenses',     icon: TrendingDown },
+  { key: 'recurring',  label: 'Recurring',    icon: RefreshCw },
   { key: 'addcosts',   label: 'Add. Costs',   icon: Layers },
   { key: 'efficiency', label: 'Efficiency',   icon: TrendingUp },
   { key: 'loss',       label: 'Loss & Theft', icon: Shield },
@@ -146,6 +147,16 @@ export default function MillFinanceDashboard() {
 
   const { data: expData } = useMillExpenses();
   const createExpMut = useCreateMillExpense();
+  const { data: recurringData } = useRecurringExpenses();
+  const recurring = recurringData?.recurring || [];
+  const materializeMut = useMaterializeRecurring();
+
+  async function handleMaterialize(r) {
+    try {
+      await materializeMut.mutateAsync({ id: r.id, data: {} });
+      addToast(`Posted ${r.category} ${PKR(r.amount)} for ${r.nextDue}`, 'success');
+    } catch (e) { addToast(e.message, 'error'); }
+  }
   const { data: workers = [] } = useMillWorkers();
   const createWorkerMut = useCreateMillWorker();
   const updateWorkerMut = useUpdateMillWorker();
@@ -1118,6 +1129,77 @@ export default function MillFinanceDashboard() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* ─── RECURRING ─────────────────────────────────────────────── */}
+      {activeTab === 'recurring' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <p className="text-xs text-gray-500">Expenses you marked recurring. Post the next occurrence when it's due — it creates a fresh expense (payable + GL) and advances the schedule.</p>
+            {recurring.some(r => r.due) && (
+              <button
+                onClick={async () => { for (const r of recurring.filter(x => x.due)) { await handleMaterialize(r); } }}
+                disabled={materializeMut.isPending}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                <RefreshCw className="w-3.5 h-3.5" /> Post all due ({recurring.filter(r => r.due).length})
+              </button>
+            )}
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <Stat tone="blue"  icon={RefreshCw} label="Recurring Lines" value={String(recurring.length)} sub="Active schedules" />
+            <Stat tone="red"   icon={CalendarDays} label="Due Now" value={String(recurring.filter(r => r.due).length)} sub="Ready to post" />
+            <Stat tone="slate" icon={DollarSign} label="Monthly-equiv." value={PKR(recurring.reduce((s, r) => s + (r.recurrence === 'weekly' ? r.amount * 4.33 : r.recurrence === 'quarterly' ? r.amount / 3 : r.recurrence === 'yearly' ? r.amount / 12 : r.amount), 0))} sub="Approx run-rate" />
+          </div>
+          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-600 uppercase tracking-wide">
+                  <th className="text-left px-4 py-3 font-medium">Category</th>
+                  <th className="text-left px-4 py-3 font-medium">Payee / detail</th>
+                  <th className="text-left px-4 py-3 font-medium">Repeats</th>
+                  <th className="text-right px-4 py-3 font-medium">Amount</th>
+                  <th className="text-left px-4 py-3 font-medium">Last paid</th>
+                  <th className="text-left px-4 py-3 font-medium">Next due</th>
+                  <th className="text-right px-4 py-3 font-medium no-print">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {recurring.map(r => (
+                  <tr key={r.id} className={`hover:bg-gray-50 ${r.due ? 'bg-amber-50/40' : ''}`}>
+                    <td className="px-4 py-3 capitalize font-medium text-gray-800">{r.category}</td>
+                    <td className="px-4 py-3 text-gray-600">{r.payee || r.subcategory || '—'}</td>
+                    <td className="px-4 py-3 capitalize text-gray-600">{r.recurrence}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{PKR(r.amount)}</td>
+                    <td className="px-4 py-3 text-gray-500">{fmtDate(r.lastDate)}</td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center gap-1 ${r.due ? 'text-amber-700 font-medium' : 'text-gray-600'}`}>
+                        {fmtDate(r.nextDue)}
+                        {r.due && <span className="px-1.5 py-0.5 rounded text-[9px] bg-amber-100 text-amber-700 uppercase">Due</span>}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right no-print">
+                      <button
+                        onClick={() => handleMaterialize(r)}
+                        disabled={!r.due || materializeMut.isPending}
+                        className={`px-2.5 py-1 text-xs font-medium rounded-lg ${r.due ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'} disabled:opacity-60`}
+                      >
+                        {r.due ? 'Post now' : 'Not due'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {recurring.length === 0 && (
+                  <tr><td colSpan={7} className="px-4 py-10 text-center text-gray-400">No recurring expenses yet — tick <span className="font-medium">Recurring</span> when adding an expense.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[11px] text-gray-400 flex items-start gap-1.5">
+            <RefreshCw className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-gray-400" />
+            "Post now" creates the next expense dated at its due date and rolls the schedule forward. A series is keyed by category + payee + cadence; editing an occurrence's amount changes the next one too.
+          </p>
         </div>
       )}
 

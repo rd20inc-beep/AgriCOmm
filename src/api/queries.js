@@ -1153,7 +1153,30 @@ export function useCreateMillExpense() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data) => millingApi.createExpense(data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['mill-expenses'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['mill-expenses'] });
+      qc.invalidateQueries({ queryKey: ['recurring-expenses'] });
+    },
+  });
+}
+
+export function useRecurringExpenses() {
+  return useQuery({
+    queryKey: ['recurring-expenses'],
+    queryFn: async () => { const res = await millingApi.listRecurringExpenses(); return transformKeys(unwrap(res) || {}); },
+  });
+}
+
+export function useMaterializeRecurring() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => millingApi.materializeRecurring(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['recurring-expenses'] });
+      qc.invalidateQueries({ queryKey: ['mill-expenses'] });
+      qc.invalidateQueries({ queryKey: ['payables'] });
+      qc.invalidateQueries({ queryKey: ['mill-cash-flow'] });
+    },
   });
 }
 
