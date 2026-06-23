@@ -16,6 +16,7 @@ import {
   BUCKET_KEYS, BUCKET_COLORS, ageDays, ageBucket, bucketize, isOpenAR,
 } from '../utils/aging';
 import { useFxRate } from '../utils/fx';
+import AnomalyWatchCard from '../../ai/components/AnomalyWatchCard';
 
 // ─── Formatting helpers ───────────────────────────────────────────────
 function fmtPKR(n) {
@@ -196,6 +197,9 @@ export default function FinanceOverview() {
           hintBad={(summary.collectionRate || 0) < 80}
         />
       </div>
+
+      {/* ─── AI ANOMALY WATCH ─────────────────────────────────────── */}
+      <AnomalyWatchCard />
 
       {/* ─── BUSINESS SEGMENTS ────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
