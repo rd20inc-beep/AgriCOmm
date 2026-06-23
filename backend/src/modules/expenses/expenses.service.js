@@ -285,7 +285,10 @@ const expensesService = {
     if (!expense) throw new NotFoundError('Expense not found.');
     if (expense.payment_status === 'Paid') throw new ValidationError('Already paid.');
 
-    const payDate = paid_date || new Date().toISOString().split('T')[0];
+    // Joi parses paid_date into a Date; normalize to a YYYY-MM-DD string so the
+    // GL journal's date math (createJournal does string ops) doesn't choke.
+    const rawPayDate = paid_date || new Date().toISOString().split('T')[0];
+    const payDate = rawPayDate instanceof Date ? rawPayDate.toISOString().slice(0, 10) : rawPayDate;
     // A post-dated cheque records but does NOT mark the expense paid until it
     // clears — insert the uncleared payment and stop.
     const isPostDated = payment_method === 'cheque' && due_date && new Date(due_date) > new Date(new Date().toDateString());
