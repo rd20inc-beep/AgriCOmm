@@ -31,6 +31,7 @@ const paySchema = Joi.object({
   payment_reference: Joi.string().max(100).allow(null, '').optional(),
   paid_date: Joi.date().optional(),
   due_date: Joi.date().allow(null).optional(),
+  notes: Joi.string().max(500).allow(null, '').optional(),
 });
 
 function validate(schema, body) {

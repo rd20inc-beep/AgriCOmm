@@ -222,7 +222,7 @@ const expensesService = {
     return row;
   },
 
-  async markPaid(id, { bank_account_id, payment_method, payment_reference, paid_date, due_date }, userId) {
+  async markPaid(id, { bank_account_id, payment_method, payment_reference, paid_date, due_date, notes }, userId) {
     const expense = await db('business_expenses').where('id', id).first();
     if (!expense) throw new NotFoundError('Expense not found.');
     if (expense.payment_status === 'Paid') throw new ValidationError('Already paid.');
@@ -242,7 +242,7 @@ const expensesService = {
           due_date: due_date || null, cleared: false,
           linked_payable_id: payable ? payable.id : null,
           source_table: 'business_expenses', source_id: parseInt(id, 10), payment_date: payDate,
-          notes: `Pending cheque for ${expense.expense_no}`, created_by: userId || null,
+          notes: notes || `Pending cheque for ${expense.expense_no}`, created_by: userId || null,
         });
         return expense;
       });
@@ -271,7 +271,7 @@ const expensesService = {
         payment_method: payment_method || 'bank', bank_account_id: bank_account_id || null,
         bank_reference: payment_reference || null, due_date: due_date || null,
         linked_payable_id: payable ? payable.id : null,
-        payment_date: payDate, notes: `Payment for ${expense.expense_no}`, created_by: userId || null,
+        payment_date: payDate, notes: notes || `Payment for ${expense.expense_no}`, created_by: userId || null,
       });
 
       // Debit bank
