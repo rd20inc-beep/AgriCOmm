@@ -7,6 +7,7 @@ import StatementPayDrawer from '../components/StatementPayDrawer';
 import SearchSelect from '../../../shared/components/SearchSelect';
 import LedgerTypeCounts from '../../milling/components/LedgerTypeCounts';
 import PartyAllocationLedger from '../../milling/components/PartyAllocationLedger';
+import OpenItemsPanel from '../../milling/components/OpenItemsPanel';
 import { accountingApi } from '../../accounting/api/services';
 import { useCustomers, useSuppliers } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
@@ -372,6 +373,11 @@ export default function PartyLedger() {
           {transactions.length > 0 && <LedgerTypeCounts counts={statement?.type_counts} />}
           </>
           )}
+
+          {/* Open items — outstanding receivables/payables (incl. ones not yet on
+              the GL, e.g. export orders awaiting advance) so the statement isn't
+              blank when Due Dates shows money owed. */}
+          <OpenItemsPanel items={statement?.open_items} partyType={mode} />
         </div>
       )}
 

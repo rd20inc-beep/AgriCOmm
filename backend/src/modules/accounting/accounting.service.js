@@ -1231,6 +1231,27 @@ const accountingService = {
       };
     });
 
+    // Open receivables NOT carried on the GL ledger — e.g. export orders still
+    // "Awaiting Advance" create expected receivable rows but no posted journal,
+    // so they show in Due Dates yet leave the (GL-based) statement empty.
+    // Surface them so the statement explains what's still owed. Local-sale
+    // receivables are excluded — those are already merged in as ledger lines.
+    const openRecv = await db('receivables as r')
+      .leftJoin('export_orders as o', 'o.id', 'r.order_id')
+      .where('r.customer_id', cid)
+      .whereNot('r.status', 'Paid')
+      .where('r.outstanding', '>', 0)
+      .whereNull('r.local_sale_id')
+      .orderBy('r.due_date')
+      .select('r.recv_no', 'r.type', 'r.outstanding', 'r.expected_amount', 'r.received_amount',
+        'r.currency', 'r.due_date', 'r.status', 'o.order_no');
+    const openItems = openRecv.map((r) => ({
+      ref: r.recv_no, label: r.type || 'Receivable', order_no: r.order_no || null,
+      currency: r.currency || 'PKR', outstanding: parseFloat(r.outstanding) || 0,
+      expected: parseFloat(r.expected_amount) || 0, received: parseFloat(r.received_amount) || 0,
+      due_date: r.due_date, status: r.status,
+    }));
+
     return {
       customer_id: cid,
       currency: statementCurrency,
@@ -1243,6 +1264,7 @@ const accountingService = {
       total_credit: parseFloat(totalCredit.toFixed(2)),
       closing_balance: parseFloat(runningBalance.toFixed(2)),
       closing_balance_usd: parseFloat(runningBalanceUsd.toFixed(2)),
+      open_items: openItems,
     };
   },
 
@@ -1540,6 +1562,22 @@ const accountingService = {
       };
     });
 
+    // Open (unsettled) payables for this supplier — an at-a-glance "what's still
+    // owed" aging that mirrors the Due Dates list.
+    const openPay = await db('payables')
+      .where('supplier_id', sid)
+      .whereNot('status', 'Paid')
+      .where('outstanding', '>', 0)
+      .orderBy('due_date')
+      .select('pay_no', 'linked_ref', 'category', 'outstanding', 'original_amount', 'paid_amount',
+        'currency', 'due_date', 'status');
+    const openItems = openPay.map((p) => ({
+      ref: p.linked_ref || p.pay_no, label: p.category || 'Payable', order_no: null,
+      currency: p.currency || 'PKR', outstanding: parseFloat(p.outstanding) || 0,
+      expected: parseFloat(p.original_amount) || 0, received: parseFloat(p.paid_amount) || 0,
+      due_date: p.due_date, status: p.status,
+    }));
+
     return {
       supplier_id: sid,
       currency: statementCurrency,
@@ -1552,6 +1590,7 @@ const accountingService = {
       total_credit: parseFloat(totalCredit.toFixed(2)),
       closing_balance: parseFloat(runningBalance.toFixed(2)),
       closing_balance_usd: parseFloat(runningBalanceUsd.toFixed(2)),
+      open_items: openItems,
     };
   },
 

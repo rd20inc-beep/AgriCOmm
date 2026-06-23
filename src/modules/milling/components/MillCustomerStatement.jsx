@@ -5,6 +5,7 @@ import { X, ArrowDownLeft, ArrowUpRight, Scale, ExternalLink, Printer, Download 
 import { accountingApi } from '../../accounting/api/services';
 import PartyAllocationLedger from './PartyAllocationLedger';
 import LedgerTypeCounts from './LedgerTypeCounts';
+import OpenItemsPanel from './OpenItemsPanel';
 import { printStatement } from './printStatement';
 
 // Inline customer statement (charges/receipts + running balance) for the Mill
@@ -148,6 +149,9 @@ export default function MillCustomerStatement({ customerId, customerName, params
       </div>
       {transactions.length > 0 && <LedgerTypeCounts counts={statement?.type_counts} />}
       </>
+      )}
+      {statement?.open_items?.length > 0 && (
+        <div className="p-3 border-t border-gray-100"><OpenItemsPanel items={statement.open_items} partyType="customer" /></div>
       )}
     </div>
   );

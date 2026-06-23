@@ -5,6 +5,7 @@ import { X, Printer, Download, ArrowDownLeft, ArrowUpRight, Scale, ExternalLink 
 import { accountingApi } from '../../accounting/api/services';
 import PartyAllocationLedger from './PartyAllocationLedger';
 import LedgerTypeCounts from './LedgerTypeCounts';
+import OpenItemsPanel from './OpenItemsPanel';
 import { printStatement } from './printStatement';
 
 // Statements are shown in the party's transaction currency (mill suppliers are
@@ -168,6 +169,9 @@ export default function MillSupplierStatement({ supplierId, supplierName, params
       </div>
       {transactions.length > 0 && <LedgerTypeCounts counts={statement?.type_counts} />}
       </>
+      )}
+      {statement?.open_items?.length > 0 && (
+        <div className="p-3 border-t border-gray-100"><OpenItemsPanel items={statement.open_items} partyType="supplier" /></div>
       )}
     </div>
   );
