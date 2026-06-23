@@ -2,6 +2,45 @@ const db = require('../../config/database');
 const { NotFoundError, ValidationError } = require('../../shared/errors');
 const accountingService = require('../accounting/accounting.service');
 
+// Settlement journal posted when an expense is PAID: DR Supplier Payable (2010)
+// CR Cash & Bank (1000). The obligation was booked at create (CR 2010 via the
+// expense_recorded rule); this clears it and lands the cash/bank outflow on the
+// GL — mirroring finance recordPayment for Money In/Out. Cash payments (no bank
+// account) still credit the 1000 control account. Best-effort: a journal failure
+// never blocks the payment. Returns nothing.
+async function postExpenseSettlement(trx, { expense, paymentNo, payDate, userId }) {
+  try {
+    const [ap, cash] = await Promise.all([
+      trx('chart_of_accounts').where({ code: '2010' }).first(),
+      trx('chart_of_accounts').where({ code: '1000' }).first(),
+    ]);
+    if (!ap || !cash) { console.warn(`Expense settlement journal skipped (missing 2010/1000) for ${paymentNo}`); return; }
+    const amt = parseFloat(expense.amount_pkr) || 0;
+    if (amt <= 0) return;
+    const entity = expense.expense_type === 'mill' ? 'mill' : expense.expense_type === 'export' ? 'export' : 'general';
+    const journal = await accountingService.createJournal(trx, {
+      date: payDate,
+      entity,
+      refType: 'Payment',
+      refNo: paymentNo,
+      description: `Payment ${paymentNo} for ${expense.expense_no}`,
+      currency: 'PKR',
+      fxRate: 1,
+      isAuto: true,
+      userId: userId || null,
+      partyType: expense.supplier_id ? 'supplier' : null,
+      partyId: expense.supplier_id || null,
+      lines: [
+        { account_id: ap.id, account: ap.name, debit: amt, credit: 0, narration: `DR ${ap.code} ${ap.name} — ${paymentNo}` },
+        { account_id: cash.id, account: cash.name, debit: 0, credit: amt, narration: `CR ${cash.code} ${cash.name} — ${paymentNo}` },
+      ],
+    });
+    if (journal?.id) await accountingService.postJournal(trx, journal.id);
+  } catch (e) {
+    console.warn(`Expense settlement journal failed for ${paymentNo}:`, e.message);
+  }
+}
+
 const CATEGORY_MAP = {
   general: [
     'utility_bill', 'rent', 'insurance', 'license', 'professional_fees',
@@ -129,7 +168,7 @@ const expensesService = {
         ? (parseInt(String(lastPay.pay_no).replace(/^PAY-EXP/, ''), 10) || 0) + 1
         : 1;
       const payNo = `PAY-EXP${String(nextSeq).padStart(4, '0')}`;
-      await trx('payables').insert({
+      const [payableRow] = await trx('payables').insert({
         pay_no: payNo,
         entity: expense_type === 'mill' ? 'mill' : expense_type === 'export' ? 'export' : 'general',
         category: category || 'miscellaneous',
@@ -145,13 +184,32 @@ const expensesService = {
         source_id: expense.id,
         payable_type: 'expense',
         notes: description || null,
-      });
+      }).returning('id');
 
-      // ─── If paid now, update bank balance ───
-      if (pay_now && bank_account_id) {
-        await trx('bank_accounts').where('id', bank_account_id).update({
-          current_balance: trx.raw('current_balance - ?', [amountPkr]),
-          updated_at: trx.fn.now(),
+      // ─── If paid now: record the payment row, debit the bank, and post the
+      // settlement journal — so a pay-at-create expense is fully consistent
+      // with the pay-later (markPaid) flow (payment trail + GL both move). ───
+      if (pay_now) {
+        const payDate = (expense_date instanceof Date ? expense_date.toISOString().slice(0, 10) : expense_date) || new Date().toISOString().split('T')[0];
+        const payCount = await trx('payments').count('id as c').first();
+        const paymentNo = `EXP-PAY-${(parseInt(payCount?.c) || 0) + 1}`;
+        await trx('payments').insert({
+          payment_no: paymentNo,
+          type: 'payment', amount: amountPkr, currency: 'PKR', fx_rate: 1, base_amount_pkr: amountPkr,
+          payment_method: payment_method || 'bank', bank_account_id: bank_account_id || null,
+          bank_reference: payment_reference || null,
+          linked_payable_id: payableRow?.id || null,
+          payment_date: payDate, notes: `Payment for ${expenseNo}`, created_by: userId || null,
+        });
+        if (bank_account_id) {
+          await trx('bank_accounts').where('id', bank_account_id).update({
+            current_balance: trx.raw('current_balance - ?', [amountPkr]),
+            updated_at: trx.fn.now(),
+          });
+        }
+        await postExpenseSettlement(trx, {
+          expense: { amount_pkr: amountPkr, supplier_id, expense_type, expense_no: expenseNo },
+          paymentNo, payDate, userId,
         });
       }
 
@@ -265,8 +323,9 @@ const expensesService = {
 
       // Canonical payment row (so the payment-trail + dashboard cheque view see it).
       const payCount = await trx('payments').count('id as c').first();
+      const paymentNo = `EXP-PAY-${(parseInt(payCount?.c) || 0) + 1}`;
       await trx('payments').insert({
-        payment_no: `EXP-PAY-${(parseInt(payCount?.c) || 0) + 1}`,
+        payment_no: paymentNo,
         type: 'payment', amount: expense.amount_pkr, currency: 'PKR', fx_rate: 1, base_amount_pkr: expense.amount_pkr,
         payment_method: payment_method || 'bank', bank_account_id: bank_account_id || null,
         bank_reference: payment_reference || null, due_date: due_date || null,
@@ -281,6 +340,9 @@ const expensesService = {
           updated_at: trx.fn.now(),
         });
       }
+
+      // GL settlement at pay time: DR Supplier Payable / CR Cash & Bank.
+      await postExpenseSettlement(trx, { expense, paymentNo, payDate, userId });
 
       return updated;
     });
