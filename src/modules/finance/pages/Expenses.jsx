@@ -283,7 +283,9 @@ export default function Expenses() {
   }
 
   async function handlePay() {
-    if (!payForm.bank_account_id) { addToast('Select bank account', 'error'); return; }
+    // Cash & Cheque don't draw from a tracked account (same as Money In/Out).
+    const needsAccount = payForm.payment_method !== 'cash' && payForm.payment_method !== 'cheque';
+    if (needsAccount && !payForm.bank_account_id) { addToast('Select bank account', 'error'); return; }
     try {
       await payMut.mutateAsync({ id: payId, data: payForm });
       addToast('Payment recorded', 'success');
@@ -486,66 +488,61 @@ export default function Expenses() {
                 </div>
               )}
 
-              {/* Bank account — a cash account implies a cash payment (mirrors the
-                  party Record Payment drawer) */}
+              {/* Payment Method — first; it drives whether an account is needed
+                  (mirrors the Money In / Money Out drawers). Cash & Cheque don't
+                  pick an account. */}
               <div>
-                <label className="text-xs text-gray-500 block mb-1">Pay from account</label>
-                <select
-                  value={payForm.bank_account_id}
-                  onChange={e => {
-                    const id = e.target.value;
-                    const acct = (bankAccountsList || []).find(a => String(a.id) === String(id));
-                    setPayForm(p => ({
-                      ...p,
-                      bank_account_id: id,
-                      payment_method: acct?.type === 'cash' ? 'cash' : (p.payment_method === 'cash' ? 'bank' : p.payment_method),
-                    }));
-                  }}
+                <label className="text-xs text-gray-500 block mb-1">Payment Method</label>
+                <select value={payForm.payment_method}
+                  onChange={e => { const m = e.target.value; setPayForm(p => ({ ...p, payment_method: m, bank_account_id: (m === 'cash' || m === 'cheque') ? '' : p.bank_account_id })); }}
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  <option value="">Select bank account…</option>
-                  {(bankAccountsList || []).map(b => (
-                    <option key={b.id} value={b.id}>{b.name} — {b.bankName || ''} ({b.currency || 'PKR'} {Math.round(parseFloat(b.currentBalance) || 0).toLocaleString()})</option>
-                  ))}
+                  <option value="bank">Bank Transfer</option>
+                  <option value="cheque">Cheque</option>
+                  <option value="cash">Cash</option>
+                  <option value="online">Online</option>
                 </select>
               </div>
 
-              {/* Method + payment date */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-gray-500 block mb-1">Method</label>
-                  <select value={payForm.payment_method} onChange={e => setPayForm(p => ({ ...p, payment_method: e.target.value }))}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <option value="bank">Bank Transfer</option>
-                    <option value="cheque">Cheque</option>
-                    <option value="cash">Cash</option>
-                    <option value="online">Online</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500 block mb-1">Payment date</label>
-                  <input type="date" value={payForm.paid_date} onChange={e => setPayForm(p => ({ ...p, paid_date: e.target.value }))}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                </div>
-              </div>
-
+              {/* Cheque details — number (optional) + the date it clears */}
               {payForm.payment_method === 'cheque' && (
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-gray-500 block mb-1">Cheque # <span className="text-gray-300">(optional)</span></label>
                     <input type="text" value={payForm.payment_reference} onChange={e => setPayForm(p => ({ ...p, payment_reference: e.target.value }))}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="e.g. 004512" />
                   </div>
                   <div>
-                    <label className="text-xs text-gray-500 block mb-1">Cheque clears on</label>
+                    <label className="text-xs text-gray-500 block mb-1">Cheque date</label>
                     <input type="date" value={payForm.due_date} onChange={e => setPayForm(p => ({ ...p, due_date: e.target.value }))}
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                 </div>
               )}
 
+              {/* Pay From Account — only for account-based methods (Bank / Online) */}
+              {payForm.payment_method !== 'cash' && payForm.payment_method !== 'cheque' && (
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Pay From Account</label>
+                  <select value={payForm.bank_account_id} onChange={e => setPayForm(p => ({ ...p, bank_account_id: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">Select bank account…</option>
+                    {(bankAccountsList || []).map(b => (
+                      <option key={b.id} value={b.id}>{b.name} — {b.bankName || ''} ({b.currency || 'PKR'} {Math.round(parseFloat(b.currentBalance) || 0).toLocaleString()})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Payment date */}
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Payment date</label>
+                <input type="date" value={payForm.paid_date} onChange={e => setPayForm(p => ({ ...p, paid_date: e.target.value }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+
               {/* Notes */}
               <div>
-                <label className="text-xs text-gray-500 block mb-1">Notes</label>
+                <label className="text-xs text-gray-500 block mb-1">Notes <span className="text-gray-300">(optional)</span></label>
                 <input type="text" value={payForm.notes} onChange={e => setPayForm(p => ({ ...p, notes: e.target.value }))}
                   placeholder={pe ? `Payment for ${pe.expense_no}` : 'Payment note'}
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />

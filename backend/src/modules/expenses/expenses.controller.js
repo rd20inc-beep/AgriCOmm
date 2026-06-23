@@ -26,7 +26,12 @@ const createSchema = Joi.object({
 });
 
 const paySchema = Joi.object({
-  bank_account_id: Joi.number().integer().required(),
+  // Cash & cheque don't draw from a tracked account; account-based methods do.
+  bank_account_id: Joi.number().integer().allow(null, '').when('payment_method', {
+    is: Joi.valid('cash', 'cheque'),
+    then: Joi.optional(),
+    otherwise: Joi.required(),
+  }),
   payment_method: Joi.string().max(30).default('bank'),
   payment_reference: Joi.string().max(100).allow(null, '').optional(),
   paid_date: Joi.date().optional(),
