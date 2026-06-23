@@ -957,7 +957,7 @@ function ExpenseTable({ loading, rows, onPay, onView }) {
               </td>
               <td className="py-2.5 px-4 text-right">
                 <div className="inline-flex items-center gap-1.5">
-                  {e.payment_status === 'Unpaid' && (
+                  {e.payment_status !== 'Paid' && (
                     <button onClick={() => onPay(e)}
                       className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded hover:bg-emerald-100 inline-flex items-center gap-1">
                       <CreditCard size={12} /> Pay
