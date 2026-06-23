@@ -464,53 +464,63 @@ export default function Expenses() {
         );
       })()}
 
-      {/* Pay modal */}
-      {payId && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setPayId(null)}>
-          <div className="bg-white rounded-xl p-6 w-full max-w-md space-y-4" onClick={e => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold text-gray-900">Record Payment</h3>
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Bank Account *</label>
-              <select value={payForm.bank_account_id} onChange={e => setPayForm(p => ({ ...p, bank_account_id: e.target.value }))}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none bg-white">
-                <option value="">Select</option>
-                {(bankAccountsList || []).map(b => <option key={b.id} value={b.id}>{b.name} ({b.currency})</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Method</label>
-              <select value={payForm.payment_method} onChange={e => setPayForm(p => ({ ...p, payment_method: e.target.value }))}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none bg-white">
-                <option value="bank">Bank Transfer</option>
-                <option value="cheque">Cheque</option>
-                <option value="cash">Cash</option>
-                <option value="online">Online</option>
-              </select>
-            </div>
-            {payForm.payment_method === 'cheque' && (
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Cheque # <span className="text-gray-300 normal-case">(optional)</span></label>
-                  <input type="text" value={payForm.payment_reference} onChange={e => setPayForm(p => ({ ...p, payment_reference: e.target.value }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Cheque date</label>
-                  <input type="date" value={payForm.due_date} onChange={e => setPayForm(p => ({ ...p, due_date: e.target.value }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none" />
-                </div>
-              </div>
-            )}
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setPayId(null)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+      {/* Record payment — right slide-over (consistent with the detail drawer
+          and the other pay/receive flows), not a centered dialog */}
+      {payId && (() => {
+        const pe = filtered.find((x) => String(x.id) === String(payId));
+        const amt = pe ? (pe.currency === 'PKR' ? fmtPKR(pe.amount) : `${pe.currency} ${Number(pe.amount).toLocaleString()}`) : '';
+        return (
+          <SlideDrawer open={!!payId} onClose={() => setPayId(null)}
+            title="Record Payment" subtitle={pe?.expense_no} icon={CreditCard} size="md"
+            footer={
               <button onClick={handlePay} disabled={payMut.isPending}
-                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50">
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50">
                 {payMut.isPending ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Confirm Payment
               </button>
+            }>
+            <div className="space-y-4">
+              {pe && (
+                <div className="bg-gray-50 rounded-lg p-3 text-center">
+                  <p className="text-xs text-gray-500">Paying{pe.vendor_name || pe.supplier_name_joined ? ` ${pe.vendor_name || pe.supplier_name_joined}` : ''}</p>
+                  <p className="text-xl font-bold text-gray-900">{amt}</p>
+                </div>
+              )}
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Bank Account *</label>
+                <select value={payForm.bank_account_id} onChange={e => setPayForm(p => ({ ...p, bank_account_id: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none bg-white">
+                  <option value="">Select</option>
+                  {(bankAccountsList || []).map(b => <option key={b.id} value={b.id}>{b.name} ({b.currency})</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Method</label>
+                <select value={payForm.payment_method} onChange={e => setPayForm(p => ({ ...p, payment_method: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none bg-white">
+                  <option value="bank">Bank Transfer</option>
+                  <option value="cheque">Cheque</option>
+                  <option value="cash">Cash</option>
+                  <option value="online">Online</option>
+                </select>
+              </div>
+              {payForm.payment_method === 'cheque' && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Cheque # <span className="text-gray-300 normal-case">(optional)</span></label>
+                    <input type="text" value={payForm.payment_reference} onChange={e => setPayForm(p => ({ ...p, payment_reference: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Cheque date</label>
+                    <input type="date" value={payForm.due_date} onChange={e => setPayForm(p => ({ ...p, due_date: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none" />
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
-        </div>
-      )}
+          </SlideDrawer>
+        );
+      })()}
     </div>
   );
 }

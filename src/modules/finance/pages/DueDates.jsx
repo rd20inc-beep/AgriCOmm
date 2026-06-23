@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { ArrowDownLeft, ArrowUpRight, CalendarClock, AlertTriangle, CheckCircle } from 'lucide-react';
 import { useUpcoming, useClearCheque } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
@@ -33,7 +34,12 @@ function List({ title, icon: Icon, tone, items, total, onClear, clearing }) {
                     <span className={isOverdue(x.dueDate) ? 'text-red-600 font-medium' : 'text-gray-700'}>{fmtDate(x.dueDate)}</span>
                     {isOverdue(x.dueDate) && <span className="ml-1.5 text-[10px] text-red-500 inline-flex items-center gap-0.5"><AlertTriangle size={10} /> overdue</span>}
                   </td>
-                  <td className="py-2 px-4 text-gray-900">{x.party}</td>
+                  <td className="py-2 px-4 text-gray-900">
+                    {x.partyId ? (
+                      <Link to={`/finance/statements?type=${x.partyType}&id=${x.partyId}`}
+                        className="text-blue-600 hover:underline font-medium">{x.party}</Link>
+                    ) : x.party}
+                  </td>
                   <td className="py-2 px-4">
                     <span className={`text-[11px] px-2 py-0.5 rounded-full ${x.kind === 'cheque' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>{x.label}</span>
                     {x.reference && <span className="ml-1.5 text-[11px] text-gray-400 font-mono">{x.reference}</span>}
