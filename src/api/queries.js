@@ -1242,11 +1242,22 @@ export function usePayrollSummary(params = {}) {
   });
 }
 
+export function useAttendance(params = {}) {
+  return useQuery({
+    queryKey: ['attendance', params],
+    enabled: !!params.month,
+    queryFn: async () => { const res = await millingApi.listAttendance(params); return transformKeys(unwrap(res, 'attendance') || []); },
+  });
+}
+
 export function useRecordAttendance() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data) => millingApi.recordAttendance(data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['payroll-summary'] }); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['payroll-summary'] });
+      qc.invalidateQueries({ queryKey: ['attendance'] });
+    },
   });
 }
 

@@ -12,7 +12,7 @@ import {
   useMillExpenses, useCreateMillExpense, useMillWorkers, useCreateMillWorker,
   useUpdateMillWorker, useDeleteMillWorker, useCreateWorkerAdvance, useWorkerAdvances,
   useDeleteWorkerAdvance,
-  usePayrollSummary, useRecordAttendance, useInventory, useExpenseVendors,
+  usePayrollSummary, useRecordAttendance, useAttendance, useInventory, useExpenseVendors,
   usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow,
   useMillLotCosts, useLocalSales,
 } from '../../../api/queries';
@@ -136,7 +136,9 @@ export default function MillFinanceDashboard() {
   const deleteWorkerMut = useDeleteMillWorker();
   const createAdvanceMut = useCreateWorkerAdvance();
   const curMonth = new Date().toISOString().slice(0, 7);
-  const { data: payrollData } = usePayrollSummary({ month: curMonth });
+  const [payrollMonth, setPayrollMonth] = useState(curMonth);
+  const [payrollView, setPayrollView] = useState('payroll'); // 'payroll' | 'attendance'
+  const { data: payrollData } = usePayrollSummary({ month: payrollMonth });
   const recordAttMut = useRecordAttendance();
 
   const { data: lotCosts = { categories: [], grandTotal: 0 } } = useMillLotCosts();
@@ -452,10 +454,10 @@ export default function MillFinanceDashboard() {
     try {
       if (workerForm.id) {
         await updateWorkerMut.mutateAsync({ id: workerForm.id, data: payload });
-        addToast('Worker updated', 'success');
+        addToast('Employee updated', 'success');
       } else {
         await createWorkerMut.mutateAsync(payload);
-        addToast('Worker added', 'success');
+        addToast('Employee added', 'success');
       }
       setShowWorkerDrawer(false);
       setWorkerForm(EMPTY_WORKER);
@@ -467,7 +469,7 @@ export default function MillFinanceDashboard() {
   async function handleToggleActive(worker) {
     try {
       await updateWorkerMut.mutateAsync({ id: worker.id, data: { is_active: !worker.isActive } });
-      addToast(worker.isActive ? 'Worker deactivated' : 'Worker reactivated', 'success');
+      addToast(worker.isActive ? 'Employee deactivated' : 'Employee reactivated', 'success');
     } catch (e) { addToast(e.message, 'error'); }
   }
 
@@ -475,7 +477,7 @@ export default function MillFinanceDashboard() {
     if (!deleteWorkerTarget) return;
     try {
       await deleteWorkerMut.mutateAsync(deleteWorkerTarget.id);
-      addToast('Worker deleted', 'success');
+      addToast('Employee deleted', 'success');
       setDeleteWorkerTarget(null);
     } catch (e) { addToast(e.message, 'error'); }
   }
@@ -551,7 +553,7 @@ export default function MillFinanceDashboard() {
               onClick={() => setShowWorkerDrawer(true)}
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-white/15 hover:bg-white/25 ring-1 ring-white/30 transition-colors"
             >
-              <UserPlus size={13} /> Add Worker
+              <UserPlus size={13} /> Add Employee
             </button>
             <Link
               to="/finance"
@@ -673,10 +675,10 @@ export default function MillFinanceDashboard() {
             <div className="bg-white rounded-xl border border-gray-100 p-5">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-sm font-semibold text-gray-800">Payroll · {curMonth}</h3>
-                <span className="text-xs text-gray-400">{payrollSummary.length} workers</span>
+                <span className="text-xs text-gray-400">{payrollSummary.length} employees</span>
               </div>
               {payrollSummary.length === 0 ? (
-                <p className="text-sm text-gray-400">No workers added yet.</p>
+                <p className="text-sm text-gray-400">No employees added yet.</p>
               ) : (
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm pb-2 border-b border-gray-100">
@@ -1226,24 +1228,52 @@ export default function MillFinanceDashboard() {
         const payById = new Map(payrollSummary.map(p => [p.id, p]));
         return (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-gray-500">Daily-wage & salaried workers, advances, and the monthly payroll run for <span className="font-medium text-gray-700">{curMonth}</span>.</p>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5">
+              {[['payroll', 'Payroll', Wallet], ['attendance', 'Attendance', CalendarDays]].map(([key, label, Icon]) => (
+                <button
+                  key={key}
+                  onClick={() => setPayrollView(key)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition ${payrollView === key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  <Icon className="w-3.5 h-3.5" /> {label}
+                </button>
+              ))}
+            </div>
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => openExpDrawer({ category: 'salaries', amount: Math.round(payrollTotal || 0), description: `Mill payroll for ${curMonth}` })}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40"
-                disabled={!payrollTotal}
-              >
-                <Wallet className="w-3.5 h-3.5" /> Post Payroll Run
-              </button>
+              <input
+                type="month"
+                value={payrollMonth}
+                max={curMonth}
+                onChange={e => setPayrollMonth(e.target.value || curMonth)}
+                className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-gray-900"
+              />
+              {payrollView === 'payroll' && (
+                <button
+                  onClick={() => openExpDrawer({ category: 'salaries', amount: Math.round(payrollTotal || 0), description: `Mill payroll for ${payrollMonth}` })}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40"
+                  disabled={!payrollTotal}
+                >
+                  <Wallet className="w-3.5 h-3.5" /> Post Payroll Run
+                </button>
+              )}
               <button onClick={() => openWorkerDrawer(null)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-700">
-                <UserPlus className="w-3.5 h-3.5" /> Add Worker
+                <UserPlus className="w-3.5 h-3.5" /> Add Employee
               </button>
             </div>
           </div>
+
+          {payrollView === 'attendance' ? (
+            <EmployeeAttendanceGrid
+              month={payrollMonth}
+              employees={workers}
+              recordAttMut={recordAttMut}
+              addToast={addToast}
+            />
+          ) : (<>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <Stat tone="blue"  icon={Users}      label="Active Workers"  value={payrollSummary.length} sub={`${workers.length} total`} />
-            <Stat tone="slate" icon={DollarSign} label="Gross Payroll"   value={PKR(payrollGross)} sub={curMonth} />
+            <Stat tone="blue"  icon={Users}      label="Active Employees"  value={payrollSummary.length} sub={`${workers.length} total`} />
+            <Stat tone="slate" icon={DollarSign} label="Gross Payroll"   value={PKR(payrollGross)} sub={payrollMonth} />
             <Stat tone="amber" icon={HandCoins}  label="Advances Outstanding" value={PKR(advancesOutstandingTotal)} sub="To recover" />
             <Stat tone="red"   icon={Wallet}     label="Net to Pay"      value={PKR(payrollTotal)} sub="Gross − advances" />
           </div>
@@ -1251,7 +1281,7 @@ export default function MillFinanceDashboard() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-600 uppercase tracking-wide">
-                  <th className="text-left px-4 py-3 font-medium">Worker</th>
+                  <th className="text-left px-4 py-3 font-medium">Employee</th>
                   <th className="text-left px-4 py-3 font-medium">Pay basis</th>
                   <th className="text-right px-4 py-3 font-medium">Days / OT</th>
                   <th className="text-right px-4 py-3 font-medium">Gross</th>
@@ -1300,7 +1330,7 @@ export default function MillFinanceDashboard() {
                   );
                 })}
                 {workers.length === 0 && (
-                  <tr><td colSpan={7} className="px-4 py-10 text-center text-gray-400">No workers added yet — click <span className="font-medium">Add Worker</span> to start.</td></tr>
+                  <tr><td colSpan={7} className="px-4 py-10 text-center text-gray-400">No employees added yet — click <span className="font-medium">Add Employee</span> to start.</td></tr>
                 )}
                 {payrollSummary.length > 0 && (
                   <tr className="bg-gray-50 font-semibold text-gray-800">
@@ -1316,8 +1346,9 @@ export default function MillFinanceDashboard() {
           </div>
           <p className="text-xs text-gray-400 flex items-start gap-1.5">
             <HandCoins className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-amber-500" />
-            Advances are paid out as cash now (they appear in Money Out / GL) and are automatically deducted from the worker's net pay until recovered. <span className="font-medium text-gray-500">Post Payroll Run</span> records the net total ({PKR(payrollTotal)}) for {curMonth}.
+            Advances are paid out as cash now (they appear in Money Out / GL) and are automatically deducted from the employee's net pay until recovered. <span className="font-medium text-gray-500">Post Payroll Run</span> records the net total ({PKR(payrollTotal)}) for {payrollMonth}.
           </p>
+          </>)}
         </div>
         );
       })()}
@@ -1497,7 +1528,7 @@ export default function MillFinanceDashboard() {
       <SlideDrawer
         open={showWorkerDrawer}
         onClose={() => setShowWorkerDrawer(false)}
-        title={workerForm.id ? 'Edit Mill Worker' : 'Add Mill Worker'}
+        title={workerForm.id ? 'Edit Mill Employee' : 'Add Mill Employee'}
         subtitle="Daily-wage or salaried — drives attendance & monthly payroll"
         icon={UserPlus}
         footer={
@@ -1508,7 +1539,7 @@ export default function MillFinanceDashboard() {
               disabled={createWorkerMut.isPending || updateWorkerMut.isPending}
               className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-60"
             >
-              {(createWorkerMut.isPending || updateWorkerMut.isPending) ? 'Saving…' : workerForm.id ? 'Save Changes' : 'Add Worker'}
+              {(createWorkerMut.isPending || updateWorkerMut.isPending) ? 'Saving…' : workerForm.id ? 'Save Changes' : 'Add Employee'}
             </button>
           </div>
         }
@@ -1708,7 +1739,7 @@ export default function MillFinanceDashboard() {
               <div>
                 <h3 className="text-base font-semibold text-gray-900">Delete {deleteWorkerTarget.name}?</h3>
                 <p className="text-sm text-gray-500 mt-1">
-                  This permanently removes the worker, their attendance, and their advances.
+                  This permanently removes the employee, their attendance, and their advances.
                   {(parseFloat(deleteWorkerTarget.advanceOutstanding) || 0) > 0 && (
                     <> Any advance cash-outs ({PKR(deleteWorkerTarget.advanceOutstanding)} outstanding) will be reversed from Money Out / GL.</>
                   )}{' '}
@@ -1750,6 +1781,119 @@ export default function MillFinanceDashboard() {
           onClose={() => setPaySupplier(null)}
         />
       )}
+    </div>
+  );
+}
+
+// Monthly attendance register — rows = active employees, columns = each day of
+// the month. Click a cell to cycle Present → Half-day → Leave → Absent. Feeds the
+// payroll summary's effective-days math. Posts via the existing /attendance upsert.
+const ATT_ORDER = ['present', 'half_day', 'leave', 'absent'];
+const ATT_LETTER = { present: 'P', half_day: 'H', leave: 'L', absent: 'A' };
+const ATT_STYLE = {
+  present: 'bg-emerald-500 text-white',
+  half_day: 'bg-amber-400 text-white',
+  leave: 'bg-sky-400 text-white',
+  absent: 'bg-rose-400 text-white',
+};
+const ATT_LABEL = { present: 'Present', half_day: 'Half day', leave: 'Leave', absent: 'Absent' };
+
+function EmployeeAttendanceGrid({ month, employees, recordAttMut, addToast }) {
+  const { data: records = [], isLoading } = useAttendance({ month });
+  const [optimistic, setOptimistic] = useState({}); // `${id}|${date}` → status (until refetch confirms)
+
+  const active = employees.filter(e => e.isActive);
+  const [y, m] = month.split('-').map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const dates = Array.from({ length: daysInMonth }, (_, i) => `${month}-${String(i + 1).padStart(2, '0')}`);
+
+  const fetchedMap = {};
+  for (const r of records) {
+    const d = String(r.date).slice(0, 10);
+    fetchedMap[`${r.workerId}|${d}`] = { status: r.status, overtimeHours: r.overtimeHours };
+  }
+  const statusOf = (id, date) => optimistic[`${id}|${date}`] ?? fetchedMap[`${id}|${date}`]?.status ?? null;
+
+  async function cycle(emp, date) {
+    const cur = statusOf(emp.id, date);
+    const next = cur ? ATT_ORDER[(ATT_ORDER.indexOf(cur) + 1) % ATT_ORDER.length] : 'present';
+    const key = `${emp.id}|${date}`;
+    setOptimistic(o => ({ ...o, [key]: next }));
+    try {
+      await recordAttMut.mutateAsync({
+        worker_id: emp.id, date, status: next,
+        hours_worked: next === 'half_day' ? 4 : next === 'present' ? 8 : 0,
+        overtime_hours: fetchedMap[key]?.overtimeHours || 0,
+      });
+      setOptimistic(o => { const n = { ...o }; delete n[key]; return n; }); // refetch now authoritative
+    } catch (e) {
+      setOptimistic(o => { const n = { ...o }; delete n[key]; return n; });
+      addToast(e.message, 'error');
+    }
+  }
+
+  const effectiveDays = (emp) => dates.reduce((s, d) => {
+    const st = statusOf(emp.id, d);
+    return s + (st === 'present' ? 1 : st === 'half_day' ? 0.5 : 0);
+  }, 0);
+  const isSunday = (d) => new Date(`${d}T00:00:00`).getDay() === 0;
+
+  if (active.length === 0) {
+    return <div className="bg-white rounded-xl border border-gray-100 px-4 py-10 text-center text-sm text-gray-400">No active employees to mark attendance for.</div>;
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <p className="text-xs text-gray-500">Click a day to cycle <span className="font-medium">Present → Half-day → Leave → Absent</span>. Present &amp; half-days drive payroll.</p>
+        <div className="flex items-center gap-3 text-[11px] text-gray-500">
+          {ATT_ORDER.map(s => (
+            <span key={s} className="inline-flex items-center gap-1">
+              <span className={`w-3.5 h-3.5 rounded-sm inline-flex items-center justify-center text-[9px] font-bold ${ATT_STYLE[s]}`}>{ATT_LETTER[s]}</span>
+              {ATT_LABEL[s]}
+            </span>
+          ))}
+        </div>
+      </div>
+      <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
+        {isLoading ? (
+          <p className="px-4 py-10 text-center text-sm text-gray-400">Loading attendance…</p>
+        ) : (
+        <table className="text-xs border-collapse">
+          <thead>
+            <tr className="bg-gray-50 border-b border-gray-100 text-gray-500">
+              <th className="sticky left-0 z-10 bg-gray-50 text-left px-3 py-2 font-medium min-w-[150px]">Employee</th>
+              {dates.map(d => (
+                <th key={d} className={`px-0 py-2 font-medium text-center w-7 ${isSunday(d) ? 'bg-gray-100 text-gray-400' : ''}`}>{d.slice(8)}</th>
+              ))}
+              <th className="px-3 py-2 font-medium text-right min-w-[64px]">Days</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {active.map(emp => (
+              <tr key={emp.id} className="hover:bg-gray-50/50">
+                <td className="sticky left-0 z-10 bg-white px-3 py-1.5 font-medium text-gray-800 whitespace-nowrap">{emp.name}</td>
+                {dates.map(d => {
+                  const st = statusOf(emp.id, d);
+                  return (
+                    <td key={d} className={`px-0 py-1 text-center ${isSunday(d) ? 'bg-gray-50' : ''}`}>
+                      <button
+                        onClick={() => cycle(emp, d)}
+                        title={`${emp.name} · ${d}${st ? ` · ${ATT_LABEL[st]}` : ''}`}
+                        className={`w-6 h-6 rounded text-[10px] font-bold transition ${st ? ATT_STYLE[st] : 'bg-gray-100 text-gray-300 hover:bg-gray-200'}`}
+                      >
+                        {st ? ATT_LETTER[st] : ''}
+                      </button>
+                    </td>
+                  );
+                })}
+                <td className="px-3 py-1.5 text-right font-semibold tabular-nums text-gray-800">{effectiveDays(emp)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        )}
+      </div>
     </div>
   );
 }
