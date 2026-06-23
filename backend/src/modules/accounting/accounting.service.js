@@ -1601,12 +1601,24 @@ const accountingService = {
       .orderBy('due_date')
       .select('pay_no', 'linked_ref', 'category', 'outstanding', 'original_amount', 'paid_amount',
         'currency', 'due_date', 'status');
-    const openItems = openPay.map((p) => ({
-      ref: p.linked_ref || p.pay_no, label: p.category || 'Payable', order_no: null,
-      currency: p.currency || 'PKR', outstanding: parseFloat(p.outstanding) || 0,
-      expected: parseFloat(p.original_amount) || 0, received: parseFloat(p.paid_amount) || 0,
-      due_date: p.due_date, status: p.status,
-    }));
+    // Friendlier "Type": show the product (rice type) for raw-rice payables that
+    // link to a lot/batch; otherwise a cleaned-up category ("Raw Material" /
+    // "office_supplies" → "Raw rice" / "Office supplies").
+    const cleanCat = (c) => {
+      if (!c) return 'Payable';
+      if (/^raw\s*(material|rice)$/i.test(c)) return 'Raw rice';
+      return c.replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
+    };
+    const openItems = openPay.map((p) => {
+      const src = (p.linked_ref && (lotByNo[p.linked_ref] || batchByNo[p.linked_ref])) || null;
+      const product = src && lotProdName[src.product_id];
+      return {
+        ref: p.linked_ref || p.pay_no, label: product || cleanCat(p.category), order_no: null,
+        currency: p.currency || 'PKR', outstanding: parseFloat(p.outstanding) || 0,
+        expected: parseFloat(p.original_amount) || 0, received: parseFloat(p.paid_amount) || 0,
+        due_date: p.due_date, status: p.status,
+      };
+    });
 
     return {
       supplier_id: sid,
@@ -1655,7 +1667,11 @@ const accountingService = {
         notes: s.notes || null, amount: num(s.total_amount),
       }));
       const saleIds = sales.map((s) => s.id);
-      const pays = saleIds.length ? await db('payments').whereIn('local_sale_id', saleIds).orderBy('payment_date')
+      // Don't count an uncleared post-dated cheque as paid — money hasn't moved
+      // until it clears (cash/bank/online settle immediately).
+      const pays = saleIds.length ? await db('payments').whereIn('local_sale_id', saleIds)
+        .where((qb) => qb.whereNot('payment_method', 'cheque').orWhere('cleared', true))
+        .orderBy('payment_date')
         .select('payment_no', 'amount', 'payment_date', 'payment_method', 'bank_reference', 'local_sale_id') : [];
       payRows = pays.map((p) => ({ ref: p.payment_no, date: p.payment_date, amount: num(p.amount), method: p.payment_method, reference: p.bank_reference || null, invId: p.local_sale_id }));
     } else {
@@ -1668,7 +1684,10 @@ const accountingService = {
         particulars: p.category || '', notes: p.notes || null, amount: num(p.original_amount),
       }));
       const payIds = payables.map((p) => p.id);
-      const pays = payIds.length ? await db('payments').whereIn('linked_payable_id', payIds).orderBy('payment_date')
+      // Skip uncleared post-dated cheques — they haven't settled the bill yet.
+      const pays = payIds.length ? await db('payments').whereIn('linked_payable_id', payIds)
+        .where((qb) => qb.whereNot('payment_method', 'cheque').orWhere('cleared', true))
+        .orderBy('payment_date')
         .select('payment_no', 'amount', 'payment_date', 'payment_method', 'bank_reference', 'linked_payable_id') : [];
       payRows = pays.map((p) => ({ ref: p.payment_no, date: p.payment_date, amount: num(p.amount), method: p.payment_method, reference: p.bank_reference || null, invId: p.linked_payable_id }));
     }
