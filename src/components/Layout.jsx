@@ -6,7 +6,7 @@ import {
   User, Users, Plus, X, LogOut, AlertTriangle, AlertCircle, Info, CreditCard,
   ArrowRightLeft, FlaskConical, Menu, ShieldCheck, Shield,
   ChevronsLeft, ChevronsRight, Sun, Moon,
-  Zap, Brain, Beaker, Printer, Boxes, ClipboardCheck,
+  Zap, Brain, Beaker, Printer, Boxes, ClipboardCheck, Sparkles,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
@@ -45,6 +45,7 @@ const sidebarNav = [
   { label: 'Reports', icon: BarChart3, to: '/reports', permission: { module: 'reports', action: 'view' } },
   { label: 'Print Reports', icon: Printer, to: '/reports/print', permission: { module: 'reports', action: 'view' } },
   { section: 'Intelligence' },
+  { label: 'AI Assistant', icon: Sparkles, to: '/ai' },
   { label: 'Exceptions', icon: Zap, to: '/exceptions', permission: { module: 'admin', action: 'view' } },
   { label: 'Analytics', icon: Brain, to: '/intelligence' },
   { label: 'Simulator', icon: Beaker, to: '/simulator' },
