@@ -1261,6 +1261,49 @@ export function useRecordAttendance() {
   });
 }
 
+export function usePayrollRuns() {
+  return useQuery({
+    queryKey: ['payroll-runs'],
+    queryFn: async () => { const res = await millingApi.listPayrollRuns(); return transformKeys(unwrap(res, 'runs') || []); },
+  });
+}
+
+export function usePayrollRun(id) {
+  return useQuery({
+    queryKey: ['payroll-run', id],
+    enabled: !!id,
+    queryFn: async () => { const res = await millingApi.getPayrollRun(id); return transformKeys(unwrap(res) || {}); },
+  });
+}
+
+// Invalidate everything a payroll run touches: the run list, the summary (paid),
+// employees/advances (recovered), and the money trails (expense/payable/banks).
+function invalidatePayroll(qc) {
+  qc.invalidateQueries({ queryKey: ['payroll-runs'] });
+  qc.invalidateQueries({ queryKey: ['payroll-summary'] });
+  qc.invalidateQueries({ queryKey: ['mill-workers'] });
+  qc.invalidateQueries({ queryKey: ['mill-expenses'] });
+  qc.invalidateQueries({ queryKey: ['payables'] });
+  qc.invalidateQueries({ queryKey: ['bank-accounts'] });
+  qc.invalidateQueries({ queryKey: ['mill-cash-flow'] });
+}
+
+export function usePostPayrollRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => millingApi.postPayrollRun(data),
+    onSuccess: () => invalidatePayroll(qc),
+  });
+}
+
+export function useDeletePayrollRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => millingApi.deletePayrollRun(id),
+    onSuccess: () => invalidatePayroll(qc),
+  });
+}
+
 export function useMills() {
   return useQuery({
     queryKey: ['mills'],

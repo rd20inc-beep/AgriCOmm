@@ -782,59 +782,212 @@ router.post('/attendance', authorize('milling', 'create'), async (req, res) => {
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
+// Compute the month's payroll for every ACTIVE employee — the single source of
+// truth shared by GET /payroll/summary and POST /payroll/run (so a run can never
+// post a figure that disagrees with what the screen showed).
+async function computePayrollSummary(month) {
+  const startDate = month ? `${month}-01` : new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+  // Last day of the month — `${month}-31` is an invalid date for 30-day months
+  // and February. Date.UTC(year, monthNum, 0) rolls back to the month's last day.
+  const endDate = month
+    ? new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).toISOString().split('T')[0]
+    : new Date().toISOString().split('T')[0];
+
+  const workers = await db('mill_workers').where('is_active', true).orderBy('name');
+  const attendance = await db('mill_attendance')
+    .where('date', '>=', startDate).where('date', '<=', endDate);
+  // Outstanding advances net off net pay (the cash already went out when given).
+  const advRows = workers.length ? await db('mill_worker_advances')
+    .whereIn('worker_id', workers.map((w) => w.id)).where('status', 'outstanding')
+    .groupBy('worker_id')
+    .select('worker_id', db.raw('COALESCE(SUM(amount - recovered_amount), 0) as outstanding')) : [];
+  const advMap = new Map(advRows.map((r) => [r.worker_id, parseFloat(r.outstanding) || 0]));
+
+  const summary = workers.map(w => {
+    const records = attendance.filter(a => a.worker_id === w.id);
+    const daysPresent = records.filter(a => a.status === 'present').length;
+    const halfDays = records.filter(a => a.status === 'half_day').length;
+    const totalOT = records.reduce((s, a) => s + (parseFloat(a.overtime_hours) || 0), 0);
+    const effectiveDays = daysPresent + (halfDays * 0.5);
+    const dailyWage = parseFloat(w.daily_wage) || 0;
+    // Salaried staff earn their flat monthly figure; daily-wage staff earn per
+    // effective day worked. Overtime (if logged) pays 1.5× the daily hourly rate.
+    const basicPay = w.pay_type === 'monthly'
+      ? (parseFloat(w.monthly_salary) || 0)
+      : effectiveDays * dailyWage;
+    const otPay = totalOT * (dailyWage / 8 * 1.5);
+    const gross = basicPay + otPay;
+    const advanceOutstanding = advMap.get(w.id) || 0;
+    // Recover advances against this run's gross, but never below zero.
+    const advanceDeduction = Math.min(advanceOutstanding, gross);
+    return {
+      ...w, daysPresent, halfDays, effectiveDays, totalOT,
+      basicPay: Math.round(basicPay), otPay: Math.round(otPay),
+      grossPay: Math.round(gross),
+      advanceOutstanding: Math.round(advanceOutstanding),
+      advanceDeduction: Math.round(advanceDeduction),
+      netPay: Math.round(gross - advanceDeduction),
+      totalPay: Math.round(gross - advanceDeduction), // back-compat alias
+    };
+  });
+
+  const grandGross = summary.reduce((s, w) => s + w.grossPay, 0);
+  const grandAdvance = summary.reduce((s, w) => s + w.advanceDeduction, 0);
+  const grandTotal = summary.reduce((s, w) => s + w.netPay, 0);
+  return { summary, grandGross, grandAdvance, grandTotal, period: { startDate, endDate } };
+}
+
+// Apply `amount` of recovery to a worker's outstanding advances, oldest first —
+// so a posted payroll run closes out the advances it deducted (otherwise the
+// same advance would be deducted again every following month).
+async function recoverAdvancesForWorker(trx, workerId, amount) {
+  let remaining = parseFloat(amount) || 0;
+  if (remaining <= 0) return;
+  const advs = await trx('mill_worker_advances')
+    .where({ worker_id: workerId, status: 'outstanding' })
+    .orderBy('advance_date', 'asc').orderBy('id', 'asc');
+  for (const a of advs) {
+    if (remaining <= 0) break;
+    const out = (parseFloat(a.amount) || 0) - (parseFloat(a.recovered_amount) || 0);
+    const applied = Math.min(out, remaining);
+    const newRecovered = (parseFloat(a.recovered_amount) || 0) + applied;
+    await trx('mill_worker_advances').where('id', a.id).update({
+      recovered_amount: newRecovered,
+      status: newRecovered >= (parseFloat(a.amount) || 0) - 0.01 ? 'recovered' : 'outstanding',
+      updated_at: trx.fn.now(),
+    });
+    remaining -= applied;
+  }
+}
+
+// Reverse `amount` of recovery (when a run is deleted) — newest recovery first.
+async function unrecoverAdvancesForWorker(trx, workerId, amount) {
+  let remaining = parseFloat(amount) || 0;
+  if (remaining <= 0) return;
+  const advs = await trx('mill_worker_advances')
+    .where('worker_id', workerId).where('recovered_amount', '>', 0)
+    .orderBy('advance_date', 'desc').orderBy('id', 'desc');
+  for (const a of advs) {
+    if (remaining <= 0) break;
+    const rec = parseFloat(a.recovered_amount) || 0;
+    const applied = Math.min(rec, remaining);
+    const newRec = rec - applied;
+    await trx('mill_worker_advances').where('id', a.id).update({
+      recovered_amount: newRec,
+      status: newRec >= (parseFloat(a.amount) || 0) - 0.01 ? 'recovered' : 'outstanding',
+      updated_at: trx.fn.now(),
+    });
+    remaining -= applied;
+  }
+}
+
 router.get('/payroll/summary', authorize('milling', 'view'), async (req, res) => {
   try {
-    const { month } = req.query;
-    const startDate = month ? `${month}-01` : new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
-    // Last day of the month — `${month}-31` is an invalid date for 30-day
-    // months and February (Postgres throws "date/time field value out of
-    // range"). Date.UTC(year, monthNum, 0) rolls back to the month's last day.
-    const endDate = month
-      ? new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).toISOString().split('T')[0]
-      : new Date().toISOString().split('T')[0];
+    const data = await computePayrollSummary(req.query.month);
+    return res.json({ success: true, data });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
 
-    const workers = await db('mill_workers').where('is_active', true).orderBy('name');
-    const attendance = await db('mill_attendance')
-      .where('date', '>=', startDate).where('date', '<=', endDate);
-    // Outstanding advances net off net pay (the cash already went out when given).
-    const advRows = workers.length ? await db('mill_worker_advances')
-      .whereIn('worker_id', workers.map((w) => w.id)).where('status', 'outstanding')
-      .groupBy('worker_id')
-      .select('worker_id', db.raw('COALESCE(SUM(amount - recovered_amount), 0) as outstanding')) : [];
-    const advMap = new Map(advRows.map((r) => [r.worker_id, parseFloat(r.outstanding) || 0]));
+// List posted payroll runs (history) + the linked expense's bank.
+router.get('/payroll/runs', authorize('milling', 'view'), async (req, res) => {
+  try {
+    const runs = await db('mill_payroll_runs as r')
+      .leftJoin('bank_accounts as ba', 'r.bank_account_id', 'ba.id')
+      .select('r.*', 'ba.name as bank_name')
+      .orderBy('r.period', 'desc');
+    return res.json({ success: true, data: { runs } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
 
-    const summary = workers.map(w => {
-      const records = attendance.filter(a => a.worker_id === w.id);
-      const daysPresent = records.filter(a => a.status === 'present').length;
-      const halfDays = records.filter(a => a.status === 'half_day').length;
-      const totalOT = records.reduce((s, a) => s + (parseFloat(a.overtime_hours) || 0), 0);
-      const effectiveDays = daysPresent + (halfDays * 0.5);
-      const dailyWage = parseFloat(w.daily_wage) || 0;
-      // Salaried staff earn their flat monthly figure; daily-wage staff earn per
-      // effective day worked. Overtime (if logged) pays 1.5× the daily hourly rate.
-      const basicPay = w.pay_type === 'monthly'
-        ? (parseFloat(w.monthly_salary) || 0)
-        : effectiveDays * dailyWage;
-      const otPay = totalOT * (dailyWage / 8 * 1.5);
-      const gross = basicPay + otPay;
-      const advanceOutstanding = advMap.get(w.id) || 0;
-      // Recover advances against this run's gross, but never below zero.
-      const advanceDeduction = Math.min(advanceOutstanding, gross);
-      return {
-        ...w, daysPresent, halfDays, effectiveDays, totalOT,
-        basicPay: Math.round(basicPay), otPay: Math.round(otPay),
-        grossPay: Math.round(gross),
-        advanceOutstanding: Math.round(advanceOutstanding),
-        advanceDeduction: Math.round(advanceDeduction),
-        netPay: Math.round(gross - advanceDeduction),
-        totalPay: Math.round(gross - advanceDeduction), // back-compat alias
-      };
+// A single run with its per-employee payslip lines.
+router.get('/payroll/runs/:id', authorize('milling', 'view'), async (req, res) => {
+  try {
+    const run = await db('mill_payroll_runs as r')
+      .leftJoin('bank_accounts as ba', 'r.bank_account_id', 'ba.id')
+      .select('r.*', 'ba.name as bank_name')
+      .where('r.id', req.params.id).first();
+    if (!run) return res.status(404).json({ success: false, message: 'Payroll run not found.' });
+    const lines = await db('mill_payroll_lines').where('run_id', run.id).orderBy('worker_name');
+    return res.json({ success: true, data: { run, lines } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Post a payroll run: pay the month's NET salaries (cash/bank + GL via a paid
+// business_expense), snapshot each employee's payslip line, and recover the
+// advances that were deducted. Idempotent per period (unique). Server recomputes
+// the figures — the client's numbers are never trusted.
+router.post('/payroll/run', authorize('milling', 'create'), async (req, res) => {
+  try {
+    const { month, pay_method, bank_account_id, pay_date, notes } = req.body;
+    if (!/^\d{4}-\d{2}$/.test(month || '')) return res.status(400).json({ success: false, message: 'A valid month (YYYY-MM) is required.' });
+    const existing = await db('mill_payroll_runs').where('period', month).first();
+    if (existing) return res.status(409).json({ success: false, message: `Payroll for ${month} has already been posted (run #${existing.id}). Delete that run first to re-post.` });
+
+    const { summary, grandGross, grandAdvance, grandTotal } = await computePayrollSummary(month);
+    if (!summary.length || grandGross <= 0) return res.status(400).json({ success: false, message: 'Nothing to post for this month — add employees, mark attendance or set salaries first.' });
+
+    const method = pay_method === 'bank' ? 'bank' : 'cash';
+    const payDate = pay_date || new Date().toISOString().split('T')[0];
+    // Cash payments move the Office Petty Cash account if one exists; bank
+    // payments use the chosen account.
+    let acctId = method === 'bank' ? (bank_account_id || null) : null;
+    if (method === 'cash' && !acctId) {
+      acctId = (await db('bank_accounts').where('type', 'cash').first('id'))?.id || null;
+    }
+
+    // 1) Pay out the net total as a paid salaries expense (cash/bank + GL).
+    let expense = null;
+    if (grandTotal > 0) {
+      expense = await expensesService.create({
+        expense_type: 'mill', category: 'salaries', amount: grandTotal, currency: 'PKR',
+        expense_date: payDate,
+        description: `Salaries — payroll run ${month}`,
+        notes: notes || `Payroll ${month}: ${summary.length} employee(s) · gross ${grandGross} · advances ${grandAdvance} · net ${grandTotal}`,
+        pay_now: true, bank_account_id: acctId,
+        payment_method: method,
+      }, req.user?.id);
+    }
+
+    // 2) Record the run + payslip lines, and recover deducted advances.
+    const run = await db.transaction(async (trx) => {
+      const [r] = await trx('mill_payroll_runs').insert({
+        period: month, pay_date: payDate, pay_method: method, bank_account_id: acctId,
+        gross_total: grandGross, advance_total: grandAdvance, net_total: grandTotal,
+        employee_count: summary.length, expense_id: expense?.id || null,
+        status: 'posted', notes: notes || null, created_by: req.user?.id || null,
+      }).returning('*');
+      for (const w of summary) {
+        await trx('mill_payroll_lines').insert({
+          run_id: r.id, worker_id: w.id, worker_name: w.name, role: w.role, pay_type: w.pay_type,
+          effective_days: w.effectiveDays || 0, ot_hours: w.totalOT || 0,
+          basic_pay: w.basicPay, ot_pay: w.otPay, gross_pay: w.grossPay,
+          advance_deducted: w.advanceDeduction, net_pay: w.netPay,
+        });
+        if (w.advanceDeduction > 0) await recoverAdvancesForWorker(trx, w.id, w.advanceDeduction);
+      }
+      return r;
     });
+    return res.json({ success: true, data: { run } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
 
-    const grandGross = summary.reduce((s, w) => s + w.grossPay, 0);
-    const grandAdvance = summary.reduce((s, w) => s + w.advanceDeduction, 0);
-    const grandTotal = summary.reduce((s, w) => s + w.netPay, 0);
-    return res.json({ success: true, data: { summary, grandGross, grandAdvance, grandTotal, period: { startDate, endDate } } });
+// Undo a payroll run — reverse its cash-out (+ GL), restore the advances it
+// recovered to outstanding, and delete the run (lines cascade).
+router.delete('/payroll/runs/:id', authorize('milling', 'delete'), async (req, res) => {
+  try {
+    const run = await db('mill_payroll_runs').where('id', req.params.id).first();
+    if (!run) return res.status(404).json({ success: false, message: 'Payroll run not found.' });
+    await db.transaction(async (trx) => {
+      const lines = await trx('mill_payroll_lines').where('run_id', run.id);
+      for (const l of lines) {
+        if (parseFloat(l.advance_deducted) > 0 && l.worker_id) {
+          await unrecoverAdvancesForWorker(trx, l.worker_id, l.advance_deducted);
+        }
+      }
+      await unwindAdvanceExpense(trx, run.expense_id); // reverse cash-out + GL
+      await trx('mill_payroll_runs').where('id', run.id).del(); // lines cascade
+    });
+    return res.json({ success: true, data: { deleted: run.id } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 

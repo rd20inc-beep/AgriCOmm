@@ -1077,6 +1077,36 @@ COL mill_packing_logs.tare_kg_per_bag:numeric:NOT NULL
 COL mill_packing_logs.tare_weight_kg:numeric:NOT NULL
 COL mill_packing_logs.total_cost:numeric:NULL
 COL mill_packing_logs.warehouse_id:integer:NULL
+COL mill_payroll_lines.advance_deducted:numeric:NOT NULL
+COL mill_payroll_lines.basic_pay:numeric:NOT NULL
+COL mill_payroll_lines.created_at:timestamp with time zone:NOT NULL
+COL mill_payroll_lines.effective_days:numeric:NOT NULL
+COL mill_payroll_lines.gross_pay:numeric:NOT NULL
+COL mill_payroll_lines.id:integer:NOT NULL
+COL mill_payroll_lines.net_pay:numeric:NOT NULL
+COL mill_payroll_lines.ot_hours:numeric:NOT NULL
+COL mill_payroll_lines.ot_pay:numeric:NOT NULL
+COL mill_payroll_lines.pay_type:character varying:NULL
+COL mill_payroll_lines.role:character varying:NULL
+COL mill_payroll_lines.run_id:integer:NOT NULL
+COL mill_payroll_lines.updated_at:timestamp with time zone:NOT NULL
+COL mill_payroll_lines.worker_id:integer:NULL
+COL mill_payroll_lines.worker_name:character varying:NOT NULL
+COL mill_payroll_runs.advance_total:numeric:NOT NULL
+COL mill_payroll_runs.bank_account_id:integer:NULL
+COL mill_payroll_runs.created_at:timestamp with time zone:NOT NULL
+COL mill_payroll_runs.created_by:integer:NULL
+COL mill_payroll_runs.employee_count:integer:NOT NULL
+COL mill_payroll_runs.expense_id:integer:NULL
+COL mill_payroll_runs.gross_total:numeric:NOT NULL
+COL mill_payroll_runs.id:integer:NOT NULL
+COL mill_payroll_runs.net_total:numeric:NOT NULL
+COL mill_payroll_runs.notes:text:NULL
+COL mill_payroll_runs.pay_date:date:NOT NULL
+COL mill_payroll_runs.pay_method:character varying:NOT NULL
+COL mill_payroll_runs.period:character varying:NOT NULL
+COL mill_payroll_runs.status:character varying:NOT NULL
+COL mill_payroll_runs.updated_at:timestamp with time zone:NOT NULL
 COL mill_performance.avg_bran_pct:numeric:NULL
 COL mill_performance.avg_broken_pct:numeric:NULL
 COL mill_performance.avg_cost_per_mt:numeric:NULL
@@ -2332,6 +2362,11 @@ CON mill_packing_logs.mill_packing_logs_packed_by_foreign(f)
 CON mill_packing_logs.mill_packing_logs_pkey(p)
 CON mill_packing_logs.mill_packing_logs_poly_item_id_foreign(f)
 CON mill_packing_logs.mill_packing_logs_warehouse_id_foreign(f)
+CON mill_payroll_lines.mill_payroll_lines_pkey(p)
+CON mill_payroll_lines.mill_payroll_lines_run_id_foreign(f)
+CON mill_payroll_lines.mill_payroll_lines_worker_id_foreign(f)
+CON mill_payroll_runs.mill_payroll_runs_period_unique(u)
+CON mill_payroll_runs.mill_payroll_runs_pkey(p)
 CON mill_performance.chk_mill_performance_avg_bran_pct_range(c)
 CON mill_performance.chk_mill_performance_avg_broken_pct_range(c)
 CON mill_performance.chk_mill_performance_avg_cost_per_mt_nn(c)
