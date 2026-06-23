@@ -43,9 +43,15 @@ export default function PackingTab({ order, onUpdated }) {
     printing: order.bagPrinting || order.bag_printing || '',
     color: order.bagColor || order.bag_color || '',
     brand: order.bagBrand || order.bag_brand || '',
+    masterKg: order.masterBagSizeKg || order.master_bag_size_kg || '',
   };
   const receivingMode = order.receivingMode || order.receiving_mode || '';
   const totalBags = order.totalBags || order.total_bags || 0;
+  // Master-bag math: how many master bags the order ships in (total kg ÷ master kg).
+  const orderKg = (parseFloat(order.qtyMT ?? order.qty_mt) || 0) * 1000;
+  const masterKg = parseFloat(bagSpec.masterKg) || 0;
+  const masterBagCount = masterKg > 0 ? Math.ceil(orderKg / masterKg) : 0;
+  const retailPerMaster = (masterKg > 0 && parseFloat(bagSpec.sizeKg) > 0) ? Math.floor(masterKg / parseFloat(bagSpec.sizeKg)) : 0;
   const packingNotes = order.packingNotes || order.packing_notes || '';
   const packingLines = order.packingLines || order.packing_lines || [];
   // Per-item packing (multi-product P.I.) — each line can carry its own bag.
@@ -145,7 +151,9 @@ export default function PackingTab({ order, onUpdated }) {
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                     {bagSpec.type && <div><p className="text-xs text-gray-500">Bag Type</p><p className="text-sm font-medium">{bagSpec.type}</p></div>}
                     {bagSpec.quality && <div><p className="text-xs text-gray-500">Quality</p><p className="text-sm font-medium">{bagSpec.quality}</p></div>}
-                    {bagSpec.sizeKg && <div><p className="text-xs text-gray-500">Size</p><p className="text-sm font-medium">{bagSpec.sizeKg} KG</p></div>}
+                    {bagSpec.sizeKg && <div><p className="text-xs text-gray-500">Bag Size</p><p className="text-sm font-medium">{bagSpec.sizeKg} KG</p></div>}
+                    {masterKg > 0 && <div><p className="text-xs text-gray-500">Master Bag</p><p className="text-sm font-medium">{masterKg} KG{retailPerMaster > 0 ? ` (${retailPerMaster} × ${bagSpec.sizeKg}kg)` : ''}</p></div>}
+                    {masterBagCount > 0 && <div><p className="text-xs text-gray-500">Master Bags</p><p className="text-sm font-medium text-amber-700">{masterBagCount.toLocaleString()}</p></div>}
                     {bagSpec.weightGm && <div><p className="text-xs text-gray-500">Bag Weight</p><p className="text-sm font-medium">{bagSpec.weightGm} gm</p></div>}
                     {bagSpec.printing && <div><p className="text-xs text-gray-500">Printing</p><p className="text-sm font-medium">{bagSpec.printing}</p></div>}
                     {bagSpec.color && <div><p className="text-xs text-gray-500">Color</p><p className="text-sm font-medium">{bagSpec.color}</p></div>}
