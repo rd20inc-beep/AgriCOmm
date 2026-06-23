@@ -593,8 +593,9 @@ router.post('/expenses', authorize('milling', 'create'),
 // occurrence is due at last_date + cadence. The Recurring tab lists each series
 // with its next-due date and lets you materialize (post) the due ones.
 // =============================================================================
+const isoDate = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10));
 function addInterval(dateStr, recurrence) {
-  const dt = new Date(`${String(dateStr).slice(0, 10)}T00:00:00Z`);
+  const dt = new Date(`${isoDate(dateStr)}T00:00:00Z`);
   if (recurrence === 'weekly') dt.setUTCDate(dt.getUTCDate() + 7);
   else if (recurrence === 'quarterly') dt.setUTCMonth(dt.getUTCMonth() + 3);
   else if (recurrence === 'yearly') dt.setUTCFullYear(dt.getUTCFullYear() + 1);
@@ -622,7 +623,7 @@ router.get('/expenses/recurring', authorize('milling', 'view'), async (req, res)
     const recurring = Object.entries(latest).map(([k, e]) => {
       const nextDue = addInterval(e.expense_date, e.recurrence);
       return {
-        ...e, last_date: String(e.expense_date).slice(0, 10), next_due: nextDue,
+        ...e, last_date: isoDate(e.expense_date), next_due: nextDue,
         due: nextDue <= today, occurrences: counts[k],
         payee: e.employee_name || e.vendor_name || null,
       };
