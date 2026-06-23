@@ -1048,7 +1048,10 @@ const accountingService = {
         'quantity_kg', 'quantity_bags', 'bag_weight_kg', 'lot_no', 'notes', 'collection_location');
     const lsIds = localSalesRows.map((s) => s.id);
     const lsPays = lsIds.length
-      ? await db('payments').whereIn('local_sale_id', lsIds).select('amount', 'payment_date', 'payment_no', 'payment_method', 'bank_reference', 'local_sale_id')
+      ? await db('payments as p')
+        .leftJoin('bank_accounts as ba', 'ba.id', 'p.bank_account_id')
+        .whereIn('p.local_sale_id', lsIds)
+        .select('p.amount', 'p.payment_date', 'p.payment_no', 'p.payment_method', 'p.bank_reference', 'p.local_sale_id', 'ba.name as account_name')
       : [];
     const saleById = Object.fromEntries(localSalesRows.map((s) => [s.id, s]));
     const methodLbl = { cash: 'Cash', cheque: 'Cheque', bank_transfer: 'Bank transfer', online: 'Online', mobile: 'Mobile' };
@@ -1079,6 +1082,7 @@ const accountingService = {
         const saleDesc = sale ? [sale.item_name, sale.lot_no ? `Lot ${sale.lot_no}` : ''].filter(Boolean).join(' ') : '';
         const bits = [
           methodLbl[p.payment_method] || p.payment_method,
+          p.account_name,                       // which account received it
           p.bank_reference,
           sale?.sale_no ? `for ${sale.sale_no}${saleDesc ? ` (${saleDesc})` : ''}` : '',
         ].filter(Boolean).join(' · ');

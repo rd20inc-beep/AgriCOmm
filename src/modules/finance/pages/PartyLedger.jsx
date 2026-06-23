@@ -290,8 +290,8 @@ export default function PartyLedger() {
                   <thead>
                     <tr className="border-b border-gray-200 bg-gray-50 text-xs uppercase text-gray-500">
                       <th className="text-left py-2.5 px-3 font-semibold">Date</th>
-                      <th className="text-left py-2.5 px-3 font-semibold">Vch Type</th>
-                      <th className="text-left py-2.5 px-3 font-semibold">Vch No</th>
+                      <th className="text-left py-2.5 px-3 font-semibold">Type</th>
+                      <th className="text-left py-2.5 px-3 font-semibold">Voucher No.</th>
                       <th className="text-left py-2.5 px-3 font-semibold">Description</th>
                       <th className="text-right py-2.5 px-3 font-semibold">Debit</th>
                       <th className="text-right py-2.5 px-3 font-semibold">Credit</th>
@@ -327,8 +327,8 @@ export default function PartyLedger() {
                             <td className="py-2.5 px-3 text-xs whitespace-nowrap">
                               {t.ref_no
                                 ? (href
-                                    ? <Link to={href} className="text-blue-600 hover:underline font-medium">{t.vch_no || t.ref_no}</Link>
-                                    : <span className="text-gray-700">{t.vch_no || t.ref_no}</span>)
+                                    ? <Link to={href} className="text-blue-600 hover:underline font-medium">{t.ref_no}</Link>
+                                    : <span className="text-gray-700">{t.ref_no}</span>)
                                 : <span className="text-gray-400">—</span>}
                             </td>
                             <td className="py-2.5 px-3 text-gray-700 min-w-[220px]" style={{ maxWidth: 420 }}>

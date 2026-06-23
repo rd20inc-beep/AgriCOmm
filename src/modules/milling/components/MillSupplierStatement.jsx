@@ -121,8 +121,8 @@ export default function MillSupplierStatement({ supplierId, supplierName, params
             <thead>
               <tr className="bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500">
                 <th className="text-left font-medium px-3 py-2">Date</th>
-                <th className="text-left font-medium px-3 py-2">Vch Type</th>
-                <th className="text-left font-medium px-3 py-2">Vch No</th>
+                <th className="text-left font-medium px-3 py-2">Type</th>
+                <th className="text-left font-medium px-3 py-2">Voucher No.</th>
                 <th className="text-left font-medium px-3 py-2">Description</th>
                 <th className="text-right font-medium px-3 py-2">Paid (Dr)</th>
                 <th className="text-right font-medium px-3 py-2">Billed (Cr)</th>
@@ -141,7 +141,7 @@ export default function MillSupplierStatement({ supplierId, supplierName, params
                     <td className="px-3 py-1.5 whitespace-nowrap text-gray-600">{fmtDate(t.date)}</td>
                     <td className="px-3 py-1.5 whitespace-nowrap text-gray-500 text-xs">{t.vch_type || '—'}</td>
                     <td className="px-3 py-1.5 whitespace-nowrap text-xs">
-                      {link ? <Link to={link} className="text-blue-600 hover:underline">{t.vch_no || t.ref_no}</Link> : (t.vch_no || t.ref_no || '—')}
+                      {link ? <Link to={link} className="text-blue-600 hover:underline">{t.ref_no || t.vch_no}</Link> : (t.ref_no || t.vch_no || "—")}
                     </td>
                     <td className="px-3 py-1.5 min-w-[200px] max-w-[420px]">
                       <span className="block text-gray-700 whitespace-normal break-words">
