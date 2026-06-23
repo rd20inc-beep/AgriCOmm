@@ -27,17 +27,21 @@ export default function PartyAllocationLedger({ partyType, partyId }) {
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between gap-2">
+      <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between gap-2 flex-wrap">
         <h4 className="text-sm font-semibold text-gray-700">Invoice & payment allocation</h4>
-        <span className="text-[11px] text-gray-400">{counts.invoices} {billLabel.toLowerCase()}{counts.invoices === 1 ? '' : 's'} · {counts.payments} {payLabel.toLowerCase()}{counts.payments === 1 ? '' : 's'}</span>
+        <div className="flex items-center gap-3">
+          <span className="inline-flex items-center gap-1 text-[10px] text-gray-500"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-200 border border-emerald-300" /> Paid</span>
+          <span className="inline-flex items-center gap-1 text-[10px] text-gray-500"><span className="w-2.5 h-2.5 rounded-sm bg-amber-200 border border-amber-300" /> Outstanding</span>
+          <span className="text-[11px] text-gray-400">{counts.invoices} {billLabel.toLowerCase()}{counts.invoices === 1 ? '' : 's'} · {counts.payments} {payLabel.toLowerCase()}{counts.payments === 1 ? '' : 's'}</span>
+        </div>
       </div>
 
       {invoices.length === 0 ? (
         <div className="p-6 text-center text-sm text-gray-400">No invoices yet.</div>
       ) : (
-        <div className="divide-y divide-gray-100">
+        <div className="divide-y divide-white/60">
           {invoices.map((inv, i) => (
-            <div key={i} className="px-4 py-3">
+            <div key={i} className={`px-4 py-3 ${inv.status === 'Paid' ? 'bg-emerald-50' : 'bg-amber-50'}`}>
               {/* Invoice header */}
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -62,7 +66,7 @@ export default function PartyAllocationLedger({ partyType, partyId }) {
 
               {/* Payments applied */}
               {inv.payments.length > 0 ? (
-                <div className="mt-2 ml-5 rounded-lg bg-gray-50/70 border border-gray-100 divide-y divide-gray-100">
+                <div className="mt-2 ml-5 rounded-lg bg-white/70 border border-black/5 divide-y divide-black/5">
                   {inv.payments.map((p, j) => (
                     <div key={j} className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs">
                       <span className="flex items-center gap-1.5 min-w-0 text-gray-600">

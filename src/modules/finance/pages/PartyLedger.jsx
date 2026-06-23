@@ -241,8 +241,8 @@ export default function PartyLedger() {
             </div>
           </div>
 
-          {/* KPI tiles */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {/* KPI tiles — screen only, excluded from the printed ledger */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 no-print">
             <FinanceKPI icon={Scale} title="Opening Balance" value={fmtCurCompact(opening, cur)}
               subtitle={showUsd ? `≈ ${fmtCurCompact(openingUsd, 'USD')}` : 'Before this period'} status="neutral" loading={stmtLoading} />
             <FinanceKPI icon={ArrowDownLeft} title="Total Debit" value={fmtCurCompact(totalDebit, cur)}

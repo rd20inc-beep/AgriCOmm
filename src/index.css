@@ -479,6 +479,18 @@ input, select, textarea { font-size: 14px; }
   body.app-print-mask .print-report { position: absolute; left: 0; top: 0; width: 100%; }
   body.app-print-mask .sidebar,
   body.app-print-mask header { display: none !important; }
+  /* Elements marked no-print are dropped from the printout entirely (KPI tiles,
+     hero band, on-screen controls) — display:none beats the visibility re-show
+     above and collapses the space. */
+  body.app-print-mask .no-print,
+  body.app-print-mask .no-print * { display: none !important; }
+  /* Print the paid/unpaid row backgrounds (green/amber) — browsers drop
+     backgrounds by default. */
+  body.app-print-mask .print-report,
+  body.app-print-mask .print-report * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
 }
 
 /* ===== FOCUS VISIBLE ===== */
