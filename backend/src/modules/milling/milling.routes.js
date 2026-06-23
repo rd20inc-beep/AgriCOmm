@@ -756,7 +756,9 @@ router.get('/attendance', authorize('milling', 'view'), async (req, res) => {
       .leftJoin('mill_workers as w', 'a.worker_id', 'w.id')
       .select('a.*', 'w.name as worker_name', 'w.daily_wage')
       .orderBy('a.date', 'desc');
-    if (month) query = query.where('a.date', '>=', `${month}-01`).where('a.date', '<', `${month}-32`);
+    // Match the calendar month directly — `${month}-32` is an invalid date and
+    // Postgres throws "date/time field value out of range".
+    if (month) query = query.whereRaw("TO_CHAR(a.date, 'YYYY-MM') = ?", [month]);
     if (worker_id) query = query.where('a.worker_id', worker_id);
     const records = await query.limit(500);
     return res.json({ success: true, data: { attendance: records } });
