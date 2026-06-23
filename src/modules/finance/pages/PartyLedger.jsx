@@ -50,6 +50,10 @@ const refLink = (refNo) => {
   return null;
 };
 
+// Per-row tint + pill so a sale/bill row reads Paid / Partial / Unpaid at a glance.
+const STATUS_ROW = { Paid: 'bg-emerald-50', Partial: 'bg-amber-50', Unpaid: 'bg-rose-50' };
+const STATUS_PILL = { Paid: 'bg-emerald-100 text-emerald-700', Partial: 'bg-amber-100 text-amber-700', Unpaid: 'bg-rose-100 text-rose-700' };
+
 export default function PartyLedger() {
   const { companyProfileData } = useApp();
   const { queryParams: rangeParams } = useFinanceDateRange();
@@ -315,7 +319,7 @@ export default function PartyLedger() {
                         const dr = parseFloat(t.debit) || 0;
                         const cr = parseFloat(t.credit) || 0;
                         return (
-                          <tr key={`${t.journal_no || 'jl'}-${i}`} className="hover:bg-gray-50">
+                          <tr key={`${t.journal_no || 'jl'}-${i}`} className={STATUS_ROW[t.status] || 'hover:bg-gray-50'}>
                             <td className="py-2.5 px-3 text-gray-600 whitespace-nowrap text-xs">
                               {t.date ? new Date(t.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '—'}
                             </td>
@@ -328,7 +332,10 @@ export default function PartyLedger() {
                                 : <span className="text-gray-400">—</span>}
                             </td>
                             <td className="py-2.5 px-3 text-gray-700 min-w-[220px]" style={{ maxWidth: 420 }}>
-                              <span className="block whitespace-normal break-words">{t.description || '—'}</span>
+                              <span className="block whitespace-normal break-words">
+                                {t.status && <span className={`mr-1.5 px-1.5 py-0.5 rounded text-[9px] font-semibold align-middle ${STATUS_PILL[t.status]}`}>{t.status}</span>}
+                                {t.description || '—'}
+                              </span>
                               {t.account_name && <span className="block text-[10px] text-gray-400 whitespace-normal break-words">{t.account_code} · {t.account_name}</span>}
                             </td>
                             <td className="py-2.5 px-3 text-right tabular-nums whitespace-nowrap">

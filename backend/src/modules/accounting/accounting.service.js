@@ -1044,7 +1044,7 @@ const accountingService = {
           });
         }
       })
-      .select('id', 'sale_no', 'total_amount', 'created_at', 'item_name', 'item_type',
+      .select('id', 'sale_no', 'total_amount', 'due_amount', 'paid_amount', 'created_at', 'item_name', 'item_type',
         'quantity_kg', 'quantity_bags', 'bag_weight_kg', 'lot_no', 'notes', 'collection_location');
     const lsIds = localSalesRows.map((s) => s.id);
     const lsPays = lsIds.length
@@ -1068,7 +1068,9 @@ const accountingService = {
           s.lot_no ? `Lot ${s.lot_no}` : '',
           s.collection_location,
         ].filter(Boolean).join(' · ');
-        return { date: s.created_at, ref_no: s.sale_no, description: `Local sale${detail ? ` — ${detail}` : ''}${s.notes ? ` (${s.notes})` : ''}`, d: total, c: 0 };
+        const due = parseFloat(s.due_amount) || 0;
+        const status = due <= 0.01 ? 'Paid' : ((total - due) > 0 ? 'Partial' : 'Unpaid');
+        return { date: s.created_at, ref_no: s.sale_no, description: `Local sale${detail ? ` — ${detail}` : ''}${s.notes ? ` (${s.notes})` : ''}`, d: total, c: 0, status };
       }),
       ...lsPays.map((p) => {
         // Reference the sale this receipt settles (which item/lot), so a receipt
@@ -1172,7 +1174,7 @@ const accountingService = {
       ...journalTxns.map((t) => ({
         date: t.date, journal_no: t.journal_no, ref_no: t.ref_no, description: enrichExport(t.ref_no, t.description),
         account_code: t.account_code, account_name: t.account_name,
-        nd: parseFloat(t.debit), nc: parseFloat(t.credit),
+        nd: parseFloat(t.debit), nc: parseFloat(t.credit), status: null,
         currency: t.currency, fx_rate: t.fx_rate, orig_fx_rate: t.orig_fx_rate, orig_currency: t.orig_currency,
       })),
       ...localRaw.filter((t) => {
@@ -1182,7 +1184,7 @@ const accountingService = {
       }).map((t) => ({
         date: t.date, journal_no: null, ref_no: t.ref_no, description: t.description,
         account_code: '1120', account_name: 'Local Sales A/R',
-        nd: t.d, nc: t.c, currency: 'PKR', fx_rate: 1, orig_fx_rate: null, orig_currency: null,
+        nd: t.d, nc: t.c, status: t.status || null, currency: 'PKR', fx_rate: 1, orig_fx_rate: null, orig_currency: null,
       })),
     ].sort((a, b) => {
       // Compare by DAY (a sale's created_at carries a time, a payment_date is
@@ -1221,6 +1223,7 @@ const accountingService = {
         description: t.description,
         account_code: t.account_code,
         account_name: t.account_name,
+        status: t.status || null,
         debit: parseFloat(debit.toFixed(2)),
         credit: parseFloat(credit.toFixed(2)),
         debit_usd: parseFloat(debitUsd.toFixed(2)),
@@ -1283,6 +1286,17 @@ const accountingService = {
       .where({ supplier_id: sid })
       .select('id', 'pay_no', 'linked_ref', 'original_amount', 'paid_amount',
         'currency', 'due_date', 'created_at', 'category', 'source_table', 'notes');
+
+    // Paid status per payable, keyed by both its refs, so each bill row in the
+    // ledger can be tinted Paid / Partial / Unpaid.
+    const payableStatusByRef = {};
+    for (const p of payables) {
+      const orig = parseFloat(p.original_amount) || 0;
+      const paid = parseFloat(p.paid_amount) || 0;
+      const st = (orig - paid) <= 0.01 ? 'Paid' : (paid > 0 ? 'Partial' : 'Unpaid');
+      if (p.pay_no) payableStatusByRef[p.pay_no] = st;
+      if (p.linked_ref) payableStatusByRef[p.linked_ref] = st;
+    }
 
     // Detailed purchase narration: raw-rice payables link to an inventory_lots
     // row (by lot_no = linked_ref) carrying the full buy — rice type, variety,
@@ -1540,6 +1554,8 @@ const accountingService = {
       const vchType = classifyVch('supplier', n.ref_no, n.debit, n.credit);
       typeCounts[vchKey(vchType)] += 1;
       typeCounts.total += 1;
+      // Only bill (credit) rows carry a paid status; payments don't.
+      const status = n.credit > 0 ? (payableStatusByRef[n.ref_no] || null) : null;
       return {
         date: n.date,
         journal_no: n.journal_no,
@@ -1549,6 +1565,7 @@ const accountingService = {
         description: n.description,
         account_code: n.account_code,
         account_name: n.account_name,
+        status,
         debit: parseFloat(n.debit.toFixed(2)),
         credit: parseFloat(n.credit.toFixed(2)),
         debit_usd: parseFloat(n.debit_usd.toFixed(2)),

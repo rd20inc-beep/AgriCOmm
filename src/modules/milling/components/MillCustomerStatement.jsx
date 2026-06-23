@@ -18,6 +18,9 @@ function curSymbol(cur) {
 }
 const fmtCur = (v, cur) => `${curSymbol(cur)}${Math.round(parseFloat(v) || 0).toLocaleString()}`;
 
+const STATUS_ROW = { Paid: 'bg-emerald-50', Partial: 'bg-amber-50', Unpaid: 'bg-rose-50' };
+const STATUS_PILL = { Paid: 'bg-emerald-100 text-emerald-700', Partial: 'bg-amber-100 text-amber-700', Unpaid: 'bg-rose-100 text-rose-700' };
+
 const refLink = (refNo) => {
   if (!refNo) return null;
   if (refNo.startsWith('LS-')) return '/local-sales';
@@ -122,14 +125,17 @@ export default function MillCustomerStatement({ customerId, customerName, params
               {transactions.map((t, i) => {
                 const link = refLink(t.ref_no);
                 return (
-                  <tr key={i} className="hover:bg-gray-50/60">
+                  <tr key={i} className={STATUS_ROW[t.status] || 'hover:bg-gray-50/60'}>
                     <td className="px-3 py-1.5 whitespace-nowrap text-gray-600">{fmtDate(t.date)}</td>
                     <td className="px-3 py-1.5 whitespace-nowrap text-xs text-gray-500">{t.vch_type || '—'}</td>
                     <td className="px-3 py-1.5 whitespace-nowrap text-xs">
                       {link ? <Link to={link} className="text-blue-600 hover:underline">{t.vch_no || t.ref_no}</Link> : (t.vch_no || t.ref_no || '—')}
                     </td>
                     <td className="px-3 py-1.5 min-w-[200px] max-w-[420px]">
-                      <span className="block text-gray-700 whitespace-normal break-words">{t.description || '—'}</span>
+                      <span className="block text-gray-700 whitespace-normal break-words">
+                        {t.status && <span className={`mr-1.5 px-1.5 py-0.5 rounded text-[9px] font-semibold align-middle ${STATUS_PILL[t.status]}`}>{t.status}</span>}
+                        {t.description || '—'}
+                      </span>
                     </td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-gray-800">{parseFloat(t.debit) ? fmtCur(t.debit, cur) : ''}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-emerald-600">{parseFloat(t.credit) ? fmtCur(t.credit, cur) : ''}</td>
