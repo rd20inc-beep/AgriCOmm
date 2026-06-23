@@ -267,9 +267,17 @@ export default function MoneyIn() {
         emptyText="No receivables found"
         loading={isLoading}
         actions={(row) => (
-          <button onClick={() => openDrawer(row)} className="text-blue-600 hover:text-blue-800">
-            <Eye size={15} />
-          </button>
+          <div className="inline-flex items-center gap-1.5">
+            {row.status !== 'Paid' && parseFloat(row.outstanding) > 0 && (
+              <button onClick={(e) => { e.stopPropagation(); openDrawer(row); }}
+                className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded hover:bg-emerald-100 inline-flex items-center gap-1">
+                <DollarSign size={12} /> Receive
+              </button>
+            )}
+            <button onClick={(e) => { e.stopPropagation(); openDrawer(row); }} className="text-blue-600 hover:text-blue-800 p-1" title="View details">
+              <Eye size={15} />
+            </button>
+          </div>
         )}
       />
       </div>{/* /.print-report */}

@@ -211,7 +211,17 @@ export default function LocalSales() {
                       <td className="py-2.5 px-4 text-right text-xs tabular-nums">{fmtPKR(s.ratePerKg)}/kg</td>
                       <td className="py-2.5 px-4 text-right font-bold tabular-nums">{fmtPKR(s.totalAmount)}</td>
                       <td className="py-2.5 px-4 text-center"><StatusBadge status={s.paymentStatus} /></td>
-                      <td className="py-2.5 px-4 text-center"><button onClick={(e) => { e.stopPropagation(); openSaleDetail(s); }} className="text-blue-600 hover:text-blue-800" title="View details"><Eye size={15} /></button></td>
+                      <td className="py-2.5 px-4 text-center">
+                        <div className="inline-flex items-center gap-1.5">
+                          {parseFloat(s.dueAmount) > 0 && (
+                            <button onClick={(e) => { e.stopPropagation(); setSelectedSale(s); setPayForm(p => ({ ...p, amount: String(parseFloat(s.dueAmount) || 0), collection_location: s.collectionLocation || s.collection_location || 'Mill' })); setShowPaymentModal(true); }}
+                              className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded hover:bg-emerald-100 inline-flex items-center gap-1">
+                              <CreditCard size={12} /> Pay
+                            </button>
+                          )}
+                          <button onClick={(e) => { e.stopPropagation(); openSaleDetail(s); }} className="text-blue-600 hover:text-blue-800 p-1" title="View details"><Eye size={15} /></button>
+                        </div>
+                      </td>
                     </tr>
                   );
                 }

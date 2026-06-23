@@ -448,9 +448,17 @@ export default function Purchases() {
                       )}
                     </td>
                     <td className="px-4 py-2.5 text-center">
-                      <button onClick={() => setDetailPurchase(p)} className="text-blue-600 hover:text-blue-800" title="View details">
-                        <Eye size={15} />
-                      </button>
+                      <div className="inline-flex items-center gap-1.5">
+                        {String(p.paymentStatus || 'pending').toLowerCase() !== 'paid' && (
+                          <button onClick={() => setPayTarget(p)}
+                            className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded hover:bg-emerald-100 inline-flex items-center gap-1">
+                            <DollarSign size={12} /> Pay
+                          </button>
+                        )}
+                        <button onClick={() => setDetailPurchase(p)} className="text-blue-600 hover:text-blue-800 p-1" title="View details">
+                          <Eye size={15} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
