@@ -2,6 +2,13 @@
 // reports preview (/reports/print) and the standalone print route
 // (/print-report) that opens in a new tab. Pulling them into a single
 // file keeps the two entry points in lockstep.
+import { Link } from 'react-router-dom';
+
+// A reference that's a clickable link on screen but prints as plain text.
+export function RefLink({ to, children }) {
+  if (!to) return <span>{children}</span>;
+  return <Link to={to} className="text-blue-600 hover:underline print:text-gray-900 print:no-underline">{children}</Link>;
+}
 
 export function fmtMt(v) {
   return (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -365,6 +372,126 @@ export function Footer() {
     <div className="text-[11px] text-gray-400 pt-4 border-t border-gray-200 flex justify-between">
       <span>AgriCOmm ERP · Printable Report</span>
       <span>Page printed {new Date().toLocaleString()}</span>
+    </div>
+  );
+}
+
+// ─── Purchase ledger ───────────────────────────────────────────────────
+export function PurchaseLedgerView({ data, companyName, range }) {
+  const { rows, totals } = data;
+  return (
+    <div className="print-report space-y-6 text-sm text-gray-900">
+      <Header companyName={companyName} title="Purchase Ledger" subtitle={range?.from ? `${fmtDate(range.from)} – ${fmtDate(range.to)}` : 'All purchases'} />
+      <SummaryRow items={[
+        { label: 'Purchases', value: totals.lots },
+        { label: 'Total Qty', value: `${fmtMt(totals.mt)} MT` },
+        { label: 'Total Value', value: fmtPkr(totals.valuePkr) },
+      ]} />
+      <Section title="Purchase Detail — every raw-rice lot & its supplier">
+        <Table
+          head={['Date', 'Lot', 'Supplier', 'Rice Type', 'Variety/Grade', 'Qty (MT)', 'Rate/kg', 'Value (PKR)', 'Payment']}
+          align={['left', 'left', 'left', 'left', 'left', 'right', 'right', 'right', 'left']}
+          rows={rows.map(r => [
+            fmtDate(r.date),
+            <RefLink to={`/lot-inventory/${r.lotId}`}>{r.lotNo}</RefLink>,
+            r.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.supplier}</RefLink> : (r.supplier || '—'),
+            r.riceType || '—', r.variety || r.grade || '—',
+            fmtMt(r.mt), fmtPkr(r.ratePerKg), fmtPkr(r.valuePkr), r.paymentStatus || '—',
+          ])}
+          empty="No purchases in this period."
+          totalRow={['', '', '', '', 'TOTAL', fmtMt(totals.mt), '', fmtPkr(totals.valuePkr), '']}
+        />
+      </Section>
+      <Footer />
+    </div>
+  );
+}
+
+// ─── Sales ledger (local + export) ─────────────────────────────────────
+export function SalesLedgerView({ data, companyName, range }) {
+  const { local, export: exp, totals } = data;
+  return (
+    <div className="print-report space-y-6 text-sm text-gray-900">
+      <Header companyName={companyName} title="Sales Ledger" subtitle={range?.from ? `${fmtDate(range.from)} – ${fmtDate(range.to)}` : 'All sales'} />
+      <SummaryRow items={[
+        { label: 'Local Sales', value: totals.localCount },
+        { label: 'Local Qty', value: `${fmtMt(totals.localMt)} MT` },
+        { label: 'Local Value', value: fmtPkr(totals.localPkr) },
+        { label: 'Export Orders', value: totals.exportCount },
+        { label: 'Export Value', value: `$${(totals.exportUsd || 0).toLocaleString()}` },
+      ]} />
+      <Section title="Local Sales">
+        <Table
+          head={['Sale No', 'Date', 'Customer', 'Item', 'Qty (MT)', 'Rate/kg', 'Value (PKR)', 'Payment']}
+          align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'left']}
+          rows={local.map(r => [
+            r.lotId ? <RefLink to={`/lot-inventory/${r.lotId}`}>{r.ref}</RefLink> : r.ref,
+            fmtDate(r.date), r.customer || '—', r.item || '—',
+            fmtMt(r.mt), fmtPkr(r.ratePerKg), fmtPkr(r.valuePkr), r.paymentStatus || '—',
+          ])}
+          empty="No local sales."
+          totalRow={['', '', '', 'TOTAL', fmtMt(totals.localMt), '', fmtPkr(totals.localPkr), '']}
+        />
+      </Section>
+      <Section title="Export Orders">
+        <Table
+          head={['Order No', 'Date', 'Customer', 'Product', 'Qty (MT)', '$/MT', 'Value (USD)', 'Status']}
+          align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'left']}
+          rows={exp.map(r => [
+            <RefLink to={`/export/${r.id}`}>{r.ref}</RefLink>,
+            fmtDate(r.date), r.customer || '—', r.item || '—',
+            fmtMt(r.mt), `$${(r.ratePerMt || 0).toLocaleString()}`, `$${(r.valueUsd || 0).toLocaleString()}`, r.status || '—',
+          ])}
+          empty="No export orders."
+          totalRow={['', '', '', 'TOTAL', fmtMt(totals.exportMt), '', `$${(totals.exportUsd || 0).toLocaleString()}`, '']}
+        />
+      </Section>
+      <Footer />
+    </div>
+  );
+}
+
+// ─── Detailed stock (traceable) ────────────────────────────────────────
+export function StockDetailView({ data, companyName }) {
+  const { rows, millStore, totals } = data;
+  return (
+    <div className="print-report space-y-6 text-sm text-gray-900">
+      <Header companyName={companyName} title="Stock — Detailed & Traceable" subtitle={`As of ${new Date().toLocaleString()}`} />
+      <SummaryRow items={[
+        { label: 'Lots on hand', value: totals.lots },
+        { label: 'Total Qty', value: `${fmtMt(totals.mt)} MT` },
+        { label: 'Stock Value', value: fmtPkr(totals.valuePkr) },
+        { label: 'Mill Store Items', value: millStore.length },
+        { label: 'Mill Store Value', value: fmtPkr(totals.millStoreValue) },
+      ]} />
+      <Section title="Rice Stock — by lot, traced to its source">
+        <Table
+          head={['Lot', 'Type', 'Item', 'Variety/Grade', 'On hand (MT)', 'Available', 'Source / Supplier', 'Warehouse', 'Value (PKR)']}
+          align={['left', 'left', 'left', 'left', 'right', 'right', 'left', 'left', 'right']}
+          rows={rows.map(r => [
+            <RefLink to={`/lot-inventory/${r.lotId}`}>{r.lotNo}</RefLink>,
+            r.type, r.item || '—', r.variety || r.grade || '—',
+            fmtMt(r.onHandMt), fmtMt(r.availableMt),
+            r.supplier
+              ? (r.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.supplier}</RefLink> : r.supplier)
+              : (r.sourceSupplier ? <span className="text-gray-600">milled from {r.sourceSupplier}{r.sourceBatch ? ` · ${r.sourceBatch}` : ''}</span> : '—'),
+            r.warehouse || '—', fmtPkr(r.valuePkr),
+          ])}
+          empty="No stock on hand."
+          totalRow={['', '', '', 'TOTAL', fmtMt(totals.mt), '', '', '', fmtPkr(totals.valuePkr)]}
+        />
+      </Section>
+      {millStore.length > 0 && (
+        <Section title="Mill Store — packaging & consumables">
+          <Table
+            head={['Item', 'Category', 'Qty', 'Unit', 'Cost/unit', 'Supplier', 'Value (PKR)']}
+            align={['left', 'left', 'right', 'left', 'right', 'left', 'right']}
+            rows={millStore.map(m => [m.name, m.category || '—', fmtKg(m.qty), m.unit || '—', fmtPkr(m.costPerUnit), m.supplier || '—', fmtPkr(m.qty * m.costPerUnit)])}
+            empty="Mill store empty."
+          />
+        </Section>
+      )}
+      <Footer />
     </div>
   );
 }

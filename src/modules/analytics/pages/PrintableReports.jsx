@@ -1,11 +1,12 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Printer, RefreshCw, Calendar, Factory, Boxes, TrendingUp, Wallet, ArrowDownLeft, ArrowUpRight } from 'lucide-react';
+import { Printer, RefreshCw, Calendar, Factory, Boxes, TrendingUp, Wallet, ArrowDownLeft, ArrowUpRight, ShoppingCart, FileText, Package } from 'lucide-react';
 import api from '../../../api/client';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import {
   ProductionReportView, StockReportView,
   PnlReportView, CashflowReportView, AgingReportView,
+  PurchaseLedgerView, SalesLedgerView, StockDetailView,
 } from './PrintableReportsViews';
 
 // ─── Period helpers ────────────────────────────────────────────────────
@@ -56,7 +57,9 @@ export default function PrintableReports() {
   // financials (P&L, Cashflow, AR/AP aging) mix export data, which the mill
   // must not see. Their mill financials live on the Mill Finance dashboard.
   const millScoped = user?.role === 'Mill Manager';
-  const REPORT_TYPES = millScoped ? ['production', 'stock'] : ['production', 'stock', 'pnl', 'cashflow', 'ar_aging', 'ap_aging'];
+  const REPORT_TYPES = millScoped
+    ? ['production', 'stock', 'stock_detail', 'purchase_ledger']
+    : ['production', 'stock', 'stock_detail', 'purchase_ledger', 'sales_ledger', 'pnl', 'cashflow', 'ar_aging', 'ap_aging'];
 
   const [reportType, setReportType] = useState('production'); // 'production' | 'stock' | 'pnl' | 'cashflow' | 'ar_aging' | 'ap_aging'
   const [preset, setPreset] = useState('monthly');
@@ -68,7 +71,7 @@ export default function PrintableReports() {
 
   // Period-based reports use the period selector; snapshot reports
   // (stock + AR/AP aging) ignore it.
-  const usesPeriod = reportType === 'production' || reportType === 'pnl' || reportType === 'cashflow';
+  const usesPeriod = ['production', 'pnl', 'cashflow', 'purchase_ledger', 'sales_ledger'].includes(reportType);
 
   const range = useMemo(() => {
     if (preset === 'custom' && customFrom && customTo) {
@@ -97,6 +100,12 @@ export default function PrintableReports() {
         res = await api.get('/api/reporting/printable/ar-aging');
       } else if (reportType === 'ap_aging') {
         res = await api.get('/api/reporting/printable/ap-aging');
+      } else if (reportType === 'purchase_ledger') {
+        res = await api.get('/api/reporting/printable/purchase-ledger', periodParams);
+      } else if (reportType === 'sales_ledger') {
+        res = await api.get('/api/reporting/printable/sales-ledger', periodParams);
+      } else if (reportType === 'stock_detail') {
+        res = await api.get('/api/reporting/printable/stock-detail', {});
       } else {
         res = await api.get('/api/reporting/printable/stock', { group_by: stockGroupBy });
       }
@@ -110,7 +119,7 @@ export default function PrintableReports() {
 
   // Belt-and-suspenders: never hold/load a report type this role can't see.
   useEffect(() => {
-    if (millScoped && !['production', 'stock'].includes(reportType)) setReportType('production');
+    if (millScoped && !REPORT_TYPES.includes(reportType)) setReportType('production');
   }, [millScoped, reportType]);
 
   useEffect(() => { loadReport(); }, [loadReport]);
@@ -140,8 +149,11 @@ export default function PrintableReports() {
         <div className="flex flex-wrap items-center gap-3">
           <div className="inline-flex rounded-lg overflow-hidden border border-gray-200 flex-wrap">
             {[
-              { k: 'production', l: 'Production', i: Factory },
-              { k: 'stock',      l: 'Stock',      i: Boxes },
+              { k: 'production',     l: 'Production',     i: Factory },
+              { k: 'stock',          l: 'Stock',          i: Boxes },
+              { k: 'stock_detail',   l: 'Stock (detail)', i: Package },
+              { k: 'purchase_ledger', l: 'Purchases',     i: ShoppingCart },
+              { k: 'sales_ledger',   l: 'Sales',          i: FileText },
               { k: 'pnl',        l: 'P&L',        i: TrendingUp },
               { k: 'cashflow',   l: 'Cashflow',   i: Wallet },
               { k: 'ar_aging',   l: 'AR Aging',   i: ArrowDownLeft },
@@ -227,6 +239,12 @@ export default function PrintableReports() {
           <AgingReportView data={data} companyName={companyName} kind="receivable" />
         ) : reportType === 'ap_aging' && data.buckets ? (
           <AgingReportView data={data} companyName={companyName} kind="payable" />
+        ) : reportType === 'purchase_ledger' && data.rows && data.totals ? (
+          <PurchaseLedgerView data={data} companyName={companyName} range={range} />
+        ) : reportType === 'sales_ledger' && data.local !== undefined ? (
+          <SalesLedgerView data={data} companyName={companyName} range={range} />
+        ) : reportType === 'stock_detail' && data.rows && data.millStore !== undefined ? (
+          <StockDetailView data={data} companyName={companyName} />
         ) : (
           <div className="text-center text-gray-400 py-12">No data.</div>
         )}

@@ -1019,6 +1019,100 @@ const reportingController = {
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
   },
+
+  // ── Purchase ledger — every raw-rice purchase lot, who we bought it from,
+  // qty/rate/value. Each row links to the lot. ──
+  async printablePurchaseLedger(req, res) {
+    try {
+      const db = require('../../config/database');
+      const { from, to } = req.query;
+      let q = db('inventory_lots as l')
+        .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
+        .leftJoin('products as p', 'l.product_id', 'p.id')
+        .where('l.type', 'raw');
+      if (from) q = q.where('l.created_at', '>=', from);
+      if (to) q = q.where('l.created_at', '<=', to);
+      const rows = await q.select(
+        'l.id', 'l.lot_no', 'l.created_at', 'l.item_name', 'l.variety', 'l.grade',
+        'l.rate_per_kg', 'l.total_bags', 'l.supplier_id', 'l.payment_status',
+        's.name as supplier_name', 'p.name as product_name',
+        db.raw('COALESCE(NULLIF(l.received_net_weight_kg,0), NULLIF(l.net_weight_kg,0), l.qty*1000) as kg'),
+      ).orderBy('l.created_at', 'desc');
+      const detail = rows.map((r) => {
+        const kg = parseFloat(r.kg) || 0; const rate = parseFloat(r.rate_per_kg) || 0;
+        return { lotId: r.id, lotNo: r.lot_no, date: r.created_at, supplier: r.supplier_name || '—', supplierId: r.supplier_id,
+          riceType: r.product_name || r.item_name, variety: r.variety, grade: r.grade,
+          mt: kg / 1000, ratePerKg: rate, valuePkr: kg * rate, bags: r.total_bags, paymentStatus: r.payment_status };
+      });
+      return res.json({ success: true, data: { rows: detail, totals: { lots: detail.length, mt: detail.reduce((s, d) => s + d.mt, 0), valuePkr: detail.reduce((s, d) => s + d.valuePkr, 0) }, period: { from, to } } });
+    } catch (err) { console.error('Purchase ledger error:', err); return res.status(500).json({ success: false, message: 'Internal server error.' }); }
+  },
+
+  // ── Sales ledger — local sales + export orders, each clickable to its sale/order. ──
+  async printableSalesLedger(req, res) {
+    try {
+      const db = require('../../config/database');
+      const { from, to } = req.query;
+      let ls = db('local_sales as ls').leftJoin('customers as c', 'ls.customer_id', 'c.id')
+        .select('ls.id', 'ls.sale_no', 'ls.sale_date', 'ls.item_name', 'ls.item_type', 'ls.quantity_kg', 'ls.rate_per_kg', 'ls.total_amount', 'ls.lot_no', 'ls.lot_id', 'ls.payment_status', db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer"));
+      if (from) ls = ls.where('ls.sale_date', '>=', from);
+      if (to) ls = ls.where('ls.sale_date', '<=', to);
+      const localRows = await ls.orderBy('ls.sale_date', 'desc');
+      let eo = db('export_orders as o').leftJoin('customers as c', 'o.customer_id', 'c.id')
+        .select('o.id', 'o.order_no', 'o.created_at', 'o.product_name', 'o.qty_mt', 'o.price_per_mt', 'o.status', db.raw("COALESCE(c.name, '—') as customer"));
+      if (from) eo = eo.where('o.created_at', '>=', from);
+      if (to) eo = eo.where('o.created_at', '<=', to);
+      const exportRows = await eo.orderBy('o.created_at', 'desc');
+      const local = localRows.map((r) => ({ id: r.id, ref: r.sale_no, date: r.sale_date, customer: r.customer, item: r.item_name, itemType: r.item_type, mt: (parseFloat(r.quantity_kg) || 0) / 1000, ratePerKg: parseFloat(r.rate_per_kg) || 0, valuePkr: parseFloat(r.total_amount) || 0, lotNo: r.lot_no, lotId: r.lot_id, paymentStatus: r.payment_status }));
+      const exp = exportRows.map((r) => ({ id: r.id, ref: r.order_no, date: r.created_at, customer: r.customer, item: r.product_name, mt: parseFloat(r.qty_mt) || 0, ratePerMt: parseFloat(r.price_per_mt) || 0, valueUsd: (parseFloat(r.qty_mt) || 0) * (parseFloat(r.price_per_mt) || 0), status: r.status }));
+      return res.json({ success: true, data: { local, export: exp, totals: { localCount: local.length, localMt: local.reduce((s, d) => s + d.mt, 0), localPkr: local.reduce((s, d) => s + d.valuePkr, 0), exportCount: exp.length, exportMt: exp.reduce((s, d) => s + d.mt, 0), exportUsd: exp.reduce((s, d) => s + d.valueUsd, 0) }, period: { from, to } } });
+    } catch (err) { console.error('Sales ledger error:', err); return res.status(500).json({ success: false, message: 'Internal server error.' }); }
+  },
+
+  // ── Detailed stock — every lot on hand with the supplier it was purchased from
+  // (and, for milled output, the raw-rice supplier traced via its batch) + the
+  // mill store. Each lot links to its detail. ──
+  async printableStockDetail(req, res) {
+    try {
+      const db = require('../../config/database');
+      const { status = 'Available' } = req.query;
+      let q = db('inventory_lots as l')
+        .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
+        .leftJoin('products as p', 'l.product_id', 'p.id')
+        .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id');
+      if (status && status !== 'all') q = q.where('l.status', status);
+      const lots = await q.select(
+        'l.id', 'l.lot_no', 'l.type', 'l.item_name', 'l.variety', 'l.grade', 'l.processing_type',
+        'l.blend_batch_no', 'l.batch_ref', 'l.supplier_id', 'l.status', 'l.total_bags',
+        's.name as supplier_name', 'p.name as product_name', 'w.name as warehouse_name',
+        db.raw('COALESCE(NULLIF(l.net_weight_kg,0), l.qty*1000) as on_hand_kg'),
+        db.raw('l.available_qty*1000 as available_kg'),
+        db.raw('l.reserved_qty*1000 as reserved_kg'),
+        db.raw('COALESCE(NULLIF(l.landed_cost_per_kg,0), NULLIF(l.rate_per_kg,0), l.cost_per_unit/1000.0, 0) as cost_per_kg'),
+      ).orderBy([{ column: 'l.type' }, { column: 'l.lot_no' }]);
+      // Trace milled output (batch_ref = 'batch-<id>') back to the raw-rice supplier.
+      const ids = [...new Set(lots.map((l) => l.batch_ref).filter(Boolean).map((r) => parseInt(String(r).replace(/^batch-/, ''), 10)).filter(Boolean))];
+      const batchSrc = {};
+      if (ids.length) {
+        const bs = await db('milling_batches as mb').leftJoin('suppliers as s', 'mb.supplier_id', 's.id').whereIn('mb.id', ids).select('mb.id', 'mb.batch_no', 's.name as supplier');
+        for (const b of bs) batchSrc[`batch-${b.id}`] = { batchNo: b.batch_no, supplier: b.supplier };
+      }
+      const rows = lots.map((l) => {
+        const onHand = parseFloat(l.on_hand_kg) || 0; const cpk = parseFloat(l.cost_per_kg) || 0; const src = batchSrc[l.batch_ref];
+        return { lotId: l.id, lotNo: l.lot_no, type: l.type, item: l.product_name || l.item_name, variety: l.variety, grade: l.grade,
+          supplier: l.supplier_name, supplierId: l.supplier_id,
+          sourceBatch: src?.batchNo || l.blend_batch_no || null, sourceSupplier: src?.supplier || null,
+          warehouse: l.warehouse_name, status: l.status, bags: l.total_bags,
+          onHandMt: onHand / 1000, availableMt: (parseFloat(l.available_kg) || 0) / 1000, reservedMt: (parseFloat(l.reserved_kg) || 0) / 1000,
+          costPerKg: cpk, valuePkr: onHand * cpk };
+      });
+      const ms = await db('mill_stock as ms').join('mill_items as mi', 'ms.item_id', 'mi.id').leftJoin('suppliers as s', 'mi.preferred_supplier_id', 's.id')
+        .where('ms.quantity_available', '>', 0)
+        .select('mi.name', 'mi.category', 'mi.unit', 'ms.quantity_available', 'mi.avg_cost_per_unit', 's.name as supplier').orderBy('mi.category');
+      const millStore = ms.map((m) => ({ name: m.name, category: m.category, unit: m.unit, qty: parseFloat(m.quantity_available) || 0, costPerUnit: parseFloat(m.avg_cost_per_unit) || 0, supplier: m.supplier }));
+      return res.json({ success: true, data: { rows, millStore, totals: { lots: rows.length, mt: rows.reduce((s, r) => s + r.onHandMt, 0), valuePkr: rows.reduce((s, r) => s + r.valuePkr, 0), millStoreValue: millStore.reduce((s, m) => s + m.qty * m.costPerUnit, 0) } } });
+    } catch (err) { console.error('Stock detail error:', err); return res.status(500).json({ success: false, message: 'Internal server error.' }); }
+  },
 };
 
 module.exports = reportingController;
