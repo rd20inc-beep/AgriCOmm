@@ -1560,13 +1560,22 @@ const accountingService = {
       typeCounts.total += 1;
       // Only bill (credit) rows carry a paid status; payments don't.
       const status = n.credit > 0 ? (payableStatusByRef[n.ref_no] || null) : null;
+      // For a payment (debit) row, fold the method + the account it was paid
+      // from into the description so "how it was paid" is visible in the ledger.
+      const pv = n.ref_no ? payInfo[n.ref_no] : null;
+      let description = n.description;
+      if (n.debit > 0 && pv && (pv.paid_via || pv.payment_method)) {
+        const mLbl = { cash: 'Cash', cheque: 'Cheque', bank_transfer: 'Bank transfer', online: 'Online', mobile: 'Mobile' }[pv.payment_method] || pv.payment_method;
+        const tail = [mLbl, pv.paid_via].filter(Boolean).filter((v, idx, a) => a.indexOf(v) === idx).join(' · ');
+        if (tail) description = `${n.description} — ${tail}`;
+      }
       return {
         date: n.date,
         journal_no: n.journal_no,
         ref_no: n.ref_no,
         vch_type: vchType,
         vch_no: vchNoOf(n.ref_no),
-        description: n.description,
+        description,
         account_code: n.account_code,
         account_name: n.account_name,
         status,
