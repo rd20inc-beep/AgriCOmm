@@ -1276,10 +1276,18 @@ export function usePayrollRun(id) {
   });
 }
 
+export function usePayrollReport(params = {}) {
+  return useQuery({
+    queryKey: ['payroll-report', params],
+    queryFn: async () => { const res = await millingApi.payrollReport(params); return transformKeys(unwrap(res) || {}); },
+  });
+}
+
 // Invalidate everything a payroll run touches: the run list, the summary (paid),
 // employees/advances (recovered), and the money trails (expense/payable/banks).
 function invalidatePayroll(qc) {
   qc.invalidateQueries({ queryKey: ['payroll-runs'] });
+  qc.invalidateQueries({ queryKey: ['payroll-report'] });
   qc.invalidateQueries({ queryKey: ['payroll-summary'] });
   qc.invalidateQueries({ queryKey: ['mill-workers'] });
   qc.invalidateQueries({ queryKey: ['mill-expenses'] });

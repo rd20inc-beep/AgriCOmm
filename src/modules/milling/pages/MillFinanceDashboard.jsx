@@ -4,7 +4,7 @@ import {
   DollarSign, Users, Zap, Shield, TrendingUp, TrendingDown, AlertTriangle,
   Plus, UserPlus, Package, Factory, Wallet, ArrowUpRight, ArrowDownRight, Printer,
   Building2, Banknote, Receipt, Layers, Truck, ExternalLink,
-  Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X,
+  Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X, FileText,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
@@ -13,7 +13,7 @@ import {
   useUpdateMillWorker, useDeleteMillWorker, useCreateWorkerAdvance, useWorkerAdvances,
   useDeleteWorkerAdvance,
   usePayrollSummary, useRecordAttendance, useAttendance, useInventory, useExpenseVendors,
-  usePayrollRuns, usePostPayrollRun, useDeletePayrollRun, usePayrollRun, useBankAccounts,
+  usePayrollRuns, usePostPayrollRun, useDeletePayrollRun, usePayrollRun, usePayrollReport, useBankAccounts,
   usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow,
   useMillLotCosts, useLocalSales,
 } from '../../../api/queries';
@@ -1255,7 +1255,7 @@ export default function MillFinanceDashboard() {
         <div className="space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5">
-              {[['payroll', 'Payroll', Wallet], ['attendance', 'Attendance', CalendarDays]].map(([key, label, Icon]) => (
+              {[['payroll', 'Payroll', Wallet], ['attendance', 'Attendance', CalendarDays], ['reports', 'Reports', FileText]].map(([key, label, Icon]) => (
                 <button
                   key={key}
                   onClick={() => setPayrollView(key)}
@@ -1266,13 +1266,15 @@ export default function MillFinanceDashboard() {
               ))}
             </div>
             <div className="flex items-center gap-2">
-              <input
-                type="month"
-                value={payrollMonth}
-                max={curMonth}
-                onChange={e => setPayrollMonth(e.target.value || curMonth)}
-                className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-gray-900"
-              />
+              {payrollView !== 'reports' && (
+                <input
+                  type="month"
+                  value={payrollMonth}
+                  max={curMonth}
+                  onChange={e => setPayrollMonth(e.target.value || curMonth)}
+                  className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-gray-900"
+                />
+              )}
               {payrollView === 'payroll' && anyUnpaid && (
                 <button
                   onClick={() => openRunDrawer(null)}
@@ -1294,6 +1296,8 @@ export default function MillFinanceDashboard() {
               recordAttMut={recordAttMut}
               addToast={addToast}
             />
+          ) : payrollView === 'reports' ? (
+            <PayrollReport companyProfile={companyProfileData} onOpenRun={(id) => setPayslipsRunId(id)} />
           ) : (<>
           {monthRuns.length > 0 && (
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 space-y-2">
@@ -2280,5 +2284,137 @@ function PayslipsPanel({ runId, companyProfile, onClose, onUndo, deleteRunMut })
         </div>
       )}
     </SlideDrawer>
+  );
+}
+
+// Printable A4 payroll report — every run + its payslip lines, with grand totals.
+function printPayrollReport(runs, totals, company, range) {
+  const co = company || {};
+  const name = co.legalName || co.name || 'AGRI COMMODITIES';
+  const rs = (v) => 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString();
+  const d = (x) => x ? new Date(x).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
+  const runBlocks = runs.map((r) => `
+    <div style="margin-top:18px;break-inside:avoid">
+      <div style="display:flex;justify-content:space-between;border-bottom:1px solid #cbd5e1;padding-bottom:4px">
+        <div style="font-weight:600">${r.period} · ${d(r.payDate)} · ${r.payMethod === 'bank' ? (r.bankName || 'bank') : 'cash'}</div>
+        <div style="color:#6b7280">${r.employeeCount} emp · net <b>${rs(r.netTotal)}</b></div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:4px">
+        <thead><tr style="color:#6b7280;text-align:left">
+          <th style="padding:3px 0">Employee</th><th style="text-align:right">Gross</th><th style="text-align:right">Advance</th><th style="text-align:right">Net</th>
+        </tr></thead>
+        <tbody>${(r.lines || []).map((l) => `<tr>
+          <td style="padding:2px 0">${l.workerName}</td>
+          <td style="text-align:right;font-variant-numeric:tabular-nums">${rs(l.grossPay)}</td>
+          <td style="text-align:right;font-variant-numeric:tabular-nums">${parseFloat(l.advanceDeducted) ? '−' + rs(l.advanceDeducted) : '—'}</td>
+          <td style="text-align:right;font-variant-numeric:tabular-nums;font-weight:600">${rs(l.netPay)}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>`).join('');
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Payroll Report</title>
+    <style>@page{size:A4 portrait;margin:14mm}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    body{font-family:'Segoe UI',Tahoma,sans-serif;color:#1f2937;margin:0}
+    .hd{display:flex;justify-content:space-between;border-bottom:2px solid #111827;padding-bottom:8px}
+    .t{font-size:18px;font-weight:700;color:#1e3a5f;text-transform:uppercase}
+    .kpis{display:flex;gap:16px;margin-top:12px;font-size:13px}
+    .kpi{background:#f9fafb;border-radius:8px;padding:8px 12px}</style></head><body>
+    <div class="hd"><div class="t">${name}</div>
+    <div style="text-align:right"><div style="font-size:15px;font-weight:700;text-transform:uppercase">Payroll Report</div>
+    <div style="font-size:12px;color:#6b7280">${range || 'All periods'}</div></div></div>
+    <div class="kpis">
+      <div class="kpi">Runs<br/><b>${totals.runs}</b></div>
+      <div class="kpi">Gross<br/><b>${rs(totals.grossTotal)}</b></div>
+      <div class="kpi">Advances recovered<br/><b>${rs(totals.advanceTotal)}</b></div>
+      <div class="kpi">Net paid<br/><b>${rs(totals.netTotal)}</b></div>
+    </div>
+    ${runBlocks || '<p style="color:#9ca3af;margin-top:24px">No payroll runs in this period.</p>'}
+    <script>window.addEventListener('load',function(){setTimeout(function(){window.focus();window.print();},250)});</script>
+    </body></html>`;
+  const w = window.open('', '_blank', 'width=820,height=1100');
+  if (!w) return;
+  w.document.write(html); w.document.close();
+}
+
+// Payroll Reports view — all runs with their payslips, totals, period filter,
+// per-payslip print and a printable whole-report.
+function PayrollReport({ companyProfile, onOpenRun }) {
+  const [range, setRange] = useState({ from: '', to: '' });
+  const { data, isLoading } = usePayrollReport(range.from || range.to ? range : {});
+  const runs = data?.runs || [];
+  const totals = data?.totals || { runs: 0, grossTotal: 0, advanceTotal: 0, netTotal: 0 };
+  const [expanded, setExpanded] = useState(null);
+  const rangeLabel = range.from || range.to ? `${range.from || '…'} → ${range.to || '…'}` : 'All periods';
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2 text-xs text-gray-500">
+          <span>From</span>
+          <input type="month" value={range.from} onChange={e => setRange(r => ({ ...r, from: e.target.value }))} className="border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:border-gray-900" />
+          <span>to</span>
+          <input type="month" value={range.to} onChange={e => setRange(r => ({ ...r, to: e.target.value }))} className="border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:border-gray-900" />
+          {(range.from || range.to) && <button onClick={() => setRange({ from: '', to: '' })} className="text-gray-400 hover:text-gray-700">clear</button>}
+        </div>
+        <button onClick={() => printPayrollReport(runs, totals, companyProfile, rangeLabel)} disabled={!runs.length} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">
+          <Printer className="w-3.5 h-3.5" /> Print Report
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Stat tone="blue"  icon={FileText}   label="Payroll Runs" value={String(totals.runs)} sub={rangeLabel} />
+        <Stat tone="slate" icon={DollarSign} label="Gross"        value={PKR(totals.grossTotal)} sub="All runs" />
+        <Stat tone="amber" icon={HandCoins}  label="Advances Recovered" value={PKR(totals.advanceTotal)} sub="Cleared" />
+        <Stat tone="green" icon={Wallet}     label="Net Paid"     value={PKR(totals.netTotal)} sub="Cash + bank" />
+      </div>
+
+      {isLoading ? (
+        <div className="bg-white rounded-xl border border-gray-100 px-4 py-10 text-center text-sm text-gray-400">Loading…</div>
+      ) : runs.length === 0 ? (
+        <div className="bg-white rounded-xl border border-gray-100 px-4 py-10 text-center text-sm text-gray-400">No payroll runs yet{(range.from || range.to) ? ' in this period' : ''}.</div>
+      ) : (
+        <div className="space-y-2">
+          {runs.map(r => {
+            const open = expanded === r.id;
+            return (
+            <div key={r.id} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+              <button onClick={() => setExpanded(open ? null : r.id)} className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 text-left">
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-semibold bg-gray-100 text-gray-700 rounded px-2 py-0.5">{r.period}</span>
+                  <span className="text-sm text-gray-700">{fmtDate(r.payDate)} · {r.payMethod === 'bank' ? (r.bankName || 'bank') : 'cash'} · {r.employeeCount} emp</span>
+                </div>
+                <div className="flex items-center gap-4 text-sm">
+                  {parseFloat(r.advanceTotal) > 0 && <span className="text-amber-700 tabular-nums hidden sm:inline">adv −{PKR(r.advanceTotal)}</span>}
+                  <span className="font-semibold tabular-nums">{PKR(r.netTotal)}</span>
+                  <span className="text-gray-400">{open ? '▾' : '▸'}</span>
+                </div>
+              </button>
+              {open && (
+                <div className="border-t border-gray-100 px-4 py-2">
+                  <table className="w-full text-xs">
+                    <thead><tr className="text-gray-500"><th className="text-left py-1.5">Employee</th><th className="text-right">Days</th><th className="text-right">Gross</th><th className="text-right">Advance</th><th className="text-right">Net</th><th className="text-right no-print">Payslip</th></tr></thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {(r.lines || []).map(l => (
+                        <tr key={l.id}>
+                          <td className="py-1.5 text-gray-800">{l.workerName}<span className="text-gray-400 capitalize"> · {l.payType === 'monthly' ? 'salary' : 'daily'}</span></td>
+                          <td className="py-1.5 text-right tabular-nums text-gray-500">{l.effectiveDays} d{parseFloat(l.otHours) ? ` · ${l.otHours}h OT` : ''}</td>
+                          <td className="py-1.5 text-right tabular-nums">{PKR(l.grossPay)}</td>
+                          <td className="py-1.5 text-right tabular-nums text-amber-700">{parseFloat(l.advanceDeducted) ? `−${PKR(l.advanceDeducted)}` : '—'}</td>
+                          <td className="py-1.5 text-right tabular-nums font-semibold">{PKR(l.netPay)}</td>
+                          <td className="py-1.5 text-right no-print"><button onClick={() => printPayslip(r, l, companyProfile)} className="text-blue-700 hover:underline">print</button></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div className="flex justify-end pt-2 no-print">
+                    <button onClick={() => onOpenRun(r.id)} className="text-xs text-emerald-700 font-medium hover:underline">Open run →</button>
+                  </div>
+                </div>
+              )}
+            </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }

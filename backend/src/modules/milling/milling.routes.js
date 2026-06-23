@@ -914,6 +914,36 @@ router.get('/payroll/runs', authorize('milling', 'view'), async (req, res) => {
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
+// Payroll report — every run (optionally within a from..to period range) with
+// its payslip lines nested, plus grand totals. One pass over runs + lines.
+router.get('/payroll/report', authorize('milling', 'view'), async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    let q = db('mill_payroll_runs as r')
+      .leftJoin('bank_accounts as ba', 'r.bank_account_id', 'ba.id')
+      .select('r.*', 'ba.name as bank_name')
+      .orderBy('r.period', 'desc').orderBy('r.id', 'desc');
+    if (from) q = q.where('r.period', '>=', from);
+    if (to) q = q.where('r.period', '<=', to);
+    const runs = await q;
+    const runIds = runs.map((r) => r.id);
+    const lines = runIds.length
+      ? await db('mill_payroll_lines').whereIn('run_id', runIds).orderBy('worker_name')
+      : [];
+    const byRun = {};
+    for (const l of lines) (byRun[l.run_id] = byRun[l.run_id] || []).push(l);
+    const withLines = runs.map((r) => ({ ...r, lines: byRun[r.id] || [] }));
+    const totals = {
+      runs: runs.length,
+      employees: lines.length,
+      grossTotal: runs.reduce((s, r) => s + parseFloat(r.gross_total || 0), 0),
+      advanceTotal: runs.reduce((s, r) => s + parseFloat(r.advance_total || 0), 0),
+      netTotal: runs.reduce((s, r) => s + parseFloat(r.net_total || 0), 0),
+    };
+    return res.json({ success: true, data: { runs: withLines, totals } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
 // A single run with its per-employee payslip lines.
 router.get('/payroll/runs/:id', authorize('milling', 'view'), async (req, res) => {
   try {

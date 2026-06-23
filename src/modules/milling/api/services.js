@@ -30,6 +30,7 @@ export const millingApi = {
   payrollSummary: (params) => api.get('/api/milling/payroll/summary', params),
   postPayrollRun: (data) => api.post('/api/milling/payroll/run', data),
   listPayrollRuns: () => api.get('/api/milling/payroll/runs'),
+  payrollReport: (params) => api.get('/api/milling/payroll/report', params),
   getPayrollRun: (id) => api.get(`/api/milling/payroll/runs/${id}`),
   deletePayrollRun: (id) => api.delete(`/api/milling/payroll/runs/${id}`),
   listUtilities: (params) => api.get('/api/milling/utilities', params),
