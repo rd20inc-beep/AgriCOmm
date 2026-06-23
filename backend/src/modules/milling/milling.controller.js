@@ -1141,7 +1141,26 @@ const millingController = {
         // milling_completion journal below then moves Raw Rice → Finished, so
         // Raw Rice nets to zero and the supplier payable stands. (The business
         // buys milled rice by type, not unmilled paddy — see migration 119.)
-        if (batch.processing_type !== 'blended' && batch.supplier_id) {
+        // ...UNLESS the batch mills lots that were already purchased on their own
+        // (each purchased lot booked a supplier payable at intake). Re-booking the
+        // raw cost here would owe the supplier twice for rice bought once. A batch
+        // sourcing from such lots is milling owned stock, not making a new purchase.
+        let sourcedFromPurchasedLots = false;
+        {
+          const srcLots = await trx('batch_source_lots')
+            .where({ batch_id: batch.id }).whereNotNull('lot_id').select('lot_id');
+          if (srcLots.length) {
+            const lotNos = (await trx('inventory_lots')
+              .whereIn('id', srcLots.map((s) => s.lot_id)).select('lot_no')).map((l) => l.lot_no);
+            if (lotNos.length) {
+              const lotPayable = await trx('payables').whereIn('linked_ref', lotNos)
+                .where((qb) => qb.whereNull('source_table').orWhereNot('source_table', 'milling_raw_rice'))
+                .first('id');
+              sourcedFromPurchasedLots = !!lotPayable;
+            }
+          }
+        }
+        if (batch.processing_type !== 'blended' && batch.supplier_id && !sourcedFromPurchasedLots) {
           const rawCostRow = await trx('milling_costs')
             .where({ batch_id: batch.id, category: 'raw_rice' })
             .sum('amount as total').first();
