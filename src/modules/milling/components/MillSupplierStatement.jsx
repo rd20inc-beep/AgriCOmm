@@ -1,8 +1,9 @@
 import { useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { X, Printer, Download, ArrowDownLeft, ArrowUpRight, Scale, ExternalLink } from 'lucide-react';
+import { X, Printer, Download, ArrowDownLeft, ArrowUpRight, Scale, ExternalLink, Sparkles } from 'lucide-react';
 import { accountingApi } from '../../accounting/api/services';
+import DraftEmailDrawer from '../../ai/components/DraftEmailDrawer';
 import PartyAllocationLedger from './PartyAllocationLedger';
 import LedgerTypeCounts from './LedgerTypeCounts';
 import OpenItemsPanel from './OpenItemsPanel';
@@ -45,6 +46,7 @@ const fmtDate = (d) => {
  */
 export default function MillSupplierStatement({ supplierId, supplierName, params = {}, onClose }) {
   const [view, setView] = useState('statement'); // 'statement' | 'allocation'
+  const [draftOpen, setDraftOpen] = useState(false);
   const cardRef = useRef(null);
   const { data: statement, isLoading, isError, error } = useQuery({
     queryKey: ['mill-supplier-statement', supplierId, params],
@@ -81,6 +83,9 @@ export default function MillSupplierStatement({ supplierId, supplierName, params
           <button onClick={() => printStatement(cardRef.current, `Statement - ${supplierName || 'Supplier'}`)} className="inline-flex items-center gap-1 rounded-lg bg-white/10 hover:bg-white/20 px-2.5 py-1.5 text-xs" title="Download PDF">
             <Download size={13} /> PDF
           </button>
+          <button onClick={() => setDraftOpen(true)} className="inline-flex items-center gap-1 rounded-lg bg-white/10 hover:bg-white/20 px-2.5 py-1.5 text-xs" title="Draft email with AI">
+            <Sparkles size={13} /> Draft
+          </button>
           <Link
             to={`/finance/statements?type=supplier&id=${supplierId}`}
             className="inline-flex items-center gap-1 rounded-lg bg-white/10 hover:bg-white/20 px-2.5 py-1.5 text-xs"
@@ -95,6 +100,10 @@ export default function MillSupplierStatement({ supplierId, supplierName, params
           )}
         </div>
       </div>
+
+      {draftOpen && (
+        <DraftEmailDrawer partyType="supplier" partyId={supplierId} partyName={supplierName} onClose={() => setDraftOpen(false)} />
+      )}
 
       {view === 'allocation' ? (
         <div className="p-3"><PartyAllocationLedger partyType="supplier" partyId={supplierId} /></div>

@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Users, Truck, BookUser, Scale, ArrowDownLeft, ArrowUpRight, Printer, FileText, Wallet, HandCoins } from 'lucide-react';
+import { Users, Truck, BookUser, Scale, ArrowDownLeft, ArrowUpRight, Printer, FileText, Wallet, HandCoins, Sparkles } from 'lucide-react';
+import DraftEmailDrawer from '../../ai/components/DraftEmailDrawer';
 import { FinanceKPI } from '../../../components/finance';
 import StatementPayDrawer from '../components/StatementPayDrawer';
 import SearchSelect from '../../../shared/components/SearchSelect';
@@ -66,6 +67,7 @@ export default function PartyLedger() {
   // to local-sales customers (export buyers stay hidden from the mill).
   const scope = searchParams.get('scope') === 'local' ? 'local' : null;
   const [payOpen, setPayOpen] = useState(false);
+  const [draftOpen, setDraftOpen] = useState(false);
   const [view, setView] = useState('statement'); // 'statement' | 'allocation'
 
   // Merge a patch into the query string, preserving unrelated params
@@ -186,6 +188,10 @@ export default function PartyLedger() {
               className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm">
               {mode === 'customer' ? <Wallet size={14} /> : <HandCoins size={14} />}
               {mode === 'customer' ? 'Record Receipt' : 'Record Payment'}
+            </button>
+            <button onClick={() => setDraftOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-violet-700 bg-violet-50 border border-violet-200 hover:bg-violet-100 rounded-lg shadow-sm no-print">
+              <Sparkles size={14} /> Draft Email
             </button>
             <button onClick={handlePrint}
               className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm">
@@ -394,6 +400,16 @@ export default function PartyLedger() {
           mode={mode}
           party={{ id: selectedParty.id, name: selectedParty.name }}
           onClose={() => setPayOpen(false)}
+        />
+      )}
+
+      {/* AI-drafted email from this party's ledger */}
+      {draftOpen && selectedParty && (
+        <DraftEmailDrawer
+          partyType={mode}
+          partyId={selectedParty.id}
+          partyName={selectedParty.name}
+          onClose={() => setDraftOpen(false)}
         />
       )}
     </div>

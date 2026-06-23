@@ -1,7 +1,8 @@
 import { useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { X, ArrowDownLeft, ArrowUpRight, Scale, ExternalLink, Printer, Download } from 'lucide-react';
+import { X, ArrowDownLeft, ArrowUpRight, Scale, ExternalLink, Printer, Download, Sparkles } from 'lucide-react';
+import DraftEmailDrawer from '../../ai/components/DraftEmailDrawer';
 import { accountingApi } from '../../accounting/api/services';
 import PartyAllocationLedger from './PartyAllocationLedger';
 import LedgerTypeCounts from './LedgerTypeCounts';
@@ -36,6 +37,7 @@ const fmtDate = (d) => {
 
 export default function MillCustomerStatement({ customerId, customerName, params = {}, onClose }) {
   const [view, setView] = useState('statement'); // 'statement' | 'allocation'
+  const [draftOpen, setDraftOpen] = useState(false);
   const cardRef = useRef(null);
   const { data: statement, isLoading, isError, error } = useQuery({
     queryKey: ['mill-customer-statement', customerId, params],
@@ -71,6 +73,9 @@ export default function MillCustomerStatement({ customerId, customerName, params
           <button onClick={() => printStatement(cardRef.current, `Statement - ${customerName || 'Customer'}`)} className="inline-flex items-center gap-1 rounded-lg bg-white/10 hover:bg-white/20 px-2.5 py-1.5 text-xs" title="Download PDF">
             <Download size={13} /> PDF
           </button>
+          <button onClick={() => setDraftOpen(true)} className="inline-flex items-center gap-1 rounded-lg bg-white/10 hover:bg-white/20 px-2.5 py-1.5 text-xs" title="Draft email with AI">
+            <Sparkles size={13} /> Draft
+          </button>
           <Link
             to={`/milling/statements?type=customer&id=${customerId}&scope=local`}
             className="inline-flex items-center gap-1 rounded-lg bg-white/10 hover:bg-white/20 px-2.5 py-1.5 text-xs"
@@ -85,6 +90,10 @@ export default function MillCustomerStatement({ customerId, customerName, params
           )}
         </div>
       </div>
+
+      {draftOpen && (
+        <DraftEmailDrawer partyType="customer" partyId={customerId} partyName={customerName} onClose={() => setDraftOpen(false)} />
+      )}
 
       {view === 'allocation' ? (
         <div className="p-3"><PartyAllocationLedger partyType="customer" partyId={customerId} /></div>
