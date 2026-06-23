@@ -1261,6 +1261,25 @@ export function useRecordAttendance() {
   });
 }
 
+export function useBulkAttendance() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => millingApi.bulkAttendance(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['payroll-summary'] });
+      qc.invalidateQueries({ queryKey: ['attendance'] });
+    },
+  });
+}
+
+export function useAttendanceHolidays(month) {
+  return useQuery({
+    queryKey: ['attendance-holidays', month],
+    enabled: !!month,
+    queryFn: async () => { const res = await millingApi.attendanceHolidays({ month }); return transformKeys(unwrap(res, 'holidays') || []); },
+  });
+}
+
 export function usePayrollRuns() {
   return useQuery({
     queryKey: ['payroll-runs'],

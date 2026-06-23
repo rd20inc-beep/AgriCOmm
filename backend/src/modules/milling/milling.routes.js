@@ -765,20 +765,96 @@ router.get('/attendance', authorize('milling', 'view'), async (req, res) => {
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
+const VALID_ATTENDANCE = ['present', 'absent', 'half_day', 'leave', 'off'];
+const attHours = (status) => (status === 'half_day' ? 4 : status === 'present' ? 8 : 0);
+
 router.post('/attendance', authorize('milling', 'create'), async (req, res) => {
   try {
     const { worker_id, date, status, hours_worked, overtime_hours, notes } = req.body;
     if (!worker_id || !date) return res.status(400).json({ success: false, message: 'worker_id and date required.' });
-    const VALID_ATTENDANCE = ['present', 'absent', 'half_day', 'leave'];
     if (status && !VALID_ATTENDANCE.includes(status)) {
       return res.status(400).json({ success: false, message: `Invalid status. Must be one of: ${VALID_ATTENDANCE.join(', ')}.` });
     }
     const [record] = await db('mill_attendance').insert({
       worker_id, date, status: status || 'present',
-      hours_worked: hours_worked || 8, overtime_hours: overtime_hours || 0,
+      hours_worked: hours_worked ?? attHours(status || 'present'), overtime_hours: overtime_hours || 0,
       notes: notes || null,
     }).returning('*').onConflict(['worker_id', 'date']).merge();
     return res.json({ success: true, data: { attendance: record } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Bulk attendance — set many (worker, date) cells at once (Sundays off, holidays,
+// company-wide leave, a range). status 'clear' deletes the cell. One transaction.
+router.post('/attendance/bulk', authorize('milling', 'create'), async (req, res) => {
+  try {
+    const { records } = req.body;
+    if (!Array.isArray(records) || !records.length) return res.status(400).json({ success: false, message: 'records[] required.' });
+    let applied = 0;
+    await db.transaction(async (trx) => {
+      for (const r of records) {
+        if (!r.worker_id || !r.date) continue;
+        if (r.status === 'clear' || r.status === null) {
+          await trx('mill_attendance').where({ worker_id: r.worker_id, date: r.date }).del();
+          applied += 1;
+        } else if (VALID_ATTENDANCE.includes(r.status)) {
+          await trx('mill_attendance').insert({
+            worker_id: r.worker_id, date: r.date, status: r.status,
+            hours_worked: attHours(r.status), overtime_hours: 0,
+          }).onConflict(['worker_id', 'date']).merge();
+          applied += 1;
+        }
+      }
+    });
+    return res.json({ success: true, data: { applied } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Pakistan federal (gazetted) public holidays for a year. Fixed-date holidays are
+// exact; the Islamic ones depend on moon-sighting so they're flagged approximate
+// and the supervisor confirms before applying. (No live AI/API is wired in the
+// backend — this is a baked-in calendar; it can be swapped for an AI/API source
+// later by setting an API key and replacing this helper.)
+function pakistanFederalHolidays(year) {
+  const fixed = [
+    [`${year}-02-05`, 'Kashmir Solidarity Day'],
+    [`${year}-03-23`, 'Pakistan Day'],
+    [`${year}-05-01`, 'Labour Day'],
+    [`${year}-08-14`, 'Independence Day'],
+    [`${year}-11-09`, 'Iqbal Day'],
+    [`${year}-12-25`, 'Quaid-e-Azam Day / Christmas'],
+  ].map(([date, name]) => ({ date, name, approximate: false }));
+  // Government-announced Islamic holidays (moon-sighting → approximate).
+  const islamic = {
+    2025: [
+      ['2025-03-31', 'Eid-ul-Fitr'], ['2025-04-01', 'Eid-ul-Fitr'], ['2025-04-02', 'Eid-ul-Fitr'],
+      ['2025-06-07', 'Eid-ul-Azha'], ['2025-06-08', 'Eid-ul-Azha'], ['2025-06-09', 'Eid-ul-Azha'],
+      ['2025-07-05', 'Ashura (9 Muharram)'], ['2025-07-06', 'Ashura (10 Muharram)'],
+      ['2025-09-05', 'Eid Milad-un-Nabi'],
+    ],
+    2026: [
+      ['2026-03-20', 'Eid-ul-Fitr'], ['2026-03-21', 'Eid-ul-Fitr'], ['2026-03-22', 'Eid-ul-Fitr'],
+      ['2026-05-27', 'Eid-ul-Azha'], ['2026-05-28', 'Eid-ul-Azha'], ['2026-05-29', 'Eid-ul-Azha'],
+      ['2026-06-25', 'Ashura (9 Muharram)'], ['2026-06-26', 'Ashura (10 Muharram)'],
+      ['2026-08-25', 'Eid Milad-un-Nabi'],
+    ],
+    2027: [
+      ['2027-03-10', 'Eid-ul-Fitr'], ['2027-03-11', 'Eid-ul-Fitr'], ['2027-03-12', 'Eid-ul-Fitr'],
+      ['2027-05-17', 'Eid-ul-Azha'], ['2027-05-18', 'Eid-ul-Azha'], ['2027-05-19', 'Eid-ul-Azha'],
+      ['2027-06-15', 'Ashura (9 Muharram)'], ['2027-06-16', 'Ashura (10 Muharram)'],
+      ['2027-08-15', 'Eid Milad-un-Nabi'],
+    ],
+  };
+  const isl = (islamic[year] || []).map(([date, name]) => ({ date, name, approximate: true }));
+  return [...fixed, ...isl].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+router.get('/attendance/holidays', authorize('milling', 'view'), async (req, res) => {
+  try {
+    const { month } = req.query;
+    if (!/^\d{4}-\d{2}$/.test(month || '')) return res.status(400).json({ success: false, message: 'month (YYYY-MM) required.' });
+    const holidays = pakistanFederalHolidays(Number(month.slice(0, 4))).filter((h) => h.date.slice(0, 7) === month);
+    return res.json({ success: true, data: { holidays } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 

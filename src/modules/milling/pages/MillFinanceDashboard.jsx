@@ -12,7 +12,7 @@ import {
   useMillExpenses, useCreateMillExpense, useMillWorkers, useCreateMillWorker,
   useUpdateMillWorker, useDeleteMillWorker, useCreateWorkerAdvance, useWorkerAdvances,
   useDeleteWorkerAdvance,
-  usePayrollSummary, useRecordAttendance, useAttendance, useInventory, useExpenseVendors,
+  usePayrollSummary, useRecordAttendance, useAttendance, useBulkAttendance, useAttendanceHolidays, useInventory, useExpenseVendors,
   usePayrollRuns, usePostPayrollRun, useDeletePayrollRun, usePayrollRun, usePayrollReport, useBankAccounts,
   usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow,
   useMillLotCosts, useLocalSales,
@@ -1865,24 +1865,37 @@ export default function MillFinanceDashboard() {
 // Monthly attendance register — rows = active employees, columns = each day of
 // the month. Click a cell to cycle Present → Half-day → Leave → Absent. Feeds the
 // payroll summary's effective-days math. Posts via the existing /attendance upsert.
-const ATT_ORDER = ['present', 'half_day', 'leave', 'absent'];
-const ATT_LETTER = { present: 'P', half_day: 'H', leave: 'L', absent: 'A' };
+const ATT_ORDER = ['present', 'half_day', 'leave', 'absent', 'off'];
+const ATT_LETTER = { present: 'P', half_day: 'H', leave: 'L', absent: 'A', off: 'O' };
 const ATT_STYLE = {
   present: 'bg-emerald-500 text-white',
   half_day: 'bg-amber-400 text-white',
   leave: 'bg-sky-400 text-white',
   absent: 'bg-rose-400 text-white',
+  off: 'bg-slate-400 text-white',
 };
-const ATT_LABEL = { present: 'Present', half_day: 'Half day', leave: 'Leave', absent: 'Absent' };
+const ATT_LABEL = { present: 'Present', half_day: 'Half day', leave: 'Leave', absent: 'Absent', off: 'Off / holiday' };
+const WEEKDAY = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 
 function EmployeeAttendanceGrid({ month, employees, recordAttMut, addToast }) {
   const { data: records = [], isLoading } = useAttendance({ month });
-  const [optimistic, setOptimistic] = useState({}); // `${id}|${date}` → status (until refetch confirms)
+  const bulkMut = useBulkAttendance();
+  const { data: holidays = [] } = useAttendanceHolidays(month);
+  const [optimistic, setOptimistic] = useState({}); // `${id}|${date}` → status ('' = cleared) until refetch
+  const [selDays, setSelDays] = useState(() => new Set());   // selected date columns
+  const [selEmps, setSelEmps] = useState(() => new Set());   // selected employee rows (empty = all)
+  const [showHolidays, setShowHolidays] = useState(false);
+  const [holExcluded, setHolExcluded] = useState(() => new Set()); // holiday dates the user unticked
 
   const active = employees.filter(e => e.isActive);
+  const activeIds = active.map(e => e.id);
   const [y, m] = month.split('-').map(Number);
   const daysInMonth = new Date(y, m, 0).getDate();
   const dates = Array.from({ length: daysInMonth }, (_, i) => `${month}-${String(i + 1).padStart(2, '0')}`);
+  const dow = (d) => new Date(`${d}T00:00:00`).getDay();
+  const isSunday = (d) => dow(d) === 0;
+  const holidayByDate = {};
+  for (const h of holidays) holidayByDate[String(h.date).slice(0, 10)] = h;
 
   const fetchedMap = {};
   for (const r of records) {
@@ -1902,18 +1915,57 @@ function EmployeeAttendanceGrid({ month, employees, recordAttMut, addToast }) {
         hours_worked: next === 'half_day' ? 4 : next === 'present' ? 8 : 0,
         overtime_hours: fetchedMap[key]?.overtimeHours || 0,
       });
-      setOptimistic(o => { const n = { ...o }; delete n[key]; return n; }); // refetch now authoritative
+      setOptimistic(o => { const n = { ...o }; delete n[key]; return n; });
     } catch (e) {
       setOptimistic(o => { const n = { ...o }; delete n[key]; return n; });
       addToast(e.message, 'error');
     }
   }
 
+  // Apply one status across (dates × employees) in a single bulk call.
+  async function bulkApply(targetDates, targetEmpIds, status, label) {
+    const ds = [...targetDates], ids = targetEmpIds.length ? targetEmpIds : activeIds;
+    if (!ds.length || !ids.length) return;
+    const records2 = [], optim = {};
+    for (const id of ids) for (const d of ds) {
+      records2.push({ worker_id: id, date: d, status });
+      optim[`${id}|${d}`] = status === 'clear' ? '' : status;
+    }
+    setOptimistic(o => ({ ...o, ...optim }));
+    try {
+      await bulkMut.mutateAsync({ records: records2 });
+      setOptimistic(o => { const n = { ...o }; for (const k of Object.keys(optim)) delete n[k]; return n; });
+      addToast(label || `${records2.length} cell(s) updated`, 'success');
+    } catch (e) {
+      setOptimistic(o => { const n = { ...o }; for (const k of Object.keys(optim)) delete n[k]; return n; });
+      addToast(e.message, 'error');
+    }
+  }
+
+  const toggleDay = (d) => setSelDays(s => { const n = new Set(s); n.has(d) ? n.delete(d) : n.add(d); return n; });
+  const toggleEmp = (id) => setSelEmps(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const clearSel = () => { setSelDays(new Set()); setSelEmps(new Set()); };
+
+  function applySelected(status) {
+    const empIds = [...selEmps];
+    bulkApply([...selDays], empIds, status,
+      `${selDays.size} day(s)${empIds.length ? ` × ${empIds.length} emp` : ' · all'} → ${status === 'clear' ? 'cleared' : ATT_LABEL[status]}`);
+    clearSel();
+  }
+  function markSundaysOff() {
+    bulkApply(dates.filter(isSunday), activeIds, 'off', 'Sundays marked off');
+  }
+  function applyHolidays() {
+    const pick = holidays.map(h => String(h.date).slice(0, 10)).filter(d => !holExcluded.has(d));
+    if (!pick.length) { addToast('No holidays selected', 'error'); return; }
+    bulkApply(pick, activeIds, 'off', `${pick.length} holiday(s) marked off`);
+    setShowHolidays(false);
+  }
+
   const effectiveDays = (emp) => dates.reduce((s, d) => {
     const st = statusOf(emp.id, d);
     return s + (st === 'present' ? 1 : st === 'half_day' ? 0.5 : 0);
   }, 0);
-  const isSunday = (d) => new Date(`${d}T00:00:00`).getDay() === 0;
 
   if (active.length === 0) {
     return <div className="bg-white rounded-xl border border-gray-100 px-4 py-10 text-center text-sm text-gray-400">No active employees to mark attendance for.</div>;
@@ -1921,9 +1973,42 @@ function EmployeeAttendanceGrid({ month, employees, recordAttMut, addToast }) {
 
   return (
     <div className="space-y-3">
+      {/* Toolbar: quick actions + legend */}
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <p className="text-xs text-gray-500">Click a day to cycle <span className="font-medium">Present → Half-day → Leave → Absent</span>. Present &amp; half-days drive payroll.</p>
-        <div className="flex items-center gap-3 text-[11px] text-gray-500">
+        <div className="flex items-center gap-2">
+          <button onClick={markSundaysOff} disabled={bulkMut.isPending} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50">
+            <CalendarDays className="w-3.5 h-3.5" /> Mark Sundays Off
+          </button>
+          <div className="relative">
+            <button onClick={() => setShowHolidays(s => !s)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100">
+              <Receipt className="w-3.5 h-3.5" /> 🇵🇰 Pakistan Holidays{holidays.length ? ` (${holidays.length})` : ''}
+            </button>
+            {showHolidays && (
+              <div className="absolute z-30 mt-1 w-72 bg-white border border-gray-200 rounded-xl shadow-lg p-3 text-xs">
+                <div className="font-medium text-gray-700 mb-1.5">Federal holidays · {month}</div>
+                {holidays.length === 0 ? (
+                  <p className="text-gray-400 py-2">No federal holidays this month. Mark any day off via the grid or selection.</p>
+                ) : (<>
+                  <div className="space-y-1 max-h-56 overflow-y-auto">
+                    {holidays.map(h => {
+                      const d = String(h.date).slice(0, 10);
+                      const checked = !holExcluded.has(d);
+                      return (
+                        <label key={d} className="flex items-center gap-2 py-0.5 cursor-pointer">
+                          <input type="checkbox" checked={checked} onChange={() => setHolExcluded(s => { const n = new Set(s); checked ? n.add(d) : n.delete(d); return n; })} className="rounded border-gray-300" />
+                          <span className="text-gray-700">{d.slice(8)} · {h.name}{h.approximate ? <span className="text-amber-500"> ~</span> : ''}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[10px] text-gray-400 mt-1.5">~ Islamic dates are moon-sighting — verify the announced date.</p>
+                  <button onClick={applyHolidays} disabled={bulkMut.isPending} className="mt-2 w-full px-3 py-1.5 text-xs font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">Mark selected as Off</button>
+                </>)}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2.5 text-[11px] text-gray-500 flex-wrap">
           {ATT_ORDER.map(s => (
             <span key={s} className="inline-flex items-center gap-1">
               <span className={`w-3.5 h-3.5 rounded-sm inline-flex items-center justify-center text-[9px] font-bold ${ATT_STYLE[s]}`}>{ATT_LETTER[s]}</span>
@@ -1932,6 +2017,26 @@ function EmployeeAttendanceGrid({ month, employees, recordAttMut, addToast }) {
           ))}
         </div>
       </div>
+
+      <p className="text-[11px] text-gray-400">Click a cell to cycle status. Click <span className="font-medium">date headers</span> (and optionally <span className="font-medium">employee names</span>) to select, then apply a status to many at once.</p>
+
+      {/* Bulk action bar — appears when day columns are selected */}
+      {selDays.size > 0 && (
+        <div className="sticky top-0 z-20 flex items-center justify-between flex-wrap gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2">
+          <span className="text-xs text-blue-800 font-medium">
+            {selDays.size} day{selDays.size > 1 ? 's' : ''} {selEmps.size ? `× ${selEmps.size} employee${selEmps.size > 1 ? 's' : ''}` : '· all employees'} selected
+          </span>
+          <div className="flex items-center gap-1">
+            {ATT_ORDER.map(s => (
+              <button key={s} onClick={() => applySelected(s)} disabled={bulkMut.isPending}
+                className={`px-2 py-1 rounded text-[11px] font-bold ${ATT_STYLE[s]} disabled:opacity-50`} title={ATT_LABEL[s]}>{ATT_LETTER[s]}</button>
+            ))}
+            <button onClick={() => applySelected('clear')} disabled={bulkMut.isPending} className="px-2 py-1 rounded text-[11px] font-medium bg-white text-gray-600 border border-gray-300 hover:bg-gray-50">Clear</button>
+            <button onClick={clearSel} className="ml-1 p-1 text-blue-400 hover:text-blue-700"><X className="w-3.5 h-3.5" /></button>
+          </div>
+        </div>
+      )}
+
       <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
         {isLoading ? (
           <p className="px-4 py-10 text-center text-sm text-gray-400">Loading attendance…</p>
@@ -1940,20 +2045,37 @@ function EmployeeAttendanceGrid({ month, employees, recordAttMut, addToast }) {
           <thead>
             <tr className="bg-gray-50 border-b border-gray-100 text-gray-500">
               <th className="sticky left-0 z-10 bg-gray-50 text-left px-3 py-2 font-medium min-w-[150px]">Employee</th>
-              {dates.map(d => (
-                <th key={d} className={`px-0 py-2 font-medium text-center w-7 ${isSunday(d) ? 'bg-gray-100 text-gray-400' : ''}`}>{d.slice(8)}</th>
-              ))}
+              {dates.map(d => {
+                const sel = selDays.has(d);
+                const hol = holidayByDate[d];
+                return (
+                  <th key={d} className={`px-0 py-1 font-medium text-center w-7 ${sel ? 'bg-blue-100' : isSunday(d) ? 'bg-rose-50' : ''}`}>
+                    <button onClick={() => toggleDay(d)} title={`${d}${hol ? ` · ${hol.name}` : ''} — click to select`} className={`w-full leading-tight ${sel ? 'text-blue-700' : isSunday(d) || hol ? 'text-rose-500' : 'text-gray-400'}`}>
+                      <div className="text-[8px]">{WEEKDAY[dow(d)]}</div>
+                      <div className="text-[10px] font-semibold">{d.slice(8)}</div>
+                      {hol && <div className="text-[7px] leading-none text-amber-500">★</div>}
+                    </button>
+                  </th>
+                );
+              })}
               <th className="px-3 py-2 font-medium text-right min-w-[64px]">Days</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {active.map(emp => (
-              <tr key={emp.id} className="hover:bg-gray-50/50">
-                <td className="sticky left-0 z-10 bg-white px-3 py-1.5 font-medium text-gray-800 whitespace-nowrap">{emp.name}</td>
+            {active.map(emp => {
+              const empSel = selEmps.has(emp.id);
+              return (
+              <tr key={emp.id} className={`hover:bg-gray-50/50 ${empSel ? 'bg-blue-50/40' : ''}`}>
+                <td className="sticky left-0 z-10 bg-white px-3 py-1.5 whitespace-nowrap">
+                  <button onClick={() => toggleEmp(emp.id)} title="Click to select this employee for bulk actions" className={`font-medium ${empSel ? 'text-blue-700' : 'text-gray-800 hover:text-blue-600'}`}>
+                    {empSel ? '☑ ' : ''}{emp.name}
+                  </button>
+                </td>
                 {dates.map(d => {
                   const st = statusOf(emp.id, d);
+                  const colSel = selDays.has(d);
                   return (
-                    <td key={d} className={`px-0 py-1 text-center ${isSunday(d) ? 'bg-gray-50' : ''}`}>
+                    <td key={d} className={`px-0 py-1 text-center ${colSel ? 'bg-blue-50' : isSunday(d) ? 'bg-rose-50/40' : ''}`}>
                       <button
                         onClick={() => cycle(emp, d)}
                         title={`${emp.name} · ${d}${st ? ` · ${ATT_LABEL[st]}` : ''}`}
@@ -1966,7 +2088,8 @@ function EmployeeAttendanceGrid({ month, employees, recordAttMut, addToast }) {
                 })}
                 <td className="px-3 py-1.5 text-right font-semibold tabular-nums text-gray-800">{effectiveDays(emp)}</td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
         )}
