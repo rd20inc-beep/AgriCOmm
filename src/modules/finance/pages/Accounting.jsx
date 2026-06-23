@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { FileText, ChevronRight, ChevronDown, BookOpen, Scale, CheckCircle2, AlertTriangle, Layers, Printer } from 'lucide-react';
+import { FileText, ChevronRight, ChevronDown, BookOpen, Scale, CheckCircle2, AlertTriangle, Layers, Printer, Search } from 'lucide-react';
 import { FinanceKPI } from '../../../components/finance';
 import { useJournalEntries } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
@@ -39,6 +39,33 @@ export default function Accounting() {
   const [expanded, setExpanded] = useState(() => new Set());
 
   const [forceExpandForPrint, setForceExpandForPrint] = useState(false);
+
+  // Filters: entity (mill/export/general), posting status, and a free-text
+  // search across journal no / reference / description.
+  const [entityFilter, setEntityFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [search, setSearch] = useState('');
+
+  // Counts per entity across the WHOLE period (drive the filter pills) — the
+  // displayed totals below use the filtered set.
+  const entityCounts = useMemo(() => {
+    const m = { all: journalData.length, mill: 0, export: 0, general: 0 };
+    for (const j of journalData) { const e = j.entity || 'general'; m[e] = (m[e] || 0) + 1; }
+    return m;
+  }, [journalData]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return journalData.filter((j) => {
+      if (entityFilter !== 'all' && (j.entity || 'general') !== entityFilter) return false;
+      if (statusFilter !== 'all' && (j.status || 'Draft') !== statusFilter) return false;
+      if (q) {
+        const hay = `${j.journalNo || j.journal_no || ''} ${j.refNo || j.ref_no || ''} ${j.description || ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [journalData, entityFilter, statusFilter, search]);
 
   function handlePrint() {
     document.body.classList.add('app-print-mask');
@@ -80,8 +107,8 @@ export default function Accounting() {
     const r = parseFloat(j.fxRate || j.fx_rate || 0) || 1;
     return amt * r;
   };
-  const totalDebit  = journalData.reduce((s, j) => s + toPkr(j, 'totalDebit'),  0);
-  const totalCredit = journalData.reduce((s, j) => s + toPkr(j, 'totalCredit'), 0);
+  const totalDebit  = filtered.reduce((s, j) => s + toPkr(j, 'totalDebit'),  0);
+  const totalCredit = filtered.reduce((s, j) => s + toPkr(j, 'totalCredit'), 0);
 
   // Book health — DR and CR should match within a tiny rounding tolerance.
   const imbalance = Math.abs(totalDebit - totalCredit);
@@ -90,7 +117,7 @@ export default function Accounting() {
   const { postedCount, reversedCount, draftCount, entityMix } = useMemo(() => {
     let p = 0, r = 0, d = 0;
     const mix = new Map();
-    for (const j of journalData) {
+    for (const j of filtered) {
       const s = (j.status || 'Draft');
       if (s === 'Posted') p++;
       else if (s === 'Reversed') r++;
@@ -99,7 +126,7 @@ export default function Accounting() {
       mix.set(e, (mix.get(e) || 0) + 1);
     }
     return { postedCount: p, reversedCount: r, draftCount: d, entityMix: mix };
-  }, [journalData]);
+  }, [filtered]);
 
   return (
     <div className="space-y-5 pb-4">
@@ -115,8 +142,8 @@ export default function Accounting() {
               {fmtPkrCompact(totalDebit)}
             </div>
             <div className="text-xs opacity-90 mt-1">
-              {journalData.length} {journalData.length === 1 ? 'entry' : 'entries'} in selected period
-              {entityMix.size > 0 && (
+              {filtered.length} {filtered.length === 1 ? 'entry' : 'entries'}{entityFilter !== 'all' ? ` · ${entityFilter} only` : ' in selected period'}
+              {entityFilter === 'all' && entityMix.size > 0 && (
                 <> · {Array.from(entityMix.entries()).map(([e, n]) => `${n} ${e}`).join(' · ')}</>
               )}
             </div>
@@ -135,10 +162,10 @@ export default function Accounting() {
 
       {/* ─── KPI tiles ──────────────────────────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <FinanceKPI icon={Layers} title="Total Entries" value={String(journalData.length)}
-          subtitle={isLoading ? 'Loading…' : 'In selected period'} status="neutral" loading={isLoading} />
+        <FinanceKPI icon={Layers} title="Total Entries" value={String(filtered.length)}
+          subtitle={isLoading ? 'Loading…' : (entityFilter !== 'all' || statusFilter !== 'all' || search ? 'Filtered' : 'In selected period')} status="neutral" loading={isLoading} />
         <FinanceKPI icon={CheckCircle2} title="Posted" value={String(postedCount)}
-          subtitle={journalData.length > 0 ? `${Math.round(postedCount / journalData.length * 100)}% of total` : '—'}
+          subtitle={filtered.length > 0 ? `${Math.round(postedCount / filtered.length * 100)}% of total` : '—'}
           status={postedCount > 0 ? 'good' : 'neutral'} loading={isLoading} />
         <FinanceKPI icon={AlertTriangle} title="Reversed / Draft" value={String(reversedCount + draftCount)}
           subtitle={`${reversedCount} reversed · ${draftCount} draft`}
@@ -161,6 +188,36 @@ export default function Accounting() {
         </button>
       </div>
 
+      {/* ─── Filters (no-print) ─────────────────────────────────── */}
+      <div className="flex flex-col lg:flex-row lg:items-center gap-3 no-print">
+        {/* Entity */}
+        <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5 text-sm">
+          {[['all', 'All'], ['mill', 'Mill'], ['export', 'Export'], ['general', 'General']].map(([k, label]) => (
+            <button key={k} onClick={() => setEntityFilter(k)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors ${entityFilter === k ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              {label}<span className="text-[10px] text-gray-400">{entityCounts[k] || 0}</span>
+            </button>
+          ))}
+        </div>
+        {/* Status */}
+        <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5 text-sm">
+          {[['all', 'All'], ['Posted', 'Posted'], ['Reversed', 'Reversed'], ['Draft', 'Draft']].map(([k, label]) => (
+            <button key={k} onClick={() => setStatusFilter(k)}
+              className={`px-3 py-1.5 rounded-md font-medium transition-colors ${statusFilter === k ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>{label}</button>
+          ))}
+        </div>
+        {/* Search */}
+        <div className="relative flex-1 min-w-0 max-w-xs">
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search journal / ref / description…"
+            className="w-full border border-gray-200 rounded-lg pl-8 pr-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </div>
+        {(entityFilter !== 'all' || statusFilter !== 'all' || search) && (
+          <button onClick={() => { setEntityFilter('all'); setStatusFilter('all'); setSearch(''); }}
+            className="text-xs text-gray-400 hover:text-gray-600">Clear</button>
+        )}
+      </div>
+
       {/* .print-report — the global @media print rule (gated on
           body.app-print-mask) un-hides this subtree when handlePrint
           fires, so only the journal table reaches paper, not the hero
@@ -178,7 +235,7 @@ export default function Accounting() {
             <div className="text-right">
               <div className="text-lg font-bold">Journal Entries</div>
               <div className="text-xs text-gray-600">
-                {journalData.length} entries · Total {fmtPkrCompact(totalDebit)}
+                {entityFilter !== 'all' ? `${entityFilter} · ` : ''}{filtered.length} entries · Total {fmtPkrCompact(totalDebit)}
                 {isBalanced ? ' · Balanced ✓' : ` · Imbalance ${fmtPkrCompact(imbalance)}`}
               </div>
             </div>
@@ -188,8 +245,10 @@ export default function Accounting() {
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         {isLoading ? (
           <div className="p-10 text-center text-sm text-gray-400">Loading journal entries…</div>
-        ) : journalData.length === 0 ? (
-          <div className="p-10 text-center text-sm text-gray-400">No journal entries posted in this date range.</div>
+        ) : filtered.length === 0 ? (
+          <div className="p-10 text-center text-sm text-gray-400">
+            {journalData.length === 0 ? 'No journal entries posted in this date range.' : 'No entries match the current filters.'}
+          </div>
         ) : (
           <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[760px]">
@@ -206,7 +265,7 @@ export default function Accounting() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {journalData.map(j => {
+              {filtered.map(j => {
                 const id = j.id || j.journalNo || j.journal_no;
                 const isOpen = forceExpandForPrint || expanded.has(id);
                 const lines = j.lines || [];
