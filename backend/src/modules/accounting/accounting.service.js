@@ -1251,13 +1251,25 @@ const accountingService = {
       .whereNull('r.local_sale_id')
       .orderBy('r.due_date')
       .select('r.recv_no', 'r.type', 'r.outstanding', 'r.expected_amount', 'r.received_amount',
-        'r.currency', 'r.due_date', 'r.status', 'o.order_no');
-    const openItems = openRecv.map((r) => ({
-      ref: r.recv_no, label: r.type || 'Receivable', order_no: r.order_no || null,
-      currency: r.currency || 'PKR', outstanding: parseFloat(r.outstanding) || 0,
-      expected: parseFloat(r.expected_amount) || 0, received: parseFloat(r.received_amount) || 0,
-      due_date: r.due_date, status: r.status,
-    }));
+        'r.currency', 'r.due_date', 'r.status', 'o.order_no', 'o.product_name', 'o.qty_mt',
+        'o.quantity_unit', 'o.price_per_mt', 'o.incoterm', 'o.total_bags');
+    const openItems = openRecv.map((r) => {
+      const qty = parseFloat(r.qty_mt) || 0;
+      const price = parseFloat(r.price_per_mt) || 0;
+      const detail = [
+        r.product_name,
+        qty > 0 ? `${qty} ${r.quantity_unit || 'MT'}` : '',
+        price > 0 ? `@ ${price.toLocaleString()}/MT (${(price / 1000).toLocaleString(undefined, { maximumFractionDigits: 3 })}/kg)` : '',
+        r.incoterm,
+        r.total_bags ? `${r.total_bags} bags` : '',
+      ].filter(Boolean).join(' · ') || null;
+      return {
+        ref: r.recv_no, label: r.type || 'Receivable', detail, order_no: r.order_no || null,
+        currency: r.currency || 'PKR', outstanding: parseFloat(r.outstanding) || 0,
+        expected: parseFloat(r.expected_amount) || 0, received: parseFloat(r.received_amount) || 0,
+        due_date: r.due_date, status: r.status,
+      };
+    });
 
     return {
       customer_id: cid,
@@ -1612,8 +1624,11 @@ const accountingService = {
     const openItems = openPay.map((p) => {
       const src = (p.linked_ref && (lotByNo[p.linked_ref] || batchByNo[p.linked_ref])) || null;
       const product = src && lotProdName[src.product_id];
+      // Full buy detail (weight · rate/kg · bags …) without repeating the product
+      // name, so the not-yet-settled line carries the same info as the ledger.
+      const detail = purchaseNarration(p.linked_ref, false) || purchaseNarration(p.pay_no, false) || null;
       return {
-        ref: p.linked_ref || p.pay_no, label: product || cleanCat(p.category), order_no: null,
+        ref: p.linked_ref || p.pay_no, label: product || cleanCat(p.category), detail, order_no: null,
         currency: p.currency || 'PKR', outstanding: parseFloat(p.outstanding) || 0,
         expected: parseFloat(p.original_amount) || 0, received: parseFloat(p.paid_amount) || 0,
         due_date: p.due_date, status: p.status,

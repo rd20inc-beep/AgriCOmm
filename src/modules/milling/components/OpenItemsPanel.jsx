@@ -47,10 +47,13 @@ export default function OpenItemsPanel({ items, partyType }) {
               const partial = (parseFloat(i.received) || 0) > 0;
               return (
                 <tr key={idx} className={partial ? 'bg-amber-50' : 'bg-rose-50'}>
-                  <td className="px-4 py-2 font-medium text-gray-800">
-                    {i.ref}
-                    <span className={`ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold ${partial ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'}`}>{partial ? 'Partial' : 'Unpaid'}</span>
-                    {i.order_no && i.order_no !== i.ref && <span className="text-[11px] text-gray-400 ml-1.5">{i.order_no}</span>}
+                  <td className="px-4 py-2 font-medium text-gray-800 max-w-[420px]">
+                    <span>
+                      {i.ref}
+                      <span className={`ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold ${partial ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'}`}>{partial ? 'Partial' : 'Unpaid'}</span>
+                      {i.order_no && i.order_no !== i.ref && <span className="text-[11px] text-gray-400 ml-1.5">{i.order_no}</span>}
+                    </span>
+                    {i.detail && <span className="block text-[11px] text-gray-500 font-normal whitespace-normal break-words">{i.detail}</span>}
                   </td>
                   <td className="px-4 py-2 text-gray-600 capitalize">{String(i.label || '').replace(/_/g, ' ')}</td>
                   <td className="px-4 py-2 whitespace-nowrap">
