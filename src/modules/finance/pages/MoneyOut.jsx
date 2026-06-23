@@ -5,6 +5,7 @@ import { FinanceKPI, FinanceTable, FinanceFilterBar } from '../../../components/
 import { usePayables, useRecordPayment, useBankAccounts, useReceivables, usePayablePayments } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
+import TransactionDocument from '../../../components/TransactionDocument';
 import StatusBadge from '../../../components/StatusBadge';
 import PartyLink from '../../../shared/components/PartyLink';
 import { toPkr } from '../utils/fx';
@@ -346,6 +347,11 @@ export default function MoneyOut() {
                 ) : (
                   <p className="text-xs text-gray-400 py-2">No payments recorded yet.</p>
                 ))}
+              </div>
+
+              {/* Downloadable / printable payment voucher */}
+              <div className="pt-2 border-t border-gray-100">
+                <TransactionDocument kind="voucher" data={drawer} companyProfile={companyProfileData} />
               </div>
             </div>
 

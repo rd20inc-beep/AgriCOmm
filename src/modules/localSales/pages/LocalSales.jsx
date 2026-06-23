@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useLocalSales, useLocalSalesSummary, useCreateLocalSale, useAcceptLocalSalePayment, useLotInventory } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
+import TransactionDocument from '../../../components/TransactionDocument';
 import { useMillStoreItems } from '../../millStore/api/queries';
 import { LoadingSpinner, ErrorState, EmptyState } from '../../../components/LoadingState';
 import StatusBadge from '../../../components/StatusBadge';
@@ -25,9 +26,10 @@ const SELECT = INPUT;
 const LABEL = "block text-xs font-semibold text-gray-600 uppercase mb-1";
 
 export default function LocalSales() {
-  const { addToast, customersList, refreshFromApi, bankAccountsList = [] } = useApp();
+  const { addToast, customersList, refreshFromApi, bankAccountsList = [], companyProfileData } = useApp();
   const bankOpts = (Array.isArray(bankAccountsList) ? bankAccountsList : []).filter(b => (b.type || '') !== 'cash' && (b.isActive ?? b.is_active ?? true));
   const [showSaleModal, setShowSaleModal] = useState(false);
+  const [invoiceSale, setInvoiceSale] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [displayUnit, setDisplayUnit] = useState('kg');
   const [statusFilter, setStatusFilter] = useState('');
@@ -269,7 +271,15 @@ export default function LocalSales() {
       )}
 
       {/* New Sale Modal */}
-      <SaleModal isOpen={showSaleModal} onClose={() => setShowSaleModal(false)} customers={customersList} addToast={addToast} refetch={refetch} refreshFromApi={refreshFromApi} />
+      <SaleModal isOpen={showSaleModal} onClose={() => setShowSaleModal(false)} customers={customersList} addToast={addToast} refetch={refetch} refreshFromApi={refreshFromApi} onCreated={(s) => setInvoiceSale(s)} />
+
+      {/* Invoice for the just-created sale — print / download */}
+      {invoiceSale && (
+        <SlideDrawer open={!!invoiceSale} onClose={() => setInvoiceSale(null)} title={`Invoice — ${invoiceSale.saleNo || ''}`} subtitle="Sale created" icon={ShoppingCart} size="lg"
+          footer={<button onClick={() => setInvoiceSale(null)} className="w-full px-4 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-700">Done</button>}>
+          <TransactionDocument kind="invoice" data={invoiceSale} companyProfile={companyProfileData} />
+        </SlideDrawer>
+      )}
 
       {/* Sale Detail — right slide-over */}
       {selectedSale && (
@@ -310,6 +320,11 @@ export default function LocalSales() {
               })()}
               <div className="inline-flex items-center gap-1.5"><User size={13} className="text-gray-400" /><span className="text-gray-500">Created by:</span> <span className="font-medium">{selectedSale.createdByName || '—'}</span></div>
               <div><span className="text-gray-500">Created:</span> <span className="font-medium">{selectedSale.createdAt ? new Date(selectedSale.createdAt).toLocaleString('en-GB') : '—'}</span></div>
+            </div>
+
+            {/* Downloadable / printable sales invoice */}
+            <div className="pt-2 border-t border-gray-100">
+              <TransactionDocument kind="invoice" data={selectedSale} companyProfile={companyProfileData} />
             </div>
 
             {parseFloat(selectedSale.dueAmount) > 0 && (
@@ -436,7 +451,7 @@ export default function LocalSales() {
 // lotCategory / CAT_ORDER / CAT_COLOR now live in utils/lotCategory (shared
 // with the Mill New-Batch lot picker).
 
-function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromApi }) {
+function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromApi, onCreated }) {
   const createMutation = useCreateLocalSale();
   const { data: lots = [] } = useLotInventory({ status: 'Available' });
   const safeLots = useMemo(() => (Array.isArray(lots) ? lots : []).filter(l => (parseFloat(l.availableQty) || 0) > 0), [lots]);
@@ -558,6 +573,20 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
         } catch { /* non-blocking */ }
       }
       refreshFromApi('local-sales');
+      // Hand the freshly-created sale back so the parent can offer a printable /
+      // downloadable invoice immediately.
+      const paid = form.paid_amount === '' ? (isCashy && effectiveMode !== 'credit' ? grandTotal : 0) : (parseFloat(form.paid_amount) || 0);
+      const due = Math.max(0, grandTotal - paid);
+      onCreated && onCreated({
+        saleNo: res?.data?.group_no || res?.data?.sale_no || '',
+        customerName: (customers.find((c) => String(c.id) === String(form.customer_id)) || {}).name,
+        buyerName: form.buyer_name, createdAt: new Date().toISOString(),
+        items: cart.map((c) => ({ itemName: c.item_name, itemType: c.item_type, quantityKg: c.qtyKg, ratePerKg: c.ratePerKg, totalAmount: c.total, quantityUnit: c.quantity_unit, millItemId: c.mill_item_id })),
+        totalAmount: grandTotal, paidAmount: paid, dueAmount: due,
+        paymentStatus: due <= 0.01 ? 'Paid' : (paid > 0 ? 'Partial' : 'Unpaid'),
+        paymentMode: effectiveMode, paymentReference: payload.payment_reference,
+        collectionLocation: payload.collection_location, vehicleNo: form.vehicle_no, driverName: form.driver_name,
+      });
       onClose();
       reset();
     } catch (err) { addToast(err.message || 'Sale failed', 'error'); }
