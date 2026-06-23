@@ -1150,7 +1150,7 @@ export default function MillFinanceDashboard() {
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <Stat tone="blue"  icon={RefreshCw} label="Recurring Lines" value={String(recurring.length)} sub="Active schedules" />
             <Stat tone="red"   icon={CalendarDays} label="Due Now" value={String(recurring.filter(r => r.due).length)} sub="Ready to post" />
-            <Stat tone="slate" icon={DollarSign} label="Monthly-equiv." value={PKR(recurring.reduce((s, r) => s + (r.recurrence === 'weekly' ? r.amount * 4.33 : r.recurrence === 'quarterly' ? r.amount / 3 : r.recurrence === 'yearly' ? r.amount / 12 : r.amount), 0))} sub="Approx run-rate" />
+            <Stat tone="slate" icon={DollarSign} label="Monthly-equiv." value={PKR(recurring.reduce((s, r) => { const a = parseFloat(r.amount) || 0; return s + (r.recurrence === 'weekly' ? a * 4.33 : r.recurrence === 'quarterly' ? a / 3 : r.recurrence === 'yearly' ? a / 12 : a); }, 0))} sub="Approx run-rate" />
           </div>
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
             <table className="w-full text-sm">
