@@ -145,7 +145,10 @@ export default function MillFinanceDashboard() {
   const postRunMut = usePostPayrollRun();
   const deleteRunMut = useDeletePayrollRun();
   const [showRunDrawer, setShowRunDrawer] = useState(false);
+  const [runPreselect, setRunPreselect] = useState(null); // worker id to pre-select in the run drawer (per-row Pay)
   const [payslipsRunId, setPayslipsRunId] = useState(null); // open the payslips panel for a run
+
+  function openRunDrawer(preselectId = null) { setRunPreselect(preselectId); setShowRunDrawer(true); }
 
   const { data: lotCosts = { categories: [], grandTotal: 0 } } = useMillLotCosts();
 
@@ -202,7 +205,14 @@ export default function MillFinanceDashboard() {
   const payrollGross = payrollData?.grandGross || 0;
   const payrollAdvances = payrollData?.grandAdvance || 0;
   const advancesOutstandingTotal = workers.reduce((s, w) => s + (parseFloat(w.advanceOutstanding) || 0), 0);
-  const postedRun = payrollRuns.find(r => r.period === payrollMonth) || null;
+  // Multiple runs per month are allowed (pay employees separately) — track this
+  // month's runs, who's still unpaid, and how much was already paid out.
+  const monthRuns = payrollRuns.filter(r => r.period === payrollMonth);
+  const paidThisMonth = monthRuns.reduce((s, r) => s + (parseFloat(r.netTotal) || 0), 0);
+  const paidCount = payrollData?.paidCount || 0;
+  const unpaidNet = payrollData?.unpaidNet ?? payrollTotal;
+  const unpaidEmployees = payrollSummary.filter(w => !w.paid && w.grossPay > 0);
+  const anyUnpaid = unpaidEmployees.length > 0;
 
   const [activeTab, setActiveTab] = useState('overview');
   // Deep-link from the Mill Customers/Suppliers pages: ?tab=customers&customer=ID
@@ -1263,22 +1273,14 @@ export default function MillFinanceDashboard() {
                 onChange={e => setPayrollMonth(e.target.value || curMonth)}
                 className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-gray-900"
               />
-              {payrollView === 'payroll' && (postedRun ? (
+              {payrollView === 'payroll' && anyUnpaid && (
                 <button
-                  onClick={() => setPayslipsRunId(postedRun.id)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
+                  onClick={() => openRunDrawer(null)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
                 >
-                  <Receipt className="w-3.5 h-3.5" /> Posted · View payslips
+                  <Wallet className="w-3.5 h-3.5" /> {monthRuns.length ? 'Pay Remaining' : 'Post Payroll Run'}
                 </button>
-              ) : (
-                <button
-                  onClick={() => setShowRunDrawer(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40"
-                  disabled={!payrollTotal}
-                >
-                  <Wallet className="w-3.5 h-3.5" /> Post Payroll Run
-                </button>
-              ))}
+              )}
               <button onClick={() => openWorkerDrawer(null)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-700">
                 <UserPlus className="w-3.5 h-3.5" /> Add Employee
               </button>
@@ -1293,15 +1295,20 @@ export default function MillFinanceDashboard() {
               addToast={addToast}
             />
           ) : (<>
-          {postedRun && (
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 flex items-center justify-between flex-wrap gap-2">
+          {monthRuns.length > 0 && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 space-y-2">
               <div className="flex items-center gap-2 text-sm text-emerald-800">
                 <Receipt className="w-4 h-4" />
-                <span><span className="font-semibold">Payroll for {postedRun.period} posted</span> — {PKR(postedRun.netTotal)} paid via {postedRun.payMethod === 'bank' ? (postedRun.bankName || 'bank') : 'cash'} on {fmtDate(postedRun.payDate)} to {postedRun.employeeCount} employee(s). Advances recovered.</span>
+                <span><span className="font-semibold">{PKR(paidThisMonth)} paid</span> to {paidCount} employee(s) across {monthRuns.length} run{monthRuns.length > 1 ? 's' : ''} this month{anyUnpaid ? ` · ${unpaidEmployees.length} still to pay` : ' · all paid'}.</span>
               </div>
-              <div className="flex items-center gap-2">
-                <button onClick={() => setPayslipsRunId(postedRun.id)} className="px-2.5 py-1 text-xs font-medium rounded-lg bg-white text-emerald-700 border border-emerald-200 hover:bg-emerald-100">View payslips</button>
-                <button onClick={() => handleDeleteRun(postedRun)} disabled={deleteRunMut.isPending} className="px-2.5 py-1 text-xs font-medium rounded-lg text-rose-600 hover:bg-rose-50 disabled:opacity-50">Undo run</button>
+              <div className="flex flex-wrap gap-2">
+                {monthRuns.map(r => (
+                  <div key={r.id} className="inline-flex items-center gap-2 bg-white border border-emerald-200 rounded-lg px-2.5 py-1 text-xs">
+                    <span className="text-gray-600">{r.employeeCount} emp · <span className="font-semibold tabular-nums">{PKR(r.netTotal)}</span> · {r.payMethod === 'bank' ? (r.bankName || 'bank') : 'cash'} · {fmtDate(r.payDate)}</span>
+                    <button onClick={() => setPayslipsRunId(r.id)} className="text-emerald-700 font-medium hover:underline">payslips</button>
+                    <button onClick={() => handleDeleteRun(r)} disabled={deleteRunMut.isPending} className="text-rose-500 hover:text-rose-700 disabled:opacity-50">undo</button>
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -1309,7 +1316,7 @@ export default function MillFinanceDashboard() {
             <Stat tone="blue"  icon={Users}      label="Active Employees"  value={payrollSummary.length} sub={`${workers.length} total`} />
             <Stat tone="slate" icon={DollarSign} label="Gross Payroll"   value={PKR(payrollGross)} sub={payrollMonth} />
             <Stat tone="amber" icon={HandCoins}  label="Advances Outstanding" value={PKR(advancesOutstandingTotal)} sub="To recover" />
-            <Stat tone={postedRun ? 'green' : 'red'} icon={Wallet} label={postedRun ? 'Net Paid' : 'Net to Pay'} value={PKR(postedRun ? postedRun.netTotal : payrollTotal)} sub={postedRun ? 'Posted' : 'Gross − advances'} />
+            <Stat tone={anyUnpaid ? 'red' : 'green'} icon={Wallet} label={anyUnpaid ? 'Net Remaining' : 'Net Paid'} value={PKR(anyUnpaid ? unpaidNet : paidThisMonth)} sub={anyUnpaid ? `${unpaidEmployees.length} unpaid` : 'All paid'} />
           </div>
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
             <table className="w-full text-sm">
@@ -1343,7 +1350,8 @@ export default function MillFinanceDashboard() {
                       <span className="tabular-nums text-gray-700">{monthly ? `${PKR(w.monthlySalary)}/mo` : `${PKR(w.dailyWage)}/day`}</span>
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums text-gray-600">
-                      {p ? (monthly ? '—' : `${p.effectiveDays} d`) : '—'}{p && p.totalOT ? ` · ${p.totalOT}h OT` : ''}
+                      {p ? `${p.effectiveDays} d` : '—'}{p && p.totalOT ? ` · ${p.totalOT}h OT` : ''}
+                      {p && monthly && <span className="block text-[10px] text-gray-300">salary fixed</span>}
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums">{p ? PKR(p.grossPay) : '—'}</td>
                     <td className="px-4 py-3 text-right tabular-nums">
@@ -1351,9 +1359,16 @@ export default function MillFinanceDashboard() {
                         ? <button onClick={() => setAdvancesPanelWorker(w)} className="text-amber-700 font-medium hover:underline">−{PKR(adv)}</button>
                         : <span className="text-gray-300">—</span>}
                     </td>
-                    <td className="px-4 py-3 text-right font-semibold tabular-nums">{p ? PKR(p.netPay) : '—'}</td>
+                    <td className="px-4 py-3 text-right font-semibold tabular-nums">
+                      {p?.paid
+                        ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-700 uppercase">Paid</span>
+                        : (p ? PKR(p.netPay) : '—')}
+                    </td>
                     <td className="px-4 py-3 no-print">
                       <div className="flex items-center justify-end gap-1">
+                        {p && !p.paid && p.grossPay > 0 && (
+                          <button title="Pay this employee" onClick={() => openRunDrawer(w.id)} className="p-1.5 rounded-md text-emerald-600 hover:bg-emerald-50"><Wallet className="w-3.5 h-3.5" /></button>
+                        )}
                         <button title="Give advance" onClick={() => openAdvanceDrawer(w)} className="p-1.5 rounded-md text-amber-600 hover:bg-amber-50"><HandCoins className="w-3.5 h-3.5" /></button>
                         <button title="Edit" onClick={() => openWorkerDrawer(w)} className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100"><Pencil className="w-3.5 h-3.5" /></button>
                         <button title={w.isActive ? 'Deactivate' : 'Reactivate'} onClick={() => handleToggleActive(w)} className={`p-1.5 rounded-md hover:bg-gray-100 ${w.isActive ? 'text-gray-500' : 'text-emerald-600'}`}><Power className="w-3.5 h-3.5" /></button>
@@ -1766,13 +1781,10 @@ export default function MillFinanceDashboard() {
       {showRunDrawer && (
         <PayrollRunDrawer
           month={payrollMonth}
-          summary={payrollSummary}
-          gross={payrollGross}
-          advances={payrollAdvances}
-          net={payrollTotal}
-          companyProfile={companyProfileData}
-          onClose={() => setShowRunDrawer(false)}
-          onPosted={(run) => { setShowRunDrawer(false); addToast(`Payroll for ${run.period} posted — ${PKR(run.netTotal)} paid`, 'success'); setPayslipsRunId(run.id); }}
+          employees={unpaidEmployees}
+          preselectId={runPreselect}
+          onClose={() => { setShowRunDrawer(false); setRunPreselect(null); }}
+          onPosted={(run) => { setShowRunDrawer(false); setRunPreselect(null); addToast(`Payroll posted — ${PKR(run.netTotal)} paid`, 'success'); setPayslipsRunId(run.id); }}
           postRunMut={postRunMut}
           addToast={addToast}
         />
@@ -2049,7 +2061,7 @@ function printPayslip(run, line, company) {
     <div style="font-size:15px;font-weight:600">${line.workerName}</div>
     <div style="font-size:12px;color:#6b7280;text-transform:capitalize">${line.role || ''} · ${line.payType === 'monthly' ? 'Monthly salary' : 'Daily wage'}</div></div>
     <table>
-      ${row('Effective days', line.payType === 'monthly' ? '—' : `${line.effectiveDays} d`)}
+      ${row('Days worked', `${line.effectiveDays} d${line.payType === 'monthly' ? ' (salary fixed)' : ''}`)}
       ${row('Basic pay', 'Rs ' + Math.round(line.basicPay).toLocaleString())}
       ${parseFloat(line.otPay) > 0 ? row('Overtime', 'Rs ' + Math.round(line.otPay).toLocaleString()) : ''}
       ${row('Gross pay', 'Rs ' + Math.round(line.grossPay).toLocaleString(), true)}
@@ -2071,13 +2083,36 @@ function printPayslip(run, line, company) {
 
 // Drawer to post a payroll run: pick cash/bank + date, review the per-employee
 // breakdown, then pay it out. Server recomputes the figures on submit.
-function PayrollRunDrawer({ month, summary, gross, advances, net, companyProfile, onClose, onPosted, postRunMut, addToast }) {
+function PayrollRunDrawer({ month, employees, preselectId, onClose, onPosted, postRunMut, addToast }) {
   const { data: bankAccounts = [] } = useBankAccounts();
   const banks = bankAccounts.filter(a => a.type !== 'cash');
   const [form, setForm] = useState({ pay_method: 'cash', bank_account_id: '', pay_date: new Date().toISOString().split('T')[0] });
-  const payable = summary.filter(w => w.grossPay > 0 || w.advanceDeduction > 0);
+  // One editable row per unpaid employee: include, advance-to-clear, and the
+  // amount actually being paid (defaults to gross − advance, both overridable).
+  const [rows, setRows] = useState(() => employees.map(w => {
+    const advance = Math.round(Math.min(w.advanceOutstanding || 0, w.grossPay || 0));
+    return {
+      id: w.id, name: w.name, role: w.role, gross: w.grossPay || 0,
+      outstanding: Math.round(w.advanceOutstanding || 0),
+      include: preselectId ? w.id === preselectId : true,
+      advance, net: Math.max(0, (w.grossPay || 0) - advance),
+    };
+  }));
+
+  const setRow = (id, patch) => setRows(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
+  // Changing the advance-to-clear re-derives the net (still editable afterwards).
+  const onAdvance = (r, raw) => {
+    const advance = Math.max(0, Math.min(Math.round(parseFloat(raw) || 0), r.outstanding));
+    setRow(r.id, { advance, net: Math.max(0, r.gross - advance) });
+  };
+  const onNet = (r, raw) => setRow(r.id, { net: Math.max(0, Math.round(parseFloat(raw) || 0)) });
+
+  const included = rows.filter(r => r.include);
+  const totalNet = included.reduce((s, r) => s + r.net, 0);
+  const totalAdvance = included.reduce((s, r) => s + r.advance, 0);
 
   async function post() {
+    if (!included.length) { addToast('Select at least one employee to pay', 'error'); return; }
     if (form.pay_method === 'bank' && !form.bank_account_id) { addToast('Choose a bank account', 'error'); return; }
     try {
       const res = await postRunMut.mutateAsync({
@@ -2085,6 +2120,7 @@ function PayrollRunDrawer({ month, summary, gross, advances, net, companyProfile
         pay_method: form.pay_method,
         bank_account_id: form.pay_method === 'bank' ? Number(form.bank_account_id) : null,
         pay_date: form.pay_date,
+        lines: included.map(r => ({ worker_id: r.id, net_pay: r.net, advance_deducted: r.advance })),
       });
       const raw = res?.data?.run || {};
       onPosted({ id: raw.id, period: raw.period, netTotal: raw.net_total });
@@ -2096,25 +2132,22 @@ function PayrollRunDrawer({ month, summary, gross, advances, net, companyProfile
       open
       onClose={onClose}
       title="Post Payroll Run"
-      subtitle={`Pay net salaries for ${month}`}
+      subtitle={`Pay employees for ${month}`}
       icon={Wallet}
-      size="lg"
+      size="xl"
       footer={
-        <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
-          <button onClick={post} disabled={postRunMut.isPending || net <= 0} className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">
-            {postRunMut.isPending ? 'Posting…' : `Pay ${PKR(net)}`}
-          </button>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-gray-500">{included.length} selected · advance cleared {PKR(totalAdvance)}</span>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+            <button onClick={post} disabled={postRunMut.isPending || !included.length} className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">
+              {postRunMut.isPending ? 'Posting…' : `Pay ${PKR(totalNet)}`}
+            </button>
+          </div>
         </div>
       }
     >
       <div className="space-y-4">
-        <div className="grid grid-cols-3 gap-3">
-          <div className="rounded-lg bg-gray-50 p-3"><div className="text-[11px] text-gray-400 uppercase">Gross</div><div className="text-sm font-semibold tabular-nums">{PKR(gross)}</div></div>
-          <div className="rounded-lg bg-amber-50 p-3"><div className="text-[11px] text-amber-500 uppercase">Advances</div><div className="text-sm font-semibold tabular-nums text-amber-700">−{PKR(advances)}</div></div>
-          <div className="rounded-lg bg-emerald-50 p-3"><div className="text-[11px] text-emerald-500 uppercase">Net to pay</div><div className="text-sm font-semibold tabular-nums text-emerald-700">{PKR(net)}</div></div>
-        </div>
-
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Pay via</label>
@@ -2143,25 +2176,62 @@ function PayrollRunDrawer({ month, summary, gross, advances, net, companyProfile
         )}
 
         <div>
-          <div className="text-xs font-medium text-gray-600 mb-1">Breakdown · {payable.length} employee(s)</div>
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs font-medium text-gray-600">Employees · tick who to pay, adjust each amount</span>
+            <span className="text-[11px] text-gray-400">{rows.length} unpaid</span>
+          </div>
           <div className="rounded-lg border border-gray-200 overflow-hidden">
             <table className="w-full text-xs">
-              <thead><tr className="bg-gray-50 text-gray-500"><th className="text-left px-3 py-2">Employee</th><th className="text-right px-3 py-2">Gross</th><th className="text-right px-3 py-2">Advance</th><th className="text-right px-3 py-2">Net</th></tr></thead>
+              <thead>
+                <tr className="bg-gray-50 text-gray-500">
+                  <th className="text-left px-3 py-2 w-8"></th>
+                  <th className="text-left px-3 py-2">Employee</th>
+                  <th className="text-right px-3 py-2">Gross</th>
+                  <th className="text-right px-3 py-2">Clear advance</th>
+                  <th className="text-right px-3 py-2">Paying now</th>
+                </tr>
+              </thead>
               <tbody className="divide-y divide-gray-100">
-                {payable.map(w => (
-                  <tr key={w.id}>
-                    <td className="px-3 py-1.5 text-gray-800">{w.name}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{PKR(w.grossPay)}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-amber-700">{w.advanceDeduction ? `−${PKR(w.advanceDeduction)}` : '—'}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums font-semibold">{PKR(w.netPay)}</td>
+                {rows.map(r => (
+                  <tr key={r.id} className={r.include ? '' : 'opacity-40'}>
+                    <td className="px-3 py-1.5">
+                      <input type="checkbox" checked={r.include} onChange={e => setRow(r.id, { include: e.target.checked })} className="rounded border-gray-300" />
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <div className="text-gray-800 font-medium">{r.name}</div>
+                      {r.outstanding > 0 && <div className="text-[10px] text-amber-600">advance {PKR(r.outstanding)} outstanding</div>}
+                    </td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-gray-600">{PKR(r.gross)}</td>
+                    <td className="px-3 py-1.5 text-right">
+                      {r.outstanding > 0 ? (
+                        <input type="number" min="0" max={r.outstanding} value={r.advance} disabled={!r.include}
+                          onChange={e => onAdvance(r, e.target.value)}
+                          className="w-24 border border-gray-200 rounded px-2 py-1 text-right tabular-nums focus:outline-none focus:border-gray-900 disabled:bg-gray-50" />
+                      ) : <span className="text-gray-300">—</span>}
+                    </td>
+                    <td className="px-3 py-1.5 text-right">
+                      <input type="number" min="0" value={r.net} disabled={!r.include}
+                        onChange={e => onNet(r, e.target.value)}
+                        className="w-28 border border-gray-200 rounded px-2 py-1 text-right tabular-nums font-medium focus:outline-none focus:border-gray-900 disabled:bg-gray-50" />
+                    </td>
                   </tr>
                 ))}
-                {payable.length === 0 && <tr><td colSpan={4} className="px-3 py-6 text-center text-gray-400">Nothing to pay — set salaries or mark attendance first.</td></tr>}
+                {rows.length === 0 && <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-400">Everyone is already paid for this month, or no one has pay due — mark attendance / set salaries first.</td></tr>}
               </tbody>
+              {included.length > 0 && (
+                <tfoot>
+                  <tr className="bg-gray-50 font-semibold text-gray-800">
+                    <td></td><td className="px-3 py-2">Total ({included.length})</td>
+                    <td></td>
+                    <td className="px-3 py-2 text-right tabular-nums text-amber-700">{totalAdvance ? `−${PKR(totalAdvance)}` : '—'}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{PKR(totalNet)}</td>
+                  </tr>
+                </tfoot>
+              )}
             </table>
           </div>
         </div>
-        <p className="text-[11px] text-gray-400">Pays the net total now ({form.pay_method === 'bank' ? 'from the bank account' : 'in cash'}) and posts to Money Out / GL, generates a payslip per employee, and marks the deducted advances recovered. Idempotent — one run per month.</p>
+        <p className="text-[11px] text-gray-400">Pays each ticked employee the amount shown ({form.pay_method === 'bank' ? 'from the bank account' : 'in cash'}) — posts to Money Out / GL, generates a payslip, and clears the advance you entered. You can run payroll again later to pay the rest.</p>
       </div>
     </SlideDrawer>
   );

@@ -881,9 +881,24 @@ async function unrecoverAdvancesForWorker(trx, workerId, amount) {
   }
 }
 
+// Employees already paid in a posted run for this period (so a second run can't
+// pay them again, and the UI can show a Paid badge).
+async function paidWorkerIdsForPeriod(month) {
+  const rows = await db('mill_payroll_lines as pl')
+    .join('mill_payroll_runs as r', 'pl.run_id', 'r.id')
+    .where('r.period', month).whereNotNull('pl.worker_id')
+    .distinct('pl.worker_id').select('pl.worker_id');
+  return new Set(rows.map((r) => r.worker_id));
+}
+
 router.get('/payroll/summary', authorize('milling', 'view'), async (req, res) => {
   try {
     const data = await computePayrollSummary(req.query.month);
+    const paid = await paidWorkerIdsForPeriod(req.query.month);
+    data.summary = data.summary.map((w) => ({ ...w, paid: paid.has(w.id) }));
+    // Net still owed = only employees not yet paid this period.
+    data.unpaidNet = data.summary.filter((w) => !w.paid).reduce((s, w) => s + w.netPay, 0);
+    data.paidCount = data.summary.filter((w) => w.paid).length;
     return res.json({ success: true, data });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
@@ -912,19 +927,45 @@ router.get('/payroll/runs/:id', authorize('milling', 'view'), async (req, res) =
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
-// Post a payroll run: pay the month's NET salaries (cash/bank + GL via a paid
-// business_expense), snapshot each employee's payslip line, and recover the
-// advances that were deducted. Idempotent per period (unique). Server recomputes
-// the figures — the client's numbers are never trusted.
+// Post a payroll run: pay SELECTED employees their net salary (cash/bank + GL via
+// a paid business_expense), snapshot each one's payslip line, and recover the
+// advance each chose to clear. The client may pass per-employee `lines`
+// ({worker_id, net_pay, advance_deducted}) to override the computed defaults and
+// pick exactly who to pay; with no lines, every not-yet-paid active employee is
+// paid at the computed net. The server always recomputes gross/basic from
+// attendance, clamps the advance to what's outstanding, and blocks anyone already
+// paid this period — so the saved numbers stay trustworthy.
 router.post('/payroll/run', authorize('milling', 'create'), async (req, res) => {
   try {
-    const { month, pay_method, bank_account_id, pay_date, notes } = req.body;
+    const { month, pay_method, bank_account_id, pay_date, notes, lines } = req.body;
     if (!/^\d{4}-\d{2}$/.test(month || '')) return res.status(400).json({ success: false, message: 'A valid month (YYYY-MM) is required.' });
-    const existing = await db('mill_payroll_runs').where('period', month).first();
-    if (existing) return res.status(409).json({ success: false, message: `Payroll for ${month} has already been posted (run #${existing.id}). Delete that run first to re-post.` });
 
-    const { summary, grandGross, grandAdvance, grandTotal } = await computePayrollSummary(month);
-    if (!summary.length || grandGross <= 0) return res.status(400).json({ success: false, message: 'Nothing to post for this month — add employees, mark attendance or set salaries first.' });
+    const { summary } = await computePayrollSummary(month);
+    const byId = new Map(summary.map((w) => [w.id, w]));
+    const alreadyPaid = await paidWorkerIdsForPeriod(month);
+
+    // Resolve which employees to pay + how much.
+    let toPay;
+    if (Array.isArray(lines) && lines.length) {
+      toPay = [];
+      for (const ln of lines) {
+        const w = byId.get(ln.worker_id);
+        if (!w) continue; // not an active employee this month
+        if (alreadyPaid.has(w.id)) return res.status(409).json({ success: false, message: `${w.name} has already been paid for ${month}.` });
+        const advanceDeducted = Math.max(0, Math.min(parseFloat(ln.advance_deducted) || 0, w.advanceOutstanding));
+        const netPay = ln.net_pay != null && ln.net_pay !== ''
+          ? Math.max(0, Math.round(parseFloat(ln.net_pay)))
+          : Math.max(0, w.grossPay - advanceDeducted);
+        toPay.push({ ...w, advanceDeduction: advanceDeducted, netPay });
+      }
+    } else {
+      toPay = summary.filter((w) => !alreadyPaid.has(w.id));
+    }
+    if (!toPay.length) return res.status(400).json({ success: false, message: 'No employees selected to pay (or everyone is already paid for this month).' });
+
+    const grossTotal = toPay.reduce((s, w) => s + w.grossPay, 0);
+    const advanceTotal = toPay.reduce((s, w) => s + w.advanceDeduction, 0);
+    const netTotal = toPay.reduce((s, w) => s + w.netPay, 0);
 
     const method = pay_method === 'bank' ? 'bank' : 'cash';
     const payDate = pay_date || new Date().toISOString().split('T')[0];
@@ -937,12 +978,12 @@ router.post('/payroll/run', authorize('milling', 'create'), async (req, res) => 
 
     // 1) Pay out the net total as a paid salaries expense (cash/bank + GL).
     let expense = null;
-    if (grandTotal > 0) {
+    if (netTotal > 0) {
       expense = await expensesService.create({
-        expense_type: 'mill', category: 'salaries', amount: grandTotal, currency: 'PKR',
+        expense_type: 'mill', category: 'salaries', amount: netTotal, currency: 'PKR',
         expense_date: payDate,
         description: `Salaries — payroll run ${month}`,
-        notes: notes || `Payroll ${month}: ${summary.length} employee(s) · gross ${grandGross} · advances ${grandAdvance} · net ${grandTotal}`,
+        notes: notes || `Payroll ${month}: ${toPay.length} employee(s) · gross ${grossTotal} · advances ${advanceTotal} · net ${netTotal}`,
         pay_now: true, bank_account_id: acctId,
         payment_method: method,
       }, req.user?.id);
@@ -952,11 +993,11 @@ router.post('/payroll/run', authorize('milling', 'create'), async (req, res) => 
     const run = await db.transaction(async (trx) => {
       const [r] = await trx('mill_payroll_runs').insert({
         period: month, pay_date: payDate, pay_method: method, bank_account_id: acctId,
-        gross_total: grandGross, advance_total: grandAdvance, net_total: grandTotal,
-        employee_count: summary.length, expense_id: expense?.id || null,
+        gross_total: grossTotal, advance_total: advanceTotal, net_total: netTotal,
+        employee_count: toPay.length, expense_id: expense?.id || null,
         status: 'posted', notes: notes || null, created_by: req.user?.id || null,
       }).returning('*');
-      for (const w of summary) {
+      for (const w of toPay) {
         await trx('mill_payroll_lines').insert({
           run_id: r.id, worker_id: w.id, worker_name: w.name, role: w.role, pay_type: w.pay_type,
           effective_days: w.effectiveDays || 0, ot_hours: w.totalOT || 0,
