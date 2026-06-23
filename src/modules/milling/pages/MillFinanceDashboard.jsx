@@ -25,6 +25,7 @@ import MillSupplierPayDrawer from '../components/MillSupplierPayDrawer';
 import MillCustomerStatement from '../components/MillCustomerStatement';
 import MillCustomerPayDrawer from '../components/MillCustomerPayDrawer';
 import StatementPayDrawer from '../../finance/components/StatementPayDrawer';
+import AnomalyWatchCard from '../../ai/components/AnomalyWatchCard';
 
 const PKR = (v) => 'Rs ' + Math.round(v || 0).toLocaleString('en-PK');
 const fmtDate = (d) => {
@@ -667,6 +668,9 @@ export default function MillFinanceDashboard() {
               </div>
             )}
           </div>
+
+          {/* AI Anomaly Watch */}
+          <AnomalyWatchCard />
 
           {/* Expense breakdown + Payroll summary */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
