@@ -33,5 +33,6 @@ router.use('/enterprise', require('./enterprise')); // Note: health is public, r
 router.use('/control', authenticate, require('./control'));
 router.use('/intelligence', authenticate, require('./intelligence'));
 router.use('/smart', authenticate, require('./smart'));
+router.use('/ai', authenticate, require('../modules/ai/ai.routes'));
 
 module.exports = router;

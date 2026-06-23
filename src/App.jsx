@@ -73,6 +73,7 @@ const StockCount = lazyWithReload(() => import('./modules/inventory/pages/StockC
 const LocalSales = lazyWithReload(() => import('./modules/localSales/pages/LocalSales'));
 const LotDetail = lazyWithReload(() => import('./modules/inventory/pages/LotDetail'));
 const ExceptionDashboard = lazyWithReload(() => import('./modules/analytics/pages/ExceptionDashboard'));
+const AiAssistant = lazyWithReload(() => import('./modules/ai/pages/AiAssistant'));
 const Intelligence = lazyWithReload(() => import('./modules/analytics/pages/Intelligence'));
 const ScenarioSimulator = lazyWithReload(() => import('./modules/analytics/pages/ScenarioSimulator'));
 const Admin = lazyWithReload(() => import('./modules/admin/pages/Admin'));
@@ -221,6 +222,7 @@ function StandardRoutes() {
         <Route path="/reports/print" element={<ProtectedRoute module="reports" action="view"><PrintableReports /></ProtectedRoute>} />
         <Route path="/reports/lots" element={<ProtectedRoute module="reports" action="view"><LotReport /></ProtectedRoute>} />
         <Route path="/exceptions" element={<ProtectedRoute module="admin" action="view"><ExceptionDashboard /></ProtectedRoute>} />
+        <Route path="/ai" element={<AiAssistant />} />
         <Route path="/intelligence" element={<ProtectedRoute anyOf={[{ module: 'finance', action: 'view' }, { module: 'admin', action: 'view' }]}><Intelligence /></ProtectedRoute>} />
         <Route path="/simulator" element={<ProtectedRoute anyOf={[{ module: 'finance', action: 'view' }, { module: 'admin', action: 'view' }]}><ScenarioSimulator /></ProtectedRoute>} />
         <Route path="/approvals" element={<ProtectedRoute module="admin" action="view"><Approvals /></ProtectedRoute>} />
