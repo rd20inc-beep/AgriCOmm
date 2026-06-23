@@ -6,6 +6,8 @@ const PKR = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
 const fmtDate = (d) => { if (!d) return '—'; const dt = new Date(d); return Number.isNaN(dt.getTime()) ? d : dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }); };
 const METHOD = { cash: 'Cash', cheque: 'Cheque', bank_transfer: 'Bank transfer', online: 'Online', mobile: 'Mobile' };
 const STATUS_TONE = { Paid: 'bg-emerald-100 text-emerald-700', Partial: 'bg-amber-100 text-amber-700', Unpaid: 'bg-rose-100 text-rose-700' };
+// Row tint per status so paid / partial / unpaid read at a glance (and print).
+const STATUS_BG = { Paid: 'bg-emerald-50', Partial: 'bg-amber-50', Unpaid: 'bg-rose-50' };
 
 // Invoice ↔ payment allocation ledger (LedgerReport.pdf style): each invoice
 // with the payments applied to it + outstanding, and a totals/counts footer.
@@ -29,9 +31,10 @@ export default function PartyAllocationLedger({ partyType, partyId }) {
     <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
       <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between gap-2 flex-wrap">
         <h4 className="text-sm font-semibold text-gray-700">Invoice & payment allocation</h4>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <span className="inline-flex items-center gap-1 text-[10px] text-gray-500"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-200 border border-emerald-300" /> Paid</span>
-          <span className="inline-flex items-center gap-1 text-[10px] text-gray-500"><span className="w-2.5 h-2.5 rounded-sm bg-amber-200 border border-amber-300" /> Outstanding</span>
+          <span className="inline-flex items-center gap-1 text-[10px] text-gray-500"><span className="w-2.5 h-2.5 rounded-sm bg-amber-200 border border-amber-300" /> Partial</span>
+          <span className="inline-flex items-center gap-1 text-[10px] text-gray-500"><span className="w-2.5 h-2.5 rounded-sm bg-rose-200 border border-rose-300" /> Unpaid</span>
           <span className="text-[11px] text-gray-400">{counts.invoices} {billLabel.toLowerCase()}{counts.invoices === 1 ? '' : 's'} · {counts.payments} {payLabel.toLowerCase()}{counts.payments === 1 ? '' : 's'}</span>
         </div>
       </div>
@@ -41,7 +44,7 @@ export default function PartyAllocationLedger({ partyType, partyId }) {
       ) : (
         <div className="divide-y divide-white/60">
           {invoices.map((inv, i) => (
-            <div key={i} className={`px-4 py-3 ${inv.status === 'Paid' ? 'bg-emerald-50' : 'bg-amber-50'}`}>
+            <div key={i} className={`px-4 py-3 ${STATUS_BG[inv.status] || 'bg-gray-50'}`}>
               {/* Invoice header */}
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
