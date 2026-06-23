@@ -504,10 +504,12 @@ router.get('/expenses', authorize('milling', 'view'), async (req, res) => {
         'e.invoice_reference as reference',
         'e.payment_method',
         'e.payment_status',
+        'e.vendor_name', 'e.is_recurring', 'e.recurrence', 'e.employee_id',
         'e.notes', 'e.created_at', 'e.created_by',
         db.raw("TO_CHAR(e.expense_date, 'YYYY-MM') as period"),
-        's.name as supplier_name'
+        's.name as supplier_name', 'w.name as employee_name'
       )
+      .leftJoin('mill_workers as w', 'w.id', 'e.employee_id')
       // Newest first; created_at tie-breaks rows on the same date so the
       // most recently-saved bill is always at the top.
       .orderBy('e.expense_date', 'desc')
@@ -532,7 +534,7 @@ router.post('/expenses', authorize('milling', 'create'),
   auditAction('create', 'mill_expense', (req, data) => data.data?.expense?.id),
   async (req, res) => {
     try {
-      const { category, description, amount, expense_date, payment_method, reference, notes, supplier_id, vendor_name, pay_now, bank_account_id } = req.body;
+      const { category, subcategory, description, amount, expense_date, payment_method, reference, notes, supplier_id, vendor_name, pay_now, bank_account_id, employee_id, is_recurring, recurrence } = req.body;
       if (!category || !amount || !expense_date) {
         return res.status(400).json({ success: false, message: 'category, amount, and expense_date are required.' });
       }
@@ -561,6 +563,7 @@ router.post('/expenses', authorize('milling', 'create'),
       const expense = await expensesService.create({
         expense_type: 'mill',
         category,
+        subcategory: subcategory || null,
         amount: parseFloat(amount),
         currency: 'PKR',
         expense_date,
@@ -569,6 +572,9 @@ router.post('/expenses', authorize('milling', 'create'),
         invoice_reference: reference || null,
         supplier_id: supplier_id || null,
         vendor_name: vendor_name || null,
+        employee_id: employee_id || null,
+        is_recurring: !!is_recurring,
+        recurrence: recurrence || null,
         pay_now: !!pay_now,
         bank_account_id: bank_account_id || null,
         payment_method: payment_method || null,

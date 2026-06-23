@@ -4,7 +4,7 @@ import {
   DollarSign, Users, Zap, Shield, TrendingUp, TrendingDown, AlertTriangle,
   Plus, UserPlus, Package, Factory, Wallet, ArrowUpRight, ArrowDownRight, Printer,
   Building2, Banknote, Receipt, Layers, Truck, ExternalLink,
-  Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X, FileText,
+  Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X, FileText, RefreshCw,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
@@ -46,6 +46,20 @@ const EXPENSE_CATS = [
   'transport', 'fuel', 'packaging', 'inspection', 'freight',
   'commission', 'miscellaneous',
 ];
+// Category-specific extra field for the Add Expense drawer → saved to subcategory.
+// 'salaries' is special-cased (employee picker), so it's not here.
+const CAT_DETAIL = {
+  utilities:   { label: 'Utility type', options: ['Electricity', 'Water', 'Gas', 'Internet'] },
+  fuel:        { label: 'Vehicle / equipment', placeholder: 'e.g. Generator, Truck LEX-123' },
+  rent:        { label: 'Property / location', placeholder: 'e.g. Mill warehouse' },
+  transport:   { label: 'Vehicle / route', placeholder: 'e.g. Lahore → Mill' },
+  maintenance: { label: 'Asset / equipment', placeholder: 'e.g. Huller #2, boiler' },
+  insurance:   { label: 'Policy number', placeholder: 'Policy #' },
+  inspection:  { label: 'Inspection / lab', placeholder: 'e.g. SGS moisture test' },
+  freight:     { label: 'Shipment / route', placeholder: '' },
+  commission:  { label: 'Deal / party', placeholder: '' },
+};
+const RECURRENCES = ['monthly', 'weekly', 'quarterly', 'yearly'];
 const WORKER_ROLES = ['operator', 'laborer', 'supervisor', 'driver', 'guard', 'cleaner'];
 // VENDOR_OPTIONS used to be a hardcoded map here. It now lives in the
 // `expense_vendors` table and is managed via Admin → Expense Vendors.
@@ -229,7 +243,8 @@ export default function MillFinanceDashboard() {
   }, [searchParams, localCustomers, suppliers]);
   const [showExpDrawer, setShowExpDrawer] = useState(false);
   const [showWorkerDrawer, setShowWorkerDrawer] = useState(false);
-  const [expForm, setExpForm] = useState({ category: 'salaries', vendor_preset: '', vendor_name: '', description: '', amount: '', expense_date: new Date().toISOString().split('T')[0], reference: '', notes: '' });
+  const EMPTY_EXP = { category: 'salaries', vendor_preset: '', vendor_name: '', subcategory: '', employee_id: '', is_recurring: false, recurrence: 'monthly', description: '', amount: '', expense_date: new Date().toISOString().split('T')[0], reference: '', notes: '' };
+  const [expForm, setExpForm] = useState(EMPTY_EXP);
   const EMPTY_WORKER = { id: null, name: '', role: 'laborer', pay_type: 'daily', daily_wage: '', monthly_salary: '', phone: '', cnic: '', joined_date: new Date().toISOString().split('T')[0], notes: '' };
   const [workerForm, setWorkerForm] = useState(EMPTY_WORKER);
   const [advanceTarget, setAdvanceTarget] = useState(null); // worker we're giving an advance to
@@ -406,14 +421,10 @@ export default function MillFinanceDashboard() {
 
   function openExpDrawer(prefill) {
     setExpForm({
+      ...EMPTY_EXP,
       category: prefill?.category || 'salaries',
-      vendor_preset: '',
-      vendor_name: '',
       description: prefill?.description || '',
       amount: prefill?.amount != null ? String(prefill.amount) : '',
-      expense_date: new Date().toISOString().split('T')[0],
-      reference: '',
-      notes: '',
     });
     setShowExpDrawer(true);
   }
@@ -425,15 +436,20 @@ export default function MillFinanceDashboard() {
     const vendorName = (expForm.vendor_preset && expForm.vendor_preset !== '__other')
       ? expForm.vendor_preset
       : (expForm.vendor_name || null);
+    const empId = (expForm.category === 'salaries' && /^\d+$/.test(expForm.employee_id)) ? Number(expForm.employee_id) : null;
     try {
       await createExpMut.mutateAsync({
         category: expForm.category,
+        subcategory: expForm.subcategory || null,
         description: expForm.description,
         amount: expForm.amount,
         expense_date: expForm.expense_date,
         reference: expForm.reference,
         notes: expForm.notes,
         vendor_name: vendorName,
+        employee_id: empId,
+        is_recurring: !!expForm.is_recurring,
+        recurrence: expForm.is_recurring ? expForm.recurrence : null,
       });
       addToast('Expense recorded — also visible on Finance dashboard', 'success');
       setShowExpDrawer(false);
@@ -1079,8 +1095,14 @@ export default function MillFinanceDashboard() {
                 {expenses.map(e => (
                   <tr key={e.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 text-gray-600">{e.expenseDate}</td>
-                    <td className="px-4 py-3 capitalize">{e.category}</td>
-                    <td className="px-4 py-3 text-gray-600">{e.description || '—'}</td>
+                    <td className="px-4 py-3">
+                      <span className="capitalize">{e.category}</span>
+                      {e.isRecurring && <span className="ml-1.5 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-violet-100 text-violet-700 uppercase"><RefreshCw className="w-2.5 h-2.5" />{e.recurrence || 'recurring'}</span>}
+                    </td>
+                    <td className="px-4 py-3 text-gray-600">
+                      {e.description || '—'}
+                      {(e.employeeName || e.subcategory) && <span className="block text-[10px] text-gray-400">{e.employeeName || e.subcategory}</span>}
+                    </td>
                     <td className="px-4 py-3 text-gray-500 text-xs">{e.reference || e.invoiceReference || '—'}</td>
                     <td className="px-4 py-3">
                       <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${(e.paymentStatus === 'Paid') ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
@@ -1477,7 +1499,7 @@ export default function MillFinanceDashboard() {
               <label className="block text-xs font-medium text-gray-600 mb-1">Category *</label>
               <select
                 value={expForm.category}
-                onChange={e => setExpForm(p => ({ ...p, category: e.target.value, vendor_preset: '', vendor_name: '' }))}
+                onChange={e => setExpForm(p => ({ ...p, category: e.target.value, vendor_preset: '', vendor_name: '', subcategory: '', employee_id: '' }))}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900 bg-white"
               >
                 {EXPENSE_CATS.map(c => <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>)}
@@ -1494,45 +1516,76 @@ export default function MillFinanceDashboard() {
             </div>
           </div>
 
-          {/* ─── Provider / Vendor — dynamic per category ───────── */}
-          {VENDOR_OPTIONS[expForm.category] ? (
+          {/* ─── Dynamic fields per category ─────────────────────── */}
+          {expForm.category === 'salaries' ? (
             <div className="space-y-2">
-              <label className="block text-xs font-medium text-gray-600">
-                Provider <span className="text-gray-400 font-normal">· choose from common {expForm.category} providers</span>
-              </label>
+              <label className="block text-xs font-medium text-gray-600">Employee <span className="text-gray-400 font-normal">· who is this salary for?</span></label>
               <select
-                value={expForm.vendor_preset}
-                onChange={e => setExpForm(p => ({ ...p, vendor_preset: e.target.value, vendor_name: '' }))}
+                value={expForm.employee_id}
+                onChange={e => {
+                  const id = e.target.value;
+                  const w = workers.find(x => String(x.id) === id);
+                  setExpForm(p => ({ ...p, employee_id: id, vendor_name: id === '__other' ? '' : (w?.name || '') }));
+                }}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900 bg-white"
               >
-                <option value="">Select a provider…</option>
-                {VENDOR_OPTIONS[expForm.category].map(v => (
-                  <option key={v} value={v}>{v}</option>
-                ))}
-                <option value="__other">Other (specify below)</option>
+                <option value="">Select employee…</option>
+                {workers.filter(w => w.isActive).map(w => <option key={w.id} value={w.id}>{w.name}{w.role ? ` · ${w.role}` : ''}</option>)}
+                <option value="__other">Other (contractor / batch)</option>
               </select>
-              {expForm.vendor_preset === '__other' && (
-                <input
-                  type="text"
-                  value={expForm.vendor_name}
-                  onChange={e => setExpForm(p => ({ ...p, vendor_name: e.target.value }))}
-                  placeholder="Enter provider name"
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
-                  autoFocus
-                />
+              {expForm.employee_id === '__other' && (
+                <input type="text" value={expForm.vendor_name} onChange={e => setExpForm(p => ({ ...p, vendor_name: e.target.value }))}
+                  placeholder="e.g. external contractor / May payroll batch"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900" autoFocus />
               )}
+              <p className="text-[11px] text-gray-400">For monthly payroll across all staff, use <span className="font-medium">Payroll → Post Payroll Run</span> instead.</p>
             </div>
           ) : (
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Vendor / Payee <span className="text-gray-400 font-normal">· optional</span></label>
-              <input
-                type="text"
-                value={expForm.vendor_name}
-                onChange={e => setExpForm(p => ({ ...p, vendor_name: e.target.value }))}
-                placeholder={expForm.category === 'salaries' ? 'e.g. May payroll batch' : 'Who is being paid?'}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
-              />
-            </div>
+            <>
+              {VENDOR_OPTIONS[expForm.category] ? (
+                <div className="space-y-2">
+                  <label className="block text-xs font-medium text-gray-600">
+                    Provider <span className="text-gray-400 font-normal">· common {expForm.category} providers</span>
+                  </label>
+                  <select
+                    value={expForm.vendor_preset}
+                    onChange={e => setExpForm(p => ({ ...p, vendor_preset: e.target.value, vendor_name: '' }))}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900 bg-white"
+                  >
+                    <option value="">Select a provider…</option>
+                    {VENDOR_OPTIONS[expForm.category].map(v => <option key={v} value={v}>{v}</option>)}
+                    <option value="__other">Other (specify below)</option>
+                  </select>
+                  {expForm.vendor_preset === '__other' && (
+                    <input type="text" value={expForm.vendor_name} onChange={e => setExpForm(p => ({ ...p, vendor_name: e.target.value }))}
+                      placeholder="Enter provider name" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900" autoFocus />
+                  )}
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Vendor / Payee <span className="text-gray-400 font-normal">· optional</span></label>
+                  <input type="text" value={expForm.vendor_name} onChange={e => setExpForm(p => ({ ...p, vendor_name: e.target.value }))}
+                    placeholder="Who is being paid?" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900" />
+                </div>
+              )}
+
+              {/* Category-specific detail → subcategory */}
+              {CAT_DETAIL[expForm.category] && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{CAT_DETAIL[expForm.category].label} <span className="text-gray-400 font-normal">· optional</span></label>
+                  {CAT_DETAIL[expForm.category].options ? (
+                    <select value={expForm.subcategory} onChange={e => setExpForm(p => ({ ...p, subcategory: e.target.value }))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900 bg-white">
+                      <option value="">Select…</option>
+                      {CAT_DETAIL[expForm.category].options.map(o => <option key={o} value={o}>{o}</option>)}
+                    </select>
+                  ) : (
+                    <input type="text" value={expForm.subcategory} onChange={e => setExpForm(p => ({ ...p, subcategory: e.target.value }))}
+                      placeholder={CAT_DETAIL[expForm.category].placeholder} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900" />
+                  )}
+                </div>
+              )}
+            </>
           )}
 
           <div>
@@ -1575,6 +1628,25 @@ export default function MillFinanceDashboard() {
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
             />
           </div>
+          {/* ─── Recurring ───────────────────────────────────────── */}
+          <div className="rounded-lg border border-gray-200 p-3">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={expForm.is_recurring} onChange={e => setExpForm(p => ({ ...p, is_recurring: e.target.checked }))} className="rounded border-gray-300" />
+              <span className="text-sm font-medium text-gray-700 inline-flex items-center gap-1.5"><RefreshCw className="w-3.5 h-3.5 text-gray-400" /> Recurring expense</span>
+            </label>
+            {expForm.is_recurring && (
+              <div className="mt-2 flex items-center gap-2">
+                <span className="text-xs text-gray-500">Repeats</span>
+                <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5">
+                  {RECURRENCES.map(r => (
+                    <button key={r} type="button" onClick={() => setExpForm(p => ({ ...p, recurrence: r }))}
+                      className={`px-2.5 py-1 text-xs rounded-md capitalize ${expForm.recurrence === r ? 'bg-white text-gray-900 shadow-sm font-medium' : 'text-gray-500 hover:text-gray-700'}`}>{r}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="bg-blue-50/50 border border-blue-100 rounded-lg p-3 text-xs text-blue-800">
             Saving creates a <span className="font-medium">business_expense</span> + <span className="font-medium">payable</span> + journal entry. The expense becomes payable on Money Out.
           </div>

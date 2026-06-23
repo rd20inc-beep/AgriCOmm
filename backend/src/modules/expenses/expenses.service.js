@@ -79,6 +79,7 @@ const expensesService = {
       supplier_id, vendor_name, expense_date, due_date, invoice_reference,
       description, notes, batch_id, order_id,
       pay_now, bank_account_id, payment_method, payment_reference,
+      employee_id, is_recurring, recurrence,
     } = data;
 
     if (!amount || Number(amount) <= 0) throw new ValidationError('Amount must be positive.');
@@ -109,6 +110,9 @@ const expensesService = {
         notes: notes || null,
         batch_id: batch_id || null,
         order_id: order_id || null,
+        employee_id: employee_id || null,
+        is_recurring: !!is_recurring,
+        recurrence: is_recurring ? (recurrence || 'monthly') : null,
         payment_status: pay_now ? 'Paid' : 'Pending',
         bank_account_id: pay_now ? (bank_account_id || null) : null,
         paid_date: pay_now ? expense_date : null,

@@ -194,12 +194,14 @@ COL business_expenses.created_by:integer:NULL
 COL business_expenses.currency:character varying:NOT NULL
 COL business_expenses.description:text:NULL
 COL business_expenses.due_date:date:NULL
+COL business_expenses.employee_id:integer:NULL
 COL business_expenses.expense_date:date:NOT NULL
 COL business_expenses.expense_no:character varying:NOT NULL
 COL business_expenses.expense_type:character varying:NOT NULL
 COL business_expenses.fx_rate:numeric:NULL
 COL business_expenses.id:integer:NOT NULL
 COL business_expenses.invoice_reference:character varying:NULL
+COL business_expenses.is_recurring:boolean:NOT NULL
 COL business_expenses.notes:text:NULL
 COL business_expenses.order_id:integer:NULL
 COL business_expenses.paid_amount:numeric:NOT NULL
@@ -207,6 +209,7 @@ COL business_expenses.paid_date:date:NULL
 COL business_expenses.payment_method:character varying:NULL
 COL business_expenses.payment_reference:character varying:NULL
 COL business_expenses.payment_status:character varying:NOT NULL
+COL business_expenses.recurrence:character varying:NULL
 COL business_expenses.subcategory:character varying:NULL
 COL business_expenses.supplier_id:integer:NULL
 COL business_expenses.updated_at:timestamp with time zone:NOT NULL
@@ -2016,6 +2019,7 @@ CON business_expenses.business_expenses_approved_by_foreign(f)
 CON business_expenses.business_expenses_bank_account_id_foreign(f)
 CON business_expenses.business_expenses_batch_id_foreign(f)
 CON business_expenses.business_expenses_created_by_foreign(f)
+CON business_expenses.business_expenses_employee_id_foreign(f)
 CON business_expenses.business_expenses_expense_no_unique(u)
 CON business_expenses.business_expenses_order_id_foreign(f)
 CON business_expenses.business_expenses_payment_chk(c)
