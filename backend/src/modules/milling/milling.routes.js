@@ -585,24 +585,168 @@ router.post('/expenses', authorize('milling', 'create'),
 // Mill Workers & Payroll
 // =============================================================================
 
+// Each worker carries its outstanding-advance total so the UI can show it and
+// the payroll run can net it off. Computed in one grouped query, not N+1.
+async function attachAdvances(workers) {
+  const ids = workers.map((w) => w.id);
+  if (!ids.length) return workers;
+  const rows = await db('mill_worker_advances')
+    .whereIn('worker_id', ids).where('status', 'outstanding')
+    .groupBy('worker_id')
+    .select('worker_id')
+    .sum(db.raw('(amount - recovered_amount) as outstanding'));
+  const map = new Map(rows.map((r) => [r.worker_id, parseFloat(r.outstanding) || 0]));
+  return workers.map((w) => ({ ...w, advance_outstanding: map.get(w.id) || 0 }));
+}
+
 router.get('/workers', authorize('milling', 'view'), async (req, res) => {
   try {
-    const workers = await db('mill_workers').orderBy('name');
-    return res.json({ success: true, data: { workers } });
+    const workers = await db('mill_workers').orderBy('is_active', 'desc').orderBy('name');
+    return res.json({ success: true, data: { workers: await attachAdvances(workers) } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
+// pay_type 'monthly' needs monthly_salary; 'daily' needs daily_wage. We always
+// store a daily_wage (derived from salary/26 for monthly staff) so overtime and
+// any day-based math keep working regardless of pay type.
+function normalizeWorkerPay(body) {
+  const pay_type = body.pay_type === 'monthly' ? 'monthly' : 'daily';
+  const monthly_salary = pay_type === 'monthly' ? parseFloat(body.monthly_salary) : null;
+  let daily_wage = body.daily_wage != null && body.daily_wage !== '' ? parseFloat(body.daily_wage) : null;
+  if (pay_type === 'monthly' && (!daily_wage || Number.isNaN(daily_wage))) {
+    daily_wage = monthly_salary ? Math.round((monthly_salary / 26) * 100) / 100 : 0;
+  }
+  return { pay_type, monthly_salary, daily_wage };
+}
+
 router.post('/workers', authorize('milling', 'create'), async (req, res) => {
   try {
-    const { name, role, daily_wage, phone, cnic, joined_date, mill_id, notes } = req.body;
-    if (!name || !daily_wage) return res.status(400).json({ success: false, message: 'name and daily_wage required.' });
+    const { name, role, phone, cnic, joined_date, mill_id, notes } = req.body;
+    const { pay_type, monthly_salary, daily_wage } = normalizeWorkerPay(req.body);
+    if (!name) return res.status(400).json({ success: false, message: 'name is required.' });
+    if (pay_type === 'monthly' && !(monthly_salary > 0)) return res.status(400).json({ success: false, message: 'monthly_salary required for salaried workers.' });
+    if (pay_type === 'daily' && !(daily_wage > 0)) return res.status(400).json({ success: false, message: 'daily_wage required for daily-wage workers.' });
     const [worker] = await db('mill_workers').insert({
-      name, role: role || 'laborer', daily_wage: parseFloat(daily_wage),
+      name, role: role || 'laborer', pay_type, monthly_salary, daily_wage,
       phone: phone || null, cnic: cnic || null,
       joined_date: joined_date || new Date().toISOString().split('T')[0],
       mill_id: mill_id || null, notes: notes || null,
     }).returning('*');
     return res.json({ success: true, data: { worker } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Edit a worker — pay type/rate, contact, or activate/deactivate. Deactivating
+// (is_active=false) keeps all history but drops them from the active payroll run.
+router.put('/workers/:id', authorize('milling', 'edit'), async (req, res) => {
+  try {
+    const worker = await db('mill_workers').where('id', req.params.id).first();
+    if (!worker) return res.status(404).json({ success: false, message: 'Worker not found.' });
+    const updates = {};
+    for (const f of ['name', 'role', 'phone', 'cnic', 'joined_date', 'notes']) {
+      if (req.body[f] !== undefined) updates[f] = req.body[f] || null;
+    }
+    if (req.body.is_active !== undefined) updates.is_active = !!req.body.is_active;
+    if (req.body.pay_type !== undefined || req.body.daily_wage !== undefined || req.body.monthly_salary !== undefined) {
+      const pay = normalizeWorkerPay({ ...worker, ...req.body });
+      if (pay.pay_type === 'monthly' && !(pay.monthly_salary > 0)) return res.status(400).json({ success: false, message: 'monthly_salary required for salaried workers.' });
+      if (pay.pay_type === 'daily' && !(pay.daily_wage > 0)) return res.status(400).json({ success: false, message: 'daily_wage required for daily-wage workers.' });
+      Object.assign(updates, pay);
+    }
+    updates.updated_at = db.fn.now();
+    const [updated] = await db('mill_workers').where('id', req.params.id).update(updates).returning('*');
+    return res.json({ success: true, data: { worker: updated } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Fully unwind a salary-advance cash-out (the business_expense it created, its
+// payable, payment, bank movement and GL journals) — danger-zone hard-delete
+// style, so deleting an advance or its worker leaves no orphan money behind.
+async function unwindAdvanceExpense(trx, expenseId) {
+  if (!expenseId) return;
+  const exp = await trx('business_expenses').where('id', expenseId).first();
+  if (!exp) return;
+  const payables = await trx('payables').where({ source_table: 'business_expenses', source_id: expenseId }).select('id');
+  const payableIds = payables.map((p) => p.id);
+  if (payableIds.length) {
+    const pays = await trx('payments').whereIn('linked_payable_id', payableIds).select('id', 'payment_no', 'bank_account_id', 'amount');
+    for (const p of pays) {
+      if (p.bank_account_id) await trx('bank_accounts').where('id', p.bank_account_id).increment('current_balance', parseFloat(p.amount) || 0);
+      await trx('journal_lines').whereIn('journal_id', trx('journal_entries').where('ref_no', p.payment_no).select('id')).del();
+      await trx('journal_entries').where('ref_no', p.payment_no).del();
+    }
+    await trx('payments').whereIn('linked_payable_id', payableIds).del();
+    await trx('payables').whereIn('id', payableIds).del();
+  }
+  await trx('journal_lines').whereIn('journal_id', trx('journal_entries').where('ref_no', exp.expense_no).select('id')).del();
+  await trx('journal_entries').where('ref_no', exp.expense_no).del();
+  await trx('business_expenses').where('id', expenseId).del();
+}
+
+// Delete a worker permanently — unwinds every advance's cash-out, then cascades
+// attendance + advances (FK onDelete CASCADE) and removes the worker.
+router.delete('/workers/:id', authorize('milling', 'delete'), async (req, res) => {
+  try {
+    const worker = await db('mill_workers').where('id', req.params.id).first();
+    if (!worker) return res.status(404).json({ success: false, message: 'Worker not found.' });
+    await db.transaction(async (trx) => {
+      const advances = await trx('mill_worker_advances').where('worker_id', worker.id).select('expense_id');
+      for (const a of advances) await unwindAdvanceExpense(trx, a.expense_id);
+      await trx('mill_workers').where('id', worker.id).del(); // attendance + advances cascade
+    });
+    return res.json({ success: true, data: { deleted: worker.id } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// List a worker's advances (most recent first).
+router.get('/workers/:id/advances', authorize('milling', 'view'), async (req, res) => {
+  try {
+    const advances = await db('mill_worker_advances').where('worker_id', req.params.id).orderBy('advance_date', 'desc').orderBy('id', 'desc');
+    return res.json({ success: true, data: { advances } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Record a salary advance: real cash-out (business_expense, category 'salaries',
+// paid now → Money Out / GL) PLUS a tracked advance row that nets off payroll.
+router.post('/workers/:id/advances', authorize('milling', 'create'), async (req, res) => {
+  try {
+    const worker = await db('mill_workers').where('id', req.params.id).first();
+    if (!worker) return res.status(404).json({ success: false, message: 'Worker not found.' });
+    const amount = parseFloat(req.body.amount);
+    if (!(amount > 0)) return res.status(400).json({ success: false, message: 'A positive advance amount is required.' });
+    const advance_date = req.body.advance_date || new Date().toISOString().split('T')[0];
+    const expense = await expensesService.create({
+      expense_type: 'mill', category: 'salaries', amount, currency: 'PKR',
+      expense_date: advance_date,
+      description: `Salary advance — ${worker.name}`,
+      notes: req.body.notes || null,
+      vendor_name: worker.name,
+      pay_now: true,
+      bank_account_id: req.body.bank_account_id || null,
+      payment_method: req.body.payment_method || 'cash',
+      payment_reference: req.body.payment_reference || null,
+    }, req.user?.id);
+    const [advance] = await db('mill_worker_advances').insert({
+      worker_id: worker.id, advance_date, amount,
+      recovered_amount: 0, status: 'outstanding',
+      expense_id: expense?.id || null,
+      notes: req.body.notes || null,
+      created_by: req.user?.id || null,
+    }).returning('*');
+    return res.json({ success: true, data: { advance } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Delete an advance — unwinds its cash-out and removes the record.
+router.delete('/advances/:id', authorize('milling', 'delete'), async (req, res) => {
+  try {
+    const advance = await db('mill_worker_advances').where('id', req.params.id).first();
+    if (!advance) return res.status(404).json({ success: false, message: 'Advance not found.' });
+    await db.transaction(async (trx) => {
+      await unwindAdvanceExpense(trx, advance.expense_id);
+      await trx('mill_worker_advances').where('id', advance.id).del();
+    });
+    return res.json({ success: true, data: { deleted: advance.id } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -651,6 +795,12 @@ router.get('/payroll/summary', authorize('milling', 'view'), async (req, res) =>
     const workers = await db('mill_workers').where('is_active', true).orderBy('name');
     const attendance = await db('mill_attendance')
       .where('date', '>=', startDate).where('date', '<=', endDate);
+    // Outstanding advances net off net pay (the cash already went out when given).
+    const advRows = workers.length ? await db('mill_worker_advances')
+      .whereIn('worker_id', workers.map((w) => w.id)).where('status', 'outstanding')
+      .groupBy('worker_id').select('worker_id')
+      .sum(db.raw('(amount - recovered_amount) as outstanding')) : [];
+    const advMap = new Map(advRows.map((r) => [r.worker_id, parseFloat(r.outstanding) || 0]));
 
     const summary = workers.map(w => {
       const records = attendance.filter(a => a.worker_id === w.id);
@@ -658,17 +808,32 @@ router.get('/payroll/summary', authorize('milling', 'view'), async (req, res) =>
       const halfDays = records.filter(a => a.status === 'half_day').length;
       const totalOT = records.reduce((s, a) => s + (parseFloat(a.overtime_hours) || 0), 0);
       const effectiveDays = daysPresent + (halfDays * 0.5);
-      const basicPay = effectiveDays * parseFloat(w.daily_wage);
-      const otPay = totalOT * (parseFloat(w.daily_wage) / 8 * 1.5);
+      const dailyWage = parseFloat(w.daily_wage) || 0;
+      // Salaried staff earn their flat monthly figure; daily-wage staff earn per
+      // effective day worked. Overtime (if logged) pays 1.5× the daily hourly rate.
+      const basicPay = w.pay_type === 'monthly'
+        ? (parseFloat(w.monthly_salary) || 0)
+        : effectiveDays * dailyWage;
+      const otPay = totalOT * (dailyWage / 8 * 1.5);
+      const gross = basicPay + otPay;
+      const advanceOutstanding = advMap.get(w.id) || 0;
+      // Recover advances against this run's gross, but never below zero.
+      const advanceDeduction = Math.min(advanceOutstanding, gross);
       return {
         ...w, daysPresent, halfDays, effectiveDays, totalOT,
         basicPay: Math.round(basicPay), otPay: Math.round(otPay),
-        totalPay: Math.round(basicPay + otPay),
+        grossPay: Math.round(gross),
+        advanceOutstanding: Math.round(advanceOutstanding),
+        advanceDeduction: Math.round(advanceDeduction),
+        netPay: Math.round(gross - advanceDeduction),
+        totalPay: Math.round(gross - advanceDeduction), // back-compat alias
       };
     });
 
-    const grandTotal = summary.reduce((s, w) => s + w.totalPay, 0);
-    return res.json({ success: true, data: { summary, grandTotal, period: { startDate, endDate } } });
+    const grandGross = summary.reduce((s, w) => s + w.grossPay, 0);
+    const grandAdvance = summary.reduce((s, w) => s + w.advanceDeduction, 0);
+    const grandTotal = summary.reduce((s, w) => s + w.netPay, 0);
+    return res.json({ success: true, data: { summary, grandGross, grandAdvance, grandTotal, period: { startDate, endDate } } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 

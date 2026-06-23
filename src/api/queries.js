@@ -1168,7 +1168,70 @@ export function useCreateMillWorker() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data) => millingApi.createWorker(data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['mill-workers'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['mill-workers'] });
+      qc.invalidateQueries({ queryKey: ['payroll-summary'] });
+    },
+  });
+}
+
+export function useUpdateMillWorker() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => millingApi.updateWorker(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['mill-workers'] });
+      qc.invalidateQueries({ queryKey: ['payroll-summary'] });
+    },
+  });
+}
+
+export function useDeleteMillWorker() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => millingApi.deleteWorker(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['mill-workers'] });
+      qc.invalidateQueries({ queryKey: ['payroll-summary'] });
+      qc.invalidateQueries({ queryKey: ['mill-expenses'] });
+      qc.invalidateQueries({ queryKey: ['payables'] });
+    },
+  });
+}
+
+export function useWorkerAdvances(workerId) {
+  return useQuery({
+    queryKey: ['worker-advances', workerId],
+    enabled: !!workerId,
+    queryFn: async () => { const res = await millingApi.listWorkerAdvances(workerId); return transformKeys(unwrap(res, 'advances') || []); },
+  });
+}
+
+export function useCreateWorkerAdvance() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => millingApi.createWorkerAdvance(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['mill-workers'] });
+      qc.invalidateQueries({ queryKey: ['payroll-summary'] });
+      qc.invalidateQueries({ queryKey: ['worker-advances'] });
+      qc.invalidateQueries({ queryKey: ['mill-expenses'] });
+      qc.invalidateQueries({ queryKey: ['payables'] });
+    },
+  });
+}
+
+export function useDeleteWorkerAdvance() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => millingApi.deleteWorkerAdvance(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['mill-workers'] });
+      qc.invalidateQueries({ queryKey: ['payroll-summary'] });
+      qc.invalidateQueries({ queryKey: ['worker-advances'] });
+      qc.invalidateQueries({ queryKey: ['mill-expenses'] });
+      qc.invalidateQueries({ queryKey: ['payables'] });
+    },
   });
 }
 

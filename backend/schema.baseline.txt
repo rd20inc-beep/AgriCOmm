@@ -1153,6 +1153,17 @@ COL mill_stock_movements.reference_id:integer:NULL
 COL mill_stock_movements.reference_type:character varying:NULL
 COL mill_stock_movements.total_cost:numeric:NULL
 COL mill_stock_movements.warehouse_id:integer:NULL
+COL mill_worker_advances.advance_date:date:NOT NULL
+COL mill_worker_advances.amount:numeric:NOT NULL
+COL mill_worker_advances.created_at:timestamp with time zone:NOT NULL
+COL mill_worker_advances.created_by:integer:NULL
+COL mill_worker_advances.expense_id:integer:NULL
+COL mill_worker_advances.id:integer:NOT NULL
+COL mill_worker_advances.notes:text:NULL
+COL mill_worker_advances.recovered_amount:numeric:NOT NULL
+COL mill_worker_advances.status:character varying:NOT NULL
+COL mill_worker_advances.updated_at:timestamp with time zone:NOT NULL
+COL mill_worker_advances.worker_id:integer:NOT NULL
 COL mill_workers.cnic:character varying:NULL
 COL mill_workers.created_at:timestamp with time zone:NOT NULL
 COL mill_workers.daily_wage:numeric:NOT NULL
@@ -1160,8 +1171,10 @@ COL mill_workers.id:integer:NOT NULL
 COL mill_workers.is_active:boolean:NOT NULL
 COL mill_workers.joined_date:date:NULL
 COL mill_workers.mill_id:integer:NULL
+COL mill_workers.monthly_salary:numeric:NULL
 COL mill_workers.name:character varying:NOT NULL
 COL mill_workers.notes:text:NULL
+COL mill_workers.pay_type:character varying:NOT NULL
 COL mill_workers.phone:character varying:NULL
 COL mill_workers.role:character varying:NULL
 COL mill_workers.updated_at:timestamp with time zone:NOT NULL
@@ -2365,6 +2378,8 @@ CON mill_stock_movements.mill_stock_movements_performed_by_foreign(f)
 CON mill_stock_movements.mill_stock_movements_pkey(p)
 CON mill_stock_movements.mill_stock_movements_type_chk(c)
 CON mill_stock_movements.mill_stock_movements_warehouse_id_foreign(f)
+CON mill_worker_advances.mill_worker_advances_pkey(p)
+CON mill_worker_advances.mill_worker_advances_worker_id_foreign(f)
 CON mill_workers.mill_workers_mill_id_foreign(f)
 CON mill_workers.mill_workers_pkey(p)
 CON milling_batches.chk_mb_b1_nonneg(c)

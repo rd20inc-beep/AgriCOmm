@@ -4,11 +4,14 @@ import {
   DollarSign, Users, Zap, Shield, TrendingUp, TrendingDown, AlertTriangle,
   Plus, UserPlus, Package, Factory, Wallet, ArrowUpRight, ArrowDownRight, Printer,
   Building2, Banknote, Receipt, Layers, Truck, ExternalLink,
+  Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import {
   useMillExpenses, useCreateMillExpense, useMillWorkers, useCreateMillWorker,
+  useUpdateMillWorker, useDeleteMillWorker, useCreateWorkerAdvance, useWorkerAdvances,
+  useDeleteWorkerAdvance,
   usePayrollSummary, useRecordAttendance, useInventory, useExpenseVendors,
   usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow,
   useMillLotCosts, useLocalSales,
@@ -129,6 +132,9 @@ export default function MillFinanceDashboard() {
   const createExpMut = useCreateMillExpense();
   const { data: workers = [] } = useMillWorkers();
   const createWorkerMut = useCreateMillWorker();
+  const updateWorkerMut = useUpdateMillWorker();
+  const deleteWorkerMut = useDeleteMillWorker();
+  const createAdvanceMut = useCreateWorkerAdvance();
   const curMonth = new Date().toISOString().slice(0, 7);
   const { data: payrollData } = usePayrollSummary({ month: curMonth });
   const recordAttMut = useRecordAttendance();
@@ -184,7 +190,10 @@ export default function MillFinanceDashboard() {
   const expSummary = expData?.summary || [];
   const totalOverhead = expSummary.reduce((s, e) => s + (parseFloat(e.total) || 0), 0);
   const payrollSummary = payrollData?.summary || [];
-  const payrollTotal = payrollData?.grandTotal || 0;
+  const payrollTotal = payrollData?.grandTotal || 0; // net (gross − advances) — what you pay out now
+  const payrollGross = payrollData?.grandGross || 0;
+  const payrollAdvances = payrollData?.grandAdvance || 0;
+  const advancesOutstandingTotal = workers.reduce((s, w) => s + (parseFloat(w.advanceOutstanding) || 0), 0);
 
   const [activeTab, setActiveTab] = useState('overview');
   // Deep-link from the Mill Customers/Suppliers pages: ?tab=customers&customer=ID
@@ -201,7 +210,12 @@ export default function MillFinanceDashboard() {
   const [showExpDrawer, setShowExpDrawer] = useState(false);
   const [showWorkerDrawer, setShowWorkerDrawer] = useState(false);
   const [expForm, setExpForm] = useState({ category: 'salaries', vendor_preset: '', vendor_name: '', description: '', amount: '', expense_date: new Date().toISOString().split('T')[0], reference: '', notes: '' });
-  const [workerForm, setWorkerForm] = useState({ name: '', role: 'laborer', daily_wage: '', phone: '' });
+  const EMPTY_WORKER = { id: null, name: '', role: 'laborer', pay_type: 'daily', daily_wage: '', monthly_salary: '', phone: '', cnic: '', joined_date: new Date().toISOString().split('T')[0], notes: '' };
+  const [workerForm, setWorkerForm] = useState(EMPTY_WORKER);
+  const [advanceTarget, setAdvanceTarget] = useState(null); // worker we're giving an advance to
+  const [advanceForm, setAdvanceForm] = useState({ amount: '', advance_date: new Date().toISOString().split('T')[0], payment_method: 'cash', notes: '' });
+  const [deleteWorkerTarget, setDeleteWorkerTarget] = useState(null); // confirm-delete state
+  const [advancesPanelWorker, setAdvancesPanelWorker] = useState(null); // view advances drawer
 
   const completed = useMemo(() => millingBatches.filter(b => b.status === 'Completed'), [millingBatches]);
 
@@ -408,19 +422,76 @@ export default function MillFinanceDashboard() {
     }
   }
 
-  async function handleAddWorker() {
-    if (!workerForm.name || !workerForm.daily_wage) {
-      addToast('Name and wage required', 'error');
-      return;
+  function openWorkerDrawer(worker) {
+    if (worker) {
+      setWorkerForm({
+        id: worker.id, name: worker.name || '', role: worker.role || 'laborer',
+        pay_type: worker.payType || 'daily',
+        daily_wage: worker.dailyWage != null ? String(worker.dailyWage) : '',
+        monthly_salary: worker.monthlySalary != null ? String(worker.monthlySalary) : '',
+        phone: worker.phone || '', cnic: worker.cnic || '',
+        joined_date: worker.joinedDate ? String(worker.joinedDate).slice(0, 10) : '',
+        notes: worker.notes || '',
+      });
+    } else {
+      setWorkerForm(EMPTY_WORKER);
     }
+    setShowWorkerDrawer(true);
+  }
+
+  async function handleSaveWorker() {
+    if (!workerForm.name.trim()) { addToast('Name is required', 'error'); return; }
+    if (workerForm.pay_type === 'monthly' && !(parseFloat(workerForm.monthly_salary) > 0)) { addToast('Monthly salary is required', 'error'); return; }
+    if (workerForm.pay_type === 'daily' && !(parseFloat(workerForm.daily_wage) > 0)) { addToast('Daily wage is required', 'error'); return; }
+    const payload = {
+      name: workerForm.name.trim(), role: workerForm.role, pay_type: workerForm.pay_type,
+      daily_wage: workerForm.daily_wage || null, monthly_salary: workerForm.monthly_salary || null,
+      phone: workerForm.phone || null, cnic: workerForm.cnic || null,
+      joined_date: workerForm.joined_date || null, notes: workerForm.notes || null,
+    };
     try {
-      await createWorkerMut.mutateAsync(workerForm);
-      addToast('Worker added', 'success');
+      if (workerForm.id) {
+        await updateWorkerMut.mutateAsync({ id: workerForm.id, data: payload });
+        addToast('Worker updated', 'success');
+      } else {
+        await createWorkerMut.mutateAsync(payload);
+        addToast('Worker added', 'success');
+      }
       setShowWorkerDrawer(false);
-      setWorkerForm({ name: '', role: 'laborer', daily_wage: '', phone: '' });
+      setWorkerForm(EMPTY_WORKER);
     } catch (e) {
       addToast(e.message, 'error');
     }
+  }
+
+  async function handleToggleActive(worker) {
+    try {
+      await updateWorkerMut.mutateAsync({ id: worker.id, data: { is_active: !worker.isActive } });
+      addToast(worker.isActive ? 'Worker deactivated' : 'Worker reactivated', 'success');
+    } catch (e) { addToast(e.message, 'error'); }
+  }
+
+  async function handleDeleteWorker() {
+    if (!deleteWorkerTarget) return;
+    try {
+      await deleteWorkerMut.mutateAsync(deleteWorkerTarget.id);
+      addToast('Worker deleted', 'success');
+      setDeleteWorkerTarget(null);
+    } catch (e) { addToast(e.message, 'error'); }
+  }
+
+  function openAdvanceDrawer(worker) {
+    setAdvanceTarget(worker);
+    setAdvanceForm({ amount: '', advance_date: new Date().toISOString().split('T')[0], payment_method: 'cash', notes: '' });
+  }
+
+  async function handleGiveAdvance() {
+    if (!(parseFloat(advanceForm.amount) > 0)) { addToast('Enter an advance amount', 'error'); return; }
+    try {
+      await createAdvanceMut.mutateAsync({ id: advanceTarget.id, data: advanceForm });
+      addToast(`Advance of ${PKR(parseFloat(advanceForm.amount))} recorded for ${advanceTarget.name}`, 'success');
+      setAdvanceTarget(null);
+    } catch (e) { addToast(e.message, 'error'); }
   }
 
   function handlePrint() {
@@ -1151,10 +1222,12 @@ export default function MillFinanceDashboard() {
       )}
 
       {/* ─── PAYROLL ───────────────────────────────────────────────── */}
-      {activeTab === 'payroll' && (
+      {activeTab === 'payroll' && (() => {
+        const payById = new Map(payrollSummary.map(p => [p.id, p]));
+        return (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <p className="text-xs text-gray-500">Workers, attendance, and monthly payroll runs.</p>
+            <p className="text-xs text-gray-500">Daily-wage & salaried workers, advances, and the monthly payroll run for <span className="font-medium text-gray-700">{curMonth}</span>.</p>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => openExpDrawer({ category: 'salaries', amount: Math.round(payrollTotal || 0), description: `Mill payroll for ${curMonth}` })}
@@ -1163,57 +1236,91 @@ export default function MillFinanceDashboard() {
               >
                 <Wallet className="w-3.5 h-3.5" /> Post Payroll Run
               </button>
-              <button onClick={() => setShowWorkerDrawer(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-700">
+              <button onClick={() => openWorkerDrawer(null)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-700">
                 <UserPlus className="w-3.5 h-3.5" /> Add Worker
               </button>
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-3">
-            <Stat tone="blue"  icon={Users}      label="Active Workers" value={payrollSummary.length} sub="On payroll" />
-            <Stat tone="red"   icon={DollarSign} label="Monthly Payroll" value={PKR(payrollTotal)} sub={curMonth} />
-            <Stat tone="slate" icon={DollarSign} label="Avg Daily Wage"  value={PKR(payrollSummary.length > 0 ? payrollSummary.reduce((s, w) => s + parseFloat(w.dailyWage || 0), 0) / payrollSummary.length : 0)} sub="Per worker" />
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Stat tone="blue"  icon={Users}      label="Active Workers"  value={payrollSummary.length} sub={`${workers.length} total`} />
+            <Stat tone="slate" icon={DollarSign} label="Gross Payroll"   value={PKR(payrollGross)} sub={curMonth} />
+            <Stat tone="amber" icon={HandCoins}  label="Advances Outstanding" value={PKR(advancesOutstandingTotal)} sub="To recover" />
+            <Stat tone="red"   icon={Wallet}     label="Net to Pay"      value={PKR(payrollTotal)} sub="Gross − advances" />
           </div>
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-600 uppercase tracking-wide">
-                  <th className="text-left px-4 py-3 font-medium">Name</th>
-                  <th className="text-left px-4 py-3 font-medium">Role</th>
-                  <th className="text-right px-4 py-3 font-medium">Daily Wage</th>
-                  <th className="text-right px-4 py-3 font-medium">Days</th>
-                  <th className="text-right px-4 py-3 font-medium">OT Hours</th>
-                  <th className="text-right px-4 py-3 font-medium">Basic</th>
-                  <th className="text-right px-4 py-3 font-medium">OT Pay</th>
-                  <th className="text-right px-4 py-3 font-medium">Total</th>
+                  <th className="text-left px-4 py-3 font-medium">Worker</th>
+                  <th className="text-left px-4 py-3 font-medium">Pay basis</th>
+                  <th className="text-right px-4 py-3 font-medium">Days / OT</th>
+                  <th className="text-right px-4 py-3 font-medium">Gross</th>
+                  <th className="text-right px-4 py-3 font-medium">Advance</th>
+                  <th className="text-right px-4 py-3 font-medium">Net pay</th>
+                  <th className="text-right px-4 py-3 font-medium no-print">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {payrollSummary.map(w => (
-                  <tr key={w.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-medium text-gray-900">{w.name}</td>
-                    <td className="px-4 py-3 capitalize text-gray-600">{w.role}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{PKR(parseFloat(w.dailyWage))}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{w.effectiveDays}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{w.totalOT || 0}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{PKR(w.basicPay)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{PKR(w.otPay)}</td>
-                    <td className="px-4 py-3 text-right font-semibold tabular-nums">{PKR(w.totalPay)}</td>
+                {workers.map(w => {
+                  const p = payById.get(w.id);
+                  const adv = parseFloat(w.advanceOutstanding) || 0;
+                  const monthly = w.payType === 'monthly';
+                  return (
+                  <tr key={w.id} className={`hover:bg-gray-50 ${!w.isActive ? 'opacity-50' : ''}`}>
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-gray-900 flex items-center gap-2">
+                        {w.name}
+                        {!w.isActive && <span className="px-1.5 py-0.5 rounded text-[10px] bg-gray-200 text-gray-600 uppercase">Inactive</span>}
+                      </div>
+                      <div className="text-xs text-gray-400 capitalize">{w.role}{w.phone ? ` · ${w.phone}` : ''}</div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium uppercase mr-1.5 ${monthly ? 'bg-violet-100 text-violet-700' : 'bg-sky-100 text-sky-700'}`}>{monthly ? 'Salary' : 'Daily'}</span>
+                      <span className="tabular-nums text-gray-700">{monthly ? `${PKR(w.monthlySalary)}/mo` : `${PKR(w.dailyWage)}/day`}</span>
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums text-gray-600">
+                      {p ? (monthly ? '—' : `${p.effectiveDays} d`) : '—'}{p && p.totalOT ? ` · ${p.totalOT}h OT` : ''}
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums">{p ? PKR(p.grossPay) : '—'}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">
+                      {adv > 0
+                        ? <button onClick={() => setAdvancesPanelWorker(w)} className="text-amber-700 font-medium hover:underline">−{PKR(adv)}</button>
+                        : <span className="text-gray-300">—</span>}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold tabular-nums">{p ? PKR(p.netPay) : '—'}</td>
+                    <td className="px-4 py-3 no-print">
+                      <div className="flex items-center justify-end gap-1">
+                        <button title="Give advance" onClick={() => openAdvanceDrawer(w)} className="p-1.5 rounded-md text-amber-600 hover:bg-amber-50"><HandCoins className="w-3.5 h-3.5" /></button>
+                        <button title="Edit" onClick={() => openWorkerDrawer(w)} className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100"><Pencil className="w-3.5 h-3.5" /></button>
+                        <button title={w.isActive ? 'Deactivate' : 'Reactivate'} onClick={() => handleToggleActive(w)} className={`p-1.5 rounded-md hover:bg-gray-100 ${w.isActive ? 'text-gray-500' : 'text-emerald-600'}`}><Power className="w-3.5 h-3.5" /></button>
+                        <button title="Delete" onClick={() => setDeleteWorkerTarget(w)} className="p-1.5 rounded-md text-rose-500 hover:bg-rose-50"><Trash2 className="w-3.5 h-3.5" /></button>
+                      </div>
+                    </td>
                   </tr>
-                ))}
-                {payrollSummary.length === 0 && (
-                  <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-400">No workers added yet</td></tr>
+                  );
+                })}
+                {workers.length === 0 && (
+                  <tr><td colSpan={7} className="px-4 py-10 text-center text-gray-400">No workers added yet — click <span className="font-medium">Add Worker</span> to start.</td></tr>
                 )}
                 {payrollSummary.length > 0 && (
-                  <tr className="bg-gray-50 font-semibold">
-                    <td colSpan={7} className="px-4 py-3 text-right">Grand Total</td>
+                  <tr className="bg-gray-50 font-semibold text-gray-800">
+                    <td colSpan={3} className="px-4 py-3 text-right">Grand Total</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{PKR(payrollGross)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums text-amber-700">−{PKR(payrollAdvances)}</td>
                     <td className="px-4 py-3 text-right tabular-nums">{PKR(payrollTotal)}</td>
+                    <td className="no-print" />
                   </tr>
                 )}
               </tbody>
             </table>
           </div>
+          <p className="text-xs text-gray-400 flex items-start gap-1.5">
+            <HandCoins className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-amber-500" />
+            Advances are paid out as cash now (they appear in Money Out / GL) and are automatically deducted from the worker's net pay until recovered. <span className="font-medium text-gray-500">Post Payroll Run</span> records the net total ({PKR(payrollTotal)}) for {curMonth}.
+          </p>
         </div>
-      )}
+        );
+      })()}
 
       {/* ─── UTILITIES ─────────────────────────────────────────────── */}
       {activeTab === 'utilities' && (
@@ -1386,22 +1493,22 @@ export default function MillFinanceDashboard() {
         </div>
       </SlideDrawer>
 
-      {/* ─── ADD WORKER DRAWER ─────────────────────────────────────── */}
+      {/* ─── ADD / EDIT WORKER DRAWER ──────────────────────────────── */}
       <SlideDrawer
         open={showWorkerDrawer}
         onClose={() => setShowWorkerDrawer(false)}
-        title="Add Mill Worker"
-        subtitle="Used for daily attendance and monthly payroll"
+        title={workerForm.id ? 'Edit Mill Worker' : 'Add Mill Worker'}
+        subtitle="Daily-wage or salaried — drives attendance & monthly payroll"
         icon={UserPlus}
         footer={
           <div className="flex justify-end gap-2">
             <button onClick={() => setShowWorkerDrawer(false)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
             <button
-              onClick={handleAddWorker}
-              disabled={createWorkerMut.isPending}
+              onClick={handleSaveWorker}
+              disabled={createWorkerMut.isPending || updateWorkerMut.isPending}
               className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-60"
             >
-              {createWorkerMut.isPending ? 'Saving…' : 'Add Worker'}
+              {(createWorkerMut.isPending || updateWorkerMut.isPending) ? 'Saving…' : workerForm.id ? 'Save Changes' : 'Add Worker'}
             </button>
           </div>
         }
@@ -1428,16 +1535,46 @@ export default function MillFinanceDashboard() {
               </select>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Daily Wage (PKR) *</label>
-              <input
-                type="number" min="0"
-                value={workerForm.daily_wage}
-                onChange={e => setWorkerForm(p => ({ ...p, daily_wage: e.target.value }))}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900 tabular-nums"
-              />
+
+          {/* Pay type toggle — daily wage vs monthly salary */}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Pay basis *</label>
+            <div className="grid grid-cols-2 gap-2">
+              {[['daily', 'Daily Wage', 'Paid per day worked'], ['monthly', 'Monthly Salary', 'Flat monthly figure']].map(([val, lbl, hint]) => (
+                <button
+                  key={val} type="button"
+                  onClick={() => setWorkerForm(p => ({ ...p, pay_type: val }))}
+                  className={`text-left px-3 py-2 rounded-lg border text-sm transition ${workerForm.pay_type === val ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-700 hover:border-gray-400'}`}
+                >
+                  <div className="font-medium">{lbl}</div>
+                  <div className={`text-[11px] ${workerForm.pay_type === val ? 'text-gray-300' : 'text-gray-400'}`}>{hint}</div>
+                </button>
+              ))}
             </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            {workerForm.pay_type === 'monthly' ? (
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Monthly Salary (PKR) *</label>
+                <input
+                  type="number" min="0"
+                  value={workerForm.monthly_salary}
+                  onChange={e => setWorkerForm(p => ({ ...p, monthly_salary: e.target.value }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900 tabular-nums"
+                />
+                <p className="text-[11px] text-gray-400 mt-1">≈ {PKR((parseFloat(workerForm.monthly_salary) || 0) / 26)}/day for overtime math</p>
+              </div>
+            ) : (
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Daily Wage (PKR) *</label>
+                <input
+                  type="number" min="0"
+                  value={workerForm.daily_wage}
+                  onChange={e => setWorkerForm(p => ({ ...p, daily_wage: e.target.value }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900 tabular-nums"
+                />
+              </div>
+            )}
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Phone</label>
               <input
@@ -1448,8 +1585,146 @@ export default function MillFinanceDashboard() {
               />
             </div>
           </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">CNIC</label>
+              <input
+                type="text" placeholder="00000-0000000-0"
+                value={workerForm.cnic}
+                onChange={e => setWorkerForm(p => ({ ...p, cnic: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Joined Date</label>
+              <input
+                type="date"
+                value={workerForm.joined_date}
+                onChange={e => setWorkerForm(p => ({ ...p, joined_date: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Notes</label>
+            <textarea
+              rows={2}
+              value={workerForm.notes}
+              onChange={e => setWorkerForm(p => ({ ...p, notes: e.target.value }))}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
+            />
+          </div>
         </div>
       </SlideDrawer>
+
+      {/* ─── GIVE ADVANCE DRAWER ───────────────────────────────────── */}
+      <SlideDrawer
+        open={!!advanceTarget}
+        onClose={() => setAdvanceTarget(null)}
+        title="Give Salary Advance"
+        subtitle={advanceTarget ? `Advance to ${advanceTarget.name}` : ''}
+        icon={HandCoins}
+        footer={
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setAdvanceTarget(null)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+            <button
+              onClick={handleGiveAdvance}
+              disabled={createAdvanceMut.isPending}
+              className="px-4 py-2 text-sm text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-60"
+            >
+              {createAdvanceMut.isPending ? 'Recording…' : 'Record Advance'}
+            </button>
+          </div>
+        }
+      >
+        {advanceTarget && (
+          <div className="space-y-4">
+            <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800 flex items-start gap-2">
+              <HandCoins className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <span>This pays <span className="font-medium">{advanceTarget.name}</span> now — it posts to Money Out / GL as a salary advance and is auto-deducted from their next payroll. Current outstanding: <span className="font-medium">{PKR(advanceTarget.advanceOutstanding || 0)}</span>.</span>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Amount (PKR) *</label>
+                <input
+                  type="number" min="0" autoFocus
+                  value={advanceForm.amount}
+                  onChange={e => setAdvanceForm(p => ({ ...p, amount: e.target.value }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900 tabular-nums"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Date</label>
+                <input
+                  type="date"
+                  value={advanceForm.advance_date}
+                  onChange={e => setAdvanceForm(p => ({ ...p, advance_date: e.target.value }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Paid via</label>
+              <select
+                value={advanceForm.payment_method}
+                onChange={e => setAdvanceForm(p => ({ ...p, payment_method: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900 bg-white"
+              >
+                <option value="cash">Cash</option>
+                <option value="bank">Bank Transfer</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Notes</label>
+              <textarea
+                rows={2}
+                value={advanceForm.notes}
+                onChange={e => setAdvanceForm(p => ({ ...p, notes: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
+              />
+            </div>
+          </div>
+        )}
+      </SlideDrawer>
+
+      {/* ─── WORKER ADVANCES PANEL ─────────────────────────────────── */}
+      {advancesPanelWorker && (
+        <WorkerAdvancesPanel
+          worker={advancesPanelWorker}
+          onClose={() => setAdvancesPanelWorker(null)}
+          onGiveAdvance={() => { const w = advancesPanelWorker; setAdvancesPanelWorker(null); openAdvanceDrawer(w); }}
+          addToast={addToast}
+        />
+      )}
+
+      {/* ─── DELETE WORKER CONFIRM ─────────────────────────────────── */}
+      {deleteWorkerTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setDeleteWorkerTarget(null)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center flex-shrink-0">
+                <Trash2 className="w-5 h-5 text-rose-600" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-gray-900">Delete {deleteWorkerTarget.name}?</h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  This permanently removes the worker, their attendance, and their advances.
+                  {(parseFloat(deleteWorkerTarget.advanceOutstanding) || 0) > 0 && (
+                    <> Any advance cash-outs ({PKR(deleteWorkerTarget.advanceOutstanding)} outstanding) will be reversed from Money Out / GL.</>
+                  )}{' '}
+                  To keep history instead, use <span className="font-medium">Deactivate</span>.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-6">
+              <button onClick={() => setDeleteWorkerTarget(null)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+              <button onClick={handleDeleteWorker} disabled={deleteWorkerMut.isPending} className="px-4 py-2 text-sm text-white bg-rose-600 rounded-lg hover:bg-rose-700 disabled:opacity-60">
+                {deleteWorkerMut.isPending ? 'Deleting…' : 'Delete Permanently'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Pay a supplier — same drawer the Finance dashboard uses. */}
       {payParty && (
@@ -1476,5 +1751,77 @@ export default function MillFinanceDashboard() {
         />
       )}
     </div>
+  );
+}
+
+// Right-side panel listing a worker's advances, with a delete (unwind) action.
+function WorkerAdvancesPanel({ worker, onClose, onGiveAdvance, addToast }) {
+  const { data: advances = [], isLoading } = useWorkerAdvances(worker.id);
+  const deleteAdvanceMut = useDeleteWorkerAdvance();
+  const [confirmId, setConfirmId] = useState(null);
+  const outstanding = advances
+    .filter(a => a.status === 'outstanding')
+    .reduce((s, a) => s + ((parseFloat(a.amount) || 0) - (parseFloat(a.recoveredAmount) || 0)), 0);
+
+  async function handleDelete(id) {
+    try {
+      await deleteAdvanceMut.mutateAsync(id);
+      addToast('Advance deleted and cash-out reversed', 'success');
+      setConfirmId(null);
+    } catch (e) { addToast(e.message, 'error'); }
+  }
+
+  return (
+    <SlideDrawer
+      open
+      onClose={onClose}
+      title="Salary Advances"
+      subtitle={`${worker.name} · ${PKR(outstanding)} outstanding`}
+      icon={HandCoins}
+      footer={
+        <div className="flex justify-between gap-2">
+          <button onClick={onGiveAdvance} className="inline-flex items-center gap-1.5 px-4 py-2 text-sm text-white bg-amber-600 rounded-lg hover:bg-amber-700">
+            <HandCoins className="w-4 h-4" /> Give Advance
+          </button>
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Close</button>
+        </div>
+      }
+    >
+      {isLoading ? (
+        <p className="text-sm text-gray-400">Loading…</p>
+      ) : advances.length === 0 ? (
+        <p className="text-sm text-gray-400">No advances recorded for this worker.</p>
+      ) : (
+        <div className="space-y-2">
+          {advances.map(a => {
+            const out = (parseFloat(a.amount) || 0) - (parseFloat(a.recoveredAmount) || 0);
+            return (
+            <div key={a.id} className="rounded-lg border border-gray-200 p-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-semibold text-gray-900 tabular-nums">{PKR(a.amount)}</div>
+                  <div className="text-xs text-gray-400 flex items-center gap-1"><CalendarDays className="w-3 h-3" /> {fmtDate(a.advanceDate)}</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`px-2 py-0.5 rounded text-[11px] font-medium ${a.status === 'outstanding' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                    {a.status === 'outstanding' ? `${PKR(out)} due` : 'Recovered'}
+                  </span>
+                  {confirmId === a.id ? (
+                    <span className="flex items-center gap-1">
+                      <button onClick={() => handleDelete(a.id)} disabled={deleteAdvanceMut.isPending} className="px-2 py-1 text-[11px] text-white bg-rose-600 rounded hover:bg-rose-700">Confirm</button>
+                      <button onClick={() => setConfirmId(null)} className="p-1 text-gray-400 hover:text-gray-600"><X className="w-3.5 h-3.5" /></button>
+                    </span>
+                  ) : (
+                    <button title="Delete & reverse" onClick={() => setConfirmId(a.id)} className="p-1.5 rounded-md text-rose-500 hover:bg-rose-50"><Trash2 className="w-3.5 h-3.5" /></button>
+                  )}
+                </div>
+              </div>
+              {a.notes && <div className="text-xs text-gray-500 mt-1.5">{a.notes}</div>}
+            </div>
+            );
+          })}
+        </div>
+      )}
+    </SlideDrawer>
   );
 }
