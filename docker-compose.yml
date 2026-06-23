@@ -47,6 +47,10 @@ services:
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_SENDER_NAME: ${SMTP_SENDER_NAME:-AGRI COMMODITIES}
       SMTP_SENDER_EMAIL: ${SMTP_SENDER_EMAIL:-info@agririce.com}
+      # AI (optional) — set OPENAI_API_KEY in the server's .env to enable AI features.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       TURNSTILE_SECRET: ${TURNSTILE_SECRET:-}
     ports:
       - "3001:3001"

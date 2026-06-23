@@ -27,6 +27,15 @@ const config = {
   },
 
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+
+  // AI (OpenAI-compatible). Set OPENAI_API_KEY in the prod environment to enable;
+  // when unset, AI features fall back to their non-AI defaults. OPENAI_BASE_URL
+  // lets you point at Azure/OpenAI-compatible gateways.
+  ai: {
+    openaiKey: process.env.OPENAI_API_KEY || '',
+    model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+    baseUrl: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
+  },
 };
 
 module.exports = config;

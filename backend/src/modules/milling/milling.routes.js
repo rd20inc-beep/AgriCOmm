@@ -8,6 +8,7 @@ const { authorizeRole } = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
+const aiService = require('../ai/ai.service');
 
 // =============================================================================
 // Existing Batch Routes
@@ -853,8 +854,31 @@ router.get('/attendance/holidays', authorize('milling', 'view'), async (req, res
   try {
     const { month } = req.query;
     if (!/^\d{4}-\d{2}$/.test(month || '')) return res.status(400).json({ success: false, message: 'month (YYYY-MM) required.' });
-    const holidays = pakistanFederalHolidays(Number(month.slice(0, 4))).filter((h) => h.date.slice(0, 7) === month);
-    return res.json({ success: true, data: { holidays } });
+    // Baked-in calendar is the reliable default and the fallback.
+    let holidays = pakistanFederalHolidays(Number(month.slice(0, 4))).filter((h) => h.date.slice(0, 7) === month);
+    let source = 'calendar';
+    // If an AI key is configured, ask the model for that month's Pakistan federal
+    // holidays (more current for moon-sighting dates). Validate hard; any problem
+    // silently falls back to the calendar so attendance never breaks.
+    if (aiService.enabled()) {
+      try {
+        const out = await aiService.complete({
+          system: 'You are a precise calendar assistant for Pakistan. Reply with JSON only.',
+          prompt: `List the official Pakistan FEDERAL public (gazetted) holidays that fall in the month ${month} (format YYYY-MM). `
+            + `Return JSON: {"holidays":[{"date":"YYYY-MM-DD","name":"string","approximate":boolean}]}. `
+            + `Set "approximate": true for Islamic/moon-sighting holidays (Eid, Ashura, Eid Milad-un-Nabi), false for fixed-date ones. `
+            + `Only include dates within ${month}. If none, return an empty array.`,
+          json: true,
+        });
+        const aiH = (out?.holidays || [])
+          .filter((h) => /^\d{4}-\d{2}-\d{2}$/.test(h?.date) && h.date.slice(0, 7) === month && h?.name)
+          .map((h) => ({ date: h.date, name: String(h.name).slice(0, 80), approximate: !!h.approximate }));
+        if (aiH.length) { holidays = aiH; source = 'ai'; }
+      } catch (e) {
+        console.warn('AI holidays failed, using calendar:', e.message);
+      }
+    }
+    return res.json({ success: true, data: { holidays, source, aiEnabled: aiService.enabled() } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
