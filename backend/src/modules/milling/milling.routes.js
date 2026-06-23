@@ -593,8 +593,7 @@ async function attachAdvances(workers) {
   const rows = await db('mill_worker_advances')
     .whereIn('worker_id', ids).where('status', 'outstanding')
     .groupBy('worker_id')
-    .select('worker_id')
-    .sum(db.raw('(amount - recovered_amount) as outstanding'));
+    .select('worker_id', db.raw('COALESCE(SUM(amount - recovered_amount), 0) as outstanding'));
   const map = new Map(rows.map((r) => [r.worker_id, parseFloat(r.outstanding) || 0]));
   return workers.map((w) => ({ ...w, advance_outstanding: map.get(w.id) || 0 }));
 }
@@ -798,8 +797,8 @@ router.get('/payroll/summary', authorize('milling', 'view'), async (req, res) =>
     // Outstanding advances net off net pay (the cash already went out when given).
     const advRows = workers.length ? await db('mill_worker_advances')
       .whereIn('worker_id', workers.map((w) => w.id)).where('status', 'outstanding')
-      .groupBy('worker_id').select('worker_id')
-      .sum(db.raw('(amount - recovered_amount) as outstanding')) : [];
+      .groupBy('worker_id')
+      .select('worker_id', db.raw('COALESCE(SUM(amount - recovered_amount), 0) as outstanding')) : [];
     const advMap = new Map(advRows.map((r) => [r.worker_id, parseFloat(r.outstanding) || 0]));
 
     const summary = workers.map(w => {
