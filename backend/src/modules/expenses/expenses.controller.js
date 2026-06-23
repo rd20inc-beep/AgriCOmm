@@ -13,7 +13,7 @@ const createSchema = Joi.object({
   supplier_id: Joi.number().integer().allow(null).optional(),
   vendor_name: Joi.string().max(255).allow(null, '').optional(),
   expense_date: Joi.date().required(),
-  due_date: Joi.date().allow(null).optional(),
+  due_date: Joi.date().allow(null, '').optional(),
   invoice_reference: Joi.string().max(100).allow(null, '').optional(),
   description: Joi.string().allow(null, '').optional(),
   notes: Joi.string().allow(null, '').optional(),
@@ -35,7 +35,7 @@ const paySchema = Joi.object({
   payment_method: Joi.string().max(30).default('bank'),
   payment_reference: Joi.string().max(100).allow(null, '').optional(),
   paid_date: Joi.date().optional(),
-  due_date: Joi.date().allow(null).optional(),
+  due_date: Joi.date().allow(null, '').optional(),
   notes: Joi.string().max(500).allow(null, '').optional(),
 });
 
