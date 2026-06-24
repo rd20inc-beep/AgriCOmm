@@ -1,6 +1,7 @@
 const db = require('../../config/database');
 const { NotFoundError, ValidationError } = require('../../shared/errors');
 const accountingService = require('../accounting/accounting.service');
+const { resolveCashAccountId } = require('../../shared/cashAccounts');
 
 // Settlement journal posted when an expense is PAID: DR Supplier Payable (2010)
 // CR Cash & Bank (1000). The obligation was booked at create (CR 2010 via the
@@ -92,6 +93,14 @@ const expensesService = {
     return db.transaction(async (trx) => {
       const expenseNo = await generateExpenseNo(trx);
 
+      // For a cash payment with no explicit account, draw from the paying entity's
+      // cash float: the Mill's cash (Mill Cash) for mill expenses, Office Petty Cash
+      // for Head Office / general — so each entity's cash balance stays accurate.
+      let resolvedAccountId = bank_account_id || null;
+      if (pay_now && !resolvedAccountId && payment_method === 'cash') {
+        resolvedAccountId = await resolveCashAccountId(trx, { entity: expense_type || 'general' });
+      }
+
       const [expense] = await trx('business_expenses').insert({
         expense_no: expenseNo,
         expense_type: expense_type || 'general',
@@ -114,7 +123,7 @@ const expensesService = {
         is_recurring: !!is_recurring,
         recurrence: is_recurring ? (recurrence || 'monthly') : null,
         payment_status: pay_now ? 'Paid' : 'Pending',
-        bank_account_id: pay_now ? (bank_account_id || null) : null,
+        bank_account_id: pay_now ? resolvedAccountId : null,
         paid_date: pay_now ? expense_date : null,
         payment_method: pay_now ? (payment_method || 'bank') : null,
         payment_reference: pay_now ? (payment_reference || null) : null,
@@ -200,13 +209,13 @@ const expensesService = {
         await trx('payments').insert({
           payment_no: paymentNo,
           type: 'payment', amount: amountPkr, currency: 'PKR', fx_rate: 1, base_amount_pkr: amountPkr,
-          payment_method: payment_method || 'bank', bank_account_id: bank_account_id || null,
+          payment_method: payment_method || 'bank', bank_account_id: resolvedAccountId,
           bank_reference: payment_reference || null,
           linked_payable_id: payableRow?.id || null,
           payment_date: payDate, notes: `Payment for ${expenseNo}`, created_by: userId || null,
         });
-        if (bank_account_id) {
-          await trx('bank_accounts').where('id', bank_account_id).update({
+        if (resolvedAccountId) {
+          await trx('bank_accounts').where('id', resolvedAccountId).update({
             current_balance: trx.raw('current_balance - ?', [amountPkr]),
             updated_at: trx.fn.now(),
           });
@@ -341,9 +350,12 @@ const expensesService = {
       });
     }
     return db.transaction(async (trx) => {
+      // Cash with no explicit account → the paying entity's cash float (Mill Cash
+      // for mill expenses, Office Petty Cash for Head Office / general).
+      const acctId = bank_account_id || (payment_method === 'cash' ? await resolveCashAccountId(trx, { entity: expense.expense_type || 'general' }) : null);
       const [updated] = await trx('business_expenses').where('id', id).update({
         payment_status: fullyPaid ? 'Paid' : 'Partial',
-        bank_account_id: bank_account_id || null,
+        bank_account_id: acctId,
         payment_method: payment_method || 'bank',
         payment_reference: payment_reference || null,
         paid_date: payDate,
@@ -366,15 +378,15 @@ const expensesService = {
       await trx('payments').insert({
         payment_no: paymentNo,
         type: 'payment', amount: payAmt, currency: 'PKR', fx_rate: 1, base_amount_pkr: payAmt,
-        payment_method: payment_method || 'bank', bank_account_id: bank_account_id || null,
+        payment_method: payment_method || 'bank', bank_account_id: acctId,
         bank_reference: payment_reference || null, due_date: due_date || null,
         linked_payable_id: payable ? payable.id : null,
         payment_date: payDate, notes: notes || `Payment for ${expense.expense_no}`, created_by: userId || null,
       });
 
-      // Debit bank for this installment
-      if (bank_account_id) {
-        await trx('bank_accounts').where('id', bank_account_id).update({
+      // Debit the resolved cash/bank account for this installment.
+      if (acctId) {
+        await trx('bank_accounts').where('id', acctId).update({
           current_balance: trx.raw('current_balance - ?', [payAmt]),
           updated_at: trx.fn.now(),
         });

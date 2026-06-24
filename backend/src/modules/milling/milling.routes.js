@@ -491,6 +491,7 @@ router.put('/batches/:id/prices', authorize('milling', 'edit'),
 // no longer written to. (mill_expenses was empty at the time of the cut-over.)
 const expensesService = require('../expenses/expenses.service');
 const automationService = require('../admin/automation.service');
+const { resolveCashAccountId } = require('../../shared/cashAccounts');
 
 router.get('/expenses', authorize('milling', 'view'), async (req, res) => {
   try {
@@ -1181,11 +1182,11 @@ router.post('/payroll/run', authorize('milling', 'create'), async (req, res) => 
 
     const method = pay_method === 'bank' ? 'bank' : 'cash';
     const payDate = pay_date || new Date().toISOString().split('T')[0];
-    // Cash payments move the Office Petty Cash account if one exists; bank
+    // Cash payroll draws from the Mill's own cash float (Mill Cash); bank
     // payments use the chosen account.
     let acctId = method === 'bank' ? (bank_account_id || null) : null;
     if (method === 'cash' && !acctId) {
-      acctId = (await db('bank_accounts').where('type', 'cash').first('id'))?.id || null;
+      acctId = await resolveCashAccountId(db, { entity: 'mill' });
     }
 
     // 1) Pay out the net total as a paid salaries expense (cash/bank + GL).

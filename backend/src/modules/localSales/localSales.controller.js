@@ -6,6 +6,7 @@ const db = require('../../config/database');
 const uc = require('../../services/unitConversion');
 const inventoryService = require('../../services/inventoryService');
 const accountingService = require('../accounting/accounting.service');
+const { resolveCashAccountId } = require('../../shared/cashAccounts');
 
 async function generateSaleNo(trx) {
   const count = await (trx || db)('local_sales').count('id as c').first();
@@ -14,12 +15,13 @@ async function generateSaleNo(trx) {
 
 // Which account a receipt lands in: cash → the cash-type account; bank transfer
 // → the chosen bank account; cheque (uncleared) / credit (unpaid) → none.
-async function resolveReceiptAccountId(trx, { paymentMode, bankAccountId, amount }) {
+async function resolveReceiptAccountId(trx, { paymentMode, bankAccountId, amount, collectionLocation }) {
   if (!(amount > 0)) return null;
   if (paymentMode === 'bank_transfer') return bankAccountId || null;
   if (paymentMode === 'cash') {
-    const cashAcct = await trx('bank_accounts').where({ type: 'cash', is_active: true }).orderBy('id').first();
-    return cashAcct ? cashAcct.id : null;
+    // Local sales are mill sales — cash collected lands in the Mill's cash float
+    // (Mill Cash) unless it was explicitly collected at Head Office.
+    return resolveCashAccountId(trx, { entity: 'mill', collectionLocation: collectionLocation || null });
   }
   return null;
 }
@@ -193,7 +195,7 @@ module.exports = {
         }
 
         // Cash / bank receipts move the receiving account's balance with the money.
-        const receiptAccountId = await resolveReceiptAccountId(trx, { paymentMode: payment_mode, bankAccountId: bank_account_id, amount: totalPaid });
+        const receiptAccountId = await resolveReceiptAccountId(trx, { paymentMode: payment_mode, bankAccountId: bank_account_id, amount: totalPaid, collectionLocation: collection_location });
 
         let groupNo = null;
         const created = [];
@@ -375,7 +377,7 @@ module.exports = {
         }
 
         // Create payment record (cleared=false for an uncleared post-dated cheque).
-        const receiptAccountId = isPostDated ? null : await resolveReceiptAccountId(trx, { paymentMode: payment_method, bankAccountId: bank_account_id, amount: payAmount });
+        const receiptAccountId = isPostDated ? null : await resolveReceiptAccountId(trx, { paymentMode: payment_method, bankAccountId: bank_account_id, amount: payAmount, collectionLocation: collection_location });
         const payCount = await trx('payments').count('id as c').first();
         const [payRow] = await trx('payments').insert({
           payment_no: `PL-${(parseInt(payCount?.c) || 0) + 1}`,
