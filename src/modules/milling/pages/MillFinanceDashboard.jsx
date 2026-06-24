@@ -9,7 +9,7 @@ import {
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import {
-  useMillExpenses, useCreateMillExpense, useRecurringExpenses, useMaterializeRecurring, useMillWorkers, useCreateMillWorker,
+  useMillExpenses, useCreateMillExpense, useRecurringExpenses, useMaterializeRecurring, useRunDueRecurring, useMillWorkers, useCreateMillWorker,
   useUpdateMillWorker, useDeleteMillWorker, useCreateWorkerAdvance, useWorkerAdvances,
   useDeleteWorkerAdvance,
   usePayrollSummary, useRecordAttendance, useAttendance, useBulkAttendance, useAttendanceHolidays, useInventory, useExpenseVendors,
@@ -150,6 +150,7 @@ export default function MillFinanceDashboard() {
   const { data: recurringData } = useRecurringExpenses();
   const recurring = recurringData?.recurring || [];
   const materializeMut = useMaterializeRecurring();
+  const runDueMut = useRunDueRecurring();
 
   async function handleMaterialize(r) {
     try {
@@ -1136,14 +1137,14 @@ export default function MillFinanceDashboard() {
       {activeTab === 'recurring' && (
         <div className="space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
-            <p className="text-xs text-gray-500">Expenses you marked recurring. Post the next occurrence when it's due — it creates a fresh expense (payable + GL) and advances the schedule.</p>
+            <p className="text-xs text-gray-500">Expenses you marked recurring. These auto-post daily once due (accrued as a payable + GL); use the button below to catch up every missed period now.</p>
             {recurring.some(r => r.due) && (
               <button
-                onClick={async () => { for (const r of recurring.filter(x => x.due)) { await handleMaterialize(r); } }}
-                disabled={materializeMut.isPending}
+                onClick={async () => { const r = await runDueMut.mutateAsync(); window.alert(`Auto-posted ${r?.created ?? r?.processed ?? 0} due recurring expense(s).`); }}
+                disabled={runDueMut.isPending}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
               >
-                <RefreshCw className="w-3.5 h-3.5" /> Post all due ({recurring.filter(r => r.due).length})
+                <RefreshCw className={`w-3.5 h-3.5 ${runDueMut.isPending ? 'animate-spin' : ''}`} /> Post all due ({recurring.filter(r => r.due).length})
               </button>
             )}
           </div>

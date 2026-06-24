@@ -20,6 +20,7 @@ export const millingApi = {
   createExpense: (data) => api.post('/api/milling/expenses', data),
   listRecurringExpenses: () => api.get('/api/milling/expenses/recurring'),
   materializeRecurring: (id, data) => api.post(`/api/milling/expenses/recurring/${id}/materialize`, data),
+  runDueRecurring: () => api.post('/api/milling/expenses/recurring/run-due', {}),
   listWorkers: () => api.get('/api/milling/workers'),
   createWorker: (data) => api.post('/api/milling/workers', data),
   updateWorker: (id, data) => api.put(`/api/milling/workers/${id}`, data),

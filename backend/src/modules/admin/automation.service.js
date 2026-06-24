@@ -1,5 +1,17 @@
 const db = require('../../config/database');
 const emailService = require('../communications/email.service');
+const expensesService = require('../expenses/expenses.service');
+
+// Recurring-expense date helpers (mirror milling.routes so cadence math matches).
+const _isoDate = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10));
+function _addInterval(dateStr, recurrence) {
+  const dt = new Date(`${_isoDate(dateStr)}T00:00:00Z`);
+  if (recurrence === 'weekly') dt.setUTCDate(dt.getUTCDate() + 7);
+  else if (recurrence === 'quarterly') dt.setUTCMonth(dt.getUTCMonth() + 3);
+  else if (recurrence === 'yearly') dt.setUTCFullYear(dt.getUTCFullYear() + 1);
+  else dt.setUTCMonth(dt.getUTCMonth() + 1); // monthly (default)
+  return dt.toISOString().slice(0, 10);
+}
 
 const automationService = {
   // ============================================================
@@ -53,6 +65,9 @@ const automationService = {
           break;
         case 'email_reminder':
           result = await this.scanOverdueReceivables();
+          break;
+        case 'recurring_expense':
+          result = await this.materializeDueRecurringExpenses();
           break;
         default:
           result = { processed: 0, details: { message: `Unknown task type: ${task.task_type}` } };
@@ -693,6 +708,58 @@ const automationService = {
   // ============================================================
   // Task Scheduler (simplified — checks DB, not real cron)
   // ============================================================
+  // Auto-post recurring mill expenses whose next occurrence is due. Each recurring
+  // business_expense series (category + payee + cadence) has a latest occurrence;
+  // we walk forward from it, creating any missed occurrences up to today. New
+  // occurrences are ACCRUED (pay_now=false) — never auto-paid from a bank account —
+  // so a human still confirms the payment. Idempotent: skips a period that already
+  // has an occurrence, so re-runs (or a manual materialize) never double-post.
+  async materializeDueRecurringExpenses() {
+    const rows = await db('business_expenses')
+      .where('expense_type', 'mill').where('is_recurring', true)
+      .select('id', 'expense_no', 'category', 'subcategory', 'vendor_name', 'supplier_id',
+        'employee_id', 'recurrence', 'description', db.raw('amount_pkr as amount'), 'expense_date')
+      .orderBy('expense_date', 'desc');
+
+    const latest = {};
+    for (const e of rows) {
+      const k = `${e.category}|${e.employee_id || e.vendor_name || ''}|${e.recurrence || 'monthly'}`;
+      if (!latest[k]) latest[k] = e; // rows are date-desc → first seen is newest
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    let created = 0; const items = [];
+    for (const e of Object.values(latest)) {
+      let cursor = _isoDate(e.expense_date);
+      let guard = 0;
+      while (guard++ < 240) { // cap catch-up at ~20 yrs monthly to avoid runaway
+        const nextDue = _addInterval(cursor, e.recurrence);
+        if (nextDue > today) break;
+        // Idempotency: does this period already exist for the series?
+        const dupQ = db('business_expenses')
+          .where('expense_type', 'mill').where('category', e.category)
+          .where('recurrence', e.recurrence).whereRaw('DATE(expense_date) = ?', [nextDue]);
+        if (e.employee_id) dupQ.where('employee_id', e.employee_id);
+        else if (e.vendor_name) dupQ.where('vendor_name', e.vendor_name);
+        else dupQ.whereNull('employee_id').whereNull('vendor_name');
+        if (await dupQ.first()) { cursor = nextDue; continue; }
+
+        const expense = await expensesService.create({
+          expense_type: 'mill', category: e.category, subcategory: e.subcategory,
+          amount: parseFloat(e.amount), currency: 'PKR', expense_date: nextDue,
+          description: e.description || null, vendor_name: e.vendor_name || null,
+          supplier_id: e.supplier_id || null, employee_id: e.employee_id || null,
+          is_recurring: true, recurrence: e.recurrence, pay_now: false,
+          notes: `Auto-posted recurring (${e.recurrence}) from ${e.expense_no}`,
+        }, 1);
+        created++;
+        items.push({ expense_no: expense?.expense_no || null, category: e.category, date: nextDue, amount: parseFloat(e.amount) });
+        cursor = nextDue;
+      }
+    }
+    return { processed: created, details: { created, items } };
+  },
+
   async runDueScheduledTasks() {
     const now = new Date().toISOString();
 

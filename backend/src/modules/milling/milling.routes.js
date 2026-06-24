@@ -490,6 +490,7 @@ router.put('/batches/:id/prices', authorize('milling', 'edit'),
 // Out tab, and Accounting ledger. The legacy `mill_expenses` table is
 // no longer written to. (mill_expenses was empty at the time of the cut-over.)
 const expensesService = require('../expenses/expenses.service');
+const automationService = require('../admin/automation.service');
 
 router.get('/expenses', authorize('milling', 'view'), async (req, res) => {
   try {
@@ -629,6 +630,15 @@ router.get('/expenses/recurring', authorize('milling', 'view'), async (req, res)
       };
     }).sort((a, b) => (a.next_due < b.next_due ? -1 : 1));
     return res.json({ success: true, data: { recurring, dueCount: recurring.filter((r) => r.due).length } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Auto-post EVERY due recurring series in one shot (the same routine the hourly
+// scheduler runs). Lets the user trigger the catch-up on demand from the UI.
+router.post('/expenses/recurring/run-due', authorize('milling', 'create'), async (req, res) => {
+  try {
+    const result = await automationService.materializeDueRecurringExpenses();
+    return res.json({ success: true, data: result });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
