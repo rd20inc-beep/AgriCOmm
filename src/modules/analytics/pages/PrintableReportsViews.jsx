@@ -683,8 +683,9 @@ export function PnlAccrualView({ data, companyName, range, preset }) {
           />
           <p className="text-[11px] text-gray-500 mt-1 print:text-gray-700">
             Identity: Opening + Purchases − COGS = Closing. Closing is the current on-hand cost; opening is derived so the
-            roll-forward ties out exactly (the system keeps no historical stock snapshot). This reconciles the period's COGS
-            to the change in inventory value.
+            roll-forward ties out exactly (the system keeps no historical stock snapshot). A negative opening means period
+            purchases exceeded closing stock + COGS — i.e. cost left inventory via milling yield loss or by-product recovery
+            rather than a recognised sale, which is normal for a milling operation.
           </p>
         </Section>
       )}
