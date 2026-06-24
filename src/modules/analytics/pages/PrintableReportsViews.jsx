@@ -111,7 +111,7 @@ export function ProductionReportView({ data, companyName, range, preset }) {
 
 // ─── Stock report view ─────────────────────────────────────────────────
 export function StockReportView({ data, companyName, groupLabel }) {
-  const { rows, grand, asOf } = data;
+  const { rows, grand, asOf, groupBy } = data;
   return (
     <div className="print-report space-y-6 text-sm text-gray-900">
       <Header companyName={companyName} title="Stock Report" subtitle={`As of ${new Date(asOf).toLocaleString()} · ${groupLabel || ''}`} />
@@ -130,7 +130,10 @@ export function StockReportView({ data, companyName, groupLabel }) {
           head={[groupLabel || 'Group', 'Lots', 'Total (kg)', 'Katta', 'Available (kg)', 'Reserved (kg)', 'Per kg', 'Value (PKR)']}
           align={['left', 'right', 'right', 'right', 'right', 'right', 'right', 'right']}
           rows={rows.map(r => [
-            r.name, r.lotCount, fmtKg(r.totalKg), fmtKg(r.bags), fmtKg(r.availableKg), fmtKg(r.reservedKg), fmtPkr(r.perKg), fmtPkr(r.valuePkr),
+            (groupBy === 'supplier' && r.supplierId)
+              ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.name}</RefLink>
+              : r.name,
+            r.lotCount, fmtKg(r.totalKg), fmtKg(r.bags), fmtKg(r.availableKg), fmtKg(r.reservedKg), fmtPkr(r.perKg), fmtPkr(r.valuePkr),
           ])}
           empty="No stock to report."
           totalRow={['TOTAL', grand.lotCount, fmtKg(grand.totalKg), fmtKg(grand.bags), fmtKg(grand.availableKg), fmtKg(grand.reservedKg), fmtPkr(grand.perKg), fmtPkr(grand.valuePkr)]}
@@ -358,12 +361,16 @@ export function Header({ companyName, title, subtitle }) {
 }
 
 export function SummaryRow({ items }) {
+  // One row on screen/print regardless of how many KPIs (4–7). Static class
+  // strings so Tailwind's scanner keeps them; falls back to 2 cols on phones.
+  const cols = { 3: 'sm:grid-cols-3', 4: 'sm:grid-cols-4', 5: 'sm:grid-cols-5', 6: 'sm:grid-cols-6', 7: 'sm:grid-cols-7' }[items.length] || 'sm:grid-cols-5';
+  const printCols = { 3: 'print:grid-cols-3', 4: 'print:grid-cols-4', 5: 'print:grid-cols-5', 6: 'print:grid-cols-6', 7: 'print:grid-cols-7' }[items.length] || 'print:grid-cols-5';
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+    <div className={`grid grid-cols-2 ${cols} ${printCols} gap-2`}>
       {items.map((it, i) => (
-        <div key={i} className="border border-gray-200 rounded p-3">
-          <div className="text-[11px] text-gray-500 uppercase">{it.label}</div>
-          <div className="text-base font-semibold text-gray-900 mt-1">{it.value}</div>
+        <div key={i} className="border border-gray-200 rounded px-2.5 py-2 min-w-0">
+          <div className="text-[10px] text-gray-500 uppercase truncate">{it.label}</div>
+          <div className="text-sm font-semibold text-gray-900 mt-0.5 tabular-nums truncate">{it.value}</div>
         </div>
       ))}
     </div>

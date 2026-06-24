@@ -991,6 +991,10 @@ const reportingController = {
       const rows = await q
         .select(
           db.raw(`COALESCE(${nameCol}, '—') as group_name`),
+          // Supplier-grouped rows carry the supplier id so the report can link the
+          // name to that supplier's ledger. Null for every other grouping (a group
+          // like a product spans many suppliers, so no single id applies).
+          db.raw(group_by === 'supplier' ? 'l.supplier_id as group_id' : 'NULL::integer as group_id'),
           db.raw('COUNT(l.id)::int as lot_count'),
           db.raw('COALESCE(SUM(CASE WHEN l.net_weight_kg > 0 THEN l.net_weight_kg ELSE CAST(l.qty AS DECIMAL) * 1000 END), 0)::numeric as total_kg'),
           db.raw('COALESCE(SUM(CAST(l.available_qty AS DECIMAL) * 1000), 0)::numeric as available_kg'),
@@ -1031,6 +1035,7 @@ const reportingController = {
           groupBy: group_by,
           rows: rows.map(r => ({
             name:        r.group_name,
+            supplierId:  r.group_id || null,
             lotCount:    r.lot_count,
             totalKg:     num(r.total_kg),
             availableKg: num(r.available_kg),
