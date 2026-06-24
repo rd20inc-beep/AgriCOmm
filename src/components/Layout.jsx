@@ -12,6 +12,7 @@ import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { useMasterDataApprovalsCount } from '../modules/admin/api/queries';
 import { RouteErrorBoundary } from './ErrorBoundary';
+import ChatWidget from './ChatWidget';
 
 const sidebarNav = [
   { section: 'Main' },
@@ -534,6 +535,7 @@ export default function Layout({ children }) {
           </RouteErrorBoundary>
         </main>
       </div>
+      <ChatWidget />
     </div>
   );
 }

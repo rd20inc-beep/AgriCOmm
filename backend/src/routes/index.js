@@ -34,5 +34,6 @@ router.use('/control', authenticate, require('./control'));
 router.use('/intelligence', authenticate, require('./intelligence'));
 router.use('/smart', authenticate, require('./smart'));
 router.use('/ai', authenticate, require('../modules/ai/ai.routes'));
+router.use('/chat', authenticate, require('../modules/chat/chat.routes'));
 
 module.exports = router;
