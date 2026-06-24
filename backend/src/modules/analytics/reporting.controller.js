@@ -1261,6 +1261,11 @@ const reportingController = {
         .sum({ total: 'amount_pkr' }).count({ cnt: 'id' }).first();
       const opexByCat = await db('business_expenses').whereBetween('expense_date', [fromDate, toDate]).where('amount_pkr', '>', 0)
         .select('category').sum({ total: 'amount_pkr' }).count({ cnt: 'id' }).groupBy('category').orderByRaw('SUM(amount_pkr) DESC');
+      // Individual expenses so the FE can expand a category to its line items.
+      const opexLines = await db('business_expenses as e').leftJoin('suppliers as s', 'e.supplier_id', 's.id')
+        .whereBetween('e.expense_date', [fromDate, toDate]).where('e.amount_pkr', '>', 0)
+        .select('e.expense_no', 'e.category', 'e.vendor_name', 'e.supplier_id', 'e.amount_pkr', 'e.expense_date', db.raw("COALESCE(s.name, e.vendor_name, '—') as payee"))
+        .orderBy('e.amount_pkr', 'desc').limit(500);
       // Export selling costs are matched to the SHIPPED export revenue (recognized
       // when the order ships), not when the cost was incurred — costs for orders
       // still in progress stay deferred (WIP), keeping the accrual matching clean.
@@ -1286,7 +1291,7 @@ const reportingController = {
       cogs.totalPkr = cogs.exportPkr + cogs.localPkr;
       const grossProfitPkr = revenue.totalPkr - cogs.totalPkr;
       const grossMarginPct = revenue.totalPkr > 0 ? (grossProfitPkr / revenue.totalPkr) * 100 : 0;
-      const opex = { businessPkr: num(opexRow.total), businessCount: parseInt(opexRow.cnt, 10) || 0, sellingPkr: num(sellingRow.total), sellingCount: parseInt(sellingRow.cnt, 10) || 0, byCategory: opexByCat.map((r) => ({ category: r.category, count: parseInt(r.cnt, 10) || 0, amountPkr: num(r.total) })) };
+      const opex = { businessPkr: num(opexRow.total), businessCount: parseInt(opexRow.cnt, 10) || 0, sellingPkr: num(sellingRow.total), sellingCount: parseInt(sellingRow.cnt, 10) || 0, byCategory: opexByCat.map((r) => ({ category: r.category, count: parseInt(r.cnt, 10) || 0, amountPkr: num(r.total) })), expenses: opexLines.map((r) => ({ ref: r.expense_no, category: r.category, payee: r.payee, supplierId: r.supplier_id || null, date: r.expense_date, amountPkr: num(r.amount_pkr) })) };
       opex.totalPkr = opex.businessPkr + opex.sellingPkr;
       const netProfitPkr = grossProfitPkr - opex.totalPkr;
       const netMarginPct = revenue.totalPkr > 0 ? (netProfitPkr / revenue.totalPkr) * 100 : 0;

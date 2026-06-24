@@ -82,11 +82,29 @@ export function ProductionReportView({ data, companyName, range, preset }) {
           single row identical to the period totals. */}
 
       <Section title="By Product">
-        <Table
+        <ExpandableGroupTable
           head={['Product', 'Batches', 'Raw MT', 'Finished MT', 'Yield %']}
           align={['left', 'right', 'right', 'right', 'right']}
-          rows={byProduct.map(r => [r.name, r.batchCount, fmtMt(r.rawMt), fmtMt(r.finishedMt), fmtPct(r.yieldPct)])}
+          groups={byProduct.map(r => {
+            const mine = (batches || []).filter(b => (b.productName || '—') === r.name);
+            return {
+              key: r.name,
+              cells: [r.name, r.batchCount, fmtMt(r.rawMt), fmtMt(r.finishedMt), fmtPct(r.yieldPct)],
+              detail: mine.length ? (
+                <MiniTable
+                  head={['Batch', 'Supplier', 'Status', 'Raw MT', 'Finished MT', 'Yield %', 'Created']}
+                  align={['left', 'left', 'left', 'right', 'right', 'right', 'left']}
+                  rows={mine.map(b => [
+                    <RefLink to={`/milling/${b.id}`}>{b.isBlend ? `${b.batchNo} (blend)` : b.batchNo}</RefLink>,
+                    b.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${b.supplierId}`}>{b.supplierName}</RefLink> : (b.supplierName || '—'),
+                    b.status, fmtMt(b.rawMt), fmtMt(b.finishedMt), fmtPct(b.yieldPct), fmtDate(b.createdAt),
+                  ])}
+                />
+              ) : null,
+            };
+          })}
           empty="No production this period."
+          hint="Click a product to see its batches."
         />
       </Section>
 
@@ -384,17 +402,38 @@ export function AgingReportView({ data, companyName, kind }) {
         { label: 'Total Outstanding', value: fmtPkr(totalPkr) },
       ]} />
       <Section title="By Bucket">
-        <Table
+        <ExpandableGroupTable
           head={['Bucket', 'Count', 'Outstanding (PKR)', '% of Total']}
           align={['left', 'right', 'right', 'right']}
-          rows={BUCKETS.map(b => [
-            `${b} days`,
-            buckets[b]?.count || 0,
-            fmtPkr(buckets[b]?.totalPkr || 0),
-            totalPkr > 0 ? `${((buckets[b]?.totalPkr || 0) / totalPkr * 100).toFixed(1)}%` : '—',
-          ])}
+          groups={BUCKETS.map(b => {
+            const mine = rows.filter(r => r.bucket === b);
+            return {
+              key: b,
+              cells: [
+                `${b} days`,
+                buckets[b]?.count || 0,
+                fmtPkr(buckets[b]?.totalPkr || 0),
+                totalPkr > 0 ? `${((buckets[b]?.totalPkr || 0) / totalPkr * 100).toFixed(1)}%` : '—',
+              ],
+              detail: mine.length ? (
+                <MiniTable
+                  head={[isAR ? 'Receivable' : 'Payable', 'Counterparty', 'Due', 'Days', 'Outstanding (PKR)']}
+                  align={['left', 'left', 'left', 'right', 'right']}
+                  rows={mine.map(r => {
+                    const partyId = isAR ? r.customerId : r.supplierId;
+                    return [
+                      isAR ? r.recvNo : r.payableNo,
+                      partyId ? <RefLink to={`/finance/statements?type=${isAR ? 'customer' : 'supplier'}&id=${partyId}`}>{r.counterparty}</RefLink> : r.counterparty,
+                      r.dueDate ? fmtDate(r.dueDate) : '—', r.ageDays, fmtPkr(r.outstandingPkr),
+                    ];
+                  })}
+                />
+              ) : null,
+            };
+          })}
           totalRow={['TOTAL', rows.length, fmtPkr(totalPkr), '100%']}
           empty="No open balances."
+          hint="Click a bucket to see its open items."
         />
       </Section>
       <Section title={isAR ? 'Open Receivables (oldest first)' : 'Open Payables (oldest first)'}>
@@ -514,6 +553,89 @@ export function Footer() {
       <span>AgriCOmm ERP · Printable Report</span>
       <span>Page printed {new Date().toLocaleString()}</span>
     </div>
+  );
+}
+
+// A grouped table whose rows expand in place to reveal underlying records.
+// `groups` = [{ key, cells:[...], detail:<ReactNode|null> }]; a row with a
+// detail node gets a ▸/▾ chevron and toggles it open. Mirrors the Stock report's
+// expand behaviour so every grouped report drills down the same way.
+export function ExpandableGroupTable({ head, align = [], groups, totalRow, empty, hint }) {
+  const [open, setOpen] = useState({});
+  if (!groups || groups.length === 0) {
+    return <div className="text-center text-xs text-gray-400 py-4">{empty || 'No data.'}</div>;
+  }
+  return (
+    <>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs border-collapse">
+          <thead>
+            <tr className="bg-gray-100 border-b-2 border-gray-300">
+              {head.map((h, i) => (
+                <th key={i} className={`px-3 py-2 font-semibold text-gray-700 text-${align[i] || 'left'}`}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {groups.map((g, gi) => {
+              const k = g.key ?? gi;
+              const canExpand = !!g.detail;
+              const isOpen = !!open[k];
+              return (
+                <Fragment key={k}>
+                  <tr className={`border-b border-gray-100 ${canExpand ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                    onClick={canExpand ? () => setOpen(o => ({ ...o, [k]: !o[k] })) : undefined}>
+                    {g.cells.map((c, ci) => (
+                      <td key={ci} className={`px-3 py-1.5 text-${align[ci] || 'left'}`}>
+                        {ci === 0 ? (
+                          <span className="inline-flex items-center gap-1.5">
+                            {canExpand
+                              ? <span className="text-gray-400 print:hidden w-3 inline-block">{isOpen ? '▾' : '▸'}</span>
+                              : <span className="w-3 inline-block print:hidden" />}
+                            <span className={canExpand ? 'font-medium text-blue-700 print:text-gray-900' : ''}>{c}</span>
+                          </span>
+                        ) : c}
+                      </td>
+                    ))}
+                  </tr>
+                  {isOpen && canExpand && (
+                    <tr className="bg-gray-50/60"><td colSpan={head.length} className="px-3 py-2">{g.detail}</td></tr>
+                  )}
+                </Fragment>
+              );
+            })}
+          </tbody>
+          {totalRow && (
+            <tfoot>
+              <tr className="border-t-2 border-gray-700 font-semibold bg-gray-50">
+                {totalRow.map((c, ci) => (<td key={ci} className={`px-3 py-2 text-${align[ci] || 'left'}`}>{c}</td>))}
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+      {hint && <p className="text-[11px] text-gray-400 mt-1 print:hidden">{hint}</p>}
+    </>
+  );
+}
+
+// Compact inner table used inside expanded group rows.
+function MiniTable({ head, align = [], rows }) {
+  return (
+    <table className="w-full text-[11px] border-collapse">
+      <thead>
+        <tr className="text-gray-400 border-b border-gray-200">
+          {head.map((h, i) => <th key={i} className={`py-1 px-2 font-medium text-${align[i] || 'left'}`}>{h}</th>)}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row, ri) => (
+          <tr key={ri} className="border-b border-gray-100 last:border-0">
+            {row.map((c, ci) => <td key={ci} className={`py-1 px-2 text-${align[ci] || 'left'}`}>{c}</td>)}
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
@@ -737,15 +859,33 @@ export function PnlAccrualView({ data, companyName, range, preset }) {
       </Section>
 
       <Section title="Operating Expenses — by category">
-        <Table
+        <ExpandableGroupTable
           head={['Category', 'Count', 'Amount (PKR)']}
           align={['left', 'right', 'right']}
-          rows={[
-            ...(opex.byCategory || []).map(c => [c.category || '—', c.count, fmtPkr(c.amountPkr)]),
-            ...(opex.sellingPkr > 0 ? [['Export selling costs (freight/customs/…)', opex.sellingCount, fmtPkr(opex.sellingPkr)]] : []),
+          groups={[
+            ...(opex.byCategory || []).map(c => {
+              const mine = (opex.expenses || []).filter(e => (e.category || '—') === (c.category || '—'));
+              return {
+                key: c.category || '—',
+                cells: [c.category || '—', c.count, fmtPkr(c.amountPkr)],
+                detail: mine.length ? (
+                  <MiniTable
+                    head={['Expense', 'Payee', 'Date', 'Amount (PKR)']}
+                    align={['left', 'left', 'left', 'right']}
+                    rows={mine.map(e => [
+                      e.ref,
+                      e.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${e.supplierId}`}>{e.payee}</RefLink> : (e.payee || '—'),
+                      fmtDate(e.date), fmtPkr(e.amountPkr),
+                    ])}
+                  />
+                ) : null,
+              };
+            }),
+            ...(opex.sellingPkr > 0 ? [{ key: '__selling', cells: ['Export selling costs (freight/customs/…)', opex.sellingCount, fmtPkr(opex.sellingPkr)], detail: null }] : []),
           ]}
           totalRow={['TOTAL', opex.businessCount + opex.sellingCount, fmtPkr(opex.totalPkr)]}
           empty="No operating expenses in this period."
+          hint="Click a category to see its expenses."
         />
       </Section>
 
