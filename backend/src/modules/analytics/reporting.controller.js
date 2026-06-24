@@ -1223,7 +1223,13 @@ const reportingController = {
         .sum({ total: 'amount_pkr' }).count({ cnt: 'id' }).first();
       const opexByCat = await db('business_expenses').whereBetween('expense_date', [fromDate, toDate]).where('amount_pkr', '>', 0)
         .select('category').sum({ total: 'amount_pkr' }).count({ cnt: 'id' }).groupBy('category').orderByRaw('SUM(amount_pkr) DESC');
-      const sellingRow = await db('export_order_costs as eoc').whereBetween('eoc.created_at', [fromDate, toDate]).where('eoc.amount', '>', 0)
+      // Export selling costs are matched to the SHIPPED export revenue (recognized
+      // when the order ships), not when the cost was incurred — costs for orders
+      // still in progress stay deferred (WIP), keeping the accrual matching clean.
+      const sellingRow = await db('export_order_costs as eoc')
+        .join('export_orders as eo', 'eoc.order_id', 'eo.id')
+        .whereIn('eo.status', ['Shipped', 'Arrived', 'Closed']).whereBetween('eo.updated_at', [fromDate, toDate])
+        .where('eoc.amount', '>', 0)
         .whereRaw("COALESCE(eoc.notes,'') NOT ILIKE 'From business expense%'")
         .sum({ total: db.raw('CASE WHEN COALESCE(eoc.base_amount_pkr,0) > 0 THEN eoc.base_amount_pkr ELSE COALESCE(eoc.amount,0)*COALESCE(eoc.fx_rate,1) END') }).count({ cnt: 'eoc.id' }).first();
 
