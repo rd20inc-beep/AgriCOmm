@@ -1125,9 +1125,27 @@ const reportingController = {
         const bs = await db('milling_batches as mb').leftJoin('suppliers as s', 'mb.supplier_id', 's.id').whereIn('mb.id', ids).select('mb.id', 'mb.batch_no', 's.name as supplier');
         for (const b of bs) batchSrc[`batch-${b.id}`] = { batchNo: b.batch_no, supplier: b.supplier };
       }
+      // Subtype tag — the inventory "tag" each lot is filed under (Sweeping, B1,
+      // B2, B3, CSR, Powder, Sortex, Rice Bran/Husk, Broken, Finished/Raw Rice).
+      const tagOf = (l) => {
+        const name = (l.item_name || '').toLowerCase();
+        const grade = (l.grade || '').toUpperCase();
+        if (name.includes('sweeping') || (l.grade || '').toLowerCase().includes('sweeping')) return 'Sweeping';
+        if (name.includes('powder')) return 'Powder';
+        if (name.includes('sortex')) return 'Sortex';
+        if (name.includes('bran')) return 'Rice Bran';
+        if (name.includes('husk')) return 'Rice Husk';
+        if (grade === 'SHORT GRAIN') return 'Short Grain';
+        if (['B1', 'B2', 'B3', 'CSR'].includes(grade)) return grade;
+        if (name.startsWith('broken')) return 'Broken';
+        if (l.type === 'finished') return 'Finished Rice';
+        if (l.type === 'raw') return 'Raw Rice';
+        return 'Other';
+      };
       const rows = lots.map((l) => {
         const onHand = parseFloat(l.on_hand_kg) || 0; const cpk = parseFloat(l.cost_per_kg) || 0; const src = batchSrc[l.batch_ref];
         return { lotId: l.id, lotNo: l.lot_no, type: l.type, item: l.product_name || l.item_name, variety: l.variety, grade: l.grade,
+          subtype: tagOf(l),
           supplier: l.supplier_name, supplierId: l.supplier_id,
           sourceBatch: src?.batchNo || l.blend_batch_no || null, sourceSupplier: src?.supplier || null,
           warehouse: l.warehouse_name, status: l.status, bags: l.total_bags,

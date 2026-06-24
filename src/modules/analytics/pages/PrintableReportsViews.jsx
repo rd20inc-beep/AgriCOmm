@@ -2,12 +2,23 @@
 // reports preview (/reports/print) and the standalone print route
 // (/print-report) that opens in a new tab. Pulling them into a single
 // file keeps the two entry points in lockstep.
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 
 // A reference that's a clickable link on screen but prints as plain text.
 export function RefLink({ to, children }) {
   if (!to) return <span>{children}</span>;
   return <Link to={to} className="text-blue-600 hover:underline print:text-gray-900 print:no-underline">{children}</Link>;
+}
+
+// A filter chip for the inventory tags on the Stock (detail) report.
+export function TagChip({ label, count, active, onClick }) {
+  return (
+    <button onClick={onClick}
+      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition ${active ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200 hover:border-blue-400'}`}>
+      {label}<span className={`text-[10px] ${active ? 'text-blue-100' : 'text-gray-400'}`}>{count}</span>
+    </button>
+  );
 }
 
 export function fmtMt(v) {
@@ -492,9 +503,27 @@ export function SalesLedgerView({ data, companyName, range }) {
 // ─── Detailed stock (traceable) ────────────────────────────────────────
 export function StockDetailView({ data, companyName }) {
   const { rows, millStore, totals } = data;
+  const [tag, setTag] = useState('all');
+
+  // Build the tag chips from the lots' subtypes, ordered by a sensible priority.
+  const ORDER = ['Finished Rice', 'Raw Rice', 'B1', 'B2', 'B3', 'CSR', 'Short Grain', 'Broken', 'Powder', 'Sweeping', 'Sortex', 'Rice Bran', 'Rice Husk', 'Other'];
+  const byTag = {};
+  for (const r of rows) {
+    const t = r.subtype || 'Other';
+    if (!byTag[t]) byTag[t] = { count: 0, mt: 0, value: 0 };
+    byTag[t].count += 1; byTag[t].mt += r.onHandMt || 0; byTag[t].value += r.valuePkr || 0;
+  }
+  const tags = Object.keys(byTag).sort((a, b) => {
+    const ia = ORDER.indexOf(a), ib = ORDER.indexOf(b);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  });
+  const shown = tag === 'all' ? rows : rows.filter(r => (r.subtype || 'Other') === tag);
+  const shownMt = shown.reduce((s, r) => s + (r.onHandMt || 0), 0);
+  const shownValue = shown.reduce((s, r) => s + (r.valuePkr || 0), 0);
+
   return (
     <div className="print-report space-y-6 text-sm text-gray-900">
-      <Header companyName={companyName} title="Stock — Detailed & Traceable" subtitle={`As of ${new Date().toLocaleString()}`} />
+      <Header companyName={companyName} title="Stock — Detailed & Traceable" subtitle={`As of ${new Date().toLocaleString()}${tag !== 'all' ? ` · ${tag}` : ''}`} />
       <SummaryRow items={[
         { label: 'Lots on hand', value: totals.lots },
         { label: 'Total Qty', value: `${fmtMt(totals.mt)} MT` },
@@ -502,21 +531,29 @@ export function StockDetailView({ data, companyName }) {
         { label: 'Mill Store Items', value: millStore.length },
         { label: 'Mill Store Value', value: fmtPkr(totals.millStoreValue) },
       ]} />
-      <Section title="Rice Stock — by lot, traced to its source">
+
+      {/* Inventory tags — click to filter the detail to that subtype. */}
+      <div className="flex flex-wrap gap-2 no-print">
+        <TagChip label="All" count={rows.length} active={tag === 'all'} onClick={() => setTag('all')} />
+        {tags.map(t => <TagChip key={t} label={t} count={byTag[t].count} active={tag === t} onClick={() => setTag(t)} />)}
+      </div>
+
+      <Section title={tag === 'all' ? 'Rice Stock — by lot, traced to its source' : `${tag} — ${shown.length} lot${shown.length === 1 ? '' : 's'} · ${fmtMt(shownMt)} MT · ${fmtPkr(shownValue)}`}>
         <Table
-          head={['Lot', 'Type', 'Item', 'Variety/Grade', 'On hand (MT)', 'Available', 'Source / Supplier', 'Warehouse', 'Value (PKR)']}
+          head={['Lot', 'Tag', 'Item', 'Variety/Grade', 'On hand (MT)', 'Available', 'Source / Supplier', 'Warehouse', 'Value (PKR)']}
           align={['left', 'left', 'left', 'left', 'right', 'right', 'left', 'left', 'right']}
-          rows={rows.map(r => [
+          rows={shown.map(r => [
             <RefLink to={`/lot-inventory/${r.lotId}`}>{r.lotNo}</RefLink>,
-            r.type, r.item || '—', r.variety || r.grade || '—',
+            <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-700 print:bg-transparent print:px-0">{r.subtype}</span>,
+            r.item || '—', r.variety || r.grade || '—',
             fmtMt(r.onHandMt), fmtMt(r.availableMt),
             r.supplier
               ? (r.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.supplier}</RefLink> : r.supplier)
               : (r.sourceSupplier ? <span className="text-gray-600">milled from {r.sourceSupplier}{r.sourceBatch ? ` · ${r.sourceBatch}` : ''}</span> : '—'),
             r.warehouse || '—', fmtPkr(r.valuePkr),
           ])}
-          empty="No stock on hand."
-          totalRow={['', '', '', 'TOTAL', fmtMt(totals.mt), '', '', '', fmtPkr(totals.valuePkr)]}
+          empty="No stock for this tag."
+          totalRow={['', '', '', 'TOTAL', fmtMt(shownMt), '', '', '', fmtPkr(shownValue)]}
         />
       </Section>
       {millStore.length > 0 && (

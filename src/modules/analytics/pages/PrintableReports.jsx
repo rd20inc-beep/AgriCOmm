@@ -6,7 +6,7 @@ import { useAuth } from '../../../context/AuthContext';
 import {
   ProductionReportView, StockReportView,
   PnlReportView, CashflowReportView, AgingReportView,
-  PurchaseLedgerView, SalesLedgerView, StockDetailView, SweepingReportView,
+  PurchaseLedgerView, SalesLedgerView, StockDetailView,
 } from './PrintableReportsViews';
 
 // ─── Period helpers ────────────────────────────────────────────────────
@@ -58,8 +58,8 @@ export default function PrintableReports() {
   // must not see. Their mill financials live on the Mill Finance dashboard.
   const millScoped = user?.role === 'Mill Manager';
   const REPORT_TYPES = millScoped
-    ? ['production', 'stock', 'stock_detail', 'sweeping', 'purchase_ledger']
-    : ['production', 'stock', 'stock_detail', 'sweeping', 'purchase_ledger', 'sales_ledger', 'pnl', 'cashflow', 'ar_aging', 'ap_aging'];
+    ? ['production', 'stock', 'stock_detail', 'purchase_ledger']
+    : ['production', 'stock', 'stock_detail', 'purchase_ledger', 'sales_ledger', 'pnl', 'cashflow', 'ar_aging', 'ap_aging'];
 
   const [reportType, setReportType] = useState('production'); // 'production' | 'stock' | 'pnl' | 'cashflow' | 'ar_aging' | 'ap_aging'
   const [preset, setPreset] = useState('monthly');
@@ -106,8 +106,6 @@ export default function PrintableReports() {
         res = await api.get('/api/reporting/printable/sales-ledger', periodParams);
       } else if (reportType === 'stock_detail') {
         res = await api.get('/api/reporting/printable/stock-detail', {});
-      } else if (reportType === 'sweeping') {
-        res = await api.get('/api/reporting/printable/sweeping', {});
       } else {
         res = await api.get('/api/reporting/printable/stock', { group_by: stockGroupBy });
       }
@@ -154,7 +152,6 @@ export default function PrintableReports() {
               { k: 'production',     l: 'Production',     i: Factory },
               { k: 'stock',          l: 'Stock',          i: Boxes },
               { k: 'stock_detail',   l: 'Stock (detail)', i: Package },
-              { k: 'sweeping',       l: 'Sweeping',       i: Boxes },
               { k: 'purchase_ledger', l: 'Purchases',     i: ShoppingCart },
               { k: 'sales_ledger',   l: 'Sales',          i: FileText },
               { k: 'pnl',        l: 'P&L',        i: TrendingUp },
@@ -248,8 +245,6 @@ export default function PrintableReports() {
           <SalesLedgerView data={data} companyName={companyName} range={range} />
         ) : reportType === 'stock_detail' && data.rows && data.millStore !== undefined ? (
           <StockDetailView data={data} companyName={companyName} />
-        ) : reportType === 'sweeping' && data.rows && data.totals ? (
-          <SweepingReportView data={data} companyName={companyName} />
         ) : (
           <div className="text-center text-gray-400 py-12">No data.</div>
         )}
