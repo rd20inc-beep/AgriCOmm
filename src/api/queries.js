@@ -677,6 +677,13 @@ export function useCreateFundTransfer() {
     onSuccess: () => invalidateMoneyCaches(qc),
   });
 }
+export function useAcceptFundTransfer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => financeApi.acceptFundTransfer(id),
+    onSuccess: () => invalidateMoneyCaches(qc),
+  });
+}
 export function useDeleteFundTransfer() {
   const qc = useQueryClient();
   return useMutation({

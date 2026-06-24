@@ -654,6 +654,8 @@ COL follow_ups.linked_type:character varying:NOT NULL
 COL follow_ups.note:text:NULL
 COL follow_ups.status:character varying:NOT NULL
 COL follow_ups.user_id:integer:NULL
+COL fund_transfers.accepted_at:timestamp with time zone:NULL
+COL fund_transfers.accepted_by:integer:NULL
 COL fund_transfers.amount:numeric:NOT NULL
 COL fund_transfers.created_at:timestamp with time zone:NOT NULL
 COL fund_transfers.created_by:integer:NULL
@@ -2183,6 +2185,7 @@ CON export_orders.export_orders_product_id_foreign(f)
 CON follow_ups.chk_follow_ups_status_valid(c)
 CON follow_ups.follow_ups_pkey(p)
 CON follow_ups.follow_ups_user_id_foreign(f)
+CON fund_transfers.fund_transfers_accepted_by_foreign(f)
 CON fund_transfers.fund_transfers_created_by_foreign(f)
 CON fund_transfers.fund_transfers_from_account_id_foreign(f)
 CON fund_transfers.fund_transfers_pkey(p)

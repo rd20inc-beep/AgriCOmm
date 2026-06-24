@@ -769,11 +769,15 @@ const millingAdvancedController = {
 
       const num = (v) => parseFloat(v) || 0;
 
-      // Head Office ⇄ Mill fund transfers touching the mill (in when funds arrive,
-      // out when the mill sends funds back). Treated as a cash movement, not a sale.
+      // Head Office ⇄ Mill fund transfers touching the mill. The mill's money
+      // LEAVES at create (a Mill→HO send counts out immediately), but money
+      // ARRIVES only once the mill ACCEPTS an incoming transfer (status completed).
       let ftQ = db('fund_transfers as ft')
-        .where(function () { this.where('ft.from_entity', 'mill').orWhere('ft.to_entity', 'mill'); })
-        .select('ft.id', 'ft.transfer_no', 'ft.transfer_date', 'ft.method', 'ft.amount', 'ft.from_entity', 'ft.to_entity');
+        .where(function () {
+          this.where('ft.from_entity', 'mill') // mill sent → out (any status)
+            .orWhere(function () { this.where('ft.to_entity', 'mill').andWhere('ft.status', 'completed'); }); // accepted in
+        })
+        .select('ft.id', 'ft.transfer_no', 'ft.transfer_date', 'ft.method', 'ft.amount', 'ft.from_entity', 'ft.to_entity', 'ft.status');
       if (from_date) ftQ = ftQ.where('ft.transfer_date', '>=', from_date);
       if (to_date) ftQ = ftQ.where('ft.transfer_date', '<=', to_date);
       const ftRows = (await ftQ).map((r) => ({
@@ -783,6 +787,19 @@ const millingAdvancedController = {
         counterparty: r.to_entity === 'mill' ? 'From Head Office' : 'To Head Office',
         direction: r.to_entity === 'mill' ? 'in' : 'out', isTransfer: true,
       }));
+
+      // Incoming transfers awaiting the mill supervisor's acceptance (the alert).
+      const pendingTransfers = (await db('fund_transfers as ft')
+        .leftJoin('bank_accounts as fa', 'fa.id', 'ft.from_account_id')
+        .leftJoin('bank_accounts as ta', 'ta.id', 'ft.to_account_id')
+        .where({ 'ft.to_entity': 'mill', 'ft.status': 'pending' })
+        .orderBy('ft.transfer_date', 'desc')
+        .select('ft.id', 'ft.transfer_no', 'ft.transfer_date', 'ft.amount', 'ft.method', 'ft.reference', 'fa.name as from_account_name', 'ta.name as to_account_name'))
+        .map((r) => ({ id: r.id, transferNo: r.transfer_no, date: r.transfer_date, amount: num(r.amount), method: r.method, reference: r.reference, fromAccount: r.from_account_name, toAccount: r.to_account_name }));
+
+      // The mill's own cash float (so the supervisor sees usable funds on hand).
+      const millCashRow = await db('bank_accounts').where({ entity: 'mill', type: 'cash' }).orderBy('id').first();
+      const millCashBalance = millCashRow ? num(millCashRow.current_balance) : 0;
 
       const ledger = [
         ...outRows.map((r) => ({ ...r, direction: 'out', amount_pkr: num(r.amount_pkr) })),
@@ -828,6 +845,9 @@ const millingAdvancedController = {
           moneyInSummary: {
             billed: num(inSummary?.billed), collected: num(inSummary?.collected), outstanding: num(inSummary?.outstanding),
           },
+          pendingTransfers,
+          pendingTransfersTotal: pendingTransfers.reduce((s, r) => s + r.amount, 0),
+          millCashBalance,
         },
       });
     } catch (err) {

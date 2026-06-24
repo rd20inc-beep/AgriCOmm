@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
-import { Landmark, Wallet, TrendingUp, TrendingDown, Activity, Printer, ArrowLeftRight, Trash2 } from 'lucide-react';
+import { Landmark, Wallet, TrendingUp, TrendingDown, Activity, Printer, ArrowLeftRight, Trash2, Check } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart } from '../../../components/finance';
-import { useBankAccounts, useBankTransactions, useFundTransfers, useDeleteFundTransfer } from '../../../api/queries';
+import { useBankAccounts, useBankTransactions, useFundTransfers, useDeleteFundTransfer, useAcceptFundTransfer } from '../../../api/queries';
 import TransferFundsDrawer from '../components/TransferFundsDrawer';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
@@ -25,9 +25,13 @@ export default function Cash() {
   const [showTransfer, setShowTransfer] = useState(false);
   const { data: fundTransfers = [] } = useFundTransfers();
   const delTransfer = useDeleteFundTransfer();
+  const acceptTransfer = useAcceptFundTransfer();
   async function handleDeleteTransfer(t) {
-    if (!window.confirm(`Reverse transfer ${t.transferNo}? This restores both account balances and removes its GL entries.`)) return;
+    if (!window.confirm(`Reverse transfer ${t.transferNo}? This restores account balances and removes its GL entries.`)) return;
     try { await delTransfer.mutateAsync(t.id); } catch (e) { window.alert(e?.response?.data?.message || e?.message || 'Could not reverse the transfer.'); }
+  }
+  async function handleAcceptTransfer(t) {
+    try { await acceptTransfer.mutateAsync(t.id); } catch (e) { window.alert(e?.response?.data?.message || e?.message || 'Could not accept the transfer.'); }
   }
 
   function handlePrint() {
@@ -214,12 +218,14 @@ export default function Cash() {
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="bg-gray-50 text-gray-500">
-                <tr>{['Ref', 'Date', 'Direction', 'From', 'To', 'Method', 'Amount', ''].map((h, i) => (
+                <tr>{['Ref', 'Date', 'Direction', 'From', 'To', 'Method', 'Amount', 'Status', ''].map((h, i) => (
                   <th key={i} className={`px-3 py-2 font-medium ${i === 6 ? 'text-right' : 'text-left'}`}>{h}</th>))}
                 </tr>
               </thead>
               <tbody>
-                {fundTransfers.map((t) => (
+                {fundTransfers.map((t) => {
+                  const hoIsReceiver = t.toEntity === 'general'; // Mill → HO awaits HO acceptance here
+                  return (
                   <tr key={t.id} className="border-t border-gray-100">
                     <td className="px-3 py-2 font-medium text-gray-700">{t.transferNo}</td>
                     <td className="px-3 py-2">{t.transferDate ? new Date(t.transferDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—'}</td>
@@ -232,12 +238,22 @@ export default function Cash() {
                     <td className="px-3 py-2 text-gray-600">{t.toAccountName || '—'}</td>
                     <td className="px-3 py-2 text-gray-500 capitalize">{(t.method || '').replace('_', ' ')}</td>
                     <td className="px-3 py-2 text-right font-semibold tabular-nums">{fmtPKR(t.amount)}</td>
-                    <td className="px-3 py-2 text-right">
-                      <button onClick={() => handleDeleteTransfer(t)} disabled={delTransfer.isPending} title="Reverse transfer"
+                    <td className="px-3 py-2">
+                      {t.status === 'completed'
+                        ? <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700">Received</span>
+                        : <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700">{hoIsReceiver ? 'Awaiting you' : 'Awaiting mill'}</span>}
+                    </td>
+                    <td className="px-3 py-2 text-right whitespace-nowrap">
+                      {t.status === 'pending' && hoIsReceiver && (
+                        <button onClick={() => handleAcceptTransfer(t)} disabled={acceptTransfer.isPending} title="Accept funds"
+                          className="no-print inline-flex items-center gap-1 px-2 py-1 mr-1 text-[11px] font-medium rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"><Check size={12} /> Accept</button>
+                      )}
+                      <button onClick={() => handleDeleteTransfer(t)} disabled={delTransfer.isPending} title={t.status === 'completed' ? 'Reverse transfer' : 'Cancel transfer'}
                         className="no-print text-gray-400 hover:text-red-600 disabled:opacity-50"><Trash2 size={14} /></button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

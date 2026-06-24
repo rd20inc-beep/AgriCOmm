@@ -151,8 +151,9 @@ export default function TransferFundsDrawer({ open, onClose, defaultDirection = 
 
         {amt > 0 && fromAcct && toAcct && (
           <div className="text-xs text-gray-600 border border-gray-200 rounded-lg p-3 bg-gray-50">
-            <span className="font-medium">{fmt(amt)}</span> moves from <span className="font-medium">{fromAcct.name}</span> to <span className="font-medium">{toAcct.name}</span>.
-            Both balances update, and the inter-company position is posted to the GL.
+            <span className="font-medium">{fmt(amt)}</span> leaves <span className="font-medium">{fromAcct.name}</span> now. The
+            <span className="font-medium"> {direction === 'ho_to_mill' ? 'Mill' : 'Head Office'}</span> must <span className="font-medium">accept</span> it before it lands in
+            <span className="font-medium"> {toAcct.name}</span> and can be used.
           </div>
         )}
         {error && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2">{error}</div>}

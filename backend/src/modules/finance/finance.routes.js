@@ -22,6 +22,14 @@ router.post('/fund-transfers', authorize('finance', 'confirm_payment'),
       return res.json({ success: true, data: { transfer } });
     } catch (e) { return res.status(e.statusCode || 400).json({ success: false, message: e.message }); }
   });
+router.post('/fund-transfers/:id/accept', authorize('milling', 'edit'),
+  auditAction('accept_fund_transfer', 'finance', (req) => req.params.id),
+  async (req, res) => {
+    try {
+      const transfer = await fundTransfers.accept(req.params.id, req.user?.id);
+      return res.json({ success: true, data: { transfer } });
+    } catch (e) { return res.status(e.statusCode || 400).json({ success: false, message: e.message }); }
+  });
 router.delete('/fund-transfers/:id', authorize('finance', 'confirm_payment'), async (req, res) => {
   try {
     const result = await fundTransfers.remove(req.params.id, req.user?.id);

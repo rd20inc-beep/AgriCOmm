@@ -4,7 +4,7 @@ import {
   DollarSign, Users, Zap, Shield, TrendingUp, TrendingDown, AlertTriangle,
   Plus, UserPlus, Package, Factory, Wallet, ArrowUpRight, ArrowDownRight, Printer,
   Building2, Banknote, Receipt, Layers, Truck, ExternalLink,
-  Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X, FileText, RefreshCw, Sparkles, ArrowLeftRight,
+  Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X, FileText, RefreshCw, Sparkles, ArrowLeftRight, Inbox, Check,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
@@ -14,7 +14,7 @@ import {
   useDeleteWorkerAdvance,
   usePayrollSummary, useRecordAttendance, useAttendance, useBulkAttendance, useAttendanceHolidays, useInventory, useExpenseVendors,
   usePayrollRuns, usePostPayrollRun, useDeletePayrollRun, usePayrollRun, usePayrollReport, useBankAccounts,
-  usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow,
+  usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow, useAcceptFundTransfer,
   useMillLotCosts, useLocalSales,
 } from '../../../api/queries';
 import { useCommodityPrices } from '../hooks/useCommodityPrices';
@@ -244,6 +244,14 @@ export default function MillFinanceDashboard() {
   const cashSummary = cashFlow?.summary || { cashIn: 0, cashOut: 0, net: 0, count: 0 };
   const moneyOutStreams = cashFlow?.moneyOutStreams || [];
   const moneyInSummary = cashFlow?.moneyInSummary || { billed: 0, collected: 0, outstanding: 0 };
+  const pendingTransfers = cashFlow?.pendingTransfers || [];
+  const pendingTransfersTotal = cashFlow?.pendingTransfersTotal || 0;
+  const millCashBalance = cashFlow?.millCashBalance || 0;
+  const acceptTransferMut = useAcceptFundTransfer();
+  async function handleAcceptTransfer(t) {
+    try { await acceptTransferMut.mutateAsync(t.id); }
+    catch (e) { window.alert(e?.response?.data?.message || e?.message || 'Could not accept the transfer.'); }
+  }
 
   const expenses = expData?.expenses || [];
   const expSummary = expData?.summary || [];
@@ -647,6 +655,51 @@ export default function MillFinanceDashboard() {
           </div>
         </div>
       </div>
+
+      {/* ─── FUNDS FROM HEAD OFFICE ────────────────────────────────── */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 no-print">
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-4 py-3 flex items-center justify-between">
+          <span className="text-xs font-medium text-emerald-800 inline-flex items-center gap-1.5"><Wallet size={14} /> Mill Cash available</span>
+          <span className="text-lg font-bold text-emerald-900 tabular-nums">{PKR(millCashBalance)}</span>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 flex items-center justify-between">
+          <span className="text-xs font-medium text-gray-600 inline-flex items-center gap-1.5"><Inbox size={14} className="text-amber-500" /> Awaiting acceptance</span>
+          <span className="text-lg font-bold text-gray-900 tabular-nums">{PKR(pendingTransfersTotal)}</span>
+        </div>
+        <button onClick={() => setShowTransfer(true)}
+          className="rounded-xl border border-blue-200 bg-blue-50/60 px-4 py-3 flex items-center justify-between hover:bg-blue-100 transition-colors text-left">
+          <span className="text-xs font-medium text-blue-800 inline-flex items-center gap-1.5"><ArrowLeftRight size={14} /> Send funds to Head Office</span>
+          <span className="text-xs font-semibold text-blue-700">Transfer →</span>
+        </button>
+      </div>
+
+      {pendingTransfers.length > 0 && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 no-print">
+          <div className="flex items-center gap-2 mb-3">
+            <Inbox className="w-5 h-5 text-amber-600 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-amber-900">{pendingTransfers.length} fund transfer{pendingTransfers.length === 1 ? '' : 's'} from Head Office awaiting your acceptance</p>
+              <p className="text-xs text-amber-700">Total {PKR(pendingTransfersTotal)} — accept to add it to Mill Cash so the mill can use the funds.</p>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {pendingTransfers.map(t => (
+              <div key={t.id} className="flex items-center justify-between gap-3 bg-white rounded-lg border border-amber-200 px-3 py-2 flex-wrap">
+                <div className="text-xs text-gray-700 min-w-0">
+                  <span className="font-semibold text-gray-900">{t.transferNo}</span> · <span className="font-medium">{PKR(t.amount)}</span>
+                  {t.date && <> · {new Date(t.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</>}
+                  <span className="text-gray-400"> · from {t.fromAccount || 'Head Office'} → {t.toAccount || 'Mill Cash'}</span>
+                  {t.reference && <span className="text-gray-400"> · Ref {t.reference}</span>}
+                </div>
+                <button onClick={() => handleAcceptTransfer(t)} disabled={acceptTransferMut.isPending}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 flex-shrink-0">
+                  <Check size={13} /> {acceptTransferMut.isPending ? 'Accepting…' : 'Accept funds'}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ─── TABS ──────────────────────────────────────────────────── */}
       <div className="flex items-center gap-1 border-b border-gray-200 overflow-x-auto">
