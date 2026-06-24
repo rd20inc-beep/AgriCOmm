@@ -4,7 +4,7 @@ import {
   DollarSign, Users, Zap, Shield, TrendingUp, TrendingDown, AlertTriangle,
   Plus, UserPlus, Package, Factory, Wallet, ArrowUpRight, ArrowDownRight, Printer,
   Building2, Banknote, Receipt, Layers, Truck, ExternalLink,
-  Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X, FileText, RefreshCw, Sparkles,
+  Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X, FileText, RefreshCw, Sparkles, ArrowLeftRight,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
@@ -25,6 +25,7 @@ import MillSupplierPayDrawer from '../components/MillSupplierPayDrawer';
 import MillCustomerStatement from '../components/MillCustomerStatement';
 import MillCustomerPayDrawer from '../components/MillCustomerPayDrawer';
 import StatementPayDrawer from '../../finance/components/StatementPayDrawer';
+import TransferFundsDrawer from '../../finance/components/TransferFundsDrawer';
 import AnomalyWatchCard from '../../ai/components/AnomalyWatchCard';
 
 const PKR = (v) => 'Rs ' + Math.round(v || 0).toLocaleString('en-PK');
@@ -275,6 +276,7 @@ export default function MillFinanceDashboard() {
   }, [searchParams, localCustomers, suppliers]);
   const [showExpDrawer, setShowExpDrawer] = useState(false);
   const [showWorkerDrawer, setShowWorkerDrawer] = useState(false);
+  const [showTransfer, setShowTransfer] = useState(false);
   const EMPTY_EXP = { category: 'salaries', vendor_preset: '', vendor_name: '', subcategory: '', employee_id: '', is_recurring: false, recurrence: 'monthly', description: '', amount: '', expense_date: new Date().toISOString().split('T')[0], reference: '', notes: '' };
   const [expForm, setExpForm] = useState(EMPTY_EXP);
   const EMPTY_WORKER = { id: null, name: '', role: 'laborer', pay_type: 'daily', daily_wage: '', monthly_salary: '', phone: '', cnic: '', joined_date: new Date().toISOString().split('T')[0], notes: '' };
@@ -628,6 +630,13 @@ export default function MillFinanceDashboard() {
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-white/15 hover:bg-white/25 ring-1 ring-white/30 transition-colors"
             >
               <UserPlus size={13} /> Add Employee
+            </button>
+            <button
+              onClick={() => setShowTransfer(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-white/15 hover:bg-white/25 ring-1 ring-white/30 transition-colors"
+              title="Move money between Head Office and the Mill"
+            >
+              <ArrowLeftRight size={13} /> Transfer Funds
             </button>
             <Link
               to="/finance"
@@ -1890,6 +1899,9 @@ export default function MillFinanceDashboard() {
           </div>
         </div>
       </SlideDrawer>
+
+      {/* ─── TRANSFER FUNDS DRAWER ─────────────────────────────────── */}
+      <TransferFundsDrawer open={showTransfer} onClose={() => setShowTransfer(false)} defaultDirection="ho_to_mill" />
 
       {/* ─── GIVE ADVANCE DRAWER ───────────────────────────────────── */}
       <SlideDrawer

@@ -5,6 +5,29 @@ const authorize = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
+const fundTransfers = require('../finance/fundTransfers.service');
+
+// ── Head Office ⇄ Mill fund transfers ──
+router.get('/fund-transfers', authorize('finance', 'view'), async (req, res) => {
+  try {
+    const transfers = await fundTransfers.list(req.query);
+    return res.json({ success: true, data: { transfers } });
+  } catch (e) { return res.status(e.statusCode || 500).json({ success: false, message: e.message }); }
+});
+router.post('/fund-transfers', authorize('finance', 'confirm_payment'),
+  auditAction('fund_transfer', 'finance', (req, data) => data?.data?.transfer?.id || null),
+  async (req, res) => {
+    try {
+      const transfer = await fundTransfers.create(req.body, req.user?.id);
+      return res.json({ success: true, data: { transfer } });
+    } catch (e) { return res.status(e.statusCode || 400).json({ success: false, message: e.message }); }
+  });
+router.delete('/fund-transfers/:id', authorize('finance', 'confirm_payment'), async (req, res) => {
+  try {
+    const result = await fundTransfers.remove(req.params.id, req.user?.id);
+    return res.json({ success: true, data: result });
+  } catch (e) { return res.status(e.statusCode || 400).json({ success: false, message: e.message }); }
+});
 
 router.get('/receivables', authorize('finance', 'view'), controller.getReceivables);
 router.get('/receivables/:id/receipts', authorize('finance', 'view'), controller.getReceivableReceipts);

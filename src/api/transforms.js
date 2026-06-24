@@ -364,6 +364,7 @@ export function transformBankAccount(db) {
     branch: db.branch || '',
     currency: db.currency || 'PKR',
     currentBalance: parseFloat(db.current_balance) || 0,
+    entity: db.entity || 'general',
   };
 }
 

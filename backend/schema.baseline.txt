@@ -125,6 +125,7 @@ COL bank_accounts.branch:character varying:NULL
 COL bank_accounts.created_at:timestamp with time zone:NOT NULL
 COL bank_accounts.currency:character varying:NOT NULL
 COL bank_accounts.current_balance:numeric:NOT NULL
+COL bank_accounts.entity:character varying:NOT NULL
 COL bank_accounts.id:integer:NOT NULL
 COL bank_accounts.is_active:boolean:NOT NULL
 COL bank_accounts.name:character varying:NOT NULL
@@ -653,6 +654,24 @@ COL follow_ups.linked_type:character varying:NOT NULL
 COL follow_ups.note:text:NULL
 COL follow_ups.status:character varying:NOT NULL
 COL follow_ups.user_id:integer:NULL
+COL fund_transfers.amount:numeric:NOT NULL
+COL fund_transfers.created_at:timestamp with time zone:NOT NULL
+COL fund_transfers.created_by:integer:NULL
+COL fund_transfers.currency:character varying:NOT NULL
+COL fund_transfers.direction:character varying:NOT NULL
+COL fund_transfers.from_account_id:integer:NULL
+COL fund_transfers.from_entity:character varying:NOT NULL
+COL fund_transfers.id:integer:NOT NULL
+COL fund_transfers.je_ref_no:character varying:NULL
+COL fund_transfers.method:character varying:NOT NULL
+COL fund_transfers.notes:text:NULL
+COL fund_transfers.reference:character varying:NULL
+COL fund_transfers.status:character varying:NOT NULL
+COL fund_transfers.to_account_id:integer:NULL
+COL fund_transfers.to_entity:character varying:NOT NULL
+COL fund_transfers.transfer_date:date:NOT NULL
+COL fund_transfers.transfer_no:character varying:NOT NULL
+COL fund_transfers.updated_at:timestamp with time zone:NOT NULL
 COL fx_gain_loss_ledger.calculated_at:timestamp with time zone:NULL
 COL fx_gain_loss_ledger.calculation_basis:character varying:NULL
 COL fx_gain_loss_ledger.created_at:timestamp with time zone:NULL
@@ -2164,6 +2183,11 @@ CON export_orders.export_orders_product_id_foreign(f)
 CON follow_ups.chk_follow_ups_status_valid(c)
 CON follow_ups.follow_ups_pkey(p)
 CON follow_ups.follow_ups_user_id_foreign(f)
+CON fund_transfers.fund_transfers_created_by_foreign(f)
+CON fund_transfers.fund_transfers_from_account_id_foreign(f)
+CON fund_transfers.fund_transfers_pkey(p)
+CON fund_transfers.fund_transfers_to_account_id_foreign(f)
+CON fund_transfers.fund_transfers_transfer_no_unique(u)
 CON fx_gain_loss_ledger.fx_gain_loss_ledger_export_order_id_foreign(f)
 CON fx_gain_loss_ledger.fx_gain_loss_ledger_pkey(p)
 CON fx_rates.chk_fx_rates_rate_nonneg(c)

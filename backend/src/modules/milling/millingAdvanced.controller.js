@@ -768,13 +768,30 @@ const millingAdvancedController = {
       );
 
       const num = (v) => parseFloat(v) || 0;
+
+      // Head Office ⇄ Mill fund transfers touching the mill (in when funds arrive,
+      // out when the mill sends funds back). Treated as a cash movement, not a sale.
+      let ftQ = db('fund_transfers as ft')
+        .where(function () { this.where('ft.from_entity', 'mill').orWhere('ft.to_entity', 'mill'); })
+        .select('ft.id', 'ft.transfer_no', 'ft.transfer_date', 'ft.method', 'ft.amount', 'ft.from_entity', 'ft.to_entity');
+      if (from_date) ftQ = ftQ.where('ft.transfer_date', '>=', from_date);
+      if (to_date) ftQ = ftQ.where('ft.transfer_date', '<=', to_date);
+      const ftRows = (await ftQ).map((r) => ({
+        id: `ft-${r.id}`, payment_no: r.transfer_no, payment_date: r.transfer_date,
+        payment_method: r.method, amount_pkr: num(r.amount),
+        category: 'Fund transfer', ref: r.transfer_no,
+        counterparty: r.to_entity === 'mill' ? 'From Head Office' : 'To Head Office',
+        direction: r.to_entity === 'mill' ? 'in' : 'out', isTransfer: true,
+      }));
+
       const ledger = [
         ...outRows.map((r) => ({ ...r, direction: 'out', amount_pkr: num(r.amount_pkr) })),
         ...inRows.map((r) => ({ ...r, direction: 'in', amount_pkr: num(r.amount_pkr) })),
-      ].sort((a, b) => new Date(a.payment_date) - new Date(b.payment_date) || a.id - b.id);
+        ...ftRows,
+      ].sort((a, b) => new Date(a.payment_date) - new Date(b.payment_date) || (String(a.id) < String(b.id) ? -1 : 1));
 
-      const cashOut = outRows.reduce((s, r) => s + num(r.amount_pkr), 0);
-      const cashIn = inRows.reduce((s, r) => s + num(r.amount_pkr), 0);
+      const cashOut = outRows.reduce((s, r) => s + num(r.amount_pkr), 0) + ftRows.filter((r) => r.direction === 'out').reduce((s, r) => s + r.amount_pkr, 0);
+      const cashIn = inRows.reduce((s, r) => s + num(r.amount_pkr), 0) + ftRows.filter((r) => r.direction === 'in').reduce((s, r) => s + r.amount_pkr, 0);
 
       // Money-out streams: current paid-vs-outstanding snapshot.
       const streamRows = await db('payables')

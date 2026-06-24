@@ -652,6 +652,39 @@ export function usePayPurchase() {
   });
 }
 
+// ── Head Office ⇄ Mill fund transfers ──
+export function useFundTransfers(params = {}) {
+  return useQuery({
+    queryKey: ['fund-transfers', params],
+    queryFn: async () => {
+      const res = await financeApi.fundTransfers(params);
+      return transformKeys(unwrap(res, 'transfers') || []);
+    },
+  });
+}
+function invalidateMoneyCaches(qc) {
+  qc.invalidateQueries({ queryKey: ['fund-transfers'] });
+  qc.invalidateQueries({ queryKey: queryKeys.bankAccounts.all });
+  qc.invalidateQueries({ queryKey: ['bank-transactions'] });
+  qc.invalidateQueries({ queryKey: ['finance-bank-transactions'] });
+  qc.invalidateQueries({ queryKey: queryKeys.financeOverview });
+  qc.invalidateQueries({ queryKey: ['mill-cash-flow'] });
+}
+export function useCreateFundTransfer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => financeApi.createFundTransfer(data),
+    onSuccess: () => invalidateMoneyCaches(qc),
+  });
+}
+export function useDeleteFundTransfer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => financeApi.deleteFundTransfer(id),
+    onSuccess: () => invalidateMoneyCaches(qc),
+  });
+}
+
 export function useBankAccounts(opts = {}) {
   return useQuery({
     queryKey: queryKeys.bankAccounts.all,
