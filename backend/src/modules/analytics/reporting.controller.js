@@ -685,6 +685,30 @@ const reportingController = {
       const netProfitPkr = revenue.totalPkr - costs.totalPkr;
       const marginPct = revenue.totalPkr > 0 ? (netProfitPkr / revenue.totalPkr) * 100 : 0;
 
+      // ─── Line-item detail (clickable drill-downs) ───────────────
+      const exportLines = await db('export_orders as o').leftJoin('customers as c', 'o.customer_id', 'c.id')
+        .whereIn('o.status', ['Shipped', 'Arrived', 'Closed']).whereBetween('o.updated_at', [fromDate, toDate])
+        .select('o.id', 'o.order_no', 'o.product_name', db.raw('COALESCE(o.contract_value_pkr_locked,0) as amount_pkr'), db.raw("COALESCE(c.name,'—') as customer"))
+        .orderByRaw('amount_pkr desc').limit(200);
+      const localLines = await db('local_sales as ls').leftJoin('customers as c', 'ls.customer_id', 'c.id')
+        .where('ls.status', 'Completed').whereBetween('ls.sale_date', [fromDate, toDate])
+        .select('ls.id', 'ls.sale_no', 'ls.lot_id', 'ls.item_name', 'ls.total_amount', db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer"))
+        .orderBy('ls.total_amount', 'desc').limit(200);
+      const purchaseLines = await db('inventory_lots as l').leftJoin('suppliers as s', 'l.supplier_id', 's.id')
+        .whereBetween('l.purchase_date', [fromDate, toDate])
+        .select('l.id', 'l.lot_no', 'l.item_name', 'l.supplier_id', 'l.landed_cost_total', db.raw("COALESCE(s.name,'—') as supplier"))
+        .orderBy('l.landed_cost_total', 'desc').limit(200);
+      const expenseLines = await db('business_expenses')
+        .whereBetween('expense_date', [fromDate, toDate]).where('amount_pkr', '>', 0)
+        .select('id', 'expense_no', 'category', 'vendor_name', 'amount_pkr', 'expense_type').orderBy('amount_pkr', 'desc').limit(200);
+
+      const detail = {
+        export: exportLines.map((r) => ({ id: r.id, ref: r.order_no, party: r.customer, item: r.product_name, amountPkr: parseFloat(r.amount_pkr) || 0 })),
+        local: localLines.map((r) => ({ id: r.id, ref: r.sale_no, lotId: r.lot_id, party: r.customer, item: r.item_name, amountPkr: parseFloat(r.total_amount) || 0 })),
+        purchases: purchaseLines.map((r) => ({ lotId: r.id, ref: r.lot_no, supplierId: r.supplier_id, party: r.supplier, item: r.item_name, amountPkr: parseFloat(r.landed_cost_total) || 0 })),
+        expenses: expenseLines.map((r) => ({ ref: r.expense_no, category: r.category, party: r.vendor_name, kind: r.expense_type, amountPkr: parseFloat(r.amount_pkr) || 0 })),
+      };
+
       return res.json({
         success: true,
         data: {
@@ -693,6 +717,7 @@ const reportingController = {
           costs,
           netProfitPkr,
           marginPct,
+          detail,
         },
       });
     } catch (err) {
@@ -758,20 +783,20 @@ const reportingController = {
         .leftJoin('customers as c',   'r.customer_id', 'c.id')
         .where('p.type', 'receipt')
         .whereBetween('p.payment_date', [fromDate, toDate])
-        .select('p.payment_no', 'p.payment_date', 'p.base_amount_pkr', 'p.payment_method')
+        .select('p.payment_no', 'p.payment_date', 'p.base_amount_pkr', 'p.payment_method', 'c.id as customer_id')
         .select(db.raw("COALESCE(c.name, 'Counterparty') as counterparty"))
         .orderBy('p.base_amount_pkr', 'desc')
-        .limit(10);
+        .limit(200);
 
       const topPayments = await db('payments as p')
         .leftJoin('payables as pay', 'p.linked_payable_id', 'pay.id')
         .leftJoin('suppliers as s',  'pay.supplier_id', 's.id')
         .where('p.type', 'payment')
         .whereBetween('p.payment_date', [fromDate, toDate])
-        .select('p.payment_no', 'p.payment_date', 'p.base_amount_pkr', 'p.payment_method')
+        .select('p.payment_no', 'p.payment_date', 'p.base_amount_pkr', 'p.payment_method', 's.id as supplier_id')
         .select(db.raw("COALESCE(s.name, pay.linked_ref, 'Vendor') as counterparty"))
         .orderBy('p.base_amount_pkr', 'desc')
-        .limit(10);
+        .limit(200);
 
       return res.json({
         success: true,
@@ -783,6 +808,7 @@ const reportingController = {
             paymentNo: r.payment_no,
             date: r.payment_date,
             counterparty: r.counterparty,
+            customerId: r.customer_id,
             method: r.payment_method,
             amountPkr: parseFloat(r.base_amount_pkr) || 0,
           })),
@@ -790,6 +816,7 @@ const reportingController = {
             paymentNo: r.payment_no,
             date: r.payment_date,
             counterparty: r.counterparty,
+            supplierId: r.supplier_id,
             method: r.payment_method,
             amountPkr: parseFloat(r.base_amount_pkr) || 0,
           })),

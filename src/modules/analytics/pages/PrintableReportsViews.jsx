@@ -133,7 +133,7 @@ export function StockReportView({ data, companyName, groupLabel }) {
 
 // ─── Profit & Loss report view ─────────────────────────────────────────
 export function PnlReportView({ data, companyName, range, preset }) {
-  const { revenue, costs, netProfitPkr, marginPct } = data;
+  const { revenue, costs, netProfitPkr, marginPct, detail } = data;
   const periodLabel = preset === 'daily' ? 'Daily' : preset === 'weekly' ? 'Weekly' : preset === 'monthly' ? 'Monthly' : 'Custom Range';
   return (
     <div className="print-report space-y-6 text-sm text-gray-900">
@@ -185,6 +185,32 @@ export function PnlReportView({ data, companyName, range, preset }) {
           empty=""
         />
       </Section>
+
+      {/* Line-item drill-downs */}
+      {detail && (detail.export?.length > 0) && (
+        <Section title="Export Sales — detail">
+          <Table head={['Order', 'Customer', 'Product', 'Revenue (PKR)']} align={['left', 'left', 'left', 'right']}
+            rows={detail.export.map(r => [<RefLink to={`/export/${r.id}`}>{r.ref}</RefLink>, r.party || '—', r.item || '—', fmtPkr(r.amountPkr)])} empty="" />
+        </Section>
+      )}
+      {detail && (detail.local?.length > 0) && (
+        <Section title="Local Sales — detail">
+          <Table head={['Sale', 'Customer', 'Item', 'Revenue (PKR)']} align={['left', 'left', 'left', 'right']}
+            rows={detail.local.map(r => [r.lotId ? <RefLink to={`/lot-inventory/${r.lotId}`}>{r.ref}</RefLink> : r.ref, r.party || '—', r.item || '—', fmtPkr(r.amountPkr)])} empty="" />
+        </Section>
+      )}
+      {detail && (detail.purchases?.length > 0) && (
+        <Section title="Raw Rice Purchases — detail">
+          <Table head={['Lot', 'Supplier', 'Item', 'Landed Cost (PKR)']} align={['left', 'left', 'left', 'right']}
+            rows={detail.purchases.map(r => [<RefLink to={`/lot-inventory/${r.lotId}`}>{r.ref}</RefLink>, r.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.party}</RefLink> : (r.party || '—'), r.item || '—', fmtPkr(r.amountPkr)])} empty="" />
+        </Section>
+      )}
+      {detail && (detail.expenses?.length > 0) && (
+        <Section title="Business Expenses — detail">
+          <Table head={['Expense', 'Category', 'Payee', 'Type', 'Amount (PKR)']} align={['left', 'left', 'left', 'left', 'right']}
+            rows={detail.expenses.map(r => [r.ref, r.category || '—', r.party || '—', r.kind || '—', fmtPkr(r.amountPkr)])} empty="" />
+        </Section>
+      )}
       <Footer />
     </div>
   );
@@ -213,21 +239,29 @@ export function CashflowReportView({ data, companyName, range, preset }) {
         />
       </Section>
       {(topReceipts || []).length > 0 && (
-        <Section title="Top Receipts">
+        <Section title="Receipts (largest first)">
           <Table
-            head={['Payment', 'Date', 'Counterparty', 'Method', 'Amount (PKR)']}
+            head={['Payment', 'Date', 'Received From', 'Method', 'Amount (PKR)']}
             align={['left', 'left', 'left', 'left', 'right']}
-            rows={topReceipts.map(r => [r.paymentNo, fmtDate(r.date), r.counterparty, r.method || '—', fmtPkr(r.amountPkr)])}
+            rows={topReceipts.map(r => [
+              r.paymentNo, fmtDate(r.date),
+              r.customerId ? <RefLink to={`/finance/statements?type=customer&id=${r.customerId}`}>{r.counterparty}</RefLink> : r.counterparty,
+              r.method || '—', fmtPkr(r.amountPkr),
+            ])}
             empty=""
           />
         </Section>
       )}
       {(topPayments || []).length > 0 && (
-        <Section title="Top Payments">
+        <Section title="Payments (largest first)">
           <Table
-            head={['Payment', 'Date', 'Counterparty', 'Method', 'Amount (PKR)']}
+            head={['Payment', 'Date', 'Paid To', 'Method', 'Amount (PKR)']}
             align={['left', 'left', 'left', 'left', 'right']}
-            rows={topPayments.map(r => [r.paymentNo, fmtDate(r.date), r.counterparty, r.method || '—', fmtPkr(r.amountPkr)])}
+            rows={topPayments.map(r => [
+              r.paymentNo, fmtDate(r.date),
+              r.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.counterparty}</RefLink> : r.counterparty,
+              r.method || '—', fmtPkr(r.amountPkr),
+            ])}
             empty=""
           />
         </Section>
