@@ -9,11 +9,13 @@ const fmt = (n) => `Rs ${Math.round(parseFloat(n) || 0).toLocaleString()}`;
 // Reusable Head Office ⇄ Mill money-transfer drawer. Moves cash between two real
 // accounts AND records the inter-company GL; used from both Finance (Cash) and
 // Mill Finance. `defaultDirection` pre-selects ho_to_mill / mill_to_ho.
-export default function TransferFundsDrawer({ open, onClose, defaultDirection = 'ho_to_mill', onDone }) {
+export default function TransferFundsDrawer({ open, onClose, defaultDirection = 'ho_to_mill', lockDirection = null, onDone }) {
   const { data: accounts = [] } = useBankAccounts();
   const createMut = useCreateFundTransfer();
 
-  const [direction, setDirection] = useState(defaultDirection);
+  // When lockDirection is set the direction is fixed (e.g. the Mill can only send
+  // to Head Office) and the toggle is hidden.
+  const [direction, setDirection] = useState(lockDirection || defaultDirection);
   const [fromId, setFromId] = useState('');
   const [toId, setToId] = useState('');
   const [amount, setAmount] = useState('');
@@ -40,7 +42,7 @@ export default function TransferFundsDrawer({ open, onClose, defaultDirection = 
     setToId(t[0] ? String(t[0].id) : '');
   }, [open, direction, accounts.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { if (open) setDirection(defaultDirection); }, [open, defaultDirection]);
+  useEffect(() => { if (open) setDirection(lockDirection || defaultDirection); }, [open, defaultDirection, lockDirection]);
 
   const fromAcct = pkr.find((a) => String(a.id) === String(fromId));
   const toAcct = pkr.find((a) => String(a.id) === String(toId));
@@ -67,7 +69,10 @@ export default function TransferFundsDrawer({ open, onClose, defaultDirection = 
   const noMill = millAccts.length === 0;
 
   return (
-    <SlideDrawer open={open} onClose={onClose} title="Transfer Funds" subtitle="Move money between Head Office and the Mill" icon={ArrowLeftRight}
+    <SlideDrawer open={open} onClose={onClose}
+      title={lockDirection === 'mill_to_ho' ? 'Send Funds to Head Office' : 'Transfer Funds'}
+      subtitle={lockDirection === 'mill_to_ho' ? 'Send money from the Mill to Head Office' : 'Move money between Head Office and the Mill'}
+      icon={ArrowLeftRight}
       footer={
         <div className="flex items-center justify-end gap-2">
           <button onClick={onClose} className="px-3 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
@@ -80,20 +85,26 @@ export default function TransferFundsDrawer({ open, onClose, defaultDirection = 
       <div className="p-5 space-y-4">
         {noMill && <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">No Mill account found. Run the latest migration to seed the Mill Cash account.</div>}
 
-        {/* Direction toggle */}
+        {/* Direction toggle (hidden when locked to a single direction) */}
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Direction</label>
-          <div className="grid grid-cols-2 gap-2">
-            {[
-              { k: 'ho_to_mill', label: 'Head Office → Mill', icon: Building2 },
-              { k: 'mill_to_ho', label: 'Mill → Head Office', icon: Factory },
-            ].map(({ k, label, icon: Ic }) => (
-              <button key={k} type="button" onClick={() => setDirection(k)}
-                className={`inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border ${direction === k ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200 hover:border-blue-400'}`}>
-                <Ic className="w-3.5 h-3.5" /> {label}
-              </button>
-            ))}
-          </div>
+          {lockDirection ? (
+            <div className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border border-blue-200 bg-blue-50 text-blue-800">
+              {lockDirection === 'mill_to_ho' ? <><Factory className="w-3.5 h-3.5" /> Mill → Head Office</> : <><Building2 className="w-3.5 h-3.5" /> Head Office → Mill</>}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { k: 'ho_to_mill', label: 'Head Office → Mill', icon: Building2 },
+                { k: 'mill_to_ho', label: 'Mill → Head Office', icon: Factory },
+              ].map(({ k, label, icon: Ic }) => (
+                <button key={k} type="button" onClick={() => setDirection(k)}
+                  className={`inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border ${direction === k ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200 hover:border-blue-400'}`}>
+                  <Ic className="w-3.5 h-3.5" /> {label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* From */}

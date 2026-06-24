@@ -642,9 +642,9 @@ export default function MillFinanceDashboard() {
             <button
               onClick={() => setShowTransfer(true)}
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-white/15 hover:bg-white/25 ring-1 ring-white/30 transition-colors"
-              title="Move money between Head Office and the Mill"
+              title="Send money from the Mill to Head Office"
             >
-              <ArrowLeftRight size={13} /> Transfer Funds
+              <ArrowLeftRight size={13} /> Send to Head Office
             </button>
             <Link
               to="/finance"
@@ -1953,8 +1953,8 @@ export default function MillFinanceDashboard() {
         </div>
       </SlideDrawer>
 
-      {/* ─── TRANSFER FUNDS DRAWER ─────────────────────────────────── */}
-      <TransferFundsDrawer open={showTransfer} onClose={() => setShowTransfer(false)} defaultDirection="ho_to_mill" />
+      {/* ─── SEND FUNDS DRAWER (mill can only send to Head Office) ──── */}
+      <TransferFundsDrawer open={showTransfer} onClose={() => setShowTransfer(false)} lockDirection="mill_to_ho" />
 
       {/* ─── GIVE ADVANCE DRAWER ───────────────────────────────────── */}
       <SlideDrawer
