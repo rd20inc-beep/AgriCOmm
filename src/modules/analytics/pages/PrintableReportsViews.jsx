@@ -204,13 +204,13 @@ export function PnlReportView({ data, companyName, range, preset }) {
       {detail && (detail.export?.length > 0) && (
         <Section title="Export Sales — detail">
           <Table head={['Order', 'Customer', 'Product', 'Revenue (PKR)']} align={['left', 'left', 'left', 'right']}
-            rows={detail.export.map(r => [<RefLink to={`/export/${r.id}`}>{r.ref}</RefLink>, r.party || '—', r.item || '—', fmtPkr(r.amountPkr)])} empty="" />
+            rows={detail.export.map(r => [<RefLink to={`/export/${r.id}`}>{r.ref}</RefLink>, r.customerId ? <RefLink to={`/finance/statements?type=customer&id=${r.customerId}`}>{r.party}</RefLink> : (r.party || '—'), r.item || '—', fmtPkr(r.amountPkr)])} empty="" />
         </Section>
       )}
       {detail && (detail.local?.length > 0) && (
         <Section title="Local Sales — detail">
           <Table head={['Sale', 'Customer', 'Item', 'Revenue (PKR)']} align={['left', 'left', 'left', 'right']}
-            rows={detail.local.map(r => [r.lotId ? <RefLink to={`/lot-inventory/${r.lotId}`}>{r.ref}</RefLink> : r.ref, r.party || '—', r.item || '—', fmtPkr(r.amountPkr)])} empty="" />
+            rows={detail.local.map(r => [r.lotId ? <RefLink to={`/lot-inventory/${r.lotId}`}>{r.ref}</RefLink> : r.ref, r.customerId ? <RefLink to={`/finance/statements?type=customer&id=${r.customerId}`}>{r.party}</RefLink> : (r.party || '—'), r.item || '—', fmtPkr(r.amountPkr)])} empty="" />
         </Section>
       )}
       {detail && (detail.purchases?.length > 0) && (
@@ -222,7 +222,7 @@ export function PnlReportView({ data, companyName, range, preset }) {
       {detail && (detail.expenses?.length > 0) && (
         <Section title="Business Expenses — detail">
           <Table head={['Expense', 'Category', 'Payee', 'Type', 'Amount (PKR)']} align={['left', 'left', 'left', 'left', 'right']}
-            rows={detail.expenses.map(r => [r.ref, r.category || '—', r.party || '—', r.kind || '—', fmtPkr(r.amountPkr)])} empty="" />
+            rows={detail.expenses.map(r => [r.ref, r.category || '—', r.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.party}</RefLink> : (r.party || '—'), r.kind || '—', fmtPkr(r.amountPkr)])} empty="" />
         </Section>
       )}
       <Footer />
@@ -709,7 +709,8 @@ export function PnlAccrualView({ data, companyName, range, preset }) {
             rows={detail.sales.map(r => [
               r.channel,
               r.channel === 'Export' ? <RefLink to={`/export/${r.id}`}>{r.ref}</RefLink> : (r.lotId ? <RefLink to={`/lot-inventory/${r.lotId}`}>{r.ref}</RefLink> : r.ref),
-              r.party || '—', r.item || '—',
+              r.customerId ? <RefLink to={`/finance/statements?type=customer&id=${r.customerId}`}>{r.party}</RefLink> : (r.party || '—'),
+              r.item || '—',
               fmtPkr(r.revPkr), fmtPkr(r.cogsPkr), fmtPkr(r.grossPkr), r.revPkr > 0 ? pct(r.grossPkr / r.revPkr * 100) : '—',
             ])}
             empty=""
