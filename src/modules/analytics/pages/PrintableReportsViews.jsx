@@ -92,12 +92,12 @@ export function ProductionReportView({ data, companyName, range, preset }) {
               cells: [r.name, r.batchCount, fmtMt(r.rawMt), fmtMt(r.finishedMt), fmtPct(r.yieldPct)],
               detail: mine.length ? (
                 <MiniTable
-                  head={['Batch', 'Supplier', 'Status', 'Raw MT', 'Finished MT', 'Yield %', 'Created']}
-                  align={['left', 'left', 'left', 'right', 'right', 'right', 'left']}
+                  head={['Batch', 'Supplier', 'Status', 'Raw MT', 'Finished MT', 'kg', 'Per kg', 'Katta', 'Yield %', 'Created']}
+                  align={['left', 'left', 'left', 'right', 'right', 'right', 'right', 'right', 'right', 'left']}
                   rows={mine.map(b => [
                     <RefLink to={`/milling/${b.id}`}>{b.isBlend ? `${b.batchNo} (blend)` : b.batchNo}</RefLink>,
                     b.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${b.supplierId}`}>{b.supplierName}</RefLink> : (b.supplierName || '—'),
-                    b.status, fmtMt(b.rawMt), fmtMt(b.finishedMt), fmtPct(b.yieldPct), fmtDate(b.createdAt),
+                    b.status, fmtMt(b.rawMt), fmtMt(b.finishedMt), fmtKg(b.finishedMt * 1000), fmtPkr(b.perKgFinished), fmtKg(b.bags), fmtPct(b.yieldPct), fmtDate(b.createdAt),
                   ])}
                 />
               ) : null,

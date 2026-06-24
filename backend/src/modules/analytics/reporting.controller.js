@@ -496,7 +496,7 @@ const reportingController = {
         .select(
           'b.id', 'b.batch_no', 'b.status', 'b.processing_type', 'b.supplier_id',
           'b.raw_qty_mt', 'b.planned_finished_mt', 'b.actual_finished_mt', 'b.yield_pct',
-          'b.created_at', 'b.completed_at',
+          'b.total_cost_per_kg_finished', 'b.created_at', 'b.completed_at',
           'm.name as mill_name',
           's.name as supplier_name',
           'p.name as product_name',
@@ -505,6 +505,16 @@ const reportingController = {
         .orderBy('b.created_at', 'asc');
 
       const num = (v) => parseFloat(v) || 0;
+      // Finished-output katta per batch — sum the finished lots' bags, keyed by
+      // batch_ref ('batch-<id>'), so the per-batch detail can show bag counts.
+      const bagsByBatch = {};
+      if (batches.length) {
+        const refs = batches.map((b) => `batch-${b.id}`);
+        const bagRows = await db('inventory_lots')
+          .whereIn('batch_ref', refs).where('type', 'finished')
+          .select('batch_ref').sum({ bags: 'total_bags' }).groupBy('batch_ref');
+        for (const r of bagRows) bagsByBatch[r.batch_ref] = parseInt(r.bags, 10) || 0;
+      }
       // A blend re-mills already-finished OWNED rice, so its raw_qty_mt is
       // finished rice re-entering as "raw" — counting it as raw input
       // double-counts the original purchase. Keep blends out of the raw/
@@ -571,6 +581,8 @@ const reportingController = {
             plannedMt: num(b.planned_finished_mt),
             finishedMt: num(b.actual_finished_mt),
             yieldPct: num(b.yield_pct) || (num(b.raw_qty_mt) > 0 ? num(b.actual_finished_mt) / num(b.raw_qty_mt) * 100 : 0),
+            perKgFinished: num(b.total_cost_per_kg_finished),
+            bags: bagsByBatch[`batch-${b.id}`] || 0,
             millName: b.mill_name,
             supplierName: b.supplier_name,
             supplierId: b.supplier_id,
