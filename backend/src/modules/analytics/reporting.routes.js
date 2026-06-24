@@ -54,6 +54,7 @@ router.get('/printable/ap-aging',   authorize('reports', 'view'), controller.pri
 router.get('/printable/purchase-ledger', authorize('reports', 'view'), controller.printablePurchaseLedger);
 router.get('/printable/sales-ledger',     authorize('reports', 'view'), controller.printableSalesLedger);
 router.get('/printable/stock-detail',     authorize('reports', 'view'), controller.printableStockDetail);
+router.get('/printable/sweeping',         authorize('reports', 'view'), controller.printableSweeping);
 
 // ═══════════════════════════════════════════════════════════════════
 // Production

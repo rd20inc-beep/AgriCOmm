@@ -494,7 +494,7 @@ const reportingController = {
         .leftJoin('suppliers as s', 'b.supplier_id', 's.id')
         .leftJoin('products as p', 'b.product_id', 'p.id')
         .select(
-          'b.id', 'b.batch_no', 'b.status', 'b.processing_type',
+          'b.id', 'b.batch_no', 'b.status', 'b.processing_type', 'b.supplier_id',
           'b.raw_qty_mt', 'b.planned_finished_mt', 'b.actual_finished_mt', 'b.yield_pct',
           'b.created_at', 'b.completed_at',
           'm.name as mill_name',
@@ -573,6 +573,7 @@ const reportingController = {
             yieldPct: num(b.yield_pct) || (num(b.raw_qty_mt) > 0 ? num(b.actual_finished_mt) / num(b.raw_qty_mt) * 100 : 0),
             millName: b.mill_name,
             supplierName: b.supplier_name,
+            supplierId: b.supplier_id,
             productName: b.product_name,
             createdAt: b.created_at,
             completedAt: b.completed_at,
@@ -813,7 +814,7 @@ const reportingController = {
         .whereNotIn('r.status', ['Paid', 'Written Off'])
         .where('r.outstanding', '>', 0)
         .select(
-          'r.id', 'r.recv_no', 'r.due_date', 'r.outstanding',
+          'r.id', 'r.recv_no', 'r.due_date', 'r.outstanding', 'r.customer_id',
           'r.currency', 'r.fx_rate', 'r.base_amount_pkr', 'r.type',
           db.raw('COALESCE(c.name, eo.order_no) as counterparty'),
           'eo.order_no'
@@ -836,7 +837,7 @@ const reportingController = {
         totalPkr += outPkr;
         return {
           recvNo: r.recv_no, dueDate: r.due_date,
-          counterparty: r.counterparty || '—',
+          counterparty: r.counterparty || '—', customerId: r.customer_id,
           type: r.type, currency: cur,
           outstanding: out, outstandingPkr: outPkr,
           ageDays: days, bucket,
@@ -867,7 +868,7 @@ const reportingController = {
         .whereNotIn('p.status', ['Paid', 'Written Off'])
         .where('p.outstanding', '>', 0)
         .select(
-          'p.id', 'p.pay_no', 'p.due_date', 'p.outstanding', 'p.source_table',
+          'p.id', 'p.pay_no', 'p.due_date', 'p.outstanding', 'p.source_table', 'p.supplier_id',
           db.raw("COALESCE(s.name, p.linked_ref, 'Vendor') as counterparty")
         )
         .orderBy('p.due_date', 'asc');
@@ -884,7 +885,7 @@ const reportingController = {
         totalPkr += outPkr;
         return {
           payableNo: r.pay_no, dueDate: r.due_date,
-          counterparty: r.counterparty || '—',
+          counterparty: r.counterparty || '—', supplierId: r.supplier_id,
           sourceTable: r.source_table,
           outstandingPkr: outPkr,
           ageDays: days, bucket,
@@ -1112,6 +1113,43 @@ const reportingController = {
       const millStore = ms.map((m) => ({ name: m.name, category: m.category, unit: m.unit, qty: parseFloat(m.quantity_available) || 0, costPerUnit: parseFloat(m.avg_cost_per_unit) || 0, supplier: m.supplier }));
       return res.json({ success: true, data: { rows, millStore, totals: { lots: rows.length, mt: rows.reduce((s, r) => s + r.onHandMt, 0), valuePkr: rows.reduce((s, r) => s + r.valuePkr, 0), millStoreValue: millStore.reduce((s, m) => s + m.qty * m.costPerUnit, 0) } } });
     } catch (err) { console.error('Stock detail error:', err); return res.status(500).json({ success: false, message: 'Internal server error.' }); }
+  },
+
+  // ── Sweeping report — every sweeping output lot traced to the milling batch it
+  // came from and the raw-rice supplier, so you can see the sweeping yield per
+  // milled lot. ──
+  async printableSweeping(req, res) {
+    try {
+      const db = require('../../config/database');
+      const { status = 'Available' } = req.query;
+      let q = db('inventory_lots as l').leftJoin('suppliers as s', 'l.supplier_id', 's.id')
+        .where((b) => b.where('l.item_name', 'ilike', '%sweeping%').orWhere('l.grade', 'ilike', '%sweeping%'));
+      if (status && status !== 'all') q = q.where('l.status', status);
+      const lots = await q.select(
+        'l.id', 'l.lot_no', 'l.item_name', 'l.grade', 'l.variety', 'l.batch_ref', 'l.blend_batch_no',
+        'l.status', 'l.supplier_id', 'l.total_bags', 'l.available_qty', 's.name as supplier_name',
+        db.raw('COALESCE(NULLIF(l.net_weight_kg,0), l.qty*1000) as kg'),
+        db.raw('COALESCE(NULLIF(l.landed_cost_per_kg,0), NULLIF(l.rate_per_kg,0), l.cost_per_unit/1000.0, 0) as cost_per_kg'),
+      ).orderBy('l.lot_no');
+      // Trace each sweeping lot back to its batch (batch_ref='batch-<id>') + raw supplier + raw input MT.
+      const ids = [...new Set(lots.map((l) => l.batch_ref).filter(Boolean).map((r) => parseInt(String(r).replace(/^batch-/, ''), 10)).filter(Boolean))];
+      const bi = {};
+      if (ids.length) {
+        const bs = await db('milling_batches as mb').leftJoin('suppliers as s', 'mb.supplier_id', 's.id').leftJoin('products as p', 'mb.product_id', 'p.id')
+          .whereIn('mb.id', ids).select('mb.id', 'mb.batch_no', 'mb.raw_qty_mt', 'mb.created_at', 's.name as raw_supplier', 's.id as raw_supplier_id', 'p.name as product');
+        for (const b of bs) bi[`batch-${b.id}`] = { batchId: b.id, batchNo: b.batch_no, rawSupplier: b.raw_supplier, rawSupplierId: b.raw_supplier_id, product: b.product, rawMt: parseFloat(b.raw_qty_mt) || 0, date: b.created_at };
+      }
+      const rows = lots.map((l) => {
+        const kg = parseFloat(l.kg) || 0; const cpk = parseFloat(l.cost_per_kg) || 0; const b = bi[l.batch_ref] || {};
+        return { lotId: l.id, lotNo: l.lot_no, batchId: b.batchId, batchNo: b.batchNo || l.blend_batch_no || null,
+          rawSupplier: b.rawSupplier || l.supplier_name || null, rawSupplierId: b.rawSupplierId || l.supplier_id || null,
+          milledProduct: b.product || null, rawMt: b.rawMt || null, date: b.date,
+          sweepingMt: kg / 1000, availableMt: parseFloat(l.available_qty) || 0, ratePerKg: cpk, valuePkr: kg * cpk,
+          bags: l.total_bags, status: l.status };
+      });
+      const totals = { lots: rows.length, sweepingMt: rows.reduce((s, r) => s + r.sweepingMt, 0), valuePkr: rows.reduce((s, r) => s + r.valuePkr, 0), batches: new Set(rows.map((r) => r.batchNo).filter(Boolean)).size };
+      return res.json({ success: true, data: { rows, totals } });
+    } catch (err) { console.error('Sweeping report error:', err); return res.status(500).json({ success: false, message: 'Internal server error.' }); }
   },
 };
 

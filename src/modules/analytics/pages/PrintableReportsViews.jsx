@@ -84,8 +84,9 @@ export function ProductionReportView({ data, companyName, range, preset }) {
           head={['Batch No', 'Supplier', 'Product', 'Status', 'Raw MT', 'Finished MT', 'Yield %', 'Created']}
           align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'left']}
           rows={batches.map(b => [
-            b.isBlend ? `${b.batchNo} (blend)` : b.batchNo,
-            b.supplierName || '—', b.productName || '—',
+            <RefLink to={`/milling/${b.id}`}>{b.isBlend ? `${b.batchNo} (blend)` : b.batchNo}</RefLink>,
+            b.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${b.supplierId}`}>{b.supplierName}</RefLink> : (b.supplierName || '—'),
+            b.productName || '—',
             b.status, fmtMt(b.rawMt), fmtMt(b.finishedMt), fmtPct(b.yieldPct), fmtDate(b.createdAt),
           ])}
           empty="No batches in this period."
@@ -274,14 +275,17 @@ export function AgingReportView({ data, companyName, kind }) {
             'Outstanding (PKR)',
           ]}
           align={['left', 'left', 'left', 'right', 'left', 'right']}
-          rows={rows.map(r => [
-            isAR ? r.recvNo : r.payableNo,
-            r.counterparty,
-            r.dueDate ? fmtDate(r.dueDate) : '—',
-            r.ageDays,
-            r.bucket,
-            fmtPkr(r.outstandingPkr),
-          ])}
+          rows={rows.map(r => {
+            const partyId = isAR ? r.customerId : r.supplierId;
+            return [
+              isAR ? r.recvNo : r.payableNo,
+              partyId ? <RefLink to={`/finance/statements?type=${isAR ? 'customer' : 'supplier'}&id=${partyId}`}>{r.counterparty}</RefLink> : r.counterparty,
+              r.dueDate ? fmtDate(r.dueDate) : '—',
+              r.ageDays,
+              r.bucket,
+              fmtPkr(r.outstandingPkr),
+            ];
+          })}
           empty="No open balances."
         />
       </Section>
@@ -491,6 +495,39 @@ export function StockDetailView({ data, companyName }) {
           />
         </Section>
       )}
+      <Footer />
+    </div>
+  );
+}
+
+// ─── Sweeping report ───────────────────────────────────────────────────
+export function SweepingReportView({ data, companyName }) {
+  const { rows, totals } = data;
+  return (
+    <div className="print-report space-y-6 text-sm text-gray-900">
+      <Header companyName={companyName} title="Sweeping Output" subtitle={`As of ${new Date().toLocaleString()}`} />
+      <SummaryRow items={[
+        { label: 'Sweeping Lots', value: totals.lots },
+        { label: 'From Batches', value: totals.batches },
+        { label: 'Total Sweeping', value: `${fmtMt(totals.sweepingMt)} MT` },
+        { label: 'Total Value', value: fmtPkr(totals.valuePkr) },
+      ]} />
+      <Section title="Sweeping by lot — milled from which batch & raw supplier">
+        <Table
+          head={['Lot', 'From Batch', 'Raw Supplier', 'Rice Milled', 'Raw In (MT)', 'Sweeping (MT)', 'Available', 'Rate/kg', 'Value (PKR)', 'Status']}
+          align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'right', 'right', 'left']}
+          rows={rows.map(r => [
+            <RefLink to={`/lot-inventory/${r.lotId}`}>{r.lotNo}</RefLink>,
+            r.batchId ? <RefLink to={`/milling/${r.batchId}`}>{r.batchNo}</RefLink> : (r.batchNo || '—'),
+            r.rawSupplierId ? <RefLink to={`/finance/statements?type=supplier&id=${r.rawSupplierId}`}>{r.rawSupplier}</RefLink> : (r.rawSupplier || '—'),
+            r.milledProduct || '—',
+            r.rawMt != null ? fmtMt(r.rawMt) : '—',
+            fmtMt(r.sweepingMt), fmtMt(r.availableMt), fmtPkr(r.ratePerKg), fmtPkr(r.valuePkr), r.status || '—',
+          ])}
+          empty="No sweeping output yet."
+          totalRow={['', '', '', '', '', fmtMt(totals.sweepingMt), '', '', fmtPkr(totals.valuePkr), '']}
+        />
+      </Section>
       <Footer />
     </div>
   );
