@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Printer, RefreshCw, Calendar, Factory, Boxes, TrendingUp, Wallet, ArrowDownLeft, ArrowUpRight, ShoppingCart, FileText, Package } from 'lucide-react';
+import { Printer, RefreshCw, Calendar, Factory, Boxes, TrendingUp, Wallet, ArrowDownLeft, ArrowUpRight, ShoppingCart, FileText, Package, Sparkles } from 'lucide-react';
 import api from '../../../api/client';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
+import { useSummarizeReport } from '../../../api/queries';
 import {
   ProductionReportView, StockReportView,
   PnlReportView, CashflowReportView, AgingReportView,
@@ -39,6 +40,58 @@ function presetRange(preset) {
   }
 }
 
+
+// Compact figures (no big arrays) for the AI narrative, per report type.
+function buildSummaryFigures(reportType, data, range) {
+  const rng = range ? `${new Date(range.from).toISOString().slice(0, 10)} to ${new Date(range.to).toISOString().slice(0, 10)}` : undefined;
+  if (reportType === 'pnl_accrual') {
+    return { range: rng, basis: 'accrual', revenue: data.revenue?.totalPkr, cogs: data.cogs?.totalPkr, grossProfit: data.grossProfitPkr, grossMarginPct: data.grossMarginPct, operatingExpenses: data.opex?.totalPkr, netProfit: data.netProfitPkr, netMarginPct: data.netMarginPct, inventoryOnHand: data.inventoryOnHandPkr, topExpenseCategories: (data.opex?.byCategory || []).slice(0, 5) };
+  }
+  if (reportType === 'pnl') {
+    return { range: rng, basis: 'cash', revenue: data.revenue?.totalPkr, totalCosts: data.costs?.totalPkr, netProfit: data.netProfitPkr, marginPct: data.marginPct, millOutputMt: data.revenue?.millFinishedMt };
+  }
+  // cashflow
+  return { range: rng, ...(data.summary || {}) };
+}
+const SUMMARY_KIND = { pnl: 'pnl', pnl_accrual: 'pnl_accrual', cashflow: 'cashflow' };
+
+function ReportSummaryCard({ reportType, data, range }) {
+  const mut = useSummarizeReport();
+  const [text, setText] = useState('');
+  const [off, setOff] = useState(false);
+  // Reset when the report or period changes.
+  useEffect(() => { setText(''); setOff(false); }, [reportType, range?.from, range?.to]);
+  if (!SUMMARY_KIND[reportType] || !data) return null;
+
+  async function run() {
+    try {
+      const res = await mut.mutateAsync({ kind: SUMMARY_KIND[reportType], figures: buildSummaryFigures(reportType, data, range) });
+      const d = res?.data || res;
+      if (d?.aiEnabled === false) { setOff(true); return; }
+      setText(d?.summary || '');
+    } catch { setText(''); }
+  }
+
+  return (
+    <div className="mb-4 rounded-xl border border-violet-100 bg-violet-50/40 p-4 print:border-gray-300 print:bg-white">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-semibold text-violet-700 inline-flex items-center gap-1.5 print:text-gray-800"><Sparkles className="w-3.5 h-3.5" /> AI Summary</span>
+        {!text && !off && (
+          <button onClick={run} disabled={mut.isPending}
+            className="print:hidden inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">
+            <Sparkles className={`w-3.5 h-3.5 ${mut.isPending ? 'animate-pulse' : ''}`} /> {mut.isPending ? 'Summarising…' : 'Summarise'}
+          </button>
+        )}
+        {text && (
+          <button onClick={run} disabled={mut.isPending} className="print:hidden text-[11px] font-medium text-violet-600 hover:text-violet-700">Regenerate</button>
+        )}
+      </div>
+      {off && <p className="text-xs text-gray-500 mt-2">AI is off — set <code>OPENAI_API_KEY</code> on the server to enable narrative summaries.</p>}
+      {text && <p className="text-sm text-gray-800 mt-2 leading-relaxed">{text}</p>}
+      {!text && !off && !mut.isPending && <p className="text-xs text-gray-400 mt-2 print:hidden">Generate a plain-English read of this report.</p>}
+    </div>
+  );
+}
 
 const STOCK_GROUP_OPTIONS = [
   { key: 'subtype',   label: 'By Byproduct (B1/B2/Sortex/...)' },
@@ -237,7 +290,9 @@ export default function PrintableReports() {
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8 print:shadow-none print:border-0 print:rounded-none print:p-0 printable-area">
         {loading || !data ? (
           <div className="text-center text-gray-400 py-12">Loading report…</div>
-        ) : reportType === 'production' && data.summary && data.batches ? (
+        ) : (<>
+          <ReportSummaryCard reportType={reportType} data={data} range={range} />
+          {reportType === 'production' && data.summary && data.batches ? (
           <ProductionReportView data={data} companyName={companyName} range={range} preset={preset} />
         ) : reportType === 'stock' && data.grand && data.rows ? (
           <StockReportView data={data} companyName={companyName} groupLabel={STOCK_GROUP_OPTIONS.find(o => o.key === stockGroupBy)?.label} />
@@ -259,9 +314,10 @@ export default function PrintableReports() {
           <SalesLedgerView data={data} companyName={companyName} range={range} />
         ) : reportType === 'stock_detail' && data.rows && data.millStore !== undefined ? (
           <StockDetailView data={data} companyName={companyName} />
-        ) : (
-          <div className="text-center text-gray-400 py-12">No data.</div>
-        )}
+          ) : (
+            <div className="text-center text-gray-400 py-12">No data.</div>
+          )}
+        </>)}
       </div>
 
     </div>

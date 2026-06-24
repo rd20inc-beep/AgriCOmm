@@ -1237,6 +1237,11 @@ const reportingController = {
       const invRow = await db('inventory_lots').whereIn('type', ['raw', 'finished']).where('status', 'Available')
         .select(db.raw('COALESCE(SUM((CASE WHEN net_weight_kg>0 THEN net_weight_kg ELSE qty*1000 END) * COALESCE(NULLIF(landed_cost_per_kg,0),NULLIF(rate_per_kg,0),cost_per_unit/1000.0,0)),0) as val')).first();
 
+      // Inventory roll-forward: raw purchases LANDED in the period (cost basis,
+      // full intake qty — this is what was added to inventory when bought).
+      const purchaseRow = await db('inventory_lots').where('type', 'raw').whereBetween('created_at', [fromDate, toDate])
+        .select(db.raw('COALESCE(SUM((CASE WHEN received_net_weight_kg>0 THEN received_net_weight_kg WHEN net_weight_kg>0 THEN net_weight_kg ELSE qty*1000 END) * COALESCE(NULLIF(landed_cost_per_kg,0),NULLIF(rate_per_kg,0),cost_per_unit/1000.0,0)),0) as val')).first();
+
       const revenue = { exportPkr: num(exportRow.rev), exportCount: parseInt(exportRow.cnt, 10) || 0, localPkr: num(localRow.rev), localCount: parseInt(localRow.cnt, 10) || 0 };
       revenue.totalPkr = revenue.exportPkr + revenue.localPkr;
       const cogs = { exportPkr: num(exportRow.cogs), localPkr: num(localRow.cogs) };
@@ -1266,6 +1271,15 @@ const reportingController = {
           range: { from: fromDate.toISOString(), to: toDate.toISOString() },
           revenue, cogs, grossProfitPkr, grossMarginPct, opex, netProfitPkr, netMarginPct,
           inventoryOnHandPkr: num(invRow.val),
+          // Roll-forward identity: Opening + Purchases − COGS = Closing. Closing is
+          // the current on-hand value; opening is derived so the identity holds
+          // exactly (no historical snapshot exists), reconciling COGS to inventory.
+          inventory: (() => {
+            const closingPkr = num(invRow.val);
+            const purchasesPkr = num(purchaseRow.val);
+            const openingPkr = closingPkr - purchasesPkr + cogs.totalPkr;
+            return { openingPkr, purchasesPkr, cogsPkr: cogs.totalPkr, closingPkr };
+          })(),
           detail: { sales, expenses: opex.byCategory },
         },
       });

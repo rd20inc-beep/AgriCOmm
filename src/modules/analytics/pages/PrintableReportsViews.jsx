@@ -608,7 +608,7 @@ export function SweepingReportView({ data, companyName }) {
 
 // ─── Accrual P&L (revenue vs COGS-of-goods-sold) ───────────────────────
 export function PnlAccrualView({ data, companyName, range, preset }) {
-  const { revenue, cogs, grossProfitPkr, grossMarginPct, opex, netProfitPkr, netMarginPct, inventoryOnHandPkr, detail } = data;
+  const { revenue, cogs, grossProfitPkr, grossMarginPct, opex, netProfitPkr, netMarginPct, inventoryOnHandPkr, inventory, detail } = data;
   const periodLabel = preset === 'daily' ? 'Daily' : preset === 'weekly' ? 'Weekly' : preset === 'monthly' ? 'Monthly' : 'Custom Range';
   const pct = (n) => `${(n || 0).toFixed(1)}%`;
   return (
@@ -667,6 +667,27 @@ export function PnlAccrualView({ data, companyName, range, preset }) {
           empty=""
         />
       </Section>
+
+      {inventory && (
+        <Section title="Inventory Roll-Forward (cost basis)">
+          <Table
+            head={['Line', 'Amount (PKR)']}
+            align={['left', 'right']}
+            rows={[
+              ['Opening inventory', fmtPkr(inventory.openingPkr)],
+              ['Add: Raw purchases landed (this period)', fmtPkr(inventory.purchasesPkr)],
+              ['Less: COGS (cost of goods sold)', `(${fmtPkr(inventory.cogsPkr)})`],
+            ]}
+            totalRow={['= Closing inventory on hand', fmtPkr(inventory.closingPkr)]}
+            empty=""
+          />
+          <p className="text-[11px] text-gray-500 mt-1 print:text-gray-700">
+            Identity: Opening + Purchases − COGS = Closing. Closing is the current on-hand cost; opening is derived so the
+            roll-forward ties out exactly (the system keeps no historical stock snapshot). This reconciles the period's COGS
+            to the change in inventory value.
+          </p>
+        </Section>
+      )}
 
       {detail && (detail.sales?.length > 0) && (
         <Section title="Sales — detail (revenue, COGS, gross)">

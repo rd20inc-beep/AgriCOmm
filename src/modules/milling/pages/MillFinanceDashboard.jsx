@@ -4,12 +4,12 @@ import {
   DollarSign, Users, Zap, Shield, TrendingUp, TrendingDown, AlertTriangle,
   Plus, UserPlus, Package, Factory, Wallet, ArrowUpRight, ArrowDownRight, Printer,
   Building2, Banknote, Receipt, Layers, Truck, ExternalLink,
-  Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X, FileText, RefreshCw,
+  Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X, FileText, RefreshCw, Sparkles,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import {
-  useMillExpenses, useCreateMillExpense, useRecurringExpenses, useMaterializeRecurring, useRunDueRecurring, useMillWorkers, useCreateMillWorker,
+  useMillExpenses, useCreateMillExpense, useRecurringExpenses, useMaterializeRecurring, useRunDueRecurring, useCategorizeExpense, useMillWorkers, useCreateMillWorker,
   useUpdateMillWorker, useDeleteMillWorker, useCreateWorkerAdvance, useWorkerAdvances,
   useDeleteWorkerAdvance,
   usePayrollSummary, useRecordAttendance, useAttendance, useBulkAttendance, useAttendanceHolidays, useInventory, useExpenseVendors,
@@ -151,6 +151,26 @@ export default function MillFinanceDashboard() {
   const recurring = recurringData?.recurring || [];
   const materializeMut = useMaterializeRecurring();
   const runDueMut = useRunDueRecurring();
+  const categorizeMut = useCategorizeExpense();
+
+  async function handleSuggestCategory() {
+    const description = expForm.description?.trim();
+    const vendor_name = expForm.vendor_name?.trim();
+    if (!description && !vendor_name) return;
+    try {
+      const res = await categorizeMut.mutateAsync({ description, vendor_name });
+      const d = res?.data || res;
+      if (d?.aiEnabled === false) { window.alert(d.message || 'AI is off.'); return; }
+      if (d?.category) {
+        setExpForm(p => ({
+          ...p,
+          category: d.category,
+          vendor_preset: '', vendor_name: '', employee_id: '',
+          subcategory: (d.category !== 'salaries' && d.subcategory) ? d.subcategory : '',
+        }));
+      }
+    } catch (e) { window.alert(`Could not suggest a category: ${e?.message || e}`); }
+  }
 
   async function handleMaterialize(r) {
     try {
@@ -1672,7 +1692,18 @@ export default function MillFinanceDashboard() {
           )}
 
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Description</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-medium text-gray-600">Description</label>
+              <button
+                type="button"
+                onClick={handleSuggestCategory}
+                disabled={categorizeMut.isPending || !(expForm.description?.trim() || expForm.vendor_name?.trim())}
+                title="Let AI pick the category from the description"
+                className="inline-flex items-center gap-1 text-[11px] font-medium text-violet-600 hover:text-violet-700 disabled:opacity-40"
+              >
+                <Sparkles className={`w-3 h-3 ${categorizeMut.isPending ? 'animate-pulse' : ''}`} /> {categorizeMut.isPending ? 'Thinking…' : 'Suggest category'}
+              </button>
+            </div>
             <input
               type="text"
               value={expForm.description}

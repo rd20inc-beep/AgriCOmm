@@ -1180,6 +1180,16 @@ export function useMaterializeRecurring() {
   });
 }
 
+// AI: suggest an expense category from its description (opt-in OPENAI_API_KEY).
+export function useCategorizeExpense() {
+  return useMutation({ mutationFn: (body) => api.post('/api/ai/categorize-expense', body) });
+}
+
+// AI: plain-English narrative summary of a computed report.
+export function useSummarizeReport() {
+  return useMutation({ mutationFn: (body) => api.post('/api/ai/summarize-report', body) });
+}
+
 export function useRunDueRecurring() {
   const qc = useQueryClient();
   return useMutation({

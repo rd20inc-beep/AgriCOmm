@@ -173,4 +173,50 @@ router.get('/anomalies', async (req, res) => {
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ── 4) Auto-categorise an expense from its free-text description ──
+const EXPENSE_CATS = ['salaries', 'utilities', 'rent', 'maintenance', 'insurance', 'transport', 'fuel', 'packaging', 'inspection', 'freight', 'commission', 'miscellaneous'];
+router.post('/categorize-expense', async (req, res) => {
+  try {
+    if (!ai.enabled()) return res.json(OFF);
+    const description = String(req.body.description || '').trim();
+    const vendor = String(req.body.vendor_name || '').trim();
+    if (!description && !vendor) return res.status(400).json({ success: false, message: 'A description (or vendor) is required.' });
+
+    const out = await ai.complete({
+      system: 'You categorise expenses for a rice-mill ERP. Output JSON only — no prose, no markdown.',
+      prompt: `Allowed categories (choose EXACTLY one): ${EXPENSE_CATS.join(', ')}.\n`
+        + `Expense description: "${description}"${vendor ? `\nVendor/payee: "${vendor}"` : ''}\n\n`
+        + 'Pick the single best category. Also suggest a short subcategory/detail (1-3 words, e.g. "Electricity", "Generator diesel", "Boiler repair") or "" if none is obvious. '
+        + 'Rate your confidence 0-1.\nReturn JSON: {"category":"<one allowed value>","subcategory":"<short or empty>","confidence":<0-1>}.',
+      json: true, maxTokens: 120,
+    });
+    let category = String(out.category || '').toLowerCase().trim();
+    if (!EXPENSE_CATS.includes(category)) category = 'miscellaneous';
+    const confidence = Math.max(0, Math.min(1, parseFloat(out.confidence) || 0));
+    return res.json({ success: true, data: { aiEnabled: true, category, subcategory: String(out.subcategory || '').trim(), confidence } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── 5) Plain-English narrative summary of a computed report ──
+const SUMMARY_KINDS = { pnl: 'cash-basis Profit & Loss', pnl_accrual: 'accrual-basis Profit & Loss', cashflow: 'Cash Flow' };
+router.post('/summarize-report', async (req, res) => {
+  try {
+    if (!ai.enabled()) return res.json(OFF);
+    const kind = String(req.body.kind || '').trim();
+    const figures = req.body.figures;
+    if (!SUMMARY_KINDS[kind]) return res.status(400).json({ success: false, message: 'kind must be one of: ' + Object.keys(SUMMARY_KINDS).join(', ') });
+    if (!figures || typeof figures !== 'object') return res.status(400).json({ success: false, message: 'figures object is required.' });
+
+    const out = await ai.complete({
+      system: 'You are a financial controller summarising reports for AGRI COMMODITIES, a rice trading company in Pakistan. Output JSON only.',
+      prompt: `Report: ${SUMMARY_KINDS[kind]}${figures.range ? ` for ${figures.range}` : ''}. All amounts are PKR.\n`
+        + `Figures (already computed — use ONLY these, never invent numbers):\n${JSON.stringify(figures)}\n\n`
+        + 'Write a concise 2-4 sentence plain-English summary a manager can read at a glance: the headline result, the biggest driver(s), and one thing to watch. '
+        + 'Refer to the exact figures. Be direct; no markdown, no bullet lists.\nReturn JSON: {"summary":"<text>"}.',
+      json: true, maxTokens: 400,
+    });
+    return res.json({ success: true, data: { aiEnabled: true, kind, summary: String(out.summary || '').trim() } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
 module.exports = router;
