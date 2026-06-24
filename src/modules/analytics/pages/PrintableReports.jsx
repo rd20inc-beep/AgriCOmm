@@ -6,7 +6,7 @@ import { useAuth } from '../../../context/AuthContext';
 import {
   ProductionReportView, StockReportView,
   PnlReportView, CashflowReportView, AgingReportView,
-  PurchaseLedgerView, SalesLedgerView, StockDetailView,
+  PurchaseLedgerView, SalesLedgerView, StockDetailView, PnlAccrualView,
 } from './PrintableReportsViews';
 
 // ─── Period helpers ────────────────────────────────────────────────────
@@ -59,7 +59,7 @@ export default function PrintableReports() {
   const millScoped = user?.role === 'Mill Manager';
   const REPORT_TYPES = millScoped
     ? ['production', 'stock', 'stock_detail', 'purchase_ledger']
-    : ['production', 'stock', 'stock_detail', 'purchase_ledger', 'sales_ledger', 'pnl', 'cashflow', 'ar_aging', 'ap_aging'];
+    : ['production', 'stock', 'stock_detail', 'purchase_ledger', 'sales_ledger', 'pnl_accrual', 'pnl', 'cashflow', 'ar_aging', 'ap_aging'];
 
   const [reportType, setReportType] = useState('production'); // 'production' | 'stock' | 'pnl' | 'cashflow' | 'ar_aging' | 'ap_aging'
   const [preset, setPreset] = useState('monthly');
@@ -71,7 +71,7 @@ export default function PrintableReports() {
 
   // Period-based reports use the period selector; snapshot reports
   // (stock + AR/AP aging) ignore it.
-  const usesPeriod = ['production', 'pnl', 'cashflow', 'purchase_ledger', 'sales_ledger'].includes(reportType);
+  const usesPeriod = ['production', 'pnl', 'pnl_accrual', 'cashflow', 'purchase_ledger', 'sales_ledger'].includes(reportType);
 
   const range = useMemo(() => {
     if (preset === 'custom' && customFrom && customTo) {
@@ -94,6 +94,8 @@ export default function PrintableReports() {
         res = await api.get('/api/reporting/printable/production', periodParams);
       } else if (reportType === 'pnl') {
         res = await api.get('/api/reporting/printable/pnl', periodParams);
+      } else if (reportType === 'pnl_accrual') {
+        res = await api.get('/api/reporting/printable/pnl-accrual', periodParams);
       } else if (reportType === 'cashflow') {
         res = await api.get('/api/reporting/printable/cashflow', periodParams);
       } else if (reportType === 'ar_aging') {
@@ -154,7 +156,8 @@ export default function PrintableReports() {
               { k: 'stock_detail',   l: 'Stock (detail)', i: Package },
               { k: 'purchase_ledger', l: 'Purchases',     i: ShoppingCart },
               { k: 'sales_ledger',   l: 'Sales',          i: FileText },
-              { k: 'pnl',        l: 'P&L',        i: TrendingUp },
+              { k: 'pnl_accrual', l: 'P&L (accrual)', i: TrendingUp },
+              { k: 'pnl',        l: 'P&L (cash)',  i: TrendingUp },
               { k: 'cashflow',   l: 'Cashflow',   i: Wallet },
               { k: 'ar_aging',   l: 'AR Aging',   i: ArrowDownLeft },
               { k: 'ap_aging',   l: 'AP Aging',   i: ArrowUpRight },
@@ -231,6 +234,8 @@ export default function PrintableReports() {
           <ProductionReportView data={data} companyName={companyName} range={range} preset={preset} />
         ) : reportType === 'stock' && data.grand && data.rows ? (
           <StockReportView data={data} companyName={companyName} groupLabel={STOCK_GROUP_OPTIONS.find(o => o.key === stockGroupBy)?.label} />
+        ) : reportType === 'pnl_accrual' && data.revenue && data.cogs ? (
+          <PnlAccrualView data={data} companyName={companyName} range={range} preset={preset} />
         ) : reportType === 'pnl' && data.revenue && data.costs ? (
           <PnlReportView data={data} companyName={companyName} range={range} preset={preset} />
         ) : reportType === 'cashflow' && data.summary ? (

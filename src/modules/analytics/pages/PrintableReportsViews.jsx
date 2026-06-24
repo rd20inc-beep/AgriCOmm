@@ -603,3 +603,85 @@ export function SweepingReportView({ data, companyName }) {
     </div>
   );
 }
+
+// ─── Accrual P&L (revenue vs COGS-of-goods-sold) ───────────────────────
+export function PnlAccrualView({ data, companyName, range, preset }) {
+  const { revenue, cogs, grossProfitPkr, grossMarginPct, opex, netProfitPkr, netMarginPct, inventoryOnHandPkr, detail } = data;
+  const periodLabel = preset === 'daily' ? 'Daily' : preset === 'weekly' ? 'Weekly' : preset === 'monthly' ? 'Monthly' : 'Custom Range';
+  const pct = (n) => `${(n || 0).toFixed(1)}%`;
+  return (
+    <div className="print-report space-y-6 text-sm text-gray-900">
+      <Header companyName={companyName} title={`${periodLabel} P&L — Accrual`} subtitle={range ? `${fmtDate(range.from)} – ${fmtDate(range.to)}` : ''} />
+      <SummaryRow items={[
+        { label: 'Revenue', value: fmtPkr(revenue.totalPkr) },
+        { label: 'COGS', value: fmtPkr(cogs.totalPkr) },
+        { label: 'Gross Profit', value: fmtPkr(grossProfitPkr) },
+        { label: 'Op. Expenses', value: fmtPkr(opex.totalPkr) },
+        { label: 'Net Profit', value: fmtPkr(netProfitPkr) },
+      ]} />
+
+      <div className="text-xs text-gray-600 border border-gray-200 rounded p-2 bg-gray-50">
+        Accrual basis: cost of goods <span className="font-medium">sold</span> is matched to revenue. Rice still in stock isn't expensed —
+        <span className="font-medium"> {fmtPkr(inventoryOnHandPkr)}</span> of inventory on hand carries forward and becomes COGS when it sells.
+      </div>
+
+      <Section title="Gross Profit — by channel">
+        <Table
+          head={['Channel', 'Sales', 'Revenue (PKR)', 'COGS (PKR)', 'Gross Profit', 'Margin']}
+          align={['left', 'right', 'right', 'right', 'right', 'right']}
+          rows={[
+            ['Export (shipped/closed)', revenue.exportCount, fmtPkr(revenue.exportPkr), fmtPkr(cogs.exportPkr), fmtPkr(revenue.exportPkr - cogs.exportPkr), revenue.exportPkr > 0 ? pct((revenue.exportPkr - cogs.exportPkr) / revenue.exportPkr * 100) : '—'],
+            ['Local (completed)', revenue.localCount, fmtPkr(revenue.localPkr), fmtPkr(cogs.localPkr), fmtPkr(revenue.localPkr - cogs.localPkr), revenue.localPkr > 0 ? pct((revenue.localPkr - cogs.localPkr) / revenue.localPkr * 100) : '—'],
+          ]}
+          totalRow={['TOTAL', revenue.exportCount + revenue.localCount, fmtPkr(revenue.totalPkr), fmtPkr(cogs.totalPkr), fmtPkr(grossProfitPkr), pct(grossMarginPct)]}
+          empty="No sales recognized in this period."
+        />
+      </Section>
+
+      <Section title="Operating Expenses — by category">
+        <Table
+          head={['Category', 'Count', 'Amount (PKR)']}
+          align={['left', 'right', 'right']}
+          rows={[
+            ...(opex.byCategory || []).map(c => [c.category || '—', c.count, fmtPkr(c.amountPkr)]),
+            ...(opex.sellingPkr > 0 ? [['Export selling costs (freight/customs/…)', opex.sellingCount, fmtPkr(opex.sellingPkr)]] : []),
+          ]}
+          totalRow={['TOTAL', opex.businessCount + opex.sellingCount, fmtPkr(opex.totalPkr)]}
+          empty="No operating expenses in this period."
+        />
+      </Section>
+
+      <Section title="Bottom Line (accrual)">
+        <Table
+          head={['Line', 'Amount (PKR)']}
+          align={['left', 'right']}
+          rows={[
+            ['Revenue', fmtPkr(revenue.totalPkr)],
+            ['Less: COGS (goods sold)', `(${fmtPkr(cogs.totalPkr)})`],
+            ['= Gross Profit', `${fmtPkr(grossProfitPkr)}  ·  ${pct(grossMarginPct)}`],
+            ['Less: Operating Expenses', `(${fmtPkr(opex.totalPkr)})`],
+            ['= Net Profit', `${fmtPkr(netProfitPkr)}  ·  ${pct(netMarginPct)}`],
+          ]}
+          empty=""
+        />
+      </Section>
+
+      {detail && (detail.sales?.length > 0) && (
+        <Section title="Sales — detail (revenue, COGS, gross)">
+          <Table
+            head={['Channel', 'Ref', 'Customer', 'Item', 'Revenue', 'COGS', 'Gross', 'Margin']}
+            align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'right']}
+            rows={detail.sales.map(r => [
+              r.channel,
+              r.channel === 'Export' ? <RefLink to={`/export/${r.id}`}>{r.ref}</RefLink> : (r.lotId ? <RefLink to={`/lot-inventory/${r.lotId}`}>{r.ref}</RefLink> : r.ref),
+              r.party || '—', r.item || '—',
+              fmtPkr(r.revPkr), fmtPkr(r.cogsPkr), fmtPkr(r.grossPkr), r.revPkr > 0 ? pct(r.grossPkr / r.revPkr * 100) : '—',
+            ])}
+            empty=""
+          />
+        </Section>
+      )}
+      <Footer />
+    </div>
+  );
+}

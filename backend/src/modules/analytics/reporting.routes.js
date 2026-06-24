@@ -55,6 +55,7 @@ router.get('/printable/purchase-ledger', authorize('reports', 'view'), controlle
 router.get('/printable/sales-ledger',     authorize('reports', 'view'), controller.printableSalesLedger);
 router.get('/printable/stock-detail',     authorize('reports', 'view'), controller.printableStockDetail);
 router.get('/printable/sweeping',         authorize('reports', 'view'), controller.printableSweeping);
+router.get('/printable/pnl-accrual',      authorize('reports', 'view'), controller.printablePnlAccrual);
 
 // ═══════════════════════════════════════════════════════════════════
 // Production

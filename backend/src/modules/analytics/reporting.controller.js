@@ -1196,6 +1196,75 @@ const reportingController = {
       return res.json({ success: true, data: { rows, totals } });
     } catch (err) { console.error('Sweeping report error:', err); return res.status(500).json({ success: false, message: 'Internal server error.' }); }
   },
+
+  // ── True ACCRUAL P&L — revenue recognized on sale, matched against the COGS of
+  // the goods actually sold (local_sales.cogs_total_pkr / export inventory COGS).
+  // Unsold purchases stay in inventory (a memo line), so a buy-heavy period no
+  // longer shows a false loss. Operating expenses are period costs (business
+  // expenses + direct export selling costs, de-duped against expenses). ──
+  async printablePnlAccrual(req, res) {
+    try {
+      const db = require('../../config/database');
+      const { from, to } = req.query;
+      if (!from || !to) return res.status(400).json({ success: false, message: 'from and to dates are required.' });
+      const fromDate = new Date(from); const toDate = new Date(to);
+      if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) return res.status(400).json({ success: false, message: 'Invalid from/to date.' });
+      const num = (v) => parseFloat(v) || 0;
+
+      // Revenue + matched COGS (recognized when sold/shipped).
+      const exportRow = await db('export_orders').whereIn('status', ['Shipped', 'Arrived', 'Closed']).whereBetween('updated_at', [fromDate, toDate])
+        .sum({ rev: 'contract_value_pkr_locked' }).sum({ cogs: 'inventory_cogs_total_pkr' }).count({ cnt: 'id' }).first();
+      const localRow = await db('local_sales').where('status', 'Completed').whereBetween('sale_date', [fromDate, toDate])
+        .sum({ rev: 'total_amount' }).sum({ cogs: 'cogs_total_pkr' }).count({ cnt: 'id' }).first();
+
+      // Operating expenses (period costs — NOT inventory). Direct export selling
+      // costs not already booked as a business_expense (avoid double-count).
+      const opexRow = await db('business_expenses').whereBetween('expense_date', [fromDate, toDate]).where('amount_pkr', '>', 0)
+        .sum({ total: 'amount_pkr' }).count({ cnt: 'id' }).first();
+      const opexByCat = await db('business_expenses').whereBetween('expense_date', [fromDate, toDate]).where('amount_pkr', '>', 0)
+        .select('category').sum({ total: 'amount_pkr' }).count({ cnt: 'id' }).groupBy('category').orderByRaw('SUM(amount_pkr) DESC');
+      const sellingRow = await db('export_order_costs as eoc').whereBetween('eoc.created_at', [fromDate, toDate]).where('eoc.amount', '>', 0)
+        .whereRaw("COALESCE(eoc.notes,'') NOT ILIKE 'From business expense%'")
+        .sum({ total: db.raw('CASE WHEN COALESCE(eoc.base_amount_pkr,0) > 0 THEN eoc.base_amount_pkr ELSE COALESCE(eoc.amount,0)*COALESCE(eoc.fx_rate,1) END') }).count({ cnt: 'eoc.id' }).first();
+
+      // Memo: rice still in inventory (its cost is deferred, not yet expensed).
+      const invRow = await db('inventory_lots').whereIn('type', ['raw', 'finished']).where('status', 'Available')
+        .select(db.raw('COALESCE(SUM((CASE WHEN net_weight_kg>0 THEN net_weight_kg ELSE qty*1000 END) * COALESCE(NULLIF(landed_cost_per_kg,0),NULLIF(rate_per_kg,0),cost_per_unit/1000.0,0)),0) as val')).first();
+
+      const revenue = { exportPkr: num(exportRow.rev), exportCount: parseInt(exportRow.cnt, 10) || 0, localPkr: num(localRow.rev), localCount: parseInt(localRow.cnt, 10) || 0 };
+      revenue.totalPkr = revenue.exportPkr + revenue.localPkr;
+      const cogs = { exportPkr: num(exportRow.cogs), localPkr: num(localRow.cogs) };
+      cogs.totalPkr = cogs.exportPkr + cogs.localPkr;
+      const grossProfitPkr = revenue.totalPkr - cogs.totalPkr;
+      const grossMarginPct = revenue.totalPkr > 0 ? (grossProfitPkr / revenue.totalPkr) * 100 : 0;
+      const opex = { businessPkr: num(opexRow.total), businessCount: parseInt(opexRow.cnt, 10) || 0, sellingPkr: num(sellingRow.total), sellingCount: parseInt(sellingRow.cnt, 10) || 0, byCategory: opexByCat.map((r) => ({ category: r.category, count: parseInt(r.cnt, 10) || 0, amountPkr: num(r.total) })) };
+      opex.totalPkr = opex.businessPkr + opex.sellingPkr;
+      const netProfitPkr = grossProfitPkr - opex.totalPkr;
+      const netMarginPct = revenue.totalPkr > 0 ? (netProfitPkr / revenue.totalPkr) * 100 : 0;
+
+      // Per-sale detail (revenue, COGS, gross) — clickable.
+      const exportLines = await db('export_orders as o').leftJoin('customers as c', 'o.customer_id', 'c.id')
+        .whereIn('o.status', ['Shipped', 'Arrived', 'Closed']).whereBetween('o.updated_at', [fromDate, toDate])
+        .select('o.id', 'o.order_no', 'o.product_name', db.raw('COALESCE(o.contract_value_pkr_locked,0) as rev'), db.raw('COALESCE(o.inventory_cogs_total_pkr,0) as cogs'), db.raw("COALESCE(c.name,'—') as customer")).orderByRaw('rev DESC').limit(200);
+      const localLines = await db('local_sales as ls').leftJoin('customers as c', 'ls.customer_id', 'c.id')
+        .where('ls.status', 'Completed').whereBetween('ls.sale_date', [fromDate, toDate])
+        .select('ls.id', 'ls.sale_no', 'ls.lot_id', 'ls.item_name', 'ls.total_amount', 'ls.cogs_total_pkr', db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer")).orderBy('ls.total_amount', 'desc').limit(200);
+      const sales = [
+        ...exportLines.map((r) => ({ channel: 'Export', id: r.id, ref: r.order_no, party: r.customer, item: r.product_name, revPkr: num(r.rev), cogsPkr: num(r.cogs), grossPkr: num(r.rev) - num(r.cogs) })),
+        ...localLines.map((r) => ({ channel: 'Local', id: r.id, lotId: r.lot_id, ref: r.sale_no, party: r.customer, item: r.item_name, revPkr: num(r.total_amount), cogsPkr: num(r.cogs_total_pkr), grossPkr: num(r.total_amount) - num(r.cogs_total_pkr) })),
+      ].sort((a, b) => b.revPkr - a.revPkr);
+
+      return res.json({
+        success: true,
+        data: {
+          range: { from: fromDate.toISOString(), to: toDate.toISOString() },
+          revenue, cogs, grossProfitPkr, grossMarginPct, opex, netProfitPkr, netMarginPct,
+          inventoryOnHandPkr: num(invRow.val),
+          detail: { sales, expenses: opex.byCategory },
+        },
+      });
+    } catch (err) { console.error('Accrual P&L error:', err); return res.status(500).json({ success: false, message: 'Internal server error.' }); }
+  },
 };
 
 module.exports = reportingController;
