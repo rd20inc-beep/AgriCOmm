@@ -1014,6 +1014,38 @@ const reportingController = {
         .groupBy(...(group_by === 'subtype' ? [db.raw(SUBTYPE_EXPR)] : [groupCol, nameCol]))
         .orderBy('total_kg', 'desc');
 
+      // Per-group lot detail so the report can expand a group inline (no extra
+      // round-trip). Grouped in JS by the SAME group_name the aggregate uses, so
+      // every dimension — including the subtype CASE — lines up exactly.
+      let lotsQ = db('inventory_lots as l')
+        .leftJoin('suppliers as s',  'l.supplier_id',  's.id')
+        .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
+        .leftJoin('products as p',   'l.product_id',   'p.id');
+      if (status && status !== 'all') lotsQ = lotsQ.where('l.status', status);
+      const lotRows = await lotsQ.select(
+        db.raw(`COALESCE(${nameCol}, '—') as group_name`),
+        'l.id as lot_id', 'l.lot_no',
+        db.raw("COALESCE(p.name, l.item_name, '—') as item"),
+        'l.variety', 'l.grade',
+        db.raw('(CASE WHEN l.net_weight_kg > 0 THEN l.net_weight_kg ELSE CAST(l.qty AS DECIMAL) * 1000 END)::numeric as on_hand_kg'),
+        db.raw('(CAST(l.available_qty AS DECIMAL) * 1000)::numeric as available_kg'),
+        db.raw('COALESCE(l.total_bags, 0)::int as bags'),
+        db.raw('COALESCE(NULLIF(l.landed_cost_per_kg, 0), NULLIF(l.rate_per_kg, 0), CAST(l.cost_per_unit AS DECIMAL) / 1000.0, 0)::numeric as cost_per_kg'),
+        'l.supplier_id', db.raw("COALESCE(s.name, '—') as supplier"),
+        db.raw("COALESCE(w.name, '—') as warehouse"),
+      ).orderByRaw('on_hand_kg DESC');
+      const lotsByGroup = {};
+      for (const lr of lotRows) {
+        const onHand = parseFloat(lr.on_hand_kg) || 0;
+        const perKg = parseFloat(lr.cost_per_kg) || 0;
+        (lotsByGroup[lr.group_name] = lotsByGroup[lr.group_name] || []).push({
+          lotId: lr.lot_id, lotNo: lr.lot_no, item: lr.item, variety: lr.variety, grade: lr.grade,
+          onHandKg: onHand, availableKg: parseFloat(lr.available_kg) || 0, bags: parseInt(lr.bags, 10) || 0,
+          perKg, supplier: lr.supplier, supplierId: lr.supplier_id || null, warehouse: lr.warehouse,
+          valuePkr: Math.round(onHand * perKg * 100) / 100,
+        });
+      }
+
       const num = (v) => parseFloat(v) || 0;
       const grand = rows.reduce(
         (a, r) => ({
@@ -1043,6 +1075,7 @@ const reportingController = {
             bags:        parseInt(r.total_bags, 10) || 0,
             perKg:       num(r.total_kg) > 0 ? num(r.total_value_pkr) / num(r.total_kg) : 0,
             valuePkr:    num(r.total_value_pkr),
+            lots:        lotsByGroup[r.group_name] || [],
           })),
           grand,
         },

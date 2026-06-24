@@ -2,7 +2,7 @@
 // reports preview (/reports/print) and the standalone print route
 // (/print-report) that opens in a new tab. Pulling them into a single
 // file keeps the two entry points in lockstep.
-import { useState } from 'react';
+import { useState, Fragment } from 'react';
 import { Link } from 'react-router-dom';
 
 // A reference that's a clickable link on screen but prints as plain text.
@@ -112,6 +112,10 @@ export function ProductionReportView({ data, companyName, range, preset }) {
 // ─── Stock report view ─────────────────────────────────────────────────
 export function StockReportView({ data, companyName, groupLabel }) {
   const { rows, grand, asOf, groupBy } = data;
+  // Which groups are expanded to show their underlying lots inline.
+  const [open, setOpen] = useState({});
+  const toggle = (k) => setOpen(o => ({ ...o, [k]: !o[k] }));
+  const isSupplier = groupBy === 'supplier';
   return (
     <div className="print-report space-y-6 text-sm text-gray-900">
       <Header companyName={companyName} title="Stock Report" subtitle={`As of ${new Date(asOf).toLocaleString()} · ${groupLabel || ''}`} />
@@ -126,22 +130,103 @@ export function StockReportView({ data, companyName, groupLabel }) {
       ]} />
 
       <Section title="Stock Breakdown">
-        <Table
-          head={[groupLabel || 'Group', 'Lots', 'Total (kg)', 'Katta', 'Available (kg)', 'Reserved (kg)', 'Per kg', 'Value (PKR)']}
-          align={['left', 'right', 'right', 'right', 'right', 'right', 'right', 'right']}
-          rows={rows.map(r => [
-            (groupBy === 'supplier' && r.supplierId)
-              ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.name}</RefLink>
-              : r.name,
-            r.lotCount, fmtKg(r.totalKg), fmtKg(r.bags), fmtKg(r.availableKg), fmtKg(r.reservedKg), fmtPkr(r.perKg), fmtPkr(r.valuePkr),
-          ])}
-          empty="No stock to report."
-          totalRow={['TOTAL', grand.lotCount, fmtKg(grand.totalKg), fmtKg(grand.bags), fmtKg(grand.availableKg), fmtKg(grand.reservedKg), fmtPkr(grand.perKg), fmtPkr(grand.valuePkr)]}
-        />
+        {(!rows || rows.length === 0) ? (
+          <div className="text-center text-xs text-gray-400 py-4">No stock to report.</div>
+        ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-gray-300 text-gray-500">
+                {[groupLabel || 'Group', 'Lots', 'Total (kg)', 'Katta', 'Available (kg)', 'Reserved (kg)', 'Per kg', 'Value (PKR)'].map((h, i) => (
+                  <th key={i} className={`py-1.5 px-2 font-medium ${i === 0 ? 'text-left' : 'text-right'}`}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, idx) => {
+                const k = `${r.name}-${idx}`;
+                const hasLots = (r.lots || []).length > 0;
+                const isOpen = !!open[k];
+                return (
+                  <Fragment key={k}>
+                    <tr className={`border-b border-gray-100 ${hasLots ? 'cursor-pointer hover:bg-gray-50' : ''}`} onClick={hasLots ? () => toggle(k) : undefined}>
+                      <td className="py-1.5 px-2 text-left">
+                        <span className="inline-flex items-center gap-1.5">
+                          {hasLots
+                            ? <span className="text-gray-400 print:hidden w-3 inline-block">{isOpen ? '▾' : '▸'}</span>
+                            : <span className="w-3 inline-block print:hidden" />}
+                          {isSupplier && r.supplierId
+                            ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.name}</RefLink>
+                            : <span className={hasLots ? 'font-medium text-blue-700 print:text-gray-900' : ''}>{r.name}</span>}
+                        </span>
+                      </td>
+                      <td className="py-1.5 px-2 text-right">{r.lotCount}</td>
+                      <td className="py-1.5 px-2 text-right">{fmtKg(r.totalKg)}</td>
+                      <td className="py-1.5 px-2 text-right">{fmtKg(r.bags)}</td>
+                      <td className="py-1.5 px-2 text-right">{fmtKg(r.availableKg)}</td>
+                      <td className="py-1.5 px-2 text-right">{fmtKg(r.reservedKg)}</td>
+                      <td className="py-1.5 px-2 text-right">{fmtPkr(r.perKg)}</td>
+                      <td className="py-1.5 px-2 text-right">{fmtPkr(r.valuePkr)}</td>
+                    </tr>
+                    {isOpen && hasLots && (
+                      <tr className="bg-gray-50/60">
+                        <td colSpan={8} className="px-2 py-2">
+                          <GroupLotsTable lots={r.lots} />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+              <tr className="border-t-2 border-gray-300 font-semibold">
+                <td className="py-1.5 px-2 text-left">TOTAL</td>
+                <td className="py-1.5 px-2 text-right">{grand.lotCount}</td>
+                <td className="py-1.5 px-2 text-right">{fmtKg(grand.totalKg)}</td>
+                <td className="py-1.5 px-2 text-right">{fmtKg(grand.bags)}</td>
+                <td className="py-1.5 px-2 text-right">{fmtKg(grand.availableKg)}</td>
+                <td className="py-1.5 px-2 text-right">{fmtKg(grand.reservedKg)}</td>
+                <td className="py-1.5 px-2 text-right">{fmtPkr(grand.perKg)}</td>
+                <td className="py-1.5 px-2 text-right">{fmtPkr(grand.valuePkr)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        )}
+        <p className="text-[11px] text-gray-400 mt-1 print:hidden">Click a group to expand its lots.</p>
       </Section>
 
       <Footer />
     </div>
+  );
+}
+
+// Inline lot breakdown shown when a Stock-report group row is expanded.
+function GroupLotsTable({ lots }) {
+  return (
+    <table className="w-full text-[11px] border-collapse">
+      <thead>
+        <tr className="text-gray-400 border-b border-gray-200">
+          {['Lot', 'Item / Variety / Grade', 'On hand (kg)', 'Available (kg)', 'Katta', 'Per kg', 'Supplier', 'Warehouse', 'Value (PKR)'].map((h, i) => (
+            <th key={i} className={`py-1 px-2 font-medium ${i === 0 || i === 1 || i === 6 || i === 7 ? 'text-left' : 'text-right'}`}>{h}</th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {lots.map((l, i) => (
+          <tr key={i} className="border-b border-gray-100 last:border-0">
+            <td className="py-1 px-2 text-left"><RefLink to={`/lot-inventory/${l.lotId}`}>{l.lotNo}</RefLink></td>
+            <td className="py-1 px-2 text-left">{[l.item, l.variety, l.grade].filter(Boolean).join(' · ') || '—'}</td>
+            <td className="py-1 px-2 text-right">{fmtKg(l.onHandKg)}</td>
+            <td className="py-1 px-2 text-right">{fmtKg(l.availableKg)}</td>
+            <td className="py-1 px-2 text-right">{fmtKg(l.bags)}</td>
+            <td className="py-1 px-2 text-right">{fmtPkr(l.perKg)}</td>
+            <td className="py-1 px-2 text-left">{l.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${l.supplierId}`}>{l.supplier}</RefLink> : (l.supplier || '—')}</td>
+            <td className="py-1 px-2 text-left">{l.warehouse || '—'}</td>
+            <td className="py-1 px-2 text-right">{fmtPkr(l.valuePkr)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
