@@ -482,7 +482,9 @@ export function SalesLedgerView({ data, companyName, range }) {
           align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'right', 'right', 'left']}
           rows={local.map(r => [
             r.lotId ? <RefLink to={`/lot-inventory/${r.lotId}`}>{r.ref}</RefLink> : r.ref,
-            fmtDate(r.date), r.customer || '—', r.item || '—',
+            fmtDate(r.date),
+            r.customerId ? <RefLink to={`/finance/statements?type=customer&id=${r.customerId}`}>{r.customer}</RefLink> : (r.customer || '—'),
+            r.item || '—',
             fmtMt(r.mt), fmtKg(r.mt * 1000), fmtPkr(r.ratePerKg), fmtKg(r.bags), fmtPkr(r.valuePkr), r.paymentStatus || '—',
           ])}
           empty="No local sales."
@@ -495,7 +497,9 @@ export function SalesLedgerView({ data, companyName, range }) {
           align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'right', 'right', 'right', 'left']}
           rows={exp.map(r => [
             <RefLink to={`/export/${r.id}`}>{r.ref}</RefLink>,
-            fmtDate(r.date), r.customer || '—', r.item || '—',
+            fmtDate(r.date),
+            r.customerId ? <RefLink to={`/finance/statements?type=customer&id=${r.customerId}`}>{r.customer}</RefLink> : (r.customer || '—'),
+            r.item || '—',
             fmtMt(r.mt), fmtKg(r.mt * 1000), `$${(r.ratePerMt || 0).toLocaleString()}`, `$${((r.ratePerMt || 0) / 1000).toFixed(3)}`, fmtKg(r.bags), `$${(r.valueUsd || 0).toLocaleString()}`, r.status || '—',
           ])}
           empty="No export orders."
