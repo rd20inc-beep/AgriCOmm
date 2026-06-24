@@ -685,3 +685,54 @@ export function PnlAccrualView({ data, companyName, range, preset }) {
     </div>
   );
 }
+
+// ─── Cash vs Accrual P&L — side by side ────────────────────────────────
+export function PnlCompareView({ data, companyName, range, preset }) {
+  const { cash, accrual } = data;
+  const periodLabel = preset === 'daily' ? 'Daily' : preset === 'weekly' ? 'Weekly' : preset === 'monthly' ? 'Monthly' : 'Custom Range';
+  const pct = (n) => `${(n || 0).toFixed(1)}%`;
+  const diff = (accrual.netProfitPkr || 0) - (cash.netProfitPkr || 0); // accrual is higher by the deferred inventory
+  const cashOtherCosts = (cash.costs.millStorePkr || 0) + (cash.costs.exportOpCostsPkr || 0) + (cash.costs.businessExpensesPkr || 0);
+  return (
+    <div className="print-report space-y-6 text-sm text-gray-900">
+      <Header companyName={companyName} title={`${periodLabel} P&L — Cash vs Accrual`} subtitle={range ? `${fmtDate(range.from)} – ${fmtDate(range.to)}` : ''} />
+      <SummaryRow items={[
+        { label: 'Revenue', value: fmtPkr(accrual.revenue.totalPkr) },
+        { label: 'Net (Cash)', value: fmtPkr(cash.netProfitPkr) },
+        { label: 'Net (Accrual)', value: fmtPkr(accrual.netProfitPkr) },
+        { label: 'Difference', value: fmtPkr(diff) },
+        { label: 'Inventory deferred', value: fmtPkr(accrual.inventoryOnHandPkr) },
+      ]} />
+
+      <Section title="Side by side">
+        <Table
+          head={['Line', 'Cash basis', 'Accrual basis']}
+          align={['left', 'right', 'right']}
+          rows={[
+            ['Revenue (recognized sales)', fmtPkr(cash.revenue.totalPkr), fmtPkr(accrual.revenue.totalPkr)],
+            ['Cost of goods sold (sold stock)', '—', fmtPkr(accrual.cogs.totalPkr)],
+            ['Raw rice purchased (this period)', fmtPkr(cash.costs.rawRicePkr), 'deferred to inventory'],
+            ['= Gross Profit', '—', `${fmtPkr(accrual.grossProfitPkr)} · ${pct(accrual.grossMarginPct)}`],
+            ['Operating / other costs', fmtPkr(cashOtherCosts), fmtPkr(accrual.opex.totalPkr)],
+            ['= NET PROFIT', fmtPkr(cash.netProfitPkr), fmtPkr(accrual.netProfitPkr)],
+            ['Margin', pct(cash.marginPct), pct(accrual.netMarginPct)],
+          ]}
+          totalRow={['NET PROFIT', fmtPkr(cash.netProfitPkr), fmtPkr(accrual.netProfitPkr)]}
+          empty=""
+        />
+      </Section>
+
+      <div className="text-xs text-gray-700 border border-gray-200 rounded p-3 bg-gray-50 space-y-1">
+        <div className="font-medium">Why they differ by {fmtPkr(diff)}</div>
+        <div>
+          The <span className="font-medium">cash basis</span> expenses the full cost of all rice <span className="font-medium">purchased</span> this
+          period ({fmtPkr(cash.costs.rawRicePkr)}). The <span className="font-medium">accrual basis</span> only expenses the cost of rice actually
+          <span className="font-medium"> sold</span> ({fmtPkr(accrual.cogs.totalPkr)}) and carries the rest — {fmtPkr(accrual.inventoryOnHandPkr)} of stock —
+          on the balance sheet until it sells. Accrual reflects true period performance; cash reflects money tied up in inventory.
+        </div>
+      </div>
+
+      <Footer />
+    </div>
+  );
+}
