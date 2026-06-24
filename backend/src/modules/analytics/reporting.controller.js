@@ -1082,17 +1082,17 @@ const reportingController = {
       const db = require('../../config/database');
       const { from, to } = req.query;
       let ls = db('local_sales as ls').leftJoin('customers as c', 'ls.customer_id', 'c.id')
-        .select('ls.id', 'ls.sale_no', 'ls.sale_date', 'ls.item_name', 'ls.item_type', 'ls.quantity_kg', 'ls.rate_per_kg', 'ls.total_amount', 'ls.lot_no', 'ls.lot_id', 'ls.payment_status', db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer"));
+        .select('ls.id', 'ls.sale_no', 'ls.sale_date', 'ls.item_name', 'ls.item_type', 'ls.quantity_kg', 'ls.quantity_bags', 'ls.rate_per_kg', 'ls.total_amount', 'ls.lot_no', 'ls.lot_id', 'ls.payment_status', db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer"));
       if (from) ls = ls.where('ls.sale_date', '>=', from);
       if (to) ls = ls.where('ls.sale_date', '<=', to);
       const localRows = await ls.orderBy('ls.sale_date', 'desc');
       let eo = db('export_orders as o').leftJoin('customers as c', 'o.customer_id', 'c.id')
-        .select('o.id', 'o.order_no', 'o.created_at', 'o.product_name', 'o.qty_mt', 'o.price_per_mt', 'o.status', db.raw("COALESCE(c.name, '—') as customer"));
+        .select('o.id', 'o.order_no', 'o.created_at', 'o.product_name', 'o.qty_mt', 'o.price_per_mt', 'o.total_bags', 'o.status', db.raw("COALESCE(c.name, '—') as customer"));
       if (from) eo = eo.where('o.created_at', '>=', from);
       if (to) eo = eo.where('o.created_at', '<=', to);
       const exportRows = await eo.orderBy('o.created_at', 'desc');
-      const local = localRows.map((r) => ({ id: r.id, ref: r.sale_no, date: r.sale_date, customer: r.customer, item: r.item_name, itemType: r.item_type, mt: (parseFloat(r.quantity_kg) || 0) / 1000, ratePerKg: parseFloat(r.rate_per_kg) || 0, valuePkr: parseFloat(r.total_amount) || 0, lotNo: r.lot_no, lotId: r.lot_id, paymentStatus: r.payment_status }));
-      const exp = exportRows.map((r) => ({ id: r.id, ref: r.order_no, date: r.created_at, customer: r.customer, item: r.product_name, mt: parseFloat(r.qty_mt) || 0, ratePerMt: parseFloat(r.price_per_mt) || 0, valueUsd: (parseFloat(r.qty_mt) || 0) * (parseFloat(r.price_per_mt) || 0), status: r.status }));
+      const local = localRows.map((r) => ({ id: r.id, ref: r.sale_no, date: r.sale_date, customer: r.customer, item: r.item_name, itemType: r.item_type, mt: (parseFloat(r.quantity_kg) || 0) / 1000, bags: r.quantity_bags || 0, ratePerKg: parseFloat(r.rate_per_kg) || 0, valuePkr: parseFloat(r.total_amount) || 0, lotNo: r.lot_no, lotId: r.lot_id, paymentStatus: r.payment_status }));
+      const exp = exportRows.map((r) => ({ id: r.id, ref: r.order_no, date: r.created_at, customer: r.customer, item: r.product_name, mt: parseFloat(r.qty_mt) || 0, bags: r.total_bags || 0, ratePerMt: parseFloat(r.price_per_mt) || 0, valueUsd: (parseFloat(r.qty_mt) || 0) * (parseFloat(r.price_per_mt) || 0), status: r.status }));
       return res.json({ success: true, data: { local, export: exp, totals: { localCount: local.length, localMt: local.reduce((s, d) => s + d.mt, 0), localPkr: local.reduce((s, d) => s + d.valuePkr, 0), exportCount: exp.length, exportMt: exp.reduce((s, d) => s + d.mt, 0), exportUsd: exp.reduce((s, d) => s + d.valueUsd, 0) }, period: { from, to } } });
     } catch (err) { console.error('Sales ledger error:', err); return res.status(500).json({ success: false, message: 'Internal server error.' }); }
   },

@@ -438,17 +438,17 @@ export function PurchaseLedgerView({ data, companyName, range }) {
       ]} />
       <Section title="Purchase Detail — every raw-rice lot & its supplier">
         <Table
-          head={['Date', 'Lot', 'Supplier', 'Rice Type', 'Variety/Grade', 'Qty (MT)', 'Rate/kg', 'Value (PKR)', 'Payment']}
-          align={['left', 'left', 'left', 'left', 'left', 'right', 'right', 'right', 'left']}
+          head={['Date', 'Lot', 'Supplier', 'Rice Type', 'Variety/Grade', 'Qty (MT)', 'kg', 'Per kg', 'Katta', 'Value (PKR)', 'Payment']}
+          align={['left', 'left', 'left', 'left', 'left', 'right', 'right', 'right', 'right', 'right', 'left']}
           rows={rows.map(r => [
             fmtDate(r.date),
             <RefLink to={`/lot-inventory/${r.lotId}`}>{r.lotNo}</RefLink>,
             r.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.supplier}</RefLink> : (r.supplier || '—'),
             r.riceType || '—', r.variety || r.grade || '—',
-            fmtMt(r.mt), fmtPkr(r.ratePerKg), fmtPkr(r.valuePkr), r.paymentStatus || '—',
+            fmtMt(r.mt), fmtKg(r.mt * 1000), fmtPkr(r.ratePerKg), fmtKg(r.bags), fmtPkr(r.valuePkr), r.paymentStatus || '—',
           ])}
           empty="No purchases in this period."
-          totalRow={['', '', '', '', 'TOTAL', fmtMt(totals.mt), '', fmtPkr(totals.valuePkr), '']}
+          totalRow={['', '', '', '', 'TOTAL', fmtMt(totals.mt), fmtKg(totals.mt * 1000), '', fmtKg(rows.reduce((s, r) => s + (parseFloat(r.bags) || 0), 0)), fmtPkr(totals.valuePkr), '']}
         />
       </Section>
       <Footer />
@@ -471,28 +471,28 @@ export function SalesLedgerView({ data, companyName, range }) {
       ]} />
       <Section title="Local Sales">
         <Table
-          head={['Sale No', 'Date', 'Customer', 'Item', 'Qty (MT)', 'Rate/kg', 'Value (PKR)', 'Payment']}
-          align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'left']}
+          head={['Sale No', 'Date', 'Customer', 'Item', 'Qty (MT)', 'kg', 'Per kg', 'Katta', 'Value (PKR)', 'Payment']}
+          align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'right', 'right', 'left']}
           rows={local.map(r => [
             r.lotId ? <RefLink to={`/lot-inventory/${r.lotId}`}>{r.ref}</RefLink> : r.ref,
             fmtDate(r.date), r.customer || '—', r.item || '—',
-            fmtMt(r.mt), fmtPkr(r.ratePerKg), fmtPkr(r.valuePkr), r.paymentStatus || '—',
+            fmtMt(r.mt), fmtKg(r.mt * 1000), fmtPkr(r.ratePerKg), fmtKg(r.bags), fmtPkr(r.valuePkr), r.paymentStatus || '—',
           ])}
           empty="No local sales."
-          totalRow={['', '', '', 'TOTAL', fmtMt(totals.localMt), '', fmtPkr(totals.localPkr), '']}
+          totalRow={['', '', '', 'TOTAL', fmtMt(totals.localMt), fmtKg(totals.localMt * 1000), '', fmtKg(local.reduce((s, r) => s + (parseFloat(r.bags) || 0), 0)), fmtPkr(totals.localPkr), '']}
         />
       </Section>
       <Section title="Export Orders">
         <Table
-          head={['Order No', 'Date', 'Customer', 'Product', 'Qty (MT)', '$/MT', 'Value (USD)', 'Status']}
-          align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'left']}
+          head={['Order No', 'Date', 'Customer', 'Product', 'Qty (MT)', 'kg', '$/MT', '$/kg', 'Katta', 'Value (USD)', 'Status']}
+          align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'right', 'right', 'right', 'left']}
           rows={exp.map(r => [
             <RefLink to={`/export/${r.id}`}>{r.ref}</RefLink>,
             fmtDate(r.date), r.customer || '—', r.item || '—',
-            fmtMt(r.mt), `$${(r.ratePerMt || 0).toLocaleString()}`, `$${(r.valueUsd || 0).toLocaleString()}`, r.status || '—',
+            fmtMt(r.mt), fmtKg(r.mt * 1000), `$${(r.ratePerMt || 0).toLocaleString()}`, `$${((r.ratePerMt || 0) / 1000).toFixed(3)}`, fmtKg(r.bags), `$${(r.valueUsd || 0).toLocaleString()}`, r.status || '—',
           ])}
           empty="No export orders."
-          totalRow={['', '', '', 'TOTAL', fmtMt(totals.exportMt), '', `$${(totals.exportUsd || 0).toLocaleString()}`, '']}
+          totalRow={['', '', '', 'TOTAL', fmtMt(totals.exportMt), fmtKg(totals.exportMt * 1000), '', '', fmtKg(exp.reduce((s, r) => s + (parseFloat(r.bags) || 0), 0)), `$${(totals.exportUsd || 0).toLocaleString()}`, '']}
         />
       </Section>
       <Footer />
@@ -520,6 +520,7 @@ export function StockDetailView({ data, companyName }) {
   const shown = tag === 'all' ? rows : rows.filter(r => (r.subtype || 'Other') === tag);
   const shownMt = shown.reduce((s, r) => s + (r.onHandMt || 0), 0);
   const shownValue = shown.reduce((s, r) => s + (r.valuePkr || 0), 0);
+  const shownBags = shown.reduce((s, r) => s + (parseFloat(r.bags) || 0), 0);
 
   return (
     <div className="print-report space-y-6 text-sm text-gray-900">
@@ -540,20 +541,21 @@ export function StockDetailView({ data, companyName }) {
 
       <Section title={tag === 'all' ? 'Rice Stock — by lot, traced to its source' : `${tag} — ${shown.length} lot${shown.length === 1 ? '' : 's'} · ${fmtMt(shownMt)} MT · ${fmtPkr(shownValue)}`}>
         <Table
-          head={['Lot', 'Tag', 'Item', 'Variety/Grade', 'On hand (MT)', 'Available', 'Source / Supplier', 'Warehouse', 'Value (PKR)']}
-          align={['left', 'left', 'left', 'left', 'right', 'right', 'left', 'left', 'right']}
+          head={['Lot', 'Tag', 'Item', 'Variety/Grade', 'On hand (MT)', 'kg', 'Per kg', 'Katta', 'Available', 'Source / Supplier', 'Warehouse', 'Value (PKR)']}
+          align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'right', 'right', 'left', 'left', 'right']}
           rows={shown.map(r => [
             <RefLink to={`/lot-inventory/${r.lotId}`}>{r.lotNo}</RefLink>,
             <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-700 print:bg-transparent print:px-0">{r.subtype}</span>,
             r.item || '—', r.variety || r.grade || '—',
-            fmtMt(r.onHandMt), fmtMt(r.availableMt),
+            fmtMt(r.onHandMt), fmtKg(r.onHandMt * 1000), fmtPkr(r.costPerKg), fmtKg(r.bags),
+            fmtMt(r.availableMt),
             r.supplier
               ? (r.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.supplier}</RefLink> : r.supplier)
               : (r.sourceSupplier ? <span className="text-gray-600">milled from {r.sourceSupplier}{r.sourceBatch ? ` · ${r.sourceBatch}` : ''}</span> : '—'),
             r.warehouse || '—', fmtPkr(r.valuePkr),
           ])}
           empty="No stock for this tag."
-          totalRow={['', '', '', 'TOTAL', fmtMt(shownMt), '', '', '', fmtPkr(shownValue)]}
+          totalRow={['', '', '', 'TOTAL', fmtMt(shownMt), fmtKg(shownMt * 1000), '', fmtKg(shownBags), '', '', '', fmtPkr(shownValue)]}
         />
       </Section>
       {millStore.length > 0 && (
