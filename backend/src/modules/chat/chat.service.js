@@ -31,10 +31,11 @@ async function listUsers(meId) {
 async function getConversations(meId) {
   const reads = await lastReadMap(meId);
 
+  const preview = (body, name) => (body && body.trim()) ? body : (name ? `📎 ${name}` : '');
   // Broadcast channel.
   const bcLast = await db('chat_messages as m').leftJoin('users as u', 'u.id', 'm.sender_id')
     .where('m.is_broadcast', true).orderBy('m.created_at', 'desc')
-    .select('m.body', 'm.created_at', 'u.full_name as sender_name', 'm.sender_id').first();
+    .select('m.body', 'm.attachment_name', 'm.created_at', 'u.full_name as sender_name', 'm.sender_id').first();
   const bcUnreadQ = db('chat_messages').where('is_broadcast', true).whereNot('sender_id', meId);
   if (reads.broadcast) bcUnreadQ.where('created_at', '>', reads.broadcast);
   const bcUnread = parseInt((await bcUnreadQ.count('id as n').first()).n, 10) || 0;
@@ -46,7 +47,7 @@ async function getConversations(meId) {
     .where('m.is_broadcast', false)
     .where(function () { this.where('m.sender_id', meId).orWhere('m.recipient_id', meId); })
     .orderBy('m.created_at', 'desc')
-    .select('m.id', 'm.sender_id', 'm.recipient_id', 'm.body', 'm.created_at', 'su.full_name as sender_name', 'ru.full_name as recipient_name')
+    .select('m.id', 'm.sender_id', 'm.recipient_id', 'm.body', 'm.attachment_name', 'm.created_at', 'su.full_name as sender_name', 'ru.full_name as recipient_name')
     .limit(500);
 
   const peers = new Map();
@@ -54,7 +55,7 @@ async function getConversations(meId) {
     const peerId = m.sender_id === meId ? m.recipient_id : m.sender_id;
     const peerName = m.sender_id === meId ? m.recipient_name : m.sender_name;
     if (!peers.has(peerId)) {
-      peers.set(peerId, { peerId, peerName: peerName || 'User', lastBody: m.body, lastAt: m.created_at, fromMe: m.sender_id === meId, unread: 0 });
+      peers.set(peerId, { peerId, peerName: peerName || 'User', lastBody: preview(m.body, m.attachment_name), lastAt: m.created_at, fromMe: m.sender_id === meId, unread: 0 });
     }
     // unread = messages TO me from this peer after my last read of that scope.
     const lr = reads[String(peerId)];
@@ -64,14 +65,15 @@ async function getConversations(meId) {
   }
 
   return {
-    broadcast: { scope: 'broadcast', lastBody: bcLast?.body || null, lastAt: bcLast?.created_at || null, lastSender: bcLast?.sender_name || null, unread: bcUnread },
+    broadcast: { scope: 'broadcast', lastBody: bcLast ? preview(bcLast.body, bcLast.attachment_name) : null, lastAt: bcLast?.created_at || null, lastSender: bcLast?.sender_name || null, unread: bcUnread },
     peers: Array.from(peers.values()).sort((a, b) => new Date(b.lastAt) - new Date(a.lastAt)),
   };
 }
 
 async function getMessages(meId, { peer, broadcast }) {
   let q = db('chat_messages as m').leftJoin('users as u', 'u.id', 'm.sender_id')
-    .select('m.id', 'm.sender_id', 'm.recipient_id', 'm.is_broadcast', 'm.body', 'm.created_at', 'u.full_name as sender_name')
+    .select('m.id', 'm.sender_id', 'm.recipient_id', 'm.is_broadcast', 'm.body', 'm.created_at', 'u.full_name as sender_name',
+      'm.attachment_name', 'm.attachment_type', 'm.attachment_size')
     .orderBy('m.created_at', 'asc').limit(300);
   if (broadcast) {
     q = q.where('m.is_broadcast', true);
@@ -85,22 +87,36 @@ async function getMessages(meId, { peer, broadcast }) {
     await markRead(meId, peerId);
   }
   const rows = await q;
-  return rows.map((m) => ({ ...m, mine: m.sender_id === meId }));
+  return rows.map((m) => ({ ...m, mine: m.sender_id === meId, hasAttachment: !!m.attachment_name }));
 }
 
-async function sendMessage(meId, { recipient_id, body, broadcast }) {
+async function sendMessage(meId, { recipient_id, body, broadcast, attachment }) {
   const text = String(body || '').trim();
-  if (!text) { const e = new Error('Message cannot be empty.'); e.statusCode = 400; throw e; }
+  if (!text && !attachment) { const e = new Error('Message cannot be empty.'); e.statusCode = 400; throw e; }
   if (!broadcast && !recipient_id) { const e = new Error('recipient_id is required for a direct message.'); e.statusCode = 400; throw e; }
   const [row] = await db('chat_messages').insert({
     sender_id: meId,
     recipient_id: broadcast ? null : recipient_id,
     is_broadcast: !!broadcast,
-    body: text,
+    body: text || null,
+    attachment_path: attachment?.path || null,
+    attachment_name: attachment?.name || null,
+    attachment_type: attachment?.type || null,
+    attachment_size: attachment?.size || null,
   }).returning('*');
   // Sending implies you've read up to now in that scope.
   await markRead(meId, broadcast ? 'broadcast' : recipient_id);
   return row;
+}
+
+// Resolve a message's attachment for serving — only a participant (sender,
+// recipient, or anyone for a broadcast) may download it.
+async function getAttachment(messageId, userId) {
+  const m = await db('chat_messages').where('id', messageId).first();
+  if (!m || !m.attachment_path) { const e = new Error('Attachment not found.'); e.statusCode = 404; throw e; }
+  const allowed = m.is_broadcast || m.sender_id === userId || m.recipient_id === userId;
+  if (!allowed) { const e = new Error('Not authorized to view this attachment.'); e.statusCode = 403; throw e; }
+  return { filePath: m.attachment_path, fileName: m.attachment_name || 'file', mimeType: m.attachment_type || 'application/octet-stream' };
 }
 
 async function getUnread(meId) {
@@ -109,4 +125,4 @@ async function getUnread(meId) {
   return { total: peerUnread + conv.broadcast.unread, broadcast: conv.broadcast.unread, direct: peerUnread };
 }
 
-module.exports = { listUsers, getConversations, getMessages, sendMessage, getUnread, markRead };
+module.exports = { listUsers, getConversations, getMessages, sendMessage, getUnread, markRead, getAttachment };

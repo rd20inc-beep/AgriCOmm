@@ -5,6 +5,15 @@ export const chatApi = {
   conversations: () => api.get('/api/chat/conversations'),
   unread: () => api.get('/api/chat/unread'),
   messages: (params) => api.get('/api/chat/messages', params),
-  send: (data) => api.post('/api/chat/messages', data),
+  // data: { body?, recipient_id?, broadcast?, file? (File) } → multipart FormData.
+  send: (data) => {
+    const fd = new FormData();
+    if (data.body) fd.append('body', data.body);
+    if (data.recipient_id != null) fd.append('recipient_id', String(data.recipient_id));
+    if (data.broadcast) fd.append('broadcast', 'true');
+    if (data.file) fd.append('file', data.file);
+    return api.post('/api/chat/messages', fd);
+  },
   markRead: (scope) => api.post('/api/chat/read', { scope }),
+  attachmentUrl: (id) => `/api/chat-attachments/${id}?token=${encodeURIComponent(localStorage.getItem('riceflow_token') || '')}`,
 };

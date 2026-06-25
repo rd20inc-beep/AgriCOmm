@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { MessageCircle, X, Send, ArrowLeft, Megaphone, Plus, Search } from 'lucide-react';
+import { MessageCircle, X, Send, ArrowLeft, Megaphone, Plus, Search, Paperclip, FileText, Download } from 'lucide-react';
 import { chatApi } from '../modules/chat/api';
 import { useAuth } from '../context/AuthContext';
 
@@ -14,6 +14,27 @@ function fmtTime(iso) {
 }
 const initials = (name) => (name || 'U').split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
 
+// Renders a message's attachment — images inline, other files as a download chip.
+function Attachment({ m, mine }) {
+  const url = chatApi.attachmentUrl(m.id);
+  const isImg = (m.attachment_type || '').startsWith('image/');
+  if (isImg) {
+    return (
+      <a href={url} target="_blank" rel="noreferrer" className="block mb-1">
+        <img src={url} alt={m.attachment_name} className="max-w-full max-h-52 rounded-lg border border-black/10" />
+      </a>
+    );
+  }
+  return (
+    <a href={url} download={m.attachment_name} target="_blank" rel="noreferrer"
+      className={`flex items-center gap-2 mb-1 px-2 py-1.5 rounded-lg ${mine ? 'bg-blue-500/40' : 'bg-gray-100'} max-w-full`}>
+      <FileText className="w-4 h-4 flex-shrink-0" />
+      <span className="text-xs truncate flex-1">{m.attachment_name}</span>
+      <Download className="w-3.5 h-3.5 flex-shrink-0 opacity-70" />
+    </a>
+  );
+}
+
 export default function ChatWidget() {
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -21,8 +42,10 @@ export default function ChatWidget() {
   const [view, setView] = useState('list');      // 'list' | 'thread' | 'new'
   const [active, setActive] = useState(null);     // {type:'broadcast'} | {type:'peer', id, name}
   const [draft, setDraft] = useState('');
+  const [file, setFile] = useState(null);
   const [userSearch, setUserSearch] = useState('');
   const endRef = useRef(null);
+  const fileRef = useRef(null);
 
   // Unread badge — always polling (even when closed) so the dot stays live.
   const { data: unreadData } = useQuery({
@@ -71,18 +94,19 @@ export default function ChatWidget() {
   const sendMut = useMutation({
     mutationFn: (payload) => chatApi.send(payload),
     onSuccess: () => {
-      setDraft('');
+      setDraft(''); setFile(null);
       qc.invalidateQueries({ queryKey: ['chat-messages', scopeKey] });
       qc.invalidateQueries({ queryKey: ['chat-conversations'] });
       qc.invalidateQueries({ queryKey: ['chat-unread'] });
     },
   });
 
-  function openThread(target) { setActive(target); setView('thread'); setDraft(''); }
+  function openThread(target) { setActive(target); setView('thread'); setDraft(''); setFile(null); }
   function handleSend() {
     const body = draft.trim();
-    if (!body || !active) return;
-    sendMut.mutate(active.type === 'broadcast' ? { broadcast: true, body } : { recipient_id: active.id, body });
+    if ((!body && !file) || !active) return;
+    const base = active.type === 'broadcast' ? { broadcast: true } : { recipient_id: active.id };
+    sendMut.mutate({ ...base, body, file: file || undefined });
   }
 
   const filteredUsers = useMemo(() =>
@@ -198,7 +222,8 @@ export default function ChatWidget() {
                   <div key={m.id} className={`flex ${m.mine ? 'justify-end' : 'justify-start'}`}>
                     <div className={`max-w-[75%] rounded-2xl px-3 py-1.5 ${m.mine ? 'bg-blue-600 text-white rounded-br-sm' : 'bg-white border border-gray-200 text-gray-800 rounded-bl-sm'}`}>
                       {!m.mine && (active.type === 'broadcast') && <div className="text-[10px] font-semibold text-blue-600 mb-0.5">{m.sender_name}</div>}
-                      <div className="text-sm whitespace-pre-wrap break-words">{m.body}</div>
+                      {m.hasAttachment && <Attachment m={m} mine={m.mine} />}
+                      {m.body && <div className="text-sm whitespace-pre-wrap break-words">{m.body}</div>}
                       <div className={`text-[9px] mt-0.5 text-right ${m.mine ? 'text-blue-100' : 'text-gray-400'}`}>{fmtTime(m.created_at)}</div>
                     </div>
                   </div>
@@ -206,15 +231,31 @@ export default function ChatWidget() {
                 {messages.length === 0 && <p className="text-center text-xs text-gray-400 py-6">No messages yet — say hello.</p>}
                 <div ref={endRef} />
               </div>
-              <div className="p-2.5 border-t border-gray-100 flex items-end gap-2">
-                <textarea rows={1} value={draft} onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-                  placeholder={active.type === 'broadcast' ? 'Announce to everyone…' : 'Type a message…'}
-                  className="flex-1 resize-none max-h-24 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400" />
-                <button onClick={handleSend} disabled={!draft.trim() || sendMut.isPending}
-                  className="w-9 h-9 rounded-lg bg-blue-600 text-white flex items-center justify-center hover:bg-blue-700 disabled:opacity-40 flex-shrink-0">
-                  <Send className="w-4 h-4" />
-                </button>
+              <div className="border-t border-gray-100">
+                {file && (
+                  <div className="px-2.5 pt-2 flex items-center gap-2 text-xs">
+                    <span className="inline-flex items-center gap-1.5 max-w-[80%] px-2 py-1 rounded bg-blue-50 text-blue-700 truncate">
+                      <Paperclip className="w-3 h-3 flex-shrink-0" /> <span className="truncate">{file.name}</span>
+                    </span>
+                    <button onClick={() => { setFile(null); if (fileRef.current) fileRef.current.value = ''; }} className="text-gray-400 hover:text-red-500"><X className="w-3.5 h-3.5" /></button>
+                  </div>
+                )}
+                <div className="p-2.5 flex items-end gap-2">
+                  <input ref={fileRef} type="file" className="hidden"
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) { if (f.size > 25 * 1024 * 1024) { window.alert('File too large (max 25MB).'); return; } setFile(f); } }} />
+                  <button onClick={() => fileRef.current?.click()} title="Attach a file"
+                    className="w-9 h-9 rounded-lg border border-gray-200 text-gray-500 flex items-center justify-center hover:bg-gray-50 flex-shrink-0">
+                    <Paperclip className="w-4 h-4" />
+                  </button>
+                  <textarea rows={1} value={draft} onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+                    placeholder={active.type === 'broadcast' ? 'Announce to everyone…' : 'Type a message…'}
+                    className="flex-1 resize-none max-h-24 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400" />
+                  <button onClick={handleSend} disabled={(!draft.trim() && !file) || sendMut.isPending}
+                    className="w-9 h-9 rounded-lg bg-blue-600 text-white flex items-center justify-center hover:bg-blue-700 disabled:opacity-40 flex-shrink-0">
+                    <Send className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </>
           )}

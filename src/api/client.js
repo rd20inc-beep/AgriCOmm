@@ -35,7 +35,13 @@ async function request(endpoint, options = {}) {
   }
 
   if (body && method !== 'GET') {
-    config.body = typeof body === 'string' ? body : JSON.stringify(body);
+    if (typeof FormData !== 'undefined' && body instanceof FormData) {
+      // Let the browser set the multipart boundary Content-Type itself.
+      delete config.headers['Content-Type'];
+      config.body = body;
+    } else {
+      config.body = typeof body === 'string' ? body : JSON.stringify(body);
+    }
   }
 
   // Timeout via AbortController

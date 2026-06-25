@@ -229,7 +229,11 @@ COL chart_of_accounts.parent_id:integer:NULL
 COL chart_of_accounts.sub_type:character varying:NULL
 COL chart_of_accounts.type:character varying:NOT NULL
 COL chart_of_accounts.updated_at:timestamp with time zone:NOT NULL
-COL chat_messages.body:text:NOT NULL
+COL chat_messages.attachment_name:character varying:NULL
+COL chat_messages.attachment_path:text:NULL
+COL chat_messages.attachment_size:integer:NULL
+COL chat_messages.attachment_type:character varying:NULL
+COL chat_messages.body:text:NULL
 COL chat_messages.created_at:timestamp with time zone:NOT NULL
 COL chat_messages.id:integer:NOT NULL
 COL chat_messages.is_broadcast:boolean:NOT NULL
