@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { MessageCircle, X, Send, ArrowLeft, Megaphone, Plus, Search, Paperclip, FileText, Download, Phone, Video, PhoneOff, Mic, MicOff, VideoOff } from 'lucide-react';
+import { MessageCircle, X, Send, ArrowLeft, Megaphone, Search, Paperclip, FileText, Download, Phone, Video, PhoneOff, Mic, MicOff, VideoOff } from 'lucide-react';
 import { chatApi } from '../modules/chat/api';
 import { useCalling } from '../modules/chat/useCalling';
 import { useAuth } from '../context/AuthContext';
@@ -66,11 +66,11 @@ export default function ChatWidget() {
   const peers = convData?.peers || [];
   const broadcast = convData?.broadcast || { unread: 0 };
 
-  // Address book for starting a new chat.
+  // All teammates — shown directly in the list so you can start a chat with anyone.
   const { data: usersData } = useQuery({
     queryKey: ['chat-users'],
     queryFn: async () => unwrap(await chatApi.users()),
-    enabled: !!user && open && view === 'new',
+    enabled: !!user && open,
   });
   const allUsers = usersData?.users || [];
 
@@ -111,9 +111,21 @@ export default function ChatWidget() {
     sendMut.mutate({ ...base, body, file: file || undefined });
   }
 
-  const filteredUsers = useMemo(() =>
-    allUsers.filter((u) => (u.full_name || '').toLowerCase().includes(userSearch.toLowerCase())),
-  [allUsers, userSearch]);
+  // Merge every teammate with their conversation preview; people with recent chats
+  // float to the top, the rest sort alphabetically — Announcements lives at the end.
+  const people = useMemo(() => {
+    const byPeer = Object.fromEntries(peers.map((p) => [p.peerId, p]));
+    return allUsers
+      .map((u) => ({ id: u.id, name: u.full_name, email: u.email, conv: byPeer[u.id] || null }))
+      .sort((a, b) => {
+        if (a.conv && b.conv) return new Date(b.conv.lastAt) - new Date(a.conv.lastAt);
+        if (a.conv) return -1; if (b.conv) return 1;
+        return (a.name || '').localeCompare(b.name || '');
+      });
+  }, [allUsers, peers]);
+  const shownPeople = useMemo(() =>
+    people.filter((u) => (u.name || '').toLowerCase().includes(userSearch.toLowerCase())),
+  [people, userSearch]);
 
   if (!user) return null;
 
@@ -161,8 +173,35 @@ export default function ChatWidget() {
           {/* LIST */}
           {view === 'list' && (
             <div className="flex-1 overflow-y-auto">
+              {/* Search people */}
+              <div className="p-2.5 sticky top-0 bg-white border-b border-gray-100 z-10">
+                <div className="relative">
+                  <Search className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input value={userSearch} onChange={(e) => setUserSearch(e.target.value)} placeholder="Search people…"
+                    className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400" />
+                </div>
+              </div>
+
+              {/* People */}
+              {shownPeople.map((u) => (
+                <button key={u.id} onClick={() => openThread({ type: 'peer', id: u.id, name: u.name })}
+                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 border-b border-gray-100 text-left">
+                  <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0 text-xs font-semibold">{initials(u.name)}</div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-sm text-gray-900 truncate">{u.name}</span>
+                      {u.conv && <span className="text-[10px] text-gray-400 flex-shrink-0 ml-1">{fmtTime(u.conv.lastAt)}</span>}
+                    </div>
+                    <p className="text-xs text-gray-500 truncate">{u.conv ? `${u.conv.fromMe ? 'You: ' : ''}${u.conv.lastBody}` : <span className="text-gray-400">{u.email || 'Tap to start a chat'}</span>}</p>
+                  </div>
+                  {u.conv?.unread > 0 && <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">{u.conv.unread}</span>}
+                </button>
+              ))}
+              {shownPeople.length === 0 && <p className="text-center text-xs text-gray-400 px-4 py-6">No people found.</p>}
+
+              {/* Announcements — broadcast to everyone (kept at the bottom) */}
               <button onClick={() => openThread({ type: 'broadcast' })}
-                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 border-b border-gray-100 text-left">
+                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-amber-50/60 border-t border-gray-200 text-left bg-amber-50/30">
                 <div className="w-10 h-10 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center flex-shrink-0"><Megaphone className="w-5 h-5" /></div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between">
@@ -173,51 +212,10 @@ export default function ChatWidget() {
                 </div>
                 {broadcast.unread > 0 && <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">{broadcast.unread}</span>}
               </button>
-
-              {peers.map((p) => (
-                <button key={p.peerId} onClick={() => openThread({ type: 'peer', id: p.peerId, name: p.peerName })}
-                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 border-b border-gray-100 text-left">
-                  <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0 text-xs font-semibold">{initials(p.peerName)}</div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium text-sm text-gray-900 truncate">{p.peerName}</span>
-                      <span className="text-[10px] text-gray-400 flex-shrink-0 ml-1">{fmtTime(p.lastAt)}</span>
-                    </div>
-                    <p className="text-xs text-gray-500 truncate">{p.fromMe ? 'You: ' : ''}{p.lastBody}</p>
-                  </div>
-                  {p.unread > 0 && <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">{p.unread}</span>}
-                </button>
-              ))}
-
-              {peers.length === 0 && (
-                <p className="text-center text-xs text-gray-400 px-4 py-6">No conversations yet. Start one with <span className="font-medium">New message</span>.</p>
-              )}
             </div>
           )}
 
           {/* NEW chat — pick a person */}
-          {view === 'new' && (
-            <div className="flex-1 overflow-y-auto">
-              <div className="p-3 sticky top-0 bg-white border-b border-gray-100">
-                <div className="relative">
-                  <Search className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                  <input autoFocus value={userSearch} onChange={(e) => setUserSearch(e.target.value)} placeholder="Search people…"
-                    className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400" />
-                </div>
-              </div>
-              {filteredUsers.map((u) => (
-                <button key={u.id} onClick={() => openThread({ type: 'peer', id: u.id, name: u.full_name })}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 text-left">
-                  <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-semibold">{initials(u.full_name)}</div>
-                  <div className="min-w-0">
-                    <div className="text-sm text-gray-900 truncate">{u.full_name}</div>
-                    <div className="text-[11px] text-gray-400 truncate">{u.email}</div>
-                  </div>
-                </button>
-              ))}
-              {filteredUsers.length === 0 && <p className="text-center text-xs text-gray-400 py-6">No people found.</p>}
-            </div>
-          )}
 
           {/* THREAD */}
           {view === 'thread' && active && (
@@ -268,13 +266,6 @@ export default function ChatWidget() {
             </>
           )}
 
-          {/* Footer action (list view) */}
-          {view === 'list' && (
-            <button onClick={() => { setView('new'); setUserSearch(''); }}
-              className="m-3 inline-flex items-center justify-center gap-1.5 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700">
-              <Plus className="w-4 h-4" /> New message
-            </button>
-          )}
         </div>
       )}
 
