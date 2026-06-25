@@ -10,6 +10,7 @@ import {
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { RouteErrorBoundary } from './ErrorBoundary';
+import ChatWidget from './ChatWidget';
 
 const exportNav = [
   { section: 'Main' },
@@ -115,7 +116,7 @@ export default function ExportLayout({ children }) {
   const handleSidebarNavigate = () => setSidebarOpen(false);
 
   return (
-    <div className="flex h-screen overflow-hidden" style={{ background: 'var(--color-bg)' }}>
+    <div className="flex h-screen overflow-hidden w-full" style={{ background: 'var(--color-bg)' }}>
       {sidebarOpen && (
         <div
           className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden"
@@ -328,6 +329,7 @@ export default function ExportLayout({ children }) {
           </RouteErrorBoundary>
         </main>
       </div>
+      <ChatWidget />
     </div>
   );
 }

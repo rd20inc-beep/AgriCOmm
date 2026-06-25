@@ -289,7 +289,7 @@ export default function Layout({ children }) {
   const handleSidebarNavigate = () => setSidebarOpen(false);
 
   return (
-    <div className="flex h-screen overflow-hidden" style={{ background: 'var(--color-bg)' }}>
+    <div className="flex h-screen overflow-hidden w-full" style={{ background: 'var(--color-bg)' }}>
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
         <div
