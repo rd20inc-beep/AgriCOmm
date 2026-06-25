@@ -783,50 +783,42 @@ const financeController = {
   async getAlerts(req, res) {
     try {
       const today = new Date().toISOString().slice(0, 10);
+      const in7 = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+      const num = (v) => parseFloat(v) || 0;
+      const rs = (v) => 'Rs ' + Math.round(num(v)).toLocaleString();
+      const safe = async (fn, dflt) => { try { return await fn(); } catch { return dflt; } };
+      const alerts = [];
 
-      const [overdueReceivables, overduePayables, pendingOrders] = await Promise.all([
-        db('receivables')
-          .where('due_date', '<', today)
-          .whereNot('status', 'Paid')
-          .count('id as count')
-          .sum('outstanding as total')
-          .first(),
-        db('payables')
-          .where('due_date', '<', today)
-          .whereNot('status', 'Paid')
-          .count('id as count')
-          .sum('outstanding as total')
-          .first(),
-        db('export_orders')
-          .whereIn('status', ['Draft', 'Awaiting Advance'])
-          .count('id as count')
-          .first(),
-      ]);
+      // Overdue receivables (money owed to us, past due).
+      const orr = await safe(() => db('receivables').where('due_date', '<', today).whereNot('status', 'Paid').count('id as c').sum('outstanding as t').first(), { c: 0, t: 0 });
+      if (parseInt(orr.c, 10) > 0) alerts.push({ id: 'overdue_receivables', type: 'receivable', severity: 'warning', title: 'Overdue receivables', message: `${orr.c} receivable(s) past due — ${rs(orr.t)} still to collect.`, count: parseInt(orr.c, 10), total: num(orr.t), link: '/finance/money-in' });
 
-      return res.json({
-        success: true,
-        data: {
-          alerts: [
-            {
-              type: 'overdue_receivables',
-              count: parseInt(overdueReceivables.count) || 0,
-              total: parseFloat(overdueReceivables.total) || 0,
-              severity: parseInt(overdueReceivables.count) > 0 ? 'warning' : 'info',
-            },
-            {
-              type: 'overdue_payables',
-              count: parseInt(overduePayables.count) || 0,
-              total: parseFloat(overduePayables.total) || 0,
-              severity: parseInt(overduePayables.count) > 0 ? 'danger' : 'info',
-            },
-            {
-              type: 'pending_orders',
-              count: parseInt(pendingOrders.count) || 0,
-              severity: 'info',
-            },
-          ],
-        },
-      });
+      // Overdue payables (we owe, past due).
+      const orp = await safe(() => db('payables').where('due_date', '<', today).whereNot('status', 'Paid').where('outstanding', '>', 0).count('id as c').sum('outstanding as t').first(), { c: 0, t: 0 });
+      if (parseInt(orp.c, 10) > 0) alerts.push({ id: 'overdue_payables', type: 'payable', severity: 'danger', title: 'Overdue payables', message: `${orp.c} bill(s) past due — ${rs(orp.t)} owed.`, count: parseInt(orp.c, 10), total: num(orp.t), link: '/finance/money-out' });
+
+      // Overdrawn bank/cash accounts.
+      const negBanks = await safe(() => db('bank_accounts').where('current_balance', '<', 0).where('is_active', true).select('name', 'current_balance', 'currency'), []);
+      for (const b of negBanks) {
+        const pfx = (b.currency === 'USD') ? '$' : 'Rs ';
+        alerts.push({ id: `neg_bank_${b.name}`, type: 'bank', severity: 'danger', title: 'Account overdrawn', message: `${b.name} balance is negative: ${pfx}${Math.round(num(b.current_balance)).toLocaleString()}.`, link: '/finance/cash' });
+      }
+
+      // Cheques past their clearing date but not yet cleared.
+      const oc = await safe(() => db('payments').where('payment_method', 'cheque').where('cleared', false).whereNotNull('due_date').where('due_date', '<', today).count('id as c').sum('amount as t').first(), { c: 0, t: 0 });
+      if (parseInt(oc.c, 10) > 0) alerts.push({ id: 'overdue_cheques', type: 'cheque', severity: 'warning', title: 'Cheques awaiting clearance', message: `${oc.c} cheque(s) are past their clearing date — ${rs(oc.t)}.`, count: parseInt(oc.c, 10), total: num(oc.t), link: '/finance/due-dates' });
+
+      // Due within the next 7 days (heads-up, info).
+      const dueRecv = await safe(() => db('receivables').whereBetween('due_date', [today, in7]).whereNot('status', 'Paid').count('id as c').sum('outstanding as t').first(), { c: 0, t: 0 });
+      if (parseInt(dueRecv.c, 10) > 0) alerts.push({ id: 'due_recv', type: 'receivable', severity: 'info', title: 'Receivables due this week', message: `${dueRecv.c} receivable(s) due within 7 days — ${rs(dueRecv.t)}.`, count: parseInt(dueRecv.c, 10), total: num(dueRecv.t), link: '/finance/due-dates' });
+      const duePay = await safe(() => db('payables').whereBetween('due_date', [today, in7]).whereNot('status', 'Paid').where('outstanding', '>', 0).count('id as c').sum('outstanding as t').first(), { c: 0, t: 0 });
+      if (parseInt(duePay.c, 10) > 0) alerts.push({ id: 'due_pay', type: 'payable', severity: 'info', title: 'Payables due this week', message: `${duePay.c} bill(s) due within 7 days — ${rs(duePay.t)}.`, count: parseInt(duePay.c, 10), total: num(duePay.t), link: '/finance/due-dates' });
+
+      // Export orders awaiting action.
+      const po = await safe(() => db('export_orders').whereIn('status', ['Draft', 'Awaiting Advance']).count('id as c').first(), { c: 0 });
+      if (parseInt(po.c, 10) > 0) alerts.push({ id: 'pending_orders', type: 'order', severity: 'info', title: 'Orders awaiting action', message: `${po.c} export order(s) in Draft / Awaiting Advance.`, count: parseInt(po.c, 10) });
+
+      return res.json({ success: true, data: { alerts } });
     } catch (err) {
       console.error('Get alerts error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });

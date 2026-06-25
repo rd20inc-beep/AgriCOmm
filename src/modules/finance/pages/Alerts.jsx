@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
-import { Bell, AlertTriangle, AlertCircle, Info, CheckCircle, Clock } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Bell, AlertTriangle, AlertCircle, Info, Clock, ArrowUpRight } from 'lucide-react';
 import { FinanceKPI } from '../../../components/finance';
 import { useFinanceAlerts } from '../../../api/queries';
 
@@ -15,6 +16,7 @@ const SEVERITY_CONFIG = {
 const FILTER_TABS = ['All', 'Critical', 'Warning', 'Info'];
 
 export default function Alerts() {
+  const navigate = useNavigate();
   const { data: alertsData = [], isLoading } = useFinanceAlerts();
   const [filter, setFilter] = useState('All');
   // Local-only dismiss set so the user can hide a noisy alert this
@@ -97,13 +99,16 @@ export default function Alerts() {
           const config = SEVERITY_CONFIG[alert.severity] || SEVERITY_CONFIG.info;
           const Icon = config.icon;
           return (
-            <div key={alert.id || i} className={`${config.bg} border ${config.border} rounded-xl p-4`}>
+            <div key={alert.id || i}
+              onClick={() => alert.link && navigate(alert.link)}
+              className={`${config.bg} border ${config.border} rounded-xl p-4 ${alert.link ? 'cursor-pointer hover:shadow-sm transition-shadow' : ''}`}>
               <div className="flex items-start gap-3">
                 <Icon size={18} className={`${config.iconColor} mt-0.5 flex-shrink-0`} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
                     <h4 className="text-sm font-semibold text-gray-900">{alert.title}</h4>
                     <span className={`w-2 h-2 rounded-full ${config.dot}`} />
+                    {alert.link && <ArrowUpRight size={13} className="text-gray-400" />}
                   </div>
                   <p className="text-sm text-gray-600">{alert.message}</p>
                   {alert.date && (
@@ -114,7 +119,7 @@ export default function Alerts() {
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
                   <button
-                    onClick={() => handleDismiss(alert.id)}
+                    onClick={(e) => { e.stopPropagation(); handleDismiss(alert.id); }}
                     title="Hide this alert in the current session. Alerts are recomputed on refresh — fix the underlying condition to make it go away."
                     className="text-xs px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 font-medium">
                     Dismiss
