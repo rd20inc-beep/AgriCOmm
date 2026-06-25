@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { MessageCircle, X, Send, ArrowLeft, Megaphone, Search, Paperclip, FileText, Download, Phone, Video, PhoneOff, Mic, MicOff, VideoOff } from 'lucide-react';
+import { MessageCircle, X, Send, ArrowLeft, Megaphone, Search, Paperclip, FileText, Download, Phone, Video, PhoneOff, Mic, MicOff, VideoOff, Smile, Image as ImageIcon, Camera } from 'lucide-react';
 import { chatApi } from '../modules/chat/api';
 import { useCalling } from '../modules/chat/useCalling';
 import { useAuth } from '../context/AuthContext';
 
 const unwrap = (res) => res?.data || res || {};
+const EMOJIS = '😀 😁 😂 🤣 😊 😍 😘 😎 🤩 🥳 🤔 😐 😴 😢 😭 😡 🤯 😱 🙄 😅 😉 🙂 🤗 🤝 🙏 👍 👎 👌 ✌️ 🤞 💪 👏 🙌 👋 💯 🔥 ✨ 🎉 ⭐ 💡 ✅ ❌ ⚠️ ❓ ❗ 💰 💵 📈 📉 📊 📦 🚚 🌾 🏭 📝 📌 📅 ⏰ 📞 📧 ❤️ 🎯 🚀'.split(' ');
 function fmtTime(iso) {
   if (!iso) return '';
   const d = new Date(iso); const now = new Date();
@@ -45,9 +46,20 @@ export default function ChatWidget() {
   const [active, setActive] = useState(null);     // {type:'broadcast'} | {type:'peer', id, name}
   const [draft, setDraft] = useState('');
   const [file, setFile] = useState(null);
+  const [showEmoji, setShowEmoji] = useState(false);
+  const [showAttach, setShowAttach] = useState(false);
   const [userSearch, setUserSearch] = useState('');
   const endRef = useRef(null);
   const fileRef = useRef(null);
+
+  function pickFile(kind) {
+    setShowAttach(false);
+    const inp = fileRef.current; if (!inp) return;
+    if (kind === 'image') { inp.accept = 'image/*'; inp.removeAttribute('capture'); }
+    else if (kind === 'camera') { inp.accept = 'image/*'; inp.setAttribute('capture', 'environment'); }
+    else { inp.accept = ''; inp.removeAttribute('capture'); }
+    inp.value = ''; inp.click();
+  }
 
   // Unread badge — always polling (even when closed) so the dot stays live.
   const { data: unreadData } = useQuery({
@@ -96,14 +108,14 @@ export default function ChatWidget() {
   const sendMut = useMutation({
     mutationFn: (payload) => chatApi.send(payload),
     onSuccess: () => {
-      setDraft(''); setFile(null);
+      setDraft(''); setFile(null); setShowEmoji(false); setShowAttach(false);
       qc.invalidateQueries({ queryKey: ['chat-messages', scopeKey] });
       qc.invalidateQueries({ queryKey: ['chat-conversations'] });
       qc.invalidateQueries({ queryKey: ['chat-unread'] });
     },
   });
 
-  function openThread(target) { setActive(target); setView('thread'); setDraft(''); setFile(null); }
+  function openThread(target) { setActive(target); setView('thread'); setDraft(''); setFile(null); setShowEmoji(false); setShowAttach(false); }
   function handleSend() {
     const body = draft.trim();
     if ((!body && !file) || !active) return;
@@ -246,17 +258,43 @@ export default function ChatWidget() {
                     <button onClick={() => { setFile(null); if (fileRef.current) fileRef.current.value = ''; }} className="text-gray-400 hover:text-red-500"><X className="w-3.5 h-3.5" /></button>
                   </div>
                 )}
-                <div className="p-2.5 flex items-end gap-2">
+                {/* Emoji picker */}
+                {showEmoji && (
+                  <div className="px-2 pb-1 max-h-28 overflow-y-auto grid grid-cols-8 gap-0.5 border-t border-gray-100 pt-1.5">
+                    {EMOJIS.map((e) => (
+                      <button key={e} onClick={() => setDraft((d) => d + e)} className="text-lg hover:bg-gray-100 rounded leading-none py-1">{e}</button>
+                    ))}
+                  </div>
+                )}
+                <div className="p-2.5 flex items-end gap-1.5 relative">
                   <input ref={fileRef} type="file" className="hidden"
                     onChange={(e) => { const f = e.target.files?.[0]; if (f) { if (f.size > 25 * 1024 * 1024) { window.alert('File too large (max 25MB).'); return; } setFile(f); } }} />
-                  <button onClick={() => fileRef.current?.click()} title="Attach a file"
-                    className="w-9 h-9 rounded-lg border border-gray-200 text-gray-500 flex items-center justify-center hover:bg-gray-50 flex-shrink-0">
-                    <Paperclip className="w-4 h-4" />
+
+                  {/* Emoji button */}
+                  <button onClick={() => { setShowEmoji((v) => !v); setShowAttach(false); }} title="Emoji"
+                    className={`w-9 h-9 rounded-lg border flex items-center justify-center flex-shrink-0 ${showEmoji ? 'border-blue-400 text-blue-600 bg-blue-50' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
+                    <Smile className="w-4 h-4" />
                   </button>
+
+                  {/* Attach with options menu */}
+                  <div className="relative flex-shrink-0">
+                    <button onClick={() => { setShowAttach((v) => !v); setShowEmoji(false); }} title="Attach"
+                      className={`w-9 h-9 rounded-lg border flex items-center justify-center ${showAttach ? 'border-blue-400 text-blue-600 bg-blue-50' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
+                      <Paperclip className="w-4 h-4" />
+                    </button>
+                    {showAttach && (
+                      <div className="absolute bottom-11 left-0 w-44 bg-white rounded-xl shadow-xl border border-gray-200 py-1 z-20">
+                        <button onClick={() => pickFile('image')} className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"><ImageIcon className="w-4 h-4 text-emerald-500" /> Photo / Image</button>
+                        <button onClick={() => pickFile('document')} className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"><FileText className="w-4 h-4 text-blue-500" /> Document</button>
+                        <button onClick={() => pickFile('camera')} className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"><Camera className="w-4 h-4 text-violet-500" /> Camera</button>
+                      </div>
+                    )}
+                  </div>
+
                   <textarea rows={1} value={draft} onChange={(e) => setDraft(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
                     placeholder={active.type === 'broadcast' ? 'Announce to everyone…' : 'Type a message…'}
-                    className="flex-1 resize-none max-h-24 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400" />
+                    className="flex-1 min-w-0 resize-none max-h-24 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400" />
                   <button onClick={handleSend} disabled={(!draft.trim() && !file) || sendMut.isPending}
                     className="w-9 h-9 rounded-lg bg-blue-600 text-white flex items-center justify-center hover:bg-blue-700 disabled:opacity-40 flex-shrink-0">
                     <Send className="w-4 h-4" />
