@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { chatApi } from './api';
+import { ensureNotifyPermission, showNotify } from './notify';
 
 // 1:1 WebRTC audio/video calling. Signaling rides the per-user SSE channel
 // (/api/streams/call-signals) for inbound and POST /api/chat/signal for outbound.
@@ -32,27 +33,34 @@ export function useCalling(user) {
 
   useEffect(() => { callRef.current = call; }, [call]);
 
-  // A telephone-style two-tone ring, generated with Web Audio (no asset needed).
+  // A realistic telephone ring: a "brrr-brrr" double burst of the classic 440+480 Hz
+  // ringback pair (the two close tones beat to give the warbling phone-ring sound).
   const ringOnce = useCallback(() => {
     const ctx = audioCtxRef.current; if (!ctx) return;
     if (ctx.state === 'suspended') ctx.resume().catch(() => {});
     const now = ctx.currentTime;
-    [[0, 480], [0.4, 620]].forEach(([off, freq]) => {
-      const o = ctx.createOscillator(); const g = ctx.createGain();
-      o.type = 'sine'; o.frequency.value = freq; o.connect(g); g.connect(ctx.destination);
-      const s = now + off;
-      g.gain.setValueAtTime(0.0001, s);
-      g.gain.exponentialRampToValueAtTime(0.28, s + 0.03);
-      g.gain.exponentialRampToValueAtTime(0.0001, s + 0.34);
-      o.start(s); o.stop(s + 0.36);
-    });
+    const burst = (start, dur) => {
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, start);
+      g.gain.linearRampToValueAtTime(0.22, start + 0.04);
+      g.gain.setValueAtTime(0.22, start + dur - 0.05);
+      g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+      g.connect(ctx.destination);
+      [440, 480].forEach((f) => {
+        const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f;
+        o.connect(g); o.start(start); o.stop(start + dur);
+      });
+    };
+    burst(now, 0.4);
+    burst(now + 0.6, 0.4);
   }, []);
 
-  // Create the AudioContext once and unlock it on the first user gesture so the
-  // ringtone can play (browsers block audio until the page has been interacted with).
+  // Create the AudioContext once and unlock it (+ ask for notification permission)
+  // on the first user gesture — browsers block audio and gate Notification prompts
+  // until the page has been interacted with.
   useEffect(() => {
     try { audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)(); } catch { /* noop */ }
-    const unlock = () => { audioCtxRef.current?.resume().catch(() => {}); };
+    const unlock = () => { audioCtxRef.current?.resume().catch(() => {}); ensureNotifyPermission(); };
     window.addEventListener('pointerdown', unlock);
     window.addEventListener('keydown', unlock);
     return () => { window.removeEventListener('pointerdown', unlock); window.removeEventListener('keydown', unlock); };
@@ -63,14 +71,13 @@ export function useCalling(user) {
     const ringing = call && (call.status === 'incoming' || call.status === 'outgoing');
     if (ringing) {
       ringOnce();
-      ringTimerRef.current = setInterval(ringOnce, 2800);
-      // Best-effort OS notification for incoming calls when the tab isn't focused.
-      if (call.status === 'incoming' && 'Notification' in window) {
-        if (Notification.permission === 'granted') {
-          try { new Notification(`Incoming ${call.kind} call`, { body: call.peerName, tag: 'rf-call' }); } catch { /* noop */ }
-        } else if (Notification.permission !== 'denied') {
-          Notification.requestPermission().catch(() => {});
-        }
+      ringTimerRef.current = setInterval(ringOnce, 3000);
+      // OS notification for incoming calls (desktop + mobile via the service worker).
+      if (call.status === 'incoming') {
+        showNotify(`Incoming ${call.kind} call`, {
+          body: `${call.peerName} is calling…`, tag: 'rf-call', renotify: true,
+          requireInteraction: true, icon: '/logo.png', vibrate: [400, 200, 400],
+        });
       }
     }
     return () => { if (ringTimerRef.current) { clearInterval(ringTimerRef.current); ringTimerRef.current = null; } };
