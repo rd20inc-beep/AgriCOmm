@@ -27,8 +27,54 @@ export function useCalling(user) {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const remoteAudioRef = useRef(null);
+  const audioCtxRef = useRef(null);
+  const ringTimerRef = useRef(null);
 
   useEffect(() => { callRef.current = call; }, [call]);
+
+  // A telephone-style two-tone ring, generated with Web Audio (no asset needed).
+  const ringOnce = useCallback(() => {
+    const ctx = audioCtxRef.current; if (!ctx) return;
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    const now = ctx.currentTime;
+    [[0, 480], [0.4, 620]].forEach(([off, freq]) => {
+      const o = ctx.createOscillator(); const g = ctx.createGain();
+      o.type = 'sine'; o.frequency.value = freq; o.connect(g); g.connect(ctx.destination);
+      const s = now + off;
+      g.gain.setValueAtTime(0.0001, s);
+      g.gain.exponentialRampToValueAtTime(0.28, s + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001, s + 0.34);
+      o.start(s); o.stop(s + 0.36);
+    });
+  }, []);
+
+  // Create the AudioContext once and unlock it on the first user gesture so the
+  // ringtone can play (browsers block audio until the page has been interacted with).
+  useEffect(() => {
+    try { audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)(); } catch { /* noop */ }
+    const unlock = () => { audioCtxRef.current?.resume().catch(() => {}); };
+    window.addEventListener('pointerdown', unlock);
+    window.addEventListener('keydown', unlock);
+    return () => { window.removeEventListener('pointerdown', unlock); window.removeEventListener('keydown', unlock); };
+  }, []);
+
+  // Ring while a call is being set up (incoming for the callee, ringback for the caller).
+  useEffect(() => {
+    const ringing = call && (call.status === 'incoming' || call.status === 'outgoing');
+    if (ringing) {
+      ringOnce();
+      ringTimerRef.current = setInterval(ringOnce, 2800);
+      // Best-effort OS notification for incoming calls when the tab isn't focused.
+      if (call.status === 'incoming' && 'Notification' in window) {
+        if (Notification.permission === 'granted') {
+          try { new Notification(`Incoming ${call.kind} call`, { body: call.peerName, tag: 'rf-call' }); } catch { /* noop */ }
+        } else if (Notification.permission !== 'denied') {
+          Notification.requestPermission().catch(() => {});
+        }
+      }
+    }
+    return () => { if (ringTimerRef.current) { clearInterval(ringTimerRef.current); ringTimerRef.current = null; } };
+  }, [call?.status, ringOnce]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const signal = useCallback((to, type, payload, kind) => {
     chatApi.signal({ to, type, payload, kind }).catch(() => {});
