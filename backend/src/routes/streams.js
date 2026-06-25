@@ -3,8 +3,28 @@ const db = require('../config/database');
 const authenticateEventSource = require('../middleware/authEventSource');
 const authorize = require('../middleware/rbac');
 const { subscribeExportOrderUpdates } = require('../services/exportOrderEventBus');
+const { subscribeSignals } = require('../modules/chat/callSignalBus');
 
 const router = express.Router();
+
+// Per-user WebRTC call-signaling channel. The connected user receives any signal
+// (incoming call / answer / ICE / hangup) addressed to them.
+router.get('/call-signals', authenticateEventSource, (req, res) => {
+  res.status(200).set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.flushHeaders();
+  res.write(`event: ready\ndata: ${JSON.stringify({ userId: req.user.id })}\n\n`);
+
+  const unsubscribe = subscribeSignals(req.user.id, (signal) => {
+    res.write(`data: ${JSON.stringify(signal)}\n\n`);
+  });
+  const heartbeat = setInterval(() => res.write(': ping\n\n'), 25000);
+  req.on('close', () => { clearInterval(heartbeat); unsubscribe(); res.end(); });
+});
 
 router.get('/export-orders/:id', authenticateEventSource, authorize('export_orders', 'view'), async (req, res) => {
   const { id } = req.params;

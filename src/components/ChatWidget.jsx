@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { MessageCircle, X, Send, ArrowLeft, Megaphone, Plus, Search, Paperclip, FileText, Download } from 'lucide-react';
+import { MessageCircle, X, Send, ArrowLeft, Megaphone, Plus, Search, Paperclip, FileText, Download, Phone, Video, PhoneOff, Mic, MicOff, VideoOff } from 'lucide-react';
 import { chatApi } from '../modules/chat/api';
+import { useCalling } from '../modules/chat/useCalling';
 import { useAuth } from '../context/AuthContext';
 
 const unwrap = (res) => res?.data || res || {};
@@ -38,6 +39,7 @@ function Attachment({ m, mine }) {
 export default function ChatWidget() {
   const { user } = useAuth();
   const qc = useQueryClient();
+  const calling = useCalling(user);
   const [open, setOpen] = useState(false);
   const [view, setView] = useState('list');      // 'list' | 'thread' | 'new'
   const [active, setActive] = useState(null);     // {type:'broadcast'} | {type:'peer', id, name}
@@ -147,6 +149,12 @@ export default function ChatWidget() {
               {view === 'thread' && active?.type === 'broadcast' && <Megaphone className="w-4 h-4" />}
               <span className="font-semibold text-sm truncate">{headerTitle}</span>
             </div>
+            {view === 'thread' && active?.type === 'peer' && !calling.call && (
+              <>
+                <button onClick={() => calling.startCall({ id: active.id, name: active.name }, 'audio')} title="Audio call" className="p-1 hover:bg-white/15 rounded"><Phone className="w-4 h-4" /></button>
+                <button onClick={() => calling.startCall({ id: active.id, name: active.name }, 'video')} title="Video call" className="p-1 hover:bg-white/15 rounded"><Video className="w-4 h-4" /></button>
+              </>
+            )}
             <button onClick={() => setOpen(false)} className="p-1 hover:bg-white/15 rounded"><X className="w-4 h-4" /></button>
           </div>
 
@@ -269,6 +277,81 @@ export default function ChatWidget() {
           )}
         </div>
       )}
+
+      <CallOverlay calling={calling} />
+    </div>
+  );
+}
+
+// Ringing / in-call UI — rendered regardless of whether the chat panel is open so
+// incoming calls always surface.
+function CallOverlay({ calling }) {
+  const { call, muted, camOff, acceptCall, declineCall, hangup, toggleMute, toggleCam, localVideoRef, remoteVideoRef, remoteAudioRef } = calling;
+  if (!call) return <audio ref={remoteAudioRef} autoPlay className="hidden" />;
+  const isVideo = call.kind === 'video';
+  const connected = call.status === 'connected';
+
+  // Incoming / outgoing ringing card.
+  if (!connected) {
+    return (
+      <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center" >
+        <audio ref={remoteAudioRef} autoPlay className="hidden" />
+        <div className="bg-white rounded-2xl shadow-2xl w-80 p-6 text-center">
+          <div className="w-20 h-20 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-2xl font-bold mx-auto mb-3">
+            {(call.peerName || 'U').split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase()}
+          </div>
+          <div className="text-lg font-semibold text-gray-900">{call.peerName}</div>
+          <div className="text-sm text-gray-500 mt-1 flex items-center justify-center gap-1.5">
+            {isVideo ? <Video className="w-4 h-4" /> : <Phone className="w-4 h-4" />}
+            {call.status === 'incoming' ? `Incoming ${call.kind} call…` : `Calling…`}
+          </div>
+          <div className="flex items-center justify-center gap-4 mt-6">
+            {call.status === 'incoming' ? (
+              <>
+                <button onClick={declineCall} className="w-14 h-14 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center"><PhoneOff className="w-6 h-6" /></button>
+                <button onClick={acceptCall} className="w-14 h-14 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white flex items-center justify-center">{isVideo ? <Video className="w-6 h-6" /> : <Phone className="w-6 h-6" />}</button>
+              </>
+            ) : (
+              <button onClick={hangup} className="w-14 h-14 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center"><PhoneOff className="w-6 h-6" /></button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Connected in-call view.
+  return (
+    <div className="fixed inset-0 z-[70] bg-gray-900 flex flex-col">
+      <audio ref={remoteAudioRef} autoPlay className="hidden" />
+      <div className="flex-1 relative flex items-center justify-center">
+        {isVideo ? (
+          <>
+            <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-contain bg-black" />
+            <video ref={localVideoRef} autoPlay playsInline muted className="absolute bottom-4 right-4 w-32 h-24 object-cover rounded-lg border-2 border-white/40 bg-black" />
+          </>
+        ) : (
+          <div className="text-center text-white">
+            <div className="w-28 h-28 rounded-full bg-white/10 flex items-center justify-center text-4xl font-bold mx-auto mb-4">
+              {(call.peerName || 'U').split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase()}
+            </div>
+            <div className="text-xl font-semibold">{call.peerName}</div>
+            <div className="text-sm text-white/60 mt-1">Voice call · connected</div>
+          </div>
+        )}
+        <div className="absolute top-4 left-4 text-white/80 text-sm font-medium">{call.peerName}</div>
+      </div>
+      <div className="py-5 flex items-center justify-center gap-5 bg-black/30">
+        <button onClick={toggleMute} title={muted ? 'Unmute' : 'Mute'} className={`w-12 h-12 rounded-full flex items-center justify-center ${muted ? 'bg-white text-gray-900' : 'bg-white/15 text-white hover:bg-white/25'}`}>
+          {muted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+        </button>
+        {isVideo && (
+          <button onClick={toggleCam} title={camOff ? 'Camera on' : 'Camera off'} className={`w-12 h-12 rounded-full flex items-center justify-center ${camOff ? 'bg-white text-gray-900' : 'bg-white/15 text-white hover:bg-white/25'}`}>
+            {camOff ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
+          </button>
+        )}
+        <button onClick={hangup} title="Hang up" className="w-14 h-14 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center"><PhoneOff className="w-6 h-6" /></button>
+      </div>
     </div>
   );
 }

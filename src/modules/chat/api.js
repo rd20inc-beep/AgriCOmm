@@ -16,4 +16,7 @@ export const chatApi = {
   },
   markRead: (scope) => api.post('/api/chat/read', { scope }),
   attachmentUrl: (id) => `/api/chat-attachments/${id}?token=${encodeURIComponent(localStorage.getItem('riceflow_token') || '')}`,
+  // WebRTC call signaling
+  signal: (data) => api.post('/api/chat/signal', data),
+  callStreamUrl: () => `/api/streams/call-signals?token=${encodeURIComponent(localStorage.getItem('riceflow_token') || '')}`,
 };

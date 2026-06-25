@@ -5,6 +5,8 @@ const fs = require('fs');
 
 const router = express.Router();
 const chat = require('./chat.service');
+const db = require('../../config/database');
+const { publishSignal } = require('./callSignalBus');
 
 // Chat files live in the PERSISTED uploads volume (/app/uploads/chat), not the
 // documents module's non-persisted dir.
@@ -54,6 +56,18 @@ router.post('/messages', upload.single('file'), async (req, res) => {
 router.post('/read', async (req, res) => {
   try { await chat.markRead(meId(req), req.body?.scope); return res.json({ success: true }); }
   catch (e) { return res.status(e.statusCode || 400).json({ success: false, message: e.message }); }
+});
+
+// Relay a WebRTC signal (offer/answer/ice/decline/hangup) to another user. The
+// sender id/name are stamped server-side so the callee knows who is calling.
+router.post('/signal', async (req, res) => {
+  try {
+    const { to, type, payload, kind } = req.body || {};
+    if (!to || !type) return res.status(400).json({ success: false, message: 'to and type are required.' });
+    const me = await db('users').where('id', meId(req)).first('id', 'full_name');
+    publishSignal(Number(to), { type, kind: kind || null, payload: payload ?? null, from: me.id, fromName: me.full_name || 'User' });
+    return res.json({ success: true });
+  } catch (e) { return res.status(e.statusCode || 400).json({ success: false, message: e.message }); }
 });
 
 module.exports = router;
