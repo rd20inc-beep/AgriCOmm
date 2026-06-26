@@ -428,6 +428,11 @@ module.exports = {
 
       const bagWt = parseFloat(bag_weight_kg) || 50;
       const netWeightKg = uc.toKg(quantity_input, quantity_unit, bagWt);
+      // Ordered quantity (what was ordered, vs the received netWeightKg above).
+      // Defaults to received when not supplied, so a fully-received lot shows no variance.
+      const orderedKg = (req.body.ordered_quantity_input != null && req.body.ordered_quantity_input !== '')
+        ? uc.toKg(req.body.ordered_quantity_input, req.body.ordered_quantity_unit || quantity_unit, bagWt)
+        : netWeightKg;
       const ratePerKg = uc.rateToPerKg(rate_input, rate_unit, bagWt);
       const totalBags = inputTotalBags || (quantity_unit === 'katta' || quantity_unit === 'bag' ? Math.round(parseFloat(quantity_input)) : Math.round(netWeightKg / bagWt));
       const purchaseAmount = uc.round2(netWeightKg * ratePerKg);
@@ -567,7 +572,8 @@ module.exports = {
           total_bags: totalBags,
           gross_weight_kg: netWeightKg,
           net_weight_kg: netWeightKg,
-          received_net_weight_kg: netWeightKg, // immutable original intake
+          received_net_weight_kg: netWeightKg, // what actually arrived (drives stock + bill)
+          ordered_net_weight_kg: orderedKg,    // what was ordered (for the short/over variance)
           // Pricing
           rate_input_unit: rate_unit,
           rate_input_value: parseFloat(rate_input),
@@ -1538,6 +1544,111 @@ module.exports = {
     } catch (err) {
       const status = err.status || 500;
       if (status === 500) console.error('setLotPurchaseRate error:', err);
+      return res.status(status).json({ success: false, message: err.message });
+    }
+  },
+
+  // ─── Record the RECEIVED quantity on a raw lot (ordered vs received) ───
+  //
+  // A lot ordered for 14 MT but only 10 MT received: set received to the actual
+  // amount; stock (net/available) drops to it, and the supplier bill re-bills to
+  // received × rate + add-ons (the bill always follows what arrived). Over-receipt
+  // (received > ordered) works the same way. Mirrors setLotPurchaseRate's payable +
+  // signed-delta GL re-accrual. ordered_net_weight_kg is preserved (or optionally
+  // corrected) so the short/over variance shows on the lot.
+  async setLotReceivedQty(req, res) {
+    try {
+      const { id } = req.params;
+      const newReceivedKg = parseFloat(req.body.received_net_weight_kg);
+      if (!Number.isFinite(newReceivedKg) || newReceivedKg <= 0) {
+        return res.status(400).json({ success: false, message: 'received_net_weight_kg must be a positive number (in kg).' });
+      }
+      const result = await db.transaction(async (trx) => {
+        const lot = await trx('inventory_lots').where({ id }).first();
+        if (!lot) { const e = new Error('Lot not found.'); e.status = 404; throw e; }
+        if (lot.type !== 'raw') { const e = new Error('Only raw purchase lots have a received quantity.'); e.status = 400; throw e; }
+
+        const oldReceived = parseFloat(lot.received_net_weight_kg) || parseFloat(lot.net_weight_kg) || 0;
+        const curNet = parseFloat(lot.net_weight_kg) || 0;
+        const utilized = Math.max(0, uc.round2(oldReceived - curNet)); // already milled/sold/transferred out
+        const reservedKg = (parseFloat(lot.reserved_qty) || 0) * 1000;
+        const newNet = uc.round2(newReceivedKg - utilized);
+        if (newNet < 0) { const e = new Error(`Received quantity is below what has already been used from this lot (${Math.round(utilized).toLocaleString()} kg).`); e.status = 409; throw e; }
+        if (newNet < reservedKg - 0.01) { const e = new Error(`Received quantity is below the amount already reserved (${Math.round(reservedKg).toLocaleString()} kg). Release reservations first.`); e.status = 409; throw e; }
+
+        const rate = parseFloat(lot.rate_per_kg) || 0;
+        const newPurchaseAmount = uc.round2(newReceivedKg * rate);
+        const directCosts = (parseFloat(lot.labor_cost) || 0) + (parseFloat(lot.unloading_cost) || 0) + (parseFloat(lot.packing_cost) || 0) + (parseFloat(lot.other_cost) || 0);
+        const totalBagCost = parseFloat(lot.total_bag_cost) || 0;
+        const landedTotal = uc.round2(newPurchaseAmount + directCosts + totalBagCost);
+        const landedPerKg = newReceivedKg > 0 ? uc.round4(landedTotal / newReceivedKg) : 0;
+
+        const orderedInput = req.body.ordered_net_weight_kg;
+        const orderedKg = (orderedInput != null && orderedInput !== '')
+          ? Math.max(0, parseFloat(orderedInput))
+          : (parseFloat(lot.ordered_net_weight_kg) || oldReceived);
+
+        await trx('inventory_lots').where({ id }).update({
+          received_net_weight_kg: newReceivedKg,
+          ordered_net_weight_kg: orderedKg,
+          net_weight_kg: newNet, gross_weight_kg: newNet,
+          qty: uc.kgToTon(newNet), available_qty: newNet / 1000,
+          purchase_amount: newPurchaseAmount,
+          landed_cost_total: landedTotal, landed_cost_per_kg: landedPerKg,
+          total_value: landedTotal, cost_per_unit: landedPerKg * 1000,
+          updated_at: trx.fn.now(),
+        });
+
+        // Re-bill the Raw Material payable + re-accrue the GL with a signed delta
+        // (same as setLotPurchaseRate — never reverse+repost).
+        let payableUpdated = false;
+        const pay = await trx('payables').where({ linked_ref: lot.lot_no, category: 'Raw Material' })
+          .where(function () { this.whereNull('source_table').orWhereNot('source_table', 'lot_transport'); }).first();
+        if (pay) {
+          const paid = parseFloat(pay.paid_amount) || 0;
+          const outstanding = Math.max(0, uc.round2(landedTotal - paid));
+          await trx('payables').where({ id: pay.id }).update({
+            original_amount: landedTotal, outstanding,
+            status: outstanding <= 0.01 ? 'Paid' : (paid > 0 ? 'Partial' : 'Pending'), updated_at: trx.fn.now(),
+          });
+          payableUpdated = true;
+        }
+        const oldLanded = parseFloat(lot.landed_cost_total) || 0;
+        const delta = uc.round2(landedTotal - oldLanded);
+        if (Math.abs(delta) > 0.01 && lot.supplier_id) {
+          const rule = await trx('posting_rules')
+            .where({ trigger_event: 'purchase_invoice', is_active: true })
+            .where(function () { this.where({ entity: 'mill' }).orWhereNull('entity'); }).first();
+          if (rule) {
+            const [stockAcc, apAcc] = await Promise.all([
+              trx('chart_of_accounts').where({ id: rule.debit_account_id }).first(),
+              trx('chart_of_accounts').where({ id: rule.credit_account_id }).first(),
+            ]);
+            const amt = Math.abs(delta);
+            const up = delta > 0;
+            const lines = [
+              { account_id: rule.debit_account_id, account: stockAcc?.name || '', debit: up ? amt : 0, credit: up ? 0 : amt, narration: `${up ? 'DR' : 'CR'} ${stockAcc ? stockAcc.code + ' ' + stockAcc.name : ''} — received qty adj` },
+              { account_id: rule.credit_account_id, account: apAcc?.name || '', debit: up ? 0 : amt, credit: up ? amt : 0, narration: `${up ? 'CR' : 'DR'} ${apAcc ? apAcc.code + ' ' + apAcc.name : ''} — received qty adj` },
+            ];
+            const adj = await accountingService.createJournal(trx, {
+              date: new Date().toISOString().slice(0, 10), entity: 'mill',
+              refType: 'Purchase Lot', refNo: lot.lot_no,
+              description: `Lot ${lot.lot_no} received qty set to ${Math.round(newReceivedKg).toLocaleString()} kg (bill Rs ${delta >= 0 ? '+' : ''}${delta})`,
+              lines, currency: 'PKR', isAuto: true, postingRuleId: rule.id,
+              userId: req.user?.id, partyType: 'supplier', partyId: lot.supplier_id,
+            });
+            await accountingService.postJournal(trx, adj.id);
+          }
+        }
+
+        const propagation = await inventoryService.propagateLotCostToBatches(trx, parseInt(id, 10), { userId: req.user?.id });
+        const updated = await trx('inventory_lots').where({ id }).first();
+        return { updated, payableUpdated, propagation };
+      });
+      return res.json({ success: true, data: { lot: enrichLot(result.updated), payableUpdated: result.payableUpdated, propagation: result.propagation } });
+    } catch (err) {
+      const status = err.status || 500;
+      if (status === 500) console.error('setLotReceivedQty error:', err);
       return res.status(status).json({ success: false, message: err.message });
     }
   },

@@ -808,6 +808,7 @@ COL inventory_lots.milling_status:character varying:NULL
 COL inventory_lots.moisture_pct:numeric:NULL
 COL inventory_lots.net_weight_kg:numeric:NOT NULL
 COL inventory_lots.notes:text:NULL
+COL inventory_lots.ordered_net_weight_kg:numeric:NULL
 COL inventory_lots.other_cost:numeric:NOT NULL
 COL inventory_lots.packing_cost:numeric:NOT NULL
 COL inventory_lots.paid_amount:numeric:NOT NULL

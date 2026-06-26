@@ -179,6 +179,9 @@ const createPurchaseLot = Joi.object({
   bag_cost_included: Joi.boolean().default(false),
   quantity_input: Joi.number().positive().required(),
   quantity_unit: Joi.string().valid('katta', 'bag', 'kg', 'maund', 'ton', 'mt').default('katta'),
+  // Ordered quantity (optional) — what was ordered, vs quantity_input = received.
+  ordered_quantity_input: Joi.number().positive().allow(null, ''),
+  ordered_quantity_unit: Joi.string().valid('katta', 'bag', 'kg', 'maund', 'ton', 'mt').allow(null, ''),
   bag_weight_kg: Joi.number().positive().default(50),
   rate_input: Joi.number().positive().required(),
   rate_unit: Joi.string().valid('katta', 'bag', 'kg', 'maund', 'ton', 'mt').default('katta'),

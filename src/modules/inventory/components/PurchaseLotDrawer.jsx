@@ -47,6 +47,7 @@ const defaultForm = () => ({
   supplier_id: '',
   product_id: '',
   weight_kg: '',
+  ordered_weight_kg: '',
   total_bags: '',
   price_per_mt: '',
   purchase_date: new Date().toISOString().slice(0, 10),
@@ -174,6 +175,9 @@ export default function PurchaseLotDrawer({
   const avgBagKg = bags > 0 && weightKg > 0 ? weightKg / bags : 0;
   const totalValue = weightMT * pricePerMT;
   const ratePerKg = pricePerMT / 1000;
+  // Ordered vs received (optional). Bill follows RECEIVED (weightKg).
+  const orderedKg = parseFloat(form.ordered_weight_kg) || 0;
+  const orderedVariance = orderedKg > 0 ? weightKg - orderedKg : 0; // <0 short, >0 over
 
   // ─────────── Submit ───────────
   async function handleSubmit() {
@@ -231,9 +235,11 @@ export default function PurchaseLotDrawer({
         sortex_status: null,
         // Everything else (B1/B2/B3/Cobba/CSR/NB/OV/chalky/purity/...) lands in jsonb
         quality_json: Object.keys(quality).length ? quality : null,
-        // Quantity in kilograms
+        // Quantity in kilograms (received drives stock + bill; ordered optional)
         quantity_input: weightKg,
         quantity_unit: 'kg',
+        ordered_quantity_input: orderedKg > 0 ? orderedKg : null,
+        ordered_quantity_unit: 'kg',
         bag_weight_kg: avgBagKg > 0 ? avgBagKg : (bags > 0 ? weightKg / bags : 50),
         total_bags: bags || null,
         // Rate per kilogram
@@ -514,12 +520,12 @@ export default function PurchaseLotDrawer({
         {/* ─────────── Quantity ─────────── */}
         <div className="grid grid-cols-2 gap-3">
           <Input
-            label="Weight (KG) *"
+            label="Received Weight (KG) *"
             type="number" step="1" min="0"
             value={form.weight_kg}
             onChange={(v) => setForm(prev => ({ ...prev, weight_kg: v }))}
             placeholder="e.g. 30000"
-            hint={weightMT > 0 ? `${weightMT.toFixed(2)} MT` : null}
+            hint={weightMT > 0 ? `${weightMT.toFixed(2)} MT — drives stock & bill` : null}
           />
           <Input
             label="Bags"
@@ -530,6 +536,18 @@ export default function PurchaseLotDrawer({
             hint={avgBagKg > 0 ? `${avgBagKg.toFixed(2)} kg/bag avg` : null}
           />
         </div>
+        <Input
+          label="Ordered Weight (KG)"
+          type="number" step="1" min="0"
+          value={form.ordered_weight_kg}
+          onChange={(v) => setForm(prev => ({ ...prev, ordered_weight_kg: v }))}
+          placeholder="Leave blank if fully received"
+          hint={orderedKg > 0 && Math.abs(orderedVariance) > 0.5
+            ? (orderedVariance < 0
+                ? `Short ${(Math.abs(orderedVariance) / 1000).toFixed(2)} MT vs order`
+                : `Over ${(orderedVariance / 1000).toFixed(2)} MT vs order`)
+            : 'Ordered amount (for the short/over variance)'}
+        />
 
         {/* ─────────── Price ─────────── */}
         <div>

@@ -62,6 +62,7 @@ export default function LotDetail() {
   const [showTxnModal, setShowTxnModal] = useState(false);
   const [showCostModal, setShowCostModal] = useState(false);
   const [showPriceModal, setShowPriceModal] = useState(false);
+  const [showReceivedModal, setShowReceivedModal] = useState(false);
   const [showCostSheet, setShowCostSheet] = useState(false);
   const [showAllocateModal, setShowAllocateModal] = useState(false);
   const [showStartMilling, setShowStartMilling] = useState(false);
@@ -157,6 +158,10 @@ export default function LotDetail() {
   // ledger sum, then the current net weight, for lots predating the column.
   const receivedCol = parseFloat(lot.receivedNetWeightKg) || 0;
   const receivedKg = receivedCol > 0 ? receivedCol : (inflowKg > 0 ? inflowKg : netKg);
+  // Ordered vs received: ordered is what was ordered; received (above) drives stock
+  // + bill. Variance < 0 = short shipment, > 0 = over-receipt.
+  const orderedKg = parseFloat(lot.orderedNetWeightKg) || 0;
+  const orderVariance = orderedKg > 0 ? receivedKg - orderedKg : 0;
   const eq = allEquivalents(netKg, bw);
   const rateKg = parseFloat(lot.ratePerKg) || 0;
   const landedKg = parseFloat(lot.landedCostPerKg) || 0;
@@ -356,6 +361,19 @@ export default function LotDetail() {
           <p className="text-xs text-gray-400">{usedPct}% utilized</p>
         </div>
       </div>
+
+      {/* Ordered vs received — only when they differ (short or over shipment). */}
+      {lot.type === 'raw' && orderedKg > 0 && Math.abs(orderVariance) > 0.5 && (
+        <div className={`rounded-xl border p-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm ${orderVariance < 0 ? 'bg-amber-50 border-amber-200 text-amber-900' : 'bg-blue-50 border-blue-200 text-blue-900'}`}>
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+          <span><span className="font-semibold">Ordered</span> {dv(orderedKg).toLocaleString()} {ul()}</span>
+          <span className="text-gray-400">·</span>
+          <span><span className="font-semibold">Received</span> {dv(receivedKg).toLocaleString()} {ul()}</span>
+          <span className="text-gray-400">·</span>
+          <span className="font-semibold">{orderVariance < 0 ? `Short ${dv(Math.abs(orderVariance)).toLocaleString()}` : `Over ${dv(orderVariance).toLocaleString()}`} {ul()}</span>
+          <span className="text-gray-500">— the supplier bill is based on the received amount.</span>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex items-center gap-1 border-b border-gray-200 overflow-x-auto">
@@ -606,7 +624,10 @@ export default function LotDetail() {
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-blue-700 uppercase tracking-wider">Purchase Pricing</h3>
               {lot.type === 'raw' && (
-                <button onClick={() => setShowPriceModal(true)} className="btn btn-sm btn-secondary"><Edit3 className="w-3.5 h-3.5" /> Edit Price</button>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setShowReceivedModal(true)} className="btn btn-sm btn-secondary"><Scale className="w-3.5 h-3.5" /> Edit Received</button>
+                  <button onClick={() => setShowPriceModal(true)} className="btn btn-sm btn-secondary"><Edit3 className="w-3.5 h-3.5" /> Edit Price</button>
+                </div>
               )}
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -1120,6 +1141,7 @@ export default function LotDetail() {
       <TransactionModal isOpen={showTxnModal} onClose={() => setShowTxnModal(false)} lotId={lot.id} lotNo={lot.lotNo} availableKg={availKg} bagWeightKg={bw} defaultRateKg={landedKg || rateKg} warehouses={warehousesList} addToast={addToast} refetch={refetch} mutation={txnMutation} />
       <CostEditModal isOpen={showCostModal} onClose={() => setShowCostModal(false)} lot={lot} milled={millingBatches.length > 0 || outboundTxns.length > 0} suppliers={suppliersList} addToast={addToast} refetch={refetch} />
       <PriceEditModal isOpen={showPriceModal} onClose={() => setShowPriceModal(false)} lot={lot} addToast={addToast} refetch={refetch} />
+      <ReceivedQtyModal isOpen={showReceivedModal} onClose={() => setShowReceivedModal(false)} lot={lot} addToast={addToast} refetch={refetch} />
       <AllocateToBatchModal isOpen={showAllocateModal} onClose={() => setShowAllocateModal(false)} lot={lot} addToast={addToast} refetch={refetch} />
       <AddLotVehicleModal
         isOpen={showAddVehicle}
@@ -1441,6 +1463,79 @@ function PriceEditModal({ isOpen, onClose, lot, addToast, refetch }) {
           <div className="flex justify-between"><span className="text-gray-500">Received weight</span><span className="font-medium">{Math.round(receivedKg).toLocaleString()} kg</span></div>
           <div className="flex justify-between"><span className="text-gray-500">New rice cost</span><span className="font-medium">{fmtPKR(newAmount)}</span></div>
           <div className="flex justify-between border-t pt-1.5"><span className="text-gray-600 font-semibold">Change</span><span className={`font-bold ${delta >= 0 ? 'text-red-600' : 'text-emerald-700'}`}>{delta >= 0 ? '+' : ''}{fmtPKR(delta)}</span></div>
+        </div>
+      </div>
+    </SlideDrawer>
+  );
+}
+
+// Edit a raw lot's RECEIVED quantity (ordered vs received). Stock drops/rises to
+// the received amount and the supplier bill re-bills to received × rate + add-ons.
+function ReceivedQtyModal({ isOpen, onClose, lot, addToast, refetch }) {
+  const curReceivedKg = parseFloat(lot.receivedNetWeightKg) || parseFloat(lot.netWeightKg) || 0;
+  const orderedKg = parseFloat(lot.orderedNetWeightKg) || curReceivedKg;
+  const rate = parseFloat(lot.ratePerKg) || 0;
+  const addOns = (parseFloat(lot.laborCost) || 0) + (parseFloat(lot.unloadingCost) || 0) + (parseFloat(lot.packingCost) || 0) + (parseFloat(lot.otherCost) || 0) + (parseFloat(lot.totalBagCost) || 0);
+  const [received, setReceived] = useState(String(Math.round(curReceivedKg) || ''));
+  const [ordered, setOrdered] = useState(String(Math.round(orderedKg) || ''));
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { if (isOpen) { setReceived(String(Math.round(curReceivedKg) || '')); setOrdered(String(Math.round(orderedKg) || '')); } /* eslint-disable-next-line */ }, [isOpen]);
+
+  const newReceived = parseFloat(received) || 0;
+  const newOrdered = parseFloat(ordered) || 0;
+  const newBill = newReceived * rate + addOns;
+  const variance = newOrdered > 0 ? newReceived - newOrdered : 0;
+
+  async function handleSave() {
+    if (!(newReceived > 0)) { addToast('Enter the received weight in kg', 'error'); return; }
+    setSaving(true);
+    try {
+      const res = await lotInventoryApi.setReceivedQty(lot.id, { received_net_weight_kg: newReceived, ordered_net_weight_kg: newOrdered || null });
+      const prop = res?.data?.propagation;
+      const parts = [`Received set to ${Math.round(newReceived).toLocaleString()} kg`];
+      if (res?.data?.payableUpdated) parts.push('bill adjusted');
+      if (prop?.affectedBatches > 0) parts.push(`${prop.affectedBatches} batch(es) re-costed`);
+      addToast(parts.join(' · '), 'success'); refetch(); onClose();
+    } catch (err) { addToast(err?.data?.message || err.message || 'Failed', 'error'); } finally { setSaving(false); }
+  }
+
+  const footer = (
+    <div className="flex items-center justify-between gap-3">
+      <div className="text-xs text-gray-500">New bill <span className="font-bold text-gray-900 ml-1">{fmtPKR(newBill)}</span></div>
+      <div className="flex gap-2">
+        <button onClick={onClose} className="btn btn-secondary btn-sm">Cancel</button>
+        <button onClick={handleSave} disabled={saving || !(newReceived > 0)} className="btn btn-primary btn-sm"><Save className="w-4 h-4" /> {saving ? 'Saving…' : 'Save'}</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <SlideDrawer open={isOpen} onClose={onClose} title="Edit Received Quantity" subtitle={lot.lotNo} icon={Scale} size="md" footer={footer}>
+      <div className="space-y-5">
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+          Stock and the supplier bill follow the <strong>received</strong> amount (received × rate + add-ons). Ordered is recorded for the short/over variance. Can't go below what's already been used or reserved from the lot.
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Received (kg)</label>
+            <input type="number" step="1" value={received} onChange={e => setReceived(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm" autoFocus />
+            <p className="text-[11px] text-gray-400 mt-1">{(newReceived / 1000).toFixed(2)} MT</p>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Ordered (kg)</label>
+            <input type="number" step="1" value={ordered} onChange={e => setOrdered(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm" />
+            <p className="text-[11px] text-gray-400 mt-1">{(newOrdered / 1000).toFixed(2)} MT</p>
+          </div>
+        </div>
+        {newOrdered > 0 && Math.abs(variance) > 0.5 && (
+          <div className={`text-sm font-medium ${variance < 0 ? 'text-amber-700' : 'text-blue-700'}`}>
+            {variance < 0 ? `Short ${(Math.abs(variance) / 1000).toFixed(2)} MT vs order` : `Over ${(variance / 1000).toFixed(2)} MT vs order`}
+          </div>
+        )}
+        <div className="bg-gray-50 rounded-lg p-3 space-y-1.5 text-sm">
+          <div className="flex justify-between"><span className="text-gray-500">Rate</span><span className="font-medium">Rs {rate.toLocaleString()}/kg</span></div>
+          <div className="flex justify-between"><span className="text-gray-500">Add-on costs</span><span className="font-medium">{fmtPKR(addOns)}</span></div>
+          <div className="flex justify-between border-t pt-1.5"><span className="text-gray-600 font-semibold">New bill</span><span className="font-bold text-gray-900">{fmtPKR(newBill)}</span></div>
         </div>
       </div>
     </SlideDrawer>

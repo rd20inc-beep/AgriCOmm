@@ -85,6 +85,14 @@ router.put(
   controller.setLotPurchaseRate
 );
 
+// Record the actual RECEIVED quantity (ordered vs received) — re-bills to received
+router.put(
+  '/lots/:id/received-qty',
+  authorize('inventory', 'edit'),
+  auditAction('update_lot_received_qty', 'inventory_lot'),
+  controller.setLotReceivedQty
+);
+
 // Edit a lot's recorded quality after creation
 router.put(
   '/lots/:id/quality',

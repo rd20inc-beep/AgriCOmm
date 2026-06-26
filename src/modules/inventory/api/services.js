@@ -23,6 +23,7 @@ export const lotInventoryApi = {
   recordTransaction: (lotId, data) => api.post(`/api/lot-inventory/lots/${lotId}/transactions`, data),
   updateLotCosts: (id, data) => api.put(`/api/lot-inventory/lots/${id}/costs`, data),
   setPurchaseRate: (id, rate_per_kg) => api.put(`/api/lot-inventory/lots/${id}/purchase-rate`, { rate_per_kg }),
+  setReceivedQty: (id, body) => api.put(`/api/lot-inventory/lots/${id}/received-qty`, body),
   updateLotQuality: (id, data) => api.put(`/api/lot-inventory/lots/${id}/quality`, data),
   allocateLotToBatch: (id, data) => api.post(`/api/lot-inventory/lots/${id}/allocate-to-batch`, data),
   transferLotToExport: (id, data) => api.post(`/api/lot-inventory/lots/${id}/transfer-to-export`, data),
