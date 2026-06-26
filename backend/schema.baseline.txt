@@ -1523,6 +1523,29 @@ COL pricing_simulations.raw_rice_cost_per_mt:numeric:NULL
 COL pricing_simulations.recommended_price:numeric:NULL
 COL pricing_simulations.target_margin_pct:numeric:NULL
 COL pricing_simulations.total_cost_per_mt:numeric:NULL
+COL printed_bag_orders.bag_size_kg:numeric:NULL
+COL printed_bag_orders.bag_type_id:integer:NULL
+COL printed_bag_orders.bag_type_name:character varying:NULL
+COL printed_bag_orders.brand_marking:character varying:NULL
+COL printed_bag_orders.created_at:timestamp with time zone:NOT NULL
+COL printed_bag_orders.created_by:integer:NULL
+COL printed_bag_orders.currency:character varying:NOT NULL
+COL printed_bag_orders.id:integer:NOT NULL
+COL printed_bag_orders.notes:text:NULL
+COL printed_bag_orders.order_id:integer:NOT NULL
+COL printed_bag_orders.ordered_date:date:NULL
+COL printed_bag_orders.paid_amount:numeric:NOT NULL
+COL printed_bag_orders.payment_status:character varying:NOT NULL
+COL printed_bag_orders.pbo_no:character varying:NOT NULL
+COL printed_bag_orders.printing:character varying:NULL
+COL printed_bag_orders.quantity:integer:NOT NULL
+COL printed_bag_orders.received_date:date:NULL
+COL printed_bag_orders.received_qty:integer:NULL
+COL printed_bag_orders.status:character varying:NOT NULL
+COL printed_bag_orders.total_amount:numeric:NOT NULL
+COL printed_bag_orders.unit_cost:numeric:NOT NULL
+COL printed_bag_orders.updated_at:timestamp with time zone:NOT NULL
+COL printed_bag_orders.vendor_id:integer:NULL
 COL product_categories.created_at:timestamp with time zone:NOT NULL
 COL product_categories.description:text:NULL
 COL product_categories.group_key:character varying:NULL
@@ -2622,6 +2645,11 @@ CON pricing_simulations.chk_pricing_simulations_total_cost_per_mt_nn(c)
 CON pricing_simulations.pricing_simulations_created_by_foreign(f)
 CON pricing_simulations.pricing_simulations_pkey(p)
 CON pricing_simulations.pricing_simulations_product_id_foreign(f)
+CON printed_bag_orders.printed_bag_orders_bag_type_id_foreign(f)
+CON printed_bag_orders.printed_bag_orders_order_id_foreign(f)
+CON printed_bag_orders.printed_bag_orders_pbo_no_unique(u)
+CON printed_bag_orders.printed_bag_orders_pkey(p)
+CON printed_bag_orders.printed_bag_orders_vendor_id_foreign(f)
 CON product_categories.product_categories_no_self_parent_chk(c)
 CON product_categories.product_categories_parent_id_foreign(f)
 CON product_categories.product_categories_pkey(p)
