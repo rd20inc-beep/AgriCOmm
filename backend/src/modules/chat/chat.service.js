@@ -165,6 +165,27 @@ async function getApprovals(meId) {
     }
   }
 
+  const safe = async (fn, dflt) => { try { return await fn(); } catch { return dflt; } };
+  const cnt = (r) => parseInt(r?.c, 10) || 0;
+
+  // Export-order confirmations (advance / balance) — finance & owner roles.
+  if ([1, 3, 9].includes(roleId)) {
+    const eo = await safe(() => db('export_orders').whereIn('status', ['Awaiting Advance', 'Awaiting Balance']).count('id as c').first(), { c: 0 });
+    if (cnt(eo) > 0) items.push({ id: 'export_confirmations', kind: 'confirmation', title: 'Export confirmations', message: `${cnt(eo)} order(s) awaiting advance / balance confirmation.`, link: '/finance/confirmations' });
+  }
+
+  // Milling batches awaiting approval — mill & owner roles.
+  if ([1, 4, 9].includes(roleId)) {
+    const mb = await safe(() => db('milling_batches').where('status', 'Pending Approval').count('id as c').first(), { c: 0 });
+    if (cnt(mb) > 0) items.push({ id: 'batch_approvals', kind: 'batch', title: 'Milling batches to approve', message: `${cnt(mb)} batch(es) pending approval.`, link: '/milling' });
+  }
+
+  // Stock adjustments awaiting approval — inventory, mill & owner roles.
+  if ([1, 4, 6, 9].includes(roleId)) {
+    const sa = await safe(() => db('stock_adjustments').where('approval_status', 'pending').count('id as c').first(), { c: 0 });
+    if (cnt(sa) > 0) items.push({ id: 'stock_adjustments', kind: 'stock_adjustment', title: 'Stock adjustments to approve', message: `${cnt(sa)} adjustment(s) awaiting approval.`, link: '/stock-adjustments' });
+  }
+
   return { items, count: items.length };
 }
 
