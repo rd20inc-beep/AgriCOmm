@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
+import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import {
   useMillExpenses, useCreateMillExpense, useRecurringExpenses, useMaterializeRecurring, useRunDueRecurring, useCategorizeExpense, useMillWorkers, useCreateMillWorker,
   useUpdateMillWorker, useDeleteMillWorker, useCreateWorkerAdvance, useWorkerAdvances,
@@ -248,9 +249,10 @@ export default function MillFinanceDashboard() {
   const pendingTransfersTotal = cashFlow?.pendingTransfersTotal || 0;
   const millCashBalance = cashFlow?.millCashBalance || 0;
   const acceptTransferMut = useAcceptFundTransfer();
+  const { requestOwnerApproval } = useOwnerAuth();
   async function handleAcceptTransfer(t) {
-    try { await acceptTransferMut.mutateAsync(t.id); }
-    catch (e) { window.alert(e?.response?.data?.message || e?.message || 'Could not accept the transfer.'); }
+    try { await requestOwnerApproval((ownerId) => acceptTransferMut.mutateAsync({ id: t.id, ownerId })); }
+    catch (e) { if (e?.message !== 'Owner authorization cancelled') window.alert(e?.response?.data?.message || e?.message || 'Could not accept the transfer.'); }
   }
 
   const expenses = expData?.expenses || [];

@@ -44,7 +44,7 @@ export const adminApi = {
   suppliersQuickAdd: (data) => api.post('/api/admin/suppliers/quick-add', data),
   approvalsList:  (params) => api.get('/api/admin/approvals', params),
   approvalsCount: () => api.get('/api/admin/approvals/count'),
-  approvalApprove: (type, id) => api.post(`/api/admin/approvals/${type}/${id}/approve`),
+  approvalApprove: (type, id, body = {}) => api.post(`/api/admin/approvals/${type}/${id}/approve`, body),
   approvalReject:  (type, id, data) => api.post(`/api/admin/approvals/${type}/${id}/reject`, data),
   // Super-Admin Danger Zone (permanent hard-deletes + balance correction)
   dangerLotImpact:  (id) => api.get(`/api/admin/danger/lots/${id}/impact`),

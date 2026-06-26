@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { Check, X, Plus, Loader2, Clock, RefreshCw, Info } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
+import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import {
   useMillStoreAdjustments,
   useMillStoreItems,
@@ -33,6 +34,7 @@ function periodStart() {
 
 export default function StoreAdjustments() {
   const { addToast } = useApp();
+  const { requestOwnerApproval } = useOwnerAuth();
   const { hasPermission } = useAuth();
   const canApprove = hasPermission('mill_store', 'approve_adjustment');
 
@@ -130,10 +132,10 @@ export default function StoreAdjustments() {
 
   async function handleApprove(id) {
     try {
-      await approveMut.mutateAsync(id);
+      await requestOwnerApproval((ownerId) => approveMut.mutateAsync({ id, ownerId }));
       addToast('Adjustment approved — stock updated', 'success');
     } catch (err) {
-      addToast(`Failed: ${err?.response?.data?.message || err.message}`, 'error');
+      if (err?.message !== 'Owner authorization cancelled') addToast(`Failed: ${err?.response?.data?.message || err.message}`, 'error');
     }
   }
 

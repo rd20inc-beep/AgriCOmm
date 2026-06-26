@@ -6,6 +6,24 @@ const authorize = require('../middleware/rbac');
 const auditAction = require('../middleware/audit');
 const auditService = require('../services/auditService');
 
+// GET /api/users/owners — active Owner users, for the approval owner-picker.
+// Open to any authenticated user (just id + name) so a non-owner approver can
+// name which owner authorized the action. Declared BEFORE '/:id' so it isn't
+// swallowed by the id route.
+router.get('/owners', async (req, res) => {
+  try {
+    const owners = await db('users as u')
+      .join('roles as r', 'r.id', 'u.role_id')
+      .where('r.name', 'Owner')
+      .where('u.is_active', true)
+      .select('u.id', 'u.full_name')
+      .orderBy('u.full_name');
+    return res.json({ success: true, data: { owners } });
+  } catch (e) {
+    return res.status(500).json({ success: false, message: e.message });
+  }
+});
+
 // GET /api/users — list users with role names, pagination
 router.get('/', authorize('admin', 'view'), async (req, res) => {
   try {

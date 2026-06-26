@@ -16,6 +16,7 @@ import {
   Mail,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
+import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import { useConfirmAdvance, useConfirmBalance, useUpdateOrderStatus } from '../../../api/queries';
 import Modal from '../../../components/Modal';
 import StatusBadge from '../../../components/StatusBadge';
@@ -33,6 +34,7 @@ function daysSince(dateStr) {
 
 export default function FinanceConfirmations() {
   const { exportOrders, addToast, settings, bankAccountsList } = useApp();
+  const { requestOwnerApproval } = useOwnerAuth();
 
   const confirmAdvanceMut = useConfirmAdvance();
   const confirmBalanceMut = useConfirmBalance();
@@ -161,12 +163,12 @@ export default function FinanceConfirmations() {
 
     try {
       const mut = milestoneType === 'advance' ? confirmAdvanceMut : confirmBalanceMut;
-      await mut.mutateAsync({ id: orderId, data: payload });
+      await requestOwnerApproval((ownerId) => mut.mutateAsync({ id: orderId, data: { ...payload, authorized_by_owner_id: ownerId } }));
       const label = milestoneType === 'advance' ? 'Advance' : 'Balance';
       addToast(`${label} payment of ${formatCurrency(amount)} confirmed for ${selectedOrder.id}`);
       recordPayment(selectedOrder.id, milestoneType, amount, formData.paymentMethod, formData.bankReference, formData.bankAccount);
     } catch (err) {
-      addToast(`Payment confirmation failed: ${err.message || 'Server error'}`, 'error');
+      if (err?.message !== 'Owner authorization cancelled') addToast(`Payment confirmation failed: ${err.message || 'Server error'}`, 'error');
     }
     closeModal();
   }
@@ -191,7 +193,7 @@ export default function FinanceConfirmations() {
 
     try {
       const mut = milestoneType === 'advance' ? confirmAdvanceMut : confirmBalanceMut;
-      await mut.mutateAsync({ id: orderId, data: payload });
+      await requestOwnerApproval((ownerId) => mut.mutateAsync({ id: orderId, data: { ...payload, authorized_by_owner_id: ownerId } }));
       const label = milestoneType === 'advance' ? 'advance' : 'balance';
       addToast(`Partial ${label} of ${formatCurrency(amount)} recorded for ${selectedOrder.id}`, 'warning');
       recordPayment(selectedOrder.id, milestoneType + ' (partial)', amount, formData.paymentMethod, formData.bankReference, formData.bankAccount);

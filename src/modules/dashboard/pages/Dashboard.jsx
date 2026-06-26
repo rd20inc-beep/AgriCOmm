@@ -19,6 +19,7 @@ import { millingApi } from '../../../modules/milling/api/services';
 import YieldDistributionChart from './dashboard/YieldDistributionChart';
 import RecentActivity from './dashboard/RecentActivity';
 import PendingApprovalsCard from '../components/PendingApprovalsCard';
+import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 
 // ─── Formatting ────────────────────────────────────────────────────────
 const fmt = (v) => '$' + (Number(v) || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
@@ -37,6 +38,7 @@ const PHASES = [
 // ─── Page ─────────────────────────────────────────────────────────────
 export default function Dashboard() {
   const navigate = useNavigate();
+  const { requestOwnerApproval } = useOwnerAuth();
   const { exportOrders, millingBatches, dataLoading, refreshFromApi, addToast } = useApp();
   const { user } = useAuth();
   const isOwnerOrAdmin = user?.role === 'Owner' || user?.role === 'Super Admin';
@@ -242,10 +244,10 @@ export default function Dashboard() {
                     <button
                       onClick={async () => {
                         try {
-                          await millingApi.approveBatch(b.dbId || b.id);
+                          await requestOwnerApproval((ownerId) => millingApi.approveBatch(b.dbId || b.id, { authorized_by_owner_id: ownerId }));
                           addToast(`Batch ${b.id} approved`, 'success');
                           refreshFromApi('batches');
-                        } catch (err) { addToast(err?.response?.data?.message || 'Failed', 'error'); }
+                        } catch (err) { if (err?.message !== 'Owner authorization cancelled') addToast(err?.response?.data?.message || 'Failed', 'error'); }
                       }}
                       className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700"
                     >

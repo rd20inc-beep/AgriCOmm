@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
+import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import { queryKeys } from '../../../api/queryClient';
 import {
   useMillingBatch, useSaveQuality, useRecordYield,
@@ -83,6 +84,7 @@ export default function MillingBatchDetail() {
   const qc = useQueryClient();
   const { addToast, millingCostCategories, companyProfileData, suppliersList } = useApp();
   const { user } = useAuth();
+  const { requestOwnerApproval } = useOwnerAuth();
   const isOwnerOrAdmin = user?.role === 'Owner' || user?.role === 'Super Admin' || user?.role === 'Mill Manager';
   const commodityPrices = useCommodityPrices();
 
@@ -674,10 +676,10 @@ export default function MillingBatchDetail() {
                 <button
                   onClick={async () => {
                     try {
-                      await millingModApi.approveBatch(batch.dbId || batch.id);
+                      await requestOwnerApproval((ownerId) => millingModApi.approveBatch(batch.dbId || batch.id, { authorized_by_owner_id: ownerId }));
                       addToast('Batch approved — moved to Queued', 'success');
                       invalidateBatch();
-                    } catch (err) { addToast(`Failed: ${err?.response?.data?.message || err.message}`, 'error'); }
+                    } catch (err) { if (err?.message !== 'Owner authorization cancelled') addToast(`Failed: ${err?.response?.data?.message || err.message}`, 'error'); }
                   }}
                   className="inline-flex items-center gap-2 px-4 py-2.5 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors"
                 >

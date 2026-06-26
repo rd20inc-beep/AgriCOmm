@@ -6,6 +6,7 @@ const authorize = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
+const ownerApproval = require('../../middleware/ownerApproval');
 
 /**
  * Authorize if user has ANY of the listed module.action permissions.
@@ -114,6 +115,7 @@ router.post(
 router.post(
   '/:id/confirm-advance',
   authorizeAny(['export_orders', 'confirm_advance'], ['finance', 'confirm_payment']),
+  ownerApproval('export_advance'),
   validate(schemas.confirmAdvance),
   auditAction('confirm_advance', 'export_order', (req) => req.params.id),
   controller.confirmAdvance
@@ -121,6 +123,7 @@ router.post(
 router.post(
   '/:id/confirm-balance',
   authorizeAny(['export_orders', 'confirm_balance'], ['finance', 'confirm_payment']),
+  ownerApproval('export_balance'),
   validate(schemas.confirmBalance),
   auditAction('confirm_balance', 'export_order', (req) => req.params.id),
   controller.confirmBalance

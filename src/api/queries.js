@@ -680,8 +680,14 @@ export function useCreateFundTransfer() {
 export function useAcceptFundTransfer() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id) => financeApi.acceptFundTransfer(id),
-    onSuccess: () => invalidateMoneyCaches(qc),
+    // Accepts either a bare id (owner self-approves) or { id, ownerId } where
+    // ownerId is the authorizing owner (required for non-owner approvers).
+    mutationFn: (arg) => {
+      const id = (arg && typeof arg === 'object') ? arg.id : arg;
+      const ownerId = (arg && typeof arg === 'object') ? arg.ownerId : undefined;
+      return financeApi.acceptFundTransfer(id, ownerId ? { authorized_by_owner_id: ownerId } : {});
+    },
+    onSuccess: () => { invalidateMoneyCaches(qc); qc.invalidateQueries({ queryKey: ['chat-approvals'] }); },
   });
 }
 export function useDeleteFundTransfer() {

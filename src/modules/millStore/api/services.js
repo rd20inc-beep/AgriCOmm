@@ -37,7 +37,7 @@ export const millStoreApi = {
   // Adjustments
   listAdjustments: (params) => api.get('/api/mill-store/adjustments', params),
   requestAdjustment: (data) => api.post('/api/mill-store/adjustments', data),
-  approveAdjustment: (id) => api.put(`/api/mill-store/adjustments/${id}/approve`),
+  approveAdjustment: (id, body = {}) => api.put(`/api/mill-store/adjustments/${id}/approve`, body),
   rejectAdjustment: (id, data) => api.put(`/api/mill-store/adjustments/${id}/reject`, data),
 
   // Consumption (on milling routes)

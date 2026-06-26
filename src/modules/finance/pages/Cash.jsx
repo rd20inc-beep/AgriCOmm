@@ -5,6 +5,7 @@ import { useBankAccounts, useBankTransactions, useFundTransfers, useDeleteFundTr
 import TransferFundsDrawer from '../components/TransferFundsDrawer';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
+import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import { shortenRef } from '../utils/refs';
 
 function fmtPKR(n) {
@@ -26,12 +27,14 @@ export default function Cash() {
   const { data: fundTransfers = [] } = useFundTransfers();
   const delTransfer = useDeleteFundTransfer();
   const acceptTransfer = useAcceptFundTransfer();
+  const { requestOwnerApproval } = useOwnerAuth();
   async function handleDeleteTransfer(t) {
     if (!window.confirm(`Reverse transfer ${t.transferNo}? This restores account balances and removes its GL entries.`)) return;
     try { await delTransfer.mutateAsync(t.id); } catch (e) { window.alert(e?.response?.data?.message || e?.message || 'Could not reverse the transfer.'); }
   }
   async function handleAcceptTransfer(t) {
-    try { await acceptTransfer.mutateAsync(t.id); } catch (e) { window.alert(e?.response?.data?.message || e?.message || 'Could not accept the transfer.'); }
+    try { await requestOwnerApproval((ownerId) => acceptTransfer.mutateAsync({ id: t.id, ownerId })); }
+    catch (e) { if (e?.message !== 'Owner authorization cancelled') window.alert(e?.response?.data?.message || e?.message || 'Could not accept the transfer.'); }
   }
 
   function handlePrint() {

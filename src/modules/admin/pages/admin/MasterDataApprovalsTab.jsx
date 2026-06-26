@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { CheckCircle2, XCircle, Clock, User as UserIcon, Calendar, RefreshCw, Truck, Package, AlertCircle, Loader2, Users } from 'lucide-react';
 import { adminApi } from '../../api/services';
 import { useApp } from '../../../../context/AppContext';
+import { useOwnerAuth } from '../../../../context/OwnerAuthContext';
 import SlideDrawer from '../../../../components/SlideDrawer';
 
 /**
@@ -165,6 +166,7 @@ function Section({ title, icon: Icon, color, rows, onApprove, onReject, busyId }
 
 export default function MasterDataApprovalsTab() {
   const { addToast } = useApp();
+  const { requestOwnerApproval } = useOwnerAuth();
   const [statusFilter, setStatusFilter] = useState('pending');
   const [products, setProducts] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
@@ -193,11 +195,11 @@ export default function MasterDataApprovalsTab() {
   async function approve(row) {
     setBusyId(`${row._type}:${row.id}`);
     try {
-      await adminApi.approvalApprove(row._type, row.id);
+      await requestOwnerApproval((ownerId) => adminApi.approvalApprove(row._type, row.id, { authorized_by_owner_id: ownerId }));
       addToast?.(`Approved ${row.name}`, 'success');
       load();
     } catch (err) {
-      addToast?.(err?.response?.data?.message || err.message || 'Failed to approve', 'error');
+      if (err?.message !== 'Owner authorization cancelled') addToast?.(err?.response?.data?.message || err.message || 'Failed to approve', 'error');
     } finally {
       setBusyId(null);
     }

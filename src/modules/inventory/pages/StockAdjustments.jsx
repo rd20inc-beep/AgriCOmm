@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Plus, CheckCircle, XCircle, Shield, RefreshCw, Info } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
+import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import { lotInventoryApi } from '../../../api/services';
 import { useLotInventory } from '../../../api/queries';
 import Modal from '../../../components/Modal';
@@ -27,6 +28,7 @@ function periodStart() {
 
 export default function StockAdjustments() {
   const { addToast } = useApp();
+  const { requestOwnerApproval } = useOwnerAuth();
   const { data: lots = [] } = useLotInventory({});
   const [adjustments, setAdjustments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -117,10 +119,10 @@ export default function StockAdjustments() {
 
   async function handleApprove(id) {
     try {
-      await lotInventoryApi.approveAdjustment(id);
+      await requestOwnerApproval((ownerId) => lotInventoryApi.approveAdjustment(id, { authorized_by_owner_id: ownerId }));
       addToast('Adjustment approved — stock updated');
       loadAdjustments();
-    } catch (err) { addToast(err.message || 'Failed', 'error'); }
+    } catch (err) { if (err?.message !== 'Owner authorization cancelled') addToast(err.message || 'Failed', 'error'); }
   }
 
   async function handleReject(id) {

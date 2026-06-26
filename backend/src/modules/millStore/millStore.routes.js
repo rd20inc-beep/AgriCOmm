@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const authorize = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
+const ownerApproval = require('../../middleware/ownerApproval');
 const ctrl = require('./millStore.controller');
 
 // Items
@@ -93,6 +94,7 @@ router.post(
 router.put(
   '/adjustments/:id/approve',
   authorize('mill_store', 'approve_adjustment'),
+  ownerApproval('stock_adjustment'),
   auditAction('approve', 'mill_stock_adjustment', (req) => req.params.id),
   ctrl.approveAdjustment
 );

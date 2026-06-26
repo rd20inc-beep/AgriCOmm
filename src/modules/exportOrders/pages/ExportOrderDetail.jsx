@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
+import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import { API_BASE } from '../../../api/client';
 import api from '../../../api/client';
 import { queryKeys } from '../../../api/queryClient';
@@ -42,6 +43,7 @@ export default function ExportOrderDetail() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { token } = useAuth();
+  const { requestOwnerApproval } = useOwnerAuth();
   const { millingBatches, addToast, exportCostCategories, companyProfileData, bankAccountsList, customersList, suppliersList } = useApp();
 
   // Fetch order detail via TanStack Query
@@ -313,7 +315,7 @@ export default function ExportOrderDetail() {
     }
     setShowAdvanceModal(false);
     try {
-      const res = await confirmAdvanceMut.mutateAsync({
+      const res = await requestOwnerApproval((ownerId) => confirmAdvanceMut.mutateAsync({
         id: orderId,
         data: {
           amount,
@@ -323,8 +325,9 @@ export default function ExportOrderDetail() {
           bank_account_id: advanceBankAccountId || null,
           bank_reference: advanceBankRef,
           notes: advanceNotes,
+          authorized_by_owner_id: ownerId,
         },
-      });
+      }));
       const updated = res?.data?.order;
       addToast(updated
         ? `Advance of $${amount.toLocaleString()} confirmed — status: ${updated.status}`
@@ -349,7 +352,7 @@ export default function ExportOrderDetail() {
     }
     setShowBalanceModal(false);
     try {
-      const res = await confirmBalanceMut.mutateAsync({
+      const res = await requestOwnerApproval((ownerId) => confirmBalanceMut.mutateAsync({
         id: orderId,
         data: {
           amount,
@@ -359,8 +362,9 @@ export default function ExportOrderDetail() {
           bank_account_id: balanceBankAccountId || null,
           bank_reference: balanceBankRef,
           notes: balanceNotes,
+          authorized_by_owner_id: ownerId,
         },
-      });
+      }));
       const updated = res?.data?.order;
       addToast(updated
         ? `Balance of $${amount.toLocaleString()} confirmed — status: ${updated.status}`

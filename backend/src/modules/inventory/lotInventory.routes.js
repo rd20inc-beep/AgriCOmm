@@ -6,6 +6,7 @@ const inventoryService = require('./inventory.service');
 const { authorize } = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 const validate = require('../../middleware/validate');
+const ownerApproval = require('../../middleware/ownerApproval');
 const schemas = require('../../middleware/schemas');
 
 // Lot sources (dropdown for purchase lot creation)
@@ -217,6 +218,7 @@ router.post('/adjustments', authorize('inventory', 'create'),
 );
 
 router.put('/adjustments/:id/approve', authorize('inventory', 'edit'),
+  ownerApproval('stock_adjustment'),
   auditAction('approve_stock_adjustment', 'stock_adjustment', (req) => req.params.id),
   async (req, res) => {
     try {

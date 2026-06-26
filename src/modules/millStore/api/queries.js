@@ -211,7 +211,11 @@ export function useRequestAdjustment() {
 export function useApproveAdjustment() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id) => millStoreApi.approveAdjustment(id),
+    mutationFn: (arg) => {
+      const id = (arg && typeof arg === 'object') ? arg.id : arg;
+      const ownerId = (arg && typeof arg === 'object') ? arg.ownerId : undefined;
+      return millStoreApi.approveAdjustment(id, ownerId ? { authorized_by_owner_id: ownerId } : {});
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['mill-store'] }),
   });
 }

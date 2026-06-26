@@ -36,7 +36,7 @@ export const lotInventoryApi = {
   getOrderCOGS: (orderId) => api.get(`/api/lot-inventory/order-cogs/${orderId}`),
   listAdjustments: (params) => api.get('/api/lot-inventory/adjustments', params),
   createAdjustment: (data) => api.post('/api/lot-inventory/adjustments', data),
-  approveAdjustment: (id) => api.put(`/api/lot-inventory/adjustments/${id}/approve`),
+  approveAdjustment: (id, body = {}) => api.put(`/api/lot-inventory/adjustments/${id}/approve`, body),
   rejectAdjustment: (id, data) => api.put(`/api/lot-inventory/adjustments/${id}/reject`, data),
   getReconciliation: () => api.get('/api/lot-inventory/reconciliation'),
   getLotReconciliation: (id) => api.get(`/api/lot-inventory/reconciliation/${id}`),

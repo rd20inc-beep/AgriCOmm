@@ -4,6 +4,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './api/queryClient';
 import { AppProvider } from './context/AppContext';
 import { AuthProvider } from './context/AuthContext';
+import { OwnerAuthProvider } from './context/OwnerAuthContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import Layout from './components/Layout';
 import MillLayout from './components/MillLayout';
@@ -248,6 +249,7 @@ function App() {
     <BrowserRouter>
       <AuthProvider>
         <AppProvider>
+          <OwnerAuthProvider>
           <Suspense fallback={<LoadingSpinner message="Loading page..." />}>
             <Routes>
               <Route path="/login" element={<Login />} />
@@ -274,6 +276,7 @@ function App() {
           </Suspense>
           <Toast />
           <QueryErrorHandler />
+          </OwnerAuthProvider>
         </AppProvider>
       </AuthProvider>
     </BrowserRouter>

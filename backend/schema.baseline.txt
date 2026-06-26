@@ -66,6 +66,14 @@ COL api_sync_log.records_synced:integer:NOT NULL
 COL api_sync_log.started_at:timestamp with time zone:NULL
 COL api_sync_log.status:character varying:NOT NULL
 COL api_sync_log.updated_at:timestamp with time zone:NULL
+COL approval_authorizations.action:character varying:NOT NULL
+COL approval_authorizations.authorized_by_owner_id:integer:NULL
+COL approval_authorizations.created_at:timestamp with time zone:NULL
+COL approval_authorizations.id:integer:NOT NULL
+COL approval_authorizations.kind:character varying:NOT NULL
+COL approval_authorizations.performed_by:integer:NULL
+COL approval_authorizations.ref:character varying:NULL
+COL approval_authorizations.self_approved:boolean:NOT NULL
 COL approval_queue.amount:numeric:NULL
 COL approval_queue.approval_type:character varying:NOT NULL
 COL approval_queue.approved_at:timestamp with time zone:NULL
@@ -2039,6 +2047,7 @@ CON api_integrations.api_integrations_pkey(p)
 CON api_sync_log.api_sync_log_integration_id_foreign(f)
 CON api_sync_log.api_sync_log_pkey(p)
 CON api_sync_log.chk_api_sync_log_status_valid(c)
+CON approval_authorizations.approval_authorizations_pkey(p)
 CON approval_queue.approval_queue_approved_by_foreign(f)
 CON approval_queue.approval_queue_pkey(p)
 CON approval_queue.approval_queue_requested_by_foreign(f)

@@ -4,6 +4,7 @@ import { CheckCircle2, ShieldCheck, Loader2 } from 'lucide-react';
 import { chatApi } from '../../chat/api';
 import { useAcceptFundTransfer } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
+import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 
 const unwrap = (res) => res?.data || res || {};
 
@@ -19,6 +20,7 @@ export default function PendingApprovalsCard({ excludeKinds = [] }) {
   const navigate = useNavigate();
   const { addToast } = useApp();
   const acceptTransfer = useAcceptFundTransfer();
+  const { requestOwnerApproval } = useOwnerAuth();
 
   const { data, isLoading } = useQuery({
     queryKey: ['chat-approvals'],
@@ -31,10 +33,10 @@ export default function PendingApprovalsCard({ excludeKinds = [] }) {
   async function act(item) {
     if (item.kind === 'fund_transfer') {
       try {
-        await acceptTransfer.mutateAsync(item.transferId);
+        await requestOwnerApproval((ownerId) => acceptTransfer.mutateAsync({ id: item.transferId, ownerId }));
         addToast?.('Funds accepted', 'success');
       } catch (e) {
-        addToast?.(e?.response?.data?.message || e?.message || 'Could not accept funds', 'error');
+        if (e?.message !== 'Owner authorization cancelled') addToast?.(e?.response?.data?.message || e?.message || 'Could not accept funds', 'error');
       }
     } else if (item.link) {
       navigate(item.link);

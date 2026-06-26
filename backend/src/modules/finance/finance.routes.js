@@ -6,6 +6,7 @@ const auditAction = require('../../middleware/audit');
 const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
 const fundTransfers = require('../finance/fundTransfers.service');
+const ownerApproval = require('../../middleware/ownerApproval');
 
 // ── Head Office ⇄ Mill fund transfers ──
 router.get('/fund-transfers', authorize('finance', 'view'), async (req, res) => {
@@ -23,6 +24,7 @@ router.post('/fund-transfers', authorize('finance', 'confirm_payment'),
     } catch (e) { return res.status(e.statusCode || 400).json({ success: false, message: e.message }); }
   });
 router.post('/fund-transfers/:id/accept', authorize('milling', 'edit'),
+  ownerApproval('fund_transfer'),
   auditAction('accept_fund_transfer', 'finance', (req) => req.params.id),
   async (req, res) => {
     try {

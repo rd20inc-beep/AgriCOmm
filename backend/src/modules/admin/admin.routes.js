@@ -5,6 +5,7 @@ const approvalsCtrl = require('./approvals.controller');
 const authorize = require('../../middleware/rbac');
 const { authorizeRole } = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
+const ownerApproval = require('../../middleware/ownerApproval');
 
 // ─────────── Master-data approvals (quick-add + admin review) ───────────
 // Quick-add: any user with inventory.create can register a new supplier
@@ -48,6 +49,7 @@ router.get('/approvals/count', authorize('admin', 'view'), approvalsCtrl.approva
 router.post(
   '/approvals/:type/:id/approve',
   authorize('master_data', 'approve'),
+  ownerApproval('master_data'),
   auditAction('approve', 'master_data', (req) => `${req.params.type}:${req.params.id}`),
   approvalsCtrl.approve
 );
