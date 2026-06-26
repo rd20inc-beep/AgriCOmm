@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { MessageCircle, X, Send, ArrowLeft, Megaphone, Search, Paperclip, FileText, Download, Phone, Video, PhoneOff, Mic, MicOff, VideoOff, Smile, Image as ImageIcon, Camera } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { MessageCircle, X, Send, ArrowLeft, Megaphone, Search, Paperclip, FileText, Download, Phone, Video, PhoneOff, Mic, MicOff, VideoOff, Smile, Image as ImageIcon, Camera, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { chatApi } from '../modules/chat/api';
 import { useCalling } from '../modules/chat/useCalling';
+import { useAcceptFundTransfer } from '../api/queries';
 import { useAuth } from '../context/AuthContext';
 
 const unwrap = (res) => res?.data || res || {};
@@ -39,8 +41,10 @@ function Attachment({ m, mine }) {
 
 export default function ChatWidget() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const calling = useCalling(user);
+  const acceptTransfer = useAcceptFundTransfer();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState('list');      // 'list' | 'thread' | 'new'
   const [active, setActive] = useState(null);     // {type:'broadcast'} | {type:'peer', id, name}
@@ -68,6 +72,25 @@ export default function ChatWidget() {
     refetchInterval: 12000, enabled: !!user,
   });
   const unread = unreadData?.total || 0;
+
+  // Pending approvals the user can act on (fund-transfer acceptances, master-data).
+  const { data: approvalsData } = useQuery({
+    queryKey: ['chat-approvals'],
+    queryFn: async () => unwrap(await chatApi.approvals()),
+    refetchInterval: 15000, enabled: !!user,
+  });
+  const approvals = approvalsData?.items || [];
+  const approvalsCount = approvalsData?.count || 0;
+  const totalBadge = unread + approvalsCount;
+
+  async function acceptApproval(item) {
+    if (item.kind === 'fund_transfer') {
+      try {
+        await acceptTransfer.mutateAsync(item.transferId);
+        qc.invalidateQueries({ queryKey: ['chat-approvals'] });
+      } catch (e) { window.alert(e?.response?.data?.message || e?.message || 'Could not accept.'); }
+    } else if (item.link) { setOpen(false); navigate(item.link); }
+  }
 
   // Conversations — poll while the panel is open.
   const { data: convData } = useQuery({
@@ -142,8 +165,9 @@ export default function ChatWidget() {
   if (!user) return null;
 
   const headerTitle = view === 'new' ? 'New message'
-    : view === 'thread' ? (active?.type === 'broadcast' ? 'Announcements' : active?.name)
-      : 'Team Chat';
+    : view === 'approvals' ? 'Approvals'
+      : view === 'thread' ? (active?.type === 'broadcast' ? 'Announcements' : active?.name)
+        : 'Team Chat';
 
   return (
     <div className="no-print">
@@ -153,9 +177,9 @@ export default function ChatWidget() {
           className="fixed bottom-5 right-5 z-[60] w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-700 text-white shadow-lg flex items-center justify-center transition-colors"
           title="Team chat">
           <MessageCircle className="w-6 h-6" />
-          {unread > 0 && (
+          {totalBadge > 0 && (
             <span className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center ring-2 ring-white">
-              {unread > 99 ? '99+' : unread}
+              {totalBadge > 99 ? '99+' : totalBadge}
             </span>
           )}
         </button>
@@ -166,7 +190,7 @@ export default function ChatWidget() {
         <div className="fixed bottom-5 right-5 z-[60] w-[92vw] sm:w-96 h-[520px] max-h-[80vh] bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden">
           {/* Header */}
           <div className="px-4 py-3 bg-blue-600 text-white flex items-center gap-2">
-            {(view === 'thread' || view === 'new') && (
+            {(view === 'thread' || view === 'new' || view === 'approvals') && (
               <button onClick={() => setView('list')} className="p-1 -ml-1 hover:bg-white/15 rounded"><ArrowLeft className="w-4 h-4" /></button>
             )}
             <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -185,6 +209,19 @@ export default function ChatWidget() {
           {/* LIST */}
           {view === 'list' && (
             <div className="flex-1 overflow-y-auto">
+              {/* Approvals — pending money acceptances / master-data reviews for you */}
+              {approvalsCount > 0 && (
+                <button onClick={() => setView('approvals')}
+                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-emerald-50 border-b border-gray-100 text-left bg-emerald-50/50">
+                  <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center flex-shrink-0"><ShieldCheck className="w-5 h-5" /></div>
+                  <div className="min-w-0 flex-1">
+                    <span className="font-semibold text-sm text-gray-900">Approvals</span>
+                    <p className="text-xs text-gray-500 truncate">{approvalsCount} item(s) need your action</p>
+                  </div>
+                  <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-emerald-500 text-white text-[10px] font-bold flex items-center justify-center">{approvalsCount}</span>
+                </button>
+              )}
+
               {/* Search people */}
               <div className="p-2.5 sticky top-0 bg-white border-b border-gray-100 z-10">
                 <div className="relative">
@@ -227,7 +264,38 @@ export default function ChatWidget() {
             </div>
           )}
 
-          {/* NEW chat — pick a person */}
+          {/* APPROVALS */}
+          {view === 'approvals' && (
+            <div className="flex-1 overflow-y-auto p-3 space-y-2">
+              {approvals.length === 0 && <p className="text-center text-xs text-gray-400 py-8">Nothing awaiting your action 🎉</p>}
+              {approvals.map((a) => (
+                <div key={a.id} className="bg-white rounded-xl border border-gray-200 p-3">
+                  <div className="flex items-start gap-2.5">
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${a.kind === 'fund_transfer' ? 'bg-emerald-100 text-emerald-600' : 'bg-blue-100 text-blue-600'}`}>
+                      {a.kind === 'fund_transfer' ? <CheckCircle2 className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-gray-900">{a.title}</p>
+                      <p className="text-xs text-gray-600 mt-0.5">{a.message}</p>
+                    </div>
+                  </div>
+                  <div className="mt-2.5 flex justify-end">
+                    {a.kind === 'fund_transfer' ? (
+                      <button onClick={() => acceptApproval(a)} disabled={acceptTransfer.isPending}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">
+                        <CheckCircle2 className="w-3.5 h-3.5" /> Accept funds
+                      </button>
+                    ) : (
+                      <button onClick={() => acceptApproval(a)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700">
+                        Review →
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* THREAD */}
           {view === 'thread' && active && (

@@ -36,6 +36,11 @@ router.get('/unread', async (req, res) => {
   catch (e) { return res.status(e.statusCode || 500).json({ success: false, message: e.message }); }
 });
 
+router.get('/approvals', async (req, res) => {
+  try { return res.json({ success: true, data: await chat.getApprovals(meId(req)) }); }
+  catch (e) { return res.status(e.statusCode || 500).json({ success: false, message: e.message }); }
+});
+
 router.get('/messages', async (req, res) => {
   try {
     const broadcast = req.query.broadcast === '1' || req.query.broadcast === 'true';

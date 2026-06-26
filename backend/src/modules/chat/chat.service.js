@@ -125,4 +125,47 @@ async function getUnread(meId) {
   return { total: peerUnread + conv.broadcast.unread, broadcast: conv.broadcast.unread, direct: peerUnread };
 }
 
-module.exports = { listUsers, getConversations, getMessages, sendMessage, getUnread, markRead, getAttachment };
+// Pending approvals the current user can act on — surfaced in the chat widget so
+// money acceptances and master-data reviews are easy to find. Role-aware:
+//   Mill Manager(4)               → incoming fund transfers TO the mill
+//   Super Admin(1)/Owner(9)/Finance Manager(3) → incoming fund transfers TO Head Office
+//   Super Admin(1)/Owner(9)       → master-data (product/supplier/customer) approvals
+async function getApprovals(meId) {
+  const me = await db('users').where('id', meId).first('role_id');
+  const roleId = me?.role_id;
+  const isMill = roleId === 4;
+  const isHO = [1, 9, 3].includes(roleId);
+  const isApprover = [1, 9].includes(roleId);
+  const items = [];
+
+  const ftEntity = isMill ? 'mill' : (isHO ? 'general' : null);
+  if (ftEntity) {
+    const fts = await db('fund_transfers as ft')
+      .where({ 'ft.to_entity': ftEntity, 'ft.status': 'pending' })
+      .orderBy('ft.transfer_date', 'desc')
+      .select('ft.id', 'ft.transfer_no', 'ft.amount', 'ft.from_entity', 'ft.transfer_date', 'ft.reference');
+    for (const f of fts) {
+      items.push({
+        id: `ft-${f.id}`, kind: 'fund_transfer', transferId: f.id,
+        title: 'Accept funds', date: f.transfer_date,
+        message: `Rs ${Math.round(parseFloat(f.amount) || 0).toLocaleString()} from ${f.from_entity === 'general' ? 'Head Office' : 'Mill'} · ${f.transfer_no}`,
+      });
+    }
+  }
+
+  if (isApprover) {
+    const [p, s, c] = await Promise.all([
+      db('products').where({ approval_status: 'pending' }).count('id as c').first().catch(() => ({ c: 0 })),
+      db('suppliers').where({ approval_status: 'pending' }).count('id as c').first().catch(() => ({ c: 0 })),
+      db('customers').where({ approval_status: 'pending' }).count('id as c').first().catch(() => ({ c: 0 })),
+    ]);
+    const total = (parseInt(p?.c, 10) || 0) + (parseInt(s?.c, 10) || 0) + (parseInt(c?.c, 10) || 0);
+    if (total > 0) {
+      items.push({ id: 'masterdata', kind: 'masterdata', title: 'Master-data approvals', message: `${total} item(s) awaiting review — products / suppliers / customers`, link: '/admin' });
+    }
+  }
+
+  return { items, count: items.length };
+}
+
+module.exports = { listUsers, getConversations, getMessages, sendMessage, getUnread, markRead, getAttachment, getApprovals };
