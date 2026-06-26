@@ -244,10 +244,10 @@ export default function Dashboard() {
                     <button
                       onClick={async () => {
                         try {
-                          await requestOwnerApproval((ownerId) => millingApi.approveBatch(b.dbId || b.id, { authorized_by_owner_id: ownerId }));
+                          await millingApi.approveBatch(b.dbId || b.id);
                           addToast(`Batch ${b.id} approved`, 'success');
                           refreshFromApi('batches');
-                        } catch (err) { if (err?.message !== 'Owner authorization cancelled') addToast(err?.response?.data?.message || 'Failed', 'error'); }
+                        } catch (err) { addToast(err?.response?.data?.message || 'Failed', 'error'); }
                       }}
                       className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700"
                     >

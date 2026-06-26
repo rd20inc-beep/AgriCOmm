@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import PartyLink from '../../../shared/components/PartyLink';
+import PendingApprovalsCard from '../../dashboard/components/PendingApprovalsCard';
 import {
   Ship, AlertTriangle, Clock, FileText, CreditCard,
   TrendingUp, Users, Package, ArrowRight, Plus, CheckCircle2,
@@ -185,6 +186,9 @@ export default function ExportHomeDashboard() {
           <Plus size={16} /> New Order
         </button>
       </div>
+
+      {/* Pending approvals — export confirmations, fund transfers (same feed as chat) */}
+      <PendingApprovalsCard excludeKinds={['batch', 'masterdata']} />
 
       {/* Action Queue */}
       <div className="bg-white rounded-xl border border-gray-200 p-5">

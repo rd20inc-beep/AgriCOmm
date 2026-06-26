@@ -218,7 +218,6 @@ router.post('/adjustments', authorize('inventory', 'create'),
 );
 
 router.put('/adjustments/:id/approve', authorize('inventory', 'edit'),
-  ownerApproval('stock_adjustment'),
   auditAction('approve_stock_adjustment', 'stock_adjustment', (req) => req.params.id),
   async (req, res) => {
     try {

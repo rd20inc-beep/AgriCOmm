@@ -94,7 +94,6 @@ router.post(
 router.put(
   '/adjustments/:id/approve',
   authorize('mill_store', 'approve_adjustment'),
-  ownerApproval('stock_adjustment'),
   auditAction('approve', 'mill_stock_adjustment', (req) => req.params.id),
   ctrl.approveAdjustment
 );

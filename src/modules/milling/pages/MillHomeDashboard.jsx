@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
+import PendingApprovalsCard from '../../dashboard/components/PendingApprovalsCard';
 import {
   Factory, Wheat, FlaskConical, Gauge, Clock, AlertTriangle,
   Plus, ArrowRight, CheckCircle2, TrendingUp, Truck, Activity,
@@ -277,6 +278,9 @@ export default function MillHomeDashboard() {
           <Plus size={16} /> New Batch
         </button>
       </div>
+
+      {/* Pending approvals — fund transfers, stock adjustments (same feed as chat) */}
+      <PendingApprovalsCard excludeKinds={['batch', 'masterdata']} />
 
       {/* Quick links */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

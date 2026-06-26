@@ -132,10 +132,10 @@ export default function StoreAdjustments() {
 
   async function handleApprove(id) {
     try {
-      await requestOwnerApproval((ownerId) => approveMut.mutateAsync({ id, ownerId }));
+      await approveMut.mutateAsync(id);
       addToast('Adjustment approved — stock updated', 'success');
     } catch (err) {
-      if (err?.message !== 'Owner authorization cancelled') addToast(`Failed: ${err?.response?.data?.message || err.message}`, 'error');
+      addToast(`Failed: ${err?.response?.data?.message || err.message}`, 'error');
     }
   }
 

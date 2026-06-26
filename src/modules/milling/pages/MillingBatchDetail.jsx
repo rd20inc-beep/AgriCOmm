@@ -676,10 +676,10 @@ export default function MillingBatchDetail() {
                 <button
                   onClick={async () => {
                     try {
-                      await requestOwnerApproval((ownerId) => millingModApi.approveBatch(batch.dbId || batch.id, { authorized_by_owner_id: ownerId }));
+                      await millingModApi.approveBatch(batch.dbId || batch.id);
                       addToast('Batch approved — moved to Queued', 'success');
                       invalidateBatch();
-                    } catch (err) { if (err?.message !== 'Owner authorization cancelled') addToast(`Failed: ${err?.response?.data?.message || err.message}`, 'error'); }
+                    } catch (err) { addToast(`Failed: ${err?.response?.data?.message || err.message}`, 'error'); }
                   }}
                   className="inline-flex items-center gap-2 px-4 py-2.5 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors"
                 >

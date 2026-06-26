@@ -1252,7 +1252,6 @@ router.delete('/payroll/runs/:id', authorize('milling', 'delete'), async (req, r
 router.put(
   '/batches/:id/approve',
   authorizeRole('Owner', 'Super Admin'),
-  ownerApproval('milling_batch'),
   auditAction('approve_batch', 'milling_batch', (req) => req.params.id),
   controller.approveBatch
 );

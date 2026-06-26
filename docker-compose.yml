@@ -52,6 +52,10 @@ services:
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       TURNSTILE_SECRET: ${TURNSTILE_SECRET:-}
+      # In-app calling TURN relay (coturn on the host). Backend mints ephemeral
+      # REST credentials from TURN_SECRET; set both in the server's .env.
+      TURN_SECRET: ${TURN_SECRET:-}
+      TURN_URL: ${TURN_URL:-69.197.139.11:3478}
     ports:
       - "3001:3001"
     volumes:

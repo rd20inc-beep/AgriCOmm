@@ -2,11 +2,33 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 
 const router = express.Router();
 const chat = require('./chat.service');
 const db = require('../../config/database');
 const { publishSignal } = require('./callSignalBus');
+
+// WebRTC ICE config — public STUN plus, when a TURN relay is configured, a TURN
+// server with EPHEMERAL credentials (coturn REST/auth-secret: username is an
+// expiry timestamp, credential = base64 HMAC-SHA1(secret, username)). TURN lets
+// calls connect across mobile/symmetric NATs where STUN alone fails.
+router.get('/ice-config', (req, res) => {
+  const secret = process.env.TURN_SECRET;
+  const turnUrl = process.env.TURN_URL || '69.197.139.11:3478';
+  const iceServers = [{ urls: ['stun:stun.l.google.com:19302', `stun:${turnUrl}`] }];
+  if (secret) {
+    const expiry = Math.floor(Date.now() / 1000) + 12 * 3600; // 12h TTL
+    const username = `${expiry}:agricomm`;
+    const credential = crypto.createHmac('sha1', secret).update(username).digest('base64');
+    iceServers.push({
+      urls: [`turn:${turnUrl}?transport=udp`, `turn:${turnUrl}?transport=tcp`],
+      username,
+      credential,
+    });
+  }
+  return res.json({ success: true, data: { iceServers } });
+});
 
 // Chat files live in the PERSISTED uploads volume (/app/uploads/chat), not the
 // documents module's non-persisted dir.

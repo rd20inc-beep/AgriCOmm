@@ -5,6 +5,7 @@ export const chatApi = {
   conversations: () => api.get('/api/chat/conversations'),
   unread: () => api.get('/api/chat/unread'),
   approvals: () => api.get('/api/chat/approvals'),
+  iceConfig: () => api.get('/api/chat/ice-config'),
   messages: (params) => api.get('/api/chat/messages', params),
   // data: { body?, recipient_id?, broadcast?, file? (File) } → multipart FormData.
   send: (data) => {

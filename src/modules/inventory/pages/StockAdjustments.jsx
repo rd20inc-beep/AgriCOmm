@@ -119,10 +119,10 @@ export default function StockAdjustments() {
 
   async function handleApprove(id) {
     try {
-      await requestOwnerApproval((ownerId) => lotInventoryApi.approveAdjustment(id, { authorized_by_owner_id: ownerId }));
+      await lotInventoryApi.approveAdjustment(id);
       addToast('Adjustment approved — stock updated');
       loadAdjustments();
-    } catch (err) { if (err?.message !== 'Owner authorization cancelled') addToast(err.message || 'Failed', 'error'); }
+    } catch (err) { addToast(err.message || 'Failed', 'error'); }
   }
 
   async function handleReject(id) {

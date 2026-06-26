@@ -4,9 +4,11 @@ import { ensureNotifyPermission, showNotify } from './notify';
 
 // 1:1 WebRTC audio/video calling. Signaling rides the per-user SSE channel
 // (/api/streams/call-signals) for inbound and POST /api/chat/signal for outbound.
-// Connectivity uses free public STUN — works on the same network and most setups;
-// calls across restrictive/symmetric NATs would additionally need a TURN server.
-const ICE = {
+// Connectivity uses STUN + a TURN relay (fetched from /api/chat/ice-config —
+// ephemeral coturn credentials). TURN is what lets calls connect across
+// mobile/symmetric NATs where STUN alone fails. Falls back to public STUN if the
+// config can't be fetched.
+const ICE_FALLBACK = {
   iceServers: [
     { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
   ],
@@ -19,6 +21,7 @@ export function useCalling(user) {
   const [camOff, setCamOff] = useState(false);
   const [, setTick] = useState(0); // force re-attach of media when streams change
 
+  const iceRef = useRef(ICE_FALLBACK);
   const pcRef = useRef(null);
   const localStreamRef = useRef(null);
   const remoteStreamRef = useRef(null);
@@ -66,6 +69,16 @@ export function useCalling(user) {
     return () => { window.removeEventListener('pointerdown', unlock); window.removeEventListener('keydown', unlock); };
   }, []);
 
+  // Fetch the ICE config (STUN + TURN with ephemeral creds) once, so calls can
+  // relay across restrictive NATs. Keeps the STUN-only fallback if it fails.
+  useEffect(() => {
+    let alive = true;
+    chatApi.iceConfig()
+      .then((res) => { const cfg = res?.data?.iceServers || res?.iceServers; if (alive && Array.isArray(cfg) && cfg.length) iceRef.current = { iceServers: cfg }; })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
   // Ring while a call is being set up (incoming for the callee, ringback for the caller).
   useEffect(() => {
     const ringing = call && (call.status === 'incoming' || call.status === 'outgoing');
@@ -95,7 +108,7 @@ export function useCalling(user) {
   }, []);
 
   function makePc(peerId) {
-    const pc = new RTCPeerConnection(ICE);
+    const pc = new RTCPeerConnection(iceRef.current);
     pc.onicecandidate = (e) => { if (e.candidate) signal(peerId, 'ice', e.candidate); };
     pc.ontrack = (e) => { remoteStreamRef.current = e.streams[0]; setTick((t) => t + 1); };
     pc.onconnectionstatechange = () => {
