@@ -362,18 +362,22 @@ export default function LotDetail() {
         </div>
       </div>
 
-      {/* Ordered vs received — only when they differ (short or over shipment). */}
-      {lot.type === 'raw' && orderedKg > 0 && Math.abs(orderVariance) > 0.5 && (
-        <div className={`rounded-xl border p-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm ${orderVariance < 0 ? 'bg-amber-50 border-amber-200 text-amber-900' : 'bg-blue-50 border-blue-200 text-blue-900'}`}>
-          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-          <span><span className="font-semibold">Ordered</span> {dv(orderedKg).toLocaleString()} {ul()}</span>
-          <span className="text-gray-400">·</span>
-          <span><span className="font-semibold">Received</span> {dv(receivedKg).toLocaleString()} {ul()}</span>
-          <span className="text-gray-400">·</span>
-          <span className="font-semibold">{orderVariance < 0 ? `Short ${dv(Math.abs(orderVariance)).toLocaleString()}` : `Over ${dv(orderVariance).toLocaleString()}`} {ul()}</span>
-          <span className="text-gray-500">— the supplier bill is based on the received amount.</span>
-        </div>
-      )}
+      {/* Ordered vs received — only when they differ (short or over shipment).
+          Shown in MT (procurement unit) + the lot's display unit in brackets. */}
+      {lot.type === 'raw' && orderedKg > 0 && Math.abs(orderVariance) > 0.5 && (() => {
+        const mt = (kg) => (Math.round((kg / 1000) * 100) / 100).toLocaleString();
+        return (
+          <div className={`rounded-xl border p-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm ${orderVariance < 0 ? 'bg-amber-50 border-amber-200 text-amber-900' : 'bg-blue-50 border-blue-200 text-blue-900'}`}>
+            <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+            <span><span className="font-semibold">Ordered</span> {mt(orderedKg)} MT</span>
+            <span className="text-gray-400">·</span>
+            <span><span className="font-semibold">Received</span> {mt(receivedKg)} MT</span>
+            <span className="text-gray-400">·</span>
+            <span className="font-semibold">{orderVariance < 0 ? `Short ${mt(Math.abs(orderVariance))}` : `Over ${mt(orderVariance)}`} MT ({dv(Math.abs(orderVariance)).toLocaleString()} {ul()})</span>
+            <span className="text-gray-500">— the supplier bill is based on the received amount.</span>
+          </div>
+        );
+      })()}
 
       {/* Tabs */}
       <div className="flex items-center gap-1 border-b border-gray-200 overflow-x-auto">
