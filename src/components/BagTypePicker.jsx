@@ -88,7 +88,7 @@ export default function BagTypePicker({
   }
 
   return (
-    <div data-bagtype-picker>
+    <div data-bagtype-picker className="relative">
       <div className="flex items-center justify-between mb-1">
         {label && <label className="block text-sm font-medium text-gray-700">{label}</label>}
         <button type="button" onClick={() => { setAdding(v => !v); setOpen(false); }}
@@ -134,23 +134,37 @@ export default function BagTypePicker({
       </div>
 
       {adding && (
-        <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-3">
+        // Fixed-width popover so the fields stay readable even when the picker
+        // sits in a narrow grid column (e.g. the 3-col Bag Specification form).
+        <div className="absolute top-full left-0 z-30 mt-1 w-80 max-w-[calc(100vw-2rem)] p-3 bg-blue-50 border border-blue-200 rounded-lg shadow-lg space-y-3">
           <p className="text-xs font-semibold text-blue-800 uppercase tracking-wide">Add new bag type</p>
-          <input value={draft.name} autoFocus onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
-            placeholder="Name * — e.g. PP Woven 25kg (Buyer Logo)"
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
-          <div className="grid grid-cols-3 gap-2">
-            <select value={draft.category} onChange={e => setDraft(d => ({ ...d, category: e.target.value }))}
-              className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm focus:ring-2 focus:ring-blue-500">
-              <option value="branded">Branded</option>
-              <option value="empty">Empty</option>
-              <option value="consumable">Consumable</option>
-            </select>
-            <select value={draft.size_kg} onChange={e => setDraft(d => ({ ...d, size_kg: e.target.value }))}
-              className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm focus:ring-2 focus:ring-blue-500">
-              {SIZE_OPTIONS.map(s => <option key={s} value={s}>{s} kg</option>)}
-            </select>
-            <input value={draft.material} onChange={e => setDraft(d => ({ ...d, material: e.target.value }))} placeholder="Material"
+          <div>
+            <label className="block text-[11px] font-medium text-gray-600 mb-1">Name <span className="text-red-500">*</span></label>
+            <input value={draft.name} autoFocus onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
+              placeholder="e.g. PP Woven 25kg (Buyer Logo)"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-[11px] font-medium text-gray-600 mb-1">Category</label>
+              <select value={draft.category} onChange={e => setDraft(d => ({ ...d, category: e.target.value }))}
+                className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm focus:ring-2 focus:ring-blue-500">
+                <option value="branded">Branded</option>
+                <option value="empty">Empty</option>
+                <option value="consumable">Consumable</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-gray-600 mb-1">Size (kg)</label>
+              <select value={draft.size_kg} onChange={e => setDraft(d => ({ ...d, size_kg: e.target.value }))}
+                className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm focus:ring-2 focus:ring-blue-500">
+                {SIZE_OPTIONS.map(s => <option key={s} value={s}>{s} kg</option>)}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="block text-[11px] font-medium text-gray-600 mb-1">Material</label>
+            <input value={draft.material} onChange={e => setDraft(d => ({ ...d, material: e.target.value }))} placeholder="e.g. PP Woven"
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
           </div>
           <div className="flex justify-end gap-2">
