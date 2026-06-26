@@ -223,8 +223,18 @@ export function transformOrder(dbOrder) {
     costs: transformCosts(dbOrder.costs),
     // Documents — convert array to keyed object if needed
     documents: transformDocuments(dbOrder.documents),
-    // Activity log
-    activityLog: dbOrder.activityLog || dbOrder.status_history || [],
+    // Activity log — normalize export_order_status_history rows (from_status /
+    // to_status / changed_by / reason / created_at) into the {action,date,by}
+    // shape the TimelineTab renders. Already-shaped entries (mock data) pass through.
+    activityLog: (dbOrder.activityLog || dbOrder.status_history || []).map((h) => ({
+      action: h.action
+        || h.reason
+        || (h.from_status ? `Status changed: ${h.from_status} → ${h.to_status}` : `Status set to ${h.to_status}`),
+      fromStatus: h.from_status ?? null,
+      toStatus: h.to_status ?? null,
+      date: h.date || h.created_at || null,
+      by: h.by || h.changed_by_name || (h.changed_by ? `User #${h.changed_by}` : 'System'),
+    })),
   };
 }
 

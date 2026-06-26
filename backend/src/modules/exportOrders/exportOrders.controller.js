@@ -399,9 +399,12 @@ const exportOrderController = {
       const [costs, documents, statusHistory, millingBatch, packingLines, shipmentContainers, items] = await Promise.all([
         db('export_order_costs').where({ order_id: orderId }).orderBy('created_at', 'asc'),
         db('export_order_documents').where({ order_id: orderId }).orderBy('created_at', 'asc'),
-        db('export_order_status_history')
-          .where({ order_id: orderId })
-          .orderBy('created_at', 'desc'),
+        db('export_order_status_history as h')
+          .leftJoin('users as u', 'u.id', 'h.changed_by')
+          .where('h.order_id', orderId)
+          .orderBy('h.created_at', 'desc')
+          .select('h.id', 'h.order_id', 'h.from_status', 'h.to_status',
+            'h.changed_by', 'h.reason', 'h.created_at', 'u.full_name as changed_by_name'),
         db('milling_batches').where({ linked_export_order_id: orderId }).first(),
         db('order_packing_lines').where({ order_id: orderId }).orderBy('line_no', 'asc'),
         db('shipment_containers').where({ order_id: orderId }).orderBy('sequence_no', 'asc'),
