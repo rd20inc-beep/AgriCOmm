@@ -9,6 +9,16 @@ const accountingService = require('../../services/accountingService');
 
 const round2 = (n) => Math.round((parseFloat(n) || 0) * 100) / 100;
 
+// The frontend keys export orders by order_no (e.g. "EX-001") — its `order.id`
+// is actually the order_no string — so accept either a numeric id or an order_no.
+async function resolveOrderId(value, conn = db) {
+  if (value == null || value === '') return null;
+  const s = String(value);
+  if (/^\d+$/.test(s)) return parseInt(s, 10);
+  const row = await conn('export_orders').where({ order_no: s }).first('id');
+  return row ? row.id : null;
+}
+
 async function nextPboNo(trx) {
   const last = await trx('printed_bag_orders')
     .where('pbo_no', 'like', 'PBO-%')
@@ -104,7 +114,9 @@ async function syncPayable(trx, { pbo, order, vendorId, total, refLabel, notes }
   }
 }
 
-async function list(orderId) {
+async function list(orderRef) {
+  const orderId = await resolveOrderId(orderRef);
+  if (!orderId) return [];
   const rows = await db('printed_bag_orders as p')
     .leftJoin('suppliers as s', 's.id', 'p.vendor_id')
     .leftJoin('bag_types as b', 'b.id', 'p.bag_type_id')
@@ -136,8 +148,9 @@ async function list(orderId) {
   });
 }
 
-async function create(orderId, body, userId) {
-  const order = await db('export_orders').where({ id: orderId }).first();
+async function create(orderRef, body, userId) {
+  const orderId = await resolveOrderId(orderRef);
+  const order = orderId ? await db('export_orders').where({ id: orderId }).first() : null;
   if (!order) { const e = new Error('Export order not found.'); e.statusCode = 404; throw e; }
 
   const quantity = parseInt(body.quantity, 10) || 0;

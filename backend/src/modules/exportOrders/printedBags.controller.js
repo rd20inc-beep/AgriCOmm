@@ -11,18 +11,20 @@ function fail(res, err) {
 module.exports = {
   async list(req, res) {
     try {
-      const orderId = parseInt(req.query.orderId || req.params.orderId, 10);
-      if (!orderId) return res.status(400).json({ success: false, message: 'orderId is required.' });
-      const items = await service.list(orderId);
+      // orderRef may be a numeric id OR an order_no (e.g. "EX-001") — the
+      // service resolves both.
+      const orderRef = req.query.orderId || req.params.orderId;
+      if (!orderRef) return res.status(400).json({ success: false, message: 'orderId is required.' });
+      const items = await service.list(orderRef);
       return res.json({ success: true, data: { items } });
     } catch (err) { return fail(res, err); }
   },
 
   async create(req, res) {
     try {
-      const orderId = parseInt(req.body.order_id || req.params.orderId, 10);
-      if (!orderId) return res.status(400).json({ success: false, message: 'order_id is required.' });
-      const row = await service.create(orderId, req.body, req.user?.id);
+      const orderRef = req.body.order_id || req.params.orderId;
+      if (!orderRef) return res.status(400).json({ success: false, message: 'order_id is required.' });
+      const row = await service.create(orderRef, req.body, req.user?.id);
       return res.status(201).json({ success: true, data: row });
     } catch (err) { return fail(res, err); }
   },
