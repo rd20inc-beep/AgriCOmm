@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Printer, RefreshCw, Calendar, Factory, Boxes, TrendingUp, Wallet, ArrowDownLeft, ArrowUpRight, ShoppingCart, FileText, Package, Sparkles } from 'lucide-react';
+import { Printer, RefreshCw, Calendar, Factory, Boxes, TrendingUp, Wallet, ArrowDownLeft, ArrowUpRight, ShoppingCart, FileText, Package, Sparkles, Shield } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../../../api/client';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
@@ -8,6 +9,7 @@ import {
   ProductionReportView, StockReportView,
   PnlReportView, CashflowReportView, AgingReportView,
   PurchaseLedgerView, SalesLedgerView, StockDetailView, PnlAccrualView, PnlCompareView,
+  AuditReportView,
 } from './PrintableReportsViews';
 
 // ─── Period helpers ────────────────────────────────────────────────────
@@ -105,16 +107,25 @@ const STOCK_GROUP_OPTIONS = [
 
 export default function PrintableReports() {
   const { addToast, companyProfileData } = useApp();
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
+  const [searchParams] = useSearchParams();
   // A Mill role only gets the mill/inventory reports — the company-wide
   // financials (P&L, Cashflow, AR/AP aging) mix export data, which the mill
   // must not see. Their mill financials live on the Mill Finance dashboard.
   const millScoped = user?.role === 'Mill Manager';
+  // The audit trail is admin-only (gated admin.view on the endpoint too).
+  const canAudit = hasPermission?.('admin', 'view');
   const REPORT_TYPES = millScoped
     ? ['production', 'stock', 'stock_detail', 'purchase_ledger']
-    : ['production', 'stock', 'stock_detail', 'purchase_ledger', 'sales_ledger', 'pnl_accrual', 'pnl', 'pnl_compare', 'cashflow', 'ar_aging', 'ap_aging'];
+    : ['production', 'stock', 'stock_detail', 'purchase_ledger', 'sales_ledger', 'pnl_accrual', 'pnl', 'pnl_compare', 'cashflow', 'ar_aging', 'ap_aging', ...(canAudit ? ['audit_trail'] : [])];
 
-  const [reportType, setReportType] = useState('production'); // 'production' | 'stock' | 'pnl' | 'cashflow' | 'ar_aging' | 'ap_aging'
+  // Preselect via ?type= (e.g. the Audit Trail page links here with type=audit_trail).
+  const initialType = REPORT_TYPES.includes(searchParams.get('type')) ? searchParams.get('type') : 'production';
+  const [reportType, setReportType] = useState(initialType);
+  // Audit-trail filters (action / entity contains, + user dropdown from the data).
+  const [auditAction, setAuditAction] = useState('');
+  const [auditEntity, setAuditEntity] = useState('');
+  const [auditUserId, setAuditUserId] = useState('');
   const [preset, setPreset] = useState('monthly');
   const [stockGroupBy, setStockGroupBy] = useState('product');
   const [customFrom, setCustomFrom] = useState('');
@@ -124,7 +135,7 @@ export default function PrintableReports() {
 
   // Period-based reports use the period selector; snapshot reports
   // (stock + AR/AP aging) ignore it.
-  const usesPeriod = ['production', 'pnl', 'pnl_accrual', 'pnl_compare', 'cashflow', 'purchase_ledger', 'sales_ledger'].includes(reportType);
+  const usesPeriod = ['production', 'pnl', 'pnl_accrual', 'pnl_compare', 'cashflow', 'purchase_ledger', 'sales_ledger', 'audit_trail'].includes(reportType);
 
   const range = useMemo(() => {
     if (preset === 'custom' && customFrom && customTo) {
@@ -167,6 +178,13 @@ export default function PrintableReports() {
         res = await api.get('/api/reporting/printable/sales-ledger', periodParams);
       } else if (reportType === 'stock_detail') {
         res = await api.get('/api/reporting/printable/stock-detail', {});
+      } else if (reportType === 'audit_trail') {
+        res = await api.get('/api/reporting/printable/audit-trail', {
+          ...periodParams,
+          ...(auditAction && { action: auditAction }),
+          ...(auditEntity && { entity_type: auditEntity }),
+          ...(auditUserId && { user_id: auditUserId }),
+        });
       } else {
         res = await api.get('/api/reporting/printable/stock', { group_by: stockGroupBy });
       }
@@ -176,7 +194,7 @@ export default function PrintableReports() {
     } finally {
       setLoading(false);
     }
-  }, [reportType, range, stockGroupBy, addToast]);
+  }, [reportType, range, stockGroupBy, auditAction, auditEntity, auditUserId, addToast]);
 
   // Belt-and-suspenders: never hold/load a report type this role can't see.
   useEffect(() => {
@@ -221,6 +239,7 @@ export default function PrintableReports() {
               { k: 'cashflow',   l: 'Cashflow',   i: Wallet },
               { k: 'ar_aging',   l: 'AR Aging',   i: ArrowDownLeft },
               { k: 'ap_aging',   l: 'AP Aging',   i: ArrowUpRight },
+              { k: 'audit_trail', l: 'Audit Trail', i: Shield },
             ].filter(({ k }) => REPORT_TYPES.includes(k)).map(({ k, l, i: Ic }) => (
               <button key={k} onClick={() => setReportType(k)}
                 className={`px-3 py-2 text-sm font-medium inline-flex items-center gap-1.5 ${reportType === k ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}>
@@ -264,6 +283,20 @@ export default function PrintableReports() {
             >
               {STOCK_GROUP_OPTIONS.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
             </select>
+          )}
+
+          {reportType === 'audit_trail' && (
+            <div className="inline-flex items-center gap-2">
+              <input value={auditAction} onChange={e => setAuditAction(e.target.value)} placeholder="Action contains…"
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white w-40" />
+              <input value={auditEntity} onChange={e => setAuditEntity(e.target.value)} placeholder="Entity type…"
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white w-36" />
+              <select value={auditUserId} onChange={e => setAuditUserId(e.target.value)}
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white">
+                <option value="">All users</option>
+                {(data?.topUsers || []).filter(u => u.userId).map(u => <option key={u.userId} value={u.userId}>{u.user}</option>)}
+              </select>
+            </div>
           )}
 
           <div className="ml-auto inline-flex items-center gap-2">
@@ -314,6 +347,8 @@ export default function PrintableReports() {
           <SalesLedgerView data={data} companyName={companyName} range={range} />
         ) : reportType === 'stock_detail' && data.rows && data.millStore !== undefined ? (
           <StockDetailView data={data} companyName={companyName} />
+        ) : reportType === 'audit_trail' && data.byCategory ? (
+          <AuditReportView data={data} companyName={companyName} range={range} />
           ) : (
             <div className="text-center text-gray-400 py-12">No data.</div>
           )}

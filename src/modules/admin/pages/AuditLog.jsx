@@ -1,8 +1,34 @@
 import { useState, useMemo } from 'react';
-import { Shield, Search, Filter, Clock, User, FileText, Eye, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Shield, Search, Filter, Clock, User, FileText, Eye, ChevronDown, ChevronUp, RefreshCw, Download, Printer } from 'lucide-react';
 import { useAuditLogs } from '../../../api/queries';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 import Modal from '../../../components/Modal';
+
+// Build + download a CSV of the currently-filtered audit rows.
+function exportAuditCsv(rows) {
+  const esc = (v) => {
+    const s = v == null ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const header = ['Timestamp', 'User', 'Email', 'Action', 'Entity Type', 'Entity ID', 'IP Address', 'Details'];
+  const lines = [header.join(',')];
+  for (const l of rows) {
+    lines.push([
+      l.createdAt ? new Date(l.createdAt).toISOString() : '',
+      l.userName || l.userEmail || 'System', l.userEmail || '',
+      l.action || '', l.entityType || '', l.entityId || '', l.ipAddress || '',
+      l.details ? JSON.stringify(l.details) : '',
+    ].map(esc).join(','));
+  }
+  const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `audit-trail-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 const ACTION_COLORS = {
   create: 'bg-green-100 text-green-700',
@@ -106,13 +132,30 @@ export default function AuditLog() {
           </h1>
           <p className="text-sm text-gray-500 mt-0.5">Complete record of all system actions</p>
         </div>
-        <button
-          onClick={() => refetch()}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
-        >
-          <RefreshCw className="w-4 h-4" />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => exportAuditCsv(filtered)}
+            disabled={filtered.length === 0}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            <Download className="w-4 h-4" />
+            Export CSV
+          </button>
+          <Link
+            to="/reports/print?type=audit_trail"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            <Printer className="w-4 h-4" />
+            Printable report
+          </Link>
+          <button
+            onClick={() => refetch()}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Summary Cards */}

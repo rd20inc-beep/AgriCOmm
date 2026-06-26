@@ -1340,6 +1340,73 @@ const reportingController = {
       });
     } catch (err) { console.error('Accrual P&L error:', err); return res.status(500).json({ success: false, message: 'Internal server error.' }); }
   },
+
+  // ──── Audit Trail (printable) — full activity log over a period, with a
+  // category/action/user summary + a detail table. Mirrors the Audit Trail
+  // page's data but shaped for a clean printable/CSV report. ────
+  async printableAuditTrail(req, res) {
+    try {
+      const db = require('../../config/database');
+      const { from, to, user_id, action, entity_type } = req.query;
+      const cap = Math.min(parseInt(req.query.limit, 10) || 1500, 5000);
+
+      const base = () => {
+        let q = db('audit_logs as a').leftJoin('users as u', 'u.id', 'a.user_id');
+        if (from) q = q.where('a.created_at', '>=', from);
+        if (to) q = q.where('a.created_at', '<=', to);
+        if (user_id) q = q.where('a.user_id', user_id);
+        if (action && action !== 'All') q = q.where('a.action', 'ilike', `%${action}%`);
+        if (entity_type && entity_type !== 'All') q = q.where('a.entity_type', entity_type);
+        return q;
+      };
+
+      const catOf = (act) => {
+        const a = (act || '').toLowerCase();
+        if (/(create|add|record|new|register)/.test(a)) return 'Create';
+        if (/(update|edit|adjust|set|change|rename|price)/.test(a)) return 'Update';
+        if (/(delete|remove|void|reject|cancel|reverse)/.test(a)) return 'Delete';
+        if (/(approve|confirm|accept|authorize|finalize)/.test(a)) return 'Approve';
+        if (/(pay|payment|receipt|settle)/.test(a)) return 'Payment';
+        if (/(login|logout|auth)/.test(a)) return 'Auth';
+        return 'Other';
+      };
+      const summarize = (details) => {
+        if (!details) return '';
+        let d = details;
+        if (typeof d === 'string') { try { d = JSON.parse(d); } catch { return String(details).slice(0, 160); } }
+        try { const s = JSON.stringify(d); return s.length > 180 ? s.slice(0, 177) + '…' : s; } catch { return ''; }
+      };
+
+      const totalRow = await base().count('a.id as c').first();
+      const total = parseInt(totalRow.c, 10) || 0;
+      const rows = await base()
+        .select('a.id', 'a.created_at', 'a.action', 'a.entity_type', 'a.entity_id',
+          'a.details', 'a.ip_address', 'a.user_id', 'u.full_name as user_name', 'u.email as user_email')
+        .orderBy('a.created_at', 'desc').limit(cap);
+      const byActionRows = await base().select('a.action').count('a.id as c').groupBy('a.action').orderBy('c', 'desc');
+      const byUserRows = await base().select('a.user_id', 'u.full_name as user_name')
+        .count('a.id as c').groupBy('a.user_id', 'u.full_name').orderBy('c', 'desc').limit(20);
+
+      const byCategory = {};
+      for (const r of byActionRows) { const c = catOf(r.action); byCategory[c] = (byCategory[c] || 0) + (parseInt(r.c, 10) || 0); }
+
+      const detail = rows.map((r) => ({
+        id: r.id, date: r.created_at,
+        user: r.user_name || r.user_email || (r.user_id ? `User #${r.user_id}` : 'System'),
+        userId: r.user_id, action: r.action, category: catOf(r.action),
+        entityType: r.entity_type || '—', entityId: r.entity_id || '',
+        ip: r.ip_address || '', details: summarize(r.details),
+      }));
+
+      return res.json({ success: true, data: {
+        rows: detail, total, shown: detail.length, truncated: total > detail.length,
+        byCategory,
+        topActions: byActionRows.slice(0, 15).map((r) => ({ action: r.action, count: parseInt(r.c, 10) || 0 })),
+        topUsers: byUserRows.map((r) => ({ userId: r.user_id, user: r.user_name || (r.user_id ? `User #${r.user_id}` : 'System'), count: parseInt(r.c, 10) || 0 })),
+        period: { from, to },
+      } });
+    } catch (err) { console.error('Audit trail report error:', err); return res.status(500).json({ success: false, message: 'Internal server error.' }); }
+  },
 };
 
 module.exports = reportingController;

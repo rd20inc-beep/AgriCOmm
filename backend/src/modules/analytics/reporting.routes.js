@@ -56,6 +56,8 @@ router.get('/printable/sales-ledger',     authorize('reports', 'view'), controll
 router.get('/printable/stock-detail',     authorize('reports', 'view'), controller.printableStockDetail);
 router.get('/printable/sweeping',         authorize('reports', 'view'), controller.printableSweeping);
 router.get('/printable/pnl-accrual',      authorize('reports', 'view'), controller.printablePnlAccrual);
+// Audit trail is sensitive — gate on admin.view (not reports.view).
+router.get('/printable/audit-trail',      authorize('admin', 'view'),   controller.printableAuditTrail);
 
 // ═══════════════════════════════════════════════════════════════════
 // Production

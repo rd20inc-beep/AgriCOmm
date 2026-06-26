@@ -897,3 +897,67 @@ export function PnlCompareView({ data, companyName, range, preset }) {
     </div>
   );
 }
+
+// ── Audit Trail (printable) — full activity log over a period with a
+// category/action/user summary + a detail table. ──
+const AUDIT_CAT_ORDER = ['Create', 'Update', 'Approve', 'Payment', 'Delete', 'Auth', 'Other'];
+const AUDIT_CAT_LABEL = { Create: 'Creates', Update: 'Updates', Approve: 'Approvals', Payment: 'Payments', Delete: 'Deletes', Auth: 'Logins', Other: 'Other' };
+function fmtDateTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  return d.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+export function AuditReportView({ data, companyName, range }) {
+  const cat = data.byCategory || {};
+  const rows = data.rows || [];
+  const summary = [
+    { label: 'Total entries', value: (data.total || 0).toLocaleString() },
+    ...AUDIT_CAT_ORDER.filter((c) => cat[c]).map((c) => ({ label: AUDIT_CAT_LABEL[c], value: (cat[c] || 0).toLocaleString() })),
+  ];
+  return (
+    <div className="print-report space-y-5 text-gray-900">
+      <Header companyName={companyName} title="Audit Trail Report" subtitle={range?.label || 'All time'} />
+      <SummaryRow items={summary.slice(0, 7)} />
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 print:grid-cols-2">
+        <Section title="Activity by action">
+          <Table
+            head={['Action', 'Count']} align={['left', 'right']}
+            rows={(data.topActions || []).map((a) => [a.action, a.count.toLocaleString()])}
+            empty="No activity in this period."
+          />
+        </Section>
+        <Section title="Activity by user">
+          <Table
+            head={['User', 'Count']} align={['left', 'right']}
+            rows={(data.topUsers || []).map((u) => [u.user, u.count.toLocaleString()])}
+            empty="No activity in this period."
+          />
+        </Section>
+      </div>
+
+      <Section title={`Detail — ${rows.length.toLocaleString()} ${data.truncated ? `of ${(data.total || 0).toLocaleString()} ` : ''}entries`}>
+        {data.truncated && (
+          <p className="text-[11px] text-amber-700 mb-2">Showing the most recent {rows.length.toLocaleString()} entries. Narrow the date range or filters to see the rest.</p>
+        )}
+        <Table
+          head={['Time', 'User', 'Action', 'Entity', 'Ref', 'Details']}
+          align={['left', 'left', 'left', 'left', 'left', 'left']}
+          rows={rows.map((r) => [
+            fmtDateTime(r.date),
+            r.user,
+            r.action,
+            r.entityType,
+            r.entityId || '—',
+            <span className="text-[10px] text-gray-500 break-all">{r.details}</span>,
+          ])}
+          empty="No audit entries match these filters."
+        />
+      </Section>
+
+      <Footer />
+    </div>
+  );
+}
