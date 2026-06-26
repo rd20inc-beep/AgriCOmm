@@ -29,6 +29,12 @@ router.post(
   auditAction('quick_add', 'customer', (req, data) => data?.data?.customer?.id),
   approvalsCtrl.quickAddCustomer
 );
+router.post(
+  '/bag-types/quick-add',
+  authorize('export_orders', 'create'),
+  auditAction('quick_add', 'bag_type', (req, data) => data?.data?.bag_type?.id),
+  approvalsCtrl.quickAddBagType
+);
 router.put(
   '/customers/:id/submit-edit',
   authorize('inventory', 'create'),

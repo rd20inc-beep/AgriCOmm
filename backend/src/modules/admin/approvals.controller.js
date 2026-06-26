@@ -198,6 +198,38 @@ const approvalsController = {
     }
   },
 
+  // ─────────────── Quick-add: bag type ───────────────
+  // Bag types are low-risk packaging masters with no approval workflow, so this
+  // creates them directly (deduped by name) — letting an export user add a bag
+  // type on the fly while building an order.
+  async quickAddBagType(req, res) {
+    try {
+      const { name, category, size_kg, material, description, reorder_level } = req.body || {};
+      if (!name || !String(name).trim()) {
+        return res.status(400).json({ success: false, message: 'Bag type name is required.' });
+      }
+      const existing = await db('bag_types')
+        .whereRaw('LOWER(name) = LOWER(?)', [String(name).trim()])
+        .first();
+      if (existing) {
+        return res.status(200).json({ success: true, data: { bag_type: existing, deduped: true } });
+      }
+      const [bag_type] = await db('bag_types').insert({
+        name: String(name).trim(),
+        category: category || 'branded',
+        size_kg: size_kg != null && size_kg !== '' ? parseFloat(size_kg) : null,
+        material: material || null,
+        description: description || null,
+        reorder_level: reorder_level != null && reorder_level !== '' ? parseInt(reorder_level, 10) : 0,
+        is_active: true,
+      }).returning('*');
+      return res.status(201).json({ success: true, data: { bag_type } });
+    } catch (err) {
+      console.error('quickAddBagType error:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
   // ─────────────── Approvals: list ───────────────
   async listApprovals(req, res) {
     try {

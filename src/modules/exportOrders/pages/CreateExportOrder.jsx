@@ -12,7 +12,10 @@ import { validateForm, required, positiveNonZero } from '../../../utils/validati
 import { toKg, fromKg, allEquivalents, UNITS } from '../../../utils/unitConversion';
 import SearchSelect from '../../../components/SearchSelect';
 import RiceTypePicker from '../../../components/RiceTypePicker';
+import BagTypePicker from '../../../components/BagTypePicker';
+import SupplierPicker from '../../../components/SupplierPicker';
 import SlideDrawer from '../../../components/SlideDrawer';
+import { printedBagsApi } from '../api/services';
 import { INCOTERMS, incotermHint, advancePctForIncoterm } from '../../../shared/constants/incoterms';
 import { PAYMENT_TERMS } from '../../../shared/constants/paymentTerms';
 import { COUNTRY_OPTIONS } from '../../../shared/constants/countries';
@@ -55,7 +58,7 @@ const masterOptionsFor = (retailKg) => {
 };
 
 export default function CreateExportOrder() {
-  const { addToast, customersList: customers, productsList: products, exportCostCategories, bagTypesList } = useApp();
+  const { addToast, customersList: customers, productsList: products, exportCostCategories, bagTypesList, suppliersList } = useApp();
   const createOrderMut = useCreateExportOrder();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -101,6 +104,13 @@ export default function CreateExportOrder() {
   // Mixed packing lines
   const [packingLines, setPackingLines] = useState([{ ...EMPTY_PACKING_LINE }]);
   const [specsOpen, setSpecsOpen] = useState(false);
+
+  // Optional printed-bag orders arranged at creation. Each becomes a vendor
+  // payable on the new order (posted after the order is created).
+  const [printedBags, setPrintedBags] = useState([]);
+  const addPrintedBag = () => setPrintedBags(prev => [...prev, { bagType: '', bagTypeId: null, bagSizeKg: '', vendorId: '', quantity: '', unitCost: '', printing: '', brand: '' }]);
+  const removePrintedBag = (idx) => setPrintedBags(prev => prev.filter((_, i) => i !== idx));
+  const updatePrintedBag = (idx, patch) => setPrintedBags(prev => prev.map((b, i) => i === idx ? { ...b, ...patch } : b));
 
   // Multi-line P.I. items — one or more products per order
   const [items, setItems] = useState([{ ...EMPTY_ITEM }]);
@@ -312,6 +322,29 @@ export default function CreateExportOrder() {
     if (!validate(status === 'Draft')) return;
     try {
       const res = await createOrderMut.mutateAsync(buildPayload(status));
+      const newOrderId = res.data?.order?.id;
+      // Arrange any printed-bag orders captured during creation against the new order.
+      const validBags = printedBags.filter(b => (parseInt(b.quantity, 10) || 0) > 0);
+      if (newOrderId && validBags.length) {
+        try {
+          for (const b of validBags) {
+            await printedBagsApi.create({
+              order_id: newOrderId,
+              bag_type_id: b.bagTypeId || null,
+              bag_type_name: b.bagType || null,
+              bag_size_kg: b.bagSizeKg || null,
+              vendor_id: b.vendorId || null,
+              quantity: parseInt(b.quantity, 10),
+              unit_cost: parseFloat(b.unitCost) || 0,
+              printing: b.printing || null,
+              brand_marking: b.brand || null,
+            });
+          }
+          addToast(`${validBags.length} printed-bag order(s) arranged`, 'success');
+        } catch (bagErr) {
+          addToast(`Order created, but a printed-bag order failed: ${bagErr.message}`, 'error');
+        }
+      }
       addToast(`Order ${res.data?.order?.order_no || ''} ${status === 'Draft' ? 'saved as draft' : 'created'}`, 'success');
       navigate(`/export/${res.data?.order?.order_no || res.data?.order?.id || ''}`);
     } catch (err) {
@@ -586,11 +619,14 @@ export default function CreateExportOrder() {
           <h2 className="text-sm font-semibold text-amber-700 uppercase tracking-wider mb-4 flex items-center gap-2"><ShoppingBag className="w-4 h-4" /> Bag Specification</h2>
           <div className="form-grid">
             <div className="form-group">
-              <label className="form-label">Bag Type</label>
-              <select value={form.bagType} onChange={e => { set('bagType', e.target.value); const bt = bagTypesList.find(b => b.name === e.target.value); if (bt?.sizeKg) set('bagSizeKg', String(bt.sizeKg)); }} className="form-input">
-                <option value="">Select bag type...</option>
-                {bagTypesList.filter(b => b.sizeKg).map(b => <option key={b.id || b.name} value={b.name}>{b.name}</option>)}
-              </select>
+              <BagTypePicker
+                label="Bag Type"
+                value={form.bagType}
+                bagTypes={bagTypesList}
+                addToast={addToast}
+                onCreated={() => qc.invalidateQueries({ queryKey: ['bag-types'] })}
+                onChange={(name, bt) => { set('bagType', name); if (bt?.sizeKg || bt?.size_kg) set('bagSizeKg', String(bt.sizeKg ?? bt.size_kg)); }}
+              />
             </div>
             <div className="form-group">
               <label className="form-label">Bag Quality</label>
@@ -701,11 +737,14 @@ export default function CreateExportOrder() {
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <div className="form-group">
-                    <label className="form-label text-xs">Bag Type</label>
-                    <select value={line.bagType} onChange={e => updatePackingLine(idx, 'bagType', e.target.value)} className="form-input text-sm py-1.5">
-                      <option value="">Select...</option>
-                      {bagTypesList.filter(b => b.sizeKg).map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
-                    </select>
+                    <BagTypePicker
+                      label="Bag Type"
+                      value={line.bagType}
+                      bagTypes={bagTypesList}
+                      addToast={addToast}
+                      onCreated={() => qc.invalidateQueries({ queryKey: ['bag-types'] })}
+                      onChange={(name) => updatePackingLine(idx, 'bagType', name)}
+                    />
                   </div>
                   <div className="form-group">
                     <label className="form-label text-xs">Fill Weight (KG)</label>
@@ -757,28 +796,23 @@ export default function CreateExportOrder() {
                       {p?.name || it.productName || `Item ${idx + 1}`}
                     </div>
                     <div className="md:col-span-3">
-                      <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Bag Type</label>
-                      <select
+                      <BagTypePicker
+                        label="Bag Type"
                         value={it.bagType}
-                        onChange={e => {
-                          const name = e.target.value;
+                        bagTypes={bagTypesList}
+                        addToast={addToast}
+                        onCreated={() => qc.invalidateQueries({ queryKey: ['bag-types'] })}
+                        onChange={(name, bt) => {
                           updateItem(idx, 'bagType', name);
-                          // Auto-fill the per-item bag size from the chosen type.
-                          const bt = bagTypesList.find(b => b.name === name);
-                          if (bt?.sizeKg) {
-                            const v = String(bt.sizeKg);
+                          const sz = bt?.sizeKg ?? bt?.size_kg;
+                          if (sz) {
+                            const v = String(sz);
                             updateItem(idx, 'bagSizeKg', v);
                             if (requiresMasterBag(v) && !it.masterBagSizeKg) updateItem(idx, 'masterBagSizeKg', '20');
                             else if (!requiresMasterBag(v)) updateItem(idx, 'masterBagSizeKg', '');
                           }
                         }}
-                        className="form-input"
-                      >
-                        <option value="">Select…</option>
-                        {bagTypesList.filter(b => b.sizeKg).map(b => (
-                          <option key={b.id || b.name} value={b.name}>{b.name}</option>
-                        ))}
-                      </select>
+                      />
                     </div>
                     <div className="md:col-span-2">
                       <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Bag Size (KG)</label>
@@ -885,6 +919,60 @@ export default function CreateExportOrder() {
                 <textarea value={form.qualityDescription} onChange={e => set('qualityDescription', e.target.value)} className="form-input resize-none" rows={2} placeholder="e.g. Pakistani Basmati White Rice - 2% Broken - Double polished & color sorted..." />
               </div>
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* ═══ Section: Printed Bags (optional procurement) ═══ */}
+      <div className="bg-white rounded-xl border border-violet-200 p-6">
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-sm font-semibold text-violet-700 uppercase tracking-wider flex items-center gap-2"><ShoppingBag className="w-4 h-4" /> Printed Bags <span className="normal-case text-gray-400 font-normal">(optional)</span></h2>
+          <button type="button" onClick={addPrintedBag} className="btn btn-sm btn-secondary"><Plus className="w-3.5 h-3.5" /> Add</button>
+        </div>
+        <p className="text-xs text-gray-500 mb-4">If you need to order printed / branded bags from a vendor for this order, arrange them here. Each becomes a payable to the vendor; you can also add or receive these later on the order's Printed Bags tab.</p>
+        {printedBags.length === 0 ? (
+          <p className="text-sm text-gray-400">No printed-bag orders. Click “Add” if you need printed bags for this shipment.</p>
+        ) : (
+          <div className="space-y-3">
+            {printedBags.map((b, idx) => {
+              const lineTotal = (parseInt(b.quantity, 10) || 0) * (parseFloat(b.unitCost) || 0);
+              return (
+                <div key={idx} className="bg-violet-50/50 rounded-lg p-4 border border-violet-100">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-semibold text-gray-500">Printed bags {idx + 1}</span>
+                    <button type="button" onClick={() => removePrintedBag(idx)} className="text-red-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <BagTypePicker label="Bag Type" value={b.bagType} bagTypes={bagTypesList} addToast={addToast}
+                      onCreated={() => qc.invalidateQueries({ queryKey: ['bag-types'] })}
+                      onChange={(name, bt) => updatePrintedBag(idx, { bagType: name, bagTypeId: bt?.id || null, bagSizeKg: bt ? String(bt.sizeKg ?? bt.size_kg ?? b.bagSizeKg) : b.bagSizeKg })} />
+                    <SupplierPicker label="Bag Vendor" value={b.vendorId} suppliers={suppliersList} addToast={addToast} clearable
+                      onChange={(id) => updatePrintedBag(idx, { vendorId: id })} />
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+                    <div className="form-group">
+                      <label className="form-label text-xs">Qty (bags)</label>
+                      <input type="number" min="0" value={b.quantity} onChange={e => updatePrintedBag(idx, { quantity: e.target.value })} className="form-input text-sm py-1.5" placeholder="2000" />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label text-xs">Unit cost (Rs)</label>
+                      <input type="number" min="0" step="0.01" value={b.unitCost} onChange={e => updatePrintedBag(idx, { unitCost: e.target.value })} className="form-input text-sm py-1.5" placeholder="60" />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label text-xs">Printing</label>
+                      <select value={b.printing} onChange={e => updatePrintedBag(idx, { printing: e.target.value })} className="form-input text-sm py-1.5">
+                        <option value="">Select…</option>
+                        <option>Plain</option><option>Buyer Logo</option><option>Buyer Logo + Text</option><option>Custom Design</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label text-xs">Line Total</label>
+                      <div className="form-input bg-gray-100 text-sm py-1.5 text-gray-700 font-medium">Rs {Math.round(lineTotal).toLocaleString()}</div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

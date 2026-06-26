@@ -7,6 +7,7 @@ export { default as DocumentsTab } from './DocumentsTab';
 export { default as DocumentCenter } from './DocumentCenter';
 export { default as ShipmentTab } from './ShipmentTab';
 export { default as PackingTab } from './PackingTab';
+export { default as PrintedBagsTab } from './PrintedBagsTab';
 export { default as TimelineTab } from './TimelineTab';
 export {
   AdvancePaymentModal,

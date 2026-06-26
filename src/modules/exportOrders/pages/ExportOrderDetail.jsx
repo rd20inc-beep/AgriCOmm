@@ -22,6 +22,7 @@ import {
   DocumentCenter,
   ShipmentTab,
   PackingTab,
+  PrintedBagsTab,
   TimelineTab,
   AdvancePaymentModal,
   BalancePaymentModal,
@@ -758,6 +759,7 @@ export default function ExportOrderDetail() {
           />
         )}
         {activeTab === 'packing' && <PackingTab order={order} onUpdated={invalidateOrder} />}
+        {activeTab === 'printedBags' && <PrintedBagsTab order={order} onUpdated={invalidateOrder} />}
         {activeTab === 'documents' && (
           <>
             <DocumentsTab order={order} onUpload={handleDocumentUpload} onApprove={handleDocumentApprove} onPreviewInvoice={() => setShowInvoicePreview(true)} />

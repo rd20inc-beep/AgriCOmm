@@ -401,6 +401,7 @@ const financeController = {
         mill_store:  { table: 'mill_purchases',    totalCol: 'total_amount',      refCol: 'purchase_no' },
         export_cost: { table: 'export_order_costs', totalCol: null,               refCol: null },
         expense:     { table: 'business_expenses', totalCol: 'amount_pkr',        refCol: 'expense_no' },
+        printed_bag: { table: 'printed_bag_orders', totalCol: 'total_amount',     refCol: 'pbo_no' },
       };
       const cfg = MAP[source];
       if (!cfg) return res.status(400).json({ success: false, message: `Unknown source "${source}".` });
@@ -1818,8 +1819,14 @@ financeController.payPurchase = async (req, res) => {
         const total = parseFloat(row.amount_pkr) || 0;
         const alreadyPaid = parseFloat(row.paid_amount) || 0;
         outstanding = Math.max(0, total - alreadyPaid);
+      } else if (source === 'printed_bag') {
+        row = await trx('printed_bag_orders').where({ id }).first();
+        if (!row) throw new Error('Printed bag order not found.');
+        const total = parseFloat(row.total_amount) || 0;
+        const alreadyPaid = parseFloat(row.paid_amount) || 0;
+        outstanding = Math.max(0, total - alreadyPaid);
       } else {
-        throw new Error(`Unknown source "${source}". Use lot | mill_store | export_cost | expense.`);
+        throw new Error(`Unknown source "${source}". Use lot | mill_store | export_cost | expense | printed_bag.`);
       }
 
       // Default to settling the whole outstanding amount when the caller
@@ -1837,6 +1844,7 @@ financeController.payPurchase = async (req, res) => {
         source === 'lot'         ? 'inventory_lots' :
         source === 'mill_store'  ? 'mill_purchases' :
         source === 'export_cost' ? 'export_order_costs' :
+        source === 'printed_bag' ? 'printed_bag_orders' :
                                    'business_expenses';
 
       // A post-dated cheque records but does NOT settle the purchase (source row,
@@ -1893,6 +1901,8 @@ financeController.payPurchase = async (req, res) => {
           payment_method: payment_method || null,
           payment_reference: payment_reference || null,
         });
+      } else if (source === 'printed_bag') {
+        await trx('printed_bag_orders').where({ id }).update(commonUpdate);
       }
 
       // Mirror payment state to the linked payables row so /finance/money-out
@@ -1963,14 +1973,15 @@ financeController.payPurchase = async (req, res) => {
       // succeeded and we don't want to roll it back over a bookkeeping
       // miss.
       try {
-        const refLabel = row.lot_no || row.purchase_no || row.expense_no
+        const refLabel = row.lot_no || row.purchase_no || row.expense_no || row.pbo_no
           || (source === 'export_cost' ? `EXP-COST #${id}` : `#${id}`);
         const refType =
           source === 'lot'         ? 'Purchase Lot'
           : source === 'mill_store' ? 'Mill Purchase'
           : source === 'export_cost'? 'Export Order Cost'
+          : source === 'printed_bag'? 'Printed Bags'
           :                           'Business Expense';
-        const entity = source === 'export_cost' ? 'export' : 'mill';
+        const entity = (source === 'export_cost' || source === 'printed_bag') ? 'export' : 'mill';
 
         // Debit side: clear the same payable that was credited at expense /
         // purchase recording. The `expense_recorded` posting rule credits

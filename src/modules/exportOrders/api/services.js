@@ -14,3 +14,13 @@ export const exportOrdersApi = {
   approveDocument: (id, data) => api.post(`/api/export-orders/${id}/documents/approve`, data),
   allocateStock: (id, data) => api.post(`/api/export-orders/${id}/allocate-stock`, data),
 };
+
+// Printed-bag procurement for an export order (mounted at /api/printed-bag-orders).
+export const printedBagsApi = {
+  list: (orderId) => api.get('/api/printed-bag-orders', { orderId }),
+  create: (data) => api.post('/api/printed-bag-orders', data),
+  update: (id, data) => api.put(`/api/printed-bag-orders/${id}`, data),
+  receive: (id, data) => api.post(`/api/printed-bag-orders/${id}/receive`, data || {}),
+  remove: (id) => api.delete(`/api/printed-bag-orders/${id}`),
+  pay: (data) => api.post('/api/finance/purchases/pay', data),
+};
