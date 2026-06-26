@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Factory, Plus, Pencil, Trash2 } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
 import { useMills, useCreateMill, useUpdateMill, useDeleteMill } from '../../../../api/queries';
-import Modal from '../../../../components/Modal';
+import Modal from '../../components/AdminDrawer';
 
 const EMPTY = { name: '', location: '', capacityMtPerDay: '', status: 'Active', contactPerson: '', phone: '', notes: '' };
 

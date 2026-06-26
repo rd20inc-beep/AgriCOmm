@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ShoppingBag, Plus, Pencil, Trash2 } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
 import { useCreateBagType, useUpdateBagType, useDeleteBagType } from '../../../../api/queries';
-import Modal from '../../../../components/Modal';
+import Modal from '../../components/AdminDrawer';
 
 const EMPTY = { name: '', category: 'empty', sizeKg: '25', material: '', description: '', reorderLevel: '100' };
 

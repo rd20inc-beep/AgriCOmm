@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
 import api from '../../../../api/client';
+import SlideDrawer from '../../../../components/SlideDrawer';
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -889,26 +890,34 @@ export default function WhatsAppTemplatesTab() {
         )}
       </div>
 
-      {/* Section C: Template Editor Modal */}
-      {editorOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto">
-          {/* Backdrop */}
-          <div className="fixed inset-0 bg-black/50" onClick={() => setEditorOpen(false)} />
-
-          {/* Modal */}
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-5xl my-4 overflow-hidden">
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200" style={{ backgroundColor: '#f0faf4' }}>
-              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                <MessageSquare className="w-5 h-5" style={{ color: '#25D366' }} />
-                {editingTemplate ? 'Edit Template' : 'New WhatsApp Template'}
-              </h3>
-              <button onClick={() => setEditorOpen(false)} className="text-gray-400 hover:text-gray-600">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-6 space-y-6 max-h-[calc(100vh-12rem)] overflow-y-auto">
+      {/* Section C: Template Editor (right drawer) */}
+      <SlideDrawer
+        open={editorOpen}
+        onClose={() => setEditorOpen(false)}
+        title={editingTemplate ? 'Edit Template' : 'New WhatsApp Template'}
+        icon={MessageSquare}
+        size="4xl"
+        footer={(
+          <div className="flex items-center justify-end gap-3">
+            <button
+              onClick={() => setEditorOpen(false)}
+              className="px-4 py-2.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSaveTemplate}
+              disabled={saving}
+              className="inline-flex items-center gap-2 text-white px-6 py-2.5 rounded-lg hover:opacity-90 transition-colors font-medium text-sm disabled:opacity-50"
+              style={{ backgroundColor: '#25D366' }}
+            >
+              {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+              {editingTemplate ? 'Update Template' : 'Create Template'}
+            </button>
+          </div>
+        )}
+      >
+            <div className="space-y-6">
               {/* Top form fields */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -1060,28 +1069,7 @@ export default function WhatsAppTemplatesTab() {
                 </div>
               </div>
             </div>
-
-            {/* Footer */}
-            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50">
-              <button
-                onClick={() => setEditorOpen(false)}
-                className="px-4 py-2.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSaveTemplate}
-                disabled={saving}
-                className="inline-flex items-center gap-2 text-white px-6 py-2.5 rounded-lg hover:opacity-90 transition-colors font-medium text-sm disabled:opacity-50"
-                style={{ backgroundColor: '#25D366' }}
-              >
-                {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                {editingTemplate ? 'Update Template' : 'Create Template'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      </SlideDrawer>
     </div>
   );
 }

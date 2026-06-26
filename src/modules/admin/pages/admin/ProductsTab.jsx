@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Package, Plus, Pencil, Trash2 } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
 import { useCreateProduct, useUpdateProduct, useDeleteProduct } from '../../../../api/queries';
-import Modal from '../../../../components/Modal';
+import Modal from '../../components/AdminDrawer';
 
 // Note: broken % is a per-order quality target (export_order_items.
 // broken_pct_target), not a product-level attribute, so it isn't on

@@ -6,7 +6,7 @@ import {
   useUpdateBankAccount,
   useDeleteBankAccount,
 } from '../../../../api/queries';
-import Modal from '../../../../components/Modal';
+import Modal from '../../components/AdminDrawer';
 
 // Form state uses camelCase for ergonomics, but the bank_accounts table
 // columns are: name, type, account_number, bank_name, branch, currency,

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Warehouse, Plus, Pencil, Trash2 } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
 import { useCreateWarehouse, useUpdateWarehouse, useDeleteWarehouse } from '../../../../api/queries';
-import Modal from '../../../../components/Modal';
+import Modal from '../../components/AdminDrawer';
 
 const EMPTY = { name: '', entity: 'mill', type: 'raw' };
 

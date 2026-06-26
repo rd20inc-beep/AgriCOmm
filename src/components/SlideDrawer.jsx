@@ -16,7 +16,7 @@ export default function SlideDrawer({ open, onClose, title, subtitle, icon: Icon
 
   if (!open) return null;
 
-  const widthClass = size === 'lg' ? 'max-w-lg' : size === 'xl' ? 'max-w-xl' : 'max-w-md';
+  const widthClass = { sm: 'max-w-sm', md: 'max-w-md', lg: 'max-w-lg', xl: 'max-w-xl', '2xl': 'max-w-2xl', '3xl': 'max-w-3xl', '4xl': 'max-w-4xl' }[size] || 'max-w-md';
 
   return (
     <div

@@ -4,7 +4,7 @@ import PartyLink from '../../../../shared/components/PartyLink';
 import { Users, Plus, Globe, Mail, Phone, Pencil, Trash2, Star, BookOpen } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
 import { useCreateCustomer, useUpdateCustomer, useDeleteCustomer } from '../../../../api/queries';
-import Modal from '../../../../components/Modal';
+import Modal from '../../components/AdminDrawer';
 
 const EMPTY = { name: '', country: '', contact_person: '', email: '', phone: '' };
 

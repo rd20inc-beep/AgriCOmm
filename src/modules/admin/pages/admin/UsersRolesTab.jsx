@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { UsersRound, Plus, Shield, XCircle, CheckCircle } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
 import { useUsers, useCreateUser, useDeactivateUser, useActivateUser } from '../../../../api/queries';
-import Modal from '../../../../components/Modal';
+import Modal from '../../components/AdminDrawer';
 
 const ROLES = [
   { id: 1, name: 'Super Admin', color: 'bg-purple-100 text-purple-700' },

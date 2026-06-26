@@ -4,7 +4,7 @@ import PartyLink from '../../../../shared/components/PartyLink';
 import { Truck, Plus, MapPin, Pencil, Trash2, Star, BookOpen } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
 import { useCreateSupplier, useUpdateSupplier, useDeleteSupplier } from '../../../../api/queries';
-import Modal from '../../../../components/Modal';
+import Modal from '../../components/AdminDrawer';
 
 // Note: the suppliers table column is `address` (matching customers).
 // We label it "Location" in the UI for our trade convention but post

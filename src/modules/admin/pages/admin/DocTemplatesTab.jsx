@@ -7,7 +7,7 @@ import {
   useUpdateDocumentTemplate,
   useDeleteDocumentTemplate,
 } from '../../../../api/queries';
-import Modal from '../../../../components/Modal';
+import Modal from '../../components/AdminDrawer';
 
 const EMPTY = {
   name: '',
