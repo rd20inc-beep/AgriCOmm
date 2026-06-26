@@ -1550,6 +1550,27 @@ const exportOrderController = {
           .where({ order_id: order.id, type: 'Advance' })
           .first();
 
+        // Guard against a double receipt: the advance may already have been
+        // settled through the Money-In "Record Payment" drawer, which updates the
+        // RECEIVABLE but NOT order.advance_received — so the order-level check
+        // above can be blind to it (this is exactly how EX-001 got two PAY rows
+        // on 2026-06-26). Re-check the actual advance receivable.
+        if (advReceivable) {
+          const recvOutstanding = Math.max(0, settledAmount(
+            parseFloat(advReceivable.expected_amount || 0) - parseFloat(advReceivable.received_amount || 0),
+          ));
+          if (recvOutstanding <= MONEY_EPSILON) {
+            const err = new Error('This advance has already been received (the receivable is settled). It may have been recorded via Money-In → Record Payment.');
+            err.statusCode = 400;
+            throw err;
+          }
+          if (confirmedAmount - recvOutstanding > MONEY_EPSILON) {
+            const err = new Error(`Advance confirmation exceeds the receivable's outstanding amount of ${recvOutstanding.toFixed(2)}.`);
+            err.statusCode = 400;
+            throw err;
+          }
+        }
+
         const advPayNo = await generatePaymentNo(trx, 'PAY');
         await trx('payments').insert({
           payment_no: advPayNo,

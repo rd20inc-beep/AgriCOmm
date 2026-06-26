@@ -998,6 +998,27 @@ const financeController = {
       const isPostDated = payment_method === 'cheque' && due_date && new Date(due_date) > _today;
 
       const result = await db.transaction(async (trx) => {
+        // Guard: don't let a receipt over-apply or double-settle a receivable.
+        // Mirror of confirmAdvance's receivable check — together they stop an
+        // advance (or any receivable) being received twice across the two screens
+        // (this is how EX-001 got two receipts on 2026-06-26). Skipped for
+        // post-dated cheques only insofar as they still can't target a settled
+        // receivable — the check below applies to both.
+        if (type === 'receipt' && linked_receivable_id) {
+          const rec = await trx('receivables').where({ id: linked_receivable_id }).first();
+          if (rec) {
+            const outstanding = Math.max(0, (parseFloat(rec.expected_amount) || 0) - (parseFloat(rec.received_amount) || 0));
+            if (outstanding <= 0.01) {
+              const e = new Error('This receivable is already fully settled — no payment is due.');
+              e.statusCode = 400; throw e;
+            }
+            if (parseFloat(amount) - outstanding > 0.01) {
+              const e = new Error(`Amount exceeds the outstanding balance of ${outstanding.toFixed(2)}.`);
+              e.statusCode = 400; throw e;
+            }
+          }
+        }
+
         const paymentNo = await generatePaymentNo(trx);
 
         // Resolve fx_rate + base_amount_pkr at write time so the
@@ -1238,7 +1259,8 @@ const financeController = {
       });
     } catch (err) {
       console.error('Record payment error:', err);
-      return res.status(500).json({ success: false, message: 'Internal server error.' });
+      const code = err.statusCode || 500;
+      return res.status(code).json({ success: false, message: code === 500 ? 'Internal server error.' : err.message });
     }
   },
 
