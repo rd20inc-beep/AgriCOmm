@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import PartyLink from '../../../shared/components/PartyLink';
+import { chatApi } from '../../chat/api';
 import {
   Ship, Factory, DollarSign, AlertTriangle, Clock,
   CheckCircle2, ArrowRight, TrendingUp, CreditCard,
@@ -16,6 +18,7 @@ import { millingApi } from '../../../modules/milling/api/services';
 
 import YieldDistributionChart from './dashboard/YieldDistributionChart';
 import RecentActivity from './dashboard/RecentActivity';
+import PendingApprovalsCard from '../components/PendingApprovalsCard';
 
 // ─── Formatting ────────────────────────────────────────────────────────
 const fmt = (v) => '$' + (Number(v) || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
@@ -40,6 +43,15 @@ export default function Dashboard() {
   // Pending master-data quick-add approvals (Admin → Approvals). Hook must run
   // before the early return below to keep hook order stable.
   const { data: pendingMasterApprovals = 0 } = useMasterDataApprovalsCount();
+  // Chat approvals feed (fund transfers, export confirmations, stock adjustments,
+  // …) — shared cache with ChatWidget; folded into the action count so the
+  // header / "all caught up" state agrees with the PendingApprovalsCard below.
+  const { data: chatApprovalsData } = useQuery({
+    queryKey: ['chat-approvals'],
+    queryFn: async () => { const r = await chatApi.approvals(); return r?.data || r || {}; },
+    refetchInterval: 15000,
+  });
+  const dashApprovals = (chatApprovalsData?.items || []).filter(a => !['batch', 'masterdata'].includes(a.kind)).length;
 
   if (dataLoading && (exportOrders || []).length === 0) {
     return <DashboardSkeleton />;
@@ -56,7 +68,7 @@ export default function Dashboard() {
   const awaitingBalance = safeOrders.filter(o => o.status === 'Awaiting Balance').length;
   const varianceAlerts = safeBatches.filter(b => b.variancePct != null && Math.abs(Number(b.variancePct)) > 1).length;
   const masterApprovals = isOwnerOrAdmin ? pendingMasterApprovals : 0;
-  const totalActions = pendingApprovalBatches.length + awaitingAdvance + docsInPrep + readyToShip + varianceAlerts + masterApprovals;
+  const totalActions = pendingApprovalBatches.length + awaitingAdvance + docsInPrep + readyToShip + varianceAlerts + masterApprovals + dashApprovals;
 
   // ─── KPIs ───
   const activeOrders = safeOrders.filter(o => !['Draft', 'Closed', 'Cancelled'].includes(o.status)).length;
@@ -204,6 +216,11 @@ export default function Dashboard() {
             <span className="text-xs px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full font-semibold">{totalActions} open</span>
           )}
         </div>
+
+        {/* Pending approvals — same feed as the chat widget (fund transfers,
+            export confirmations, stock adjustments, …). Batches + master-data are
+            excluded here because they already have their own widgets below. */}
+        <PendingApprovalsCard excludeKinds={['batch', 'masterdata']} />
 
         {/* Pending Batch Approvals — Owner/Admin only */}
         {isOwnerOrAdmin && pendingApprovalBatches.length > 0 && (
