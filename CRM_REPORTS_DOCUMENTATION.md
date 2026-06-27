@@ -67,7 +67,7 @@ RBAC is `authorize(module, action)` middleware (`backend/src/middleware/rbac.js`
 | Print | via Print Reports button | ✅ native `window.print()` (A4 CSS) | ✅ native print |
 | Download PDF | ✅ from the slide-over document (opens print window) | ➖ (print-to-PDF) | ➖ (print-to-PDF) |
 | Export CSV/JSON | ➖ (only via `POST /api/reporting/export`, not surfaced in most UI) | ➖ | ➖ |
-| Save / schedule / email / share | ❌ (saved-report endpoints exist server-side but no UI; no scheduling/email) | ❌ | ❌ |
+| Save view / schedule / email / share | ⚠ Save view ✅ (Saved Views menu); schedule/email ❌ | ❌ | ❌ |
 | Date range filter | ✅ presets | ✅ Daily/Weekly/Monthly/Custom | ❌ |
 | AI summary | ❌ | ✅ on P&L (cash/accrual) + Cashflow | ❌ |
 
@@ -444,7 +444,8 @@ All `authorize('reports','view')` unless noted. (Snake_case DB → camelCase JSO
 **Traceability (inventory module, `inventory.view`):** `/lots/:id/ancestry`, `/lots/:id/descendants`, `/batch-trace/:batchId`, `/order-trace/:orderId`, `/sale-trace/:saleId`, `/lots-report`, `/reports/stock`.
 
 > **Now surfaced** (latent endpoints wired into the dashboard): `financial/cash-forecast` (Cash Forecast tab + line chart), `production/mill-efficiency` + `quality/recovery-leaderboard` (Production tab), `kpi/benchmarks` (KPIs tab), `inventory/stock-valuation` + `inventory/stock-turnover` (Inventory tab sections).
-> **Still latent** (built, not yet in UI): `executive/pipeline`, `executive/advance-funnel`, `profitability/monthly-trend` (empty until multi-month history; export-based), `profitability/products`, `financial/fx-exposure` (export), `financial/receivable-recovery`, `financial/payable-analysis` (overlap AR/AP-aging print), `production/operator-productivity`, `production/utility-consumption`, `quality/recovery-by-variety`, `saved` reports (server-only).
+> **Also surfaced (batch 2):** `production/operator-productivity` + `production/utility-consumption` (Production tab sections, empty-state until logged), `quality/recovery-by-variety` (Quality tab section), and `saved` reports — wired as **Saved Views** in the hero (Saved menu: list + load tab+range + delete; "Save current view" → POST /saved with reportType=tab, filters={range}).
+> **Still latent** (built, not yet in UI): `executive/pipeline`, `executive/advance-funnel`, `profitability/monthly-trend` (empty until multi-month history; export-based), `profitability/products`, `financial/fx-exposure` (export), `financial/receivable-recovery`, `financial/payable-analysis` (overlap AR/AP-aging print).
 
 ---
 
@@ -501,7 +502,7 @@ PNG captures are saved under `docs/reports-screenshots/` (live production, admin
 | Capability | AgriCOmm | Salesforce | HubSpot | Zoho CRM | Dynamics | Monday | Pipedrive |
 |---|---|---|---|---|---|---|---|
 | Custom report builder (drag/drop fields) | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Saved reports + folders | ⚠ (API only) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Saved reports + folders | ⚠ Saved Views (load tab+range; no folders) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Scheduled / emailed reports | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Export CSV/Excel | ⚠ (API only) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Configurable dashboards / widgets | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
