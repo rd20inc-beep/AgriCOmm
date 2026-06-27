@@ -1,5 +1,5 @@
 import { useMemo, useState, Fragment } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext';
 import { useApp } from '../../../context/AppContext';
 import {
@@ -115,8 +115,15 @@ export default function Reports() {
   const [doc, setDoc] = useState(null); // { kind, title, subtitle, data }
   const openDoc = (d) => setDoc(d);
 
-  const [range, setRange] = useState('');
-  const [tab, setTab] = useState('moneyIn');
+  // Tab + date range live in the URL (?tab=&range=) so views are deep-linkable,
+  // bookmarkable and shareable, and the browser back button moves between tabs.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rawTab = searchParams.get('tab');
+  const tab = visibleTabs.some(t => t.key === rawTab) ? rawTab : (visibleTabs[0]?.key || 'moneyIn');
+  const rawRange = searchParams.get('range') || '';
+  const range = RANGES.some(r => r.value === rawRange) ? rawRange : '';
+  const setTab = (key) => { const p = new URLSearchParams(searchParams); p.set('tab', key); setSearchParams(p); };
+  const setRange = (val) => { const p = new URLSearchParams(searchParams); if (val) p.set('range', val); else p.delete('range'); setSearchParams(p); };
   const params = useMemo(
     () => ({ ...rangeToParams(range), ...(millScoped ? { entity: 'mill' } : {}) }),
     [range, millScoped],
