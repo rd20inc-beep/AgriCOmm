@@ -5,7 +5,7 @@ import PendingApprovalsCard from '../../dashboard/components/PendingApprovalsCar
 import {
   Factory, Wheat, FlaskConical, Gauge, Clock, AlertTriangle,
   Plus, ArrowRight, CheckCircle2, TrendingUp, Truck, Activity,
-  Package, Boxes, PackageX, ClipboardCheck,
+  Package, Boxes, PackageX, ClipboardCheck, ShoppingCart,
 } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -271,12 +271,20 @@ export default function MillHomeDashboard() {
           <h1 className="text-2xl font-bold text-gray-900">Mill Operations</h1>
           <p className="text-sm text-gray-500 mt-0.5">Today's priorities and live batch status</p>
         </div>
-        <button
-          onClick={() => navigate('/milling?new=1')}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          <Plus size={16} /> New Batch
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowNewPurchase(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            <ShoppingCart size={16} /> Add Purchase
+          </button>
+          <button
+            onClick={() => navigate('/milling?new=1')}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <Plus size={16} /> New Batch
+          </button>
+        </div>
       </div>
 
       {/* Pending approvals — fund transfers, stock adjustments (same feed as chat) */}
