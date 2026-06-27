@@ -533,7 +533,7 @@ function SaleTrackerPanel({ sale, statementHref, companyProfile }) {
             )) : <p className="text-xs text-gray-400">Raw source not recorded.</p>}
           </div>
         ) : prov.kind === 'raw' ? (
-          <p className="text-sm">Sold as raw rice — purchased lot {(prov.rawLots || [])[0]?.lotId ? <Link to={`/lot-inventory/${prov.rawLots[0].lotId}`} className="text-blue-600 hover:underline font-mono text-xs">{prov.rawLots[0].lotNo}</Link> : (prov.rawLots?.[0]?.lotNo || sale.lotNo || '—')}
+          <p className="text-sm">Sold as unprocessed rice — purchased lot {(prov.rawLots || [])[0]?.lotId ? <Link to={`/lot-inventory/${prov.rawLots[0].lotId}`} className="text-blue-600 hover:underline font-mono text-xs">{prov.rawLots[0].lotNo}</Link> : (prov.rawLots?.[0]?.lotNo || sale.lotNo || '—')}
             {prov.rawLots?.[0]?.supplier ? <> from {prov.rawLots[0].supplierId ? <Link to={statementHref?.('supplier', prov.rawLots[0].supplierId)} className="text-blue-600 hover:underline">{prov.rawLots[0].supplier}</Link> : prov.rawLots[0].supplier}</> : null}.</p>
         ) : (
           <p className="text-xs text-gray-400">Source lot not linked to this sale.</p>
@@ -833,7 +833,7 @@ function MarginBreakdown({ e, companyProfile }) {
 // Readable label for a by-product grade code.
 const GRADE_LABELS = {
   b1: 'Broken B1', b2: 'Broken B2', b3: 'Broken B3', csr: 'CSR', short_grain: 'Short Grain',
-  broken: 'Broken', bran: 'Bran', husk: 'Husk', sortex: 'Sortex', powder: 'Powder', sweeping: 'Sweeping',
+  broken: 'Broken', sortex: 'Sortex', powder: 'Powder', sweeping: 'Sweeping',
 };
 function gradeLabel(g) {
   if (!g) return 'By-product';
@@ -867,7 +867,7 @@ function MarginByBatch({ params, openDoc }) {
         <SummaryCell label="On-hand (at cost)" value={fmtPKR(totOnHand)} />
       </div>
       <Table
-        head={['Batch', 'Supplier', 'Raw', 'Finished', 'Input cost', 'Output sold', 'Cost of sold', 'Margin', '%']}
+        head={['Batch', 'Supplier', 'Input', 'Finished', 'Input cost', 'Output sold', 'Cost of sold', 'Margin', '%']}
         align={['left', 'left', 'right', 'right', 'right', 'right', 'right', 'right', 'right']}
         rowClick={rows.map(b => () => openDoc?.({ kind: 'batchMargin', title: 'Batch Margin', subtitle: b.batchNo, data: b }))}
         rows={rows.map(b => {
@@ -886,7 +886,7 @@ function MarginByBatch({ params, openDoc }) {
           ];
         })}
       />
-      <p className="text-[11px] text-gray-400">Input cost = the batch's full cost basis (raw rice + milling fee + other expenses + packing) — the same basis the residual cost engine uses, so it reconciles with the output lots' landed value. Output sold = realised local sales of the batch's finished + by-product lots, priced at each lot's residual landed cost. Unsold output is valued at cost under "On-hand".</p>
+      <p className="text-[11px] text-gray-400">Input cost = the batch's full cost basis (input rice + milling fee + other expenses + packing) — the same basis the residual cost engine uses, so it reconciles with the output lots' landed value. Output sold = realised local sales of the batch's finished + by-product lots, priced at each lot's residual landed cost. Unsold output is valued at cost under "On-hand".</p>
     </div>
   );
 }
@@ -905,7 +905,7 @@ function BatchMarginBreakdown({ b }) {
       <div className="grid grid-cols-2 gap-3 text-sm">
         <div><p className="text-xs text-gray-500">Batch</p><p className="font-medium">{b.batchNo}</p></div>
         <div><p className="text-xs text-gray-500">Supplier</p><p>{b.supplierName || '—'}</p></div>
-        <div><p className="text-xs text-gray-500">Raw input</p><p>{(parseFloat(b.rawQtyMT) || 0).toFixed(2)} MT</p></div>
+        <div><p className="text-xs text-gray-500">Input</p><p>{(parseFloat(b.rawQtyMT) || 0).toFixed(2)} MT</p></div>
         <div><p className="text-xs text-gray-500">Finished</p><p>{(parseFloat(b.finishedMT) || 0).toFixed(2)} MT · yield {(parseFloat(b.yieldPct) || 0).toFixed(1)}%</p></div>
       </div>
 
@@ -923,7 +923,7 @@ function BatchMarginBreakdown({ b }) {
           </tbody>
         </table>
       </div>
-      <p className="text-[11px] text-gray-400">Realised margin counts only output already sold. Unsold finished/by-product stock is held at cost until sold. Input cost = raw rice + milling fee + other expenses + packing (the residual cost basis); it reconciles with cost-of-sold + on-hand.</p>
+      <p className="text-[11px] text-gray-400">Realised margin counts only output already sold. Unsold finished/by-product stock is held at cost until sold. Input cost = input rice + milling fee + other expenses + packing (the residual cost basis); it reconciles with cost-of-sold + on-hand.</p>
 
       {/* Per-grade by-product breakdown */}
       {Array.isArray(b.byproducts) && b.byproducts.length > 0 && (
@@ -1210,7 +1210,7 @@ function ProductionTab({ params }) {
     <div className="space-y-6">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <SummaryCell label="Mills" value={String(millRows.length)} />
-        <SummaryCell label="Raw input" value={`${totIn.toLocaleString(undefined, { maximumFractionDigits: 1 })} MT`} />
+        <SummaryCell label="Input" value={`${totIn.toLocaleString(undefined, { maximumFractionDigits: 1 })} MT`} />
         <SummaryCell label="Finished output" value={`${totOut.toLocaleString(undefined, { maximumFractionDigits: 1 })} MT`} />
         <SummaryCell label="Avg yield" value={fmtPct(avgYield)} />
       </div>
@@ -1236,7 +1236,7 @@ function ProductionTab({ params }) {
       <div className="space-y-2">
         <SectionHeader title="Yield leaderboard (by batch)" subtitle="Best recovery first" />
         <Table
-          head={['Batch', 'Supplier', 'Product', 'Raw MT', 'Finished MT', 'Yield %', 'Broken %']}
+          head={['Batch', 'Supplier', 'Product', 'Input MT', 'Finished MT', 'Yield %', 'Broken %']}
           align={['left', 'left', 'left', 'right', 'right', 'right', 'right']}
           rowClick={lbRows.map(b => b.id ? () => navigate(`/milling/${b.id}`) : null)}
           rows={[...lbRows].sort((a, b) => (parseFloat(b.yieldPct) || 0) - (parseFloat(a.yieldPct) || 0)).map(b => [
@@ -1574,8 +1574,8 @@ function InventoryTab() {
         />
       </div>
 
-      <StockBreakdown title="By Type" subtitle="Raw / finished / byproduct" query={byType} groupHead="Type" />
-      <StockBreakdown title="By Category" subtitle="Finished, broken grades, sortex, bran, husk, blends" query={bySubtype} groupHead="Category" />
+      <StockBreakdown title="By Type" subtitle="Unprocessed / finished / byproduct" query={byType} groupHead="Type" />
+      <StockBreakdown title="By Category" subtitle="Finished, broken grades, CSR, short grain, powder, sweepings, blends" query={bySubtype} groupHead="Category" />
       <StockBreakdown title="By Warehouse" subtitle="Where the stock is held" query={byWarehouse} groupHead="Warehouse" />
 
       {/* Valuation (by type & warehouse) + turnover — surfaced from the
@@ -1692,7 +1692,7 @@ function QualityTab({ params }) {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <SummaryCell label="Suppliers" value={String(rows.length)} />
         <SummaryCell label="Milled batches" value={String(totalBatches)} />
-        <SummaryCell label="Raw input" value={`${totalQty.toLocaleString(undefined, { maximumFractionDigits: 1 })} MT`} />
+        <SummaryCell label="Input" value={`${totalQty.toLocaleString(undefined, { maximumFractionDigits: 1 })} MT`} />
         <SummaryCell label="Avg yield" value={fmtPct(avgYieldAll)} />
       </div>
 
@@ -1705,7 +1705,7 @@ function QualityTab({ params }) {
       <div className="space-y-2">
         <SectionHeader title="Supplier Quality Ranking" subtitle="Best quality score first — yield, arrival moisture/broken & rejection by supplier" />
         <Table
-          head={['#', 'Supplier', 'Batches', 'Raw MT', 'Avg Yield', 'Moisture', 'Broken', 'Rejection', 'Score']}
+          head={['#', 'Supplier', 'Batches', 'Input MT', 'Avg Yield', 'Moisture', 'Broken', 'Rejection', 'Score']}
           align={['left', 'left', 'right', 'right', 'right', 'right', 'right', 'right', 'right']}
           rows={sorted.map((r, i) => [
             i + 1,
@@ -1730,11 +1730,11 @@ function QualityTab({ params }) {
         <div className="space-y-2">
           <SectionHeader title="Recovery by variety" subtitle="Avg yield & broken % per rice variety, vs benchmark" />
           <Table
-            head={['Variety', 'Batches', 'Avg Yield', 'Broken %', 'Bran %', 'Benchmark', 'Variance']}
-            align={['left', 'right', 'right', 'right', 'right', 'right', 'right']}
+            head={['Variety', 'Batches', 'Avg Yield', 'Broken %', 'Benchmark', 'Variance']}
+            align={['left', 'right', 'right', 'right', 'right', 'right']}
             rows={varietyRows.map(v => [
               v.variety || '—', v.batchCount || 0,
-              fmtPct(v.avgYield), fmtPct(v.avgBrokenPct), fmtPct(v.avgBranPct),
+              fmtPct(v.avgYield), fmtPct(v.avgBrokenPct),
               v.benchmarkYield != null ? fmtPct(v.benchmarkYield) : '—',
               v.varianceFromBenchmark != null
                 ? <span className={(parseFloat(v.varianceFromBenchmark) || 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'}>{fmtPct(v.varianceFromBenchmark)}</span>

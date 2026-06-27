@@ -919,7 +919,6 @@ const reportingService = {
     return batches.map((b) => {
       const rawQty = parseFloat(b.raw_qty_mt) || 0;
       const brokenPct = rawQty > 0 ? parseFloat((((parseFloat(b.broken_mt) || 0) / rawQty) * 100).toFixed(1)) : 0;
-      const branPct = rawQty > 0 ? parseFloat((((parseFloat(b.bran_mt) || 0) / rawQty) * 100).toFixed(1)) : 0;
 
       return {
         id: b.id,
@@ -930,7 +929,6 @@ const reportingService = {
         finishedQtyMT: parseFloat(b.actual_finished_mt) || 0,
         yieldPct: parseFloat(b.yield_pct) || 0,
         brokenPct,
-        branPct,
       };
     });
   },
@@ -945,8 +943,7 @@ const reportingService = {
         'eo.product_name as variety',
         db.raw('COUNT(mb.id) as batch_count'),
         db.raw('COALESCE(AVG(mb.yield_pct), 0) as avg_yield'),
-        db.raw('COALESCE(AVG(mb.broken_mt / NULLIF(mb.raw_qty_mt, 0) * 100), 0) as avg_broken_pct'),
-        db.raw('COALESCE(AVG(mb.bran_mt / NULLIF(mb.raw_qty_mt, 0) * 100), 0) as avg_bran_pct')
+        db.raw('COALESCE(AVG(mb.broken_mt / NULLIF(mb.raw_qty_mt, 0) * 100), 0) as avg_broken_pct')
       )
       .where('mb.status', 'Completed')
       .whereNotNull('eo.product_name')
@@ -975,7 +972,6 @@ const reportingService = {
         batchCount: parseInt(r.batch_count, 10),
         avgYield,
         avgBrokenPct: parseFloat(parseFloat(r.avg_broken_pct).toFixed(1)),
-        avgBranPct: parseFloat(parseFloat(r.avg_bran_pct).toFixed(1)),
         benchmarkYield: benchmark ? parseFloat(benchmark.expected_yield_pct) : null,
         varianceFromBenchmark: benchmark ? parseFloat((avgYield - parseFloat(benchmark.expected_yield_pct)).toFixed(1)) : null,
       };

@@ -6,12 +6,12 @@ import { LotReportView } from './LotReportViews';
 
 const TYPE_OPTIONS = [
   { k: '', l: 'All types' },
-  { k: 'raw', l: 'Raw Rice' },
+  { k: 'raw', l: 'Unprocessed Rice' },
   { k: 'finished', l: 'Finished Rice' },
   { k: 'byproduct', l: 'Byproduct' },
 ];
 
-const typeLabel = (t) => (t === 'raw' ? 'Raw Rice' : t === 'finished' ? 'Finished Rice' : t === 'byproduct' ? 'Byproduct' : t || '—');
+const typeLabel = (t) => (t === 'raw' ? 'Unprocessed Rice' : t === 'finished' ? 'Finished Rice' : t === 'byproduct' ? 'Byproduct' : t || '—');
 const fmtMt = (v) => (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function LotReport() {

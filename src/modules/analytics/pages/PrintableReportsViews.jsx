@@ -51,13 +51,13 @@ export function ProductionReportView({ data, companyName, range, preset }) {
       <SummaryRow items={[
         { label: 'Batches', value: summary.batchCount },
         { label: 'Completed', value: summary.completed },
-        { label: 'Raw Input', value: `${fmtMt(summary.rawMt)} MT` },
+        { label: 'Input', value: `${fmtMt(summary.rawMt)} MT` },
         { label: 'Finished', value: `${fmtMt(summary.finishedMt)} MT` },
         { label: 'Avg Yield', value: fmtPct(summary.avgYieldPct) },
       ]} />
 
       {/* Blends re-mill already-finished owned rice, so their tonnage is kept
-          OUT of Raw Input / Finished above to avoid double-counting the
+          OUT of Input / Finished above to avoid double-counting the
           original purchase. Surface it here so the number is transparent. */}
       {(summary.blendedCount > 0 || summary.pendingCount > 0) && (
         <div className="text-xs text-gray-600 border border-gray-200 rounded p-2 bg-gray-50 space-y-1">
@@ -83,7 +83,7 @@ export function ProductionReportView({ data, companyName, range, preset }) {
 
       <Section title="By Product">
         <ExpandableGroupTable
-          head={['Product / Batch', 'Supplier', 'Status', 'Raw MT', 'Finished MT', 'kg', 'Per kg', 'Katta', 'Yield %', 'Created']}
+          head={['Product / Batch', 'Supplier', 'Status', 'Input MT', 'Finished MT', 'kg', 'Per kg', 'Katta', 'Yield %', 'Created']}
           align={['left', 'left', 'left', 'right', 'right', 'right', 'right', 'right', 'right', 'left']}
           groups={byProduct.map(r => {
             const mine = (batches || []).filter(b => (b.productName || '—') === r.name);
@@ -107,7 +107,7 @@ export function ProductionReportView({ data, companyName, range, preset }) {
 
       <Section title="Batch Detail">
         <Table
-          head={['Batch No', 'Supplier', 'Product', 'Status', 'Raw MT', 'Finished MT', 'Yield %', 'Created']}
+          head={['Batch No', 'Supplier', 'Product', 'Status', 'Input MT', 'Finished MT', 'Yield %', 'Created']}
           align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'left']}
           rows={batches.map(b => [
             <RefLink to={`/milling/${b.id}`}>{b.isBlend ? `${b.batchNo} (blend)` : b.batchNo}</RefLink>,
@@ -206,7 +206,7 @@ export function PnlReportView({ data, companyName, range, preset }) {
           head={['Category', 'Count', 'Amount (PKR)']}
           align={['left', 'right', 'right']}
           rows={[
-            ['Raw rice purchases (landed)', costs.rawRiceCount,           fmtPkr(costs.rawRicePkr)],
+            ['Rice purchases (landed)', costs.rawRiceCount,           fmtPkr(costs.rawRicePkr)],
             ['Mill store consumables',      costs.millStoreCount,          fmtPkr(costs.millStorePkr)],
             ['Export operational costs',    costs.exportOpCostsCount,      fmtPkr(costs.exportOpCostsPkr)],
             ['Business expenses',           costs.businessExpensesCount,   fmtPkr(costs.businessExpensesPkr)],
@@ -243,7 +243,7 @@ export function PnlReportView({ data, companyName, range, preset }) {
         </Section>
       )}
       {detail && (detail.purchases?.length > 0) && (
-        <Section title="Raw Rice Purchases — detail">
+        <Section title="Rice Purchases — detail">
           <Table head={['Lot', 'Supplier', 'Item', 'Landed Cost (PKR)']} align={['left', 'left', 'left', 'right']}
             rows={detail.purchases.map(r => [<RefLink to={`/lot-inventory/${r.lotId}`}>{r.ref}</RefLink>, r.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.party}</RefLink> : (r.party || '—'), r.item || '—', fmtPkr(r.amountPkr)])} empty="" />
         </Section>
@@ -669,7 +669,7 @@ export function StockDetailView({ data, companyName }) {
   const [tag, setTag] = useState('all');
 
   // Build the tag chips from the lots' subtypes, ordered by a sensible priority.
-  const ORDER = ['Finished Rice', 'Raw Rice', 'B1', 'B2', 'B3', 'CSR', 'Short Grain', 'Broken', 'Powder', 'Sweeping', 'Sortex', 'Rice Bran', 'Rice Husk', 'Other'];
+  const ORDER = ['Finished Rice', 'Unprocessed Rice', 'B1', 'B2', 'B3', 'CSR', 'Short Grain', 'Broken', 'Powder', 'Sweeping', 'Sortex', 'Other'];
   const byTag = {};
   for (const r of rows) {
     const t = r.subtype || 'Other';
@@ -748,9 +748,9 @@ export function SweepingReportView({ data, companyName }) {
         { label: 'Total Sweeping', value: `${fmtMt(totals.sweepingMt)} MT` },
         { label: 'Total Value', value: fmtPkr(totals.valuePkr) },
       ]} />
-      <Section title="Sweeping by lot — milled from which batch & raw supplier">
+      <Section title="Sweeping by lot — milled from which batch & source supplier">
         <Table
-          head={['Lot', 'From Batch', 'Raw Supplier', 'Rice Milled', 'Raw In (MT)', 'Sweeping (MT)', 'Available', 'Rate/kg', 'Value (PKR)', 'Status']}
+          head={['Lot', 'From Batch', 'Source Supplier', 'Rice Milled', 'Input (MT)', 'Sweeping (MT)', 'Available', 'Rate/kg', 'Value (PKR)', 'Status']}
           align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'right', 'right', 'left']}
           rows={rows.map(r => [
             <RefLink to={`/lot-inventory/${r.lotId}`}>{r.lotNo}</RefLink>,
@@ -911,7 +911,7 @@ export function PnlCompareView({ data, companyName, range, preset }) {
           rows={[
             ['Revenue (recognized sales)', fmtPkr(cash.revenue.totalPkr), fmtPkr(accrual.revenue.totalPkr)],
             ['Cost of goods sold (sold stock)', '—', fmtPkr(accrual.cogs.totalPkr)],
-            ['Raw rice purchased (this period)', fmtPkr(cash.costs.rawRicePkr), 'deferred to inventory'],
+            ['Rice purchased (this period)', fmtPkr(cash.costs.rawRicePkr), 'deferred to inventory'],
             ['= Gross Profit', '—', `${fmtPkr(accrual.grossProfitPkr)} · ${pct(accrual.grossMarginPct)}`],
             ['Operating / other costs', fmtPkr(cashOtherCosts), fmtPkr(accrual.opex.totalPkr)],
             ['= NET PROFIT', fmtPkr(cash.netProfitPkr), fmtPkr(accrual.netProfitPkr)],

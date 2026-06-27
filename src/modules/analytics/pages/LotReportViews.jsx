@@ -20,7 +20,7 @@ const show = (v, suffix = '') => (v == null || v === '' ? '—' : `${v}${suffix}
 const pct = (v) => (num(v) == null ? '—' : `${num(v)}%`);
 
 function typeLabel(t) {
-  if (t === 'raw') return 'Raw Rice';
+  if (t === 'raw') return 'Unprocessed Rice';
   if (t === 'finished') return 'Finished Rice';
   if (t === 'byproduct') return 'Byproduct';
   return t || '—';
@@ -146,7 +146,7 @@ function LotCard({ bundle }) {
               ['Finished', fmtMt(batchYield.actual_finished_mt)], ['B1', fmtMt(batchYield.b1_mt)],
               ['B2', fmtMt(batchYield.b2_mt)], ['B3', fmtMt(batchYield.b3_mt)], ['CSR', fmtMt(batchYield.csr_mt)],
               ['Short grain', fmtMt(batchYield.short_grain_mt)], ['Broken (total)', fmtMt(batchYield.broken_mt)],
-              ['Bran', fmtMt(batchYield.bran_mt)], ['Husk', fmtMt(batchYield.husk_mt)], ['Sortex rejects', fmtMt(batchYield.sortex_rejects_mt)],
+              ['Powder', fmtMt(batchYield.powder_mt)], ['Sweepings', fmtMt(batchYield.sweeping_mt)], ['Sortex rejects', fmtMt(batchYield.sortex_rejects_mt)],
             ].filter((r) => parseFloat(String(r[1]).replace(/,/g, '')) > 0)}
             empty="No yield recorded."
           />

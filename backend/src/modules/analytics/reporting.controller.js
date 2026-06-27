@@ -967,8 +967,8 @@ const reportingController = {
 
       let groupCol, nameCol;
       // "Subtype" mirrors the UI's lotSubtype() classification — splits
-      // broken lots by grade and surfaces Sortex Rejects / Rice Bran /
-      // Husk as their own categories, so a single Stock report can
+      // broken lots by grade and surfaces Sortex Rejects / Powder /
+      // Sweeping as their own categories, so a single Stock report can
       // answer "how much B1 do I have, how much B2, how much sortex".
       // Blended-milling output is kept separate from pure stock and from other
       // blends: blended broken carries a batch-scoped grade ('M-033-B1'), so it
@@ -983,16 +983,12 @@ const reportingController = {
             THEN 'Blended ' || COALESCE(l.grade, 'Broken') || ' — ' || COALESCE(l.blend_batch_no, 'n/a')
           WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%powder%'  THEN 'Blended Powder — '  || COALESCE(l.blend_batch_no, 'n/a')
           WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%sweeping%' THEN 'Blended Sweeping — ' || COALESCE(l.blend_batch_no, 'n/a')
-          WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%bran%'   THEN 'Blended Bran — '   || COALESCE(l.blend_batch_no, 'n/a')
-          WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%husk%'   THEN 'Blended Husk — '   || COALESCE(l.blend_batch_no, 'n/a')
           WHEN l.processing_type = 'blended' AND l.item_name ILIKE '%sortex%' THEN 'Blended Sortex — ' || COALESCE(l.blend_batch_no, 'n/a')
           WHEN l.type = 'finished' THEN 'Finished Rice'
           WHEN l.type = 'raw'      THEN 'Incoming Rice'
           WHEN l.item_name ILIKE '%sortex%' THEN 'Sortex Rejects'
           WHEN l.item_name ILIKE '%powder%' THEN 'Powder'
           WHEN l.item_name ILIKE '%sweeping%' THEN 'Sweeping'
-          WHEN l.item_name ILIKE '%bran%'   THEN 'Rice Bran'
-          WHEN l.item_name ILIKE '%husk%'   THEN 'Rice Husk'
           WHEN l.grade IN ('B1','B2','B3','CSR','Short Grain') THEN l.grade
           WHEN l.item_name ILIKE 'broken%'  THEN 'Broken (ungraded)'
           ELSE COALESCE(p.name, l.item_name, '—')
@@ -1491,20 +1487,18 @@ const reportingController = {
         for (const b of bs) batchSrc[`batch-${b.id}`] = { batchNo: b.batch_no, supplier: b.supplier };
       }
       // Subtype tag — the inventory "tag" each lot is filed under (Sweeping, B1,
-      // B2, B3, CSR, Powder, Sortex, Rice Bran/Husk, Broken, Finished/Raw Rice).
+      // B2, B3, CSR, Powder, Sortex, Broken, Finished/Unprocessed Rice).
       const tagOf = (l) => {
         const name = (l.item_name || '').toLowerCase();
         const grade = (l.grade || '').toUpperCase();
         if (name.includes('sweeping') || (l.grade || '').toLowerCase().includes('sweeping')) return 'Sweeping';
         if (name.includes('powder')) return 'Powder';
         if (name.includes('sortex')) return 'Sortex';
-        if (name.includes('bran')) return 'Rice Bran';
-        if (name.includes('husk')) return 'Rice Husk';
         if (grade === 'SHORT GRAIN') return 'Short Grain';
         if (['B1', 'B2', 'B3', 'CSR'].includes(grade)) return grade;
         if (name.startsWith('broken')) return 'Broken';
         if (l.type === 'finished') return 'Finished Rice';
-        if (l.type === 'raw') return 'Raw Rice';
+        if (l.type === 'raw') return 'Unprocessed Rice';
         return 'Other';
       };
       const rows = lots.map((l) => {
