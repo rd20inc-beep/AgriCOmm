@@ -664,9 +664,9 @@ export default function MillFinanceDashboard() {
 
       {/* ─── FUNDS FROM HEAD OFFICE ────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 no-print">
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-4 py-3 flex items-center justify-between">
-          <span className="text-xs font-medium text-emerald-800 inline-flex items-center gap-1.5"><Wallet size={14} /> Mill Cash available</span>
-          <span className="text-lg font-bold text-emerald-900 tabular-nums">{PKR(millCashBalance)}</span>
+        <div className={`rounded-xl border px-4 py-3 flex items-center justify-between ${millCashBalance < 0 ? 'border-red-200 bg-red-50/60' : 'border-emerald-200 bg-emerald-50/60'}`}>
+          <span className={`text-xs font-medium inline-flex items-center gap-1.5 ${millCashBalance < 0 ? 'text-red-700' : 'text-emerald-800'}`}><Wallet size={14} /> Mill Cash {millCashBalance < 0 ? 'overdrawn' : 'available'}</span>
+          <span className={`text-lg font-bold tabular-nums ${millCashBalance < 0 ? 'text-red-700' : 'text-emerald-900'}`}>{PKR(millCashBalance)}</span>
         </div>
         <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 flex items-center justify-between">
           <span className="text-xs font-medium text-gray-600 inline-flex items-center gap-1.5"><Inbox size={14} className="text-amber-500" /> Awaiting acceptance</span>
