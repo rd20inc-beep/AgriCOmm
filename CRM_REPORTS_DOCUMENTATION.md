@@ -103,7 +103,7 @@ RBAC is `authorize(module, action)` middleware (`backend/src/middleware/rbac.js`
 - **Refresh** button (force refetch), **Lot Reports** link, **Print Reports** link.
 - **KPI strip (5 tiles):** Total Money In (`receipts.totalPkr`), Total Money Out (`payments.totalPkr`), Net Cashflow (in − out), **Outstanding A/R** (`exec.totalOutstandingPkr`, *hidden for Mill*), **Booked Profit** (`exec.bookedProfitPkr` + avg margin, *hidden for Mill*).
 
-**Tabs:** Money In, Money Out, Sales, Purchases, Lots, Margin, Orders\*, Customers\*, Countries\*, Inventory, Quality.
+**Tabs:** Money In, Money Out, Sales, Purchases, Lots, Margin, **Production**, Orders\*, Customers\*, Countries\*, **Cash Forecast\***, Inventory, **KPIs**, Quality. *(Production/Cash-Forecast/KPIs added when the latent endpoints were surfaced; Inventory also gained Valuation + Turnover sections.)*
 (\* = export-only; hidden for Mill Manager. Mill sees 8 tabs.)
 
 Each tab below follows the requested 14-point structure (condensed where a point is shared/global).
@@ -443,7 +443,8 @@ All `authorize('reports','view')` unless noted. (Snake_case DB → camelCase JSO
 **KPI/saved/export:** `/kpi/benchmarks`; `GET/POST /saved`, `POST /saved/:id/run`, `DELETE /saved/:id` *(saved reports — server only, no UI)*; `POST /export` *(CSV/JSON, `reports.export`)*.
 **Traceability (inventory module, `inventory.view`):** `/lots/:id/ancestry`, `/lots/:id/descendants`, `/batch-trace/:batchId`, `/order-trace/:orderId`, `/sale-trace/:saleId`, `/lots-report`, `/reports/stock`.
 
-> Several backend endpoints (`executive/*`, `financial/*`, `production/*`, `kpi/benchmarks`, `recovery-*`, `stock-turnover`, `stock-valuation`, `monthly-trend`, `saved`) **exist but are not surfaced** in the current UI — latent capability worth exposing.
+> **Now surfaced** (latent endpoints wired into the dashboard): `financial/cash-forecast` (Cash Forecast tab + line chart), `production/mill-efficiency` + `quality/recovery-leaderboard` (Production tab), `kpi/benchmarks` (KPIs tab), `inventory/stock-valuation` + `inventory/stock-turnover` (Inventory tab sections).
+> **Still latent** (built, not yet in UI): `executive/pipeline`, `executive/advance-funnel`, `profitability/monthly-trend` (empty until multi-month history; export-based), `profitability/products`, `financial/fx-exposure` (export), `financial/receivable-recovery`, `financial/payable-analysis` (overlap AR/AP-aging print), `production/operator-productivity`, `production/utility-consumption`, `quality/recovery-by-variety`, `saved` reports (server-only).
 
 ---
 
@@ -526,7 +527,7 @@ Each: **Problem · Solution · Business value · User impact · Complexity · Pr
 
 1. **Exact-number toggle / tooltips.** *Problem:* abbreviated `Rs 5.34L` hides precision. *Solution:* hover tooltip with full number + a "₹ exact / compact" toggle. *Value:* trust, fewer errors. *Impact:* high, low friction. *Complexity:* Low. *Priority:* **P1**.
 2. **CSV export button per tab/print report.** *Problem:* `POST /api/reporting/export` exists but isn't wired to UI. *Solution:* "Export CSV" on each table using the existing endpoint (+ client-side fallback). *Value:* unblocks Excel users/accountants. *Impact:* very high. *Complexity:* Low. *Priority:* **P0**.
-3. **Surface hidden endpoints.** *Problem:* cash-forecast, FX exposure, mill-efficiency, monthly-trend, AR/AP recovery, stock-turnover/valuation are built but invisible. *Solution:* add tabs/cards. *Value:* big capability uplift for near-zero backend work. *Impact:* high. *Complexity:* Low–Med. *Priority:* **P1**.
+3. **Surface hidden endpoints.** ✅ **DONE (initial batch).** Cash Forecast, Production (mill-efficiency + recovery leaderboard), KPIs, and Inventory valuation/turnover are now live tabs/sections. *Remaining:* FX exposure, monthly-trend, AR/AP recovery, operator productivity, utility consumption, recovery-by-variety — same near-zero-backend pattern. *Priority:* **P2** (for the remainder).
 4. **Entity-scope the Inventory tab.** *Problem:* `stock-aging` ignores `entity` → Mill users can see export lots. *Solution:* pass/honor `entity`. *Value:* correctness + data-visibility compliance. *Impact:* med. *Complexity:* Low. *Priority:* **P1**.
 5. **Surface row caps / pagination notice.** *Problem:* silent truncation at 200/500. *Solution:* show "showing first N — refine the range" + add `count`. *Value:* prevents wrong conclusions. *Impact:* med. *Complexity:* Low. *Priority:* **P2**.
 6. **Aging & margin micro-charts.** *Problem:* aging/margin are tables only. *Solution:* small bar/sparkline using existing Recharts. *Value:* faster reads. *Impact:* med. *Complexity:* Low. *Priority:* **P2**.
