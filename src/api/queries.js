@@ -648,6 +648,9 @@ export function usePayPurchase() {
       qc.invalidateQueries({ queryKey: queryKeys.bankAccounts.all });
       qc.invalidateQueries({ queryKey: queryKeys.financeOverview });
       qc.invalidateQueries({ queryKey: ['finance-bank-transactions'] });
+      qc.invalidateQueries({ queryKey: ['mill-expenses'] });
+      qc.invalidateQueries({ queryKey: ['mill-cash-flow'] });
+      qc.invalidateQueries({ queryKey: queryKeys.payables.all });
     },
   });
 }

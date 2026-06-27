@@ -16,7 +16,7 @@ import {
   usePayrollSummary, useRecordAttendance, useAttendance, useBulkAttendance, useAttendanceHolidays, useInventory, useExpenseVendors,
   usePayrollRuns, usePostPayrollRun, useDeletePayrollRun, usePayrollRun, usePayrollReport, useBankAccounts,
   usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow, useAcceptFundTransfer,
-  useMillLotCosts, useLocalSales,
+  useMillLotCosts, useLocalSales, usePayPurchase,
 } from '../../../api/queries';
 import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import SlideDrawer from '../../../components/SlideDrawer';
@@ -111,7 +111,7 @@ function Stat({ label, value, sub, tone = 'slate', icon: Icon }) {
 }
 
 export default function MillFinanceDashboard() {
-  const { millingBatches, addToast, companyProfileData } = useApp();
+  const { millingBatches, addToast, companyProfileData, bankAccountsList } = useApp();
   const cp = useCommodityPrices();
   const DEFAULT_PRICES = { finished: cp.finished, broken: cp.broken, bran: cp.bran, husk: cp.husk };
   const batchPrice = (b, product) => b[`${product}PricePerMT`] || DEFAULT_PRICES[product];
@@ -220,6 +220,7 @@ export default function MillFinanceDashboard() {
   const canPay = hasPermission('finance', 'confirm_payment');
   const [payParty, setPayParty] = useState(null);
   const [paySupplier, setPaySupplier] = useState(null);
+  const [payExpense, setPayExpense] = useState(null); // pay a specific mill expense
 
   // ── Cash account: actual money in/out ledger with a period filter ──
   const [cashRange, setCashRange] = useState('all'); // all | month | quarter | ytd
@@ -1186,6 +1187,7 @@ export default function MillFinanceDashboard() {
                   <th className="text-left px-4 py-3 font-medium">Reference</th>
                   <th className="text-left px-4 py-3 font-medium">Status</th>
                   <th className="text-right px-4 py-3 font-medium">Amount</th>
+                  {canPay && <th className="text-right px-4 py-3 font-medium no-print">Action</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -1207,10 +1209,22 @@ export default function MillFinanceDashboard() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right font-medium tabular-nums">{PKR(parseFloat(e.amount))}</td>
+                    {canPay && (
+                      <td className="px-4 py-3 text-right no-print">
+                        {(e.paymentStatus !== 'Paid') ? (
+                          <button
+                            onClick={() => setPayExpense(e)}
+                            className="inline-flex items-center gap-1 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1 text-[11px] font-medium"
+                          >
+                            <Banknote size={12} /> Pay
+                          </button>
+                        ) : <span className="text-[11px] text-gray-400">Paid</span>}
+                      </td>
+                    )}
                   </tr>
                 ))}
                 {expenses.length === 0 && (
-                  <tr><td colSpan={6} className="px-4 py-10 text-center text-gray-400">No expenses recorded yet</td></tr>
+                  <tr><td colSpan={canPay ? 7 : 6} className="px-4 py-10 text-center text-gray-400">No expenses recorded yet</td></tr>
                 )}
               </tbody>
             </table>
@@ -2119,7 +2133,88 @@ export default function MillFinanceDashboard() {
           onClose={() => setPaySupplier(null)}
         />
       )}
+
+      {/* Pay a specific mill expense (electricity, fuel, salaries, …). */}
+      <ExpensePayDrawer expense={payExpense} bankAccounts={bankAccountsList} addToast={addToast} onClose={() => setPayExpense(null)} />
     </div>
+  );
+}
+
+// Pay a single mill expense via the unified pay-purchase flow (source='expense').
+// Marks the business_expense paid, settles its payable, moves the bank account.
+function ExpensePayDrawer({ expense, bankAccounts = [], addToast, onClose }) {
+  const payMut = usePayPurchase();
+  const total = expense ? (parseFloat(expense.amountPkr) || parseFloat(expense.amount) || 0) : 0;
+  const paid = expense ? (parseFloat(expense.paidAmount) || 0) : 0;
+  const outstanding = Math.max(0, total - paid);
+  const [amount, setAmount] = useState('');
+  const [method, setMethod] = useState('cash');
+  const [bankId, setBankId] = useState('');
+  const [ref, setRef] = useState('');
+  useEffect(() => {
+    if (expense) { setAmount(String(Math.round(outstanding))); setMethod('cash'); setBankId(''); setRef(''); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expense]);
+  if (!expense) return null;
+  const PKR = (n) => `Rs ${Math.round(parseFloat(n) || 0).toLocaleString()}`;
+
+  async function pay() {
+    const amt = parseFloat(amount);
+    if (!(amt > 0)) { addToast?.('Enter an amount', 'error'); return; }
+    try {
+      await payMut.mutateAsync({
+        source: 'expense', source_id: expense.id, amount: amt,
+        bank_account_id: bankId || null, payment_method: method, payment_reference: ref || null,
+      });
+      addToast?.(`Paid ${PKR(amt)} — ${expense.description || expense.category}`, 'success');
+      onClose();
+    } catch (err) { addToast?.(err?.data?.message || err.message || 'Payment failed', 'error'); }
+  }
+
+  const footer = (
+    <div className="flex justify-end gap-2">
+      <button onClick={onClose} className="px-3 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+      <button onClick={pay} disabled={payMut.isPending} className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">
+        <Banknote className="w-4 h-4" /> {payMut.isPending ? 'Paying…' : 'Record Payment'}
+      </button>
+    </div>
+  );
+
+  return (
+    <SlideDrawer open={!!expense} onClose={onClose} title="Pay Expense" subtitle={expense.description || expense.category} icon={Banknote} size="md" footer={footer}>
+      <div className="space-y-4">
+        <div className="bg-gray-50 rounded-lg p-3 text-sm space-y-1">
+          <div className="flex justify-between"><span className="text-gray-500">Category</span><span className="font-medium capitalize">{expense.category}</span></div>
+          <div className="flex justify-between"><span className="text-gray-500">Total</span><span className="font-medium">{PKR(total)}</span></div>
+          <div className="flex justify-between"><span className="text-gray-500">Outstanding</span><span className="font-semibold text-amber-700">{PKR(outstanding)}</span></div>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Amount (Rs)</label>
+          <input type="number" value={amount} onChange={e => setAmount(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Method</label>
+          <select value={method} onChange={e => setMethod(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500">
+            <option value="cash">Cash</option>
+            <option value="bank_transfer">Bank Transfer</option>
+            <option value="cheque">Cheque</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Pay from account</label>
+          <select value={bankId} onChange={e => setBankId(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500">
+            <option value="">— none —</option>
+            {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}{a.bankName ? ` (${a.bankName})` : ''}</option>)}
+          </select>
+        </div>
+        {method === 'cheque' && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Cheque #</label>
+            <input value={ref} onChange={e => setRef(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500" />
+          </div>
+        )}
+      </div>
+    </SlideDrawer>
   );
 }
 
