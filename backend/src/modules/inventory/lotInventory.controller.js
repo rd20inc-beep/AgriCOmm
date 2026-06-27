@@ -2479,6 +2479,14 @@ module.exports = {
           .returning('id');
         const inheritedVehicles = Array.isArray(inheritedRows) ? inheritedRows.length : 0;
 
+        // If any carried-over truck has a per-truck price (quality_json.price_per_mt
+        // captured at intake), drive the batch raw_rice cost from the trucks
+        // (Σ weight × price). No-op when no truck is priced — the raw cost then
+        // falls back to the lot's landed cost via ensureRawCostFromSourceLots.
+        if (inheritedVehicles > 0) {
+          await inventoryService.recomputeRawRiceCostFromVehicles(trx, batch.id, req.user?.id);
+        }
+
         // Roll the lot's total received weight up to the batch — same
         // truth-from-the-scale rule we use in receiveRice. Skip if the
         // operator already supplied an override.

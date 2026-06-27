@@ -2310,6 +2310,48 @@ const inventoryService = {
     return rawTotal;
   },
 
+  // Recompute a batch's raw_rice milling_cost from its vehicle arrivals:
+  // Σ(weight_mt × the per-truck price in quality_json.price_per_mt). Trucks
+  // without a price use the weighted-average price of the priced trucks. No-op
+  // when NO truck carries a price (so it never zeroes a cost set another way,
+  // e.g. a blend costed from source lots, or a lot costed from its landed rate).
+  // Cascades into already-yielded output lots so their costing stays correct.
+  // Shared by the batch add/remove-vehicle handlers and start-milling so an
+  // intake-captured per-truck price flows into the batch raw cost on milling.
+  async recomputeRawRiceCostFromVehicles(trx, batchId, userId) {
+    const vrows = await trx('milling_vehicle_arrivals').where({ batch_id: batchId });
+    if (!vrows.length) return;
+    let pricedW = 0, pricedCost = 0, totalW = 0;
+    for (const v of vrows) {
+      const w = parseFloat(v.weight_mt) || 0;
+      totalW += w;
+      const qj = v.quality_json || {};
+      const p = qj.price_per_mt != null ? parseFloat(qj.price_per_mt) : null;
+      if (p != null && !Number.isNaN(p) && p > 0) { pricedW += w; pricedCost += w * p; }
+    }
+    if (totalW > 0) {
+      const b = await trx('milling_batches').where({ id: batchId }).first('actual_finished_mt');
+      const fin = parseFloat(b?.actual_finished_mt) || 0;
+      if (fin > 0) {
+        await trx('milling_batches').where({ id: batchId })
+          .update({ yield_pct: Math.round((fin / totalW) * 1000) / 10, updated_at: trx.fn.now() });
+      }
+    }
+    if (pricedW <= 0) return; // no per-truck price anywhere — leave any existing cost alone
+    const avg = pricedCost / pricedW;
+    const rawRiceCost = Math.round((pricedCost + Math.max(0, totalW - pricedW) * avg) * 100) / 100;
+    const notes = `Auto from ${vrows.length} vehicle(s): ${Math.round(totalW * 100) / 100} MT @ ~Rs ${Math.round(avg).toLocaleString()}/MT`;
+    const existing = await trx('milling_costs').where({ batch_id: batchId, category: 'raw_rice' }).first();
+    if (existing) {
+      await trx('milling_costs').where({ id: existing.id }).update({ amount: rawRiceCost, notes, updated_at: trx.fn.now() });
+    } else {
+      await trx('milling_costs').insert({ batch_id: batchId, category: 'raw_rice', amount: rawRiceCost, notes, created_by: userId || null });
+    }
+    const yielded = await trx('inventory_lots')
+      .where({ batch_ref: `batch-${batchId}` }).whereIn('type', ['finished', 'byproduct']).first('id');
+    if (yielded) await inventoryService.recomputeBatchOutputsAfterPriceChange(trx, batchId, { userId });
+  },
+
   async reallocateBatchCosts(trx, batchId) {
     const batch = await trx('milling_batches').where({ id: batchId }).first();
     if (!batch) return null;
