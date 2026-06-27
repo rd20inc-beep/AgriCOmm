@@ -4,7 +4,7 @@ import {
   DollarSign, Users, Zap, Shield, TrendingUp, TrendingDown, AlertTriangle,
   Plus, UserPlus, Package, Factory, Wallet, ArrowUpRight, ArrowDownRight, Printer,
   Building2, Banknote, Receipt, Layers, Truck, ExternalLink,
-  Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X, FileText, RefreshCw, Sparkles, ArrowLeftRight, Inbox, Check,
+  Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X, FileText, RefreshCw, Sparkles, ArrowLeftRight, Inbox, Check, ShoppingCart,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
@@ -19,6 +19,7 @@ import {
   useMillLotCosts, useLocalSales, useRecordPayment, usePayablePayments,
 } from '../../../api/queries';
 import TransactionDocument from '../../../components/TransactionDocument';
+import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
 import StatusBadge from '../../../components/StatusBadge';
 import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import SlideDrawer from '../../../components/SlideDrawer';
@@ -224,6 +225,7 @@ export default function MillFinanceDashboard() {
   const [paySupplier, setPaySupplier] = useState(null);
   const [payExpense, setPayExpense] = useState(null); // pay a specific mill expense
   const [cashEntry, setCashEntry] = useState(null); // view a cash-ledger entry's voucher/receipt
+  const [showNewPurchase, setShowNewPurchase] = useState(false); // mill-store purchase drawer
 
   // ── Cash account: actual money in/out ledger with a period filter ──
   const [cashRange, setCashRange] = useState('all'); // all | month | quarter | ytd
@@ -639,6 +641,13 @@ export default function MillFinanceDashboard() {
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-white/15 hover:bg-white/25 ring-1 ring-white/30 transition-colors"
             >
               <Plus size={13} /> Add Expense
+            </button>
+            <button
+              onClick={() => setShowNewPurchase(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-white/15 hover:bg-white/25 ring-1 ring-white/30 transition-colors"
+              title="Record a mill-store / consumables purchase (bags, fuel, etc.)"
+            >
+              <ShoppingCart size={13} /> Add Purchase
             </button>
             <button
               onClick={() => setShowWorkerDrawer(true)}
@@ -2142,6 +2151,9 @@ export default function MillFinanceDashboard() {
 
       {/* View a cash-ledger entry's voucher (out) or receipt (in), downloadable. */}
       <CashEntryDrawer entry={cashEntry} companyProfile={companyProfileData} onClose={() => setCashEntry(null)} />
+
+      {/* Record a mill-store / consumables purchase (bags, fuel, …). */}
+      <NewPurchaseDrawer open={showNewPurchase} onClose={() => setShowNewPurchase(false)} />
     </div>
   );
 }

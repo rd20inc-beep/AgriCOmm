@@ -188,11 +188,12 @@ const millStoreRepo = {
     await trx('mill_purchases').where('id', purchase.id).update({ total_amount: totalRounded });
     purchase.total_amount = totalRounded;
 
-    // Create the corresponding payable so the mill-store purchase
-    // shows up on the Money Out tab and contributes to AP totals.
-    // Without this, stock cost is recognised but the supplier debt
-    // is invisible to finance — they'd have to record it twice.
-    if (purchase.supplier_id && totalRounded > 0) {
+    // Create the corresponding payable so the mill-store purchase shows up on
+    // Money Out + the mill cash ledger (when paid) and contributes to AP totals.
+    // Created for EVERY purchase with a value — even cash/no-supplier ones —
+    // otherwise the purchase is invisible to finance. (Previously gated on
+    // supplier_id, so supplier-less purchases never appeared anywhere.)
+    if (totalRounded > 0) {
       const last = await trx('payables')
         .where('pay_no', 'like', 'PAY-MS%')
         .orderBy('id', 'desc')
@@ -234,8 +235,8 @@ const millStoreRepo = {
             ? `Mill store purchase ${purchase.purchase_no} (Invoice ${header.invoice_number})`
             : `Mill store purchase ${purchase.purchase_no}`,
           userId: header.created_by,
-          partyType: 'supplier',
-          partyId: purchase.supplier_id,
+          partyType: purchase.supplier_id ? 'supplier' : null,
+          partyId: purchase.supplier_id || null,
         });
       } catch (e) {
         console.warn('Mill purchase journal post failed:', e.message);
