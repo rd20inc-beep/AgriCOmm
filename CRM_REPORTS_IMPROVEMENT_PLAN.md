@@ -292,9 +292,10 @@ Stock Value     = on-hand qty × cost/kg   (NOT frozen landed_cost_total)
 - ✅ **Sale 360** improved (`GET /reporting/sale-detail/:id`) — line items (sale_group_no), payment trail (payments.local_sale_id), dispatch; lazy section in the Sale 360 drawer.
 - ✅ **Customer/Supplier Ledger** — already satisfied by existing `PartyLedger` (/finance/statements): print-isolated, party-picker, linked from report party links + global search. No duplicate built (anti-over-engineering).
 
-### Phase 3 — Print & Export
-- Standardized print template (logo · filters-applied · generated-by/on · signatures) for all ledgers.
-- Excel + CSV export buttons (wire existing export endpoint; add XLSX for ledgers).
+### Phase 3 — Print & Export — ✅ DONE (shipped #73, prod-verified)
+- ✅ Standardized print template (`src/modules/analytics/utils/ledgerExport.js` → `printLedger`): company header · title/subtitle · filters-applied + generated-by + generated-on meta · table · footer note · Prepared/Checked/Approved signature line. Opens a self-contained print window (no app-print-mask conflicts).
+- ✅ CSV export (`exportLedgerCSV`, reuses app-wide downloadCSV) + Print via a shared `LedgerExportBar` wired into all 5 ledgers: Lot Activity, Batch Processing, Inventory Movement (respects type filter), Finished Goods, Sale 360 items.
+- Excel: CSV is natively Excel-compatible — no XLSX dependency added (anti-over-engineering). Customer/Supplier ledger already prints via PartyLedger. Logo: company name in header (image logo deferred to avoid cross-window load issues).
 
 ### Phase 4 — Role-based dashboards
 - Owner/Admin full · Finance financial · Mill Manager production+inventory+lot/batch · **Mill Operator production-only** (needs the one additive role/permission — see §12).
