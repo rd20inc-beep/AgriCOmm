@@ -121,6 +121,45 @@ function authorizeRole(...roles) {
   };
 }
 
+/**
+ * Deny specific roles outright (a small blocklist on top of permission checks).
+ * Use when a role legitimately holds a broad permission (e.g. reports.view) but
+ * must be kept out of a finance-flavoured subset of those routes. Additive: it
+ * only blocks the named roles and changes nothing for any other role.
+ *
+ * Usage: denyRoles('Mill Operator')
+ */
+function denyRoles(...roles) {
+  return async (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: 'Access denied. Not authenticated.' });
+    }
+    try {
+      if (!req.user._roleName) {
+        const roleId = req.user.role_id;
+        let roleName;
+        if (roleId) {
+          const r = await db('roles').where('id', roleId).select('name').first();
+          roleName = r && r.name;
+        } else {
+          const dbUser = await db('users as u').join('roles as r', 'u.role_id', 'r.id')
+            .where('u.id', req.user.id).select('r.name as role_name').first();
+          roleName = dbUser && dbUser.role_name;
+        }
+        req.user._roleName = roleName;
+      }
+      if (roles.includes(req.user._roleName)) {
+        return res.status(403).json({ success: false, message: 'Forbidden. This report is not available for your role.' });
+      }
+      next();
+    } catch (err) {
+      console.error('denyRoles error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error during authorization.' });
+    }
+  };
+}
+
 module.exports = authorize;
 module.exports.authorize = authorize;
 module.exports.authorizeRole = authorizeRole;
+module.exports.denyRoles = denyRoles;

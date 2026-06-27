@@ -2,6 +2,11 @@ const express = require('express');
 const router = express.Router();
 const controller = require('../../controllers/reportingController');
 const authorize = require('../../middleware/rbac');
+const { denyRoles } = require('../../middleware/rbac');
+// The Mill Operator role holds reports.view (for production reports) but must
+// never see finance: profit, margin, receivables, payables, cashflow, FX or
+// the booked-profit executive summary. Additive blocklist on those routes only.
+const noFinanceForOperator = denyRoles('Mill Operator');
 
 // ═══════════════════════════════════════════════════════════════════
 // Executive Dashboards
@@ -9,25 +14,25 @@ const authorize = require('../../middleware/rbac');
 router.get('/search', authorize('reports', 'view'), controller.globalSearch);
 router.get('/lot-ledger/:id', authorize('reports', 'view'), controller.lotLedger);
 router.get('/batch-ledger/:id', authorize('reports', 'view'), controller.batchLedger);
-router.get('/sale-detail/:id', authorize('reports', 'view'), controller.saleDetail);
+router.get('/sale-detail/:id', authorize('reports', 'view'), noFinanceForOperator, controller.saleDetail);
 router.get('/inventory-ledger', authorize('reports', 'view'), controller.inventoryLedger);
 router.get('/finished-goods-ledger', authorize('reports', 'view'), controller.finishedGoodsLedger);
-router.get('/executive/summary', authorize('reports', 'view'), controller.executiveSummary);
-router.get('/executive/pipeline', authorize('reports', 'view'), controller.orderPipeline);
-router.get('/executive/advance-funnel', authorize('reports', 'view'), controller.advanceFunnel);
+router.get('/executive/summary', authorize('reports', 'view'), noFinanceForOperator, controller.executiveSummary);
+router.get('/executive/pipeline', authorize('reports', 'view'), noFinanceForOperator, controller.orderPipeline);
+router.get('/executive/advance-funnel', authorize('reports', 'view'), noFinanceForOperator, controller.advanceFunnel);
 
 // ═══════════════════════════════════════════════════════════════════
 // Profitability
 // ═══════════════════════════════════════════════════════════════════
-router.get('/profitability/orders', authorize('reports', 'view'), controller.orderProfitability);
-router.get('/profitability/batches', authorize('reports', 'view'), controller.batchProfitability);
-router.get('/profitability/batch-margin', authorize('reports', 'view'), controller.batchMargin);
-router.get('/lot-tracker', authorize('reports', 'view'), controller.lotTracker);
-router.get('/sales-tracker', authorize('reports', 'view'), controller.salesTracker);
-router.get('/profitability/customers', authorize('reports', 'view'), controller.customerProfitability);
-router.get('/profitability/countries', authorize('reports', 'view'), controller.countryAnalysis);
-router.get('/profitability/products', authorize('reports', 'view'), controller.productProfitability);
-router.get('/profitability/monthly-trend', authorize('reports', 'view'), controller.monthlyTrend);
+router.get('/profitability/orders', authorize('reports', 'view'), noFinanceForOperator, controller.orderProfitability);
+router.get('/profitability/batches', authorize('reports', 'view'), noFinanceForOperator, controller.batchProfitability);
+router.get('/profitability/batch-margin', authorize('reports', 'view'), noFinanceForOperator, controller.batchMargin);
+router.get('/lot-tracker', authorize('reports', 'view'), noFinanceForOperator, controller.lotTracker);
+router.get('/sales-tracker', authorize('reports', 'view'), noFinanceForOperator, controller.salesTracker);
+router.get('/profitability/customers', authorize('reports', 'view'), noFinanceForOperator, controller.customerProfitability);
+router.get('/profitability/countries', authorize('reports', 'view'), noFinanceForOperator, controller.countryAnalysis);
+router.get('/profitability/products', authorize('reports', 'view'), noFinanceForOperator, controller.productProfitability);
+router.get('/profitability/monthly-trend', authorize('reports', 'view'), noFinanceForOperator, controller.monthlyTrend);
 
 // ═══════════════════════════════════════════════════════════════════
 // Supplier & Quality
@@ -39,10 +44,10 @@ router.get('/quality/recovery-by-variety', authorize('reports', 'view'), control
 // ═══════════════════════════════════════════════════════════════════
 // Financial
 // ═══════════════════════════════════════════════════════════════════
-router.get('/financial/receivable-recovery', authorize('reports', 'view'), controller.receivableRecovery);
-router.get('/financial/payable-analysis', authorize('reports', 'view'), controller.payableAnalysis);
-router.get('/financial/cash-forecast', authorize('reports', 'view'), controller.cashForecast);
-router.get('/financial/fx-exposure', authorize('reports', 'view'), controller.fxExposure);
+router.get('/financial/receivable-recovery', authorize('reports', 'view'), noFinanceForOperator, controller.receivableRecovery);
+router.get('/financial/payable-analysis', authorize('reports', 'view'), noFinanceForOperator, controller.payableAnalysis);
+router.get('/financial/cash-forecast', authorize('reports', 'view'), noFinanceForOperator, controller.cashForecast);
+router.get('/financial/fx-exposure', authorize('reports', 'view'), noFinanceForOperator, controller.fxExposure);
 
 // ═══════════════════════════════════════════════════════════════════
 // Inventory
@@ -56,15 +61,15 @@ router.get('/inventory/stock-valuation', authorize('reports', 'view'), controlle
 // ═══════════════════════════════════════════════════════════════════
 router.get('/printable/production', authorize('reports', 'view'), controller.printableProduction);
 router.get('/printable/stock',      authorize('reports', 'view'), controller.printableStock);
-router.get('/printable/pnl',        authorize('reports', 'view'), controller.printablePnl);
-router.get('/printable/cashflow',   authorize('reports', 'view'), controller.printableCashflow);
-router.get('/printable/ar-aging',   authorize('reports', 'view'), controller.printableArAging);
-router.get('/printable/ap-aging',   authorize('reports', 'view'), controller.printableApAging);
-router.get('/printable/purchase-ledger', authorize('reports', 'view'), controller.printablePurchaseLedger);
-router.get('/printable/sales-ledger',     authorize('reports', 'view'), controller.printableSalesLedger);
+router.get('/printable/pnl',        authorize('reports', 'view'), noFinanceForOperator, controller.printablePnl);
+router.get('/printable/cashflow',   authorize('reports', 'view'), noFinanceForOperator, controller.printableCashflow);
+router.get('/printable/ar-aging',   authorize('reports', 'view'), noFinanceForOperator, controller.printableArAging);
+router.get('/printable/ap-aging',   authorize('reports', 'view'), noFinanceForOperator, controller.printableApAging);
+router.get('/printable/purchase-ledger', authorize('reports', 'view'), noFinanceForOperator, controller.printablePurchaseLedger);
+router.get('/printable/sales-ledger',     authorize('reports', 'view'), noFinanceForOperator, controller.printableSalesLedger);
 router.get('/printable/stock-detail',     authorize('reports', 'view'), controller.printableStockDetail);
 router.get('/printable/sweeping',         authorize('reports', 'view'), controller.printableSweeping);
-router.get('/printable/pnl-accrual',      authorize('reports', 'view'), controller.printablePnlAccrual);
+router.get('/printable/pnl-accrual',      authorize('reports', 'view'), noFinanceForOperator, controller.printablePnlAccrual);
 // Audit trail is sensitive — gate on admin.view (not reports.view).
 router.get('/printable/audit-trail',      authorize('admin', 'view'),   controller.printableAuditTrail);
 
