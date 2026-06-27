@@ -1101,7 +1101,7 @@ function BuyerRow({ b, statementHref, showOutput }) {
     <div className="flex items-center justify-between gap-2 border border-gray-100 rounded-lg px-3 py-1.5 mb-1 text-sm">
       <div className="min-w-0">
         <span className="font-medium">{href ? <Link to={href} className="text-blue-600 hover:underline">{b.customer}</Link> : b.customer}</span>
-        <span className="text-xs text-gray-400"> · {b.saleNo}{showOutput && b.outputItem ? ` · ${b.outputType === 'finished' ? 'Finished' : b.outputItem}` : ''}</span>
+        <span className="text-xs text-gray-400"> · {b.saleNo}{showOutput && b.outputItem ? ` · ${b.outputType === 'finished' ? 'Finished' : b.outputItem}` : ''}{b.sharePct != null && b.sharePct < 99.5 ? ` · ${Math.round(b.sharePct)}% share` : ''}</span>
       </div>
       <div className="text-right shrink-0">
         <span className="font-semibold text-gray-900">{fmtPKR(b.valuePkr)}</span>

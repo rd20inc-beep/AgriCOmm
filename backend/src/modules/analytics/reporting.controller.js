@@ -1153,6 +1153,12 @@ const reportingController = {
         // who bought them, attributed back to the raw lots that fed the batch.
         const batchIds = [...new Set(milled.map((m) => m.batch_id).filter(Boolean))];
         if (batchIds.length) {
+          // Total raw input per batch (all source lots) → split a blend's output
+          // proportionally among the raw lots that fed it.
+          const allSrc = await db('batch_source_lots').whereIn('batch_id', batchIds).select('batch_id', 'qty_mt');
+          const batchTotalQty = {};
+          for (const x of allSrc) batchTotalQty[x.batch_id] = (batchTotalQty[x.batch_id] || 0) + (parseFloat(x.qty_mt) || 0);
+
           const refs = batchIds.map((id) => `batch-${id}`);
           const outLots = await db('inventory_lots')
             .whereIn('batch_ref', refs).whereIn('type', ['finished', 'byproduct'])
@@ -1184,10 +1190,17 @@ const reportingController = {
               valuePkr: parseFloat(s.total_amount) || 0, paymentStatus: s.payment_status,
             });
           }
-          // Attribute a batch's output sales to each raw lot that fed it.
+          // Attribute a batch's output sales to each raw lot that fed it,
+          // proportional to the lot's share of the batch's raw input.
           for (const [rawLotId, batches] of Object.entries(milledByLot)) {
             const acc = [];
-            for (const m of batches) if (salesByBatch[m.batch_id]) acc.push(...salesByBatch[m.batch_id]);
+            for (const m of batches) {
+              const sales = salesByBatch[m.batch_id];
+              if (!sales) continue;
+              const tot = batchTotalQty[m.batch_id] || (parseFloat(m.qty_mt) || 0);
+              const share = tot > 0 ? (parseFloat(m.qty_mt) || 0) / tot : 1;
+              for (const sale of sales) acc.push({ ...sale, kg: sale.kg * share, valuePkr: sale.valuePkr * share, sharePct: share * 100 });
+            }
             if (acc.length) downstreamByLot[rawLotId] = acc;
           }
         }
@@ -1270,6 +1283,12 @@ const reportingController = {
         // Through-milling: who bought the batch output
         const batchIds = [...new Set(milled.map((m) => m.batch_id).filter(Boolean))];
         if (batchIds.length) {
+          // Total raw contribution per batch (ALL its source lots) so a blend's
+          // output is split proportionally among the lots that fed it.
+          const allSrc = await db('batch_source_lots').whereIn('batch_id', batchIds).select('batch_id', 'qty_mt');
+          const batchTotalQty = {};
+          for (const x of allSrc) batchTotalQty[x.batch_id] = (batchTotalQty[x.batch_id] || 0) + num(x.qty_mt);
+
           const refs = batchIds.map((id) => `batch-${id}`);
           const outLots = await db('inventory_lots').whereIn('batch_ref', refs).whereIn('type', ['finished', 'byproduct'])
             .select('id', 'batch_ref', 'type', 'item_name', 'grade', 'landed_cost_per_kg');
@@ -1289,7 +1308,15 @@ const reportingController = {
           }
           for (const [rawLotId, batches] of Object.entries(milledByLot)) {
             const acc = [];
-            for (const m of batches) if (salesByBatch[m.batch_id]) acc.push(...salesByBatch[m.batch_id]);
+            for (const m of batches) {
+              const sales = salesByBatch[m.batch_id];
+              if (!sales) continue;
+              const tot = batchTotalQty[m.batch_id] || num(m.qty_mt);
+              const share = tot > 0 ? num(m.qty_mt) / tot : 1; // this lot's slice of the batch
+              for (const sale of sales) {
+                acc.push({ ...sale, kg: sale.kg * share, valuePkr: sale.valuePkr * share, cost: sale.cost * share, sharePct: share * 100 });
+              }
+            }
             if (acc.length) downstreamByLot[rawLotId] = acc;
           }
         }

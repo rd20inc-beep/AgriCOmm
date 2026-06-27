@@ -572,7 +572,8 @@ export function PurchaseLedgerView({ data, companyName, range }) {
             }
             // Trace through milling — who bought the finished / by-product output.
             for (const d of (r.downstreamSales || [])) {
-              const outLabel = d.outputType === 'finished' ? 'Finished sold' : `${d.outputItem || 'By-product'} sold`;
+              const shareTag = d.sharePct != null && d.sharePct < 99.5 ? ` (${Math.round(d.sharePct)}% share)` : '';
+              const outLabel = (d.outputType === 'finished' ? 'Finished sold' : `${d.outputItem || 'By-product'} sold`) + shareTag;
               kids.push([
                 outLabel,
                 d.saleId ? <RefLink to={`/local-sales/${d.saleId}`}>{d.saleNo}</RefLink> : (d.saleNo || '—'),
