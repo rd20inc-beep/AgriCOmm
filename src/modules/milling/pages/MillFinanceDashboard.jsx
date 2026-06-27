@@ -223,6 +223,7 @@ export default function MillFinanceDashboard() {
   const [payParty, setPayParty] = useState(null);
   const [paySupplier, setPaySupplier] = useState(null);
   const [payExpense, setPayExpense] = useState(null); // pay a specific mill expense
+  const [cashEntry, setCashEntry] = useState(null); // view a cash-ledger entry's voucher/receipt
 
   // ── Cash account: actual money in/out ledger with a period filter ──
   const [cashRange, setCashRange] = useState('all'); // all | month | quarter | ytd
@@ -931,7 +932,7 @@ export default function MillFinanceDashboard() {
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {cashLedger.map((r) => (
-                      <tr key={`${r.direction}-${r.id}`} className="hover:bg-gray-50/60">
+                      <tr key={`${r.direction}-${r.id}`} onClick={() => setCashEntry(r)} className="hover:bg-gray-50/60 cursor-pointer" title="View voucher / receipt">
                         <td className="px-3 py-1.5 whitespace-nowrap text-gray-600">{fmtDate(r.payment_date)}</td>
                         <td className="px-3 py-1.5">
                           <span className="text-gray-800">{r.counterparty || '—'}</span>
@@ -1194,7 +1195,7 @@ export default function MillFinanceDashboard() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {expenses.map(e => (
-                  <tr key={e.id} className="hover:bg-gray-50">
+                  <tr key={e.id} onClick={() => setPayExpense(e)} className="hover:bg-gray-50 cursor-pointer" title="View voucher / pay">
                     <td className="px-4 py-3 text-gray-600">{e.expenseDate}</td>
                     <td className="px-4 py-3">
                       <span className="capitalize">{e.category}</span>
@@ -1215,12 +1216,12 @@ export default function MillFinanceDashboard() {
                       <td className="px-4 py-3 text-right no-print">
                         {(e.paymentStatus !== 'Paid') ? (
                           <button
-                            onClick={() => setPayExpense(e)}
+                            onClick={(ev) => { ev.stopPropagation(); setPayExpense(e); }}
                             className="inline-flex items-center gap-1 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1 text-[11px] font-medium"
                           >
                             <Banknote size={12} /> Pay
                           </button>
-                        ) : <span className="text-[11px] text-gray-400">Paid</span>}
+                        ) : <span className="text-[11px] text-emerald-600 inline-flex items-center gap-1"><FileText size={12} /> Voucher</span>}
                       </td>
                     )}
                   </tr>
@@ -2138,6 +2139,9 @@ export default function MillFinanceDashboard() {
 
       {/* Pay a specific mill expense (electricity, fuel, salaries, …). */}
       <ExpensePayDrawer expense={payExpense} bankAccounts={bankAccountsList} companyProfile={companyProfileData} addToast={addToast} onClose={() => setPayExpense(null)} />
+
+      {/* View a cash-ledger entry's voucher (out) or receipt (in), downloadable. */}
+      <CashEntryDrawer entry={cashEntry} companyProfile={companyProfileData} onClose={() => setCashEntry(null)} />
     </div>
   );
 }
@@ -2311,6 +2315,36 @@ function ExpensePayDrawer({ expense, bankAccounts = [], companyProfile, addToast
               <input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" /></div>
           </form>
         )}
+      </div>
+    </SlideDrawer>
+  );
+}
+
+// View a single cash-ledger entry (money in/out) as a downloadable voucher
+// (payment) or receipt (money in). Read-only — these are settled cash movements.
+function CashEntryDrawer({ entry, companyProfile, onClose }) {
+  if (!entry) return null;
+  const PKR = (n) => `Rs ${Math.round(parseFloat(n) || 0).toLocaleString()}`;
+  const isIn = entry.direction === 'in';
+  const amount = parseFloat(entry.amount_pkr) || 0;
+  // Build the doc model TransactionDocument expects (voucher for out, receipt for in).
+  const docData = isIn
+    ? { recvNo: entry.ref || entry.payment_no, customerName: entry.counterparty, type: entry.category, currency: 'PKR', dueDate: entry.payment_date, expectedAmount: amount, receivedAmount: amount, outstanding: 0, status: 'Received' }
+    : { payNo: entry.ref || entry.payment_no, supplierName: entry.counterparty, category: entry.category, linkedRef: entry.ref, entity: 'mill', currency: 'PKR', dueDate: entry.payment_date, originalAmount: amount, paidAmount: amount, outstanding: 0, status: 'Paid' };
+  return (
+    <SlideDrawer open={!!entry} onClose={onClose} title={isIn ? 'Money In' : 'Money Out'} subtitle={entry.counterparty || entry.category} icon={isIn ? ArrowDownRight : ArrowUpRight} size="lg">
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-3 text-sm">
+          <div><p className="text-xs text-gray-500">Date</p><p>{entry.payment_date ? new Date(entry.payment_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</p></div>
+          <div><p className="text-xs text-gray-500">{isIn ? 'Received from' : 'Paid to'}</p><p className="font-medium">{entry.counterparty || '—'}</p></div>
+          <div><p className="text-xs text-gray-500">Category</p><p className="capitalize">{entry.category || '—'}</p></div>
+          <div><p className="text-xs text-gray-500">Method</p><p className="capitalize">{entry.payment_method || '—'}</p></div>
+          <div><p className="text-xs text-gray-500">Reference</p><p>{entry.ref || entry.payment_no || '—'}</p></div>
+          <div><p className="text-xs text-gray-500">Amount</p><p className={`font-semibold ${isIn ? 'text-emerald-700' : 'text-rose-600'}`}>{isIn ? '+' : '−'}{PKR(amount)}</p></div>
+        </div>
+        <div className="pt-2 border-t border-gray-100">
+          <TransactionDocument kind={isIn ? 'receipt' : 'voucher'} data={docData} companyProfile={companyProfile} />
+        </div>
       </div>
     </SlideDrawer>
   );
