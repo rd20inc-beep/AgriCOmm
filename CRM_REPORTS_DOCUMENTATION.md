@@ -100,7 +100,8 @@ RBAC is `authorize(module, action)` middleware (`backend/src/middleware/rbac.js`
 
 **Global controls (hero band):**
 - **Date range** `<select>`: `All Time` (default), `Today`, `This Week` (Mon–Sun), `This Month`, `This Quarter`, `This Year` → produces `from_date`/`to_date` (ISO `YYYY-MM-DD`); All Time = no dates. Applies to every tab via a shared `params` memo (`{...range, entity:'mill'?}`).
-- **Refresh** button (force refetch), **Lot Reports** link, **Print Reports** link.
+- **Refresh** button, **Saved Views** menu (save/load/delete a tab+range view), **Lot Reports** + **Print Reports** links.
+- **URL deep-linking:** the active tab + range live in the query string (`/reports?tab=production&range=month`) — bookmarkable, shareable, back/forward works. Invalid/unauthorized tab falls back to the first visible tab.
 - **KPI strip (5 tiles):** Total Money In (`receipts.totalPkr`), Total Money Out (`payments.totalPkr`), Net Cashflow (in − out), **Outstanding A/R** (`exec.totalOutstandingPkr`, *hidden for Mill*), **Booked Profit** (`exec.bookedProfitPkr` + avg margin, *hidden for Mill*).
 
 **Tabs:** Money In, Money Out, Sales, Purchases, Lots, Margin, **Production**, Orders\*, Customers\*, Countries\*, **Cash Forecast\***, Inventory, **KPIs**, Quality. *(Production/Cash-Forecast/KPIs added when the latent endpoints were surfaced; Inventory also gained Valuation + Turnover sections.)*
