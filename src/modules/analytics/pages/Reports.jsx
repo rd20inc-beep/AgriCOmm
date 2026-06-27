@@ -650,6 +650,9 @@ function SaleTrackerPanel({ sale, statementHref, companyProfile }) {
         </div>
       </div>
 
+      {/* Items · payment trail · dispatch (Phase 2) */}
+      <SaleDetailSection saleId={sale.saleId} />
+
       {/* Downloadable invoice */}
       <div className="pt-2 border-t border-gray-100">
         <TransactionDocument kind="invoice" data={sale} companyProfile={companyProfile} />
@@ -659,6 +662,77 @@ function SaleTrackerPanel({ sale, statementHref, companyProfile }) {
         className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
         <ExternalLink size={14} /> Open sale detail
       </button>
+    </div>
+  );
+}
+
+// Lazy-loaded Sale 360 extras — all line items (multi-item sales), the
+// payment trail, and dispatch info. Fetches /reporting/sale-detail/:id.
+function SaleDetailSection({ saleId }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    if (!saleId) { setLoading(false); return; }
+    setLoading(true);
+    reportingApi.saleDetail(saleId)
+      .then(res => setData(res?.sale ? res : (res?.data || res)))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, [saleId]);
+  if (loading || !data) return null;
+  const items = data.items || [];
+  const payments = data.payments || [];
+  const dispatch = data.dispatch || {};
+  const t = data.totals || {};
+  const multi = items.length > 1;
+  const hasDispatch = dispatch.dispatched || dispatch.vehicleNo || dispatch.driverName;
+  if (!multi && payments.length === 0 && !hasDispatch) return null;
+  return (
+    <div className="space-y-4">
+      {multi && (
+        <div>
+          <h4 className="text-sm font-semibold text-gray-700 mb-2">Line items {data.sale?.saleGroupNo ? <span className="text-gray-400 font-normal">· group {data.sale.saleGroupNo}</span> : ''}</h4>
+          <div className="rounded-lg border border-gray-200 overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="bg-gray-50 text-gray-500"><tr><th className="px-2 py-1.5 text-left font-medium">Item</th><th className="px-2 py-1.5 text-left font-medium">Lot</th><th className="px-2 py-1.5 text-right font-medium">kg</th><th className="px-2 py-1.5 text-right font-medium">Rate/kg</th><th className="px-2 py-1.5 text-right font-medium">Value</th></tr></thead>
+              <tbody className="divide-y divide-gray-100">
+                {items.map(it => (
+                  <tr key={it.id}><td className="px-2 py-1.5">{it.item || '—'}</td><td className="px-2 py-1.5">{it.href ? <Link to={it.href} className="font-mono text-blue-600 hover:underline">{it.lotNo}</Link> : (it.lotNo || '—')}</td><td className="px-2 py-1.5 text-right tabular-nums">{Math.round(it.quantityKg).toLocaleString()}</td><td className="px-2 py-1.5 text-right tabular-nums">{it.ratePerKg > 0 ? `Rs ${Math.round(it.ratePerKg).toLocaleString()}` : '—'}</td><td className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(it.totalAmount)}</td></tr>
+                ))}
+                <tr className="bg-gray-50 font-semibold"><td className="px-2 py-1.5" colSpan={2}>Total</td><td className="px-2 py-1.5 text-right tabular-nums">{Math.round(t.quantityKg).toLocaleString()}</td><td className="px-2 py-1.5" /><td className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(t.totalAmount)}</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {payments.length > 0 && (
+        <div>
+          <h4 className="text-sm font-semibold text-gray-700 mb-2">Payment trail</h4>
+          <div className="rounded-lg border border-gray-200 divide-y divide-gray-100 text-xs">
+            {payments.map(p => (
+              <div key={p.id} className="flex items-center justify-between px-3 py-1.5">
+                <span className="text-gray-600">{p.date ? new Date(p.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'} · <span className="capitalize">{p.method || 'payment'}</span>{p.reference ? ` · ${p.reference}` : ''}</span>
+                <span className="tabular-nums font-medium text-emerald-700">{fmtPKR(p.amount)}</span>
+              </div>
+            ))}
+            <div className="flex items-center justify-between px-3 py-1.5 bg-gray-50 font-semibold"><span>Total received</span><span className="tabular-nums">{fmtPKR(t.paid)}</span></div>
+          </div>
+        </div>
+      )}
+
+      {hasDispatch && (
+        <div>
+          <h4 className="text-sm font-semibold text-gray-700 mb-2">Dispatch</h4>
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className={`px-2.5 py-1 rounded-lg border ${dispatch.dispatched ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-gray-50 border-gray-200 text-gray-500'}`}>{dispatch.dispatched ? 'Dispatched' : 'Not dispatched'}</span>
+            {dispatch.dispatchDate && <span className="px-2.5 py-1 rounded-lg bg-gray-50 border border-gray-200">{new Date(dispatch.dispatchDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span>}
+            {dispatch.vehicleNo && <span className="px-2.5 py-1 rounded-lg bg-gray-50 border border-gray-200">Vehicle {dispatch.vehicleNo}</span>}
+            {dispatch.driverName && <span className="px-2.5 py-1 rounded-lg bg-gray-50 border border-gray-200">{dispatch.driverName}</span>}
+            {dispatch.collectionLocation && <span className="px-2.5 py-1 rounded-lg bg-gray-50 border border-gray-200">Collected at {dispatch.collectionLocation}</span>}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

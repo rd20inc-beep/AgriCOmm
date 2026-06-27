@@ -1135,6 +1135,77 @@ const reportingService = {
   },
 
   /**
+   * Sale detail (Sale 360) — full picture of one local sale: header, all line
+   * items (rows sharing sale_group_no), the payment trail (payments linked to
+   * those item ids) and dispatch info. Read-only.
+   */
+  async getSaleDetail(saleId) {
+    const id = parseInt(saleId, 10);
+    if (!id) return null;
+    const num = (v) => parseFloat(v) || 0;
+
+    const base = await db('local_sales as ls')
+      .leftJoin('customers as c', 'ls.customer_id', 'c.id')
+      .where('ls.id', id)
+      .select('ls.*', db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer_resolved"))
+      .first();
+    if (!base) return null;
+
+    // All line items of this sale (multi-item sales share sale_group_no).
+    const itemQuery = db('local_sales as ls')
+      .leftJoin('inventory_lots as il', 'ls.lot_id', 'il.id')
+      .leftJoin('customers as c', 'ls.customer_id', 'c.id');
+    if (base.sale_group_no) itemQuery.where('ls.sale_group_no', base.sale_group_no);
+    else itemQuery.where('ls.id', id);
+    const itemRows = await itemQuery.select(
+      'ls.id', 'ls.sale_no', 'ls.item_name', 'ls.item_type', 'ls.quantity_kg', 'ls.quantity_bags',
+      'ls.rate_per_kg', 'ls.total_amount', 'ls.cogs_total_pkr', 'ls.cost_per_kg', 'ls.gross_profit_pkr',
+      'ls.lot_id', 'il.lot_no', 'il.type as lot_type',
+    ).orderBy('ls.id', 'asc');
+
+    const itemIds = itemRows.map(r => r.id);
+    const payments = await db('payments')
+      .whereIn('local_sale_id', itemIds.length ? itemIds : [id])
+      .select('id', 'payment_no', 'payment_date', 'payment_method', 'amount', 'bank_reference', 'notes', 'type')
+      .orderBy('payment_date', 'asc').orderBy('id', 'asc');
+
+    const items = itemRows.map(r => {
+      const kg = num(r.quantity_kg); const total = num(r.total_amount);
+      const cost = num(r.cogs_total_pkr) || num(r.cost_per_kg) * kg;
+      return {
+        id: r.id, saleNo: r.sale_no, item: r.item_name, itemType: r.item_type,
+        lotId: r.lot_id, lotNo: r.lot_no, lotType: r.lot_type, href: r.lot_id ? `/lot-inventory/${r.lot_id}` : null,
+        quantityKg: kg, quantityBags: r.quantity_bags, ratePerKg: num(r.rate_per_kg),
+        totalAmount: total, cost, margin: total - cost,
+      };
+    });
+    const totals = {
+      quantityKg: items.reduce((s, i) => s + i.quantityKg, 0),
+      totalAmount: items.reduce((s, i) => s + i.totalAmount, 0),
+      cost: items.reduce((s, i) => s + i.cost, 0),
+      margin: items.reduce((s, i) => s + i.margin, 0),
+      paid: payments.reduce((s, p) => s + num(p.amount), 0),
+    };
+
+    return {
+      sale: {
+        id: base.id, saleNo: base.sale_no, saleGroupNo: base.sale_group_no, date: base.sale_date,
+        customer: base.customer_resolved, customerId: base.customer_id || null,
+        paymentStatus: base.payment_status, paymentMode: base.payment_mode,
+        collectionLocation: base.collection_location, dueDate: base.due_date,
+        totalAmount: num(base.total_amount), paidAmount: num(base.paid_amount), dueAmount: num(base.due_amount),
+      },
+      items,
+      payments: payments.map(p => ({ id: p.id, paymentNo: p.payment_no, date: p.payment_date, method: p.payment_method, amount: num(p.amount), reference: p.bank_reference, notes: p.notes })),
+      dispatch: {
+        dispatched: !!base.dispatched, dispatchDate: base.dispatch_date,
+        vehicleNo: base.vehicle_no, driverName: base.driver_name, collectionLocation: base.collection_location,
+      },
+      totals,
+    };
+  },
+
+  /**
    * Inventory Movement Ledger — a filterable chronological feed of every
    * stock movement (inventory_movements), enriched with lot / warehouse /
    * reference context + a link target. Read-only.

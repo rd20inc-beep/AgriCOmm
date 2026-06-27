@@ -83,6 +83,17 @@ const reportingController = {
     }
   },
 
+  async saleDetail(req, res) {
+    try {
+      const data = await reportingService.getSaleDetail(req.params.id);
+      if (!data) return res.status(404).json({ success: false, message: 'Sale not found.' });
+      return res.json({ success: true, ...data });
+    } catch (err) {
+      console.error('Sale detail error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
   async inventoryLedger(req, res) {
     try {
       const data = await reportingService.getInventoryLedger(req.query || {});
