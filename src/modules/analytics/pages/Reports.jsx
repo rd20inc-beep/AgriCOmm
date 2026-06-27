@@ -5,7 +5,7 @@ import { useApp } from '../../../context/AppContext';
 import {
   BarChart3, TrendingUp, Users, Globe, Package, Award, Coins, Printer, RefreshCw,
   ArrowUpRight, ArrowDownLeft, Activity, Calendar, ExternalLink, AlertTriangle, FileText,
-  ShoppingCart, Truck, Receipt,
+  ShoppingCart, Truck, Receipt, Scale,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell,
@@ -77,6 +77,7 @@ const TABS = [
   { key: 'moneyOut',  label: 'Money Out',  icon: ArrowUpRight },
   { key: 'sales',     label: 'Sales',      icon: ShoppingCart },
   { key: 'purchases', label: 'Purchases',  icon: Truck },
+  { key: 'margin',    label: 'Margin',     icon: Scale },
   { key: 'orders',    label: 'Orders',     icon: TrendingUp },
   { key: 'customers', label: 'Customers',  icon: Users },
   { key: 'countries', label: 'Countries',  icon: Globe },
@@ -91,7 +92,7 @@ export default function Reports() {
   // customers, countries or export A/R / booked profit.
   const millScoped = user?.role === 'Mill Manager';
   const visibleTabs = millScoped
-    ? TABS.filter(t => ['moneyIn', 'moneyOut', 'sales', 'purchases', 'inventory', 'quality'].includes(t.key))
+    ? TABS.filter(t => ['moneyIn', 'moneyOut', 'sales', 'purchases', 'margin', 'inventory', 'quality'].includes(t.key))
     : TABS;
 
   // Party statements live under /milling for the Mill role, /finance otherwise.
@@ -197,6 +198,7 @@ export default function Reports() {
           {tab === 'moneyOut'  && <MoneyFlowTab kind="payment" params={params} totalLabel="Money Out" statementHref={statementHref} openDoc={openDoc} />}
           {tab === 'sales'     && <SalesTab params={params} statementHref={statementHref} openDoc={openDoc} />}
           {tab === 'purchases' && <PurchasesTab params={params} statementHref={statementHref} openDoc={openDoc} />}
+          {tab === 'margin'    && <MarginTab params={params} openDoc={openDoc} />}
           {tab === 'orders'    && <OrdersTab params={params} />}
           {tab === 'customers' && <CustomersTab params={params} />}
           {tab === 'countries' && <CountriesTab params={params} />}
@@ -214,7 +216,9 @@ export default function Reports() {
         icon={Receipt}
         size="lg"
       >
-        {doc && <TransactionDocument kind={doc.kind} data={doc.data} companyProfile={companyProfileData} />}
+        {doc && (doc.kind === 'margin'
+          ? <MarginBreakdown e={doc.data} companyProfile={companyProfileData} />
+          : <TransactionDocument kind={doc.kind} data={doc.data} companyProfile={companyProfileData} />)}
       </SlideDrawer>
     </div>
   );
@@ -457,6 +461,117 @@ function purchaseToDoc(r) {
       outstanding: Math.max(0, amt - paid), status: r.paymentStatus,
     },
   };
+}
+
+// ─── Tab: Margin (buy cost + expenses vs sale price, per sold lot) ─────
+// "Cost" is the lot's LANDED cost — the purchase price plus any costs added
+// to the lot — so it already folds the expenses in. We surface it both per-kg
+// and as a total next to the sale price so the trading margin is obvious.
+function marginRow(s) {
+  const soldKg = parseFloat(s.quantityKg) || 0;
+  const costPerKg = parseFloat(s.lotCostPerKg) || 0;
+  const sale = parseFloat(s.totalAmount) || 0;
+  // Prefer per-kg × sold qty (handles partial sales); fall back to the lot total.
+  const cost = costPerKg > 0 ? costPerKg * soldKg : (parseFloat(s.lotLandedTotal) || 0);
+  const hasCost = costPerKg > 0 || (parseFloat(s.lotLandedTotal) || 0) > 0;
+  const salePerKg = soldKg > 0 ? sale / soldKg : (parseFloat(s.ratePerKg) || 0);
+  const margin = sale - cost;
+  const marginPct = sale > 0 ? (margin / sale) * 100 : 0;
+  return { s, soldKg, costPerKg, salePerKg, cost, sale, margin, marginPct, hasCost };
+}
+
+function MarginTab({ params, openDoc }) {
+  const { data: sales = [], isLoading } = useLocalSales(params);
+  if (isLoading) return <Skeleton />;
+  const raw = Array.isArray(sales) ? sales : (sales?.sales || []);
+  if (raw.length === 0) return <Empty msg="No sales to analyse in this period." />;
+  const rows = raw.map(marginRow);
+
+  const totRev = rows.reduce((a, e) => a + e.sale, 0);
+  const totCost = rows.reduce((a, e) => a + (e.hasCost ? e.cost : 0), 0);
+  const totMargin = totRev - totCost;
+  const avgPct = totRev > 0 ? (totMargin / totRev) * 100 : 0;
+
+  return (
+    <div className="space-y-5">
+      <SectionHeader
+        title="Trading Margin — buy cost + expenses vs sale price"
+        subtitle="Each local sale, with the lot's landed cost (purchase + costs added to the lot) against the sale price. Click a row for the full breakdown."
+      />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <SummaryCell label="Revenue" value={fmtPKR(totRev)} />
+        <SummaryCell label="Cost (buy + exp)" value={fmtPKR(totCost)} />
+        <SummaryCell label="Gross Margin" value={<span className={totMargin >= 0 ? 'text-emerald-600' : 'text-rose-600'}>{fmtPKR(totMargin)}</span>} />
+        <SummaryCell label="Avg Margin" value={fmtPct(avgPct)} />
+      </div>
+      <Table
+        head={['Sale No', 'Lot', 'Item', 'Sold', 'Cost/kg', 'Sale/kg', 'Cost', 'Sale', 'Margin', '%']}
+        align={['left', 'left', 'left', 'right', 'right', 'right', 'right', 'right', 'right', 'right']}
+        rowClick={rows.map(e => () => openDoc?.({ kind: 'margin', title: 'Trading Margin', subtitle: e.s.saleNo, data: e }))}
+        rows={rows.map(e => {
+          const s = e.s;
+          return [
+            <span className="font-mono text-xs">{s.saleNo}</span>,
+            s.lotId
+              ? <Link to={`/lot-inventory/${s.lotId}`} onClick={(ev) => ev.stopPropagation()} className="text-blue-600 hover:underline text-xs">{s.lotRef || '—'}</Link>
+              : <span className="text-xs text-gray-500">{s.lotRef || '—'}</span>,
+            <span className="text-xs">{s.itemName || '—'}</span>,
+            `${Math.round(e.soldKg).toLocaleString()} kg`,
+            e.hasCost ? `Rs ${Math.round(e.costPerKg).toLocaleString()}` : '—',
+            `Rs ${Math.round(e.salePerKg).toLocaleString()}`,
+            e.hasCost ? fmtPKR(e.cost) : '—',
+            <span className="font-semibold text-gray-900">{fmtPKR(e.sale)}</span>,
+            e.hasCost ? <ProfitCell v={e.margin} /> : <span className="text-gray-400">—</span>,
+            e.hasCost ? <span className={`font-medium ${e.marginPct >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{e.marginPct.toFixed(1)}%</span> : '—',
+          ];
+        })}
+      />
+      <p className="text-[11px] text-gray-400">Cost = the lot's landed cost (purchase price + any costs added to the lot). Open the lot for the itemised cost breakdown.</p>
+    </div>
+  );
+}
+
+// Slider body for a Margin row — buy-vs-sale breakdown + the downloadable invoice.
+function MarginBreakdown({ e, companyProfile }) {
+  const s = e.s;
+  const perKgMargin = e.salePerKg - e.costPerKg;
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3 text-sm">
+        <div><p className="text-xs text-gray-500">Sale</p><p className="font-medium">{s.saleNo}</p></div>
+        <div><p className="text-xs text-gray-500">Lot</p><p className="font-medium">{s.lotRef || '—'}</p></div>
+        <div><p className="text-xs text-gray-500">Item</p><p>{s.itemName || '—'}</p></div>
+        <div><p className="text-xs text-gray-500">Sold</p><p>{Math.round(e.soldKg).toLocaleString()} kg</p></div>
+      </div>
+
+      <div className="rounded-lg border border-gray-200 overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-gray-50 text-[11px] uppercase text-gray-500">
+              <th className="text-left px-3 py-2">Line</th>
+              <th className="text-right px-3 py-2">Per kg</th>
+              <th className="text-right px-3 py-2">Total</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            <tr><td className="px-3 py-2 text-gray-600">Buying price + expenses</td><td className="px-3 py-2 text-right tabular-nums">Rs {Math.round(e.costPerKg).toLocaleString()}</td><td className="px-3 py-2 text-right tabular-nums font-medium">{fmtPKR(e.cost)}</td></tr>
+            <tr><td className="px-3 py-2 text-gray-600">Selling price</td><td className="px-3 py-2 text-right tabular-nums">Rs {Math.round(e.salePerKg).toLocaleString()}</td><td className="px-3 py-2 text-right tabular-nums font-medium">{fmtPKR(e.sale)}</td></tr>
+            <tr className="bg-gray-50">
+              <td className="px-3 py-2 font-semibold text-gray-800">Gross margin</td>
+              <td className={`px-3 py-2 text-right tabular-nums font-semibold ${perKgMargin >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{perKgMargin >= 0 ? '+' : ''}Rs {Math.round(perKgMargin).toLocaleString()}</td>
+              <td className={`px-3 py-2 text-right tabular-nums font-bold ${e.margin >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{fmtPKR(e.margin)} ({e.marginPct.toFixed(1)}%)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[11px] text-gray-400">Cost is the lot's landed cost (purchase + any costs added to the lot). For the itemised expense list, open the lot.</p>
+
+      {/* Downloadable sales invoice */}
+      <div className="pt-2 border-t border-gray-100">
+        <TransactionDocument kind="invoice" data={s} companyProfile={companyProfile} />
+      </div>
+    </div>
+  );
 }
 
 // ─── Tab: Orders ──────────────────────────────────────────────────────
