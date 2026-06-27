@@ -1724,6 +1724,46 @@ export function useCashForecast(params = {}) {
   });
 }
 
+export function useKpiBenchmarks(params = {}) {
+  return useQuery({
+    queryKey: ['kpi-benchmarks', params],
+    queryFn: async () => { const res = await reportingApi.kpiBenchmarks(params); return transformKeys(unwrap(res) || []); },
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useMillEfficiency(params = {}) {
+  return useQuery({
+    queryKey: ['mill-efficiency', params],
+    queryFn: async () => transformKeys(unwrap(await reportingApi.millEfficiency(params)) || []),
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useRecoveryLeaderboard(params = {}) {
+  return useQuery({
+    queryKey: ['recovery-leaderboard', params],
+    queryFn: async () => transformKeys(unwrap(await reportingApi.recoveryLeaderboard(params)) || []),
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useStockValuation(params = {}) {
+  return useQuery({
+    queryKey: ['stock-valuation', params],
+    queryFn: async () => transformKeys(unwrap(await reportingApi.stockValuation(params)) || {}),
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useStockTurnover(params = {}) {
+  return useQuery({
+    queryKey: ['stock-turnover', params],
+    queryFn: async () => transformKeys(unwrap(await reportingApi.stockTurnover(params)) || {}),
+    staleTime: 30 * 1000,
+  });
+}
+
 // ===================== NOTIFICATIONS =====================
 
 export function useNotifications(params = {}) {

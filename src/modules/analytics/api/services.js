@@ -14,6 +14,10 @@ export const reportingApi = {
   printableStock: (params) => api.get('/api/reporting/printable/stock', params),
   cashForecast: (params) => api.get('/api/reporting/financial/cash-forecast', params),
   kpiBenchmarks: (params) => api.get('/api/reporting/kpi/benchmarks', params),
+  millEfficiency: (params) => api.get('/api/reporting/production/mill-efficiency', params),
+  recoveryLeaderboard: (params) => api.get('/api/reporting/quality/recovery-leaderboard', params),
+  stockValuation: (params) => api.get('/api/reporting/inventory/stock-valuation', params),
+  stockTurnover: (params) => api.get('/api/reporting/inventory/stock-turnover', params),
   exportReport: (data) => api.post('/api/reporting/export', data),
 };
 export const intelligenceApi = {

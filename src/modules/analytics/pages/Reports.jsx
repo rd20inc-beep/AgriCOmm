@@ -6,15 +6,19 @@ import {
   BarChart3, TrendingUp, Users, Globe, Package, Award, Coins, Printer, RefreshCw,
   ArrowUpRight, ArrowDownLeft, Activity, Calendar, ExternalLink, AlertTriangle, FileText,
   ShoppingCart, Truck, Receipt, Scale, ChevronDown, ChevronRight, Layers,
+  Factory, Gauge, Wallet,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell,
+  LineChart, Line,
 } from 'recharts';
 import {
   useExecutiveSummary, useOrderProfitability, useCustomerProfitability,
   useCountryAnalysis, useStockAgingReport, useSupplierQualityRanking,
   usePayments, useReceivables, usePayables, usePrintableStock,
   useLocalSales, usePurchases, useBatchMargin, useLotTracker, useSalesTracker,
+  useCashForecast, useKpiBenchmarks, useMillEfficiency, useRecoveryLeaderboard,
+  useStockValuation, useStockTurnover,
 } from '../../../api/queries';
 import SlideDrawer from '../../../components/SlideDrawer';
 import TransactionDocument from '../../../components/TransactionDocument';
@@ -79,10 +83,13 @@ const TABS = [
   { key: 'purchases', label: 'Purchases',  icon: Truck },
   { key: 'lots',      label: 'Lots',       icon: Layers },
   { key: 'margin',    label: 'Margin',     icon: Scale },
+  { key: 'production', label: 'Production', icon: Factory },
   { key: 'orders',    label: 'Orders',     icon: TrendingUp },
   { key: 'customers', label: 'Customers',  icon: Users },
   { key: 'countries', label: 'Countries',  icon: Globe },
+  { key: 'forecast',  label: 'Cash Forecast', icon: Wallet },
   { key: 'inventory', label: 'Inventory',  icon: Package },
+  { key: 'kpis',      label: 'KPIs',       icon: Gauge },
   { key: 'quality',   label: 'Quality',    icon: Award },
 ];
 
@@ -93,7 +100,7 @@ export default function Reports() {
   // customers, countries or export A/R / booked profit.
   const millScoped = user?.role === 'Mill Manager';
   const visibleTabs = millScoped
-    ? TABS.filter(t => ['moneyIn', 'moneyOut', 'sales', 'purchases', 'lots', 'margin', 'inventory', 'quality'].includes(t.key))
+    ? TABS.filter(t => ['moneyIn', 'moneyOut', 'sales', 'purchases', 'lots', 'margin', 'production', 'inventory', 'kpis', 'quality'].includes(t.key))
     : TABS;
 
   // Party statements live under /milling for the Mill role, /finance otherwise.
@@ -201,6 +208,9 @@ export default function Reports() {
           {tab === 'purchases' && <PurchasesTab params={params} statementHref={statementHref} openDoc={openDoc} />}
           {tab === 'lots'      && <LotsTab params={params} statementHref={statementHref} openDoc={openDoc} />}
           {tab === 'margin'    && <MarginTab params={params} openDoc={openDoc} />}
+          {tab === 'production' && <ProductionTab params={params} />}
+          {tab === 'forecast'  && <ForecastTab />}
+          {tab === 'kpis'      && <KpiTab params={params} millScoped={millScoped} />}
           {tab === 'orders'    && <OrdersTab params={params} />}
           {tab === 'customers' && <CustomersTab params={params} />}
           {tab === 'countries' && <CountriesTab params={params} />}
@@ -1116,6 +1126,153 @@ function StatusBadgeMini({ s }) {
   return <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${tone}`}>{s || 'Pending'}</span>;
 }
 
+// ─── Tab: Production (mill efficiency + yield leaderboard) ─────────────
+function ProductionTab({ params }) {
+  const navigate = useNavigate();
+  const dr = { dateFrom: params?.from_date, dateTo: params?.to_date };
+  const { data: mills = [], isLoading } = useMillEfficiency(dr);
+  const { data: leaders = [] } = useRecoveryLeaderboard(dr);
+  if (isLoading) return <Skeleton />;
+  const millRows = Array.isArray(mills) ? mills : [];
+  const lbRows = Array.isArray(leaders) ? leaders : [];
+  if (millRows.length === 0 && lbRows.length === 0) return <Empty msg="No production in this period." />;
+
+  const totIn = millRows.reduce((s, m) => s + (parseFloat(m.totalInputMt ?? m.totalInputMT) || 0), 0);
+  const totOut = millRows.reduce((s, m) => s + (parseFloat(m.totalOutputMt ?? m.totalOutputMT) || 0), 0);
+  const avgYield = totIn > 0 ? (totOut / totIn) * 100 : 0;
+  const avgUtil = millRows.length ? millRows.reduce((s, m) => s + (parseFloat(m.utilization) || 0), 0) / millRows.length : 0;
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <SummaryCell label="Mills" value={String(millRows.length)} />
+        <SummaryCell label="Raw input" value={`${totIn.toLocaleString(undefined, { maximumFractionDigits: 1 })} MT`} />
+        <SummaryCell label="Finished output" value={`${totOut.toLocaleString(undefined, { maximumFractionDigits: 1 })} MT`} />
+        <SummaryCell label="Avg yield" value={fmtPct(avgYield)} />
+      </div>
+
+      <div className="space-y-2">
+        <SectionHeader title="Mill efficiency" subtitle="Throughput, yield, utilisation & downtime per mill" />
+        <Table
+          head={['Mill', 'Capacity/day', 'Batches', 'Input MT', 'Output MT', 'Avg Yield', 'Utilisation', 'Downtime hrs']}
+          align={['left', 'right', 'right', 'right', 'right', 'right', 'right', 'right']}
+          rows={millRows.map(m => [
+            m.millName || '—',
+            `${parseFloat(m.capacityMtPerDay ?? m.capacityMTPerDay) || 0} MT`,
+            m.batchesProcessed || 0,
+            (parseFloat(m.totalInputMt ?? m.totalInputMT) || 0).toFixed(1),
+            (parseFloat(m.totalOutputMt ?? m.totalOutputMT) || 0).toFixed(1),
+            fmtPct(m.avgYield),
+            fmtPct((parseFloat(m.utilization) || 0) * (parseFloat(m.utilization) <= 1 ? 100 : 1)),
+            (parseFloat(m.downtimeHours) || 0).toFixed(1),
+          ])}
+        />
+      </div>
+
+      <div className="space-y-2">
+        <SectionHeader title="Yield leaderboard (by batch)" subtitle="Best recovery first" />
+        <Table
+          head={['Batch', 'Supplier', 'Product', 'Raw MT', 'Finished MT', 'Yield %', 'Broken %']}
+          align={['left', 'left', 'left', 'right', 'right', 'right', 'right']}
+          rowClick={lbRows.map(b => b.id ? () => navigate(`/milling/${b.id}`) : null)}
+          rows={[...lbRows].sort((a, b) => (parseFloat(b.yieldPct) || 0) - (parseFloat(a.yieldPct) || 0)).map(b => [
+            <span className="font-mono text-xs text-blue-600">{b.batchNo}</span>,
+            b.supplierName || '—',
+            <span className="text-xs">{b.productName || '—'}</span>,
+            (parseFloat(b.rawQtyMt ?? b.rawQtyMT) || 0).toFixed(1),
+            (parseFloat(b.finishedQtyMt ?? b.finishedQtyMT) || 0).toFixed(1),
+            <span className="font-medium">{fmtPct(b.yieldPct)}</span>,
+            fmtPct(b.brokenPct),
+          ])}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ─── Tab: Cash Forecast (30-day projection) ───────────────────────────
+function ForecastTab() {
+  const { data = {}, isLoading } = useCashForecast({});
+  if (isLoading) return <Skeleton />;
+  const proj = Array.isArray(data.projection) ? data.projection : [];
+  const cur = parseFloat(data.currentCash) || 0;
+  const recv = parseFloat(data.totalExpectedReceipts) || 0;
+  const pay = parseFloat(data.totalExpectedPayments) || 0;
+  const endBal = proj.length ? (parseFloat(proj[proj.length - 1].projectedBalance) || 0) : cur;
+  const chart = proj.map(d => ({ name: new Date(d.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }), Balance: parseFloat(d.projectedBalance) || 0 }));
+
+  return (
+    <div className="space-y-5">
+      <SectionHeader title="Cash Forecast — projected balance (next 30 days)" subtitle="Current cash plus expected receipts (from receivable due dates) less expected payments (payable due dates)." />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <SummaryCell label="Current cash" value={<span className={cur < 0 ? 'text-rose-600' : ''}>{fmtPKR(cur)}</span>} />
+        <SummaryCell label="Expected in" value={<span className="text-emerald-600">{fmtPKR(recv)}</span>} />
+        <SummaryCell label="Expected out" value={<span className="text-rose-600">{fmtPKR(pay)}</span>} />
+        <SummaryCell label="Projected balance" value={<span className={endBal < 0 ? 'text-rose-600' : 'text-emerald-600'}>{fmtPKR(endBal)}</span>} />
+      </div>
+      {chart.length > 0 && (
+        <div className="bg-gray-50 rounded-xl p-4 border border-gray-200" style={{ height: 260 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chart} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              <XAxis dataKey="name" interval={Math.ceil(chart.length / 8)} tick={{ fontSize: 10, fill: '#6b7280' }} />
+              <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} tickFormatter={(v) => Math.abs(v) >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : Math.abs(v) >= 1e3 ? `${(v / 1e3).toFixed(0)}K` : v} />
+              <Tooltip formatter={(v) => fmtPKR(v)} />
+              <Line type="monotone" dataKey="Balance" stroke="#3b82f6" strokeWidth={2} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+      <Table
+        head={['Date', 'Expected In', 'Expected Out', 'Net', 'Projected Balance']}
+        align={['left', 'right', 'right', 'right', 'right']}
+        rows={proj.map(d => [
+          new Date(d.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }),
+          fmtPKR(d.expectedReceipts), fmtPKR(d.expectedPayments),
+          <span className={(parseFloat(d.netCashFlow) || 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'}>{fmtPKR(d.netCashFlow)}</span>,
+          <span className={(parseFloat(d.projectedBalance) || 0) < 0 ? 'text-rose-600 font-medium' : ''}>{fmtPKR(d.projectedBalance)}</span>,
+        ])}
+      />
+      <p className="text-[11px] text-gray-400">Forward-looking 30 days — the global date range filter does not apply here.</p>
+    </div>
+  );
+}
+
+// ─── Tab: KPIs (benchmark scorecard) ──────────────────────────────────
+function KpiTab({ millScoped }) {
+  const { data: rows = [], isLoading } = useKpiBenchmarks(millScoped ? { entity: 'mill' } : {});
+  if (isLoading) return <Skeleton />;
+  const list = Array.isArray(rows) ? rows : [];
+  if (list.length === 0) return <Empty msg="No KPI benchmarks configured." />;
+  const met = list.filter(k => k.status === 'Met').length;
+  const missed = list.filter(k => k.status === 'Missed').length;
+  const tone = (s) => s === 'Met' ? 'bg-emerald-100 text-emerald-700' : s === 'Missed' ? 'bg-rose-100 text-rose-700' : 'bg-gray-100 text-gray-500';
+  const fmtVal = (v, unit) => unit === '%' ? `${(parseFloat(v) || 0).toFixed(1)}%` : (parseFloat(v) || 0).toLocaleString();
+  return (
+    <div className="space-y-5">
+      <SectionHeader title="KPI Scorecard" subtitle="Target vs actual against configured benchmarks" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <SummaryCell label="KPIs" value={String(list.length)} />
+        <SummaryCell label="Met" value={<span className="text-emerald-600">{met}</span>} />
+        <SummaryCell label="Missed" value={<span className="text-rose-600">{missed}</span>} />
+        <SummaryCell label="On track" value={`${list.length ? Math.round((met / list.length) * 100) : 0}%`} />
+      </div>
+      <Table
+        head={['KPI', 'Entity', 'Target', 'Actual', 'Variance', 'Status']}
+        align={['left', 'left', 'right', 'right', 'right', 'left']}
+        rows={list.map(k => [
+          k.kpiName || '—',
+          <span className="text-xs capitalize">{k.entity || '—'}</span>,
+          fmtVal(k.target, k.unit),
+          fmtVal(k.actual, k.unit),
+          <span className={(parseFloat(k.variance) || 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'}>{fmtVal(k.variance, k.unit)}</span>,
+          <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${tone(k.status)}`}>{k.status || 'Unknown'}</span>,
+        ])}
+      />
+    </div>
+  );
+}
+
 // ─── Tab: Orders ──────────────────────────────────────────────────────
 function OrdersTab({ params }) {
   const { data: rows = [], isLoading } = useOrderProfitability(params);
@@ -1262,6 +1419,8 @@ function InventoryTab() {
   const byType = usePrintableStock('type');
   const byWarehouse = usePrintableStock('warehouse');
   const bySubtype = usePrintableStock('subtype');
+  const { data: valuation = {} } = useStockValuation();
+  const { data: turnover = {} } = useStockTurnover();
 
   if (isLoading) return <Skeleton />;
 
@@ -1316,6 +1475,40 @@ function InventoryTab() {
       <StockBreakdown title="By Type" subtitle="Raw / finished / byproduct" query={byType} groupHead="Type" />
       <StockBreakdown title="By Category" subtitle="Finished, broken grades, sortex, bran, husk, blends" query={bySubtype} groupHead="Category" />
       <StockBreakdown title="By Warehouse" subtitle="Where the stock is held" query={byWarehouse} groupHead="Warehouse" />
+
+      {/* Valuation (by type & warehouse) + turnover — surfaced from the
+          stock-valuation / stock-turnover endpoints. */}
+      {Array.isArray(valuation.byType) && valuation.byType.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <SectionHeader title="Valuation by type" subtitle="On-hand value at cost" />
+            <Table head={['Type', 'Lots', 'Qty (MT)', 'Value (PKR)']} align={['left', 'right', 'right', 'right']}
+              rows={valuation.byType.map(v => [
+                <span className="capitalize">{v.type || '—'}</span>, v.lotCount || 0,
+                (parseFloat(v.totalQty) || 0).toLocaleString(undefined, { maximumFractionDigits: 1 }), fmtPKR(v.totalValue),
+              ])} />
+          </div>
+          <div className="space-y-2">
+            <SectionHeader title="Valuation by warehouse" subtitle="Where the value sits" />
+            <Table head={['Warehouse', 'Lots', 'Qty (MT)', 'Value (PKR)']} align={['left', 'right', 'right', 'right']}
+              rows={(valuation.byWarehouse || []).map(v => [
+                v.warehouseName || '—', v.lotCount || 0,
+                (parseFloat(v.totalQty) || 0).toLocaleString(undefined, { maximumFractionDigits: 1 }), fmtPKR(v.totalValue),
+              ])} />
+          </div>
+        </div>
+      )}
+      {Array.isArray(turnover.byType) && turnover.byType.length > 0 && (
+        <div className="space-y-2">
+          <SectionHeader title="Stock turnover" subtitle={`How long stock sits before it moves — overall avg ${(parseFloat(turnover.overallAvgDays) || 0).toFixed(0)} days`} />
+          <Table head={['Type', 'Lots', 'Qty (MT)', 'Avg days held']} align={['left', 'right', 'right', 'right']}
+            rows={turnover.byType.map(t => [
+              <span className="capitalize">{t.type || '—'}</span>, t.lotCount || 0,
+              (parseFloat(t.totalQty) || 0).toLocaleString(undefined, { maximumFractionDigits: 1 }),
+              (parseFloat(t.avgDays) || 0).toFixed(0),
+            ])} />
+        </div>
+      )}
 
       {hasAging ? (
         <>
