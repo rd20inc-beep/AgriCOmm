@@ -635,6 +635,10 @@ export function useRecordPayment() {
       qc.invalidateQueries({ queryKey: queryKeys.payables.all });
       qc.invalidateQueries({ queryKey: queryKeys.financeOverview });
       qc.invalidateQueries({ queryKey: queryKeys.journals.all });
+      qc.invalidateQueries({ queryKey: queryKeys.bankAccounts.all });
+      qc.invalidateQueries({ queryKey: ['mill-expenses'] });
+      qc.invalidateQueries({ queryKey: ['mill-cash-flow'] });
+      qc.invalidateQueries({ queryKey: ['finance-bank-transactions'] });
     },
   });
 }

@@ -500,6 +500,12 @@ router.get('/expenses', authorize('milling', 'view'), async (req, res) => {
     let query = db('business_expenses as e')
       .where('e.expense_type', 'mill')
       .leftJoin('suppliers as s', 's.id', 'e.supplier_id')
+      // The 1:1 payable for this expense (source_table='business_expenses') —
+      // lets the UI pay it through the same payable/Money-Out drawer (with the
+      // voucher/invoice), and shows live paid/outstanding.
+      .leftJoin('payables as pa', function () {
+        this.on('pa.source_table', db.raw("'business_expenses'")).andOn('pa.source_id', 'e.id');
+      })
       .select(
         'e.id', 'e.expense_no', 'e.category', 'e.subcategory', 'e.description',
         db.raw('e.amount_pkr as amount'),
@@ -510,7 +516,11 @@ router.get('/expenses', authorize('milling', 'view'), async (req, res) => {
         'e.vendor_name', 'e.is_recurring', 'e.recurrence', 'e.employee_id',
         'e.notes', 'e.created_at', 'e.created_by',
         db.raw("TO_CHAR(e.expense_date, 'YYYY-MM') as period"),
-        's.name as supplier_name', 'w.name as employee_name'
+        's.name as supplier_name', 'w.name as employee_name',
+        'pa.id as payable_id', 'pa.pay_no', 'pa.original_amount as payable_original',
+        'pa.paid_amount as payable_paid', 'pa.outstanding as payable_outstanding',
+        'pa.status as payable_status', 'pa.linked_ref', 'pa.currency as payable_currency',
+        'pa.entity as payable_entity', 'pa.supplier_id as payable_supplier_id'
       )
       .leftJoin('mill_workers as w', 'w.id', 'e.employee_id')
       // Newest first; created_at tie-breaks rows on the same date so the

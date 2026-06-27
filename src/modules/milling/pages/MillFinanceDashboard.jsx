@@ -16,8 +16,10 @@ import {
   usePayrollSummary, useRecordAttendance, useAttendance, useBulkAttendance, useAttendanceHolidays, useInventory, useExpenseVendors,
   usePayrollRuns, usePostPayrollRun, useDeletePayrollRun, usePayrollRun, usePayrollReport, useBankAccounts,
   usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow, useAcceptFundTransfer,
-  useMillLotCosts, useLocalSales, usePayPurchase,
+  useMillLotCosts, useLocalSales, useRecordPayment, usePayablePayments,
 } from '../../../api/queries';
+import TransactionDocument from '../../../components/TransactionDocument';
+import StatusBadge from '../../../components/StatusBadge';
 import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import SlideDrawer from '../../../components/SlideDrawer';
 import SearchSelect from '../../../shared/components/SearchSelect';
@@ -2135,83 +2137,161 @@ export default function MillFinanceDashboard() {
       )}
 
       {/* Pay a specific mill expense (electricity, fuel, salaries, …). */}
-      <ExpensePayDrawer expense={payExpense} bankAccounts={bankAccountsList} addToast={addToast} onClose={() => setPayExpense(null)} />
+      <ExpensePayDrawer expense={payExpense} bankAccounts={bankAccountsList} companyProfile={companyProfileData} addToast={addToast} onClose={() => setPayExpense(null)} />
     </div>
   );
 }
 
-// Pay a single mill expense via the unified pay-purchase flow (source='expense').
-// Marks the business_expense paid, settles its payable, moves the bank account.
-function ExpensePayDrawer({ expense, bankAccounts = [], addToast, onClose }) {
-  const payMut = usePayPurchase();
-  const total = expense ? (parseFloat(expense.amountPkr) || parseFloat(expense.amount) || 0) : 0;
-  const paid = expense ? (parseFloat(expense.paidAmount) || 0) : 0;
-  const outstanding = Math.max(0, total - paid);
-  const [amount, setAmount] = useState('');
-  const [method, setMethod] = useState('cash');
-  const [bankId, setBankId] = useState('');
-  const [ref, setRef] = useState('');
+// Pay a single mill expense — mirrors the Finance → Money Out payable drawer:
+// amount summary, details, payments-made history, a printable voucher/invoice
+// (TransactionDocument), and the payment form. Pays the expense's linked payable
+// via recordPayment (which also marks the business_expense Paid + moves the bank).
+const EXP_METHOD_LABEL = { bank_transfer: 'Bank Transfer', cheque: 'Cheque', cash: 'Cash', online: 'Online', mobile: 'Mobile' };
+function ExpensePayDrawer({ expense, bankAccounts = [], companyProfile, addToast, onClose }) {
+  const recordMut = useRecordPayment();
+  const payableId = expense?.payableId || null;
+  const { data: payHistory, isLoading: payHistLoading } = usePayablePayments(payableId, !!payableId);
+  const total = expense ? (parseFloat(expense.payableOriginal) || parseFloat(expense.amount) || 0) : 0;
+  const paid = expense ? (parseFloat(expense.payablePaid) || 0) : 0;
+  const outstanding = expense ? (expense.payableOutstanding != null ? parseFloat(expense.payableOutstanding) : Math.max(0, total - paid)) : 0;
+  const status = expense?.payableStatus || expense?.paymentStatus || 'Pending';
+  const [form, setForm] = useState({ amount: '', bankAccountId: '', paymentMethod: 'cash', paymentDate: new Date().toISOString().split('T')[0], chequeNo: '', dueDate: '', notes: '' });
   useEffect(() => {
-    if (expense) { setAmount(String(Math.round(outstanding))); setMethod('cash'); setBankId(''); setRef(''); }
+    if (expense) setForm({ amount: String(Math.round(outstanding) || ''), bankAccountId: '', paymentMethod: 'cash', paymentDate: new Date().toISOString().split('T')[0], chequeNo: '', dueDate: '', notes: '' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expense]);
   if (!expense) return null;
   const PKR = (n) => `Rs ${Math.round(parseFloat(n) || 0).toLocaleString()}`;
+  const bankOnly = bankAccounts.filter(a => a.type !== 'cash');
 
-  async function pay() {
-    const amt = parseFloat(amount);
-    if (!(amt > 0)) { addToast?.('Enter an amount', 'error'); return; }
+  // Voucher/invoice payload (same shape TransactionDocument uses on Money Out).
+  const voucher = {
+    payNo: expense.payNo || expense.expenseNo, category: expense.category, entity: expense.payableEntity || 'mill',
+    originalAmount: total, paidAmount: paid, outstanding, supplierId: expense.payableSupplierId || expense.supplierId,
+    supplierName: expense.vendorName || expense.supplierName || expense.employeeName || expense.linkedRef,
+    linkedRef: expense.linkedRef, currency: 'PKR', status, description: expense.description, date: expense.expenseDate,
+  };
+
+  async function pay(e) {
+    e?.preventDefault?.();
+    const amt = parseFloat(form.amount);
+    if (!(amt > 0)) { addToast?.('Enter a valid amount', 'error'); return; }
+    if (!payableId) { addToast?.('This expense has no payable to settle.', 'error'); return; }
     try {
-      await payMut.mutateAsync({
-        source: 'expense', source_id: expense.id, amount: amt,
-        bank_account_id: bankId || null, payment_method: method, payment_reference: ref || null,
+      await recordMut.mutateAsync({
+        type: 'payment', amount: amt, currency: 'PKR',
+        payment_method: form.paymentMethod, payment_date: form.paymentDate,
+        bank_account_id: form.bankAccountId || null, bank_reference: form.chequeNo || null,
+        due_date: form.dueDate || null, linked_payable_id: payableId,
+        notes: form.notes || `Payment for ${voucher.payNo} — ${expense.description || expense.category}`,
       });
-      addToast?.(`Paid ${PKR(amt)} — ${expense.description || expense.category}`, 'success');
+      addToast?.(`Payment of ${PKR(amt)} recorded — ${expense.description || expense.category}`, 'success');
       onClose();
-    } catch (err) { addToast?.(err?.data?.message || err.message || 'Payment failed', 'error'); }
+    } catch (err) { addToast?.(`Failed: ${err?.data?.message || err.message || 'Payment failed'}`, 'error'); }
   }
 
-  const footer = (
+  const footer = status !== 'Paid' && outstanding > 0 ? (
     <div className="flex justify-end gap-2">
       <button onClick={onClose} className="px-3 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
-      <button onClick={pay} disabled={payMut.isPending} className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">
-        <Banknote className="w-4 h-4" /> {payMut.isPending ? 'Paying…' : 'Record Payment'}
+      <button onClick={pay} disabled={recordMut.isPending} className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">
+        <Banknote className="w-4 h-4" /> {recordMut.isPending ? 'Recording…' : 'Record Payment'}
       </button>
     </div>
-  );
+  ) : null;
 
   return (
-    <SlideDrawer open={!!expense} onClose={onClose} title="Pay Expense" subtitle={expense.description || expense.category} icon={Banknote} size="md" footer={footer}>
+    <SlideDrawer open={!!expense} onClose={onClose} title={voucher.payNo || 'Pay Expense'} subtitle={expense.description || expense.category} icon={Banknote} size="lg" footer={footer}>
       <div className="space-y-4">
-        <div className="bg-gray-50 rounded-lg p-3 text-sm space-y-1">
-          <div className="flex justify-between"><span className="text-gray-500">Category</span><span className="font-medium capitalize">{expense.category}</span></div>
-          <div className="flex justify-between"><span className="text-gray-500">Total</span><span className="font-medium">{PKR(total)}</span></div>
-          <div className="flex justify-between"><span className="text-gray-500">Outstanding</span><span className="font-semibold text-amber-700">{PKR(outstanding)}</span></div>
+        {/* Amount summary */}
+        <div className="grid grid-cols-3 gap-3">
+          <div className="bg-gray-50 rounded-lg p-3 text-center"><p className="text-xs text-gray-500">Original</p><p className="text-sm font-semibold">{PKR(total)}</p></div>
+          <div className="bg-emerald-50 rounded-lg p-3 text-center"><p className="text-xs text-emerald-600">Paid</p><p className="text-sm font-semibold text-emerald-700">{PKR(paid)}</p></div>
+          <div className="bg-red-50 rounded-lg p-3 text-center"><p className="text-xs text-red-600">Outstanding</p><p className="text-sm font-semibold text-red-700">{PKR(outstanding)}</p></div>
         </div>
+
+        {/* Details */}
+        <div className="grid grid-cols-2 gap-3 text-sm">
+          <div><p className="text-xs text-gray-500">Category</p><p className="capitalize">{expense.category}</p></div>
+          <div><p className="text-xs text-gray-500">Vendor / Ref</p><p>{voucher.supplierName || '—'}</p></div>
+          <div><p className="text-xs text-gray-500">Date</p><p>{expense.expenseDate || '—'}</p></div>
+          <div><p className="text-xs text-gray-500">Status</p><StatusBadge status={status} /></div>
+        </div>
+
+        {/* Payments made */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Amount (Rs)</label>
-          <input type="number" value={amount} onChange={e => setAmount(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500" />
+          <h3 className="text-sm font-semibold text-gray-700 mb-2">Payments Made</h3>
+          {payHistLoading ? <p className="text-xs text-gray-400 py-2">Loading payments…</p>
+            : (payHistory?.payments?.length ? (
+              <div className="space-y-2">
+                {payHistory.payments.map((p, idx) => {
+                  let from = [p.accountName, p.bankName].filter(Boolean).join(' · ');
+                  if (!from) from = p.paymentMethod === 'cash' ? 'Cash (in hand)' : '—';
+                  return (
+                    <div key={p.id || idx} className="border border-gray-200 rounded-lg px-3 py-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-semibold text-emerald-700">{PKR(p.amount)}</span>
+                        <span className="text-xs text-gray-500">{p.paymentDate ? new Date(p.paymentDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-gray-500">
+                        <span>Method: <span className="font-medium text-gray-700">{EXP_METHOD_LABEL[p.paymentMethod] || p.paymentMethod || '—'}</span></span>
+                        <span>From: <span className="font-medium text-gray-700">{from}</span></span>
+                        {p.bankReference && <span>Ref: <span className="font-medium text-gray-700">{p.bankReference}</span></span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : <p className="text-xs text-gray-400 py-2">No payments recorded yet.</p>)}
         </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Method</label>
-          <select value={method} onChange={e => setMethod(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500">
-            <option value="cash">Cash</option>
-            <option value="bank_transfer">Bank Transfer</option>
-            <option value="cheque">Cheque</option>
-          </select>
+
+        {/* Printable voucher / invoice */}
+        <div className="pt-2 border-t border-gray-100">
+          <TransactionDocument kind="voucher" data={voucher} companyProfile={companyProfile} />
         </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Pay from account</label>
-          <select value={bankId} onChange={e => setBankId(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500">
-            <option value="">— none —</option>
-            {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}{a.bankName ? ` (${a.bankName})` : ''}</option>)}
-          </select>
-        </div>
-        {method === 'cheque' && (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Cheque #</label>
-            <input value={ref} onChange={e => setRef(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500" />
-          </div>
+
+        {/* Payment form */}
+        {status !== 'Paid' && outstanding > 0 && (
+          <form onSubmit={pay} className="pt-3 border-t border-gray-200 space-y-4">
+            <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2"><Banknote size={15} /> Record Payment</h3>
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">Payment Method</label>
+              <select value={form.paymentMethod}
+                onChange={e => { const m = e.target.value; setForm({ ...form, paymentMethod: m, bankAccountId: (m === 'cash' || m === 'cheque') ? '' : form.bankAccountId }); }}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                <option value="cash">Cash</option>
+                <option value="bank_transfer">Bank Transfer</option>
+                <option value="cheque">Cheque</option>
+                <option value="online">Online Payment</option>
+                <option value="mobile">Mobile Transfer</option>
+              </select>
+            </div>
+            {form.paymentMethod === 'cheque' && (
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="text-xs text-gray-500 block mb-1">Cheque # <span className="text-gray-300">(optional)</span></label>
+                  <input value={form.chequeNo} onChange={e => setForm({ ...form, chequeNo: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="e.g. 004512" /></div>
+                <div><label className="text-xs text-gray-500 block mb-1">Cheque date</label>
+                  <input type="date" value={form.dueDate} onChange={e => setForm({ ...form, dueDate: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" /></div>
+              </div>
+            )}
+            {form.paymentMethod !== 'cash' && form.paymentMethod !== 'cheque' && (
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Pay From Account</label>
+                <select required value={form.bankAccountId} onChange={e => setForm({ ...form, bankAccountId: e.target.value })}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                  <option value="">Select account...</option>
+                  {bankOnly.map(a => <option key={a.id} value={a.id}>{a.name}{a.bankName ? ` — ${a.bankName}` : ''} ({Math.round(parseFloat(a.currentBalance) || 0).toLocaleString()})</option>)}
+                </select>
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="text-xs text-gray-500 block mb-1">Amount (Rs)</label>
+                <input type="number" step="0.01" required value={form.amount} max={outstanding} onChange={e => setForm({ ...form, amount: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" /></div>
+              <div><label className="text-xs text-gray-500 block mb-1">Payment Date</label>
+                <input type="date" required value={form.paymentDate} onChange={e => setForm({ ...form, paymentDate: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" /></div>
+            </div>
+            <div><label className="text-xs text-gray-500 block mb-1">Notes (optional)</label>
+              <input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" /></div>
+          </form>
         )}
       </div>
     </SlideDrawer>
