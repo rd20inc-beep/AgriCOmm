@@ -297,8 +297,10 @@ Stock Value     = on-hand qty × cost/kg   (NOT frozen landed_cost_total)
 - ✅ CSV export (`exportLedgerCSV`, reuses app-wide downloadCSV) + Print via a shared `LedgerExportBar` wired into all 5 ledgers: Lot Activity, Batch Processing, Inventory Movement (respects type filter), Finished Goods, Sale 360 items.
 - Excel: CSV is natively Excel-compatible — no XLSX dependency added (anti-over-engineering). Customer/Supplier ledger already prints via PartyLedger. Logo: company name in header (image logo deferred to avoid cross-window load issues).
 
-### Phase 4 — Role-based dashboards
-- Owner/Admin full · Finance financial · Mill Manager production+inventory+lot/batch · **Mill Operator production-only** (needs the one additive role/permission — see §12).
+### Phase 4 — Role-based dashboards — ✅ DONE (shipped #73, prod-verified)
+- ✅ Additive **Mill Operator** role (migration 200): production perms only (reports.view, milling, inventory.view, mill_store) — NO finance/export/admin/reports.export. Purely additive; no existing role/permission/user touched. Verified on prod: role exists, finance endpoint 403s for an operator token.
+- ✅ Production-only operator dashboard (`operatorScoped`): Reports limited to Production · Quality · Inventory; money KPI strip hidden; Inventory shown quantity-only (no value/cost columns anywhere, incl. CSV/print). Production-view banner.
+- Owner/Super Admin/Finance keep full reports; Mill Manager keeps its existing finance-capable mill view (it legitimately holds finance perms — the plan matrix's finance-free "Mill Manager" column is realised as the new Mill Operator). Assign users to the new role via Admin → Users (it appears automatically in the role list).
 
 ### Phase 5 — Future (explicitly out of scope now)
 Self-serve report builder · configurable widgets · scheduled/emailed reports · full AI analyst · mobile reporting app · analytics warehouse · multi-branch.
