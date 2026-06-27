@@ -255,41 +255,50 @@ const financeController = {
         .leftJoin('customers as c', 'c.id', 'r.customer_id')
         .leftJoin('suppliers as s', 's.id', 'pa.supplier_id')
         .where('p.payment_method', 'cheque').whereNotNull('p.due_date').where('p.cleared', false)
-        .select('p.id', 'p.type', 'p.amount', 'p.due_date', 'p.bank_reference',
+        .select('p.id', 'p.type', 'p.amount', 'p.currency', 'p.fx_rate', 'p.base_amount_pkr', 'p.due_date', 'p.bank_reference',
           'r.customer_id as recv_customer_id', 'pa.supplier_id as pay_supplier_id', 'ls.customer_id as ls_customer_id',
           db.raw("COALESCE(c.name, s.name, ls.buyer_name, 'Counterparty') as party"));
 
       const recv = await db('receivables as r').leftJoin('customers as c', 'c.id', 'r.customer_id')
         .whereNot('r.status', 'Paid').whereNotNull('r.due_date').where('r.outstanding', '>', 0)
-        .select('r.outstanding as amount', 'r.due_date', 'r.customer_id', db.raw("COALESCE(c.name, 'Customer') as party"), 'r.recv_no as ref');
+        .select('r.outstanding as amount', 'r.currency', 'r.fx_rate', 'r.due_date', 'r.customer_id', db.raw("COALESCE(c.name, 'Customer') as party"), 'r.recv_no as ref');
       const lsCredit = await db('local_sales as ls').leftJoin('customers as c', 'c.id', 'ls.customer_id')
         .where('ls.due_amount', '>', 0).whereNotNull('ls.due_date')
         .select('ls.due_amount as amount', 'ls.due_date', 'ls.customer_id', 'ls.sale_no as ref', db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as party"));
       const pay = await db('payables as pa').leftJoin('suppliers as s', 's.id', 'pa.supplier_id')
         .whereNot('pa.status', 'Paid').whereNotNull('pa.due_date').where('pa.outstanding', '>', 0)
-        .select('pa.outstanding as amount', 'pa.due_date', 'pa.supplier_id', 'pa.linked_ref as ref', db.raw("COALESCE(s.name, 'Supplier') as party"));
+        .select('pa.outstanding as amount', 'pa.currency', 'pa.due_date', 'pa.supplier_id', 'pa.linked_ref as ref', db.raw("COALESCE(s.name, 'Supplier') as party"));
+
+      // Each row carries its native currency + a PKR equivalent (for totals).
+      const toPkr = (amt, cur, fx) => ((cur || 'PKR').toUpperCase() === 'PKR' ? amt : amt * (parseFloat(fx) || 280));
 
       // A cheque receipt is against a customer, a cheque payment against a supplier.
-      const chq = (t) => cheques.filter((x) => x.type === t).map((x) => ({
-        kind: 'cheque', label: 'Cheque (pending)', dueDate: x.due_date, amount: parseFloat(x.amount) || 0,
-        party: x.party, reference: x.bank_reference, paymentId: x.id,
-        partyType: t === 'receipt' ? 'customer' : 'supplier',
-        partyId: t === 'receipt' ? (x.recv_customer_id || x.ls_customer_id || null) : (x.pay_supplier_id || null),
-      }));
+      const chq = (t) => cheques.filter((x) => x.type === t).map((x) => {
+        const amount = parseFloat(x.amount) || 0;
+        const currency = (x.currency || 'PKR').toUpperCase();
+        return {
+          kind: 'cheque', label: 'Cheque (pending)', dueDate: x.due_date, amount, currency,
+          amountPkr: parseFloat(x.base_amount_pkr) || toPkr(amount, currency, x.fx_rate),
+          party: x.party, reference: x.bank_reference, paymentId: x.id,
+          partyType: t === 'receipt' ? 'customer' : 'supplier',
+          partyId: t === 'receipt' ? (x.recv_customer_id || x.ls_customer_id || null) : (x.pay_supplier_id || null),
+        };
+      });
       const receiving = [
         ...chq('receipt'),
-        ...recv.map((x) => ({ kind: 'credit', label: 'Receivable', dueDate: x.due_date, amount: parseFloat(x.amount) || 0, party: x.party, reference: x.ref, partyType: 'customer', partyId: x.customer_id || null })),
-        ...lsCredit.map((x) => ({ kind: 'credit', label: 'Local sale (credit)', dueDate: x.due_date, amount: parseFloat(x.amount) || 0, party: x.party, reference: x.ref, partyType: 'customer', partyId: x.customer_id || null })),
+        ...recv.map((x) => { const amount = parseFloat(x.amount) || 0; const currency = (x.currency || 'PKR').toUpperCase(); return { kind: 'credit', label: 'Receivable', dueDate: x.due_date, amount, currency, amountPkr: toPkr(amount, currency, x.fx_rate), party: x.party, reference: x.ref, partyType: 'customer', partyId: x.customer_id || null }; }),
+        ...lsCredit.map((x) => ({ kind: 'credit', label: 'Local sale (credit)', dueDate: x.due_date, amount: parseFloat(x.amount) || 0, currency: 'PKR', amountPkr: parseFloat(x.amount) || 0, party: x.party, reference: x.ref, partyType: 'customer', partyId: x.customer_id || null })),
       ].sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
       const giving = [
         ...chq('payment'),
-        ...pay.map((x) => ({ kind: 'credit', label: 'Payable', dueDate: x.due_date, amount: parseFloat(x.amount) || 0, party: x.party, reference: x.ref, partyType: 'supplier', partyId: x.supplier_id || null })),
+        ...pay.map((x) => { const amount = parseFloat(x.amount) || 0; const currency = (x.currency || 'PKR').toUpperCase(); return { kind: 'credit', label: 'Payable', dueDate: x.due_date, amount, currency, amountPkr: toPkr(amount, currency, null), party: x.party, reference: x.ref, partyType: 'supplier', partyId: x.supplier_id || null }; }),
       ].sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
 
       return res.json({ success: true, data: {
         receiving, giving,
-        totalReceiving: receiving.reduce((s, x) => s + x.amount, 0),
-        totalGiving: giving.reduce((s, x) => s + x.amount, 0),
+        // Totals are PKR-equivalent (the lists can mix PKR + USD rows).
+        totalReceiving: receiving.reduce((s, x) => s + (x.amountPkr || 0), 0),
+        totalGiving: giving.reduce((s, x) => s + (x.amountPkr || 0), 0),
       } });
     } catch (err) {
       console.error('getUpcoming error:', err);

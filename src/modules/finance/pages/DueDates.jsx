@@ -4,6 +4,9 @@ import { useUpcoming, useClearCheque } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
 
 const fmtPKR = (n) => `Rs ${Math.round(parseFloat(n) || 0).toLocaleString()}`;
+// Format an amount in its own currency (USD export receivables vs PKR dues).
+const CUR_SYMBOL = { USD: '$', PKR: 'Rs', EUR: '€' };
+const fmtMoney = (n, cur) => `${CUR_SYMBOL[(cur || 'PKR').toUpperCase()] || (cur + ' ')}${Math.round(parseFloat(n) || 0).toLocaleString()}`;
 const fmtDate = (s) => s ? new Date(s).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 const isOverdue = (s) => s && new Date(s) < new Date(new Date().toDateString());
 
@@ -44,7 +47,10 @@ function List({ title, icon: Icon, tone, items, total, onClear, clearing }) {
                     <span className={`text-[11px] px-2 py-0.5 rounded-full ${x.kind === 'cheque' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>{x.label}</span>
                     {x.reference && <span className="ml-1.5 text-[11px] text-gray-400 font-mono">{x.reference}</span>}
                   </td>
-                  <td className="py-2 px-4 text-right tabular-nums font-medium text-gray-900">{fmtPKR(x.amount)}</td>
+                  <td className="py-2 px-4 text-right tabular-nums font-medium text-gray-900">
+                    {fmtMoney(x.amount, x.currency)}
+                    {x.currency && x.currency !== 'PKR' && x.amountPkr ? <span className="block text-[10px] text-gray-400 font-normal">≈ {fmtPKR(x.amountPkr)}</span> : null}
+                  </td>
                   <td className="py-2 px-4 text-right">
                     {x.paymentId && (
                       <button onClick={() => onClear(x)} disabled={clearing}
@@ -73,7 +79,7 @@ export default function DueDates() {
   async function onClear(x) {
     try {
       await clearMut.mutateAsync({ id: x.paymentId });
-      addToast?.(`Cheque cleared — ${fmtPKR(x.amount)} applied`, 'success');
+      addToast?.(`Cheque cleared — ${fmtMoney(x.amount, x.currency)} applied`, 'success');
     } catch (err) {
       addToast?.(err?.data?.message || err.message || 'Failed to clear cheque', 'error');
     }
