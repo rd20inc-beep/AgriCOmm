@@ -76,7 +76,10 @@ const purchaseLineSchema = Joi.object({
 });
 
 const createPurchaseSchema = Joi.object({
-  supplier_id: Joi.number().integer().allow(null).optional(),
+  supplier_id: Joi.number().integer().positive().required().messages({
+    'any.required': 'A supplier is required for a purchase.',
+    'number.base': 'A supplier is required for a purchase.',
+  }),
   invoice_number: Joi.string().max(100).allow(null, '').optional(),
   purchase_date: Joi.date().required(),
   notes: Joi.string().allow(null, '').optional(),

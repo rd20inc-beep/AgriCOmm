@@ -28,6 +28,7 @@ export default function NewPurchase() {
 
   async function handleSubmit(e) {
     e.preventDefault();
+    if (!supplierId) { addToast('Select a supplier', 'error'); return; }
     const validLines = lines.filter(l => l.item_id && Number(l.quantity) > 0 && Number(l.cost_per_unit) >= 0);
     if (validLines.length === 0) { addToast('Add at least one line item', 'error'); return; }
 
@@ -72,13 +73,14 @@ export default function NewPurchase() {
         <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Supplier <span className="text-gray-400 normal-case font-normal">(optional)</span></label>
+              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Supplier <span className="text-red-500">*</span></label>
               <select
                 value={supplierId}
                 onChange={(e) => setSupplierId(e.target.value)}
                 className="form-input w-full text-sm"
+                required
               >
-                <option value="">No supplier (cash / walk-in)</option>
+                <option value="">Select supplier…</option>
                 {(suppliersList || []).map(s => (
                   <option key={s.id} value={s.id}>{s.name}</option>
                 ))}

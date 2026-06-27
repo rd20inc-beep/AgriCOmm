@@ -56,6 +56,7 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved }) {
     lines.reduce((s, l) => s + (Number(l.quantity) || 0) * (Number(l.cost_per_unit) || 0), 0), [lines]);
 
   async function handleSubmit() {
+    if (!supplierId) { addToast('Select a supplier (or add a new one)', 'error'); return; }
     const validLines = lines.filter(l => l.item_id && Number(l.quantity) > 0 && Number(l.cost_per_unit) >= 0);
     if (validLines.length === 0) { addToast('Add at least one line item', 'error'); return; }
     // Packaging lines need a Bag Kg so we know how much rice each bag holds.
@@ -122,13 +123,12 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved }) {
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2">
             <SupplierPicker
-              label="Supplier (optional)"
+              label={<>Supplier <span className="text-red-500">*</span></>}
               value={supplierId}
               onChange={setSupplierId}
               suppliers={suppliersList || []}
               addToast={addToast}
-              clearable
-              placeholder="Search supplier (or leave blank for cash / walk-in)…"
+              placeholder="Search supplier (or + Add new)…"
             />
           </div>
           <div>
