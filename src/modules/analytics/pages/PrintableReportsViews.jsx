@@ -575,7 +575,7 @@ export function PurchaseLedgerView({ data, companyName, range }) {
               const outLabel = d.outputType === 'finished' ? 'Finished sold' : `${d.outputItem || 'By-product'} sold`;
               kids.push([
                 outLabel,
-                d.batchId ? <RefLink to={`/milling/${d.batchId}`}>{d.batchNo}</RefLink> : (d.batchNo || '—'),
+                d.saleId ? <RefLink to={`/local-sales/${d.saleId}`}>{d.saleNo}</RefLink> : (d.saleNo || '—'),
                 d.customerId ? <RefLink to={`/finance/statements?type=customer&id=${d.customerId}`}>{d.customer}</RefLink> : (d.customer || '—'),
                 d.outputType === 'finished' ? (d.outputItem || 'Finished') : (d.outputItem || '—'), '',
                 fmtMt(d.kg / 1000), fmtKg(d.kg), fmtPkr(d.ratePerKg), '', fmtPkr(d.valuePkr), d.paymentStatus || '—',

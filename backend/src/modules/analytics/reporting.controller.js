@@ -1166,7 +1166,7 @@ const reportingController = {
           const outSales = outIds.length
             ? await db('local_sales as ls').leftJoin('customers as c', 'ls.customer_id', 'c.id')
               .whereIn('ls.lot_id', outIds)
-              .select('ls.lot_id', 'ls.sale_no', 'ls.sale_date', 'ls.quantity_kg', 'ls.rate_per_kg',
+              .select('ls.id as sale_id', 'ls.lot_id', 'ls.sale_no', 'ls.sale_date', 'ls.quantity_kg', 'ls.rate_per_kg',
                 'ls.total_amount', 'ls.payment_status', 'ls.customer_id',
                 db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer"))
               .orderBy('ls.sale_date', 'asc')
@@ -1179,7 +1179,7 @@ const reportingController = {
             (salesByBatch[bid] = salesByBatch[bid] || []).push({
               batchId: bid, batchNo: batchNoById[bid],
               outputType: om.type, outputItem: om.grade || om.item_name,
-              saleNo: s.sale_no, date: s.sale_date, customer: s.customer, customerId: s.customer_id || null,
+              saleId: s.sale_id, saleNo: s.sale_no, date: s.sale_date, customer: s.customer, customerId: s.customer_id || null,
               kg: parseFloat(s.quantity_kg) || 0, ratePerKg: parseFloat(s.rate_per_kg) || 0,
               valuePkr: parseFloat(s.total_amount) || 0, paymentStatus: s.payment_status,
             });
