@@ -14,7 +14,7 @@ import {
   useExecutiveSummary, useOrderProfitability, useCustomerProfitability,
   useCountryAnalysis, useStockAgingReport, useSupplierQualityRanking,
   usePayments, useReceivables, usePayables, usePrintableStock,
-  useLocalSales, usePurchases, useBatchMargin, useLotTracker,
+  useLocalSales, usePurchases, useBatchMargin, useLotTracker, useSalesTracker,
 } from '../../../api/queries';
 import SlideDrawer from '../../../components/SlideDrawer';
 import TransactionDocument from '../../../components/TransactionDocument';
@@ -224,7 +224,9 @@ export default function Reports() {
             ? <BatchMarginBreakdown b={doc.data} />
             : doc.kind === 'lot'
               ? <LotTrackerPanel lot={doc.data} statementHref={statementHref} />
-              : <TransactionDocument kind={doc.kind} data={doc.data} companyProfile={companyProfileData} />)}
+              : doc.kind === 'sale'
+                ? <SaleTrackerPanel sale={doc.data} statementHref={statementHref} companyProfile={companyProfileData} />
+                : <TransactionDocument kind={doc.kind} data={doc.data} companyProfile={companyProfileData} />)}
       </SlideDrawer>
     </div>
   );
@@ -373,9 +375,10 @@ function paymentToDoc(kind, p) {
 
 // ─── Tab: Sales (local rice sales) ────────────────────────────────────
 function SalesTab({ params, statementHref, openDoc }) {
-  const { data: sales = [], isLoading } = useLocalSales(params);
+  const { from_date, to_date, entity } = params || {};
+  const { data: sales = [], isLoading } = useSalesTracker({ from: from_date, to: to_date, ...(entity ? { entity } : {}) });
   if (isLoading) return <Skeleton />;
-  const rows = Array.isArray(sales) ? sales : (sales?.sales || []);
+  const rows = Array.isArray(sales) ? sales : [];
   if (rows.length === 0) return <Empty msg="No sales in this period." />;
 
   const total = rows.reduce((s, r) => s + (parseFloat(r.totalAmount) || 0), 0);
@@ -384,7 +387,7 @@ function SalesTab({ params, statementHref, openDoc }) {
 
   return (
     <div className="space-y-5">
-      <SectionHeader title="Sales — local rice sales" subtitle="Every local sale; click a row for the downloadable invoice." />
+      <SectionHeader title="Sales — local rice sales" subtitle="Every local sale. Click a sale to trace its full lifecycle — what was sold, where it came from (supplier → lot → batch), the margin, and the downloadable invoice." />
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <SummaryCell label="Total Sales" value={fmtPKR(total)} />
         <SummaryCell label="Invoices" value={String(rows.length)} />
@@ -392,23 +395,107 @@ function SalesTab({ params, statementHref, openDoc }) {
         <SummaryCell label="Outstanding" value={fmtPKR(due)} />
       </div>
       <Table
-        head={['Date', 'Sale No', 'Customer', 'Items', 'Amount', 'Status']}
-        align={['left', 'left', 'left', 'right', 'right', 'left']}
-        rowClick={rows.map(s => () => openDoc?.({ kind: 'invoice', title: 'Sales Invoice', subtitle: s.customerName || s.buyerName, data: s }))}
+        head={['Date', 'Sale No', 'Customer', 'Item', 'Qty', 'Amount', 'Status']}
+        align={['left', 'left', 'left', 'left', 'right', 'right', 'left']}
+        rowClick={rows.map(s => () => openDoc?.({ kind: 'sale', title: s.saleNo, subtitle: s.customer, data: s }))}
         rows={rows.map(s => {
-          const cust = s.customerName || s.buyerName || 'Walk-in customer';
+          const cust = s.customerName || 'Walk-in customer';
           const href = statementHref?.('customer', s.customerId);
-          const nItems = Array.isArray(s.items) ? s.items.length : (s.itemCount || 1);
           return [
             s.saleDate ? new Date(s.saleDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—',
-            <span className="font-mono text-xs">{s.saleNo}</span>,
+            <span className="font-mono text-xs text-blue-600">{s.saleNo}</span>,
             href ? <Link to={href} onClick={(e) => e.stopPropagation()} className="font-medium text-blue-600 hover:underline">{cust}</Link> : <span className="font-medium">{cust}</span>,
-            nItems,
+            <span className="text-xs">{s.itemName || '—'}</span>,
+            mt2(s.quantityKg),
             <span className="font-semibold text-gray-900">{fmtPKR(s.totalAmount)}</span>,
             <StatusChip s={s.paymentStatus} />,
           ];
         })}
       />
+    </div>
+  );
+}
+
+// Slider: the full lifecycle of one sale (back-traced to supplier).
+function SaleTrackerPanel({ sale, statementHref, companyProfile }) {
+  const navigate = useNavigate();
+  const prov = sale.provenance || {};
+  const custHref = statementHref?.('customer', sale.customerId);
+  const Cell = ({ label, value }) => (
+    <div><p className="text-[11px] uppercase tracking-wider text-gray-400">{label}</p><p className="text-sm text-gray-800">{value}</p></div>
+  );
+  return (
+    <div className="space-y-5">
+      {/* Identity */}
+      <div className="grid grid-cols-2 gap-3">
+        <Cell label="Sale" value={<span className="font-mono">{sale.saleNo}</span>} />
+        <Cell label="Customer" value={custHref ? <Link to={custHref} className="text-blue-600 hover:underline">{sale.customerName}</Link> : (sale.customerName || '—')} />
+        <Cell label="Date" value={sale.saleDate ? new Date(sale.saleDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'} />
+        <Cell label="Payment" value={<><StatusBadgeMini s={sale.paymentStatus} /> {sale.dueAmount > 0 ? <span className="text-xs text-rose-600">{fmtPKR(sale.dueAmount)} due</span> : <span className="text-xs text-emerald-600">received</span>}</>} />
+      </div>
+
+      {/* What was sold */}
+      <div>
+        <h4 className="text-sm font-semibold text-gray-700 mb-2">What was sold</h4>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <Cell label="Item" value={`${sale.itemName || '—'}${sale.itemType ? ` (${sale.itemType})` : ''}`} />
+          <Cell label="Quantity" value={`${mt2(sale.quantityKg)}${sale.quantityBags ? ` · ${sale.quantityBags} bags` : ''}`} />
+          <Cell label="Rate / kg" value={sale.ratePerKg > 0 ? `Rs ${Math.round(sale.ratePerKg).toLocaleString()}` : '—'} />
+          <Cell label="From lot" value={sale.lotId ? <Link to={`/lot-inventory/${sale.lotId}`} className="text-blue-600 hover:underline font-mono text-xs">{sale.lotNo || '—'}</Link> : (sale.lotNo || '—')} />
+          {sale.collectionLocation && <Cell label="Collected at" value={sale.collectionLocation} />}
+        </div>
+      </div>
+
+      {/* Provenance — where it came from */}
+      <div>
+        <h4 className="text-sm font-semibold text-gray-700 mb-2">Where it came from</h4>
+        {prov.kind === 'milled' ? (
+          <div className="text-sm space-y-1.5">
+            <p>Milled in batch {prov.batchId ? <Link to={`/milling/${prov.batchId}`} className="text-blue-600 hover:underline">{prov.batchNo}</Link> : (prov.batchNo || '—')}, from:</p>
+            {(prov.rawLots || []).length > 0 ? (prov.rawLots || []).map((rl, i) => (
+              <div key={i} className="flex items-center justify-between border border-gray-100 rounded-lg px-3 py-1.5">
+                <span>{rl.lotId ? <Link to={`/lot-inventory/${rl.lotId}`} className="text-blue-600 hover:underline font-mono text-xs">{rl.lotNo}</Link> : <span className="font-mono text-xs">{rl.lotNo}</span>}
+                  {rl.supplier ? <> · {rl.supplierId ? <Link to={statementHref?.('supplier', rl.supplierId)} className="text-blue-600 hover:underline">{rl.supplier}</Link> : rl.supplier}</> : null}</span>
+                {rl.kg ? <span className="text-[11px] text-gray-400">{mt2(rl.kg)}</span> : null}
+              </div>
+            )) : <p className="text-xs text-gray-400">Raw source not recorded.</p>}
+          </div>
+        ) : prov.kind === 'raw' ? (
+          <p className="text-sm">Sold as raw rice — purchased lot {(prov.rawLots || [])[0]?.lotId ? <Link to={`/lot-inventory/${prov.rawLots[0].lotId}`} className="text-blue-600 hover:underline font-mono text-xs">{prov.rawLots[0].lotNo}</Link> : (prov.rawLots?.[0]?.lotNo || sale.lotNo || '—')}
+            {prov.rawLots?.[0]?.supplier ? <> from {prov.rawLots[0].supplierId ? <Link to={statementHref?.('supplier', prov.rawLots[0].supplierId)} className="text-blue-600 hover:underline">{prov.rawLots[0].supplier}</Link> : prov.rawLots[0].supplier}</> : null}.</p>
+        ) : (
+          <p className="text-xs text-gray-400">Source lot not linked to this sale.</p>
+        )}
+      </div>
+
+      {/* Financials */}
+      <div>
+        <h4 className="text-sm font-semibold text-gray-700 mb-2">Financials</h4>
+        <div className="rounded-lg border border-gray-200 overflow-hidden">
+          <table className="w-full text-sm">
+            <tbody className="divide-y divide-gray-100">
+              <tr><td className="px-3 py-2 text-gray-600">Sale value</td><td className="px-3 py-2 text-right tabular-nums font-medium">{fmtPKR(sale.totalAmount)}</td></tr>
+              <tr><td className="px-3 py-2 text-gray-600">Received</td><td className="px-3 py-2 text-right tabular-nums text-emerald-700">{fmtPKR(sale.paidAmount)}</td></tr>
+              <tr><td className="px-3 py-2 text-gray-600">Outstanding</td><td className={`px-3 py-2 text-right tabular-nums ${sale.dueAmount > 0 ? 'text-rose-700' : 'text-gray-500'}`}>{fmtPKR(sale.dueAmount)}</td></tr>
+              <tr><td className="px-3 py-2 text-gray-600">Cost of goods (landed)</td><td className="px-3 py-2 text-right tabular-nums">{sale.soldCostPerKg > 0 ? fmtPKR(sale.cost) : '—'}</td></tr>
+              <tr className="bg-gray-50">
+                <td className="px-3 py-2 font-semibold text-gray-800">Gross margin</td>
+                <td className={`px-3 py-2 text-right tabular-nums font-bold ${sale.margin >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{sale.soldCostPerKg > 0 ? <>{fmtPKR(sale.margin)} ({(parseFloat(sale.marginPct) || 0).toFixed(1)}%)</> : '—'}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Downloadable invoice */}
+      <div className="pt-2 border-t border-gray-100">
+        <TransactionDocument kind="invoice" data={sale} companyProfile={companyProfile} />
+      </div>
+
+      <button onClick={() => navigate(`/local-sales/${sale.saleId}`)}
+        className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
+        <ExternalLink size={14} /> Open sale detail
+      </button>
     </div>
   );
 }

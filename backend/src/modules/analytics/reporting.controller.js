@@ -1322,6 +1322,78 @@ const reportingController = {
     } catch (err) { console.error('Lot tracker error:', err); return res.status(500).json({ success: false, message: 'Internal server error.' }); }
   },
 
+  // ── Sales Tracker — one row per local sale with its FULL lifecycle traced
+  // BACKWARDS: the sold lot, its provenance (raw lot + supplier; for milled
+  // output → the batch and the raw lots that fed it), cost-of-goods vs sale
+  // margin, and payment. Powers the dashboard "Sales" tab Sale-360 slider. ──
+  async salesTracker(req, res) {
+    try {
+      const db = require('../../config/database');
+      const { entity, from, to } = req.query;
+      const num = (v) => parseFloat(v) || 0;
+      let q = db('local_sales as ls')
+        .leftJoin('customers as c', 'ls.customer_id', 'c.id')
+        .leftJoin('inventory_lots as il', 'ls.lot_id', 'il.id')
+        .leftJoin('suppliers as sup', 'il.supplier_id', 'sup.id');
+      if (entity) q = q.where('ls.entity', entity);
+      if (from) q = q.where('ls.sale_date', '>=', from);
+      if (to) q = q.where('ls.sale_date', '<=', to);
+      const sales = await q.select(
+        'ls.id', 'ls.sale_no', 'ls.sale_date', 'ls.item_name', 'ls.item_type', 'ls.quantity_kg', 'ls.quantity_bags',
+        'ls.rate_per_kg', 'ls.total_amount', 'ls.paid_amount', 'ls.due_amount', 'ls.payment_status', 'ls.payment_mode',
+        'ls.collection_location', 'ls.lot_id', 'ls.customer_id', db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer"),
+        'il.lot_no', 'il.type as lot_type', 'il.landed_cost_per_kg', 'il.batch_ref',
+        'il.supplier_id as lot_supplier_id', 'sup.name as lot_supplier',
+      ).orderBy('ls.sale_date', 'desc');
+
+      // Provenance for sold MILLED output: batch → raw source lots + suppliers.
+      const batchIds = [...new Set(sales.map((s) => s.batch_ref).filter(Boolean)
+        .map((r) => parseInt(String(r).replace(/^batch-/, ''), 10)).filter(Boolean))];
+      const rawByBatch = {}; const batchNoById = {};
+      if (batchIds.length) {
+        const srcs = await db('batch_source_lots as bsl')
+          .leftJoin('inventory_lots as src', 'bsl.lot_id', 'src.id')
+          .leftJoin('suppliers as s', 'src.supplier_id', 's.id')
+          .leftJoin('milling_batches as mb', 'bsl.batch_id', 'mb.id')
+          .whereIn('bsl.batch_id', batchIds)
+          .select('bsl.batch_id', 'bsl.qty_mt', 'mb.batch_no', 'src.id as raw_lot_id', 'src.lot_no as raw_lot_no',
+            'src.supplier_id as raw_supplier_id', 's.name as raw_supplier');
+        for (const r of srcs) {
+          batchNoById[r.batch_id] = r.batch_no;
+          (rawByBatch[r.batch_id] = rawByBatch[r.batch_id] || []).push({
+            lotId: r.raw_lot_id, lotNo: r.raw_lot_no, supplier: r.raw_supplier, supplierId: r.raw_supplier_id || null,
+            kg: num(r.qty_mt) * 1000,
+          });
+        }
+      }
+
+      const rows = sales.map((s) => {
+        const kg = num(s.quantity_kg); const total = num(s.total_amount); const cpk = num(s.landed_cost_per_kg);
+        const cost = cpk * kg; const margin = total - cost; const marginPct = total > 0 ? (margin / total) * 100 : 0;
+        let provenance;
+        if ((s.lot_type || '') === 'raw') {
+          provenance = { kind: 'raw', rawLots: s.lot_id ? [{ lotId: s.lot_id, lotNo: s.lot_no, supplier: s.lot_supplier, supplierId: s.lot_supplier_id || null }] : [] };
+        } else if (s.batch_ref) {
+          const bid = parseInt(String(s.batch_ref).replace(/^batch-/, ''), 10);
+          provenance = { kind: 'milled', batchId: bid, batchNo: batchNoById[bid], rawLots: rawByBatch[bid] || [] };
+        } else {
+          provenance = { kind: 'unknown', rawLots: [] };
+        }
+        return {
+          saleId: s.id, saleNo: s.sale_no, saleDate: s.sale_date,
+          customer: s.customer, customerName: s.customer, customerId: s.customer_id || null,
+          itemName: s.item_name, itemType: s.item_type, quantityKg: kg, quantityBags: s.quantity_bags,
+          ratePerKg: num(s.rate_per_kg), totalAmount: total, paidAmount: num(s.paid_amount), dueAmount: num(s.due_amount),
+          paymentStatus: s.payment_status, paymentMode: s.payment_mode, collectionLocation: s.collection_location,
+          lotId: s.lot_id, lotNo: s.lot_no, lotType: s.lot_type,
+          soldCostPerKg: cpk, cost, margin, marginPct,
+          provenance,
+        };
+      });
+      return res.json({ success: true, data: { rows, totals: { count: rows.length, valuePkr: rows.reduce((a, r) => a + r.totalAmount, 0), margin: rows.reduce((a, r) => a + r.margin, 0), due: rows.reduce((a, r) => a + r.dueAmount, 0) } } });
+    } catch (err) { console.error('Sales tracker error:', err); return res.status(500).json({ success: false, message: 'Internal server error.' }); }
+  },
+
   // ── Sales ledger — local sales + export orders, each clickable to its sale/order. ──
   async printableSalesLedger(req, res) {
     try {

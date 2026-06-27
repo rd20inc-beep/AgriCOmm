@@ -6,6 +6,7 @@ export const reportingApi = {
   batchProfitability: (params) => api.get('/api/reporting/profitability/batches', params),
   batchMargin: (params) => api.get('/api/reporting/profitability/batch-margin', params),
   lotTracker: (params) => api.get('/api/reporting/lot-tracker', params),
+  salesTracker: (params) => api.get('/api/reporting/sales-tracker', params),
   customerProfitability: (params) => api.get('/api/reporting/profitability/customers', params),
   countryAnalysis: (params) => api.get('/api/reporting/profitability/countries', params),
   supplierQualityRanking: (params) => api.get('/api/reporting/quality/supplier-ranking', params),

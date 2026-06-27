@@ -1658,6 +1658,18 @@ export function useLotTracker(params = {}) {
   });
 }
 
+export function useSalesTracker(params = {}) {
+  return useQuery({
+    queryKey: ['sales-tracker', params],
+    queryFn: async () => {
+      const res = await reportingApi.salesTracker(params);
+      const arr = res?.rows || res?.data?.rows || [];
+      return transformKeys(Array.isArray(arr) ? arr : []);
+    },
+    staleTime: 10 * 1000,
+  });
+}
+
 export function useBatchMargin(params = {}) {
   return useQuery({
     queryKey: ['batch-margin', params],
