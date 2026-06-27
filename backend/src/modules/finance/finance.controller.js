@@ -1689,12 +1689,19 @@ financeController.listPurchases = async (req, res) => {
     const millOnly = entity === 'mill';
     const all = [];
 
-    // ── Inventory lot purchases (raw / finished / byproduct) ──
+    // ── Inventory lot purchases (rice bought from a supplier) ──
     if (!wantSource || wantSource === 'lot') {
       let q = db('inventory_lots as il')
         .leftJoin('suppliers as s', 'il.supplier_id', 's.id')
         .leftJoin('users as creator', 'il.created_by', 'creator.id')
-        .where('il.landed_cost_total', '>', 0);
+        // A "purchase" is a lot ACQUIRED from a supplier — not a milling output.
+        // Exclude finished / by-product lots produced by a batch (they carry a
+        // batch_ref); keep raw purchases (even unpriced, so the buyer can spot a
+        // missing price) plus any directly-bought lot that already has a cost.
+        .whereRaw("NOT (il.type IN ('finished','byproduct') AND il.batch_ref IS NOT NULL)")
+        .where(function () {
+          this.where('il.landed_cost_total', '>', 0).orWhere('il.type', 'raw');
+        });
       if (millOnly) q = q.where('il.entity', 'mill');
       q = q
         .select(
@@ -1709,6 +1716,12 @@ financeController.listPurchases = async (req, res) => {
           's.name as supplier_name',
           db.raw("INITCAP(il.type) || ' ' || COALESCE(il.item_name, '') as category"),
           'il.payment_status',
+          // Per-lot detail for the expandable row (qty, per-kg, katta/bags).
+          'il.received_net_weight_kg as qty_kg',
+          'il.landed_cost_per_kg as rate_per_kg',
+          'il.total_bags as bags',
+          'il.bag_weight_kg as bag_weight_kg',
+          'il.type as lot_type',
           'creator.full_name as created_by_name',
           db.raw('NULL::text as approved_by_name'),
           db.raw('NULL::text as approved_at'),

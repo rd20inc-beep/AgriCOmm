@@ -1,11 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, Fragment } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext';
 import { useApp } from '../../../context/AppContext';
 import {
   BarChart3, TrendingUp, Users, Globe, Package, Award, Coins, Printer, RefreshCw,
   ArrowUpRight, ArrowDownLeft, Activity, Calendar, ExternalLink, AlertTriangle, FileText,
-  ShoppingCart, Truck, Receipt, Scale,
+  ShoppingCart, Truck, Receipt, Scale, ChevronDown, ChevronRight,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell,
@@ -412,6 +412,7 @@ function SalesTab({ params, statementHref, openDoc }) {
 // ─── Tab: Purchases (rice lots + mill store + expenses) ────────────────
 function PurchasesTab({ params, statementHref, openDoc }) {
   const { data, isLoading } = usePurchases(params);
+  const [open, setOpen] = useState(null); // expanded row key
   if (isLoading) return <Skeleton />;
   const rows = data?.purchases || [];
   if (rows.length === 0) return <Empty msg="No purchases in this period." />;
@@ -420,33 +421,104 @@ function PurchasesTab({ params, statementHref, openDoc }) {
   const total = parseFloat(totals.totalPkr ?? totals.total_pkr) || rows.reduce((s, r) => s + (parseFloat(r.amountPkr) || 0), 0);
   const unpaid = rows.filter(r => String(r.paymentStatus || '').toLowerCase() !== 'paid')
     .reduce((s, r) => s + (parseFloat(r.amountPkr) || 0), 0);
+  const keyOf = (r) => `${r.source}-${r.refId ?? r.ref}`;
 
   return (
     <div className="space-y-5">
-      <SectionHeader title="Purchases — rice, mill store & expenses" subtitle="Every purchase; click a row for the downloadable voucher." />
+      <SectionHeader title="Purchases — rice, mill store & expenses" subtitle="Click a row to expand its details (quantity, rate per kg, katta, payment); use the voucher button for the downloadable document." />
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <SummaryCell label="Total Purchases" value={fmtPKR(total)} />
         <SummaryCell label="Records" value={String(rows.length)} />
         <SummaryCell label="Unpaid" value={fmtPKR(unpaid)} />
         <SummaryCell label="Suppliers" value={String(new Set(rows.map(r => r.supplierName).filter(Boolean)).size)} />
       </div>
-      <Table
-        head={['Date', 'Ref', 'Supplier', 'Category', 'Amount', 'Status']}
-        align={['left', 'left', 'left', 'left', 'right', 'left']}
-        rowClick={rows.map(r => () => openDoc?.(purchaseToDoc(r)))}
-        rows={rows.map(r => {
-          const sup = r.supplierName || '—';
-          const href = statementHref?.('supplier', r.supplierId);
-          return [
-            r.date ? new Date(r.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—',
-            <span className="font-mono text-xs">{r.ref}</span>,
-            href ? <Link to={href} onClick={(e) => e.stopPropagation()} className="font-medium text-blue-600 hover:underline">{sup}</Link> : <span className="font-medium">{sup}</span>,
-            <span className="text-xs text-gray-600 capitalize">{r.category || r.source}</span>,
-            <span className="font-semibold text-gray-900">{fmtPKR(r.amountPkr)}</span>,
-            <StatusChip s={r.paymentStatus} />,
-          ];
-        })}
-      />
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+              <th className="w-8 py-2.5 px-3" />
+              <th className="text-left py-2.5 px-3">Date</th>
+              <th className="text-left py-2.5 px-3">Ref</th>
+              <th className="text-left py-2.5 px-3">Supplier</th>
+              <th className="text-left py-2.5 px-3">Category</th>
+              <th className="text-right py-2.5 px-3">Amount</th>
+              <th className="text-left py-2.5 px-3">Status</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {rows.map((r) => {
+              const k = keyOf(r);
+              const isOpen = open === k;
+              const sup = r.supplierName || '—';
+              const href = statementHref?.('supplier', r.supplierId);
+              return (
+                <Fragment key={k}>
+                  <tr onClick={() => setOpen(isOpen ? null : k)} className="hover:bg-gray-50 cursor-pointer">
+                    <td className="py-2.5 px-3 text-gray-400">{isOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}</td>
+                    <td className="py-2.5 px-3">{r.date ? new Date(r.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—'}</td>
+                    <td className="py-2.5 px-3 font-mono text-xs">{r.ref}</td>
+                    <td className="py-2.5 px-3">{href ? <Link to={href} onClick={(e) => e.stopPropagation()} className="font-medium text-blue-600 hover:underline">{sup}</Link> : <span className="font-medium">{sup}</span>}</td>
+                    <td className="py-2.5 px-3 text-xs text-gray-600 capitalize">{r.category || r.source}</td>
+                    <td className="py-2.5 px-3 text-right font-semibold text-gray-900">{fmtPKR(r.amountPkr)}</td>
+                    <td className="py-2.5 px-3"><StatusChip s={r.paymentStatus} /></td>
+                  </tr>
+                  {isOpen && (
+                    <tr className="bg-gray-50/60">
+                      <td />
+                      <td colSpan={6} className="px-3 pb-3 pt-1">
+                        <PurchaseDetail r={r} openDoc={openDoc} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// Expanded detail for a purchase row — qty / per-kg / katta for rice lots,
+// payment state, and a button to open the downloadable voucher.
+function PurchaseDetail({ r, openDoc }) {
+  const isLot = r.source === 'lot';
+  const qtyKg = parseFloat(r.qtyKg) || 0;
+  const ratePerKg = parseFloat(r.ratePerKg) || 0;
+  const bags = r.bags != null && r.bags !== '' ? parseInt(r.bags, 10) : null;
+  const amount = parseFloat(r.amountPkr) || 0;
+  const paid = String(r.paymentStatus || '').toLowerCase() === 'paid';
+  const Cell = ({ label, value }) => (
+    <div><p className="text-[11px] uppercase tracking-wider text-gray-400">{label}</p><p className="text-sm text-gray-800">{value}</p></div>
+  );
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-3 space-y-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {isLot && <Cell label="Quantity" value={qtyKg > 0 ? `${Math.round(qtyKg).toLocaleString()} kg (${(qtyKg / 1000).toFixed(2)} MT)` : '—'} />}
+        {isLot && <Cell label="Rate / kg" value={ratePerKg > 0 ? `Rs ${ratePerKg.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : <span className="text-amber-600">Not recorded</span>} />}
+        {isLot && <Cell label="Katta (bags)" value={bags != null ? `${bags.toLocaleString()}${r.bagWeightKg ? ` × ${parseFloat(r.bagWeightKg)} kg` : ''}` : <span className="text-amber-600">Not recorded</span>} />}
+        <Cell label="Supplier" value={r.supplierName || '—'} />
+        <Cell label="Total amount" value={fmtPKR(amount)} />
+        <Cell label="Payment" value={<StatusChip s={r.paymentStatus} />} />
+        {r.createdByName && <Cell label="Recorded by" value={r.createdByName} />}
+        {r.date && <Cell label="Date" value={new Date(r.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} />}
+      </div>
+
+      {!paid && (
+        <div className="text-xs rounded-md bg-amber-50 border border-amber-100 px-3 py-2 text-amber-800">
+          {amount > 0
+            ? <>Unpaid — <span className="font-semibold">{fmtPKR(amount)}</span> outstanding to {r.supplierName || 'the supplier'}. Pay it from Mill Finance → Suppliers / Money Out.</>
+            : <>No purchase price recorded for this lot yet, so there's nothing to pay. Set the price on the lot (Lot detail → Edit price) to create the supplier payable.</>}
+        </div>
+      )}
+
+      <div className="flex justify-end">
+        <button onClick={(e) => { e.stopPropagation(); openDoc?.(purchaseToDoc(r)); }}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
+          <FileText size={13} /> View / download voucher
+        </button>
+      </div>
     </div>
   );
 }
