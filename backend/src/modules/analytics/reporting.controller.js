@@ -1219,6 +1219,109 @@ const reportingController = {
     } catch (err) { console.error('Purchase ledger error:', err); return res.status(500).json({ success: false, message: 'Internal server error.' }); }
   },
 
+  // ── Lot Tracker — one row per purchased (raw) lot with its FULL lifecycle:
+  // purchase + payment, delivering vehicles (with per-truck quality), and
+  // disposition (remaining / sold-direct + buyers / milled + the finished-rice
+  // buyers it produced). Powers the dashboard "Lots" tab. ──
+  async lotTracker(req, res) {
+    try {
+      const db = require('../../config/database');
+      const { entity, from, to } = req.query;
+      const num = (v) => parseFloat(v) || 0;
+      let q = db('inventory_lots as l')
+        .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
+        .leftJoin('products as p', 'l.product_id', 'p.id')
+        .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
+        .where('l.type', 'raw');
+      if (entity) q = q.where('l.entity', entity);
+      if (from) q = q.where('l.created_at', '>=', from);
+      if (to) q = q.where('l.created_at', '<=', to);
+      const lots = await q.select(
+        'l.id', 'l.lot_no', 'l.created_at', 'l.purchase_date', 'l.item_name', 'l.variety', 'l.grade',
+        'l.rate_per_kg', 'l.landed_cost_per_kg', 'l.landed_cost_total', 'l.total_bags', 'l.bag_weight_kg',
+        'l.supplier_id', 'l.payment_status', 'l.paid_amount', 'l.due_amount', 'l.net_weight_kg',
+        'l.moisture_pct', 'l.broken_pct', 'l.quality_json', 'l.milling_status',
+        's.name as supplier_name', 'p.name as product_name', 'w.name as warehouse_name',
+        db.raw('COALESCE(NULLIF(l.received_net_weight_kg,0), NULLIF(l.net_weight_kg,0), l.qty*1000) as kg'),
+      ).orderBy('l.created_at', 'desc');
+      const lotIds = lots.map((l) => l.id);
+
+      const vehByLot = {}; const salesByLot = {}; const milledByLot = {}; const downstreamByLot = {};
+      if (lotIds.length) {
+        // Delivering trucks (with per-truck quality)
+        const vehs = await db('milling_vehicle_arrivals').whereIn('lot_id', lotIds)
+          .select('lot_id', 'vehicle_no', 'driver_name', 'driver_phone', 'weight_mt', 'total_bags', 'bag_size_kg', 'arrival_date', 'quality_json')
+          .orderBy('id', 'asc');
+        for (const v of vehs) (vehByLot[v.lot_id] = vehByLot[v.lot_id] || []).push(v);
+
+        // Direct sales (sold as raw) + buyers
+        const sales = await db('local_sales as ls').leftJoin('customers as c', 'ls.customer_id', 'c.id')
+          .whereIn('ls.lot_id', lotIds)
+          .select('ls.id as sale_id', 'ls.lot_id', 'ls.sale_no', 'ls.sale_date', 'ls.quantity_kg', 'ls.rate_per_kg',
+            'ls.total_amount', 'ls.payment_status', 'ls.customer_id', db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer"))
+          .orderBy('ls.sale_date', 'asc');
+        for (const s of sales) (salesByLot[s.lot_id] = salesByLot[s.lot_id] || []).push(s);
+
+        // Milled into batches
+        const milled = await db('batch_source_lots as bsl').leftJoin('milling_batches as mb', 'mb.id', 'bsl.batch_id')
+          .whereIn('bsl.lot_id', lotIds).select('bsl.lot_id', 'bsl.qty_mt', 'mb.id as batch_id', 'mb.batch_no');
+        for (const m of milled) (milledByLot[m.lot_id] = milledByLot[m.lot_id] || []).push(m);
+
+        // Through-milling: who bought the batch output
+        const batchIds = [...new Set(milled.map((m) => m.batch_id).filter(Boolean))];
+        if (batchIds.length) {
+          const refs = batchIds.map((id) => `batch-${id}`);
+          const outLots = await db('inventory_lots').whereIn('batch_ref', refs).whereIn('type', ['finished', 'byproduct'])
+            .select('id', 'batch_ref', 'type', 'item_name', 'grade');
+          const outMeta = {}; const batchOfOut = {};
+          for (const o of outLots) { outMeta[o.id] = o; batchOfOut[o.id] = parseInt(String(o.batch_ref).replace(/^batch-/, ''), 10); }
+          const outIds = outLots.map((o) => o.id);
+          const outSales = outIds.length ? await db('local_sales as ls').leftJoin('customers as c', 'ls.customer_id', 'c.id')
+            .whereIn('ls.lot_id', outIds)
+            .select('ls.id as sale_id', 'ls.lot_id', 'ls.sale_no', 'ls.sale_date', 'ls.quantity_kg', 'ls.rate_per_kg', 'ls.total_amount', 'ls.payment_status', 'ls.customer_id', db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer"))
+            .orderBy('ls.sale_date', 'asc') : [];
+          const batchNoById = {}; for (const m of milled) batchNoById[m.batch_id] = m.batch_no;
+          const salesByBatch = {};
+          for (const s of outSales) {
+            const bid = batchOfOut[s.lot_id]; const om = outMeta[s.lot_id] || {};
+            (salesByBatch[bid] = salesByBatch[bid] || []).push({ batchId: bid, batchNo: batchNoById[bid], outputType: om.type, outputItem: om.grade || om.item_name, saleId: s.sale_id, saleNo: s.sale_no, date: s.sale_date, customer: s.customer, customerId: s.customer_id || null, kg: num(s.quantity_kg), ratePerKg: num(s.rate_per_kg), valuePkr: num(s.total_amount), paymentStatus: s.payment_status });
+          }
+          for (const [rawLotId, batches] of Object.entries(milledByLot)) {
+            const acc = [];
+            for (const m of batches) if (salesByBatch[m.batch_id]) acc.push(...salesByBatch[m.batch_id]);
+            if (acc.length) downstreamByLot[rawLotId] = acc;
+          }
+        }
+      }
+
+      const rows = lots.map((l) => {
+        const kg = num(l.kg); const rate = num(l.rate_per_kg) || num(l.landed_cost_per_kg);
+        const lotSales = salesByLot[l.id] || [];
+        const lotMilled = milledByLot[l.id] || [];
+        const soldKg = lotSales.reduce((a, x) => a + num(x.quantity_kg), 0);
+        const milledKg = lotMilled.reduce((a, x) => a + num(x.qty_mt) * 1000, 0);
+        const remainingKg = Math.max(0, num(l.net_weight_kg));
+        const status = milledKg > 0 ? 'Milled' : soldKg > 0 ? (remainingKg > 0 ? 'Part-sold' : 'Sold') : remainingKg > 0 ? 'In stock' : 'Empty';
+        return {
+          lotId: l.id, lotNo: l.lot_no, date: l.purchase_date || l.created_at,
+          supplier: l.supplier_name || '—', supplierId: l.supplier_id,
+          riceType: l.product_name || l.item_name, variety: l.variety, grade: l.grade,
+          warehouse: l.warehouse_name,
+          receivedKg: kg, ratePerKg: num(l.rate_per_kg), landedCostPerKg: num(l.landed_cost_per_kg), landedTotal: num(l.landed_cost_total) || kg * rate,
+          bags: l.total_bags, bagWeightKg: num(l.bag_weight_kg),
+          paymentStatus: l.payment_status, paidAmount: num(l.paid_amount), dueAmount: num(l.due_amount),
+          moisturePct: l.moisture_pct, brokenPct: l.broken_pct, qualityJson: l.quality_json || null,
+          remainingKg, soldKg, milledKg, status,
+          vehicles: (vehByLot[l.id] || []).map((v) => ({ vehicleNo: v.vehicle_no, driverName: v.driver_name, driverPhone: v.driver_phone, weightMt: num(v.weight_mt), totalBags: v.total_bags, bagSizeKg: num(v.bag_size_kg), arrivalDate: v.arrival_date, quality: v.quality_json || null })),
+          buyers: lotSales.map((x) => ({ saleId: x.sale_id, saleNo: x.sale_no, date: x.sale_date, customer: x.customer, customerId: x.customer_id || null, kg: num(x.quantity_kg), ratePerKg: num(x.rate_per_kg), valuePkr: num(x.total_amount), paymentStatus: x.payment_status })),
+          milledInto: lotMilled.map((x) => ({ batchId: x.batch_id, batchNo: x.batch_no, kg: num(x.qty_mt) * 1000 })),
+          downstreamSales: downstreamByLot[l.id] || [],
+        };
+      });
+      return res.json({ success: true, data: { rows, totals: { lots: rows.length, mt: rows.reduce((s, r) => s + r.receivedKg / 1000, 0), valuePkr: rows.reduce((s, r) => s + r.landedTotal, 0) } } });
+    } catch (err) { console.error('Lot tracker error:', err); return res.status(500).json({ success: false, message: 'Internal server error.' }); }
+  },
+
   // ── Sales ledger — local sales + export orders, each clickable to its sale/order. ──
   async printableSalesLedger(req, res) {
     try {

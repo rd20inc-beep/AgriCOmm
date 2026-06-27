@@ -5,7 +5,7 @@ import { useApp } from '../../../context/AppContext';
 import {
   BarChart3, TrendingUp, Users, Globe, Package, Award, Coins, Printer, RefreshCw,
   ArrowUpRight, ArrowDownLeft, Activity, Calendar, ExternalLink, AlertTriangle, FileText,
-  ShoppingCart, Truck, Receipt, Scale, ChevronDown, ChevronRight,
+  ShoppingCart, Truck, Receipt, Scale, ChevronDown, ChevronRight, Layers,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell,
@@ -14,7 +14,7 @@ import {
   useExecutiveSummary, useOrderProfitability, useCustomerProfitability,
   useCountryAnalysis, useStockAgingReport, useSupplierQualityRanking,
   usePayments, useReceivables, usePayables, usePrintableStock,
-  useLocalSales, usePurchases, useBatchMargin,
+  useLocalSales, usePurchases, useBatchMargin, useLotTracker,
 } from '../../../api/queries';
 import SlideDrawer from '../../../components/SlideDrawer';
 import TransactionDocument from '../../../components/TransactionDocument';
@@ -77,6 +77,7 @@ const TABS = [
   { key: 'moneyOut',  label: 'Money Out',  icon: ArrowUpRight },
   { key: 'sales',     label: 'Sales',      icon: ShoppingCart },
   { key: 'purchases', label: 'Purchases',  icon: Truck },
+  { key: 'lots',      label: 'Lots',       icon: Layers },
   { key: 'margin',    label: 'Margin',     icon: Scale },
   { key: 'orders',    label: 'Orders',     icon: TrendingUp },
   { key: 'customers', label: 'Customers',  icon: Users },
@@ -92,7 +93,7 @@ export default function Reports() {
   // customers, countries or export A/R / booked profit.
   const millScoped = user?.role === 'Mill Manager';
   const visibleTabs = millScoped
-    ? TABS.filter(t => ['moneyIn', 'moneyOut', 'sales', 'purchases', 'margin', 'inventory', 'quality'].includes(t.key))
+    ? TABS.filter(t => ['moneyIn', 'moneyOut', 'sales', 'purchases', 'lots', 'margin', 'inventory', 'quality'].includes(t.key))
     : TABS;
 
   // Party statements live under /milling for the Mill role, /finance otherwise.
@@ -198,6 +199,7 @@ export default function Reports() {
           {tab === 'moneyOut'  && <MoneyFlowTab kind="payment" params={params} totalLabel="Money Out" statementHref={statementHref} openDoc={openDoc} />}
           {tab === 'sales'     && <SalesTab params={params} statementHref={statementHref} openDoc={openDoc} />}
           {tab === 'purchases' && <PurchasesTab params={params} statementHref={statementHref} openDoc={openDoc} />}
+          {tab === 'lots'      && <LotsTab params={params} statementHref={statementHref} openDoc={openDoc} />}
           {tab === 'margin'    && <MarginTab params={params} openDoc={openDoc} />}
           {tab === 'orders'    && <OrdersTab params={params} />}
           {tab === 'customers' && <CustomersTab params={params} />}
@@ -220,7 +222,9 @@ export default function Reports() {
           ? <MarginBreakdown e={doc.data} companyProfile={companyProfileData} />
           : doc.kind === 'batchMargin'
             ? <BatchMarginBreakdown b={doc.data} />
-            : <TransactionDocument kind={doc.kind} data={doc.data} companyProfile={companyProfileData} />)}
+            : doc.kind === 'lot'
+              ? <LotTrackerPanel lot={doc.data} statementHref={statementHref} />
+              : <TransactionDocument kind={doc.kind} data={doc.data} companyProfile={companyProfileData} />)}
       </SlideDrawer>
     </div>
   );
@@ -813,6 +817,193 @@ function BatchMarginBreakdown({ b }) {
       </button>
     </div>
   );
+}
+
+// ─── Tab: Lots — one row per purchased lot, click for its full lifecycle ──
+const LOT_STATUS_TONE = {
+  'In stock': 'bg-emerald-100 text-emerald-700', 'Milled': 'bg-blue-100 text-blue-700',
+  'Sold': 'bg-slate-100 text-slate-700', 'Part-sold': 'bg-amber-100 text-amber-700', 'Empty': 'bg-gray-100 text-gray-500',
+};
+const mt2 = (kg) => `${((parseFloat(kg) || 0) / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })} MT`;
+
+function LotsTab({ params, statementHref, openDoc }) {
+  const { from_date, to_date, entity } = params || {};
+  const { data: lots = [], isLoading } = useLotTracker({ from: from_date, to: to_date, ...(entity ? { entity } : {}) });
+  if (isLoading) return <Skeleton />;
+  const rows = Array.isArray(lots) ? lots : [];
+  if (rows.length === 0) return <Empty msg="No purchased lots in this period." />;
+
+  const totRecv = rows.reduce((s, r) => s + (parseFloat(r.receivedKg) || 0), 0);
+  const totValue = rows.reduce((s, r) => s + (parseFloat(r.landedTotal) || 0), 0);
+  const totRemaining = rows.reduce((s, r) => s + (parseFloat(r.remainingKg) || 0), 0);
+  const unpaid = rows.reduce((s, r) => s + (parseFloat(r.dueAmount) || 0), 0);
+
+  return (
+    <div className="space-y-5">
+      <SectionHeader title="Lots — every purchased lot & its full lifecycle" subtitle="Each raw-rice lot you bought. Click a lot to track everything: purchase, trucks, quality, what's remaining, what was sold/milled, and the finished-rice buyers." />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <SummaryCell label="Lots" value={String(rows.length)} />
+        <SummaryCell label="Received" value={mt2(totRecv)} />
+        <SummaryCell label="On hand" value={mt2(totRemaining)} />
+        <SummaryCell label="Landed value" value={fmtPKR(totValue)} />
+      </div>
+      <Table
+        head={['Date', 'Lot', 'Supplier', 'Rice Type', 'Received', 'Rate/kg', 'Landed', 'Status', 'Value']}
+        align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'left', 'right']}
+        rowClick={rows.map(r => () => openDoc?.({ kind: 'lot', title: r.lotNo, subtitle: r.supplier, data: r }))}
+        rows={rows.map(r => {
+          const href = statementHref?.('supplier', r.supplierId);
+          return [
+            r.date ? new Date(r.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—',
+            <span className="font-mono text-xs text-blue-600">{r.lotNo}</span>,
+            href ? <Link to={href} onClick={(e) => e.stopPropagation()} className="font-medium text-blue-600 hover:underline">{r.supplier}</Link> : <span className="font-medium">{r.supplier}</span>,
+            <span className="text-xs">{r.riceType || '—'}</span>,
+            mt2(r.receivedKg),
+            r.ratePerKg > 0 ? `Rs ${Math.round(r.ratePerKg).toLocaleString()}` : '—',
+            fmtPKR(r.landedCostPerKg ? r.landedCostPerKg * (parseFloat(r.receivedKg) || 0) : r.landedTotal),
+            <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${LOT_STATUS_TONE[r.status] || 'bg-gray-100 text-gray-600'}`}>{r.status}</span>,
+            <span className="font-semibold text-gray-900">{fmtPKR(r.landedTotal)}</span>,
+          ];
+        })}
+      />
+    </div>
+  );
+}
+
+// Slider: the full lifecycle of one lot.
+function LotTrackerPanel({ lot, statementHref }) {
+  const navigate = useNavigate();
+  const q = lot.qualityJson || {};
+  const qFields = [
+    ['Moisture', lot.moisturePct ?? q.moisture, '%'], ['Broken', lot.brokenPct ?? q.broken, '%'],
+    ['Foreign', q.foreign_matter, '%'], ['Chalky', q.chalky, '%'], ['Purity', q.purity, '%'], ['Grain size', q.grain_size, 'mm'],
+  ].filter(([, v]) => v != null && v !== '');
+  const Cell = ({ label, value }) => (
+    <div><p className="text-[11px] uppercase tracking-wider text-gray-400">{label}</p><p className="text-sm text-gray-800">{value}</p></div>
+  );
+  const supHref = statementHref?.('supplier', lot.supplierId);
+
+  return (
+    <div className="space-y-5">
+      {/* Identity */}
+      <div className="grid grid-cols-2 gap-3">
+        <Cell label="Lot" value={<span className="font-mono">{lot.lotNo}</span>} />
+        <Cell label="Supplier" value={supHref ? <Link to={supHref} className="text-blue-600 hover:underline">{lot.supplier}</Link> : (lot.supplier || '—')} />
+        <Cell label="Rice type" value={`${lot.riceType || '—'}${lot.grade ? ` · ${lot.grade}` : ''}`} />
+        <Cell label="Purchased" value={lot.date ? new Date(lot.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'} />
+        <Cell label="Status" value={<span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${LOT_STATUS_TONE[lot.status] || 'bg-gray-100 text-gray-600'}`}>{lot.status}</span>} />
+        <Cell label="Warehouse" value={lot.warehouse || '—'} />
+      </div>
+
+      {/* Purchase & cost */}
+      <div>
+        <h4 className="text-sm font-semibold text-gray-700 mb-2">Purchase & cost</h4>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <Cell label="Received" value={`${mt2(lot.receivedKg)} · ${Math.round(lot.receivedKg).toLocaleString()} kg`} />
+          <Cell label="Katta (bags)" value={lot.bags != null ? `${Number(lot.bags).toLocaleString()}${lot.bagWeightKg ? ` × ${lot.bagWeightKg} kg` : ''}` : '—'} />
+          <Cell label="Rate / kg" value={lot.ratePerKg > 0 ? `Rs ${Math.round(lot.ratePerKg).toLocaleString()}` : '—'} />
+          <Cell label="Landed / kg" value={lot.landedCostPerKg > 0 ? `Rs ${Math.round(lot.landedCostPerKg).toLocaleString()}` : '—'} />
+          <Cell label="Landed total" value={fmtPKR(lot.landedTotal)} />
+          <Cell label="Payment" value={<><StatusBadgeMini s={lot.paymentStatus} /> {lot.dueAmount > 0 ? <span className="text-xs text-rose-600">{fmtPKR(lot.dueAmount)} due</span> : <span className="text-xs text-emerald-600">paid</span>}</>} />
+        </div>
+      </div>
+
+      {/* Quality */}
+      {qFields.length > 0 && (
+        <div>
+          <h4 className="text-sm font-semibold text-gray-700 mb-2">Quality (lot)</h4>
+          <div className="flex flex-wrap gap-2">
+            {qFields.map(([k, v, u]) => <span key={k} className="px-2.5 py-1 rounded-lg bg-gray-50 border border-gray-200 text-xs"><span className="text-gray-500">{k}</span> <span className="font-semibold">{v}{u}</span></span>)}
+          </div>
+        </div>
+      )}
+
+      {/* Vehicles */}
+      {(lot.vehicles || []).length > 0 && (
+        <div>
+          <h4 className="text-sm font-semibold text-gray-700 mb-2">Delivering trucks</h4>
+          <div className="rounded-lg border border-gray-200 divide-y divide-gray-100">
+            {lot.vehicles.map((v, i) => {
+              const vq = v.quality || {};
+              const qbits = [['Moist', vq.moisture, '%'], ['Broken', vq.broken, '%'], ['Price/MT', vq.price_per_mt, '']].filter(([, x]) => x != null && x !== '');
+              return (
+                <div key={i} className="px-3 py-2 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-medium">{v.vehicleNo}{v.driverName ? <span className="text-gray-500 font-normal"> · {v.driverName}</span> : ''}</span>
+                    <span className="text-xs text-gray-500">{v.weightMt ? `${v.weightMt} MT` : ''}{v.totalBags ? ` · ${v.totalBags} bags` : ''}</span>
+                  </div>
+                  {qbits.length > 0 && <div className="mt-1 flex flex-wrap gap-x-3 text-[11px] text-gray-500">{qbits.map(([k, x, u]) => <span key={k}>{k}: <span className="font-medium text-gray-700">{u === '' ? `Rs ${Math.round(x).toLocaleString()}` : `${x}${u}`}</span></span>)}</div>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Disposition */}
+      <div>
+        <h4 className="text-sm font-semibold text-gray-700 mb-2">Where it went</h4>
+        <div className="grid grid-cols-3 gap-3 mb-3">
+          <div className="bg-emerald-50 rounded-lg p-2 text-center"><p className="text-[11px] text-emerald-600">Remaining</p><p className="text-sm font-bold text-emerald-700">{mt2(lot.remainingKg)}</p></div>
+          <div className="bg-slate-50 rounded-lg p-2 text-center"><p className="text-[11px] text-slate-500">Sold (raw)</p><p className="text-sm font-bold text-slate-700">{mt2(lot.soldKg)}</p></div>
+          <div className="bg-blue-50 rounded-lg p-2 text-center"><p className="text-[11px] text-blue-600">Milled</p><p className="text-sm font-bold text-blue-700">{mt2(lot.milledKg)}</p></div>
+        </div>
+
+        {(lot.milledInto || []).length > 0 && (
+          <div className="text-sm mb-2">
+            <span className="text-gray-500">Milled into: </span>
+            {lot.milledInto.map((m, i) => (
+              <span key={i}>{i > 0 ? ', ' : ''}{m.batchId ? <Link to={`/milling/${m.batchId}`} className="text-blue-600 hover:underline">{m.batchNo}</Link> : m.batchNo} ({mt2(m.kg)})</span>
+            ))}
+          </div>
+        )}
+
+        {(lot.buyers || []).length > 0 && (
+          <div className="mb-2">
+            <p className="text-xs font-semibold text-gray-600 mb-1">Sold as raw to</p>
+            {lot.buyers.map((b, i) => <BuyerRow key={i} b={b} statementHref={statementHref} />)}
+          </div>
+        )}
+
+        {(lot.downstreamSales || []).length > 0 && (
+          <div>
+            <p className="text-xs font-semibold text-gray-600 mb-1">Finished / by-product sold to (after milling)</p>
+            {lot.downstreamSales.map((b, i) => <BuyerRow key={i} b={b} statementHref={statementHref} showOutput />)}
+          </div>
+        )}
+
+        {(lot.buyers || []).length === 0 && (lot.downstreamSales || []).length === 0 && (lot.milledInto || []).length === 0 && (
+          <p className="text-xs text-gray-400">Not yet sold or milled — fully in stock.</p>
+        )}
+      </div>
+
+      <button onClick={() => navigate(`/lot-inventory/${lot.lotId}`)}
+        className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
+        <ExternalLink size={14} /> Open full lot detail
+      </button>
+    </div>
+  );
+}
+
+function BuyerRow({ b, statementHref, showOutput }) {
+  const href = statementHref?.('customer', b.customerId);
+  return (
+    <div className="flex items-center justify-between gap-2 border border-gray-100 rounded-lg px-3 py-1.5 mb-1 text-sm">
+      <div className="min-w-0">
+        <span className="font-medium">{href ? <Link to={href} className="text-blue-600 hover:underline">{b.customer}</Link> : b.customer}</span>
+        <span className="text-xs text-gray-400"> · {b.saleNo}{showOutput && b.outputItem ? ` · ${b.outputType === 'finished' ? 'Finished' : b.outputItem}` : ''}</span>
+      </div>
+      <div className="text-right shrink-0">
+        <span className="font-semibold text-gray-900">{fmtPKR(b.valuePkr)}</span>
+        <span className="text-[11px] text-gray-400"> · {mt2(b.kg)}</span>
+      </div>
+    </div>
+  );
+}
+
+function StatusBadgeMini({ s }) {
+  const tone = (s || '').toLowerCase() === 'paid' ? 'bg-emerald-100 text-emerald-700' : (s || '').toLowerCase() === 'partial' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700';
+  return <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${tone}`}>{s || 'Pending'}</span>;
 }
 
 // ─── Tab: Orders ──────────────────────────────────────────────────────

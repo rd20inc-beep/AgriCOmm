@@ -16,6 +16,7 @@ router.get('/executive/advance-funnel', authorize('reports', 'view'), controller
 router.get('/profitability/orders', authorize('reports', 'view'), controller.orderProfitability);
 router.get('/profitability/batches', authorize('reports', 'view'), controller.batchProfitability);
 router.get('/profitability/batch-margin', authorize('reports', 'view'), controller.batchMargin);
+router.get('/lot-tracker', authorize('reports', 'view'), controller.lotTracker);
 router.get('/profitability/customers', authorize('reports', 'view'), controller.customerProfitability);
 router.get('/profitability/countries', authorize('reports', 'view'), controller.countryAnalysis);
 router.get('/profitability/products', authorize('reports', 'view'), controller.productProfitability);

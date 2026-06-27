@@ -1646,6 +1646,18 @@ export function useCountryAnalysis(params = {}) {
   });
 }
 
+export function useLotTracker(params = {}) {
+  return useQuery({
+    queryKey: ['lot-tracker', params],
+    queryFn: async () => {
+      const res = await reportingApi.lotTracker(params);
+      const arr = res?.rows || res?.data?.rows || [];
+      return transformKeys(Array.isArray(arr) ? arr : []);
+    },
+    staleTime: 10 * 1000,
+  });
+}
+
 export function useBatchMargin(params = {}) {
   return useQuery({
     queryKey: ['batch-margin', params],
