@@ -1132,7 +1132,7 @@ const reportingController = {
 
       // Per-lot disposition: direct sales (+ buyers) and milling consumption.
       const lotIds = rows.map((r) => r.id);
-      const salesByLot = {}; const milledByLot = {};
+      const salesByLot = {}; const milledByLot = {}; const downstreamByLot = {};
       if (lotIds.length) {
         const sales = await db('local_sales as ls')
           .leftJoin('customers as c', 'ls.customer_id', 'c.id')
@@ -1148,6 +1148,49 @@ const reportingController = {
           .whereIn('bsl.lot_id', lotIds)
           .select('bsl.lot_id', 'bsl.qty_mt', 'mb.id as batch_id', 'mb.batch_no');
         for (const m of milled) (milledByLot[m.lot_id] = milledByLot[m.lot_id] || []).push(m);
+
+        // Trace THROUGH milling: each batch's finished/by-product output lots and
+        // who bought them, attributed back to the raw lots that fed the batch.
+        const batchIds = [...new Set(milled.map((m) => m.batch_id).filter(Boolean))];
+        if (batchIds.length) {
+          const refs = batchIds.map((id) => `batch-${id}`);
+          const outLots = await db('inventory_lots')
+            .whereIn('batch_ref', refs).whereIn('type', ['finished', 'byproduct'])
+            .select('id', 'batch_ref', 'type', 'item_name', 'grade');
+          const outMeta = {}; const batchOfOut = {};
+          for (const o of outLots) {
+            outMeta[o.id] = o;
+            batchOfOut[o.id] = parseInt(String(o.batch_ref).replace(/^batch-/, ''), 10);
+          }
+          const outIds = outLots.map((o) => o.id);
+          const outSales = outIds.length
+            ? await db('local_sales as ls').leftJoin('customers as c', 'ls.customer_id', 'c.id')
+              .whereIn('ls.lot_id', outIds)
+              .select('ls.lot_id', 'ls.sale_no', 'ls.sale_date', 'ls.quantity_kg', 'ls.rate_per_kg',
+                'ls.total_amount', 'ls.payment_status', 'ls.customer_id',
+                db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer"))
+              .orderBy('ls.sale_date', 'asc')
+            : [];
+          const batchNoById = {};
+          for (const m of milled) batchNoById[m.batch_id] = m.batch_no;
+          const salesByBatch = {};
+          for (const s of outSales) {
+            const bid = batchOfOut[s.lot_id]; const om = outMeta[s.lot_id] || {};
+            (salesByBatch[bid] = salesByBatch[bid] || []).push({
+              batchId: bid, batchNo: batchNoById[bid],
+              outputType: om.type, outputItem: om.grade || om.item_name,
+              saleNo: s.sale_no, date: s.sale_date, customer: s.customer, customerId: s.customer_id || null,
+              kg: parseFloat(s.quantity_kg) || 0, ratePerKg: parseFloat(s.rate_per_kg) || 0,
+              valuePkr: parseFloat(s.total_amount) || 0, paymentStatus: s.payment_status,
+            });
+          }
+          // Attribute a batch's output sales to each raw lot that fed it.
+          for (const [rawLotId, batches] of Object.entries(milledByLot)) {
+            const acc = [];
+            for (const m of batches) if (salesByBatch[m.batch_id]) acc.push(...salesByBatch[m.batch_id]);
+            if (acc.length) downstreamByLot[rawLotId] = acc;
+          }
+        }
       }
 
       const detail = rows.map((r) => {
@@ -1168,6 +1211,8 @@ const reportingController = {
             valuePkr: parseFloat(x.total_amount) || 0, paymentStatus: x.payment_status,
           })),
           milledInto: lotMilled.map((x) => ({ batchId: x.batch_id, batchNo: x.batch_no, kg: (parseFloat(x.qty_mt) || 0) * 1000 })),
+          // Through-milling trace: who bought the finished / by-product output.
+          downstreamSales: downstreamByLot[r.id] || [],
         };
       });
       return res.json({ success: true, data: { rows: detail, totals: { lots: detail.length, mt: detail.reduce((s, d) => s + d.mt, 0), valuePkr: detail.reduce((s, d) => s + d.valuePkr, 0) }, period: { from, to } } });

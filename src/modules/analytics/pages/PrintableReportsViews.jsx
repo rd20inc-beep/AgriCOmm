@@ -570,6 +570,17 @@ export function PurchaseLedgerView({ data, companyName, range }) {
             for (const m of (r.milledInto || [])) {
               kids.push(['Milled into', m.batchId ? <RefLink to={`/milling/${m.batchId}`}>{m.batchNo}</RefLink> : (m.batchNo || '—'), '', '', '', fmtMt(m.kg / 1000), fmtKg(m.kg), '', '', '', '']);
             }
+            // Trace through milling — who bought the finished / by-product output.
+            for (const d of (r.downstreamSales || [])) {
+              const outLabel = d.outputType === 'finished' ? 'Finished sold' : `${d.outputItem || 'By-product'} sold`;
+              kids.push([
+                outLabel,
+                d.batchId ? <RefLink to={`/milling/${d.batchId}`}>{d.batchNo}</RefLink> : (d.batchNo || '—'),
+                d.customerId ? <RefLink to={`/finance/statements?type=customer&id=${d.customerId}`}>{d.customer}</RefLink> : (d.customer || '—'),
+                d.outputType === 'finished' ? (d.outputItem || 'Finished') : (d.outputItem || '—'), '',
+                fmtMt(d.kg / 1000), fmtKg(d.kg), fmtPkr(d.ratePerKg), '', fmtPkr(d.valuePkr), d.paymentStatus || '—',
+              ]);
+            }
             // Sold directly — to whom
             for (const b of (r.buyers || [])) {
               kids.push([
