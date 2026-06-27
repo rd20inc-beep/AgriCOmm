@@ -573,6 +573,25 @@ router.post('/expenses', authorize('milling', 'create'),
         }
       }
 
+      // Per-employee salary: block a second salary for the same worker in the
+      // same month — whether the first was a salary expense OR a payroll run.
+      if (category === 'salaries' && employee_id) {
+        const month = String(expense_date).slice(0, 7);
+        const dupExp = await db('business_expenses')
+          .where('expense_type', 'mill').where('category', 'salaries').where('employee_id', employee_id)
+          .whereRaw("TO_CHAR(expense_date, 'YYYY-MM') = ?", [month]).first('expense_no');
+        const runLine = await db('mill_payroll_lines as pl')
+          .join('mill_payroll_runs as r', 'r.id', 'pl.run_id')
+          .where('r.period', month).where('pl.worker_id', employee_id).first('pl.id');
+        if (dupExp || runLine) {
+          const w = await db('mill_workers').where('id', employee_id).first('name');
+          return res.status(409).json({
+            success: false,
+            message: `${w?.name || 'This employee'}'s salary for ${month} has already been paid${dupExp ? ` (${dupExp.expense_no})` : ' via a payroll run'}. Edit the existing record instead of paying again.`,
+          });
+        }
+      }
+
       const expense = await expensesService.create({
         expense_type: 'mill',
         category,
@@ -1126,12 +1145,20 @@ async function unrecoverAdvancesForWorker(trx, workerId, amount) {
 
 // Employees already paid in a posted run for this period (so a second run can't
 // pay them again, and the UI can show a Paid badge).
+// Employees already PAID for a month — counts BOTH a payroll-run line AND a
+// per-employee salary expense (business_expenses category 'salaries' tagged to
+// the employee). This stops a salary being paid twice across the two flows
+// (e.g. a manual salary expense and then a payroll run for the same month).
 async function paidWorkerIdsForPeriod(month) {
-  const rows = await db('mill_payroll_lines as pl')
+  const lineRows = await db('mill_payroll_lines as pl')
     .join('mill_payroll_runs as r', 'pl.run_id', 'r.id')
     .where('r.period', month).whereNotNull('pl.worker_id')
     .distinct('pl.worker_id').select('pl.worker_id');
-  return new Set(rows.map((r) => r.worker_id));
+  const expRows = await db('business_expenses')
+    .where('expense_type', 'mill').where('category', 'salaries').whereNotNull('employee_id')
+    .whereRaw("TO_CHAR(expense_date, 'YYYY-MM') = ?", [month])
+    .distinct('employee_id').select('employee_id as worker_id');
+  return new Set([...lineRows, ...expRows].map((r) => r.worker_id));
 }
 
 router.get('/payroll/summary', authorize('milling', 'view'), async (req, res) => {
