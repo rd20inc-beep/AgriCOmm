@@ -748,7 +748,7 @@ const millingAdvancedController = {
           .select(
             'p.id', 'p.payment_no', 'p.payment_date', 'p.payment_method',
             db.raw(`${amtPkr} as amount_pkr`),
-            'pa.category', 'pa.pay_no as ref', 'pa.source_table',
+            'pa.category', 'pa.pay_no as ref', 'pa.source_table', 'pa.linked_ref',
             's.name as counterparty'
           )
       );
@@ -800,6 +800,33 @@ const millingAdvancedController = {
       // The mill's own cash float (so the supervisor sees usable funds on hand).
       const millCashRow = await db('bank_accounts').where({ entity: 'mill', type: 'cash' }).orderBy('id').first();
       const millCashBalance = millCashRow ? num(millCashRow.current_balance) : 0;
+
+      // Attach purchased line items to raw-material (rice lot) payments so the
+      // voucher itemises what was bought (rice type + quantity + rate).
+      const lotRefs = outRows
+        .filter((r) => (r.category === 'Raw Material' || r.source_table === 'inventory_lots') && r.linked_ref)
+        .map((r) => r.linked_ref);
+      if (lotRefs.length) {
+        const lots = await db('inventory_lots as l')
+          .leftJoin('products as pr', 'pr.id', 'l.product_id')
+          .whereIn('l.lot_no', lotRefs)
+          .select('l.lot_no', 'l.rate_per_kg', 'l.variety', 'l.grade', 'l.total_bags',
+            db.raw('COALESCE(NULLIF(l.received_net_weight_kg, 0), NULLIF(l.net_weight_kg, 0), 0) as kg'),
+            db.raw('COALESCE(pr.name, l.item_name) as item_name'));
+        const byLot = {};
+        for (const l of lots) byLot[l.lot_no] = l;
+        for (const r of outRows) {
+          const l = byLot[r.linked_ref];
+          if (!l) continue;
+          const kg = num(l.kg); const rate = num(l.rate_per_kg);
+          r.items = [{
+            name: [l.item_name, l.variety, l.grade].filter(Boolean).join(' · ') || 'Rice',
+            qty: kg ? `${(kg / 1000).toFixed(2)} MT${l.total_bags ? ` · ${l.total_bags} bags` : ''}` : '',
+            rate: rate ? `Rs ${rate}/kg` : '',
+            amount: kg && rate ? kg * rate : num(r.amount_pkr),
+          }];
+        }
+      }
 
       const ledger = [
         ...outRows.map((r) => ({ ...r, direction: 'out', amount_pkr: num(r.amount_pkr) })),

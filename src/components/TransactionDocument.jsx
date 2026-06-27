@@ -52,6 +52,8 @@ function model(kind, d) {
     return {
       title: 'Payment Voucher', refNo: d.payNo, date: d.dueDate,
       partyLabel: 'Paid To', party: d.supplierName || 'Supplier', currency: d.currency || 'PKR',
+      // Line items (what was purchased), when the underlying record has them.
+      items: Array.isArray(d.items) ? d.items.map((it) => ({ desc: it.desc || it.name, qty: it.qty, rate: it.rate, amount: it.amount })) : [],
       summary: [
         d.category ? ['For', String(d.category).replace(/_/g, ' ')] : null,
         d.linkedRef ? ['Reference', d.linkedRef] : null,
@@ -65,6 +67,7 @@ function model(kind, d) {
   return {
     title: 'Payment Receipt', refNo: d.recvNo, date: d.dueDate,
     partyLabel: 'Received From', party: d.customerName || 'Customer', currency: d.currency || 'PKR',
+    items: Array.isArray(d.items) ? d.items.map((it) => ({ desc: it.desc || it.name, qty: it.qty, rate: it.rate, amount: it.amount })) : [],
     summary: [
       d.type ? ['Type', d.type] : null,
       d.orderId ? ['Order', d.orderId] : null,
@@ -142,12 +145,13 @@ export default function TransactionDocument({ kind = 'receipt', data, companyPro
           {m.status && <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${STATUS[m.status] || 'bg-gray-100 text-gray-600'}`}>{m.status}</span>}
         </div>
 
-        {/* Body: invoice line items, or receipt/voucher summary */}
-        {kind === 'invoice' ? (
+        {/* Body: line items (invoice always; voucher/receipt when present),
+            otherwise the receipt/voucher summary box. */}
+        {(kind === 'invoice' || (m.items && m.items.length > 0)) ? (
           <table className="w-full text-sm mt-4 border-collapse">
             <thead>
               <tr className="bg-gray-50 text-[11px] uppercase text-gray-500">
-                <th className="text-left py-2 px-2 border-y border-gray-200">Description</th>
+                <th className="text-left py-2 px-2 border-y border-gray-200">{kind === 'voucher' ? 'Item purchased' : 'Description'}</th>
                 <th className="text-right py-2 px-2 border-y border-gray-200">Qty</th>
                 <th className="text-right py-2 px-2 border-y border-gray-200">Rate</th>
                 <th className="text-right py-2 px-2 border-y border-gray-200">Amount</th>
@@ -157,8 +161,8 @@ export default function TransactionDocument({ kind = 'receipt', data, companyPro
               {m.items.map((it, i) => (
                 <tr key={i} className="border-b border-gray-100">
                   <td className="py-2 px-2 text-gray-800">{it.desc || '—'}</td>
-                  <td className="py-2 px-2 text-right tabular-nums">{it.qty}</td>
-                  <td className="py-2 px-2 text-right tabular-nums">{it.rate}</td>
+                  <td className="py-2 px-2 text-right tabular-nums">{it.qty != null && it.qty !== '' ? it.qty : '—'}</td>
+                  <td className="py-2 px-2 text-right tabular-nums">{it.rate != null && it.rate !== '' ? it.rate : '—'}</td>
                   <td className="py-2 px-2 text-right tabular-nums font-medium">{money(it.amount, cur)}</td>
                 </tr>
               ))}

@@ -2329,8 +2329,8 @@ function CashEntryDrawer({ entry, companyProfile, onClose }) {
   const amount = parseFloat(entry.amount_pkr) || 0;
   // Build the doc model TransactionDocument expects (voucher for out, receipt for in).
   const docData = isIn
-    ? { recvNo: entry.ref || entry.payment_no, customerName: entry.counterparty, type: entry.category, currency: 'PKR', dueDate: entry.payment_date, expectedAmount: amount, receivedAmount: amount, outstanding: 0, status: 'Received' }
-    : { payNo: entry.ref || entry.payment_no, supplierName: entry.counterparty, category: entry.category, linkedRef: entry.ref, entity: 'mill', currency: 'PKR', dueDate: entry.payment_date, originalAmount: amount, paidAmount: amount, outstanding: 0, status: 'Paid' };
+    ? { recvNo: entry.ref || entry.payment_no, customerName: entry.counterparty, type: entry.category, currency: 'PKR', dueDate: entry.payment_date, expectedAmount: amount, receivedAmount: amount, outstanding: 0, status: 'Received', items: entry.items || [] }
+    : { payNo: entry.ref || entry.payment_no, supplierName: entry.counterparty, category: entry.category, linkedRef: entry.linked_ref || entry.ref, entity: 'mill', currency: 'PKR', dueDate: entry.payment_date, originalAmount: amount, paidAmount: amount, outstanding: 0, status: 'Paid', items: entry.items || [] };
   return (
     <SlideDrawer open={!!entry} onClose={onClose} title={isIn ? 'Money In' : 'Money Out'} subtitle={entry.counterparty || entry.category} icon={isIn ? ArrowDownRight : ArrowUpRight} size="lg">
       <div className="space-y-4">
