@@ -6,7 +6,7 @@ import {
   BarChart3, TrendingUp, Users, Globe, Package, Award, Coins, Printer, RefreshCw,
   ArrowUpRight, ArrowDownLeft, Activity, Calendar, ExternalLink, AlertTriangle, FileText,
   ShoppingCart, Truck, Receipt, Scale, ChevronDown, ChevronRight, Layers,
-  Factory, Gauge, Wallet, Star, Plus, Trash2, Hash, Search,
+  Factory, Gauge, Wallet, Star, Plus, Trash2, Hash, Search, Download,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell,
@@ -23,6 +23,7 @@ import {
   useSavedReports, useSaveReport, useDeleteSavedReport,
 } from '../../../api/queries';
 import { reportingApi } from '../api/services';
+import { exportLedgerCSV, printLedger } from '../utils/ledgerExport';
 import SlideDrawer from '../../../components/SlideDrawer';
 import TransactionDocument from '../../../components/TransactionDocument';
 
@@ -172,6 +173,30 @@ function GlobalSearchBox({ entity }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// Shared Export-CSV + Print bar for the Phase 2 ledger reports. Pass the
+// ledger's column defs + rows; Print uses the standardized template.
+function LedgerExportBar({ title, subtitle, meta, columns, rows, footerNote, fileBase }) {
+  const { companyProfileData } = useApp();
+  const { user } = useAuth();
+  const companyName = companyProfileData?.legalName || companyProfileData?.name || 'AGRI COMMODITIES';
+  const stamp = new Date().toISOString().slice(0, 10);
+  const disabled = !rows || rows.length === 0;
+  return (
+    <div className="flex justify-end gap-2 print:hidden">
+      <button onClick={() => exportLedgerCSV({ filename: `${fileBase || 'ledger'}_${stamp}.csv`, columns, rows })}
+        disabled={disabled}
+        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">
+        <Download size={13} /> Export CSV
+      </button>
+      <button onClick={() => printLedger({ companyName, title, subtitle, meta, columns, rows, footerNote, generatedBy: user?.name || user?.email })}
+        disabled={disabled}
+        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-40 disabled:cursor-not-allowed">
+        <Printer size={13} /> Print
+      </button>
     </div>
   );
 }
@@ -666,6 +691,15 @@ function SaleTrackerPanel({ sale, statementHref, companyProfile }) {
   );
 }
 
+// Column defs for CSV/print of a sale's line items.
+const SALE_ITEM_COLS = [
+  { label: 'Item', align: 'left', accessor: (i) => i.item || '' },
+  { label: 'Lot', align: 'left', accessor: (i) => i.lotNo || '' },
+  { label: 'Qty (kg)', align: 'right', accessor: (i) => Math.round(i.quantityKg) },
+  { label: 'Rate/kg (PKR)', align: 'right', accessor: (i) => i.ratePerKg > 0 ? Math.round(i.ratePerKg) : '' },
+  { label: 'Value (PKR)', align: 'right', accessor: (i) => Math.round(i.totalAmount) },
+];
+
 // Lazy-loaded Sale 360 extras — all line items (multi-item sales), the
 // payment trail, and dispatch info. Fetches /reporting/sale-detail/:id.
 function SaleDetailSection({ saleId }) {
@@ -691,7 +725,11 @@ function SaleDetailSection({ saleId }) {
     <div className="space-y-4">
       {multi && (
         <div>
-          <h4 className="text-sm font-semibold text-gray-700 mb-2">Line items {data.sale?.saleGroupNo ? <span className="text-gray-400 font-normal">· group {data.sale.saleGroupNo}</span> : ''}</h4>
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="text-sm font-semibold text-gray-700 mb-2">Line items {data.sale?.saleGroupNo ? <span className="text-gray-400 font-normal">· group {data.sale.saleGroupNo}</span> : ''}</h4>
+            <LedgerExportBar title="Sale — line items" subtitle={`Sale ${data.sale?.saleNo || ''}${data.sale?.customer ? ` · ${data.sale.customer}` : ''}`}
+              fileBase={`sale-${data.sale?.saleNo || saleId}`} rows={items} columns={SALE_ITEM_COLS} />
+          </div>
           <div className="rounded-lg border border-gray-200 overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="bg-gray-50 text-gray-500"><tr><th className="px-2 py-1.5 text-left font-medium">Item</th><th className="px-2 py-1.5 text-left font-medium">Lot</th><th className="px-2 py-1.5 text-right font-medium">kg</th><th className="px-2 py-1.5 text-right font-medium">Rate/kg</th><th className="px-2 py-1.5 text-right font-medium">Value</th></tr></thead>
@@ -1146,6 +1184,16 @@ function BatchMarginBreakdown({ b }) {
   );
 }
 
+// Column defs for CSV/print of a batch's output lots.
+const BATCH_OUTPUT_COLS = [
+  { label: 'Lot', align: 'left', key: 'lotNo' },
+  { label: 'Output', align: 'left', key: 'item' },
+  { label: 'Type', align: 'left', accessor: (o) => o.type === 'byproduct' ? 'by-product' : 'finished' },
+  { label: 'Qty (kg)', align: 'right', accessor: (o) => Math.round(o.kg) },
+  { label: 'Cost/kg (PKR)', align: 'right', accessor: (o) => o.costPerKg > 0 ? Math.round(o.costPerKg) : '' },
+  { label: 'Value (PKR)', align: 'right', accessor: (o) => Math.round(o.valuePkr) },
+];
+
 // Lazy-loaded batch processing ledger — inputs (source lots), recorded costs
 // and outputs (finished + by-product lots), with input/output reconciliation.
 function BatchLedgerSection({ batchId }) {
@@ -1174,6 +1222,13 @@ function BatchLedgerSection({ batchId }) {
       </button>
       {open && (loading ? <p className="text-xs text-gray-400">Loading ledger…</p> : !data || data.error ? <p className="text-xs text-gray-400">Could not load ledger.</p> : (
         <div className="space-y-3">
+          <LedgerExportBar
+            title="Batch Processing Ledger"
+            subtitle={`Batch ${data?.batch?.batchNo || ''}${data?.batch?.product ? ` · ${data.batch.product}` : ''}${data?.batch?.isBlend ? ' · blend' : ''}`}
+            meta={[`Input ${(t.inputMt || 0).toFixed(2)} MT`, `Output ${(t.outputMt || 0).toFixed(2)} MT`, `Loss ${(t.lossMt || 0).toFixed(2)} MT`]}
+            fileBase={`batch-ledger-${data?.batch?.batchNo || batchId}`}
+            rows={outputs} columns={BATCH_OUTPUT_COLS}
+            footerNote="Output lots from this batch (finished + by-product), valued at residual cost. Inputs &amp; costs shown on screen." />
           <div>
             <p className="text-xs font-semibold text-gray-600 mb-1">Inputs — source rice lots</p>
             <div className="rounded-lg border border-gray-200 overflow-x-auto">
@@ -1444,6 +1499,16 @@ function LotLedgerSection({ lotId }) {
         loading ? <p className="text-xs text-gray-400">Loading ledger…</p>
         : events.length === 0 ? <p className="text-xs text-gray-400">No recorded movements.</p>
         : (
+          <div className="space-y-2">
+          <LedgerExportBar
+            title="Lot Activity Ledger"
+            subtitle={`Lot ${data?.lot?.lotNo || ''}${data?.lot?.riceType ? ` · ${data.lot.riceType}` : ''}${data?.lot?.supplier ? ` · ${data.lot.supplier}` : ''}`}
+            meta={[`${events.length} movements`]}
+            fileBase={`lot-ledger-${data?.lot?.lotNo || lotId}`}
+            rows={events}
+            columns={LOT_LEDGER_COLS}
+            footerNote="Running balance is the lot's net weight after each movement. Source: lot_transactions."
+          />
           <div className="rounded-lg border border-gray-200 overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="bg-gray-50 text-gray-500">
@@ -1470,11 +1535,23 @@ function LotLedgerSection({ lotId }) {
               </tbody>
             </table>
           </div>
+          </div>
         )
       )}
     </div>
   );
 }
+
+// Column defs for CSV/print of the lot activity ledger.
+const LOT_LEDGER_COLS = [
+  { label: 'Date', align: 'left', accessor: (e) => e.date ? new Date(e.date).toLocaleDateString('en-GB') : '' },
+  { label: 'Activity', align: 'left', key: 'label' },
+  { label: 'Counterparty', align: 'left', accessor: (e) => e.counterparty || '' },
+  { label: 'Reference', align: 'left', accessor: (e) => e.reference || '' },
+  { label: 'In (kg)', align: 'right', accessor: (e) => e.inKg ? Math.round(e.inKg) : '' },
+  { label: 'Out (kg)', align: 'right', accessor: (e) => e.outKg ? Math.round(e.outKg) : '' },
+  { label: 'Balance (kg)', align: 'right', accessor: (e) => Math.round(e.balanceKg) },
+];
 
 function BuyerRow({ b, statementHref, showOutput }) {
   const href = statementHref?.('customer', b.customerId);
@@ -1976,6 +2053,27 @@ function InventoryTab({ millScoped }) {
   );
 }
 
+// Column defs for CSV/print of the inventory + finished-goods ledgers.
+const INVENTORY_LEDGER_COLS = [
+  { label: 'Date', align: 'left', accessor: (r) => r.date ? new Date(r.date).toLocaleDateString('en-GB') : '' },
+  { label: 'Movement', align: 'left', key: 'label' },
+  { label: 'Lot', align: 'left', accessor: (r) => r.lotNo || r.batchNo || '' },
+  { label: 'From → To', align: 'left', accessor: (r) => [r.fromWh, r.toWh].filter(Boolean).join(' → ') || r.reference || '' },
+  { label: 'Direction', align: 'left', key: 'direction' },
+  { label: 'Qty (kg)', align: 'right', accessor: (r) => Math.round(r.qtyKg) },
+  { label: 'Cost (PKR)', align: 'right', accessor: (r) => r.costPkr > 0 ? Math.round(r.costPkr) : '' },
+];
+const FINISHED_GOODS_COLS = [
+  { label: 'Output', align: 'left', accessor: (r) => gradeLabel(r.key) },
+  { label: 'Type', align: 'left', accessor: (r) => r.type === 'byproduct' ? 'by-product' : 'finished' },
+  { label: 'Lots', align: 'right', accessor: (r) => r.lots.length },
+  { label: 'Produced (kg)', align: 'right', accessor: (r) => Math.round(r.producedKg) },
+  { label: 'Sold (kg)', align: 'right', accessor: (r) => Math.round(r.soldKg) },
+  { label: 'On hand (kg)', align: 'right', accessor: (r) => Math.round(r.onHandKg) },
+  { label: 'Reserved (kg)', align: 'right', accessor: (r) => Math.round(r.reservedKg) },
+  { label: 'Value (PKR)', align: 'right', accessor: (r) => Math.round(r.valuePkr) },
+];
+
 // Finished Goods Ledger — finished + by-product stock register grouped by
 // grade/output (produced · sold · on-hand · reserved · value), expandable to lots.
 function FinishedGoodsLedgerSection({ entity }) {
@@ -1996,7 +2094,12 @@ function FinishedGoodsLedgerSection({ entity }) {
   const kg = (v) => `${Math.round(v || 0).toLocaleString()} kg`;
   return (
     <div className="space-y-2">
-      <SectionHeader title="Finished Goods Ledger" subtitle="Finished &amp; by-product stock register — produced, sold, on-hand, reserved, value" />
+      <div className="flex items-start justify-between gap-2 flex-wrap">
+        <SectionHeader title="Finished Goods Ledger" subtitle="Finished &amp; by-product stock register — produced, sold, on-hand, reserved, value" />
+        <LedgerExportBar title="Finished Goods Ledger" subtitle="On-hand finished &amp; by-product stock at cost"
+          fileBase="finished-goods-ledger" rows={rows} columns={FINISHED_GOODS_COLS}
+          footerNote="Value = on-hand kg × cost/kg. By-products grouped by grade; finished by product." />
+      </div>
       <div className="rounded-lg border border-gray-200 overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-gray-500 text-xs">
@@ -2064,10 +2167,16 @@ function InventoryMovementLedgerSection({ entity }) {
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <SectionHeader title="Inventory Movement Ledger" subtitle="Every stock movement — newest first" />
-        <select value={type} onChange={e => setType(e.target.value)}
-          className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 outline-none">
-          {types.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </select>
+        <div className="flex items-center gap-2">
+          <select value={type} onChange={e => setType(e.target.value)}
+            className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 outline-none">
+            {types.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+          <LedgerExportBar title="Inventory Movement Ledger"
+            subtitle={`Stock movements${type ? ` · ${(types.find(t => t[0] === type) || [])[1]}` : ''}`}
+            meta={[`${rows.length} rows`]} fileBase="inventory-movement-ledger" rows={rows} columns={INVENTORY_LEDGER_COLS}
+            footerNote="Source: inventory_movements. + inbound, − outbound." />
+        </div>
       </div>
       {loading ? <Skeleton /> : rows.length === 0 ? <Empty msg="No movements recorded for this filter." /> : (
         <div className="rounded-lg border border-gray-200 overflow-x-auto">
