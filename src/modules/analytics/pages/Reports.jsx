@@ -6,7 +6,7 @@ import {
   BarChart3, TrendingUp, Users, Globe, Package, Award, Coins, Printer, RefreshCw,
   ArrowUpRight, ArrowDownLeft, Activity, Calendar, ExternalLink, AlertTriangle, FileText,
   ShoppingCart, Truck, Receipt, Scale, ChevronDown, ChevronRight, Layers,
-  Factory, Gauge, Wallet,
+  Factory, Gauge, Wallet, Star, Plus, Trash2,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell,
@@ -19,6 +19,8 @@ import {
   useLocalSales, usePurchases, useBatchMargin, useLotTracker, useSalesTracker,
   useCashForecast, useKpiBenchmarks, useMillEfficiency, useRecoveryLeaderboard,
   useStockValuation, useStockTurnover,
+  useOperatorProductivity, useUtilityConsumption, useRecoveryByVariety,
+  useSavedReports, useSaveReport, useDeleteSavedReport,
 } from '../../../api/queries';
 import SlideDrawer from '../../../components/SlideDrawer';
 import TransactionDocument from '../../../components/TransactionDocument';
@@ -120,6 +122,28 @@ export default function Reports() {
     [range, millScoped],
   );
 
+  // Saved views — persist the current tab + date range as a named report and
+  // jump back to it (wires the saved-reports endpoints into the dashboard).
+  const { data: savedReports = [] } = useSavedReports();
+  const saveMut = useSaveReport();
+  const delMut = useDeleteSavedReport();
+  const [savedOpen, setSavedOpen] = useState(false);
+  const tabKeys = TABS.map(t => t.key);
+  const saveCurrentView = async () => {
+    const name = window.prompt('Name this view (tab + date range):', `${(TABS.find(t => t.key === tab) || {}).label || tab} — ${(RANGES.find(r => r.value === range) || {}).label || 'All Time'}`);
+    if (!name) return;
+    try {
+      await saveMut.mutateAsync({ name, reportType: tab, entity: millScoped ? 'mill' : 'all', filters: { range }, isShared: false });
+    } catch { /* surfaced by the mutation */ }
+  };
+  const loadView = (r) => {
+    const rt = r.reportType || r.report_type;
+    if (rt && tabKeys.includes(rt)) setTab(rt);
+    const f = r.filters || {};
+    setRange(typeof f.range === 'string' ? f.range : '');
+    setSavedOpen(false);
+  };
+
   const { data: exec = {}, isLoading: execLoading, refetch: refetchExec } = useExecutiveSummary(params);
   // Headline money totals across the system — receipts vs payments
   // from the unified payments feed. These power both the KPI strip
@@ -159,6 +183,37 @@ export default function Reports() {
               className="bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors">
               <RefreshCw size={12} /> Refresh
             </button>
+            {/* Saved views */}
+            <div className="relative">
+              <button onClick={() => setSavedOpen(o => !o)}
+                className="bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors">
+                <Star size={12} /> Saved{savedReports.length ? ` (${savedReports.length})` : ''} <ChevronDown size={12} />
+              </button>
+              {savedOpen && (
+                <div className="absolute right-0 mt-1 w-72 bg-white text-gray-800 rounded-lg shadow-xl border border-gray-200 z-20 overflow-hidden">
+                  <button onClick={saveCurrentView} className="w-full text-left px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 border-b border-gray-100 inline-flex items-center gap-1.5">
+                    <Plus size={14} /> Save current view
+                  </button>
+                  <div className="max-h-72 overflow-y-auto">
+                    {savedReports.length === 0 ? (
+                      <p className="px-3 py-3 text-xs text-gray-400">No saved views yet.</p>
+                    ) : savedReports.map(r => {
+                      const rt = r.reportType || r.report_type;
+                      const known = TABS.some(t => t.key === rt);
+                      return (
+                        <div key={r.id} className="flex items-center justify-between gap-2 px-3 py-2 hover:bg-gray-50 border-b border-gray-50">
+                          <button onClick={() => loadView(r)} className="min-w-0 text-left">
+                            <span className="block text-sm font-medium truncate">{r.name}</span>
+                            <span className="block text-[11px] text-gray-400">{(TABS.find(t => t.key === rt) || {}).label || rt}{!known ? ' · (not a dashboard tab)' : ''}{r.isShared || r.is_shared ? ' · shared' : ''}</span>
+                          </button>
+                          <button onClick={() => delMut.mutate(r.id)} title="Delete" className="shrink-0 text-gray-300 hover:text-rose-500"><Trash2 size={14} /></button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
             <Link to="/reports/lots"
               className="bg-white/15 hover:bg-white/25 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-sm font-medium inline-flex items-center gap-2 transition-colors">
               <FileText size={14} /> Lot Reports
@@ -1132,6 +1187,8 @@ function ProductionTab({ params }) {
   const dr = { dateFrom: params?.from_date, dateTo: params?.to_date };
   const { data: mills = [], isLoading } = useMillEfficiency(dr);
   const { data: leaders = [] } = useRecoveryLeaderboard(dr);
+  const { data: operators = [] } = useOperatorProductivity(dr);
+  const { data: utility = {} } = useUtilityConsumption(dr);
   if (isLoading) return <Skeleton />;
   const millRows = Array.isArray(mills) ? mills : [];
   const lbRows = Array.isArray(leaders) ? leaders : [];
@@ -1185,6 +1242,44 @@ function ProductionTab({ params }) {
             fmtPct(b.brokenPct),
           ])}
         />
+      </div>
+
+      {/* Operator productivity */}
+      <div className="space-y-2">
+        <SectionHeader title="Operator productivity" subtitle="Output & yield per operator" />
+        {(Array.isArray(operators) ? operators : []).length === 0 ? (
+          <Empty msg="No operator data — record operators on milling batches to populate this." />
+        ) : (
+          <Table
+            head={['Operator', 'Batches', 'Output MT', 'Avg Yield', 'Hours', 'Output/hr (MT)']}
+            align={['left', 'right', 'right', 'right', 'right', 'right']}
+            rows={operators.map(o => [
+              o.operatorName || '—', o.batches || 0,
+              (parseFloat(o.totalOutputMt ?? o.totalOutputMT) || 0).toFixed(1),
+              fmtPct(o.avgYield),
+              (parseFloat(o.totalHours) || 0).toFixed(1),
+              (parseFloat(o.outputPerHour) || 0).toFixed(2),
+            ])}
+          />
+        )}
+      </div>
+
+      {/* Utility consumption */}
+      <div className="space-y-2">
+        <SectionHeader title="Utility consumption" subtitle={`Cost per MT processed${utility.totalProcessedMt ?? utility.totalProcessedMT ? ` — ${(parseFloat(utility.totalProcessedMt ?? utility.totalProcessedMT) || 0).toFixed(1)} MT processed` : ''}`} />
+        {(Array.isArray(utility.byType) ? utility.byType : []).length === 0 ? (
+          <Empty msg="No utility records — log electricity/fuel/etc. to populate this." />
+        ) : (
+          <Table
+            head={['Utility', 'Unit', 'Consumption', 'Cost (PKR)', 'Cost/MT']}
+            align={['left', 'left', 'right', 'right', 'right']}
+            rows={utility.byType.map(u => [
+              <span className="capitalize">{u.utilityType || '—'}</span>, u.unit || '—',
+              (parseFloat(u.totalConsumption) || 0).toLocaleString(),
+              fmtPKR(u.totalCost), fmtPKR(u.costPerMt ?? u.costPerMT),
+            ])}
+          />
+        )}
       </div>
     </div>
   );
@@ -1567,8 +1662,12 @@ function QualityScoreChip({ v }) {
 
 function QualityTab({ params }) {
   const { data: rows = [], isLoading } = useSupplierQualityRanking(params);
+  const dr = { dateFrom: params?.from_date, dateTo: params?.to_date };
+  const { data: variety = [] } = useRecoveryByVariety(dr);
   if (isLoading) return <Skeleton />;
-  if (!Array.isArray(rows) || rows.length === 0) return <Empty msg="No quality data yet — record arrival samples on milling batches to populate this report." />;
+  const hasRanking = Array.isArray(rows) && rows.length > 0;
+  const varietyRows = Array.isArray(variety) ? variety : [];
+  if (!hasRanking && varietyRows.length === 0) return <Empty msg="No quality data yet — record arrival samples on milling batches to populate this report." />;
 
   // Backend returns: supplierName, totalBatches, totalQtyMT, avgYield, avgMoisture,
   // avgBroken, avgMoistureVariance, avgBrokenVariance, rejectionRate, qualityScore.
@@ -1582,6 +1681,7 @@ function QualityTab({ params }) {
 
   return (
     <div className="space-y-6">
+      {hasRanking && (<>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <SummaryCell label="Suppliers" value={String(rows.length)} />
         <SummaryCell label="Milled batches" value={String(totalBatches)} />
@@ -1617,6 +1717,25 @@ function QualityTab({ params }) {
           {!anyVariance && ' Moisture/broken shown are arrival-sample averages; variance needs a second (post-milling) analysis to compute.'}
         </p>
       </div>
+      </>)}
+
+      {varietyRows.length > 0 && (
+        <div className="space-y-2">
+          <SectionHeader title="Recovery by variety" subtitle="Avg yield & broken % per rice variety, vs benchmark" />
+          <Table
+            head={['Variety', 'Batches', 'Avg Yield', 'Broken %', 'Bran %', 'Benchmark', 'Variance']}
+            align={['left', 'right', 'right', 'right', 'right', 'right', 'right']}
+            rows={varietyRows.map(v => [
+              v.variety || '—', v.batchCount || 0,
+              fmtPct(v.avgYield), fmtPct(v.avgBrokenPct), fmtPct(v.avgBranPct),
+              v.benchmarkYield != null ? fmtPct(v.benchmarkYield) : '—',
+              v.varianceFromBenchmark != null
+                ? <span className={(parseFloat(v.varianceFromBenchmark) || 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'}>{fmtPct(v.varianceFromBenchmark)}</span>
+                : '—',
+            ])}
+          />
+        </div>
+      )}
     </div>
   );
 }

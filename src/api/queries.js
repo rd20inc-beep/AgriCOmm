@@ -1764,6 +1764,54 @@ export function useStockTurnover(params = {}) {
   });
 }
 
+export function useOperatorProductivity(params = {}) {
+  return useQuery({
+    queryKey: ['operator-productivity', params],
+    queryFn: async () => transformKeys(unwrap(await reportingApi.operatorProductivity(params)) || []),
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useUtilityConsumption(params = {}) {
+  return useQuery({
+    queryKey: ['utility-consumption', params],
+    queryFn: async () => transformKeys(unwrap(await reportingApi.utilityConsumption(params)) || {}),
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useRecoveryByVariety(params = {}) {
+  return useQuery({
+    queryKey: ['recovery-by-variety', params],
+    queryFn: async () => transformKeys(unwrap(await reportingApi.recoveryByVariety(params)) || []),
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useSavedReports() {
+  return useQuery({
+    queryKey: ['saved-reports'],
+    queryFn: async () => transformKeys(unwrap(await reportingApi.savedReports(), 'reports') || []),
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useSaveReport() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => reportingApi.saveReport(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-reports'] }),
+  });
+}
+
+export function useDeleteSavedReport() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => reportingApi.deleteSavedReport(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-reports'] }),
+  });
+}
+
 // ===================== NOTIFICATIONS =====================
 
 export function useNotifications(params = {}) {

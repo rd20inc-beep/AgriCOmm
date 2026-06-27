@@ -18,6 +18,12 @@ export const reportingApi = {
   recoveryLeaderboard: (params) => api.get('/api/reporting/quality/recovery-leaderboard', params),
   stockValuation: (params) => api.get('/api/reporting/inventory/stock-valuation', params),
   stockTurnover: (params) => api.get('/api/reporting/inventory/stock-turnover', params),
+  operatorProductivity: (params) => api.get('/api/reporting/production/operator-productivity', params),
+  utilityConsumption: (params) => api.get('/api/reporting/production/utility-consumption', params),
+  recoveryByVariety: (params) => api.get('/api/reporting/quality/recovery-by-variety', params),
+  savedReports: () => api.get('/api/reporting/saved'),
+  saveReport: (data) => api.post('/api/reporting/saved', data),
+  deleteSavedReport: (id) => api.delete(`/api/reporting/saved/${id}`),
   exportReport: (data) => api.post('/api/reporting/export', data),
 };
 export const intelligenceApi = {
