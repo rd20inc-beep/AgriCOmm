@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext';
+import { useApp } from '../../../context/AppContext';
 import {
   BarChart3, TrendingUp, Users, Globe, Package, Award, Coins, Printer, RefreshCw,
   ArrowUpRight, ArrowDownLeft, Activity, Calendar, ExternalLink, AlertTriangle, FileText,
+  ShoppingCart, Truck, Receipt,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell,
@@ -12,7 +14,10 @@ import {
   useExecutiveSummary, useOrderProfitability, useCustomerProfitability,
   useCountryAnalysis, useStockAgingReport, useSupplierQualityRanking,
   usePayments, useReceivables, usePayables, usePrintableStock,
+  useLocalSales, usePurchases,
 } from '../../../api/queries';
+import SlideDrawer from '../../../components/SlideDrawer';
+import TransactionDocument from '../../../components/TransactionDocument';
 
 // ─── Formatting ────────────────────────────────────────────────────────
 function fmtPKR(n) {
@@ -70,6 +75,8 @@ function rangeToParams(range) {
 const TABS = [
   { key: 'moneyIn',   label: 'Money In',   icon: ArrowDownLeft },
   { key: 'moneyOut',  label: 'Money Out',  icon: ArrowUpRight },
+  { key: 'sales',     label: 'Sales',      icon: ShoppingCart },
+  { key: 'purchases', label: 'Purchases',  icon: Truck },
   { key: 'orders',    label: 'Orders',     icon: TrendingUp },
   { key: 'customers', label: 'Customers',  icon: Users },
   { key: 'countries', label: 'Countries',  icon: Globe },
@@ -79,12 +86,23 @@ const TABS = [
 
 export default function Reports() {
   const { user } = useAuth();
-  // A Mill role's reports must stay mill-only — no export-order payments,
+  const { companyProfileData } = useApp();
+  // A Mill role's reports must stay mill-only — no export-order profitability,
   // customers, countries or export A/R / booked profit.
   const millScoped = user?.role === 'Mill Manager';
   const visibleTabs = millScoped
-    ? TABS.filter(t => ['moneyIn', 'moneyOut', 'inventory', 'quality'].includes(t.key))
+    ? TABS.filter(t => ['moneyIn', 'moneyOut', 'sales', 'purchases', 'inventory', 'quality'].includes(t.key))
     : TABS;
+
+  // Party statements live under /milling for the Mill role, /finance otherwise.
+  const statementHref = (type, id) => id
+    ? `${millScoped ? '/milling' : '/finance'}/statements?type=${type}&id=${id}`
+    : null;
+
+  // One shared right-slider that renders the printable/downloadable document
+  // (receipt / voucher / invoice) for whichever report row was clicked.
+  const [doc, setDoc] = useState(null); // { kind, title, subtitle, data }
+  const openDoc = (d) => setDoc(d);
 
   const [range, setRange] = useState('');
   const [tab, setTab] = useState('moneyIn');
@@ -175,8 +193,10 @@ export default function Reports() {
         </nav>
 
         <div className="p-4 sm:p-6">
-          {tab === 'moneyIn'   && <MoneyFlowTab kind="receipt" params={params} totalLabel="Money In"  />}
-          {tab === 'moneyOut'  && <MoneyFlowTab kind="payment" params={params} totalLabel="Money Out" />}
+          {tab === 'moneyIn'   && <MoneyFlowTab kind="receipt" params={params} totalLabel="Money In"  statementHref={statementHref} openDoc={openDoc} />}
+          {tab === 'moneyOut'  && <MoneyFlowTab kind="payment" params={params} totalLabel="Money Out" statementHref={statementHref} openDoc={openDoc} />}
+          {tab === 'sales'     && <SalesTab params={params} statementHref={statementHref} openDoc={openDoc} />}
+          {tab === 'purchases' && <PurchasesTab params={params} statementHref={statementHref} openDoc={openDoc} />}
           {tab === 'orders'    && <OrdersTab params={params} />}
           {tab === 'customers' && <CustomersTab params={params} />}
           {tab === 'countries' && <CountriesTab params={params} />}
@@ -184,12 +204,24 @@ export default function Reports() {
           {tab === 'quality'   && <QualityTab params={params} />}
         </div>
       </div>
+
+      {/* Shared document slider — invoice / receipt / voucher for a clicked row */}
+      <SlideDrawer
+        open={!!doc}
+        onClose={() => setDoc(null)}
+        title={doc?.title || 'Document'}
+        subtitle={doc?.subtitle}
+        icon={Receipt}
+        size="lg"
+      >
+        {doc && <TransactionDocument kind={doc.kind} data={doc.data} companyProfile={companyProfileData} />}
+      </SlideDrawer>
     </div>
   );
 }
 
 // ─── Tab: Money In / Money Out (the unified payments feed) ──────────
-function MoneyFlowTab({ kind, params, totalLabel }) {
+function MoneyFlowTab({ kind, params, totalLabel, statementHref, openDoc }) {
   const { data, isLoading } = usePayments({ ...params, type: kind });
   // Receivables / payables backdrop so we can show the open balance
   // alongside the realised cash flow on the same screen.
@@ -274,6 +306,7 @@ function MoneyFlowTab({ kind, params, totalLabel }) {
         <Table
           head={['Date', 'Ref', 'Counterparty', 'Source', 'Bank', 'Amount']}
           align={['left','left','left','left','left','right']}
+          rowClick={rows.map(p => () => openDoc?.(paymentToDoc(kind, p)))}
           rows={rows.map(p => {
             const pkr = parseFloat(p.baseAmountPkrNormalized) || parseFloat(p.baseAmountPkr) || 0;
             const isForeign = (p.currency || 'PKR') !== 'PKR';
@@ -283,13 +316,16 @@ function MoneyFlowTab({ kind, params, totalLabel }) {
                 <div className="text-[11px] text-gray-400">{p.currency} {Number(p.amount).toLocaleString()} @ {p.fxRate}</div>
               </div>
             ) : <span className="font-semibold text-gray-900">{fmtPKR(pkr)}</span>;
+            const href = statementHref?.(p.counterpartyType, p.counterpartyId);
             return [
               p.paymentDate ? new Date(p.paymentDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—',
               <span className="font-mono text-xs">{p.paymentNo}</span>,
-              <span className="font-medium">{p.counterparty}</span>,
+              href
+                ? <Link to={href} onClick={(e) => e.stopPropagation()} className="font-medium text-blue-600 hover:underline">{p.counterparty}</Link>
+                : <span className="font-medium">{p.counterparty}</span>,
               p.sourceRef
                 ? (p.sourceHref
-                    ? <Link to={p.sourceHref} className="text-blue-600 hover:underline text-xs">{p.sourceRef}</Link>
+                    ? <Link to={p.sourceHref} onClick={(e) => e.stopPropagation()} className="text-blue-600 hover:underline text-xs">{p.sourceRef}</Link>
                     : <span className="text-xs text-gray-600">{p.sourceRef}</span>)
                 : <span className="text-xs text-gray-400">—</span>,
               <span className="text-xs text-gray-600">{p.bankName || p.paymentMethod || '—'}</span>,
@@ -300,6 +336,127 @@ function MoneyFlowTab({ kind, params, totalLabel }) {
       )}
     </div>
   );
+}
+
+// Build the printable doc model for a payments-feed row.
+function paymentToDoc(kind, p) {
+  const pkr = parseFloat(p.baseAmountPkrNormalized) || parseFloat(p.baseAmountPkr) || 0;
+  const cur = p.currency || 'PKR';
+  const native = parseFloat(p.amount) || pkr;
+  if (kind === 'receipt') {
+    return {
+      kind: 'receipt', title: 'Payment Receipt', subtitle: p.counterparty,
+      data: {
+        recvNo: p.paymentNo, customerName: p.counterparty, type: p.recvType || (p.localSaleId ? 'Local Sale' : 'Receipt'),
+        currency: cur, dueDate: p.paymentDate, expectedAmount: native, receivedAmount: native, outstanding: 0, status: 'Received',
+      },
+    };
+  }
+  return {
+    kind: 'voucher', title: 'Payment Voucher', subtitle: p.counterparty,
+    data: {
+      payNo: p.paymentNo, supplierName: p.counterparty, category: p.payableType || 'Payment', linkedRef: p.sourceRef,
+      entity: p.payEntity, currency: cur, dueDate: p.paymentDate, originalAmount: native, paidAmount: native, outstanding: 0, status: 'Paid',
+    },
+  };
+}
+
+// ─── Tab: Sales (local rice sales) ────────────────────────────────────
+function SalesTab({ params, statementHref, openDoc }) {
+  const { data: sales = [], isLoading } = useLocalSales(params);
+  if (isLoading) return <Skeleton />;
+  const rows = Array.isArray(sales) ? sales : (sales?.sales || []);
+  if (rows.length === 0) return <Empty msg="No sales in this period." />;
+
+  const total = rows.reduce((s, r) => s + (parseFloat(r.totalAmount) || 0), 0);
+  const due   = rows.reduce((s, r) => s + (parseFloat(r.dueAmount) || 0), 0);
+  const paid  = rows.reduce((s, r) => s + (parseFloat(r.paidAmount ?? ((parseFloat(r.totalAmount) || 0) - (parseFloat(r.dueAmount) || 0))) || 0), 0);
+
+  return (
+    <div className="space-y-5">
+      <SectionHeader title="Sales — local rice sales" subtitle="Every local sale; click a row for the downloadable invoice." />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <SummaryCell label="Total Sales" value={fmtPKR(total)} />
+        <SummaryCell label="Invoices" value={String(rows.length)} />
+        <SummaryCell label="Received" value={fmtPKR(paid)} />
+        <SummaryCell label="Outstanding" value={fmtPKR(due)} />
+      </div>
+      <Table
+        head={['Date', 'Sale No', 'Customer', 'Items', 'Amount', 'Status']}
+        align={['left', 'left', 'left', 'right', 'right', 'left']}
+        rowClick={rows.map(s => () => openDoc?.({ kind: 'invoice', title: 'Sales Invoice', subtitle: s.customerName || s.buyerName, data: s }))}
+        rows={rows.map(s => {
+          const cust = s.customerName || s.buyerName || 'Walk-in customer';
+          const href = statementHref?.('customer', s.customerId);
+          const nItems = Array.isArray(s.items) ? s.items.length : (s.itemCount || 1);
+          return [
+            s.saleDate ? new Date(s.saleDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—',
+            <span className="font-mono text-xs">{s.saleNo}</span>,
+            href ? <Link to={href} onClick={(e) => e.stopPropagation()} className="font-medium text-blue-600 hover:underline">{cust}</Link> : <span className="font-medium">{cust}</span>,
+            nItems,
+            <span className="font-semibold text-gray-900">{fmtPKR(s.totalAmount)}</span>,
+            <StatusChip s={s.paymentStatus} />,
+          ];
+        })}
+      />
+    </div>
+  );
+}
+
+// ─── Tab: Purchases (rice lots + mill store + expenses) ────────────────
+function PurchasesTab({ params, statementHref, openDoc }) {
+  const { data, isLoading } = usePurchases(params);
+  if (isLoading) return <Skeleton />;
+  const rows = data?.purchases || [];
+  if (rows.length === 0) return <Empty msg="No purchases in this period." />;
+
+  const totals = data?.totals || {};
+  const total = parseFloat(totals.totalPkr ?? totals.total_pkr) || rows.reduce((s, r) => s + (parseFloat(r.amountPkr) || 0), 0);
+  const unpaid = rows.filter(r => String(r.paymentStatus || '').toLowerCase() !== 'paid')
+    .reduce((s, r) => s + (parseFloat(r.amountPkr) || 0), 0);
+
+  return (
+    <div className="space-y-5">
+      <SectionHeader title="Purchases — rice, mill store & expenses" subtitle="Every purchase; click a row for the downloadable voucher." />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <SummaryCell label="Total Purchases" value={fmtPKR(total)} />
+        <SummaryCell label="Records" value={String(rows.length)} />
+        <SummaryCell label="Unpaid" value={fmtPKR(unpaid)} />
+        <SummaryCell label="Suppliers" value={String(new Set(rows.map(r => r.supplierName).filter(Boolean)).size)} />
+      </div>
+      <Table
+        head={['Date', 'Ref', 'Supplier', 'Category', 'Amount', 'Status']}
+        align={['left', 'left', 'left', 'left', 'right', 'left']}
+        rowClick={rows.map(r => () => openDoc?.(purchaseToDoc(r)))}
+        rows={rows.map(r => {
+          const sup = r.supplierName || '—';
+          const href = statementHref?.('supplier', r.supplierId);
+          return [
+            r.date ? new Date(r.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—',
+            <span className="font-mono text-xs">{r.ref}</span>,
+            href ? <Link to={href} onClick={(e) => e.stopPropagation()} className="font-medium text-blue-600 hover:underline">{sup}</Link> : <span className="font-medium">{sup}</span>,
+            <span className="text-xs text-gray-600 capitalize">{r.category || r.source}</span>,
+            <span className="font-semibold text-gray-900">{fmtPKR(r.amountPkr)}</span>,
+            <StatusChip s={r.paymentStatus} />,
+          ];
+        })}
+      />
+    </div>
+  );
+}
+
+function purchaseToDoc(r) {
+  const amt = parseFloat(r.amountPkr) || 0;
+  const isPaid = String(r.paymentStatus || '').toLowerCase() === 'paid';
+  const paid = isPaid ? amt : 0;
+  return {
+    kind: 'voucher', title: 'Payment Voucher', subtitle: r.supplierName || r.ref,
+    data: {
+      payNo: r.ref, supplierName: r.supplierName || '—', category: r.category || r.source, linkedRef: r.ref,
+      currency: r.currency || 'PKR', dueDate: r.date, originalAmount: amt, paidAmount: paid,
+      outstanding: Math.max(0, amt - paid), status: r.paymentStatus,
+    },
+  };
 }
 
 // ─── Tab: Orders ──────────────────────────────────────────────────────
@@ -443,40 +600,52 @@ function StockBreakdown({ title, subtitle, query, groupHead }) {
 }
 
 function InventoryTab() {
-  const { data: lots = [], isLoading } = useStockAgingReport();   // per-lot array
+  const navigate = useNavigate();
+  const { data: lots = [], isLoading } = useStockAgingReport();   // per-lot array (qty > 0 only)
   const byType = usePrintableStock('type');
   const byWarehouse = usePrintableStock('warehouse');
   const bySubtype = usePrintableStock('subtype');
 
   if (isLoading) return <Skeleton />;
-  if (!Array.isArray(lots) || lots.length === 0) return <Empty msg="No stock to report." />;
+
+  // The aging feed only carries lots with qty > 0, so it goes blank the moment
+  // every lot is milled/sold down to zero — even though the stock breakdowns
+  // still have rows. Render whenever EITHER source has data; only show the
+  // empty state when both are genuinely empty.
+  const lotsArr = Array.isArray(lots) ? lots : [];
+  const hasAging = lotsArr.length > 0;
+  const printableLoading = byType.isLoading || bySubtype.isLoading || byWarehouse.isLoading;
+  const hasPrintable = ((byType.data?.rows?.length || 0) + (bySubtype.data?.rows?.length || 0) + (byWarehouse.data?.rows?.length || 0)) > 0;
+  if (!hasAging && !hasPrintable && !printableLoading) {
+    return <Empty msg="No stock on hand — every lot has been fully milled or sold." />;
+  }
 
   // Headline totals — prefer the printable-stock grand (carries available/reserved),
   // fall back to summing the per-lot aging data so the tab is never blank.
   const grand = byType.data?.grand || {};
-  const totalKg = grand.totalKg != null ? parseFloat(grand.totalKg) : lots.reduce((s, l) => s + (parseFloat(l.qty) || 0) * 1000, 0);
+  const totalKg = grand.totalKg != null ? parseFloat(grand.totalKg) : lotsArr.reduce((s, l) => s + (parseFloat(l.qty) || 0) * 1000, 0);
   const availKg = grand.availableKg;
   const reservedKg = grand.reservedKg;
-  const totalValue = grand.valuePkr != null ? parseFloat(grand.valuePkr) : lots.reduce((s, l) => s + (parseFloat(l.totalValue) || 0), 0);
-  const deadStock = lots.filter((l) => l.isDeadStock);
+  const totalValue = grand.valuePkr != null ? parseFloat(grand.valuePkr) : lotsArr.reduce((s, l) => s + (parseFloat(l.totalValue) || 0), 0);
+  const deadStock = lotsArr.filter((l) => l.isDeadStock);
   const deadValue = deadStock.reduce((s, l) => s + (parseFloat(l.totalValue) || 0), 0);
 
   // Aging buckets from days-in-stock.
   const bucketRows = AGE_BUCKETS.map(([label, test]) => {
-    const ls = lots.filter((l) => test(parseInt(l.daysInStock, 10) || 0));
+    const ls = lotsArr.filter((l) => test(parseInt(l.daysInStock, 10) || 0));
     const kg = ls.reduce((s, l) => s + (parseFloat(l.qty) || 0) * 1000, 0);
     const val = ls.reduce((s, l) => s + (parseFloat(l.totalValue) || 0), 0);
     return [label, ls.length, fmtMT(kg), fmtPKR(val), totalValue > 0 ? `${(val / totalValue * 100).toFixed(1)}%` : '—'];
   });
 
   // Oldest lots — the 8 longest-held, most useful for spotting stale stock.
-  const oldest = [...lots].sort((a, b) => (b.daysInStock || 0) - (a.daysInStock || 0)).slice(0, 8);
+  const oldest = [...lotsArr].sort((a, b) => (b.daysInStock || 0) - (a.daysInStock || 0)).slice(0, 8);
 
   return (
     <div className="space-y-6">
       {/* Headline numbers */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <SummaryCell label="Total lots" value={String(grand.lotCount ?? lots.length)} />
+        <SummaryCell label="Total lots" value={String(grand.lotCount ?? lotsArr.length)} />
         <SummaryCell label="Total weight" value={fmtMT(totalKg)} />
         <SummaryCell label="Available" value={availKg != null ? fmtMT(availKg) : '—'} />
         <SummaryCell label="Reserved" value={reservedKg != null ? fmtMT(reservedKg) : '—'} />
@@ -491,35 +660,44 @@ function InventoryTab() {
       <StockBreakdown title="By Category" subtitle="Finished, broken grades, sortex, bran, husk, blends" query={bySubtype} groupHead="Category" />
       <StockBreakdown title="By Warehouse" subtitle="Where the stock is held" query={byWarehouse} groupHead="Warehouse" />
 
-      {/* Aging */}
-      <div className="space-y-2">
-        <SectionHeader title="Stock Aging" subtitle="How long stock has been held" />
-        <Table
-          head={['Bucket', 'Lots', 'Weight', 'Value (PKR)', '% of value']}
-          align={['left', 'right', 'right', 'right', 'right']}
-          rows={bucketRows}
-        />
-      </div>
+      {hasAging ? (
+        <>
+          {/* Aging */}
+          <div className="space-y-2">
+            <SectionHeader title="Stock Aging" subtitle="How long stock has been held" />
+            <Table
+              head={['Bucket', 'Lots', 'Weight', 'Value (PKR)', '% of value']}
+              align={['left', 'right', 'right', 'right', 'right']}
+              rows={bucketRows}
+            />
+          </div>
 
-      {/* Oldest lots */}
-      <div className="space-y-2">
-        <SectionHeader title="Oldest Lots" subtitle="Longest-held stock first" />
-        <Table
-          head={['Lot No', 'Item', 'Type', 'Warehouse', 'Qty', 'Value (PKR)', 'Days held']}
-          align={['left', 'left', 'left', 'left', 'right', 'right', 'right']}
-          rows={oldest.map((l) => [
-            l.lotNo || '—',
-            l.itemName || '—',
-            l.type || '—',
-            l.warehouseName || '—',
-            `${(parseFloat(l.qty) || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} ${l.unit || 'MT'}`,
-            fmtPKR(l.totalValue),
-            l.isDeadStock
-              ? <span className="inline-flex items-center gap-1 text-rose-600 font-medium"><AlertTriangle size={12} /> {l.daysInStock}</span>
-              : (l.daysInStock || 0),
-          ])}
-        />
-      </div>
+          {/* Oldest lots — click a lot to open its detail */}
+          <div className="space-y-2">
+            <SectionHeader title="Oldest Lots" subtitle="Longest-held stock first — click a lot for full detail" />
+            <Table
+              head={['Lot No', 'Item', 'Type', 'Warehouse', 'Qty', 'Value (PKR)', 'Days held']}
+              align={['left', 'left', 'left', 'left', 'right', 'right', 'right']}
+              rowClick={oldest.map((l) => l.id ? () => navigate(`/lot-inventory/${l.id}`) : null)}
+              rows={oldest.map((l) => [
+                <span className="font-medium text-blue-600">{l.lotNo || '—'}</span>,
+                l.itemName || '—',
+                l.type || '—',
+                l.warehouseName || '—',
+                `${(parseFloat(l.qty) || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} ${l.unit || 'MT'}`,
+                fmtPKR(l.totalValue),
+                l.isDeadStock
+                  ? <span className="inline-flex items-center gap-1 text-rose-600 font-medium"><AlertTriangle size={12} /> {l.daysInStock}</span>
+                  : (l.daysInStock || 0),
+              ])}
+            />
+          </div>
+        </>
+      ) : (
+        <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
+          No lots are currently on hand (every lot has been fully milled or sold). The breakdowns above reflect the most recent lot records.
+        </div>
+      )}
 
       <div className="flex justify-end">
         <Link to="/reports/print" className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm">
@@ -671,7 +849,7 @@ function ProfitCell({ v }) {
   return <span className={`font-semibold ${cls}`}>{fmtPKR(n)}</span>;
 }
 
-function Table({ head, align = [], rows }) {
+function Table({ head, align = [], rows, rowClick }) {
   if (!rows || rows.length === 0) return <Empty msg="No rows." />;
   return (
     <div className="overflow-x-auto">
@@ -684,13 +862,17 @@ function Table({ head, align = [], rows }) {
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
-          {rows.map((row, ri) => (
-            <tr key={ri} className="hover:bg-gray-50">
-              {row.map((cell, ci) => (
-                <td key={ci} className={`text-${align[ci] || 'left'} py-2.5 px-3 text-gray-800`}>{cell}</td>
-              ))}
-            </tr>
-          ))}
+          {rows.map((row, ri) => {
+            const onClick = rowClick?.[ri];
+            return (
+              <tr key={ri} onClick={onClick}
+                className={`hover:bg-gray-50 ${onClick ? 'cursor-pointer' : ''}`}>
+                {row.map((cell, ci) => (
+                  <td key={ci} className={`text-${align[ci] || 'left'} py-2.5 px-3 text-gray-800`}>{cell}</td>
+                ))}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

@@ -906,11 +906,11 @@ const financeController = {
           'p.fx_rate', 'p.base_amount_pkr', 'p.payment_method',
           'p.payment_date', 'p.bank_reference', 'p.notes', 'p.created_at',
           'p.linked_receivable_id', 'p.linked_payable_id', 'p.local_sale_id',
-          'r.recv_no as recv_no', 'r.entity as recv_entity', 'r.type as recv_type',
-          'pa.pay_no as pay_no', 'pa.entity as pay_entity', 'pa.payable_type', 'pa.linked_ref as pay_linked_ref',
+          'r.recv_no as recv_no', 'r.entity as recv_entity', 'r.type as recv_type', 'r.customer_id as recv_customer_id',
+          'pa.pay_no as pay_no', 'pa.entity as pay_entity', 'pa.payable_type', 'pa.linked_ref as pay_linked_ref', 'pa.supplier_id as pay_supplier_id',
           'c.name as customer_name',
           's.name as supplier_name',
-          'ls.sale_no as sale_no', 'ls.buyer_name as sale_buyer',
+          'ls.sale_no as sale_no', 'ls.buyer_name as sale_buyer', 'ls.customer_id as sale_customer_id',
           'ba.name as bank_name', 'ba.currency as bank_currency'
         );
       if (type) q = q.where('p.type', type);
@@ -937,9 +937,14 @@ const financeController = {
         let counterparty = '—';
         let sourceRef = null;
         let sourceHref = null;
+        // Party identity so the FE can link the counterparty to its statement.
+        let counterparty_type = null;
+        let counterparty_id = null;
         if (r.type === 'receipt') {
           counterparty = r.customer_name || r.sale_buyer || 'Walk-in customer';
           sourceRef = r.recv_no || r.sale_no || null;
+          counterparty_type = 'customer';
+          counterparty_id = r.recv_customer_id || r.sale_customer_id || null;
           // Link to the local-sales screen for any sale-linked receipt — both
           // the RCV-LS receivables and the party-ledger receipts that carry a
           // local_sale_id (their recv_no is null, so the prefix check missed them).
@@ -947,8 +952,10 @@ const financeController = {
         } else {
           counterparty = r.supplier_name || r.pay_linked_ref || 'Vendor';
           sourceRef = r.pay_no || null;
+          counterparty_type = 'supplier';
+          counterparty_id = r.pay_supplier_id || null;
         }
-        return { ...r, counterparty, sourceRef, sourceHref };
+        return { ...r, counterparty, sourceRef, sourceHref, counterparty_type, counterparty_id };
       });
 
       // PKR totals across the filtered set. Resolve order:
@@ -1669,7 +1676,7 @@ financeController.removeAllocationLine = async function (req, res) {
 // uses this to show approver-tagged company spend at a glance.
 financeController.listPurchases = async (req, res) => {
   try {
-    const { from_date, to_date, source, limit = 500 } = req.query;
+    const { from_date, to_date, source, entity, limit = 500 } = req.query;
     const dateFilter = (q, col) => {
       if (from_date) q = q.where(col, '>=', from_date);
       if (to_date) q = q.where(col, '<=', to_date);
@@ -1677,6 +1684,9 @@ financeController.listPurchases = async (req, res) => {
     };
 
     const wantSource = source && source !== 'all' ? source : null;
+    // A Mill role's purchases are mill-only: raw-rice lots (entity=mill),
+    // mill-store consumables, and mill business expenses — never export costs.
+    const millOnly = entity === 'mill';
     const all = [];
 
     // ── Inventory lot purchases (raw / finished / byproduct) ──
@@ -1684,7 +1694,9 @@ financeController.listPurchases = async (req, res) => {
       let q = db('inventory_lots as il')
         .leftJoin('suppliers as s', 'il.supplier_id', 's.id')
         .leftJoin('users as creator', 'il.created_by', 'creator.id')
-        .where('il.landed_cost_total', '>', 0)
+        .where('il.landed_cost_total', '>', 0);
+      if (millOnly) q = q.where('il.entity', 'mill');
+      q = q
         .select(
           db.raw("'lot' AS source"),
           'il.id as ref_id',
@@ -1738,7 +1750,7 @@ financeController.listPurchases = async (req, res) => {
     // (every category pre-inserted at 0) don't clutter the list. Fall
     // back to amount*fx_rate when base_amount_pkr is 0/NULL — older rows
     // (and the addCost shortcut) leave base_amount_pkr unpopulated.
-    if (!wantSource || wantSource === 'export_cost') {
+    if (!millOnly && (!wantSource || wantSource === 'export_cost')) {
       let q = db('export_order_costs as eoc')
         .leftJoin('export_orders as eo', 'eoc.order_id', 'eo.id')
         .leftJoin('users as creator', 'eoc.created_by', 'creator.id')
@@ -1769,7 +1781,9 @@ financeController.listPurchases = async (req, res) => {
       let q = db('business_expenses as be')
         .leftJoin('suppliers as s', 'be.supplier_id', 's.id')
         .leftJoin('users as creator', 'be.created_by', 'creator.id')
-        .leftJoin('users as approver', 'be.approved_by', 'approver.id')
+        .leftJoin('users as approver', 'be.approved_by', 'approver.id');
+      if (millOnly) q = q.where('be.expense_type', 'mill');
+      q = q
         .select(
           db.raw("'expense' AS source"),
           'be.id as ref_id',
