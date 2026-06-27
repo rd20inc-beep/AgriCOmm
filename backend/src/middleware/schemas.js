@@ -205,6 +205,9 @@ const createPurchaseLot = Joi.object({
     bag_size_kg: Joi.number().min(0).allow(null, ''),
     arrival_date: Joi.date().iso().allow(null, ''),
     notes: Joi.string().allow(null, ''),
+    // Per-truck quality at intake — free-form object, whitelisted server-side.
+    quality_json: Joi.object().unknown(true).allow(null),
+    quality: Joi.object().unknown(true).allow(null),
   })).allow(null),
 });
 

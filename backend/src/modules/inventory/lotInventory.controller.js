@@ -697,6 +697,8 @@ module.exports = {
             weight_mt: vWeightMT,
             bag_size_kg: vBagSize,
             total_bags: vBags,
+            // Per-truck quality captured at intake (moisture/broken/purity/price…).
+            quality_json: sanitizeLotQuality(v.quality_json || v.quality),
             arrival_date: v.arrival_date || purchase_date || new Date().toISOString().slice(0, 10),
             notes: v.notes || null,
             created_by: req.user?.id || null,

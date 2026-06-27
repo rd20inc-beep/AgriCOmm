@@ -57,7 +57,18 @@ const defaultForm = () => ({
   vehicles: [],
 });
 
-const emptyVehicle = () => ({ vehicle_no: '', driver_name: '', driver_phone: '', weight_kg: '', total_bags: '', arrival_date: new Date().toISOString().slice(0, 10), notes: '' });
+const emptyVehicle = () => ({ vehicle_no: '', driver_name: '', driver_phone: '', weight_kg: '', total_bags: '', arrival_date: new Date().toISOString().slice(0, 10), notes: '', quality: {} });
+
+// Per-truck quality fields captured at intake (stored in the arrival's quality_json).
+const VEHICLE_QUALITY_FIELDS = [
+  { key: 'moisture', label: 'Moisture %' },
+  { key: 'broken', label: 'Broken %' },
+  { key: 'foreign_matter', label: 'Foreign %' },
+  { key: 'chalky', label: 'Chalky %' },
+  { key: 'purity', label: 'Purity %' },
+  { key: 'grain_size', label: 'Grain size (mm)' },
+  { key: 'price_per_mt', label: 'Price / MT' },
+];
 
 export default function PurchaseLotDrawer({
   isOpen,
@@ -72,6 +83,7 @@ export default function PurchaseLotDrawer({
   const [form, setForm] = useState(defaultForm);
   const [showMore, setShowMore] = useState(false);
   const [showVehicles, setShowVehicles] = useState(false);
+  const [vehQualityOpen, setVehQualityOpen] = useState({}); // { [vehicleIndex]: bool }
   const [supplierSearch, setSupplierSearch] = useState('');
   const [productSearch, setProductSearch] = useState('');
 
@@ -93,6 +105,7 @@ export default function PurchaseLotDrawer({
       setForm(defaultForm());
       setShowMore(false);
       setShowVehicles(false);
+      setVehQualityOpen({});
       setAddingSupplier(false);
       setAddingProduct(false);
       setSupplierDraft({ name: '', contact_person: '', phone: '' });
@@ -254,15 +267,24 @@ export default function PurchaseLotDrawer({
         // Optional vehicle arrival(s) — only rows where a vehicle number was entered.
         vehicles: (form.vehicles || [])
           .filter(v => String(v.vehicle_no || '').trim())
-          .map(v => ({
-            vehicle_no: v.vehicle_no.trim(),
-            driver_name: v.driver_name || null,
-            driver_phone: v.driver_phone || null,
-            weight_kg: v.weight_kg !== '' ? parseFloat(v.weight_kg) : null,
-            total_bags: v.total_bags !== '' ? parseInt(v.total_bags, 10) : null,
-            arrival_date: v.arrival_date || form.purchase_date || null,
-            notes: v.notes || null,
-          })),
+          .map(v => {
+            // Build per-truck quality_json from the entered (non-empty) fields.
+            const q = {};
+            for (const f of VEHICLE_QUALITY_FIELDS) {
+              const val = v.quality?.[f.key];
+              if (val !== '' && val != null && !Number.isNaN(parseFloat(val))) q[f.key] = parseFloat(val);
+            }
+            return {
+              vehicle_no: v.vehicle_no.trim(),
+              driver_name: v.driver_name || null,
+              driver_phone: v.driver_phone || null,
+              weight_kg: v.weight_kg !== '' ? parseFloat(v.weight_kg) : null,
+              total_bags: v.total_bags !== '' ? parseInt(v.total_bags, 10) : null,
+              arrival_date: v.arrival_date || form.purchase_date || null,
+              notes: v.notes || null,
+              quality_json: Object.keys(q).length ? q : null,
+            };
+          }),
       });
       addToast?.(`Rice purchase lot recorded — ${weightMT.toFixed(2)} MT`, 'success');
       onSuccess?.();
@@ -678,6 +700,27 @@ export default function PurchaseLotDrawer({
                     </div>
                     <Input label="Notes" value={v.notes}
                       onChange={(val) => setV('notes', val)} placeholder="Optional" />
+
+                    {/* Per-truck quality (optional, collapsed) */}
+                    <div className="border-t border-gray-200 pt-2">
+                      <button type="button"
+                        onClick={() => setVehQualityOpen(prev => ({ ...prev, [idx]: !prev[idx] }))}
+                        className="text-xs font-medium text-gray-600 hover:text-blue-600 flex items-center gap-1">
+                        <span>{vehQualityOpen[idx] ? '▾' : '▸'}</span>
+                        Quality for this truck
+                        <span className="text-[11px] text-gray-400 font-normal">— moisture, broken, price… (optional)</span>
+                      </button>
+                      {vehQualityOpen[idx] && (
+                        <div className="mt-2 grid grid-cols-3 gap-2">
+                          {VEHICLE_QUALITY_FIELDS.map(f => (
+                            <Input key={f.key} label={f.label} type="number"
+                              value={v.quality?.[f.key] ?? ''}
+                              onChange={(val) => setV('quality', { ...(v.quality || {}), [f.key]: val })}
+                              placeholder="—" />
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })}
