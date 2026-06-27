@@ -26,11 +26,14 @@ export default function MillSupplierPayDrawer({ supplier, onClose }) {
       return (da - db) || ((a.dbId || a.id || 0) - (b.dbId || b.id || 0));
     }), [payables, supplier.id]);
 
-  const bankOpts = useMemo(() => (Array.isArray(bankAccountsList) ? bankAccountsList : [])
-    .filter((b) => (b.isActive ?? b.is_active ?? true)), [bankAccountsList]);
+  // Mill Finance pays only from its own cash float (Mill Cash) — never from a
+  // Head Office bank account, and Head Office balances are never shown here.
+  const millCash = useMemo(() => (Array.isArray(bankAccountsList) ? bankAccountsList : [])
+    .find((b) => (b.type === 'cash') && ((b.entity || 'general') === 'mill'))
+    || (Array.isArray(bankAccountsList) ? bankAccountsList : []).find((b) => b.type === 'cash'), [bankAccountsList]);
 
   const [payId, setPayId] = useState('');
-  const [form, setForm] = useState({ amount: '', payment_method: 'bank_transfer', payment_date: new Date().toISOString().split('T')[0], bank_account_id: '', reference: '', due_date: '' });
+  const [form, setForm] = useState({ amount: '', payment_method: 'cash', payment_date: new Date().toISOString().split('T')[0], bank_account_id: '', reference: '', due_date: '' });
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   useEffect(() => {
@@ -57,13 +60,12 @@ export default function MillSupplierPayDrawer({ supplier, onClose }) {
     if (!payId) { addToast('Select an invoice to pay', 'error'); return; }
     if (!amt || amt <= 0) { addToast('Enter a valid amount', 'error'); return; }
     if (amt > out + 0.01) { addToast(`Amount exceeds the ${PKR(out)} outstanding on this invoice`, 'error'); return; }
-    if ((form.payment_method === 'bank_transfer') && !form.bank_account_id) { addToast('Select the account you are paying from', 'error'); return; }
     setSaving(true);
     try {
       await payMut.mutateAsync({
         type: 'payment', amount: Number(amt.toFixed(2)), currency: cur,
-        payment_method: form.payment_method, payment_date: form.payment_date,
-        bank_account_id: form.bank_account_id || null, due_date: form.due_date || null,
+        payment_method: 'cash', payment_date: form.payment_date,
+        bank_account_id: millCash?.id || null, due_date: form.due_date || null,
         bank_reference: form.reference || null, linked_payable_id: selected.dbId || selected.id,
         notes: `Payment for ${invRef(selected)} — ${supplier.name}`,
       });
@@ -128,37 +130,14 @@ export default function MillSupplierPayDrawer({ supplier, onClose }) {
               </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Payment Method</label>
-              <select value={form.payment_method}
-                onChange={(e) => { const m = e.target.value; setForm((f) => ({ ...f, payment_method: m, bank_account_id: (m === 'cash' || m === 'cheque') ? '' : f.bank_account_id })); }}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-emerald-500">
-                <option value="bank_transfer">Bank Transfer</option><option value="cheque">Cheque</option><option value="cash">Cash</option>
-              </select>
+            <div className="text-xs bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 text-emerald-800">
+              Paid from <span className="font-semibold">{millCash?.name || 'Mill Cash'}</span>. The mill settles
+              supplier bills from its cash float; fund it from Head Office if it runs short.
             </div>
 
-            {form.payment_method === 'bank_transfer' && (
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Pay From Account *</label>
-                <select value={form.bank_account_id} onChange={(e) => set('bank_account_id', e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-emerald-500">
-                  <option value="">Select account…</option>
-                  {bankOpts.map((b) => <option key={b.id} value={b.id}>{b.name}{(b.bankName || b.bank_name) ? ` — ${b.bankName || b.bank_name}` : ''}</option>)}
-                </select>
-              </div>
-            )}
-
-            {form.payment_method === 'cheque' && (
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Cheque clears on <span className="text-gray-400 font-normal">(optional)</span></label>
-                <input type="date" value={form.due_date} onChange={(e) => set('due_date', e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-emerald-500" />
-              </div>
-            )}
-
             <div>
-              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Reference {form.payment_method === 'cheque' ? '/ Cheque #' : ''}</label>
-              <input value={form.reference} onChange={(e) => set('reference', e.target.value)} placeholder="Voucher / cheque #"
+              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Reference</label>
+              <input value={form.reference} onChange={(e) => set('reference', e.target.value)} placeholder="Voucher #"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-emerald-500" />
             </div>
             <p className="text-[11px] text-gray-400">Recorded against the selected invoice so the payable, the supplier balance and the GL all reconcile.</p>

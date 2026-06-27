@@ -14,7 +14,7 @@ import {
   useUpdateMillWorker, useDeleteMillWorker, useCreateWorkerAdvance, useWorkerAdvances, useWorkerLedger,
   useDeleteWorkerAdvance,
   usePayrollSummary, useRecordAttendance, useAttendance, useBulkAttendance, useAttendanceHolidays, useInventory, useExpenseVendors,
-  usePayrollRuns, usePostPayrollRun, useDeletePayrollRun, usePayrollRun, usePayrollReport, useBankAccounts,
+  usePayrollRuns, usePostPayrollRun, useDeletePayrollRun, usePayrollRun, usePayrollReport,
   usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow, useAcceptFundTransfer,
   useMillLotCosts, useLocalSales, useRecordPayment, usePayablePayments,
 } from '../../../api/queries';
@@ -2178,7 +2178,6 @@ function ExpensePayDrawer({ expense, bankAccounts = [], companyProfile, addToast
   }, [expense]);
   if (!expense) return null;
   const PKR = (n) => `Rs ${Math.round(parseFloat(n) || 0).toLocaleString()}`;
-  const bankOnly = bankAccounts.filter(a => a.type !== 'cash');
   // Mill cash payments are drawn from the dedicated Mill Cash account so they
   // reduce "Mill Cash available" on the dashboard (and go negative when the mill
   // has spent more than it holds — a signal it needs funding from Head Office).
@@ -2199,14 +2198,11 @@ function ExpensePayDrawer({ expense, bankAccounts = [], companyProfile, addToast
     if (!(amt > 0)) { addToast?.('Enter a valid amount', 'error'); return; }
     if (!payableId) { addToast?.('This expense has no payable to settle.', 'error'); return; }
     try {
-      // Cash → Mill Cash account; bank/online/mobile → the chosen account; cheque → none (clears later).
-      const acctId = form.paymentMethod === 'cash' ? (millCash?.id || null)
-        : form.paymentMethod === 'cheque' ? null
-        : (form.bankAccountId || null);
+      // Mill Finance pays only from Mill Cash — never from a Head Office bank account.
       await recordMut.mutateAsync({
         type: 'payment', amount: amt, currency: 'PKR',
-        payment_method: form.paymentMethod, payment_date: form.paymentDate,
-        bank_account_id: acctId, bank_reference: form.chequeNo || null,
+        payment_method: 'cash', payment_date: form.paymentDate,
+        bank_account_id: millCash?.id || null, bank_reference: null,
         due_date: form.dueDate || null, linked_payable_id: payableId,
         notes: form.notes || `Payment for ${voucher.payNo} — ${expense.description || expense.category}`,
       });
@@ -2278,45 +2274,13 @@ function ExpensePayDrawer({ expense, bankAccounts = [], companyProfile, addToast
         {status !== 'Paid' && outstanding > 0 && (
           <form onSubmit={pay} className="pt-3 border-t border-gray-200 space-y-4">
             <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2"><Banknote size={15} /> Record Payment</h3>
-            <div>
-              <label className="text-xs text-gray-500 block mb-1">Payment Method</label>
-              <select value={form.paymentMethod}
-                onChange={e => { const m = e.target.value; setForm({ ...form, paymentMethod: m, bankAccountId: (m === 'cash' || m === 'cheque') ? '' : form.bankAccountId }); }}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
-                <option value="cash">Cash</option>
-                <option value="bank_transfer">Bank Transfer</option>
-                <option value="cheque">Cheque</option>
-                <option value="online">Online Payment</option>
-                <option value="mobile">Mobile Transfer</option>
-              </select>
+            <div className="text-xs bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 text-emerald-800">
+              Paid from <span className="font-semibold">{millCash?.name || 'Mill Cash'}</span>
+              {millCash ? <> · balance {PKR(millCash.currentBalance)}</> : null}
+              {millCash && (parseFloat(millCash.currentBalance) || 0) - (parseFloat(form.amount) || 0) < 0 && (
+                <span className="block text-amber-700 mt-0.5">This will overdraw Mill Cash — fund it from Head Office to clear the negative.</span>
+              )}
             </div>
-            {form.paymentMethod === 'cheque' && (
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className="text-xs text-gray-500 block mb-1">Cheque # <span className="text-gray-300">(optional)</span></label>
-                  <input value={form.chequeNo} onChange={e => setForm({ ...form, chequeNo: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="e.g. 004512" /></div>
-                <div><label className="text-xs text-gray-500 block mb-1">Cheque date</label>
-                  <input type="date" value={form.dueDate} onChange={e => setForm({ ...form, dueDate: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" /></div>
-              </div>
-            )}
-            {form.paymentMethod === 'cash' && (
-              <div className="text-xs bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 text-emerald-800">
-                Paid from <span className="font-semibold">{millCash?.name || 'Mill Cash'}</span>
-                {millCash ? <> · balance {PKR(millCash.currentBalance)}</> : null}
-                {millCash && (parseFloat(millCash.currentBalance) || 0) - (parseFloat(form.amount) || 0) < 0 && (
-                  <span className="block text-amber-700 mt-0.5">This will overdraw Mill Cash — fund it from Head Office to clear the negative.</span>
-                )}
-              </div>
-            )}
-            {form.paymentMethod !== 'cash' && form.paymentMethod !== 'cheque' && (
-              <div>
-                <label className="text-xs text-gray-500 block mb-1">Pay From Account</label>
-                <select required value={form.bankAccountId} onChange={e => setForm({ ...form, bankAccountId: e.target.value })}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
-                  <option value="">Select account...</option>
-                  {bankOnly.map(a => <option key={a.id} value={a.id}>{a.name}{a.bankName ? ` — ${a.bankName}` : ''} ({Math.round(parseFloat(a.currentBalance) || 0).toLocaleString()})</option>)}
-                </select>
-              </div>
-            )}
             <div className="grid grid-cols-2 gap-3">
               <div><label className="text-xs text-gray-500 block mb-1">Amount (Rs)</label>
                 <input type="number" step="0.01" required value={form.amount} max={outstanding} onChange={e => setForm({ ...form, amount: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" /></div>
@@ -2708,11 +2672,9 @@ function printPayslip(run, line, company) {
   w.document.close();
 }
 
-// Drawer to post a payroll run: pick cash/bank + date, review the per-employee
-// breakdown, then pay it out. Server recomputes the figures on submit.
+// Drawer to post a payroll run: review the per-employee breakdown, then pay it
+// out from Mill Cash. Server recomputes the figures on submit.
 function PayrollRunDrawer({ month, employees, preselectId, onClose, onPosted, postRunMut, addToast }) {
-  const { data: bankAccounts = [] } = useBankAccounts();
-  const banks = bankAccounts.filter(a => a.type !== 'cash');
   const [form, setForm] = useState({ pay_method: 'cash', bank_account_id: '', pay_date: new Date().toISOString().split('T')[0] });
   // One editable row per unpaid employee: include, advance-to-clear, and the
   // amount actually being paid (defaults to gross − advance, both overridable).
@@ -2740,12 +2702,12 @@ function PayrollRunDrawer({ month, employees, preselectId, onClose, onPosted, po
 
   async function post() {
     if (!included.length) { addToast('Select at least one employee to pay', 'error'); return; }
-    if (form.pay_method === 'bank' && !form.bank_account_id) { addToast('Choose a bank account', 'error'); return; }
     try {
+      // Mill payroll is always paid from Mill Cash.
       const res = await postRunMut.mutateAsync({
         month,
-        pay_method: form.pay_method,
-        bank_account_id: form.pay_method === 'bank' ? Number(form.bank_account_id) : null,
+        pay_method: 'cash',
+        bank_account_id: null,
         pay_date: form.pay_date,
         lines: included.map(r => ({ worker_id: r.id, net_pay: r.net, advance_deducted: r.advance })),
       });
@@ -2778,11 +2740,8 @@ function PayrollRunDrawer({ month, employees, preselectId, onClose, onPosted, po
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Pay via</label>
-            <div className="grid grid-cols-2 gap-2">
-              {[['cash', 'Cash'], ['bank', 'Bank']].map(([val, lbl]) => (
-                <button key={val} type="button" onClick={() => setForm(f => ({ ...f, pay_method: val }))}
-                  className={`px-3 py-2 rounded-lg border text-sm transition ${form.pay_method === val ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-700 hover:border-gray-400'}`}>{lbl}</button>
-              ))}
+            <div className="px-3 py-2 rounded-lg border border-emerald-200 bg-emerald-50 text-sm text-emerald-800 inline-flex items-center gap-1.5 w-full">
+              <Wallet size={14} /> Mill Cash
             </div>
           </div>
           <div>
@@ -2791,16 +2750,6 @@ function PayrollRunDrawer({ month, employees, preselectId, onClose, onPosted, po
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900" />
           </div>
         </div>
-        {form.pay_method === 'bank' && (
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Bank account *</label>
-            <select value={form.bank_account_id} onChange={e => setForm(f => ({ ...f, bank_account_id: e.target.value }))}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900 bg-white">
-              <option value="">Select account…</option>
-              {banks.map(a => <option key={a.id} value={a.id}>{a.name}{a.currentBalance != null ? ` · ${PKR(a.currentBalance)}` : ''}</option>)}
-            </select>
-          </div>
-        )}
 
         <div>
           <div className="flex items-center justify-between mb-1">
@@ -2858,7 +2807,7 @@ function PayrollRunDrawer({ month, employees, preselectId, onClose, onPosted, po
             </table>
           </div>
         </div>
-        <p className="text-[11px] text-gray-400">Pays each ticked employee the amount shown ({form.pay_method === 'bank' ? 'from the bank account' : 'in cash'}) — posts to Money Out / GL, generates a payslip, and clears the advance you entered. You can run payroll again later to pay the rest.</p>
+        <p className="text-[11px] text-gray-400">Pays each ticked employee the amount shown (from Mill Cash) — posts to Money Out / GL, generates a payslip, and clears the advance you entered. You can run payroll again later to pay the rest.</p>
       </div>
     </SlideDrawer>
   );

@@ -11,7 +11,7 @@ const fmtDate = (d) => { const dt = new Date(d); return Number.isNaN(dt.getTime(
 // sale), so the payment is reconcilable. Uses acceptLocalSalePayment which
 // updates the sale AND its receivable.
 export default function MillCustomerPayDrawer({ customer, onClose }) {
-  const { addToast, bankAccountsList = [] } = useApp();
+  const { addToast } = useApp();
   const { data: salesData } = useLocalSales({ customer_id: customer.id, limit: 200 });
   const sales = Array.isArray(salesData) ? salesData : (salesData?.sales || salesData?.localSales || []);
   const payMut = useAcceptLocalSalePayment();
@@ -22,9 +22,6 @@ export default function MillCustomerPayDrawer({ customer, onClose }) {
     .filter((s) => (parseFloat(s.dueAmount ?? s.due_amount) || 0) > 0.001)
     .sort((a, b) => new Date(a.saleDate || a.sale_date || a.createdAt || 0) - new Date(b.saleDate || b.sale_date || b.createdAt || 0)),
   [sales]);
-
-  const bankOpts = useMemo(() => (Array.isArray(bankAccountsList) ? bankAccountsList : [])
-    .filter((b) => (b.type || '') !== 'cash' && (b.isActive ?? b.is_active ?? true)), [bankAccountsList]);
 
   const [saleId, setSaleId] = useState('');
   const [form, setForm] = useState({ amount: '', payment_method: 'cash', payment_date: new Date().toISOString().split('T')[0], collection_location: 'Mill', bank_account_id: '', reference: '', due_date: '' });
@@ -53,7 +50,6 @@ export default function MillCustomerPayDrawer({ customer, onClose }) {
     if (!saleId) { addToast('Select an invoice to pay', 'error'); return; }
     if (!amt || amt <= 0) { addToast('Enter a valid amount', 'error'); return; }
     if (amt > due + 0.01) { addToast(`Amount exceeds the ${PKR(due)} outstanding on this invoice`, 'error'); return; }
-    if (form.payment_method === 'bank_transfer' && !form.bank_account_id) { addToast('Select the bank account that received it', 'error'); return; }
     setSaving(true);
     try {
       await payMut.mutateAsync({ saleId, data: {
@@ -125,9 +121,9 @@ export default function MillCustomerPayDrawer({ customer, onClose }) {
             <div>
               <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Payment Method</label>
               <select value={form.payment_method}
-                onChange={(e) => { const m = e.target.value; setForm((f) => ({ ...f, payment_method: m, bank_account_id: (m === 'cash' || m === 'cheque') ? '' : f.bank_account_id })); }}
+                onChange={(e) => { const m = e.target.value; setForm((f) => ({ ...f, payment_method: m, bank_account_id: '' })); }}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-emerald-500">
-                <option value="cash">Cash</option><option value="cheque">Cheque</option><option value="bank_transfer">Bank Transfer</option>
+                <option value="cash">Cash</option><option value="cheque">Cheque</option>
               </select>
             </div>
 
@@ -140,17 +136,6 @@ export default function MillCustomerPayDrawer({ customer, onClose }) {
                       className={`px-3 py-2 text-sm font-medium rounded-lg border ${form.collection_location === loc ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>{loc}</button>
                   ))}
                 </div>
-              </div>
-            )}
-
-            {form.payment_method === 'bank_transfer' && (
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Receive Into Account *</label>
-                <select value={form.bank_account_id} onChange={(e) => set('bank_account_id', e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-emerald-500">
-                  <option value="">Select bank account…</option>
-                  {bankOpts.map((b) => <option key={b.id} value={b.id}>{b.name}{(b.bankName || b.bank_name) ? ` — ${b.bankName || b.bank_name}` : ''}</option>)}
-                </select>
               </div>
             )}
 
