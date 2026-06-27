@@ -819,8 +819,13 @@ const millingAdvancedController = {
           const l = byLot[r.linked_ref];
           if (!l) continue;
           const kg = num(l.kg); const rate = num(l.rate_per_kg);
+          // De-dupe name parts (product name often equals variety) case-insensitively.
+          const seen = new Set();
+          const nameParts = [l.item_name, l.variety, l.grade].filter(Boolean).filter((x) => {
+            const k = String(x).trim().toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true;
+          });
           r.items = [{
-            name: [l.item_name, l.variety, l.grade].filter(Boolean).join(' · ') || 'Rice',
+            name: nameParts.join(' · ') || 'Rice',
             qty: kg ? `${(kg / 1000).toFixed(2)} MT${l.total_bags ? ` · ${l.total_bags} bags` : ''}` : '',
             rate: rate ? `Rs ${rate}/kg` : '',
             amount: kg && rate ? kg * rate : num(r.amount_pkr),
