@@ -1401,11 +1401,15 @@ const reportingController = {
           .whereIn('bsl.batch_id', batchIds)
           .select('bsl.batch_id', 'bsl.qty_mt', 'mb.batch_no', 'src.id as raw_lot_id', 'src.lot_no as raw_lot_no',
             'src.supplier_id as raw_supplier_id', 's.name as raw_supplier');
+        // Total raw input per batch → each source lot's % contribution (blend share).
+        const batchTotalQty = {};
+        for (const r of srcs) batchTotalQty[r.batch_id] = (batchTotalQty[r.batch_id] || 0) + num(r.qty_mt);
         for (const r of srcs) {
           batchNoById[r.batch_id] = r.batch_no;
+          const tot = batchTotalQty[r.batch_id] || num(r.qty_mt);
           (rawByBatch[r.batch_id] = rawByBatch[r.batch_id] || []).push({
             lotId: r.raw_lot_id, lotNo: r.raw_lot_no, supplier: r.raw_supplier, supplierId: r.raw_supplier_id || null,
-            kg: num(r.qty_mt) * 1000,
+            kg: num(r.qty_mt) * 1000, sharePct: tot > 0 ? (num(r.qty_mt) / tot) * 100 : 100,
           });
         }
       }

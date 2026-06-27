@@ -456,7 +456,7 @@ function SaleTrackerPanel({ sale, statementHref, companyProfile }) {
               <div key={i} className="flex items-center justify-between border border-gray-100 rounded-lg px-3 py-1.5">
                 <span>{rl.lotId ? <Link to={`/lot-inventory/${rl.lotId}`} className="text-blue-600 hover:underline font-mono text-xs">{rl.lotNo}</Link> : <span className="font-mono text-xs">{rl.lotNo}</span>}
                   {rl.supplier ? <> · {rl.supplierId ? <Link to={statementHref?.('supplier', rl.supplierId)} className="text-blue-600 hover:underline">{rl.supplier}</Link> : rl.supplier}</> : null}</span>
-                {rl.kg ? <span className="text-[11px] text-gray-400">{mt2(rl.kg)}</span> : null}
+                <span className="text-[11px] text-gray-400 shrink-0">{rl.kg ? mt2(rl.kg) : ''}{rl.sharePct != null && rl.sharePct < 99.5 ? ` · ${Math.round(rl.sharePct)}%` : ''}</span>
               </div>
             )) : <p className="text-xs text-gray-400">Raw source not recorded.</p>}
           </div>
