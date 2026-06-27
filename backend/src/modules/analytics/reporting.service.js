@@ -396,18 +396,37 @@ const reportingService = {
     let bq = db('milling_batches as mb')
       .leftJoin('suppliers as s', 'mb.supplier_id', 's.id')
       .select('mb.id', 'mb.batch_no', 's.name as supplier_name', 'mb.raw_qty_mt',
-        'mb.actual_finished_mt', 'mb.yield_pct', 'mb.status', 'mb.created_at');
+        'mb.actual_finished_mt', 'mb.yield_pct', 'mb.status', 'mb.created_at',
+        'mb.manual_milling_cost_pkr', 'mb.manual_other_expenses_pkr');
     if (from_date) bq = bq.where('mb.created_at', '>=', from_date);
     if (to_date) bq = bq.where('mb.created_at', '<=', to_date);
     const batches = await bq.orderBy('mb.created_at', 'desc').limit(parseInt(limit, 10));
     if (!batches.length) return { batches: [] };
     const ids = batches.map((b) => b.id);
 
-    // Input cost per batch = all milling_costs (raw_rice + processing + packaging).
-    const costs = await db('milling_costs').whereIn('batch_id', ids)
-      .select('batch_id').sum('amount as t').groupBy('batch_id');
+    // Input cost must use the SAME basis the residual cost engine uses
+    // (computeResidualAllocation) so it reconciles with the output lots' landed
+    // value: raw_rice (milling_costs) + manual milling fee + manual other (else
+    // recorded processing costs) + packing. Milling fee & "other" live on the
+    // BATCH columns, not as milling_costs rows — summing milling_costs alone
+    // under-counts them.
+    const costRows = await db('milling_costs').whereIn('batch_id', ids)
+      .select('batch_id', 'category', 'amount');
+    const catCost = {}; // { batchId: { raw, pack, proc } }
+    for (const c of costRows) {
+      const m = catCost[c.batch_id] || (catCost[c.batch_id] = { raw: 0, pack: 0, proc: 0 });
+      const amt = num(c.amount);
+      if (c.category === 'raw_rice') m.raw += amt;
+      else if (c.category === 'packaging') m.pack += amt;
+      else m.proc += amt;
+    }
     const costMap = {};
-    for (const c of costs) costMap[c.batch_id] = num(c.t);
+    for (const b of batches) {
+      const cb = catCost[b.id] || { raw: 0, pack: 0, proc: 0 };
+      const millingFee = b.manual_milling_cost_pkr != null ? num(b.manual_milling_cost_pkr) : 0;
+      const other = b.manual_other_expenses_pkr != null ? num(b.manual_other_expenses_pkr) : cb.proc;
+      costMap[b.id] = cb.raw + millingFee + other + cb.pack;
+    }
 
     // Output lots (finished + by-product) for these batches, keyed batch-<id>.
     const refs = ids.map((id) => `batch-${id}`);

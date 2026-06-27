@@ -640,7 +640,7 @@ function MarginByBatch({ params, openDoc }) {
           ];
         })}
       />
-      <p className="text-[11px] text-gray-400">Input cost = the batch's milling_costs (raw rice + milling + packing). Output sold = realised local sales of the batch's finished + by-product lots, priced at each lot's residual landed cost. Unsold output is valued at cost under "On-hand".</p>
+      <p className="text-[11px] text-gray-400">Input cost = the batch's full cost basis (raw rice + milling fee + other expenses + packing) — the same basis the residual cost engine uses, so it reconciles with the output lots' landed value. Output sold = realised local sales of the batch's finished + by-product lots, priced at each lot's residual landed cost. Unsold output is valued at cost under "On-hand".</p>
     </div>
   );
 }
@@ -677,7 +677,7 @@ function BatchMarginBreakdown({ b }) {
           </tbody>
         </table>
       </div>
-      <p className="text-[11px] text-gray-400">Realised margin counts only output already sold. Unsold finished/by-product stock is held at cost until sold. Input cost = the batch's milling_costs (raw + milling + packing).</p>
+      <p className="text-[11px] text-gray-400">Realised margin counts only output already sold. Unsold finished/by-product stock is held at cost until sold. Input cost = raw rice + milling fee + other expenses + packing (the residual cost basis); it reconciles with cost-of-sold + on-hand.</p>
 
       <button onClick={() => navigate(`/milling/${b.id}`)}
         className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
