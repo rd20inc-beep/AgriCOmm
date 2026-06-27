@@ -279,10 +279,10 @@ Stock Value     = on-hand qty × cost/kg   (NOT frozen landed_cost_total)
 ## 18. Safe implementation plan (phased)
 
 ### Phase 1 — Terminology & Filters (low risk, mostly display)
-- Scrub paddy/bran/husk from report views; relabel raw→Purchased/Input rice lot; hide bran/husk grades, drop `branPct` column + "Rice Bran/Husk" subtype tags.
-- Add the **universal filter bar** (URL-backed) + thread the extra filter params through endpoints that already join those tables.
-- Add **global search** box + `/reporting/search` endpoint.
-- Add **exact-number** toggle/tooltips.
+- ✅ **DONE (shipped #73, prod-verified)** — Scrub paddy/bran/husk from report views; relabel raw→Unprocessed/Input/Source rice lot; hide bran/husk grades, drop `branPct`/`avgBranPct` columns + "Rice Bran/Husk" subtype tags (Reports.jsx, LotReport.jsx, LotReportViews.jsx, PrintableReportsViews.jsx, reporting.controller.js, reporting.service.js).
+- ✅ **DONE (shipped #73, prod-verified)** — **Exact-number** toggle (URL-backed `?exact=1`) in Reports header: fmtPKR/fmtUSD switch from Cr/L/K shorthand to full digits; `exactPKR` helper for tooltips.
+- ✅ **DONE (shipped #73, prod-verified)** — **Global search** box + `GET /api/reporting/search` endpoint: cross-entity lookup (lots, batches, local sales, export orders, suppliers, customers) → grouped results that navigate to the record/statement; `entity=mill` hides export orders.
+- ⏸ **Deferred (anti-over-engineering)** — the *universal filter bar with per-endpoint param threading*. The range selector (already URL-backed) + global search + exact toggle cover the practical Phase-1 filter need. Per-report filter params (`supplier_id`, `customer_id`, `variety`, `grade`, `status`, …) are folded into **Phase 2**, added only to the specific ledger endpoints that need them, rather than threaded through every existing endpoint up front.
 
 ### Phase 2 — Ledger-based reports (assembly over existing data)
 - **Lot Ledger** activity table (`/reporting/lot-ledger/:id`) — upgrade Lot 360.
