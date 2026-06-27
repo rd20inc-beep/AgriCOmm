@@ -2163,6 +2163,11 @@ function ExpensePayDrawer({ expense, bankAccounts = [], companyProfile, addToast
   if (!expense) return null;
   const PKR = (n) => `Rs ${Math.round(parseFloat(n) || 0).toLocaleString()}`;
   const bankOnly = bankAccounts.filter(a => a.type !== 'cash');
+  // Mill cash payments are drawn from the dedicated Mill Cash account so they
+  // reduce "Mill Cash available" on the dashboard (and go negative when the mill
+  // has spent more than it holds — a signal it needs funding from Head Office).
+  const millCash = bankAccounts.find(a => a.type === 'cash' && a.entity === 'mill')
+    || bankAccounts.find(a => a.type === 'cash');
 
   // Voucher/invoice payload (same shape TransactionDocument uses on Money Out).
   const voucher = {
@@ -2178,10 +2183,14 @@ function ExpensePayDrawer({ expense, bankAccounts = [], companyProfile, addToast
     if (!(amt > 0)) { addToast?.('Enter a valid amount', 'error'); return; }
     if (!payableId) { addToast?.('This expense has no payable to settle.', 'error'); return; }
     try {
+      // Cash → Mill Cash account; bank/online/mobile → the chosen account; cheque → none (clears later).
+      const acctId = form.paymentMethod === 'cash' ? (millCash?.id || null)
+        : form.paymentMethod === 'cheque' ? null
+        : (form.bankAccountId || null);
       await recordMut.mutateAsync({
         type: 'payment', amount: amt, currency: 'PKR',
         payment_method: form.paymentMethod, payment_date: form.paymentDate,
-        bank_account_id: form.bankAccountId || null, bank_reference: form.chequeNo || null,
+        bank_account_id: acctId, bank_reference: form.chequeNo || null,
         due_date: form.dueDate || null, linked_payable_id: payableId,
         notes: form.notes || `Payment for ${voucher.payNo} — ${expense.description || expense.category}`,
       });
@@ -2271,6 +2280,15 @@ function ExpensePayDrawer({ expense, bankAccounts = [], companyProfile, addToast
                   <input value={form.chequeNo} onChange={e => setForm({ ...form, chequeNo: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="e.g. 004512" /></div>
                 <div><label className="text-xs text-gray-500 block mb-1">Cheque date</label>
                   <input type="date" value={form.dueDate} onChange={e => setForm({ ...form, dueDate: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" /></div>
+              </div>
+            )}
+            {form.paymentMethod === 'cash' && (
+              <div className="text-xs bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 text-emerald-800">
+                Paid from <span className="font-semibold">{millCash?.name || 'Mill Cash'}</span>
+                {millCash ? <> · balance {PKR(millCash.currentBalance)}</> : null}
+                {millCash && (parseFloat(millCash.currentBalance) || 0) - (parseFloat(form.amount) || 0) < 0 && (
+                  <span className="block text-amber-700 mt-0.5">This will overdraw Mill Cash — fund it from Head Office to clear the negative.</span>
+                )}
               </div>
             )}
             {form.paymentMethod !== 'cash' && form.paymentMethod !== 'cheque' && (
