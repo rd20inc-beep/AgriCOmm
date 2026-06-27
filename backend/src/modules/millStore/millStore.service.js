@@ -70,11 +70,30 @@ const millStoreService = {
     }
 
     return db.transaction(async (trx) => {
+      // Resolve the party. A cash/walk-in vendor name is matched to an existing
+      // supplier (case-insensitive) or auto-created as a PENDING supplier — so
+      // the purchase always lands on a supplier statement, like credit walk-in
+      // customers auto-register. The typed name is kept on vendor_name too.
+      let resolvedSupplierId = supplier_id || null;
+      const vn = (!resolvedSupplierId && vendor_name) ? String(vendor_name).trim() : null;
+      if (!resolvedSupplierId && vn) {
+        const existing = await trx('suppliers').whereRaw('LOWER(name) = LOWER(?)', [vn]).first('id');
+        if (existing) {
+          resolvedSupplierId = existing.id;
+        } else {
+          const [s] = await trx('suppliers').insert({
+            name: vn, type: 'Mill Store Vendor', is_active: true,
+            approval_status: 'pending', submitted_by: userId || null, submitted_at: trx.fn.now(),
+          }).returning('id');
+          resolvedSupplierId = s.id || s;
+        }
+      }
+
       const purchaseNo = await repo.generatePurchaseNo(trx);
       const header = {
         purchase_no: purchaseNo,
-        supplier_id: supplier_id || null,
-        vendor_name: supplier_id ? null : (vendor_name ? String(vendor_name).trim() : null),
+        supplier_id: resolvedSupplierId,
+        vendor_name: vn, // keep the typed walk-in name for reference
         invoice_number: invoice_number || null,
         purchase_date,
         notes: notes || null,

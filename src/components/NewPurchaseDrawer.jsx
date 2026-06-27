@@ -141,8 +141,8 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved }) {
             {walkIn ? (
               <>
                 <input type="text" value={vendorName} onChange={e => setVendorName(e.target.value)} className={INPUT}
-                  placeholder="Vendor / shop name (one-off, not saved to suppliers)" autoFocus />
-                <p className="text-[11px] text-gray-400 mt-1">For a vendor not in your list. To keep them, switch to Registered → “+ Add new”.</p>
+                  placeholder="Vendor / shop name" autoFocus />
+                <p className="text-[11px] text-gray-400 mt-1">For a vendor not in your list — they’re added as a pending supplier so the purchase shows on their statement.</p>
               </>
             ) : (
               <SupplierPicker
