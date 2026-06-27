@@ -1276,9 +1276,26 @@ const financeController = {
   async getBankAccounts(req, res) {
     try {
       const accounts = await db('bank_accounts').orderBy('name', 'asc');
+
+      // The Mill role transacts only through its own Mill Cash account and must
+      // NOT see Head Office bank balances. For that role, blank out the balance
+      // on every non-mill account (names/type/entity are kept so transfer
+      // destinations and account-name lookups still resolve). Resolve the role
+      // by NAME — role_id differs across environments.
+      let roleName = null;
+      if (req.user?.role_id) {
+        const r = await db('roles').where({ id: req.user.role_id }).first('name');
+        roleName = r?.name || null;
+      }
+      const scoped = roleName === 'Mill Manager'
+        ? accounts.map((a) => ((a.entity || 'general') === 'mill'
+          ? a
+          : { ...a, current_balance: null }))
+        : accounts;
+
       return res.json({
         success: true,
-        data: { accounts },
+        data: { accounts: scoped },
       });
     } catch (err) {
       console.error('Get bank accounts error:', err);
