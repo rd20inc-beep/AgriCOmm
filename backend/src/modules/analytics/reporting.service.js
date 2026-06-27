@@ -979,6 +979,162 @@ const reportingService = {
   },
 
   // ═══════════════════════════════════════════════════════════════════
+  // LEDGER REPORTS (Phase 2 — assembly over existing data, read-only)
+  // ═══════════════════════════════════════════════════════════════════
+
+  /**
+   * Lot Ledger — the full chronological activity for one lot, built from the
+   * authoritative `lot_transactions` table (every movement type writes a row
+   * here with a running balance_kg). Each event is enriched with a human
+   * counterparty + a link target so the report can drill through to the
+   * purchase, batch, sale, order or warehouse behind it. Read-only.
+   */
+  async getLotLedger(lotId) {
+    const id = parseInt(lotId, 10);
+    if (!id) return null;
+    const num = (v) => parseFloat(v) || 0;
+
+    const lot = await db('inventory_lots as l')
+      .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
+      .leftJoin('products as p', 'l.product_id', 'p.id')
+      .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
+      .where('l.id', id)
+      .select('l.id', 'l.lot_no', 'l.type', 'l.item_name', 'l.variety', 'l.grade', 'l.entity',
+        'l.net_weight_kg', 'l.received_net_weight_kg', 'l.available_qty', 'l.reserved_qty',
+        'l.landed_cost_per_kg', 'l.rate_per_kg', 'l.landed_cost_total', 'l.payment_status',
+        'l.paid_amount', 'l.due_amount', 'l.bag_weight_kg', 'l.purchase_date', 'l.created_at',
+        'l.supplier_id', 's.name as supplier_name', 'p.name as product_name', 'w.name as warehouse_name')
+      .first();
+    if (!lot) return null;
+
+    const txns = await db('lot_transactions')
+      .where('lot_id', id)
+      .orderBy('transaction_date', 'asc')
+      .orderBy('created_at', 'asc')
+      .orderBy('id', 'asc');
+
+    // Batch-resolve references for counterparties + links.
+    const batchIds = [...new Set(txns.filter(t => t.reference_module === 'milling_batch' && t.reference_id).map(t => t.reference_id))];
+    const orderIds = [...new Set(txns.filter(t => t.reference_module === 'export_order' && t.reference_id).map(t => t.reference_id))];
+    const saleNos = [...new Set(txns.filter(t => String(t.transaction_type).startsWith('local_sale') && t.reference_no).map(t => t.reference_no))];
+    const whIds = [...new Set(txns.flatMap(t => [t.warehouse_from_id, t.warehouse_to_id]).filter(Boolean))];
+
+    const [batches, orders, sales, warehouses] = await Promise.all([
+      batchIds.length ? db('milling_batches').whereIn('id', batchIds).select('id', 'batch_no') : [],
+      orderIds.length ? db('export_orders as eo').leftJoin('customers as c', 'eo.customer_id', 'c.id').whereIn('eo.id', orderIds).select('eo.id', 'eo.order_no', db.raw("COALESCE(c.name,'—') as customer")) : [],
+      saleNos.length ? db('local_sales as ls').leftJoin('customers as c', 'ls.customer_id', 'c.id').whereIn('ls.sale_no', saleNos).select('ls.id', 'ls.sale_no', db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer")) : [],
+      whIds.length ? db('warehouses').whereIn('id', whIds).select('id', 'name') : [],
+    ]);
+    const batchById = Object.fromEntries(batches.map(b => [b.id, b]));
+    const orderById = Object.fromEntries(orders.map(o => [o.id, o]));
+    const saleByNo = Object.fromEntries(sales.map(s => [s.sale_no, s]));
+    const whById = Object.fromEntries(warehouses.map(w => [w.id, w.name]));
+
+    const TYPE_LABELS = {
+      purchase_in: 'Purchase received', warehouse_transfer_in: 'Transfer in', warehouse_transfer_out: 'Transfer out',
+      milling_issue: 'Issued to milling', milling_receipt: 'Milling output', byproduct_receipt: 'By-product output',
+      export_dispatch_out: 'Export dispatch', local_sale_out: 'Local sale', export_allocation: 'Reserved for export',
+      export_release: 'Reservation released', stock_adjustment_plus: 'Adjustment (+)', stock_adjustment_minus: 'Adjustment (−)',
+      damage_out: 'Damage write-off', shortage_out: 'Shortage write-off', return_in: 'Return', opening_balance: 'Opening balance',
+      lot_split: 'Lot split', lot_merge: 'Lot merge',
+    };
+
+    const events = txns.map((t) => {
+      const tt = String(t.transaction_type || '');
+      let counterparty = null, href = null;
+      if (tt === 'purchase_in') { counterparty = lot.supplier_name || null; href = lot.supplier_id ? `/finance/statements?type=supplier&id=${lot.supplier_id}` : null; }
+      else if (t.reference_module === 'milling_batch' && t.reference_id) { const b = batchById[t.reference_id]; counterparty = b ? `Batch ${b.batch_no}` : (t.reference_no || null); href = `/milling/${t.reference_id}`; }
+      else if (t.reference_module === 'export_order' && t.reference_id) { const o = orderById[t.reference_id]; counterparty = o ? o.customer : (t.reference_no || null); href = `/export/${t.reference_id}`; }
+      else if (tt.startsWith('local_sale') && t.reference_no) { const s = saleByNo[t.reference_no]; counterparty = s ? s.customer : null; href = s ? `/local-sales/${s.id}` : null; }
+      else if (t.warehouse_from_id || t.warehouse_to_id) { counterparty = [whById[t.warehouse_from_id], whById[t.warehouse_to_id]].filter(Boolean).join(' → ') || null; }
+      const qtyKg = num(t.quantity_kg);
+      return {
+        id: t.id, date: t.transaction_date || t.created_at, txnNo: t.transaction_no,
+        type: tt, label: TYPE_LABELS[tt] || tt.replace(/_/g, ' '),
+        inKg: qtyKg > 0 ? qtyKg : 0, outKg: qtyKg < 0 ? -qtyKg : 0,
+        balanceKg: num(t.balance_kg), ratePerKg: num(t.rate_per_kg), costImpact: num(t.cost_impact),
+        reference: t.reference_no || null, counterparty, href, remarks: t.remarks || null,
+      };
+    });
+
+    const totIn = events.reduce((s, e) => s + e.inKg, 0);
+    const totOut = events.reduce((s, e) => s + e.outKg, 0);
+    return {
+      lot: {
+        id: lot.id, lotNo: lot.lot_no, type: lot.type, entity: lot.entity,
+        riceType: lot.product_name || lot.item_name, variety: lot.variety, grade: lot.grade,
+        supplier: lot.supplier_name, supplierId: lot.supplier_id, warehouse: lot.warehouse_name,
+        receivedKg: num(lot.received_net_weight_kg) || num(lot.net_weight_kg), currentKg: num(lot.net_weight_kg),
+        availableKg: num(lot.available_qty) * 1000, reservedKg: num(lot.reserved_qty) * 1000,
+        costPerKg: num(lot.landed_cost_per_kg) || num(lot.rate_per_kg), valuePkr: num(lot.landed_cost_total),
+        paymentStatus: lot.payment_status, paidAmount: num(lot.paid_amount), dueAmount: num(lot.due_amount),
+        purchaseDate: lot.purchase_date || lot.created_at,
+      },
+      events,
+      totals: { events: events.length, inKg: totIn, outKg: totOut, balanceKg: num(lot.net_weight_kg) },
+    };
+  },
+
+  /**
+   * Batch Processing Ledger — one batch's inputs (source lots), outputs
+   * (finished + by-product lots), recorded costs and yield, assembled from
+   * milling_batches / batch_source_lots / milling_costs / inventory_lots.
+   */
+  async getBatchLedger(batchId) {
+    const id = parseInt(batchId, 10);
+    if (!id) return null;
+    const num = (v) => parseFloat(v) || 0;
+
+    const batch = await db('milling_batches as mb')
+      .leftJoin('suppliers as s', 'mb.supplier_id', 's.id')
+      .leftJoin('products as p', 'mb.product_id', 'p.id')
+      .leftJoin('export_orders as eo', 'mb.linked_export_order_id', 'eo.id')
+      .where('mb.id', id)
+      .select('mb.id', 'mb.batch_no', 'mb.status', 'mb.processing_type', 'mb.raw_qty_mt',
+        'mb.actual_finished_mt', 'mb.yield_pct', 'mb.operator_name', 'mb.machine_line', 'mb.shift',
+        'mb.processing_hours', 'mb.created_at', 'mb.completed_at', 'mb.manual_milling_cost_pkr',
+        'mb.manual_other_expenses_pkr', 'mb.raw_cost_total', 'mb.total_cost_per_kg_finished',
+        'mb.supplier_id', 's.name as supplier_name', 'p.name as product_name', 'eo.product_name as order_product')
+      .first();
+    if (!batch) return null;
+
+    const [sources, costs, outputs] = await Promise.all([
+      db('batch_source_lots as bsl')
+        .leftJoin('inventory_lots as l', 'bsl.lot_id', 'l.id')
+        .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
+        .where('bsl.batch_id', id)
+        .select('bsl.lot_id', 'bsl.qty_mt', 'bsl.unit_cost_pkr', 'bsl.cost_total_pkr', 'bsl.ratio_pct',
+          'l.lot_no', 'l.item_name', 'l.variety', db.raw("COALESCE(s.name,'—') as supplier")),
+      db('milling_costs').where('batch_id', id).select('id', 'category', 'amount', 'notes', 'created_at').orderBy('id', 'asc'),
+      db('inventory_lots').where('batch_ref', `batch-${id}`).whereIn('type', ['finished', 'byproduct'])
+        .select('id', 'lot_no', 'type', 'item_name', 'grade', 'net_weight_kg', 'received_net_weight_kg', 'landed_cost_per_kg', 'landed_cost_total'),
+    ]);
+
+    const inputMt = sources.reduce((s, r) => s + num(r.qty_mt), 0);
+    const inputCostPkr = sources.reduce((s, r) => s + num(r.cost_total_pkr), 0)
+      + num(batch.manual_milling_cost_pkr) + num(batch.manual_other_expenses_pkr)
+      + costs.reduce((s, c) => s + num(c.amount), 0);
+    const outputKg = outputs.reduce((s, o) => s + (num(o.received_net_weight_kg) || num(o.net_weight_kg)), 0);
+
+    return {
+      batch: {
+        id: batch.id, batchNo: batch.batch_no, status: batch.status, processingType: batch.processing_type,
+        isBlend: batch.processing_type === 'blended',
+        product: batch.product_name || batch.order_product, supplier: batch.supplier_name, supplierId: batch.supplier_id,
+        rawQtyMt: num(batch.raw_qty_mt), finishedMt: num(batch.actual_finished_mt), yieldPct: num(batch.yield_pct),
+        operator: batch.operator_name, machineLine: batch.machine_line, shift: batch.shift,
+        processingHours: num(batch.processing_hours), createdAt: batch.created_at, completedAt: batch.completed_at,
+        totalCostPerKgFinished: num(batch.total_cost_per_kg_finished),
+      },
+      inputs: sources.map(r => ({ lotId: r.lot_id, lotNo: r.lot_no, item: r.item_name, variety: r.variety, supplier: r.supplier, qtyMt: num(r.qty_mt), unitCostPkr: num(r.unit_cost_pkr), costTotalPkr: num(r.cost_total_pkr), ratioPct: num(r.ratio_pct), href: r.lot_id ? `/lot-inventory/${r.lot_id}` : null })),
+      costs: costs.map(c => ({ id: c.id, category: c.category, amount: num(c.amount), notes: c.notes })),
+      manualCosts: { milling: num(batch.manual_milling_cost_pkr), other: num(batch.manual_other_expenses_pkr) },
+      outputs: outputs.map(o => ({ lotId: o.id, lotNo: o.lot_no, type: o.type, item: o.grade || o.item_name, kg: num(o.received_net_weight_kg) || num(o.net_weight_kg), costPerKg: num(o.landed_cost_per_kg), valuePkr: num(o.landed_cost_total), href: `/lot-inventory/${o.id}` })),
+      totals: { inputMt, inputCostPkr, outputKg, outputMt: outputKg / 1000, lossMt: Math.max(0, inputMt - outputKg / 1000) },
+    };
+  },
+
+  // ═══════════════════════════════════════════════════════════════════
   // GLOBAL SEARCH (reports nav helper)
   // ═══════════════════════════════════════════════════════════════════
 

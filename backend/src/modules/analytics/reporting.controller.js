@@ -61,6 +61,28 @@ const reportingController = {
     }
   },
 
+  async lotLedger(req, res) {
+    try {
+      const data = await reportingService.getLotLedger(req.params.id);
+      if (!data) return res.status(404).json({ success: false, message: 'Lot not found.' });
+      return res.json({ success: true, ...data });
+    } catch (err) {
+      console.error('Lot ledger error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  async batchLedger(req, res) {
+    try {
+      const data = await reportingService.getBatchLedger(req.params.id);
+      if (!data) return res.status(404).json({ success: false, message: 'Batch not found.' });
+      return res.json({ success: true, ...data });
+    } catch (err) {
+      console.error('Batch ledger error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
   async globalSearch(req, res) {
     try {
       const { q, entity, limit } = req.query;

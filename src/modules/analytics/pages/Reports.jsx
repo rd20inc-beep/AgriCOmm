@@ -1061,10 +1061,93 @@ function BatchMarginBreakdown({ b }) {
         </div>
       )}
 
+      {/* Full processing ledger — inputs / costs / outputs (Phase 2) */}
+      <BatchLedgerSection batchId={b.id} />
+
       <button onClick={() => navigate(`/milling/${b.id}`)}
         className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
         <ExternalLink size={14} /> Open batch detail
       </button>
+    </div>
+  );
+}
+
+// Lazy-loaded batch processing ledger — inputs (source lots), recorded costs
+// and outputs (finished + by-product lots), with input/output reconciliation.
+function BatchLedgerSection({ batchId }) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (!open || data || !batchId) return;
+    setLoading(true);
+    reportingApi.batchLedger(batchId)
+      .then(res => setData(res?.batch ? res : (res?.data || res)))
+      .catch(() => setData({ error: true }))
+      .finally(() => setLoading(false));
+  }, [open, data, batchId]);
+  const inputs = data?.inputs || [];
+  const costs = data?.costs || [];
+  const outputs = data?.outputs || [];
+  const t = data?.totals || {};
+  const mc = data?.manualCosts || {};
+  return (
+    <div>
+      <button onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between text-sm font-semibold text-gray-700 mb-2 hover:text-blue-700">
+        <span className="inline-flex items-center gap-1.5"><Factory size={14} /> Processing ledger</span>
+        <ChevronRight size={15} className={`transition-transform ${open ? 'rotate-90' : ''}`} />
+      </button>
+      {open && (loading ? <p className="text-xs text-gray-400">Loading ledger…</p> : !data || data.error ? <p className="text-xs text-gray-400">Could not load ledger.</p> : (
+        <div className="space-y-3">
+          <div>
+            <p className="text-xs font-semibold text-gray-600 mb-1">Inputs — source rice lots</p>
+            <div className="rounded-lg border border-gray-200 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50 text-gray-500"><tr><th className="px-2 py-1.5 text-left font-medium">Lot</th><th className="px-2 py-1.5 text-left font-medium">Rice</th><th className="px-2 py-1.5 text-left font-medium">Supplier</th><th className="px-2 py-1.5 text-right font-medium">MT</th><th className="px-2 py-1.5 text-right font-medium">Cost</th></tr></thead>
+                <tbody className="divide-y divide-gray-100">
+                  {inputs.map((r, i) => (
+                    <tr key={i}><td className="px-2 py-1.5 font-mono">{r.href ? <Link to={r.href} className="text-blue-600 hover:underline">{r.lotNo}</Link> : r.lotNo}</td><td className="px-2 py-1.5">{r.item}{r.variety ? ` · ${r.variety}` : ''}</td><td className="px-2 py-1.5 text-gray-600">{r.supplier}</td><td className="px-2 py-1.5 text-right tabular-nums">{r.qtyMt.toFixed(2)}</td><td className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(r.costTotalPkr)}</td></tr>
+                  ))}
+                  {inputs.length === 0 && <tr><td colSpan={5} className="px-2 py-1.5 text-gray-400">No source lots recorded.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {(costs.length > 0 || mc.milling > 0 || mc.other > 0) && (
+            <div>
+              <p className="text-xs font-semibold text-gray-600 mb-1">Recorded processing costs</p>
+              <div className="rounded-lg border border-gray-200 divide-y divide-gray-100 text-xs">
+                {mc.milling > 0 && <div className="flex justify-between px-2 py-1.5"><span className="text-gray-600">Milling fee (manual)</span><span className="tabular-nums">{fmtPKR(mc.milling)}</span></div>}
+                {mc.other > 0 && <div className="flex justify-between px-2 py-1.5"><span className="text-gray-600">Other expenses (manual)</span><span className="tabular-nums">{fmtPKR(mc.other)}</span></div>}
+                {costs.map(c => <div key={c.id} className="flex justify-between px-2 py-1.5"><span className="text-gray-600 capitalize">{c.category}{c.notes ? ` · ${c.notes}` : ''}</span><span className="tabular-nums">{fmtPKR(c.amount)}</span></div>)}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <p className="text-xs font-semibold text-gray-600 mb-1">Outputs — finished &amp; by-product</p>
+            <div className="rounded-lg border border-gray-200 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50 text-gray-500"><tr><th className="px-2 py-1.5 text-left font-medium">Lot</th><th className="px-2 py-1.5 text-left font-medium">Output</th><th className="px-2 py-1.5 text-right font-medium">kg</th><th className="px-2 py-1.5 text-right font-medium">Cost/kg</th><th className="px-2 py-1.5 text-right font-medium">Value</th></tr></thead>
+                <tbody className="divide-y divide-gray-100">
+                  {outputs.map((o, i) => (
+                    <tr key={i}><td className="px-2 py-1.5 font-mono">{o.href ? <Link to={o.href} className="text-blue-600 hover:underline">{o.lotNo}</Link> : o.lotNo}</td><td className="px-2 py-1.5">{o.item}<span className="text-gray-400"> · {o.type === 'byproduct' ? 'by-product' : 'finished'}</span></td><td className="px-2 py-1.5 text-right tabular-nums">{Math.round(o.kg).toLocaleString()}</td><td className="px-2 py-1.5 text-right tabular-nums">{o.costPerKg > 0 ? `Rs ${Math.round(o.costPerKg).toLocaleString()}` : '—'}</td><td className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(o.valuePkr)}</td></tr>
+                  ))}
+                  {outputs.length === 0 && <tr><td colSpan={5} className="px-2 py-1.5 text-gray-400">No output lots yet.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="bg-slate-50 rounded-lg p-2"><p className="text-[11px] text-slate-500">Input</p><p className="text-sm font-bold text-slate-700">{(t.inputMt || 0).toFixed(2)} MT</p></div>
+            <div className="bg-blue-50 rounded-lg p-2"><p className="text-[11px] text-blue-600">Output</p><p className="text-sm font-bold text-blue-700">{(t.outputMt || 0).toFixed(2)} MT</p></div>
+            <div className="bg-amber-50 rounded-lg p-2"><p className="text-[11px] text-amber-600">Processing loss</p><p className="text-sm font-bold text-amber-700">{(t.lossMt || 0).toFixed(2)} MT</p></div>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -1250,10 +1333,71 @@ function LotTrackerPanel({ lot, statementHref }) {
         </div>
       )}
 
+      {/* Full chronological activity ledger (Phase 2) */}
+      <LotLedgerSection lotId={lot.lotId} />
+
       <button onClick={() => navigate(`/lot-inventory/${lot.lotId}`)}
         className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
         <ExternalLink size={14} /> Open full lot detail
       </button>
+    </div>
+  );
+}
+
+// Lazy-loaded chronological lot ledger — collapsed by default so the drawer
+// stays light; fetches /reporting/lot-ledger/:id on first expand.
+function LotLedgerSection({ lotId }) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (!open || data || !lotId) return;
+    setLoading(true);
+    reportingApi.lotLedger(lotId)
+      .then(res => setData(res?.events ? res : (res?.data || res)))
+      .catch(() => setData({ events: [], error: true }))
+      .finally(() => setLoading(false));
+  }, [open, data, lotId]);
+  const events = data?.events || [];
+  return (
+    <div>
+      <button onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between text-sm font-semibold text-gray-700 mb-2 hover:text-blue-700">
+        <span className="inline-flex items-center gap-1.5"><Layers size={14} /> Full activity ledger</span>
+        <ChevronRight size={15} className={`transition-transform ${open ? 'rotate-90' : ''}`} />
+      </button>
+      {open && (
+        loading ? <p className="text-xs text-gray-400">Loading ledger…</p>
+        : events.length === 0 ? <p className="text-xs text-gray-400">No recorded movements.</p>
+        : (
+          <div className="rounded-lg border border-gray-200 overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="bg-gray-50 text-gray-500">
+                <tr>
+                  <th className="px-2 py-1.5 text-left font-medium">Date</th>
+                  <th className="px-2 py-1.5 text-left font-medium">Activity</th>
+                  <th className="px-2 py-1.5 text-left font-medium">Counterparty</th>
+                  <th className="px-2 py-1.5 text-right font-medium">In (kg)</th>
+                  <th className="px-2 py-1.5 text-right font-medium">Out (kg)</th>
+                  <th className="px-2 py-1.5 text-right font-medium">Balance (kg)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {events.map(e => (
+                  <tr key={e.id} className="hover:bg-gray-50">
+                    <td className="px-2 py-1.5 whitespace-nowrap text-gray-600">{e.date ? new Date(e.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—'}</td>
+                    <td className="px-2 py-1.5 font-medium text-gray-800">{e.label}</td>
+                    <td className="px-2 py-1.5 text-gray-600 max-w-[10rem] truncate">{e.href ? <Link to={e.href} className="text-blue-600 hover:underline">{e.counterparty || '—'}</Link> : (e.counterparty || '—')}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums text-emerald-700">{e.inKg ? Math.round(e.inKg).toLocaleString() : ''}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums text-rose-700">{e.outKg ? Math.round(e.outKg).toLocaleString() : ''}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums font-medium">{Math.round(e.balanceKg).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      )}
     </div>
   );
 }
