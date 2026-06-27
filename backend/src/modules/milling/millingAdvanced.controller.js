@@ -839,6 +839,16 @@ const millingAdvancedController = {
         .filter((r) => r.source_table === 'mill_purchases' && r.source_id)
         .map((r) => r.source_id);
       if (mpIds.length) {
+        // Walk-in vendor names (purchases without a registered supplier) so the
+        // cash-ledger counterparty / voucher shows who it was bought from.
+        const vendors = await db('mill_purchases').whereIn('id', mpIds).select('id', 'vendor_name');
+        const vendorByPurchase = {};
+        for (const v of vendors) vendorByPurchase[v.id] = v.vendor_name;
+        for (const r of outRows) {
+          if (r.source_table === 'mill_purchases' && !r.counterparty && vendorByPurchase[r.source_id]) {
+            r.counterparty = vendorByPurchase[r.source_id];
+          }
+        }
         const lines = await db('mill_purchase_items as mpi')
           .leftJoin('mill_items as mi', 'mi.id', 'mpi.item_id')
           .whereIn('mpi.purchase_id', mpIds)

@@ -52,7 +52,7 @@ const millStoreService = {
   },
 
   // ─── Purchases ───
-  async createPurchase({ supplier_id, invoice_number, purchase_date, notes, lines }, userId) {
+  async createPurchase({ supplier_id, vendor_name, invoice_number, purchase_date, notes, lines }, userId) {
     if (!lines || lines.length === 0) throw new ValidationError('At least one line item is required.');
 
     // Validate all item_ids exist
@@ -73,7 +73,8 @@ const millStoreService = {
       const purchaseNo = await repo.generatePurchaseNo(trx);
       const header = {
         purchase_no: purchaseNo,
-        supplier_id,
+        supplier_id: supplier_id || null,
+        vendor_name: supplier_id ? null : (vendor_name ? String(vendor_name).trim() : null),
         invoice_number: invoice_number || null,
         purchase_date,
         notes: notes || null,

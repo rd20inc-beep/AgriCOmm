@@ -35,6 +35,8 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved }) {
   }, [localItems, safeItems]);
 
   const [supplierId, setSupplierId] = useState('');
+  const [walkIn, setWalkIn] = useState(false); // cash / walk-in vendor (not in supplier list)
+  const [vendorName, setVendorName] = useState('');
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().split('T')[0]);
   const [notes, setNotes] = useState('');
@@ -43,7 +45,7 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved }) {
   // Reset the form each time it opens.
   useEffect(() => {
     if (!open) return;
-    setSupplierId(''); setInvoiceNumber(''); setNotes('');
+    setSupplierId(''); setWalkIn(false); setVendorName(''); setInvoiceNumber(''); setNotes('');
     setPurchaseDate(new Date().toISOString().split('T')[0]);
     setLines([newLine()]);
   }, [open]);
@@ -56,7 +58,11 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved }) {
     lines.reduce((s, l) => s + (Number(l.quantity) || 0) * (Number(l.cost_per_unit) || 0), 0), [lines]);
 
   async function handleSubmit() {
-    if (!supplierId) { addToast('Select a supplier (or add a new one)', 'error'); return; }
+    if (walkIn) {
+      if (!vendorName.trim()) { addToast('Enter the cash / walk-in vendor name', 'error'); return; }
+    } else if (!supplierId) {
+      addToast('Select a supplier, add a new one, or switch to Cash / Walk-in', 'error'); return;
+    }
     const validLines = lines.filter(l => l.item_id && Number(l.quantity) > 0 && Number(l.cost_per_unit) >= 0);
     if (validLines.length === 0) { addToast('Add at least one line item', 'error'); return; }
     // Packaging lines need a Bag Kg so we know how much rice each bag holds.
@@ -80,7 +86,8 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved }) {
       await Promise.all(weightUpdates.map(u => updateItemMut.mutateAsync(u)));
 
       await createMut.mutateAsync({
-        supplier_id: supplierId ? Number(supplierId) : null,
+        supplier_id: walkIn ? null : (supplierId ? Number(supplierId) : null),
+        vendor_name: walkIn ? vendorName.trim() : null,
         invoice_number: invoiceNumber || null,
         purchase_date: purchaseDate,
         notes: notes || null,
@@ -122,14 +129,30 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved }) {
         {/* Header fields */}
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2">
-            <SupplierPicker
-              label={<>Supplier <span className="text-red-500">*</span></>}
-              value={supplierId}
-              onChange={setSupplierId}
-              suppliers={suppliersList || []}
-              addToast={addToast}
-              placeholder="Search supplier (or + Add new)…"
-            />
+            <div className="flex items-center justify-between mb-1">
+              <label className={LABEL + ' mb-0'}>Supplier <span className="text-red-500">*</span></label>
+              <div className="inline-flex rounded-lg overflow-hidden border border-gray-200 text-[11px]">
+                <button type="button" onClick={() => { setWalkIn(false); setVendorName(''); }}
+                  className={`px-2.5 py-1 font-medium ${!walkIn ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>Registered</button>
+                <button type="button" onClick={() => { setWalkIn(true); setSupplierId(''); }}
+                  className={`px-2.5 py-1 font-medium ${walkIn ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>Cash / Walk-in</button>
+              </div>
+            </div>
+            {walkIn ? (
+              <>
+                <input type="text" value={vendorName} onChange={e => setVendorName(e.target.value)} className={INPUT}
+                  placeholder="Vendor / shop name (one-off, not saved to suppliers)" autoFocus />
+                <p className="text-[11px] text-gray-400 mt-1">For a vendor not in your list. To keep them, switch to Registered → “+ Add new”.</p>
+              </>
+            ) : (
+              <SupplierPicker
+                value={supplierId}
+                onChange={setSupplierId}
+                suppliers={suppliersList || []}
+                addToast={addToast}
+                placeholder="Search supplier (or + Add new)…"
+              />
+            )}
           </div>
           <div>
             <label className={LABEL}>Date *</label>

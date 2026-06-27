@@ -76,14 +76,18 @@ const purchaseLineSchema = Joi.object({
 });
 
 const createPurchaseSchema = Joi.object({
-  supplier_id: Joi.number().integer().positive().required().messages({
-    'any.required': 'A supplier is required for a purchase.',
-    'number.base': 'A supplier is required for a purchase.',
-  }),
+  // Either a registered supplier OR a cash/walk-in vendor name — one is required.
+  supplier_id: Joi.number().integer().positive().allow(null).optional(),
+  vendor_name: Joi.string().max(255).allow(null, '').optional(),
   invoice_number: Joi.string().max(100).allow(null, '').optional(),
   purchase_date: Joi.date().required(),
   notes: Joi.string().allow(null, '').optional(),
   lines: Joi.array().items(purchaseLineSchema).min(1).required(),
+}).custom((value, helpers) => {
+  if (!value.supplier_id && !(value.vendor_name && String(value.vendor_name).trim())) {
+    return helpers.message('Select a supplier, or enter a cash / walk-in vendor name.');
+  }
+  return value;
 });
 
 const updatePaymentSchema = Joi.object({

@@ -12,6 +12,7 @@ export default function NewPurchase() {
   const createMut = useCreatePurchase();
 
   const [supplierId, setSupplierId] = useState('');
+  const [vendorName, setVendorName] = useState(''); // shown when supplierId === '__walkin__'
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().split('T')[0]);
   const [notes, setNotes] = useState('');
@@ -28,13 +29,16 @@ export default function NewPurchase() {
 
   async function handleSubmit(e) {
     e.preventDefault();
+    const isWalkIn = supplierId === '__walkin__';
     if (!supplierId) { addToast('Select a supplier', 'error'); return; }
+    if (isWalkIn && !vendorName.trim()) { addToast('Enter the cash / walk-in vendor name', 'error'); return; }
     const validLines = lines.filter(l => l.item_id && Number(l.quantity) > 0 && Number(l.cost_per_unit) >= 0);
     if (validLines.length === 0) { addToast('Add at least one line item', 'error'); return; }
 
     try {
       await createMut.mutateAsync({
-        supplier_id: supplierId ? Number(supplierId) : null,
+        supplier_id: isWalkIn ? null : (supplierId ? Number(supplierId) : null),
+        vendor_name: isWalkIn ? vendorName.trim() : null,
         invoice_number: invoiceNumber || null,
         purchase_date: purchaseDate,
         notes: notes || null,
@@ -81,10 +85,20 @@ export default function NewPurchase() {
                 required
               >
                 <option value="">Select supplier…</option>
+                <option value="__walkin__">Cash / Walk-in (enter name)</option>
                 {(suppliersList || []).map(s => (
                   <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
               </select>
+              {supplierId === '__walkin__' && (
+                <input
+                  type="text"
+                  value={vendorName}
+                  onChange={(e) => setVendorName(e.target.value)}
+                  className="form-input w-full text-sm mt-2"
+                  placeholder="Vendor / shop name (one-off)"
+                />
+              )}
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Invoice #</label>

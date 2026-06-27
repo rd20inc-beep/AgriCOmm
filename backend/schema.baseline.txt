@@ -1198,6 +1198,7 @@ COL mill_purchases.purchase_no:character varying:NOT NULL
 COL mill_purchases.supplier_id:integer:NULL
 COL mill_purchases.total_amount:numeric:NOT NULL
 COL mill_purchases.updated_at:timestamp with time zone:NULL
+COL mill_purchases.vendor_name:character varying:NULL
 COL mill_stock.created_at:timestamp with time zone:NULL
 COL mill_stock.id:integer:NOT NULL
 COL mill_stock.item_id:integer:NOT NULL
