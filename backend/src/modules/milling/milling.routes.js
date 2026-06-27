@@ -790,6 +790,55 @@ router.get('/workers/:id/advances', authorize('milling', 'view'), async (req, re
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
+// Per-employee LEDGER — every amount given to a worker, across:
+//   • salary advances (mill_worker_advances)
+//   • payroll net pay (mill_payroll_lines → run.pay_date)
+//   • any other salary disbursement booked directly against them
+//     (business_expenses.employee_id, excluding the advances' own cash-outs so
+//      they aren't double-counted).
+router.get('/workers/:id/ledger', authorize('milling', 'view'), async (req, res) => {
+  try {
+    const workerId = parseInt(req.params.id, 10);
+    const worker = await db('mill_workers').where('id', workerId).first();
+    if (!worker) return res.status(404).json({ success: false, message: 'Worker not found.' });
+
+    const advances = await db('mill_worker_advances').where('worker_id', workerId)
+      .select('id', 'advance_date', 'amount', 'recovered_amount', 'status', 'expense_id', 'notes');
+    const advanceExpenseIds = advances.map((a) => a.expense_id).filter(Boolean);
+
+    const payLines = await db('mill_payroll_lines as l')
+      .join('mill_payroll_runs as r', 'r.id', 'l.run_id')
+      .where('l.worker_id', workerId)
+      .select('l.id', 'r.period', 'r.pay_date', 'r.pay_method', 'l.gross_pay', 'l.advance_deducted', 'l.net_pay');
+
+    let otherExpQ = db('business_expenses').where('employee_id', workerId);
+    if (advanceExpenseIds.length) otherExpQ = otherExpQ.whereNotIn('id', advanceExpenseIds);
+    const otherExp = await otherExpQ.select('id', 'expense_no', 'expense_date', 'amount', 'amount_pkr', 'description', 'category');
+
+    const entries = [
+      ...advances.map((a) => ({
+        date: a.advance_date, type: 'advance', label: 'Salary advance',
+        amount: parseFloat(a.amount) || 0, reference: a.expense_id ? `ADV-${a.id}` : null,
+        note: a.notes || null, status: a.status, recovered: parseFloat(a.recovered_amount) || 0,
+      })),
+      ...payLines.map((p) => ({
+        date: p.pay_date, type: 'payroll', label: `Payroll ${p.period}`,
+        amount: parseFloat(p.net_pay) || 0, reference: p.period,
+        note: `Gross ${Math.round(parseFloat(p.gross_pay) || 0).toLocaleString()}${parseFloat(p.advance_deducted) > 0 ? ` − advance ${Math.round(parseFloat(p.advance_deducted)).toLocaleString()}` : ''} via ${p.pay_method || 'cash'}`,
+      })),
+      ...otherExp.map((e) => ({
+        date: e.expense_date, type: 'other', label: e.description || 'Disbursement',
+        amount: parseFloat(e.amount_pkr) || parseFloat(e.amount) || 0, reference: e.expense_no, note: e.category,
+      })),
+    ].sort((a, b) => new Date(b.date) - new Date(a.date) || 0);
+
+    const total = entries.reduce((s, e) => s + e.amount, 0);
+    const advanceOutstanding = advances.reduce((s, a) => s + Math.max(0, (parseFloat(a.amount) || 0) - (parseFloat(a.recovered_amount) || 0)), 0);
+
+    return res.json({ success: true, data: { worker, entries, total, advanceOutstanding, count: entries.length } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
 // Record a salary advance: real cash-out (business_expense, category 'salaries',
 // paid now → Money Out / GL) PLUS a tracked advance row that nets off payroll.
 router.post('/workers/:id/advances', authorize('milling', 'create'), async (req, res) => {

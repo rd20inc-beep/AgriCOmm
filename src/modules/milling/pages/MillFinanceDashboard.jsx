@@ -11,7 +11,7 @@ import { useAuth } from '../../../context/AuthContext';
 import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import {
   useMillExpenses, useCreateMillExpense, useRecurringExpenses, useMaterializeRecurring, useRunDueRecurring, useCategorizeExpense, useMillWorkers, useCreateMillWorker,
-  useUpdateMillWorker, useDeleteMillWorker, useCreateWorkerAdvance, useWorkerAdvances,
+  useUpdateMillWorker, useDeleteMillWorker, useCreateWorkerAdvance, useWorkerAdvances, useWorkerLedger,
   useDeleteWorkerAdvance,
   usePayrollSummary, useRecordAttendance, useAttendance, useBulkAttendance, useAttendanceHolidays, useInventory, useExpenseVendors,
   usePayrollRuns, usePostPayrollRun, useDeletePayrollRun, usePayrollRun, usePayrollReport, useBankAccounts,
@@ -295,6 +295,7 @@ export default function MillFinanceDashboard() {
   const [advanceForm, setAdvanceForm] = useState({ amount: '', advance_date: new Date().toISOString().split('T')[0], payment_method: 'cash', notes: '' });
   const [deleteWorkerTarget, setDeleteWorkerTarget] = useState(null); // confirm-delete state
   const [advancesPanelWorker, setAdvancesPanelWorker] = useState(null); // view advances drawer
+  const [ledgerWorker, setLedgerWorker] = useState(null); // per-employee ledger drawer
 
   const completed = useMemo(() => millingBatches.filter(b => b.status === 'Completed'), [millingBatches]);
 
@@ -1537,7 +1538,7 @@ export default function MillFinanceDashboard() {
                   <tr key={w.id} className={`hover:bg-gray-50 ${!w.isActive ? 'opacity-50' : ''}`}>
                     <td className="px-4 py-3">
                       <div className="font-medium text-gray-900 flex items-center gap-2">
-                        {w.name}
+                        <button type="button" onClick={() => setLedgerWorker(w)} className="text-blue-600 hover:underline text-left" title="View ledger — all amounts paid to this employee">{w.name}</button>
                         {!w.isActive && <span className="px-1.5 py-0.5 rounded text-[10px] bg-gray-200 text-gray-600 uppercase">Inactive</span>}
                       </div>
                       <div className="text-xs text-gray-400 capitalize">{w.role}{w.phone ? ` · ${w.phone}` : ''}</div>
@@ -1957,6 +1958,9 @@ export default function MillFinanceDashboard() {
 
       {/* ─── SEND FUNDS DRAWER (mill can only send to Head Office) ──── */}
       <TransferFundsDrawer open={showTransfer} onClose={() => setShowTransfer(false)} lockDirection="mill_to_ho" />
+
+      {/* ─── EMPLOYEE LEDGER DRAWER ────────────────────────────────── */}
+      <EmployeeLedgerDrawer worker={ledgerWorker} onClose={() => setLedgerWorker(null)} />
 
       {/* ─── GIVE ADVANCE DRAWER ───────────────────────────────────── */}
       <SlideDrawer
@@ -2796,5 +2800,79 @@ function PayrollReport({ companyProfile, onOpenRun }) {
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Per-employee ledger: every amount paid to a worker (advances + payroll net
+// pay + other salary disbursements), newest first, with the period total. ───
+const LEDGER_TYPE_STYLE = {
+  advance: 'bg-amber-100 text-amber-700',
+  payroll: 'bg-emerald-100 text-emerald-700',
+  other: 'bg-gray-100 text-gray-600',
+};
+function EmployeeLedgerDrawer({ worker, onClose }) {
+  const { data, isLoading } = useWorkerLedger(worker?.id);
+  const rs = (n) => `Rs ${Math.round(parseFloat(n) || 0).toLocaleString()}`;
+  const entries = data?.entries || [];
+  return (
+    <SlideDrawer
+      open={!!worker}
+      onClose={onClose}
+      title="Employee Ledger"
+      subtitle={worker ? `${worker.name}${worker.role ? ` · ${worker.role}` : ''}` : ''}
+      icon={Users}
+      size="lg"
+    >
+      {!worker ? null : isLoading ? (
+        <p className="text-sm text-gray-400 py-8 text-center">Loading…</p>
+      ) : (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-gray-50 rounded-lg border border-gray-200 p-3">
+              <p className="text-[11px] text-gray-500 uppercase">Total paid</p>
+              <p className="text-lg font-bold text-gray-900">{rs(data?.total)}</p>
+            </div>
+            <div className="bg-amber-50 rounded-lg border border-amber-200 p-3">
+              <p className="text-[11px] text-amber-600 uppercase">Advance outstanding</p>
+              <p className="text-lg font-bold text-amber-700">{rs(data?.advanceOutstanding)}</p>
+            </div>
+          </div>
+
+          {entries.length === 0 ? (
+            <p className="text-sm text-gray-400 py-8 text-center">No payments recorded for this employee yet.</p>
+          ) : (
+            <div className="border border-gray-200 rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-[11px] text-gray-500 uppercase">
+                  <tr>
+                    <th className="text-left px-3 py-2">Date</th>
+                    <th className="text-left px-3 py-2">Type</th>
+                    <th className="text-left px-3 py-2">Detail</th>
+                    <th className="text-right px-3 py-2">Amount</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {entries.map((e, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 whitespace-nowrap text-gray-600">{e.date ? new Date(e.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</td>
+                      <td className="px-3 py-2"><span className={`text-[11px] px-2 py-0.5 rounded-full ${LEDGER_TYPE_STYLE[e.type] || 'bg-gray-100 text-gray-600'}`}>{e.label}</span></td>
+                      <td className="px-3 py-2 text-gray-500 text-xs">{e.note || e.reference || ''}</td>
+                      <td className="px-3 py-2 text-right tabular-nums font-medium text-gray-900">{rs(e.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-gray-300 bg-gray-50 font-semibold">
+                    <td className="px-3 py-2" colSpan={3}>Total paid to {worker.name}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-gray-900">{rs(data?.total)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+          <p className="text-[11px] text-gray-400">Includes salary advances, payroll net pay, and any other disbursement booked to this employee.</p>
+        </div>
+      )}
+    </SlideDrawer>
   );
 }

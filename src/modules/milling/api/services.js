@@ -26,6 +26,7 @@ export const millingApi = {
   updateWorker: (id, data) => api.put(`/api/milling/workers/${id}`, data),
   deleteWorker: (id) => api.delete(`/api/milling/workers/${id}`),
   listWorkerAdvances: (id) => api.get(`/api/milling/workers/${id}/advances`),
+  workerLedger: (id) => api.get(`/api/milling/workers/${id}/ledger`),
   createWorkerAdvance: (id, data) => api.post(`/api/milling/workers/${id}/advances`, data),
   deleteWorkerAdvance: (id) => api.delete(`/api/milling/advances/${id}`),
   listAttendance: (params) => api.get('/api/milling/attendance', params),

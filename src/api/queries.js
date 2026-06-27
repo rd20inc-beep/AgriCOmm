@@ -1299,6 +1299,15 @@ export function useWorkerAdvances(workerId) {
   });
 }
 
+// Full per-employee ledger (advances + payroll net pay + other salary disbursements).
+export function useWorkerLedger(workerId) {
+  return useQuery({
+    queryKey: ['worker-ledger', workerId],
+    enabled: !!workerId,
+    queryFn: async () => { const res = await millingApi.workerLedger(workerId); return res?.data || res || {}; },
+  });
+}
+
 export function useCreateWorkerAdvance() {
   const qc = useQueryClient();
   return useMutation({
