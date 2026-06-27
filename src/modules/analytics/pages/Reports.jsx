@@ -14,7 +14,7 @@ import {
   useExecutiveSummary, useOrderProfitability, useCustomerProfitability,
   useCountryAnalysis, useStockAgingReport, useSupplierQualityRanking,
   usePayments, useReceivables, usePayables, usePrintableStock,
-  useLocalSales, usePurchases,
+  useLocalSales, usePurchases, useBatchMargin,
 } from '../../../api/queries';
 import SlideDrawer from '../../../components/SlideDrawer';
 import TransactionDocument from '../../../components/TransactionDocument';
@@ -218,7 +218,9 @@ export default function Reports() {
       >
         {doc && (doc.kind === 'margin'
           ? <MarginBreakdown e={doc.data} companyProfile={companyProfileData} />
-          : <TransactionDocument kind={doc.kind} data={doc.data} companyProfile={companyProfileData} />)}
+          : doc.kind === 'batchMargin'
+            ? <BatchMarginBreakdown b={doc.data} />
+            : <TransactionDocument kind={doc.kind} data={doc.data} companyProfile={companyProfileData} />)}
       </SlideDrawer>
     </div>
   );
@@ -481,6 +483,29 @@ function marginRow(s) {
 }
 
 function MarginTab({ params, openDoc }) {
+  const [view, setView] = useState('sale'); // 'sale' | 'batch'
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start justify-between flex-wrap gap-2">
+        <SectionHeader
+          title="Trading Margin — buy cost + expenses vs sale price"
+          subtitle={view === 'sale'
+            ? 'By Sale: each local sale vs its lot’s landed cost (purchase + costs added to the lot). Click a row for the breakdown.'
+            : 'By Batch: each milling / blending batch’s input cost (raw + milling) vs the realised sales of its finished + by-product outputs.'}
+        />
+        <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden text-sm shrink-0">
+          {[['sale', 'By Sale'], ['batch', 'By Batch']].map(([k, l]) => (
+            <button key={k} onClick={() => setView(k)}
+              className={`px-3 py-1.5 font-medium ${view === k ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>{l}</button>
+          ))}
+        </div>
+      </div>
+      {view === 'sale' ? <MarginBySale params={params} openDoc={openDoc} /> : <MarginByBatch params={params} openDoc={openDoc} />}
+    </div>
+  );
+}
+
+function MarginBySale({ params, openDoc }) {
   const { data: sales = [], isLoading } = useLocalSales(params);
   if (isLoading) return <Skeleton />;
   const raw = Array.isArray(sales) ? sales : (sales?.sales || []);
@@ -494,10 +519,6 @@ function MarginTab({ params, openDoc }) {
 
   return (
     <div className="space-y-5">
-      <SectionHeader
-        title="Trading Margin — buy cost + expenses vs sale price"
-        subtitle="Each local sale, with the lot's landed cost (purchase + costs added to the lot) against the sale price. Click a row for the full breakdown."
-      />
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <SummaryCell label="Revenue" value={fmtPKR(totRev)} />
         <SummaryCell label="Cost (buy + exp)" value={fmtPKR(totCost)} />
@@ -570,6 +591,98 @@ function MarginBreakdown({ e, companyProfile }) {
       <div className="pt-2 border-t border-gray-100">
         <TransactionDocument kind="invoice" data={s} companyProfile={companyProfile} />
       </div>
+    </div>
+  );
+}
+
+// Margin grouped by milling/blending batch — input cost vs realised output sales.
+function MarginByBatch({ params, openDoc }) {
+  // Batch margin is keyed off milling_batches (created_at) — pass only the date range.
+  const { from_date, to_date } = params || {};
+  const { data: batches = [], isLoading } = useBatchMargin({ from_date, to_date });
+  if (isLoading) return <Skeleton />;
+  const rows = Array.isArray(batches) ? batches : [];
+  if (rows.length === 0) return <Empty msg="No milling/blending batches in this period." />;
+
+  const totInput = rows.reduce((a, b) => a + (parseFloat(b.inputCost) || 0), 0);
+  const totSold = rows.reduce((a, b) => a + (parseFloat(b.soldValue) || 0), 0);
+  const totCostOfSold = rows.reduce((a, b) => a + (parseFloat(b.costOfSold) || 0), 0);
+  const totMargin = totSold - totCostOfSold;
+  const totOnHand = rows.reduce((a, b) => a + (parseFloat(b.onHandValue) || 0), 0);
+  const avgPct = totSold > 0 ? (totMargin / totSold) * 100 : 0;
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <SummaryCell label="Input cost (raw + milling)" value={fmtPKR(totInput)} />
+        <SummaryCell label="Output sold" value={fmtPKR(totSold)} />
+        <SummaryCell label="Cost of sold" value={fmtPKR(totCostOfSold)} />
+        <SummaryCell label="Realised margin" value={<span className={totMargin >= 0 ? 'text-emerald-600' : 'text-rose-600'}>{fmtPKR(totMargin)}</span>} />
+        <SummaryCell label="On-hand (at cost)" value={fmtPKR(totOnHand)} />
+      </div>
+      <Table
+        head={['Batch', 'Supplier', 'Raw', 'Finished', 'Input cost', 'Output sold', 'Cost of sold', 'Margin', '%']}
+        align={['left', 'left', 'right', 'right', 'right', 'right', 'right', 'right', 'right']}
+        rowClick={rows.map(b => () => openDoc?.({ kind: 'batchMargin', title: 'Batch Margin', subtitle: b.batchNo, data: b }))}
+        rows={rows.map(b => {
+          const sold = parseFloat(b.soldValue) || 0;
+          const hasSales = sold > 0;
+          return [
+            <span className="font-mono text-xs">{b.batchNo}</span>,
+            <span className="text-xs">{b.supplierName || '—'}</span>,
+            `${(parseFloat(b.rawQtyMT) || 0).toFixed(1)} MT`,
+            `${(parseFloat(b.finishedMT) || 0).toFixed(1)} MT`,
+            fmtPKR(b.inputCost),
+            <span className="font-semibold text-gray-900">{fmtPKR(sold)}</span>,
+            hasSales ? fmtPKR(b.costOfSold) : '—',
+            hasSales ? <ProfitCell v={b.realizedMargin} /> : <span className="text-gray-400">—</span>,
+            hasSales ? <span className={`font-medium ${(parseFloat(b.realizedMarginPct) || 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{(parseFloat(b.realizedMarginPct) || 0).toFixed(1)}%</span> : '—',
+          ];
+        })}
+      />
+      <p className="text-[11px] text-gray-400">Input cost = the batch's milling_costs (raw rice + milling + packing). Output sold = realised local sales of the batch's finished + by-product lots, priced at each lot's residual landed cost. Unsold output is valued at cost under "On-hand".</p>
+    </div>
+  );
+}
+
+// Slider body for a Batch Margin row — input vs realised-output breakdown.
+function BatchMarginBreakdown({ b }) {
+  const navigate = useNavigate();
+  const input = parseFloat(b.inputCost) || 0;
+  const sold = parseFloat(b.soldValue) || 0;
+  const costOfSold = parseFloat(b.costOfSold) || 0;
+  const onHand = parseFloat(b.onHandValue) || 0;
+  const margin = sold - costOfSold;
+  const marginPct = sold > 0 ? (margin / sold) * 100 : 0;
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3 text-sm">
+        <div><p className="text-xs text-gray-500">Batch</p><p className="font-medium">{b.batchNo}</p></div>
+        <div><p className="text-xs text-gray-500">Supplier</p><p>{b.supplierName || '—'}</p></div>
+        <div><p className="text-xs text-gray-500">Raw input</p><p>{(parseFloat(b.rawQtyMT) || 0).toFixed(2)} MT</p></div>
+        <div><p className="text-xs text-gray-500">Finished</p><p>{(parseFloat(b.finishedMT) || 0).toFixed(2)} MT · yield {(parseFloat(b.yieldPct) || 0).toFixed(1)}%</p></div>
+      </div>
+
+      <div className="rounded-lg border border-gray-200 overflow-hidden">
+        <table className="w-full text-sm">
+          <tbody className="divide-y divide-gray-100">
+            <tr><td className="px-3 py-2 text-gray-600">Input cost (raw + milling)</td><td className="px-3 py-2 text-right tabular-nums font-medium">{fmtPKR(input)}</td></tr>
+            <tr><td className="px-3 py-2 text-gray-600">Output sold (realised)</td><td className="px-3 py-2 text-right tabular-nums font-medium">{fmtPKR(sold)}</td></tr>
+            <tr><td className="px-3 py-2 text-gray-600">Cost of sold output</td><td className="px-3 py-2 text-right tabular-nums">{fmtPKR(costOfSold)}</td></tr>
+            <tr className="bg-gray-50">
+              <td className="px-3 py-2 font-semibold text-gray-800">Realised margin</td>
+              <td className={`px-3 py-2 text-right tabular-nums font-bold ${margin >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{fmtPKR(margin)} ({marginPct.toFixed(1)}%)</td>
+            </tr>
+            <tr><td className="px-3 py-2 text-gray-500">Unsold output on hand (at cost)</td><td className="px-3 py-2 text-right tabular-nums text-gray-600">{fmtPKR(onHand)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[11px] text-gray-400">Realised margin counts only output already sold. Unsold finished/by-product stock is held at cost until sold. Input cost = the batch's milling_costs (raw + milling + packing).</p>
+
+      <button onClick={() => navigate(`/milling/${b.id}`)}
+        className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
+        <ExternalLink size={14} /> Open batch detail
+      </button>
     </div>
   );
 }

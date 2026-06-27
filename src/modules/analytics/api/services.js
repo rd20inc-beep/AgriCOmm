@@ -4,6 +4,7 @@ export const reportingApi = {
   orderPipeline: (params) => api.get('/api/reporting/executive/pipeline', params),
   orderProfitability: (params) => api.get('/api/reporting/profitability/orders', params),
   batchProfitability: (params) => api.get('/api/reporting/profitability/batches', params),
+  batchMargin: (params) => api.get('/api/reporting/profitability/batch-margin', params),
   customerProfitability: (params) => api.get('/api/reporting/profitability/customers', params),
   countryAnalysis: (params) => api.get('/api/reporting/profitability/countries', params),
   supplierQualityRanking: (params) => api.get('/api/reporting/quality/supplier-ranking', params),

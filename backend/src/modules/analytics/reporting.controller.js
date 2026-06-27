@@ -78,6 +78,19 @@ const reportingController = {
     }
   },
 
+  async batchMargin(req, res) {
+    try {
+      const { from_date, to_date, limit } = req.query;
+      const data = await reportingService.getBatchMargin({
+        from_date, to_date, limit: parseInt(limit, 10) || 200,
+      });
+      return res.json({ success: true, ...data });
+    } catch (err) {
+      console.error('Batch margin error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
   async customerProfitability(req, res) {
     try {
       const { dateFrom, dateTo, page, limit } = req.query;

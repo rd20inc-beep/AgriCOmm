@@ -1646,6 +1646,17 @@ export function useCountryAnalysis(params = {}) {
   });
 }
 
+export function useBatchMargin(params = {}) {
+  return useQuery({
+    queryKey: ['batch-margin', params],
+    queryFn: async () => {
+      const res = await reportingApi.batchMargin(params);
+      return transformKeys(unwrap(res, 'batches') || []);
+    },
+    staleTime: 10 * 1000,
+  });
+}
+
 export function useStockAgingReport() {
   return useQuery({
     queryKey: ['stock-aging-report'],

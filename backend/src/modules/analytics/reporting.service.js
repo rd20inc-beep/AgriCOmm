@@ -384,6 +384,75 @@ const reportingService = {
   },
 
   /**
+   * Per-milling-batch trading margin from ACTUAL figures (not the hardcoded
+   * reference prices getBatchProfitability uses): input cost = Σ milling_costs
+   * (raw + processing + packaging); realised revenue/cost = the local sales of
+   * the batch's output lots (finished + by-products) priced at each lot's
+   * residual landed cost. So a milled/blended batch shows what it cost to make
+   * vs what its outputs actually sold for, plus the value still on hand.
+   */
+  async getBatchMargin({ from_date, to_date, limit = 200 }) {
+    const num = (v) => parseFloat(v) || 0;
+    let bq = db('milling_batches as mb')
+      .leftJoin('suppliers as s', 'mb.supplier_id', 's.id')
+      .select('mb.id', 'mb.batch_no', 's.name as supplier_name', 'mb.raw_qty_mt',
+        'mb.actual_finished_mt', 'mb.yield_pct', 'mb.status', 'mb.created_at');
+    if (from_date) bq = bq.where('mb.created_at', '>=', from_date);
+    if (to_date) bq = bq.where('mb.created_at', '<=', to_date);
+    const batches = await bq.orderBy('mb.created_at', 'desc').limit(parseInt(limit, 10));
+    if (!batches.length) return { batches: [] };
+    const ids = batches.map((b) => b.id);
+
+    // Input cost per batch = all milling_costs (raw_rice + processing + packaging).
+    const costs = await db('milling_costs').whereIn('batch_id', ids)
+      .select('batch_id').sum('amount as t').groupBy('batch_id');
+    const costMap = {};
+    for (const c of costs) costMap[c.batch_id] = num(c.t);
+
+    // Output lots (finished + by-product) for these batches, keyed batch-<id>.
+    const refs = ids.map((id) => `batch-${id}`);
+    const outLots = await db('inventory_lots')
+      .whereIn('batch_ref', refs).whereIn('type', ['finished', 'byproduct'])
+      .select('id', 'batch_ref', 'qty', 'net_weight_kg', 'landed_cost_per_kg');
+    const lotBatch = {}; const onHand = {}; const producedKg = {};
+    for (const l of outLots) {
+      const bid = parseInt(String(l.batch_ref).replace('batch-', ''), 10);
+      lotBatch[l.id] = bid;
+      const curKg = num(l.net_weight_kg) || num(l.qty) * 1000;
+      onHand[bid] = (onHand[bid] || 0) + curKg * num(l.landed_cost_per_kg);
+    }
+    const lotIds = outLots.map((l) => l.id);
+    const cpkOf = Object.fromEntries(outLots.map((l) => [l.id, num(l.landed_cost_per_kg)]));
+
+    // Realised sales of those output lots.
+    const sales = lotIds.length
+      ? await db('local_sales').whereIn('lot_id', lotIds).select('lot_id', 'quantity_kg', 'total_amount')
+      : [];
+    const soldVal = {}; const soldCost = {}; const soldKg = {};
+    for (const sale of sales) {
+      const bid = lotBatch[sale.lot_id]; if (!bid) continue;
+      soldVal[bid] = (soldVal[bid] || 0) + num(sale.total_amount);
+      soldCost[bid] = (soldCost[bid] || 0) + cpkOf[sale.lot_id] * num(sale.quantity_kg);
+      soldKg[bid] = (soldKg[bid] || 0) + num(sale.quantity_kg);
+    }
+
+    const data = batches.map((b) => {
+      const inputCost = costMap[b.id] || 0;
+      const soldValue = soldVal[b.id] || 0;
+      const costOfSold = soldCost[b.id] || 0;
+      const realizedMargin = soldValue - costOfSold;
+      const realizedMarginPct = soldValue > 0 ? (realizedMargin / soldValue) * 100 : 0;
+      return {
+        id: b.id, batchNo: b.batch_no, supplierName: b.supplier_name, status: b.status, createdAt: b.created_at,
+        rawQtyMT: num(b.raw_qty_mt), finishedMT: num(b.actual_finished_mt), yieldPct: num(b.yield_pct),
+        inputCost, soldValue, costOfSold, realizedMargin, realizedMarginPct,
+        soldKg: soldKg[b.id] || 0, onHandValue: onHand[b.id] || 0,
+      };
+    });
+    return { batches: data };
+  },
+
+  /**
    * Aggregate by customer: total orders, revenue, profit, avg margin, outstanding receivables.
    */
   async getCustomerProfitability({ dateFrom, dateTo, page = 1, limit = 50 }) {
