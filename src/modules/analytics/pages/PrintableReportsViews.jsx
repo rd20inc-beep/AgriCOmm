@@ -556,18 +556,45 @@ export function PurchaseLedgerView({ data, companyName, range }) {
         { label: 'Total Qty', value: `${fmtMt(totals.mt)} MT` },
         { label: 'Total Value', value: fmtPkr(totals.valuePkr) },
       ]} />
-      <Section title="Purchase Detail — every raw-rice lot & its supplier">
-        <Table
+      <Section title="Purchase Detail — every raw-rice lot, its supplier & where it went">
+        <ExpandableGroupTable
           head={['Date', 'Lot', 'Supplier', 'Rice Type', 'Variety/Grade', 'Qty (MT)', 'kg', 'Per kg', 'Katta', 'Value (PKR)', 'Payment']}
           align={['left', 'left', 'left', 'left', 'left', 'right', 'right', 'right', 'right', 'right', 'left']}
-          rows={rows.map(r => [
-            fmtDate(r.date),
-            <RefLink to={`/lot-inventory/${r.lotId}`}>{r.lotNo}</RefLink>,
-            r.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.supplier}</RefLink> : (r.supplier || '—'),
-            r.riceType || '—', r.variety || r.grade || '—',
-            fmtMt(r.mt), fmtKg(r.mt * 1000), fmtPkr(r.ratePerKg), fmtKg(r.bags), fmtPkr(r.valuePkr), r.paymentStatus || '—',
-          ])}
+          hint="Click a lot to see what's still on hand, what was sold (and to whom), and what was milled."
           empty="No purchases in this period."
+          groups={rows.map(r => {
+            const kids = [];
+            // What's still in stock
+            kids.push(['Remaining on hand', '', '', '', '', fmtMt(r.remainingKg / 1000), fmtKg(r.remainingKg), '', '', '', (r.remainingKg || 0) > 0 ? 'In stock' : 'None left']);
+            // Milled into batch(es)
+            for (const m of (r.milledInto || [])) {
+              kids.push(['Milled into', m.batchId ? <RefLink to={`/milling/${m.batchId}`}>{m.batchNo}</RefLink> : (m.batchNo || '—'), '', '', '', fmtMt(m.kg / 1000), fmtKg(m.kg), '', '', '', '']);
+            }
+            // Sold directly — to whom
+            for (const b of (r.buyers || [])) {
+              kids.push([
+                'Sold',
+                b.lotSaleNo || b.saleNo || '—',
+                b.customerId ? <RefLink to={`/finance/statements?type=customer&id=${b.customerId}`}>{b.customer}</RefLink> : (b.customer || '—'),
+                '', '',
+                fmtMt(b.kg / 1000), fmtKg(b.kg), fmtPkr(b.ratePerKg), '', fmtPkr(b.valuePkr), b.paymentStatus || '—',
+              ]);
+            }
+            if ((r.buyers || []).length === 0 && (r.milledInto || []).length === 0) {
+              kids.push(['Not yet sold or milled', '', '', '', '', '', '', '', '', '', '—']);
+            }
+            return {
+              key: r.lotId,
+              cells: [
+                fmtDate(r.date),
+                <RefLink to={`/lot-inventory/${r.lotId}`}>{r.lotNo}</RefLink>,
+                r.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.supplier}</RefLink> : (r.supplier || '—'),
+                r.riceType || '—', r.variety || r.grade || '—',
+                fmtMt(r.mt), fmtKg(r.mt * 1000), fmtPkr(r.ratePerKg), fmtKg(r.bags), fmtPkr(r.valuePkr), r.paymentStatus || '—',
+              ],
+              childRows: kids,
+            };
+          })}
           totalRow={['', '', '', '', 'TOTAL', fmtMt(totals.mt), fmtKg(totals.mt * 1000), '', fmtKg(rows.reduce((s, r) => s + (parseFloat(r.bags) || 0), 0)), fmtPkr(totals.valuePkr), '']}
         />
       </Section>

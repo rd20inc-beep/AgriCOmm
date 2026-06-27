@@ -1125,15 +1125,50 @@ const reportingController = {
       if (to) q = q.where('l.created_at', '<=', to);
       const rows = await q.select(
         'l.id', 'l.lot_no', 'l.created_at', 'l.item_name', 'l.variety', 'l.grade',
-        'l.rate_per_kg', 'l.total_bags', 'l.supplier_id', 'l.payment_status',
+        'l.rate_per_kg', 'l.total_bags', 'l.supplier_id', 'l.payment_status', 'l.net_weight_kg',
         's.name as supplier_name', 'p.name as product_name',
         db.raw('COALESCE(NULLIF(l.received_net_weight_kg,0), NULLIF(l.net_weight_kg,0), l.qty*1000) as kg'),
       ).orderBy('l.created_at', 'desc');
+
+      // Per-lot disposition: direct sales (+ buyers) and milling consumption.
+      const lotIds = rows.map((r) => r.id);
+      const salesByLot = {}; const milledByLot = {};
+      if (lotIds.length) {
+        const sales = await db('local_sales as ls')
+          .leftJoin('customers as c', 'ls.customer_id', 'c.id')
+          .whereIn('ls.lot_id', lotIds)
+          .select('ls.lot_id', 'ls.sale_no', 'ls.sale_date', 'ls.quantity_kg', 'ls.total_amount',
+            'ls.rate_per_kg', 'ls.payment_status', 'ls.customer_id',
+            db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer"))
+          .orderBy('ls.sale_date', 'asc');
+        for (const s of sales) (salesByLot[s.lot_id] = salesByLot[s.lot_id] || []).push(s);
+
+        const milled = await db('batch_source_lots as bsl')
+          .leftJoin('milling_batches as mb', 'mb.id', 'bsl.batch_id')
+          .whereIn('bsl.lot_id', lotIds)
+          .select('bsl.lot_id', 'bsl.qty_mt', 'mb.id as batch_id', 'mb.batch_no');
+        for (const m of milled) (milledByLot[m.lot_id] = milledByLot[m.lot_id] || []).push(m);
+      }
+
       const detail = rows.map((r) => {
         const kg = parseFloat(r.kg) || 0; const rate = parseFloat(r.rate_per_kg) || 0;
-        return { lotId: r.id, lotNo: r.lot_no, date: r.created_at, supplier: r.supplier_name || '—', supplierId: r.supplier_id,
+        const lotSales = salesByLot[r.id] || [];
+        const lotMilled = milledByLot[r.id] || [];
+        const soldKg = lotSales.reduce((s, x) => s + (parseFloat(x.quantity_kg) || 0), 0);
+        const milledKg = lotMilled.reduce((s, x) => s + (parseFloat(x.qty_mt) || 0) * 1000, 0);
+        const remainingKg = Math.max(0, parseFloat(r.net_weight_kg) || 0);
+        return {
+          lotId: r.id, lotNo: r.lot_no, date: r.created_at, supplier: r.supplier_name || '—', supplierId: r.supplier_id,
           riceType: r.product_name || r.item_name, variety: r.variety, grade: r.grade,
-          mt: kg / 1000, ratePerKg: rate, valuePkr: kg * rate, bags: r.total_bags, paymentStatus: r.payment_status };
+          mt: kg / 1000, ratePerKg: rate, valuePkr: kg * rate, bags: r.total_bags, paymentStatus: r.payment_status,
+          receivedKg: kg, remainingKg, soldKg, milledKg,
+          buyers: lotSales.map((x) => ({
+            saleNo: x.sale_no, date: x.sale_date, customer: x.customer, customerId: x.customer_id || null,
+            kg: parseFloat(x.quantity_kg) || 0, ratePerKg: parseFloat(x.rate_per_kg) || 0,
+            valuePkr: parseFloat(x.total_amount) || 0, paymentStatus: x.payment_status,
+          })),
+          milledInto: lotMilled.map((x) => ({ batchId: x.batch_id, batchNo: x.batch_no, kg: (parseFloat(x.qty_mt) || 0) * 1000 })),
+        };
       });
       return res.json({ success: true, data: { rows: detail, totals: { lots: detail.length, mt: detail.reduce((s, d) => s + d.mt, 0), valuePkr: detail.reduce((s, d) => s + d.valuePkr, 0) }, period: { from, to } } });
     } catch (err) { console.error('Purchase ledger error:', err); return res.status(500).json({ success: false, message: 'Internal server error.' }); }
