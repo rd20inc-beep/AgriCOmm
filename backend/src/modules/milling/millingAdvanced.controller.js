@@ -748,7 +748,7 @@ const millingAdvancedController = {
           .select(
             'p.id', 'p.payment_no', 'p.payment_date', 'p.payment_method',
             db.raw(`${amtPkr} as amount_pkr`),
-            'pa.category', 'pa.pay_no as ref', 'pa.source_table', 'pa.linked_ref',
+            'pa.category', 'pa.pay_no as ref', 'pa.source_table', 'pa.source_id', 'pa.linked_ref',
             's.name as counterparty'
           )
       );
@@ -830,6 +830,31 @@ const millingAdvancedController = {
             rate: rate ? `Rs ${rate}/kg` : '',
             amount: kg && rate ? kg * rate : num(r.amount_pkr),
           }];
+        }
+      }
+
+      // Mill-store purchases (packaging / fuel / operational items) — itemise from
+      // mill_purchase_items joined to mill_items, keyed by the payable's source_id.
+      const mpIds = outRows
+        .filter((r) => r.source_table === 'mill_purchases' && r.source_id)
+        .map((r) => r.source_id);
+      if (mpIds.length) {
+        const lines = await db('mill_purchase_items as mpi')
+          .leftJoin('mill_items as mi', 'mi.id', 'mpi.item_id')
+          .whereIn('mpi.purchase_id', mpIds)
+          .select('mpi.purchase_id', 'mpi.quantity', 'mpi.cost_per_unit', 'mpi.total_cost',
+            'mi.name as item_name', 'mi.unit');
+        const byPurchase = {};
+        for (const ln of lines) {
+          (byPurchase[ln.purchase_id] = byPurchase[ln.purchase_id] || []).push({
+            name: ln.item_name || 'Item',
+            qty: `${num(ln.quantity)}${ln.unit ? ` ${ln.unit}` : ''}`,
+            rate: num(ln.cost_per_unit) ? `Rs ${num(ln.cost_per_unit)}` : '',
+            amount: num(ln.total_cost),
+          });
+        }
+        for (const r of outRows) {
+          if (r.source_table === 'mill_purchases' && byPurchase[r.source_id]) r.items = byPurchase[r.source_id];
         }
       }
 
