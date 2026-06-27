@@ -1651,7 +1651,10 @@ export function useBatchMargin(params = {}) {
     queryKey: ['batch-margin', params],
     queryFn: async () => {
       const res = await reportingApi.batchMargin(params);
-      return transformKeys(unwrap(res, 'batches') || []);
+      // Controller returns { success, batches } at the top level (api.get gives
+      // the body as `res`), so read res.batches — not the nested res.data.
+      const arr = res?.batches || res?.data?.batches || [];
+      return transformKeys(Array.isArray(arr) ? arr : []);
     },
     staleTime: 10 * 1000,
   });
