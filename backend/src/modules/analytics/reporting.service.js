@@ -1134,6 +1134,96 @@ const reportingService = {
     };
   },
 
+  /**
+   * Inventory Movement Ledger — a filterable chronological feed of every
+   * stock movement (inventory_movements), enriched with lot / warehouse /
+   * reference context + a link target. Read-only.
+   * Filters: dateFrom, dateTo, movementType, entity, lotId.
+   */
+  async getInventoryLedger({ dateFrom, dateTo, movementType, entity, lotId, limit = 300 } = {}) {
+    const num = (v) => parseFloat(v) || 0;
+    const cap = Math.min(parseInt(limit, 10) || 300, 1000);
+    let q = db('inventory_movements as m')
+      .leftJoin('inventory_lots as l', 'm.lot_id', 'l.id')
+      .leftJoin('warehouses as wf', 'm.from_warehouse_id', 'wf.id')
+      .leftJoin('warehouses as wt', 'm.to_warehouse_id', 'wt.id')
+      .leftJoin('milling_batches as mb', 'm.batch_id', 'mb.id');
+    if (dateFrom) q = q.where('m.created_at', '>=', dateFrom);
+    if (dateTo) q = q.where('m.created_at', '<=', dateTo);
+    if (movementType) q = q.where('m.movement_type', movementType);
+    if (entity) q = q.where(function () { this.where('m.source_entity', entity).orWhere('m.dest_entity', entity).orWhere('l.entity', entity); });
+    if (lotId) q = q.where('m.lot_id', parseInt(lotId, 10));
+    const rows = await q.select(
+      'm.id', 'm.created_at', 'm.movement_type', 'm.qty', 'm.total_cost', 'm.cost_per_unit',
+      'm.lot_id', 'm.batch_id', 'm.order_id', 'm.linked_ref', 'm.source_entity', 'm.dest_entity', 'm.notes',
+      'l.lot_no', 'l.item_name', 'l.type as lot_type', 'mb.batch_no',
+      'wf.name as from_wh', 'wt.name as to_wh',
+    ).orderBy('m.created_at', 'desc').orderBy('m.id', 'desc').limit(cap);
+
+    const LABELS = {
+      purchase_receipt: 'Purchase received', internal_receipt: 'Internal receipt', production_issue: 'Issued to milling',
+      production_output: 'Milling output', byproduct_output: 'By-product output', transfer_out: 'Transfer out',
+      transfer_in: 'Transfer in', export_dispatch: 'Export dispatch', local_sale: 'Local sale',
+      reservation_hold: 'Reserved', reservation_release: 'Reservation released', adjustment_plus: 'Adjustment (+)',
+      adjustment_minus: 'Adjustment (−)', damage_writeoff: 'Damage write-off', shortage_writeoff: 'Shortage write-off',
+      return: 'Return', opening_balance: 'Opening balance',
+    };
+    const OUTBOUND = new Set(['production_issue', 'transfer_out', 'export_dispatch', 'local_sale', 'adjustment_minus', 'damage_writeoff', 'shortage_writeoff']);
+
+    const out = rows.map((r) => {
+      const mt = String(r.movement_type || '');
+      const kg = num(r.qty) * 1000;
+      let href = null;
+      if (r.batch_id) href = `/milling/${r.batch_id}`;
+      else if (r.order_id) href = `/export/${r.order_id}`;
+      else if (r.lot_id) href = `/lot-inventory/${r.lot_id}`;
+      return {
+        id: r.id, date: r.created_at, type: mt, label: LABELS[mt] || mt.replace(/_/g, ' '),
+        lotId: r.lot_id, lotNo: r.lot_no, item: r.item_name, lotType: r.lot_type,
+        batchNo: r.batch_no, reference: r.linked_ref || null,
+        qtyKg: kg, direction: OUTBOUND.has(mt) ? 'out' : 'in', costPkr: num(r.total_cost),
+        fromWh: r.from_wh, toWh: r.to_wh, entity: r.dest_entity || r.source_entity || null, href,
+      };
+    });
+    return { rows: out, totals: { count: out.length, inKg: out.filter(r => r.direction === 'in').reduce((s, r) => s + r.qtyKg, 0), outKg: out.filter(r => r.direction === 'out').reduce((s, r) => s + r.qtyKg, 0) } };
+  },
+
+  /**
+   * Finished Goods Ledger — the finished + by-product stock register grouped
+   * by grade/output, with produced (original intake), sold, on-hand,
+   * reserved and on-hand value. Read-only.
+   */
+  async getFinishedGoodsLedger({ entity } = {}) {
+    const num = (v) => parseFloat(v) || 0;
+    let q = db('inventory_lots as l')
+      .leftJoin('products as p', 'l.product_id', 'p.id')
+      .whereIn('l.type', ['finished', 'byproduct']);
+    if (entity) q = q.where('l.entity', entity);
+    const lots = await q.select(
+      'l.id', 'l.lot_no', 'l.type', 'l.item_name', 'l.grade', 'l.variety', 'l.processing_type',
+      'l.net_weight_kg', 'l.received_net_weight_kg', 'l.available_qty', 'l.reserved_qty', 'l.sold_weight_kg',
+      'l.landed_cost_per_kg', 'p.name as product_name',
+    );
+
+    // Group key: by grade for by-products, by product/item for finished.
+    const groups = {};
+    for (const l of lots) {
+      const isBy = l.type === 'byproduct';
+      const key = isBy ? (l.grade || l.item_name || 'By-product') : (l.product_name || l.item_name || 'Finished Rice');
+      const g = groups[key] || (groups[key] = { key, type: l.type, producedKg: 0, onHandKg: 0, reservedKg: 0, soldKg: 0, valuePkr: 0, lots: [] });
+      const produced = num(l.received_net_weight_kg) || num(l.net_weight_kg);
+      const onHand = num(l.net_weight_kg);
+      const reserved = num(l.reserved_qty) * 1000;
+      const sold = num(l.sold_weight_kg) || Math.max(0, produced - onHand);
+      g.producedKg += produced; g.onHandKg += onHand; g.reservedKg += reserved; g.soldKg += sold;
+      g.valuePkr += onHand * num(l.landed_cost_per_kg);
+      g.lots.push({ lotId: l.id, lotNo: l.lot_no, item: l.grade || l.item_name, variety: l.variety, isBlend: l.processing_type === 'blended', producedKg: produced, onHandKg: onHand, reservedKg: reserved, soldKg: sold, costPerKg: num(l.landed_cost_per_kg), valuePkr: onHand * num(l.landed_cost_per_kg), href: `/lot-inventory/${l.id}` });
+    }
+    const rows = Object.values(groups).sort((a, b) => b.onHandKg - a.onHandKg);
+    const grand = rows.reduce((s, g) => ({ producedKg: s.producedKg + g.producedKg, onHandKg: s.onHandKg + g.onHandKg, reservedKg: s.reservedKg + g.reservedKg, soldKg: s.soldKg + g.soldKg, valuePkr: s.valuePkr + g.valuePkr }), { producedKg: 0, onHandKg: 0, reservedKg: 0, soldKg: 0, valuePkr: 0 });
+    return { rows, grand };
+  },
+
   // ═══════════════════════════════════════════════════════════════════
   // GLOBAL SEARCH (reports nav helper)
   // ═══════════════════════════════════════════════════════════════════

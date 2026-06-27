@@ -367,7 +367,7 @@ export default function Reports() {
           {tab === 'orders'    && <OrdersTab params={params} />}
           {tab === 'customers' && <CustomersTab params={params} />}
           {tab === 'countries' && <CountriesTab params={params} />}
-          {tab === 'inventory' && <InventoryTab />}
+          {tab === 'inventory' && <InventoryTab millScoped={millScoped} />}
           {tab === 'quality'   && <QualityTab params={params} />}
         </div>
       </div>
@@ -1750,8 +1750,9 @@ function StockBreakdown({ title, subtitle, query, groupHead }) {
   );
 }
 
-function InventoryTab() {
+function InventoryTab({ millScoped }) {
   const navigate = useNavigate();
+  const entity = millScoped ? 'mill' : '';
   const { data: lots = [], isLoading } = useStockAgingReport();   // per-lot array (qty > 0 only)
   const byType = usePrintableStock('type');
   const byWarehouse = usePrintableStock('warehouse');
@@ -1886,11 +1887,135 @@ function InventoryTab() {
         </div>
       )}
 
+      {/* Finished Goods Ledger (Phase 2) */}
+      <FinishedGoodsLedgerSection entity={entity} />
+
+      {/* Inventory Movement Ledger (Phase 2) */}
+      <InventoryMovementLedgerSection entity={entity} />
+
       <div className="flex justify-end">
         <Link to="/reports/print" className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm">
           Printable stock report <ExternalLink size={12} />
         </Link>
       </div>
+    </div>
+  );
+}
+
+// Finished Goods Ledger — finished + by-product stock register grouped by
+// grade/output (produced · sold · on-hand · reserved · value), expandable to lots.
+function FinishedGoodsLedgerSection({ entity }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [exp, setExp] = useState({});
+  useEffect(() => {
+    setLoading(true);
+    reportingApi.finishedGoodsLedger(entity ? { entity } : {})
+      .then(res => setData(res?.rows ? res : (res?.data || res)))
+      .catch(() => setData({ rows: [] }))
+      .finally(() => setLoading(false));
+  }, [entity]);
+  const rows = data?.rows || [];
+  const g = data?.grand || {};
+  if (loading) return <Skeleton />;
+  if (rows.length === 0) return null;
+  const kg = (v) => `${Math.round(v || 0).toLocaleString()} kg`;
+  return (
+    <div className="space-y-2">
+      <SectionHeader title="Finished Goods Ledger" subtitle="Finished &amp; by-product stock register — produced, sold, on-hand, reserved, value" />
+      <div className="rounded-lg border border-gray-200 overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 text-gray-500 text-xs">
+            <tr><th className="px-3 py-2 text-left font-medium">Output</th><th className="px-3 py-2 text-right font-medium">Produced</th><th className="px-3 py-2 text-right font-medium">Sold</th><th className="px-3 py-2 text-right font-medium">On hand</th><th className="px-3 py-2 text-right font-medium">Reserved</th><th className="px-3 py-2 text-right font-medium">Value</th></tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {rows.map((r) => (
+              <Fragment key={r.key}>
+                <tr className="hover:bg-gray-50 cursor-pointer" onClick={() => setExp(e => ({ ...e, [r.key]: !e[r.key] }))}>
+                  <td className="px-3 py-2 font-medium text-gray-800"><ChevronRight size={13} className={`inline transition-transform mr-1 text-gray-400 ${exp[r.key] ? 'rotate-90' : ''}`} />{gradeLabel(r.key)}<span className="text-gray-400 font-normal"> · {r.type === 'byproduct' ? 'by-product' : 'finished'} · {r.lots.length} lot{r.lots.length === 1 ? '' : 's'}</span></td>
+                  <td className="px-3 py-2 text-right tabular-nums">{kg(r.producedKg)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-600">{kg(r.soldKg)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums font-medium text-emerald-700">{kg(r.onHandKg)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-amber-600">{r.reservedKg > 0 ? kg(r.reservedKg) : '—'}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{fmtPKR(r.valuePkr)}</td>
+                </tr>
+                {exp[r.key] && r.lots.map(l => (
+                  <tr key={l.lotId} className="bg-gray-50/50 text-xs">
+                    <td className="px-3 py-1.5 pl-8"><Link to={l.href} className="font-mono text-blue-600 hover:underline">{l.lotNo}</Link>{l.isBlend ? <span className="text-gray-400"> · blend</span> : ''}{l.variety ? <span className="text-gray-400"> · {l.variety}</span> : ''}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{kg(l.producedKg)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{kg(l.soldKg)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-emerald-700">{kg(l.onHandKg)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-amber-600">{l.reservedKg > 0 ? kg(l.reservedKg) : '—'}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{fmtPKR(l.valuePkr)}</td>
+                  </tr>
+                ))}
+              </Fragment>
+            ))}
+            <tr className="bg-gray-100 font-semibold text-gray-800">
+              <td className="px-3 py-2">Total</td>
+              <td className="px-3 py-2 text-right tabular-nums">{kg(g.producedKg)}</td>
+              <td className="px-3 py-2 text-right tabular-nums">{kg(g.soldKg)}</td>
+              <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{kg(g.onHandKg)}</td>
+              <td className="px-3 py-2 text-right tabular-nums text-amber-600">{kg(g.reservedKg)}</td>
+              <td className="px-3 py-2 text-right tabular-nums">{fmtPKR(g.valuePkr)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// Inventory Movement Ledger — chronological feed of every stock movement,
+// filterable by type; each row links to its lot / batch / order.
+function InventoryMovementLedgerSection({ entity }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [type, setType] = useState('');
+  useEffect(() => {
+    setLoading(true);
+    reportingApi.inventoryLedger({ ...(entity ? { entity } : {}), ...(type ? { movementType: type } : {}), limit: 200 })
+      .then(res => setData(res?.rows ? res : (res?.data || res)))
+      .catch(() => setData({ rows: [] }))
+      .finally(() => setLoading(false));
+  }, [entity, type]);
+  const rows = data?.rows || [];
+  const types = [
+    ['', 'All movements'], ['purchase_receipt', 'Purchase received'], ['production_issue', 'Issued to milling'],
+    ['production_output', 'Milling output'], ['byproduct_output', 'By-product output'], ['local_sale', 'Local sale'],
+    ['export_dispatch', 'Export dispatch'], ['transfer_out', 'Transfer out'], ['transfer_in', 'Transfer in'],
+    ['adjustment_plus', 'Adjustment (+)'], ['adjustment_minus', 'Adjustment (−)'],
+  ];
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <SectionHeader title="Inventory Movement Ledger" subtitle="Every stock movement — newest first" />
+        <select value={type} onChange={e => setType(e.target.value)}
+          className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 outline-none">
+          {types.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+      </div>
+      {loading ? <Skeleton /> : rows.length === 0 ? <Empty msg="No movements recorded for this filter." /> : (
+        <div className="rounded-lg border border-gray-200 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-gray-500 text-xs">
+              <tr><th className="px-3 py-2 text-left font-medium">Date</th><th className="px-3 py-2 text-left font-medium">Movement</th><th className="px-3 py-2 text-left font-medium">Lot</th><th className="px-3 py-2 text-left font-medium">Where</th><th className="px-3 py-2 text-right font-medium">Qty (kg)</th><th className="px-3 py-2 text-right font-medium">Cost</th></tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {rows.map(r => (
+                <tr key={r.id} className="hover:bg-gray-50">
+                  <td className="px-3 py-1.5 whitespace-nowrap text-gray-600">{r.date ? new Date(r.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—'}</td>
+                  <td className="px-3 py-1.5 font-medium text-gray-800">{r.label}</td>
+                  <td className="px-3 py-1.5">{r.lotId ? <Link to={r.href || `/lot-inventory/${r.lotId}`} className="font-mono text-blue-600 hover:underline">{r.lotNo || `#${r.lotId}`}</Link> : (r.batchNo ? <Link to={r.href} className="text-blue-600 hover:underline">{r.batchNo}</Link> : '—')}</td>
+                  <td className="px-3 py-1.5 text-gray-500 text-xs">{[r.fromWh, r.toWh].filter(Boolean).join(' → ') || r.reference || '—'}</td>
+                  <td className={`px-3 py-1.5 text-right tabular-nums ${r.direction === 'out' ? 'text-rose-700' : 'text-emerald-700'}`}>{r.direction === 'out' ? '−' : '+'}{Math.round(r.qtyKg).toLocaleString()}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums text-gray-600">{r.costPkr > 0 ? fmtPKR(r.costPkr) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

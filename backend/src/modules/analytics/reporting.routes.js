@@ -9,6 +9,8 @@ const authorize = require('../../middleware/rbac');
 router.get('/search', authorize('reports', 'view'), controller.globalSearch);
 router.get('/lot-ledger/:id', authorize('reports', 'view'), controller.lotLedger);
 router.get('/batch-ledger/:id', authorize('reports', 'view'), controller.batchLedger);
+router.get('/inventory-ledger', authorize('reports', 'view'), controller.inventoryLedger);
+router.get('/finished-goods-ledger', authorize('reports', 'view'), controller.finishedGoodsLedger);
 router.get('/executive/summary', authorize('reports', 'view'), controller.executiveSummary);
 router.get('/executive/pipeline', authorize('reports', 'view'), controller.orderPipeline);
 router.get('/executive/advance-funnel', authorize('reports', 'view'), controller.advanceFunnel);

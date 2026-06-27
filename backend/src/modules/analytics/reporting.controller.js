@@ -83,6 +83,26 @@ const reportingController = {
     }
   },
 
+  async inventoryLedger(req, res) {
+    try {
+      const data = await reportingService.getInventoryLedger(req.query || {});
+      return res.json({ success: true, ...data });
+    } catch (err) {
+      console.error('Inventory ledger error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  async finishedGoodsLedger(req, res) {
+    try {
+      const data = await reportingService.getFinishedGoodsLedger(req.query || {});
+      return res.json({ success: true, ...data });
+    } catch (err) {
+      console.error('Finished goods ledger error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
   async globalSearch(req, res) {
     try {
       const { q, entity, limit } = req.query;
