@@ -595,6 +595,17 @@ function MarginBreakdown({ e, companyProfile }) {
   );
 }
 
+// Readable label for a by-product grade code.
+const GRADE_LABELS = {
+  b1: 'Broken B1', b2: 'Broken B2', b3: 'Broken B3', csr: 'CSR', short_grain: 'Short Grain',
+  broken: 'Broken', bran: 'Bran', husk: 'Husk', sortex: 'Sortex', powder: 'Powder', sweeping: 'Sweeping',
+};
+function gradeLabel(g) {
+  if (!g) return 'By-product';
+  const k = String(g).toLowerCase().trim().replace(/\s+/g, '_');
+  return GRADE_LABELS[k] || g;
+}
+
 // Margin grouped by milling/blending batch — input cost vs realised output sales.
 function MarginByBatch({ params, openDoc }) {
   // Batch margin is keyed off milling_batches (created_at) — pass only the date range.
@@ -678,6 +689,51 @@ function BatchMarginBreakdown({ b }) {
         </table>
       </div>
       <p className="text-[11px] text-gray-400">Realised margin counts only output already sold. Unsold finished/by-product stock is held at cost until sold. Input cost = raw rice + milling fee + other expenses + packing (the residual cost basis); it reconciles with cost-of-sold + on-hand.</p>
+
+      {/* Per-grade by-product breakdown */}
+      {Array.isArray(b.byproducts) && b.byproducts.length > 0 && (
+        <div className="space-y-1.5">
+          <h4 className="text-sm font-semibold text-gray-700">By-product recovery by grade</h4>
+          <div className="rounded-lg border border-gray-200 overflow-hidden">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-gray-50 text-[10px] uppercase text-gray-500">
+                  <th className="text-left px-2 py-1.5">Grade</th>
+                  <th className="text-right px-2 py-1.5">Produced</th>
+                  <th className="text-right px-2 py-1.5">Price/kg</th>
+                  <th className="text-right px-2 py-1.5">Value</th>
+                  <th className="text-right px-2 py-1.5">Sold</th>
+                  <th className="text-right px-2 py-1.5">Margin</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {b.byproducts.map((g, i) => {
+                  const soldV = parseFloat(g.soldValue) || 0;
+                  const m = parseFloat(g.margin) || 0;
+                  return (
+                    <tr key={i}>
+                      <td className="px-2 py-1.5 font-medium text-gray-800">{gradeLabel(g.grade)}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">{Math.round(parseFloat(g.producedKg) || 0).toLocaleString()} kg</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">Rs {Math.round(parseFloat(g.valuationPerKg) || 0).toLocaleString()}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums font-medium">{fmtPKR(g.valuationValue)}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">{soldV > 0 ? fmtPKR(soldV) : '—'}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">{soldV > 0 ? <span className={m >= 0 ? 'text-emerald-700' : 'text-rose-700'}>{fmtPKR(m)}</span> : '—'}</td>
+                    </tr>
+                  );
+                })}
+                <tr className="bg-gray-50 font-semibold text-gray-800">
+                  <td className="px-2 py-1.5">Total recovery</td>
+                  <td className="px-2 py-1.5" />
+                  <td className="px-2 py-1.5" />
+                  <td className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(b.byproductRecovery)}</td>
+                  <td className="px-2 py-1.5" colSpan={2} />
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[11px] text-gray-400">By-products are valued at their expected sale price; that value (recovery) is credited back into the finished cost, lowering it. “Margin” is what a grade actually sold for vs that valuation — 0 when sold at the valuation price, +/- if it sold higher/lower.</p>
+        </div>
+      )}
 
       <button onClick={() => navigate(`/milling/${b.id}`)}
         className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">

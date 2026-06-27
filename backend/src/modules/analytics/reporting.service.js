@@ -432,8 +432,9 @@ const reportingService = {
     const refs = ids.map((id) => `batch-${id}`);
     const outLots = await db('inventory_lots')
       .whereIn('batch_ref', refs).whereIn('type', ['finished', 'byproduct'])
-      .select('id', 'batch_ref', 'qty', 'net_weight_kg', 'landed_cost_per_kg');
-    const lotBatch = {}; const onHand = {}; const producedKg = {};
+      .select('id', 'batch_ref', 'type', 'lot_no', 'item_name', 'grade',
+        'qty', 'net_weight_kg', 'received_net_weight_kg', 'landed_cost_per_kg');
+    const lotBatch = {}; const onHand = {};
     for (const l of outLots) {
       const bid = parseInt(String(l.batch_ref).replace('batch-', ''), 10);
       lotBatch[l.id] = bid;
@@ -443,16 +444,42 @@ const reportingService = {
     const lotIds = outLots.map((l) => l.id);
     const cpkOf = Object.fromEntries(outLots.map((l) => [l.id, num(l.landed_cost_per_kg)]));
 
-    // Realised sales of those output lots.
+    // Realised sales of those output lots (aggregated per batch AND per lot).
     const sales = lotIds.length
       ? await db('local_sales').whereIn('lot_id', lotIds).select('lot_id', 'quantity_kg', 'total_amount')
       : [];
     const soldVal = {}; const soldCost = {}; const soldKg = {};
+    const soldValLot = {}; const soldKgLot = {};
     for (const sale of sales) {
       const bid = lotBatch[sale.lot_id]; if (!bid) continue;
       soldVal[bid] = (soldVal[bid] || 0) + num(sale.total_amount);
       soldCost[bid] = (soldCost[bid] || 0) + cpkOf[sale.lot_id] * num(sale.quantity_kg);
       soldKg[bid] = (soldKg[bid] || 0) + num(sale.quantity_kg);
+      soldValLot[sale.lot_id] = (soldValLot[sale.lot_id] || 0) + num(sale.total_amount);
+      soldKgLot[sale.lot_id] = (soldKgLot[sale.lot_id] || 0) + num(sale.quantity_kg);
+    }
+
+    // Per-grade by-product breakdown. By-products are valued at their assigned
+    // sale price (residual costing credits that value back into the finished
+    // cost), so "margin" here is the variance between what a grade ACTUALLY sold
+    // for and that valuation; an unsold grade shows its recoverable value.
+    const bpByBatch = {};
+    for (const l of outLots) {
+      if (l.type !== 'byproduct') continue;
+      const bid = lotBatch[l.id];
+      const cpk = num(l.landed_cost_per_kg);
+      const producedKg = num(l.received_net_weight_kg) || (num(l.net_weight_kg) + (soldKgLot[l.id] || 0)) || num(l.qty) * 1000;
+      const sKg = soldKgLot[l.id] || 0;
+      const sVal = soldValLot[l.id] || 0;
+      const curKg = num(l.net_weight_kg) || num(l.qty) * 1000;
+      const entry = {
+        grade: l.grade || l.item_name || String(l.lot_no || '').split('-').slice(-2, -1)[0] || 'By-product',
+        lotNo: l.lot_no,
+        producedKg, valuationPerKg: cpk, valuationValue: producedKg * cpk,
+        soldKg: sKg, soldValue: sVal, costOfSold: sKg * cpk,
+        margin: sVal - sKg * cpk, onHandValue: curKg * cpk,
+      };
+      (bpByBatch[bid] = bpByBatch[bid] || []).push(entry);
     }
 
     const data = batches.map((b) => {
@@ -461,11 +488,14 @@ const reportingService = {
       const costOfSold = soldCost[b.id] || 0;
       const realizedMargin = soldValue - costOfSold;
       const realizedMarginPct = soldValue > 0 ? (realizedMargin / soldValue) * 100 : 0;
+      const byproducts = (bpByBatch[b.id] || []).sort((x, y) => y.valuationValue - x.valuationValue);
       return {
         id: b.id, batchNo: b.batch_no, supplierName: b.supplier_name, status: b.status, createdAt: b.created_at,
         rawQtyMT: num(b.raw_qty_mt), finishedMT: num(b.actual_finished_mt), yieldPct: num(b.yield_pct),
         inputCost, soldValue, costOfSold, realizedMargin, realizedMarginPct,
         soldKg: soldKg[b.id] || 0, onHandValue: onHand[b.id] || 0,
+        byproductRecovery: byproducts.reduce((s, x) => s + x.valuationValue, 0),
+        byproducts,
       };
     });
     return { batches: data };
