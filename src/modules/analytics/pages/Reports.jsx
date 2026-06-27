@@ -207,9 +207,15 @@ export default function Reports() {
   // A Mill role's reports must stay mill-only — no export-order profitability,
   // customers, countries or export A/R / booked profit.
   const millScoped = user?.role === 'Mill Manager';
-  const visibleTabs = millScoped
-    ? TABS.filter(t => ['moneyIn', 'moneyOut', 'sales', 'purchases', 'lots', 'margin', 'production', 'inventory', 'kpis', 'quality'].includes(t.key))
-    : TABS;
+  // Mill Operator = production-only, finance-free. Sees only production,
+  // quality and (quantity-only) inventory — never money, margin, sales,
+  // receivables, payables, cashflow or net profit.
+  const operatorScoped = user?.role === 'Mill Operator';
+  const visibleTabs = operatorScoped
+    ? TABS.filter(t => ['production', 'quality', 'inventory'].includes(t.key))
+    : millScoped
+      ? TABS.filter(t => ['moneyIn', 'moneyOut', 'sales', 'purchases', 'lots', 'margin', 'production', 'inventory', 'kpis', 'quality'].includes(t.key))
+      : TABS;
 
   // Party statements live under /milling for the Mill role, /finance otherwise.
   const statementHref = (type, id) => id
@@ -349,7 +355,9 @@ export default function Reports() {
         </div>
       </div>
 
-      {/* ─── Money KPI strip (the headline numbers across the whole system) */}
+      {/* ─── Money KPI strip (the headline numbers across the whole system).
+          Hidden entirely for the production-only Mill Operator. */}
+      {!operatorScoped && (
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <KpiTile icon={ArrowDownLeft} tone="emerald" label="Total Money In"  primary={fmtPKR(totalIn)}  secondary={`${receiptsData?.count ?? 0} receipts`} />
         <KpiTile icon={ArrowUpRight}  tone="rose"    label="Total Money Out" primary={fmtPKR(totalOut)} secondary={`${paymentsData?.count ?? 0} payments`} />
@@ -362,6 +370,14 @@ export default function Reports() {
           <KpiTile icon={TrendingUp}  tone="blue"    label="Booked Profit"   primary={fmtPKR(exec.bookedProfitPkr)} secondary={`Margin ${fmtPct(exec.avgMarginPct)}`} loading={execLoading} />
         )}
       </div>
+      )}
+
+      {/* Production-only banner for the Mill Operator role. */}
+      {operatorScoped && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-4 py-3 text-sm text-blue-800 flex items-center gap-2">
+          <Factory size={16} /> Production view — batches, yield, quality and stock quantities. Financial figures are not shown for this role.
+        </div>
+      )}
 
       {/* ─── Tabs ─────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -392,7 +408,7 @@ export default function Reports() {
           {tab === 'orders'    && <OrdersTab params={params} />}
           {tab === 'customers' && <CustomersTab params={params} />}
           {tab === 'countries' && <CountriesTab params={params} />}
-          {tab === 'inventory' && <InventoryTab millScoped={millScoped} />}
+          {tab === 'inventory' && <InventoryTab millScoped={millScoped} hideValue={operatorScoped} />}
           {tab === 'quality'   && <QualityTab params={params} />}
         </div>
       </div>
@@ -1875,24 +1891,31 @@ const AGE_BUCKETS = [
   ['90+ days',   (d) => d > 90],
 ];
 
-function StockBreakdown({ title, subtitle, query, groupHead }) {
+function StockBreakdown({ title, subtitle, query, groupHead, hideValue }) {
   const { data, isLoading } = query;
   if (isLoading) return null;
   const rows = data?.rows || [];
   if (rows.length === 0) return null;
   const grand = data?.grand || {};
+  const head = hideValue
+    ? [groupHead, 'Lots', 'Total', 'Available', 'Reserved']
+    : [groupHead, 'Lots', 'Total', 'Available', 'Reserved', 'Value (PKR)'];
+  const align = hideValue ? ['left', 'right', 'right', 'right', 'right'] : ['left', 'right', 'right', 'right', 'right', 'right'];
   return (
     <div className="space-y-2">
       <SectionHeader title={title} subtitle={subtitle} />
       <Table
-        head={[groupHead, 'Lots', 'Total', 'Available', 'Reserved', 'Value (PKR)']}
-        align={['left', 'right', 'right', 'right', 'right', 'right']}
+        head={head}
+        align={align}
         rows={[
-          ...rows.map((r) => [
-            r.name || '—', r.lotCount || 0, fmtMT(r.totalKg), fmtMT(r.availableKg), fmtMT(r.reservedKg), fmtPKR(r.valuePkr),
-          ]),
+          ...rows.map((r) => {
+            const base = [r.name || '—', r.lotCount || 0, fmtMT(r.totalKg), fmtMT(r.availableKg), fmtMT(r.reservedKg)];
+            return hideValue ? base : [...base, fmtPKR(r.valuePkr)];
+          }),
           ...(grand.lotCount != null
-            ? [['TOTAL', grand.lotCount, fmtMT(grand.totalKg), fmtMT(grand.availableKg), fmtMT(grand.reservedKg), fmtPKR(grand.valuePkr)]
+            ? [(hideValue
+                ? ['TOTAL', grand.lotCount, fmtMT(grand.totalKg), fmtMT(grand.availableKg), fmtMT(grand.reservedKg)]
+                : ['TOTAL', grand.lotCount, fmtMT(grand.totalKg), fmtMT(grand.availableKg), fmtMT(grand.reservedKg), fmtPKR(grand.valuePkr)])
                 .map((c, i) => <span key={i} className="font-semibold text-gray-900">{c}</span>)]
             : []),
         ]}
@@ -1901,7 +1924,7 @@ function StockBreakdown({ title, subtitle, query, groupHead }) {
   );
 }
 
-function InventoryTab({ millScoped }) {
+function InventoryTab({ millScoped, hideValue }) {
   const navigate = useNavigate();
   const entity = millScoped ? 'mill' : '';
   const { data: lots = [], isLoading } = useStockAgingReport();   // per-lot array (qty > 0 only)
@@ -1935,12 +1958,14 @@ function InventoryTab({ millScoped }) {
   const deadStock = lotsArr.filter((l) => l.isDeadStock);
   const deadValue = deadStock.reduce((s, l) => s + (parseFloat(l.totalValue) || 0), 0);
 
-  // Aging buckets from days-in-stock.
+  // Aging buckets from days-in-stock. Value/% columns dropped in qty-only mode.
   const bucketRows = AGE_BUCKETS.map(([label, test]) => {
     const ls = lotsArr.filter((l) => test(parseInt(l.daysInStock, 10) || 0));
     const kg = ls.reduce((s, l) => s + (parseFloat(l.qty) || 0) * 1000, 0);
     const val = ls.reduce((s, l) => s + (parseFloat(l.totalValue) || 0), 0);
-    return [label, ls.length, fmtMT(kg), fmtPKR(val), totalValue > 0 ? `${(val / totalValue * 100).toFixed(1)}%` : '—'];
+    return hideValue
+      ? [label, ls.length, fmtMT(kg)]
+      : [label, ls.length, fmtMT(kg), fmtPKR(val), totalValue > 0 ? `${(val / totalValue * 100).toFixed(1)}%` : '—'];
   });
 
   // Oldest lots — the 8 longest-held, most useful for spotting stale stock.
@@ -1949,25 +1974,28 @@ function InventoryTab({ millScoped }) {
   return (
     <div className="space-y-6">
       {/* Headline numbers */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className={`grid grid-cols-2 sm:grid-cols-3 ${hideValue ? 'lg:grid-cols-5' : 'lg:grid-cols-6'} gap-3`}>
         <SummaryCell label="Total lots" value={String(grand.lotCount ?? lotsArr.length)} />
         <SummaryCell label="Total weight" value={fmtMT(totalKg)} />
         <SummaryCell label="Available" value={availKg != null ? fmtMT(availKg) : '—'} />
         <SummaryCell label="Reserved" value={reservedKg != null ? fmtMT(reservedKg) : '—'} />
-        <SummaryCell label="Total value" value={fmtPKR(totalValue)} />
+        {!hideValue && <SummaryCell label="Total value" value={fmtPKR(totalValue)} />}
         <SummaryCell
           label="Dead stock (90+d)"
-          value={<span className={deadStock.length ? 'text-rose-600' : 'text-emerald-600'}>{deadStock.length} · {fmtPKR(deadValue)}</span>}
+          value={hideValue
+            ? <span className={deadStock.length ? 'text-rose-600' : 'text-emerald-600'}>{deadStock.length} lots</span>
+            : <span className={deadStock.length ? 'text-rose-600' : 'text-emerald-600'}>{deadStock.length} · {fmtPKR(deadValue)}</span>}
         />
       </div>
 
-      <StockBreakdown title="By Type" subtitle="Unprocessed / finished / byproduct" query={byType} groupHead="Type" />
-      <StockBreakdown title="By Category" subtitle="Finished, broken grades, CSR, short grain, powder, sweepings, blends" query={bySubtype} groupHead="Category" />
-      <StockBreakdown title="By Warehouse" subtitle="Where the stock is held" query={byWarehouse} groupHead="Warehouse" />
+      <StockBreakdown title="By Type" subtitle="Unprocessed / finished / byproduct" query={byType} groupHead="Type" hideValue={hideValue} />
+      <StockBreakdown title="By Category" subtitle="Finished, broken grades, CSR, short grain, powder, sweepings, blends" query={bySubtype} groupHead="Category" hideValue={hideValue} />
+      <StockBreakdown title="By Warehouse" subtitle="Where the stock is held" query={byWarehouse} groupHead="Warehouse" hideValue={hideValue} />
 
       {/* Valuation (by type & warehouse) + turnover — surfaced from the
-          stock-valuation / stock-turnover endpoints. */}
-      {Array.isArray(valuation.byType) && valuation.byType.length > 0 && (
+          stock-valuation / stock-turnover endpoints. Valuation hidden for
+          the quantity-only Mill Operator view. */}
+      {!hideValue && Array.isArray(valuation.byType) && valuation.byType.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="space-y-2">
             <SectionHeader title="Valuation by type" subtitle="On-hand value at cost" />
@@ -2005,8 +2033,8 @@ function InventoryTab({ millScoped }) {
           <div className="space-y-2">
             <SectionHeader title="Stock Aging" subtitle="How long stock has been held" />
             <Table
-              head={['Bucket', 'Lots', 'Weight', 'Value (PKR)', '% of value']}
-              align={['left', 'right', 'right', 'right', 'right']}
+              head={hideValue ? ['Bucket', 'Lots', 'Weight'] : ['Bucket', 'Lots', 'Weight', 'Value (PKR)', '% of value']}
+              align={hideValue ? ['left', 'right', 'right'] : ['left', 'right', 'right', 'right', 'right']}
               rows={bucketRows}
             />
           </div>
@@ -2015,20 +2043,20 @@ function InventoryTab({ millScoped }) {
           <div className="space-y-2">
             <SectionHeader title="Oldest Lots" subtitle="Longest-held stock first — click a lot for full detail" />
             <Table
-              head={['Lot No', 'Item', 'Type', 'Warehouse', 'Qty', 'Value (PKR)', 'Days held']}
-              align={['left', 'left', 'left', 'left', 'right', 'right', 'right']}
+              head={hideValue ? ['Lot No', 'Item', 'Type', 'Warehouse', 'Qty', 'Days held'] : ['Lot No', 'Item', 'Type', 'Warehouse', 'Qty', 'Value (PKR)', 'Days held']}
+              align={hideValue ? ['left', 'left', 'left', 'left', 'right', 'right'] : ['left', 'left', 'left', 'left', 'right', 'right', 'right']}
               rowClick={oldest.map((l) => l.id ? () => navigate(`/lot-inventory/${l.id}`) : null)}
-              rows={oldest.map((l) => [
-                <span className="font-medium text-blue-600">{l.lotNo || '—'}</span>,
-                l.itemName || '—',
-                l.type || '—',
-                l.warehouseName || '—',
-                `${(parseFloat(l.qty) || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} ${l.unit || 'MT'}`,
-                fmtPKR(l.totalValue),
-                l.isDeadStock
+              rows={oldest.map((l) => {
+                const daysCell = l.isDeadStock
                   ? <span className="inline-flex items-center gap-1 text-rose-600 font-medium"><AlertTriangle size={12} /> {l.daysInStock}</span>
-                  : (l.daysInStock || 0),
-              ])}
+                  : (l.daysInStock || 0);
+                const base = [
+                  <span className="font-medium text-blue-600">{l.lotNo || '—'}</span>,
+                  l.itemName || '—', l.type || '—', l.warehouseName || '—',
+                  `${(parseFloat(l.qty) || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} ${l.unit || 'MT'}`,
+                ];
+                return hideValue ? [...base, daysCell] : [...base, fmtPKR(l.totalValue), daysCell];
+              })}
             />
           </div>
         </>
@@ -2039,10 +2067,10 @@ function InventoryTab({ millScoped }) {
       )}
 
       {/* Finished Goods Ledger (Phase 2) */}
-      <FinishedGoodsLedgerSection entity={entity} />
+      <FinishedGoodsLedgerSection entity={entity} hideValue={hideValue} />
 
       {/* Inventory Movement Ledger (Phase 2) */}
-      <InventoryMovementLedgerSection entity={entity} />
+      <InventoryMovementLedgerSection entity={entity} hideValue={hideValue} />
 
       <div className="flex justify-end">
         <Link to="/reports/print" className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm">
@@ -2076,7 +2104,7 @@ const FINISHED_GOODS_COLS = [
 
 // Finished Goods Ledger — finished + by-product stock register grouped by
 // grade/output (produced · sold · on-hand · reserved · value), expandable to lots.
-function FinishedGoodsLedgerSection({ entity }) {
+function FinishedGoodsLedgerSection({ entity, hideValue }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [exp, setExp] = useState({});
@@ -2095,15 +2123,15 @@ function FinishedGoodsLedgerSection({ entity }) {
   return (
     <div className="space-y-2">
       <div className="flex items-start justify-between gap-2 flex-wrap">
-        <SectionHeader title="Finished Goods Ledger" subtitle="Finished &amp; by-product stock register — produced, sold, on-hand, reserved, value" />
-        <LedgerExportBar title="Finished Goods Ledger" subtitle="On-hand finished &amp; by-product stock at cost"
-          fileBase="finished-goods-ledger" rows={rows} columns={FINISHED_GOODS_COLS}
-          footerNote="Value = on-hand kg × cost/kg. By-products grouped by grade; finished by product." />
+        <SectionHeader title="Finished Goods Ledger" subtitle={`Finished &amp; by-product stock register — produced, sold, on-hand, reserved${hideValue ? '' : ', value'}`} />
+        <LedgerExportBar title="Finished Goods Ledger" subtitle={hideValue ? 'On-hand finished &amp; by-product stock' : 'On-hand finished &amp; by-product stock at cost'}
+          fileBase="finished-goods-ledger" rows={rows} columns={hideValue ? FINISHED_GOODS_COLS.filter(c => c.label !== 'Value (PKR)') : FINISHED_GOODS_COLS}
+          footerNote={hideValue ? 'By-products grouped by grade; finished by product.' : 'Value = on-hand kg × cost/kg. By-products grouped by grade; finished by product.'} />
       </div>
       <div className="rounded-lg border border-gray-200 overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-gray-500 text-xs">
-            <tr><th className="px-3 py-2 text-left font-medium">Output</th><th className="px-3 py-2 text-right font-medium">Produced</th><th className="px-3 py-2 text-right font-medium">Sold</th><th className="px-3 py-2 text-right font-medium">On hand</th><th className="px-3 py-2 text-right font-medium">Reserved</th><th className="px-3 py-2 text-right font-medium">Value</th></tr>
+            <tr><th className="px-3 py-2 text-left font-medium">Output</th><th className="px-3 py-2 text-right font-medium">Produced</th><th className="px-3 py-2 text-right font-medium">Sold</th><th className="px-3 py-2 text-right font-medium">On hand</th><th className="px-3 py-2 text-right font-medium">Reserved</th>{!hideValue && <th className="px-3 py-2 text-right font-medium">Value</th>}</tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {rows.map((r) => (
@@ -2114,7 +2142,7 @@ function FinishedGoodsLedgerSection({ entity }) {
                   <td className="px-3 py-2 text-right tabular-nums text-slate-600">{kg(r.soldKg)}</td>
                   <td className="px-3 py-2 text-right tabular-nums font-medium text-emerald-700">{kg(r.onHandKg)}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-amber-600">{r.reservedKg > 0 ? kg(r.reservedKg) : '—'}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{fmtPKR(r.valuePkr)}</td>
+                  {!hideValue && <td className="px-3 py-2 text-right tabular-nums">{fmtPKR(r.valuePkr)}</td>}
                 </tr>
                 {exp[r.key] && r.lots.map(l => (
                   <tr key={l.lotId} className="bg-gray-50/50 text-xs">
@@ -2123,7 +2151,7 @@ function FinishedGoodsLedgerSection({ entity }) {
                     <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{kg(l.soldKg)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-emerald-700">{kg(l.onHandKg)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-amber-600">{l.reservedKg > 0 ? kg(l.reservedKg) : '—'}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{fmtPKR(l.valuePkr)}</td>
+                    {!hideValue && <td className="px-3 py-1.5 text-right tabular-nums">{fmtPKR(l.valuePkr)}</td>}
                   </tr>
                 ))}
               </Fragment>
@@ -2134,7 +2162,7 @@ function FinishedGoodsLedgerSection({ entity }) {
               <td className="px-3 py-2 text-right tabular-nums">{kg(g.soldKg)}</td>
               <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{kg(g.onHandKg)}</td>
               <td className="px-3 py-2 text-right tabular-nums text-amber-600">{kg(g.reservedKg)}</td>
-              <td className="px-3 py-2 text-right tabular-nums">{fmtPKR(g.valuePkr)}</td>
+              {!hideValue && <td className="px-3 py-2 text-right tabular-nums">{fmtPKR(g.valuePkr)}</td>}
             </tr>
           </tbody>
         </table>
@@ -2145,7 +2173,7 @@ function FinishedGoodsLedgerSection({ entity }) {
 
 // Inventory Movement Ledger — chronological feed of every stock movement,
 // filterable by type; each row links to its lot / batch / order.
-function InventoryMovementLedgerSection({ entity }) {
+function InventoryMovementLedgerSection({ entity, hideValue }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [type, setType] = useState('');
@@ -2174,7 +2202,7 @@ function InventoryMovementLedgerSection({ entity }) {
           </select>
           <LedgerExportBar title="Inventory Movement Ledger"
             subtitle={`Stock movements${type ? ` · ${(types.find(t => t[0] === type) || [])[1]}` : ''}`}
-            meta={[`${rows.length} rows`]} fileBase="inventory-movement-ledger" rows={rows} columns={INVENTORY_LEDGER_COLS}
+            meta={[`${rows.length} rows`]} fileBase="inventory-movement-ledger" rows={rows} columns={hideValue ? INVENTORY_LEDGER_COLS.filter(c => c.label !== 'Cost (PKR)') : INVENTORY_LEDGER_COLS}
             footerNote="Source: inventory_movements. + inbound, − outbound." />
         </div>
       </div>
@@ -2182,7 +2210,7 @@ function InventoryMovementLedgerSection({ entity }) {
         <div className="rounded-lg border border-gray-200 overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-500 text-xs">
-              <tr><th className="px-3 py-2 text-left font-medium">Date</th><th className="px-3 py-2 text-left font-medium">Movement</th><th className="px-3 py-2 text-left font-medium">Lot</th><th className="px-3 py-2 text-left font-medium">Where</th><th className="px-3 py-2 text-right font-medium">Qty (kg)</th><th className="px-3 py-2 text-right font-medium">Cost</th></tr>
+              <tr><th className="px-3 py-2 text-left font-medium">Date</th><th className="px-3 py-2 text-left font-medium">Movement</th><th className="px-3 py-2 text-left font-medium">Lot</th><th className="px-3 py-2 text-left font-medium">Where</th><th className="px-3 py-2 text-right font-medium">Qty (kg)</th>{!hideValue && <th className="px-3 py-2 text-right font-medium">Cost</th>}</tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {rows.map(r => (
@@ -2192,7 +2220,7 @@ function InventoryMovementLedgerSection({ entity }) {
                   <td className="px-3 py-1.5">{r.lotId ? <Link to={r.href || `/lot-inventory/${r.lotId}`} className="font-mono text-blue-600 hover:underline">{r.lotNo || `#${r.lotId}`}</Link> : (r.batchNo ? <Link to={r.href} className="text-blue-600 hover:underline">{r.batchNo}</Link> : '—')}</td>
                   <td className="px-3 py-1.5 text-gray-500 text-xs">{[r.fromWh, r.toWh].filter(Boolean).join(' → ') || r.reference || '—'}</td>
                   <td className={`px-3 py-1.5 text-right tabular-nums ${r.direction === 'out' ? 'text-rose-700' : 'text-emerald-700'}`}>{r.direction === 'out' ? '−' : '+'}{Math.round(r.qtyKg).toLocaleString()}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums text-gray-600">{r.costPkr > 0 ? fmtPKR(r.costPkr) : '—'}</td>
+                  {!hideValue && <td className="px-3 py-1.5 text-right tabular-nums text-gray-600">{r.costPkr > 0 ? fmtPKR(r.costPkr) : '—'}</td>}
                 </tr>
               ))}
             </tbody>
