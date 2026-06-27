@@ -284,13 +284,13 @@ Stock Value     = on-hand qty × cost/kg   (NOT frozen landed_cost_total)
 - ✅ **DONE (shipped #73, prod-verified)** — **Global search** box + `GET /api/reporting/search` endpoint: cross-entity lookup (lots, batches, local sales, export orders, suppliers, customers) → grouped results that navigate to the record/statement; `entity=mill` hides export orders.
 - ⏸ **Deferred (anti-over-engineering)** — the *universal filter bar with per-endpoint param threading*. The range selector (already URL-backed) + global search + exact toggle cover the practical Phase-1 filter need. Per-report filter params (`supplier_id`, `customer_id`, `variety`, `grade`, `status`, …) are folded into **Phase 2**, added only to the specific ledger endpoints that need them, rather than threaded through every existing endpoint up front.
 
-### Phase 2 — Ledger-based reports (assembly over existing data)
-- **Lot Ledger** activity table (`/reporting/lot-ledger/:id`) — upgrade Lot 360.
-- **Batch Processing Ledger** (`/reporting/batch-ledger/:id`).
-- **Inventory Movement Ledger** (`/reporting/inventory-ledger`).
-- **Finished Goods Ledger** (`/reporting/finished-goods-ledger`).
-- **Improve Sale 360** (items table + payment trail + dispatch).
-- **Customer Ledger** + **Supplier Ledger** as printable report views (promote PartyLedger).
+### Phase 2 — Ledger-based reports (assembly over existing data) — ✅ DONE (shipped #73, prod-verified)
+- ✅ **Lot Ledger** activity table (`GET /reporting/lot-ledger/:id`) — chronological lot_transactions feed (running balance + counterparty + links); collapsible section in the Lot 360 drawer.
+- ✅ **Batch Processing Ledger** (`GET /reporting/batch-ledger/:id`) — inputs/costs/outputs + input/output/loss reconciliation; collapsible section in the Batch Margin drawer.
+- ✅ **Inventory Movement Ledger** (`GET /reporting/inventory-ledger`) — filterable inventory_movements feed; section in Reports Inventory tab.
+- ✅ **Finished Goods Ledger** (`GET /reporting/finished-goods-ledger`) — finished/by-product stock register grouped by grade (produced/sold/on-hand/reserved/value), expandable to lots; section in Reports Inventory tab.
+- ✅ **Sale 360** improved (`GET /reporting/sale-detail/:id`) — line items (sale_group_no), payment trail (payments.local_sale_id), dispatch; lazy section in the Sale 360 drawer.
+- ✅ **Customer/Supplier Ledger** — already satisfied by existing `PartyLedger` (/finance/statements): print-isolated, party-picker, linked from report party links + global search. No duplicate built (anti-over-engineering).
 
 ### Phase 3 — Print & Export
 - Standardized print template (logo · filters-applied · generated-by/on · signatures) for all ledgers.
