@@ -194,6 +194,18 @@ const createPurchaseLot = Joi.object({
   notes: Joi.string().allow(null, ''),
   payment_status: Joi.string().valid('Pending', 'Partial', 'Paid').default('Pending'),
   paid_amount: Joi.number().min(0).allow(null),
+  // Optional vehicle arrivals captured on the New Purchase Lot form — each
+  // truck that delivered this lot. Only rows with a vehicle_no are recorded.
+  vehicles: Joi.array().items(Joi.object({
+    vehicle_no: Joi.string().max(50).allow(null, ''),
+    driver_name: Joi.string().max(255).allow(null, ''),
+    driver_phone: Joi.string().max(50).allow(null, ''),
+    weight_kg: Joi.number().min(0).allow(null, ''),
+    total_bags: Joi.number().integer().min(0).allow(null, ''),
+    bag_size_kg: Joi.number().min(0).allow(null, ''),
+    arrival_date: Joi.date().iso().allow(null, ''),
+    notes: Joi.string().allow(null, ''),
+  })).allow(null),
 });
 
 // Add another purchase onto an existing lot. Only the quantity / rate / cost /

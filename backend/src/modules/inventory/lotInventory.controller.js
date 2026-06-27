@@ -675,6 +675,34 @@ module.exports = {
           });
         }
 
+        // Optional vehicle arrival(s) captured on the New Purchase Lot form —
+        // each delivering truck, linked straight to this (pre-batch) lot. Rows
+        // without a vehicle number are skipped. Weight is canonicalised to MT.
+        const vehicles = Array.isArray(req.body.vehicles) ? req.body.vehicles : [];
+        for (const v of vehicles) {
+          const vno = String(v.vehicle_no || '').trim();
+          if (!vno) continue;
+          let vWeightMT = null;
+          if (v.weight_kg != null && v.weight_kg !== '') vWeightMT = parseFloat(v.weight_kg) / 1000;
+          else if (v.weight_mt != null && v.weight_mt !== '') vWeightMT = parseFloat(v.weight_mt);
+          const vBags = v.total_bags != null && v.total_bags !== '' ? parseInt(v.total_bags, 10) : null;
+          let vBagSize = v.bag_size_kg != null && v.bag_size_kg !== '' ? parseFloat(v.bag_size_kg) : null;
+          if (!vBagSize && vWeightMT && vBags && vBags > 0) vBagSize = (vWeightMT * 1000) / vBags;
+          await trx('milling_vehicle_arrivals').insert({
+            lot_id: lot.id,
+            batch_id: null,
+            vehicle_no: vno,
+            driver_name: v.driver_name || null,
+            driver_phone: v.driver_phone || null,
+            weight_mt: vWeightMT,
+            bag_size_kg: vBagSize,
+            total_bags: vBags,
+            arrival_date: v.arrival_date || purchase_date || new Date().toISOString().slice(0, 10),
+            notes: v.notes || null,
+            created_by: req.user?.id || null,
+          });
+        }
+
         return lot;
       });
 

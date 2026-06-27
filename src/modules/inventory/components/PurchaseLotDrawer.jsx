@@ -54,7 +54,10 @@ const defaultForm = () => ({
   warehouse_id: '',
   notes: '',
   quality: emptyQuality(),
+  vehicles: [],
 });
+
+const emptyVehicle = () => ({ vehicle_no: '', driver_name: '', driver_phone: '', weight_kg: '', total_bags: '', arrival_date: new Date().toISOString().slice(0, 10), notes: '' });
 
 export default function PurchaseLotDrawer({
   isOpen,
@@ -68,6 +71,7 @@ export default function PurchaseLotDrawer({
   const createMut = useCreatePurchaseLot();
   const [form, setForm] = useState(defaultForm);
   const [showMore, setShowMore] = useState(false);
+  const [showVehicles, setShowVehicles] = useState(false);
   const [supplierSearch, setSupplierSearch] = useState('');
   const [productSearch, setProductSearch] = useState('');
 
@@ -88,6 +92,7 @@ export default function PurchaseLotDrawer({
     if (isOpen) {
       setForm(defaultForm());
       setShowMore(false);
+      setShowVehicles(false);
       setAddingSupplier(false);
       setAddingProduct(false);
       setSupplierDraft({ name: '', contact_person: '', phone: '' });
@@ -246,6 +251,18 @@ export default function PurchaseLotDrawer({
         rate_input: ratePerKg,
         rate_unit: 'kg',
         notes: form.notes || null,
+        // Optional vehicle arrival(s) — only rows where a vehicle number was entered.
+        vehicles: (form.vehicles || [])
+          .filter(v => String(v.vehicle_no || '').trim())
+          .map(v => ({
+            vehicle_no: v.vehicle_no.trim(),
+            driver_name: v.driver_name || null,
+            driver_phone: v.driver_phone || null,
+            weight_kg: v.weight_kg !== '' ? parseFloat(v.weight_kg) : null,
+            total_bags: v.total_bags !== '' ? parseInt(v.total_bags, 10) : null,
+            arrival_date: v.arrival_date || form.purchase_date || null,
+            notes: v.notes || null,
+          })),
       });
       addToast?.(`Rice purchase lot recorded — ${weightMT.toFixed(2)} MT`, 'success');
       onSuccess?.();
@@ -607,6 +624,69 @@ export default function PurchaseLotDrawer({
               <Input label="Notes" value={form.notes}
                 onChange={(v) => setForm(prev => ({ ...prev, notes: v }))}
                 placeholder="e.g. Weigh bridge slip #123" />
+            </div>
+          )}
+        </div>
+
+        {/* ─────────── Vehicle details (collapsed, optional) ─────────── */}
+        <div className="border-t border-gray-200 pt-3">
+          <button
+            type="button"
+            onClick={() => setShowVehicles(v => !v)}
+            className="text-sm font-medium text-gray-700 hover:text-blue-600 flex items-center gap-1"
+          >
+            <span>{showVehicles ? '▾' : '▸'}</span>
+            <Truck size={14} className="text-gray-400" /> Vehicle details
+            <span className="text-xs text-gray-400 font-normal">— trucks that delivered this lot (optional)</span>
+            {(form.vehicles || []).filter(v => String(v.vehicle_no || '').trim()).length > 0 && (
+              <span className="ml-1 text-[11px] font-semibold text-blue-600 bg-blue-50 rounded-full px-2 py-0.5">
+                {(form.vehicles || []).filter(v => String(v.vehicle_no || '').trim()).length}
+              </span>
+            )}
+          </button>
+          {showVehicles && (
+            <div className="mt-3 space-y-3">
+              {(form.vehicles || []).length === 0 && (
+                <p className="text-xs text-gray-400">No vehicle added yet. Add the truck(s) that brought this rice in.</p>
+              )}
+              {(form.vehicles || []).map((v, idx) => {
+                const setV = (key, val) => setForm(prev => ({
+                  ...prev,
+                  vehicles: prev.vehicles.map((row, i) => i === idx ? { ...row, [key]: val } : row),
+                }));
+                return (
+                  <div key={idx} className="rounded-lg border border-gray-200 p-3 space-y-3 bg-gray-50/50">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-gray-600">Vehicle {idx + 1}</span>
+                      <button type="button"
+                        onClick={() => setForm(prev => ({ ...prev, vehicles: prev.vehicles.filter((_, i) => i !== idx) }))}
+                        className="text-xs text-rose-500 hover:text-rose-700">Remove</button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <Input label="Vehicle no" value={v.vehicle_no}
+                        onChange={(val) => setV('vehicle_no', val)} placeholder="e.g. LEB-1234" />
+                      <Input label="Arrival date" type="date" value={v.arrival_date}
+                        onChange={(val) => setV('arrival_date', val)} />
+                      <Input label="Driver name" value={v.driver_name}
+                        onChange={(val) => setV('driver_name', val)} placeholder="Optional" />
+                      <Input label="Driver phone" value={v.driver_phone}
+                        onChange={(val) => setV('driver_phone', val)} placeholder="Optional" />
+                      <Input label="Weight (kg)" type="number" value={v.weight_kg}
+                        onChange={(val) => setV('weight_kg', val)} placeholder="Optional" />
+                      <Input label="Bags" type="number" value={v.total_bags}
+                        onChange={(val) => setV('total_bags', val)} placeholder="Optional" />
+                    </div>
+                    <Input label="Notes" value={v.notes}
+                      onChange={(val) => setV('notes', val)} placeholder="Optional" />
+                  </div>
+                );
+              })}
+              <button type="button"
+                onClick={() => setForm(prev => ({ ...prev, vehicles: [...(prev.vehicles || []), emptyVehicle()] }))}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100"
+              >
+                <Plus size={14} /> Add vehicle
+              </button>
             </div>
           )}
         </div>
