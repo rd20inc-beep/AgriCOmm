@@ -935,8 +935,8 @@ function LotsTab({ params, statementHref, openDoc }) {
         <SummaryCell label="Landed value" value={fmtPKR(totValue)} />
       </div>
       <Table
-        head={['Date', 'Lot', 'Supplier', 'Rice Type', 'Received', 'Rate/kg', 'Landed', 'Status', 'Value']}
-        align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'left', 'right']}
+        head={['Date', 'Lot', 'Supplier', 'Rice Type', 'Received', 'Landed', 'Status', 'Value', 'Margin']}
+        align={['left', 'left', 'left', 'left', 'right', 'right', 'left', 'right', 'right']}
         rowClick={rows.map(r => () => openDoc?.({ kind: 'lot', title: r.lotNo, subtitle: r.supplier, data: r }))}
         rows={rows.map(r => {
           const href = statementHref?.('supplier', r.supplierId);
@@ -946,13 +946,16 @@ function LotsTab({ params, statementHref, openDoc }) {
             href ? <Link to={href} onClick={(e) => e.stopPropagation()} className="font-medium text-blue-600 hover:underline">{r.supplier}</Link> : <span className="font-medium">{r.supplier}</span>,
             <span className="text-xs">{r.riceType || '—'}</span>,
             mt2(r.receivedKg),
-            r.ratePerKg > 0 ? `Rs ${Math.round(r.ratePerKg).toLocaleString()}` : '—',
             fmtPKR(r.landedCostPerKg ? r.landedCostPerKg * (parseFloat(r.receivedKg) || 0) : r.landedTotal),
             <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${LOT_STATUS_TONE[r.status] || 'bg-gray-100 text-gray-600'}`}>{r.status}</span>,
             <span className="font-semibold text-gray-900">{fmtPKR(r.landedTotal)}</span>,
+            r.hasSales
+              ? <span className="inline-flex flex-col items-end leading-tight"><ProfitCell v={r.realizedMargin} /><span className={`text-[10px] ${(parseFloat(r.realizedMarginPct) || 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{(parseFloat(r.realizedMarginPct) || 0).toFixed(1)}%</span></span>
+              : <span className="text-gray-400">—</span>,
           ];
         })}
       />
+      <p className="text-[11px] text-gray-400">Margin = realized: revenue from what's been sold (this lot as raw + the finished/by-product it produced) minus the landed cost of those sold goods. Unsold stock isn't counted until it sells.</p>
     </div>
   );
 }
@@ -1063,6 +1066,26 @@ function LotTrackerPanel({ lot, statementHref }) {
           <p className="text-xs text-gray-400">Not yet sold or milled — fully in stock.</p>
         )}
       </div>
+
+      {/* Realized margin */}
+      {lot.hasSales && (
+        <div>
+          <h4 className="text-sm font-semibold text-gray-700 mb-2">Realized margin</h4>
+          <div className="rounded-lg border border-gray-200 overflow-hidden">
+            <table className="w-full text-sm">
+              <tbody className="divide-y divide-gray-100">
+                <tr><td className="px-3 py-2 text-gray-600">Revenue (sold so far)</td><td className="px-3 py-2 text-right tabular-nums font-medium">{fmtPKR(lot.realizedRevenue)}</td></tr>
+                <tr><td className="px-3 py-2 text-gray-600">Cost of goods sold</td><td className="px-3 py-2 text-right tabular-nums">{fmtPKR(lot.realizedCost)}</td></tr>
+                <tr className="bg-gray-50">
+                  <td className="px-3 py-2 font-semibold text-gray-800">Gross margin</td>
+                  <td className={`px-3 py-2 text-right tabular-nums font-bold ${lot.realizedMargin >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{fmtPKR(lot.realizedMargin)} ({(parseFloat(lot.realizedMarginPct) || 0).toFixed(1)}%)</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[11px] text-gray-400 mt-1">Realized only — counts what's been sold (raw + finished/by-product); unsold stock isn't included yet.</p>
+        </div>
+      )}
 
       <button onClick={() => navigate(`/lot-inventory/${lot.lotId}`)}
         className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">

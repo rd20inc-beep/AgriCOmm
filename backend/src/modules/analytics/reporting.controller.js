@@ -1272,7 +1272,7 @@ const reportingController = {
         if (batchIds.length) {
           const refs = batchIds.map((id) => `batch-${id}`);
           const outLots = await db('inventory_lots').whereIn('batch_ref', refs).whereIn('type', ['finished', 'byproduct'])
-            .select('id', 'batch_ref', 'type', 'item_name', 'grade');
+            .select('id', 'batch_ref', 'type', 'item_name', 'grade', 'landed_cost_per_kg');
           const outMeta = {}; const batchOfOut = {};
           for (const o of outLots) { outMeta[o.id] = o; batchOfOut[o.id] = parseInt(String(o.batch_ref).replace(/^batch-/, ''), 10); }
           const outIds = outLots.map((o) => o.id);
@@ -1284,7 +1284,8 @@ const reportingController = {
           const salesByBatch = {};
           for (const s of outSales) {
             const bid = batchOfOut[s.lot_id]; const om = outMeta[s.lot_id] || {};
-            (salesByBatch[bid] = salesByBatch[bid] || []).push({ batchId: bid, batchNo: batchNoById[bid], outputType: om.type, outputItem: om.grade || om.item_name, saleId: s.sale_id, saleNo: s.sale_no, date: s.sale_date, customer: s.customer, customerId: s.customer_id || null, kg: num(s.quantity_kg), ratePerKg: num(s.rate_per_kg), valuePkr: num(s.total_amount), paymentStatus: s.payment_status });
+            const cpk = num(om.landed_cost_per_kg); const kg = num(s.quantity_kg);
+            (salesByBatch[bid] = salesByBatch[bid] || []).push({ batchId: bid, batchNo: batchNoById[bid], outputType: om.type, outputItem: om.grade || om.item_name, saleId: s.sale_id, saleNo: s.sale_no, date: s.sale_date, customer: s.customer, customerId: s.customer_id || null, kg, ratePerKg: num(s.rate_per_kg), valuePkr: num(s.total_amount), costPerKg: cpk, cost: cpk * kg, paymentStatus: s.payment_status });
           }
           for (const [rawLotId, batches] of Object.entries(milledByLot)) {
             const acc = [];
@@ -1302,6 +1303,20 @@ const reportingController = {
         const milledKg = lotMilled.reduce((a, x) => a + num(x.qty_mt) * 1000, 0);
         const remainingKg = Math.max(0, num(l.net_weight_kg));
         const status = milledKg > 0 ? 'Milled' : soldKg > 0 ? (remainingKg > 0 ? 'Part-sold' : 'Sold') : remainingKg > 0 ? 'In stock' : 'Empty';
+        // Realized trading margin = revenue from what's been sold (this lot sold
+        // as raw + the finished/by-product it produced) minus the landed cost of
+        // those sold goods (raw lot cost for direct sales; output lot residual
+        // cost for downstream sales).
+        const lotCpk = num(l.landed_cost_per_kg);
+        const downstream = downstreamByLot[l.id] || [];
+        const directRevenue = lotSales.reduce((a, x) => a + num(x.total_amount), 0);
+        const directCost = lotSales.reduce((a, x) => a + num(x.quantity_kg) * lotCpk, 0);
+        const downRevenue = downstream.reduce((a, x) => a + num(x.valuePkr), 0);
+        const downCost = downstream.reduce((a, x) => a + num(x.cost), 0);
+        const realizedRevenue = directRevenue + downRevenue;
+        const realizedCost = directCost + downCost;
+        const realizedMargin = realizedRevenue - realizedCost;
+        const realizedMarginPct = realizedRevenue > 0 ? (realizedMargin / realizedRevenue) * 100 : 0;
         return {
           lotId: l.id, lotNo: l.lot_no, date: l.purchase_date || l.created_at,
           supplier: l.supplier_name || '—', supplierId: l.supplier_id,
@@ -1312,6 +1327,7 @@ const reportingController = {
           paymentStatus: l.payment_status, paidAmount: num(l.paid_amount), dueAmount: num(l.due_amount),
           moisturePct: l.moisture_pct, brokenPct: l.broken_pct, qualityJson: l.quality_json || null,
           remainingKg, soldKg, milledKg, status,
+          realizedRevenue, realizedCost, realizedMargin, realizedMarginPct, hasSales: realizedRevenue > 0,
           vehicles: (vehByLot[l.id] || []).map((v) => ({ vehicleNo: v.vehicle_no, driverName: v.driver_name, driverPhone: v.driver_phone, weightMt: num(v.weight_mt), totalBags: v.total_bags, bagSizeKg: num(v.bag_size_kg), arrivalDate: v.arrival_date, quality: v.quality_json || null })),
           buyers: lotSales.map((x) => ({ saleId: x.sale_id, saleNo: x.sale_no, date: x.sale_date, customer: x.customer, customerId: x.customer_id || null, kg: num(x.quantity_kg), ratePerKg: num(x.rate_per_kg), valuePkr: num(x.total_amount), paymentStatus: x.payment_status })),
           milledInto: lotMilled.map((x) => ({ batchId: x.batch_id, batchNo: x.batch_no, kg: num(x.qty_mt) * 1000 })),
