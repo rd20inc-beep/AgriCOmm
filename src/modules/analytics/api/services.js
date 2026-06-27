@@ -21,6 +21,7 @@ export const reportingApi = {
   operatorProductivity: (params) => api.get('/api/reporting/production/operator-productivity', params),
   utilityConsumption: (params) => api.get('/api/reporting/production/utility-consumption', params),
   recoveryByVariety: (params) => api.get('/api/reporting/quality/recovery-by-variety', params),
+  search: (params) => api.get('/api/reporting/search', params),
   savedReports: () => api.get('/api/reporting/saved'),
   saveReport: (data) => api.post('/api/reporting/saved', data),
   deleteSavedReport: (id) => api.delete(`/api/reporting/saved/${id}`),

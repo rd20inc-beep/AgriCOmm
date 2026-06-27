@@ -979,6 +979,60 @@ const reportingService = {
   },
 
   // ═══════════════════════════════════════════════════════════════════
+  // GLOBAL SEARCH (reports nav helper)
+  // ═══════════════════════════════════════════════════════════════════
+
+  /**
+   * Cross-entity quick search for the Reports global search box. Looks up
+   * lots, milling batches, sales, export orders, suppliers and customers by
+   * their reference number / name and returns lightweight rows with a link
+   * target, so the user can jump straight to the matching record.
+   * `entity === 'mill'` hides export orders (mill role has no export view).
+   * Read-only; no flow/permission changes.
+   */
+  async globalSearch({ q, entity, limit = 8 }) {
+    const term = String(q || '').trim();
+    if (term.length < 2) return { query: term, groups: [] };
+    const like = `%${term}%`;
+    const cap = Math.min(parseInt(limit, 10) || 8, 20);
+    const isMill = entity === 'mill';
+
+    const [lots, batches, sales, orders, suppliers, customers] = await Promise.all([
+      db('inventory_lots as l')
+        .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
+        .where(function () { this.where('l.lot_no', 'ilike', like).orWhere('l.item_name', 'ilike', like); })
+        .select('l.id', 'l.lot_no', 'l.item_name', 'l.type', db.raw("COALESCE(s.name,'—') as supplier"))
+        .orderBy('l.id', 'desc').limit(cap),
+      db('milling_batches as mb')
+        .leftJoin('export_orders as eo', 'mb.linked_export_order_id', 'eo.id')
+        .where('mb.batch_no', 'ilike', like)
+        .select('mb.id', 'mb.batch_no', 'mb.status', 'eo.product_name')
+        .orderBy('mb.id', 'desc').limit(cap),
+      db('local_sales as ls')
+        .where(function () { this.where('ls.sale_no', 'ilike', like).orWhere('ls.item_name', 'ilike', like).orWhere('ls.buyer_name', 'ilike', like); })
+        .select('ls.id', 'ls.sale_no', 'ls.item_name', 'ls.buyer_name')
+        .orderBy('ls.id', 'desc').limit(cap),
+      isMill ? Promise.resolve([]) : db('export_orders as eo')
+        .leftJoin('customers as c', 'eo.customer_id', 'c.id')
+        .where(function () { this.where('eo.order_no', 'ilike', like).orWhere('eo.product_name', 'ilike', like).orWhere('c.name', 'ilike', like); })
+        .select('eo.id', 'eo.order_no', 'eo.product_name', db.raw("COALESCE(c.name,'—') as customer"))
+        .orderBy('eo.id', 'desc').limit(cap),
+      db('suppliers').where('name', 'ilike', like).select('id', 'name').orderBy('name').limit(cap),
+      db('customers').where('name', 'ilike', like).select('id', 'name').orderBy('name').limit(cap),
+    ]);
+
+    const groups = [];
+    if (lots.length) groups.push({ key: 'lots', label: 'Lots', items: lots.map(l => ({ id: l.id, title: l.lot_no, subtitle: `${l.item_name || '—'}${l.supplier && l.supplier !== '—' ? ' · ' + l.supplier : ''}`, href: `/lot-inventory/${l.id}` })) });
+    if (batches.length) groups.push({ key: 'batches', label: 'Milling batches', items: batches.map(b => ({ id: b.id, title: b.batch_no, subtitle: `${b.product_name || 'Batch'}${b.status ? ' · ' + b.status : ''}`, href: `/milling/${b.id}` })) });
+    if (sales.length) groups.push({ key: 'sales', label: 'Local sales', items: sales.map(s => ({ id: s.id, title: s.sale_no || `Sale #${s.id}`, subtitle: `${s.item_name || '—'}${s.buyer_name ? ' · ' + s.buyer_name : ''}`, href: `/local-sales/${s.id}` })) });
+    if (orders.length) groups.push({ key: 'orders', label: 'Export orders', items: orders.map(o => ({ id: o.id, title: o.order_no || `Order #${o.id}`, subtitle: `${o.product_name || '—'}${o.customer && o.customer !== '—' ? ' · ' + o.customer : ''}`, href: `/export/${o.id}` })) });
+    if (suppliers.length) groups.push({ key: 'suppliers', label: 'Suppliers', items: suppliers.map(s => ({ id: s.id, title: s.name, subtitle: 'Supplier statement', href: `${isMill ? '/milling/statements' : '/finance/statements'}?type=supplier&id=${s.id}` })) });
+    if (customers.length) groups.push({ key: 'customers', label: 'Customers', items: customers.map(c => ({ id: c.id, title: c.name, subtitle: 'Customer statement', href: `${isMill ? '/milling/statements' : '/finance/statements'}?type=customer&id=${c.id}` })) });
+
+    return { query: term, groups };
+  },
+
+  // ═══════════════════════════════════════════════════════════════════
   // FINANCIAL REPORTS
   // ═══════════════════════════════════════════════════════════════════
 

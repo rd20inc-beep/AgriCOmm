@@ -6,6 +6,7 @@ const authorize = require('../../middleware/rbac');
 // ═══════════════════════════════════════════════════════════════════
 // Executive Dashboards
 // ═══════════════════════════════════════════════════════════════════
+router.get('/search', authorize('reports', 'view'), controller.globalSearch);
 router.get('/executive/summary', authorize('reports', 'view'), controller.executiveSummary);
 router.get('/executive/pipeline', authorize('reports', 'view'), controller.orderPipeline);
 router.get('/executive/advance-funnel', authorize('reports', 'view'), controller.advanceFunnel);

@@ -61,6 +61,17 @@ const reportingController = {
     }
   },
 
+  async globalSearch(req, res) {
+    try {
+      const { q, entity, limit } = req.query;
+      const data = await reportingService.globalSearch({ q, entity, limit });
+      return res.json({ success: true, ...data });
+    } catch (err) {
+      console.error('Global search error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
   async batchProfitability(req, res) {
     try {
       const { dateFrom, dateTo, supplierId, page, limit } = req.query;

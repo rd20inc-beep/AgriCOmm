@@ -1,4 +1,4 @@
-import { useMemo, useState, Fragment } from 'react';
+import { useMemo, useState, useEffect, useRef, Fragment } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext';
 import { useApp } from '../../../context/AppContext';
@@ -6,7 +6,7 @@ import {
   BarChart3, TrendingUp, Users, Globe, Package, Award, Coins, Printer, RefreshCw,
   ArrowUpRight, ArrowDownLeft, Activity, Calendar, ExternalLink, AlertTriangle, FileText,
   ShoppingCart, Truck, Receipt, Scale, ChevronDown, ChevronRight, Layers,
-  Factory, Gauge, Wallet, Star, Plus, Trash2,
+  Factory, Gauge, Wallet, Star, Plus, Trash2, Hash, Search,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell,
@@ -22,12 +22,20 @@ import {
   useOperatorProductivity, useUtilityConsumption, useRecoveryByVariety,
   useSavedReports, useSaveReport, useDeleteSavedReport,
 } from '../../../api/queries';
+import { reportingApi } from '../api/services';
 import SlideDrawer from '../../../components/SlideDrawer';
 import TransactionDocument from '../../../components/TransactionDocument';
 
 // ─── Formatting ────────────────────────────────────────────────────────
+// When the "Exact numbers" toggle is on, money is shown in full digits
+// instead of Cr/L/K/M shorthand. The flag is module-scoped and set by the
+// Reports component at the top of each render (synchronously, before any
+// formatter runs in JSX), so call sites don't need to thread a param.
+let EXACT_NUMBERS = false;
+export function setExactNumbers(on) { EXACT_NUMBERS = !!on; }
 function fmtPKR(n) {
   if (n == null || isNaN(n)) return 'Rs 0';
+  if (EXACT_NUMBERS) return `Rs ${Math.round(n).toLocaleString()}`;
   if (Math.abs(n) >= 10_000_000) return `Rs ${(n / 10_000_000).toFixed(2)}Cr`;
   if (Math.abs(n) >= 100_000) return `Rs ${(n / 100_000).toFixed(2)}L`;
   if (Math.abs(n) >= 1_000) return `Rs ${(n / 1_000).toFixed(0)}K`;
@@ -35,10 +43,13 @@ function fmtPKR(n) {
 }
 function fmtUSD(n) {
   if (n == null || isNaN(n)) return '$0';
+  if (EXACT_NUMBERS) return `$${Math.round(n).toLocaleString()}`;
   if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
   if (Math.abs(n) >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
   return `$${Math.round(n).toLocaleString()}`;
 }
+// Exact value for a title tooltip — always full digits regardless of toggle.
+function exactPKR(n) { return (n == null || isNaN(n)) ? 'Rs 0' : `Rs ${Math.round(n).toLocaleString()}`; }
 function fmtPct(n) {
   if (n == null || isNaN(n)) return '—';
   return `${Number(n).toFixed(1)}%`;
@@ -95,6 +106,76 @@ const TABS = [
   { key: 'quality',   label: 'Quality',    icon: Award },
 ];
 
+// ─── Global search box ──────────────────────────────────────────────────
+// Debounced cross-entity lookup (lots, batches, sales, orders, parties).
+// Clicking a result navigates to that record's detail/statement page.
+function GlobalSearchBox({ entity }) {
+  const navigate = useNavigate();
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState(false);
+  const [groups, setGroups] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const boxRef = useRef(null);
+
+  useEffect(() => {
+    const term = q.trim();
+    if (term.length < 2) { setGroups([]); setLoading(false); return; }
+    setLoading(true);
+    const t = setTimeout(async () => {
+      try {
+        const res = await reportingApi.search({ q: term, ...(entity ? { entity } : {}) });
+        setGroups(res?.groups || res?.data?.groups || []);
+      } catch { setGroups([]); }
+      finally { setLoading(false); }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [q, entity]);
+
+  useEffect(() => {
+    const onDoc = (e) => { if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, []);
+
+  const go = (href) => { setOpen(false); setQ(''); navigate(href); };
+  const total = groups.reduce((s, g) => s + g.items.length, 0);
+
+  return (
+    <div ref={boxRef} className="relative">
+      <div className="bg-white/15 backdrop-blur-sm rounded-lg flex items-center gap-1.5 px-2 py-1.5 w-44 focus-within:w-64 transition-all">
+        <Search size={13} className="opacity-80 shrink-0" />
+        <input value={q} onChange={e => { setQ(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
+          placeholder="Search lots, sales, parties…"
+          className="bg-transparent border-0 text-xs font-medium text-white placeholder-white/60 outline-none w-full" />
+      </div>
+      {open && q.trim().length >= 2 && (
+        <div className="absolute right-0 mt-1 w-80 bg-white text-gray-800 rounded-lg shadow-xl border border-gray-200 z-30 overflow-hidden">
+          {loading && total === 0 ? (
+            <p className="px-3 py-3 text-xs text-gray-400">Searching…</p>
+          ) : total === 0 ? (
+            <p className="px-3 py-3 text-xs text-gray-400">No matches for “{q.trim()}”.</p>
+          ) : (
+            <div className="max-h-96 overflow-y-auto">
+              {groups.map(g => (
+                <div key={g.key}>
+                  <p className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 bg-gray-50">{g.label}</p>
+                  {g.items.map(it => (
+                    <button key={`${g.key}-${it.id}`} onClick={() => go(it.href)}
+                      className="w-full text-left px-3 py-1.5 hover:bg-blue-50 border-b border-gray-50">
+                      <span className="block text-sm font-medium truncate">{it.title}</span>
+                      {it.subtitle && <span className="block text-[11px] text-gray-400 truncate">{it.subtitle}</span>}
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Reports() {
   const { user } = useAuth();
   const { companyProfileData } = useApp();
@@ -124,6 +205,10 @@ export default function Reports() {
   const range = RANGES.some(r => r.value === rawRange) ? rawRange : '';
   const setTab = (key) => { const p = new URLSearchParams(searchParams); p.set('tab', key); setSearchParams(p); };
   const setRange = (val) => { const p = new URLSearchParams(searchParams); if (val) p.set('range', val); else p.delete('range'); setSearchParams(p); };
+  // Exact-number toggle (?exact=1): show full digits instead of Cr/L/K shorthand.
+  const exactMode = searchParams.get('exact') === '1';
+  const setExactMode = (on) => { const p = new URLSearchParams(searchParams); if (on) p.set('exact', '1'); else p.delete('exact'); setSearchParams(p); };
+  setExactNumbers(exactMode); // applied synchronously before formatters run in JSX below
   const params = useMemo(
     () => ({ ...rangeToParams(range), ...(millScoped ? { entity: 'mill' } : {}) }),
     [range, millScoped],
@@ -179,6 +264,7 @@ export default function Reports() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <GlobalSearchBox entity={millScoped ? 'mill' : ''} />
             <div className="bg-white/15 backdrop-blur-sm rounded-lg flex items-center gap-1.5 px-2 py-1.5">
               <Calendar size={13} className="opacity-80" />
               <select value={range} onChange={e => setRange(e.target.value)}
@@ -186,6 +272,11 @@ export default function Reports() {
                 {RANGES.map(r => <option key={r.value} value={r.value} className="text-gray-900">{r.label}</option>)}
               </select>
             </div>
+            <button onClick={() => setExactMode(!exactMode)}
+              title={exactMode ? 'Showing full numbers — click for Cr/L/K shorthand' : 'Showing Cr/L/K shorthand — click for full numbers'}
+              className={`backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors ${exactMode ? 'bg-white text-slate-900' : 'bg-white/15 hover:bg-white/25 text-white'}`}>
+              <Hash size={12} /> Exact
+            </button>
             <button onClick={refetchAll}
               className="bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors">
               <RefreshCw size={12} /> Refresh
