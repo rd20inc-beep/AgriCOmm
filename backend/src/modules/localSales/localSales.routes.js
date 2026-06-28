@@ -20,5 +20,6 @@ router.post(
   controller.acceptPayment
 );
 router.get('/:id/payments', authorize('inventory', 'view'), controller.getPayments);
+router.get('/:id/invoice', authorize('inventory', 'view'), controller.getInvoice);
 
 module.exports = router;

@@ -42,11 +42,17 @@ export default function LocalSaleDetail() {
 
   return (
     <div className="space-y-5 pb-4">
-      {/* Back button */}
-      <button onClick={() => navigate(-1)}
-        className="inline-flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900">
-        <ArrowLeft size={15} /> Back
-      </button>
+      {/* Back button + Invoice 360 entry */}
+      <div className="flex items-center justify-between gap-2">
+        <button onClick={() => navigate(-1)}
+          className="inline-flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900">
+          <ArrowLeft size={15} /> Back
+        </button>
+        <Link to={`/local-sales/${id}/invoice`}
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
+          <FileText size={14} /> Open Invoice 360
+        </Link>
+      </div>
 
       {/* ─── HERO BAND ────────────────────────────────────────────── */}
       <div className={`rounded-2xl bg-gradient-to-r ${heroGradient} p-5 sm:p-6 text-white shadow-sm relative overflow-hidden`}>
