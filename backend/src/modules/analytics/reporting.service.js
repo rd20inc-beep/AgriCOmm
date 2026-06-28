@@ -1001,8 +1001,9 @@ const reportingService = {
       .where('l.id', id)
       .select('l.id', 'l.lot_no', 'l.type', 'l.item_name', 'l.variety', 'l.grade', 'l.entity',
         'l.net_weight_kg', 'l.received_net_weight_kg', 'l.available_qty', 'l.reserved_qty',
-        'l.landed_cost_per_kg', 'l.rate_per_kg', 'l.landed_cost_total', 'l.payment_status',
-        'l.paid_amount', 'l.due_amount', 'l.bag_weight_kg', 'l.purchase_date', 'l.created_at',
+        'l.landed_cost_per_kg', 'l.rate_per_kg', 'l.landed_cost_total', 'l.purchase_amount', 'l.payment_status',
+        'l.paid_amount', 'l.due_amount', 'l.bag_weight_kg', 'l.total_bags', 'l.moisture_pct', 'l.broken_pct',
+        'l.quality_json', 'l.processing_type', 'l.purchase_date', 'l.created_at',
         'l.supplier_id', 's.name as supplier_name', 'p.name as product_name', 'w.name as warehouse_name')
       .first();
     if (!lot) return null;
@@ -1059,19 +1060,173 @@ const reportingService = {
 
     const totIn = events.reduce((s, e) => s + e.inKg, 0);
     const totOut = events.reduce((s, e) => s + e.outKg, 0);
+
+    // ── Comprehensive Lot 360 enrichment (purchase → milling → output → sale) ──
+    const lotCostPerKg = num(lot.landed_cost_per_kg) || num(lot.rate_per_kg);
+    const receivedKg = num(lot.received_net_weight_kg) || num(lot.net_weight_kg);
+    const remainingKg = num(lot.net_weight_kg);
+
+    // Intake (purchase) vehicles → truck/driver.
+    const vehs = await db('milling_vehicle_arrivals').where('lot_id', id)
+      .select('vehicle_no', 'driver_name', 'driver_phone', 'weight_mt', 'total_bags', 'arrival_date').orderBy('id', 'asc');
+
+    // Batches this lot fed (+ each batch's total raw input for blend share).
+    const srcRows = await db('batch_source_lots as bsl').leftJoin('milling_batches as mb', 'mb.id', 'bsl.batch_id')
+      .where('bsl.lot_id', id)
+      .select('bsl.batch_id', 'bsl.qty_mt', 'mb.batch_no', 'mb.created_at', 'mb.actual_finished_mt', 'mb.raw_qty_mt');
+    const myBatchIds = [...new Set(srcRows.map(r => r.batch_id).filter(Boolean))];
+    const batchTotalQty = {};
+    if (myBatchIds.length) {
+      const allSrc = await db('batch_source_lots').whereIn('batch_id', myBatchIds).select('batch_id', 'qty_mt');
+      for (const x of allSrc) batchTotalQty[x.batch_id] = (batchTotalQty[x.batch_id] || 0) + num(x.qty_mt);
+    }
+    const shareOf = (batchId, myMt) => { const tot = batchTotalQty[batchId] || myMt; return tot > 0 ? myMt / tot : 1; };
+
+    // Output lots produced by those batches.
+    const outRefs = myBatchIds.map(bid => `batch-${bid}`);
+    const outLots = outRefs.length
+      ? await db('inventory_lots as l').leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
+        .whereIn('l.batch_ref', outRefs).whereIn('l.type', ['finished', 'byproduct'])
+        .select('l.id', 'l.batch_ref', 'l.type', 'l.item_name', 'l.grade', 'l.variety',
+          'l.net_weight_kg', 'l.received_net_weight_kg', 'l.landed_cost_per_kg', 'w.name as warehouse_name')
+      : [];
+    const batchOutputKg = {}; const outById = {};
+    for (const o of outLots) {
+      const bid = parseInt(String(o.batch_ref).replace(/^batch-/, ''), 10);
+      const produced = num(o.received_net_weight_kg) || num(o.net_weight_kg);
+      batchOutputKg[bid] = (batchOutputKg[bid] || 0) + produced;
+      outById[o.id] = { ...o, batchId: bid, produced };
+    }
+
+    // Milling history + outputs (this lot's attributable share).
+    const millingHistory = srcRows.map(r => {
+      const share = shareOf(r.batch_id, num(r.qty_mt));
+      const inputKg = num(r.qty_mt) * 1000;
+      const outputKg = (batchOutputKg[r.batch_id] || num(r.actual_finished_mt) * 1000) * share;
+      return {
+        date: r.created_at, batchNo: r.batch_no, batchId: r.batch_id, href: `/milling/${r.batch_id}`,
+        inputKg, outputKg, lossKg: Math.max(0, inputKg - outputKg), sharePct: share * 100,
+      };
+    }).sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
+
+    const outputs = outLots.map(o => {
+      const meta = outById[o.id]; const share = shareOf(meta.batchId, num((srcRows.find(s => s.batch_id === meta.batchId) || {}).qty_mt));
+      return {
+        batchNo: (srcRows.find(s => s.batch_id === meta.batchId) || {}).batch_no, batchId: meta.batchId, batchHref: `/milling/${meta.batchId}`,
+        productGrade: o.grade || o.item_name || '—', riceType: o.variety || o.item_name || '—',
+        type: o.type, qtyKg: meta.produced * share, fullQtyKg: meta.produced, sharePct: share * 100,
+        warehouse: o.warehouse_name || null, lotId: o.id, href: `/lot-inventory/${o.id}`,
+      };
+    });
+
+    // Direct sales (sold without processing — this raw lot sold directly).
+    const directSaleRows = await db('local_sales as ls').leftJoin('customers as c', 'ls.customer_id', 'c.id')
+      .where('ls.lot_id', id)
+      .select('ls.id', 'ls.sale_no', 'ls.sale_date', 'ls.item_name', 'ls.quantity_kg', 'ls.rate_per_kg',
+        'ls.total_amount', 'ls.paid_amount', 'ls.due_amount', 'ls.payment_status', 'ls.customer_id',
+        db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer"))
+      .orderBy('ls.sale_date', 'asc');
+    const directSales = directSaleRows.map(s => ({
+      date: s.sale_date, invoice: s.sale_no, saleId: s.id, href: `/local-sales/${s.id}/invoice`,
+      customer: s.customer, customerId: s.customer_id || null,
+      product: s.item_name, kind: 'Direct', qtyKg: num(s.quantity_kg), ratePerKg: num(s.rate_per_kg),
+      amount: num(s.total_amount), paid: num(s.paid_amount), due: num(s.due_amount), paymentStatus: s.payment_status,
+    }));
+
+    // Processed sales (finished/by-product from this lot's batches, split by share).
+    const outIds = outLots.map(o => o.id);
+    let processedSales = [];
+    if (outIds.length) {
+      const outSaleRows = await db('local_sales as ls').leftJoin('customers as c', 'ls.customer_id', 'c.id')
+        .whereIn('ls.lot_id', outIds)
+        .select('ls.id', 'ls.sale_no', 'ls.sale_date', 'ls.item_name', 'ls.lot_id', 'ls.quantity_kg', 'ls.rate_per_kg',
+          'ls.total_amount', 'ls.paid_amount', 'ls.due_amount', 'ls.payment_status', 'ls.customer_id',
+          db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer"))
+        .orderBy('ls.sale_date', 'asc');
+      processedSales = outSaleRows.map(s => {
+        const om = outById[s.lot_id] || {}; const share = shareOf(om.batchId, num((srcRows.find(x => x.batch_id === om.batchId) || {}).qty_mt));
+        const cpk = num(om.landed_cost_per_kg);
+        return {
+          date: s.sale_date, invoice: s.sale_no, saleId: s.id, href: `/local-sales/${s.id}/invoice`,
+          customer: s.customer, customerId: s.customer_id || null,
+          product: om.grade || om.item_name || s.item_name, kind: 'Processed',
+          qtyKg: num(s.quantity_kg) * share, amount: num(s.total_amount) * share,
+          paid: num(s.paid_amount) * share, due: num(s.due_amount) * share,
+          costPerKg: cpk, cost: cpk * num(s.quantity_kg) * share, paymentStatus: s.payment_status, sharePct: share * 100,
+        };
+      });
+    }
+
+    // Quantity summary.
+    const sentForMillingKg = srcRows.reduce((a, r) => a + num(r.qty_mt) * 1000, 0);
+    const soldWithoutProcessingKg = directSales.reduce((a, s) => a + s.qtyKg, 0);
+    const finishedProducedKg = outputs.reduce((a, o) => a + o.qtyKg, 0);
+    const soldAfterProcessingKg = processedSales.reduce((a, s) => a + s.qtyKg, 0);
+    const adjustedKg = events.filter(e => ['stock_adjustment_minus', 'damage_out', 'shortage_out'].includes(e.type)).reduce((a, e) => a + e.outKg, 0);
+    const processingLossKg = Math.max(0, sentForMillingKg - finishedProducedKg);
+
+    // Financial summary.
+    const directRevenue = directSales.reduce((a, s) => a + s.amount, 0);
+    const directCost = directSales.reduce((a, s) => a + s.qtyKg * lotCostPerKg, 0);
+    const processedRevenue = processedSales.reduce((a, s) => a + s.amount, 0);
+    const processedCost = processedSales.reduce((a, s) => a + s.cost, 0);
+    const totalRevenue = directRevenue + processedRevenue;
+    const costOfSold = directCost + processedCost;
+    const paymentReceived = directSales.reduce((a, s) => a + s.paid, 0) + processedSales.reduce((a, s) => a + s.paid, 0);
+    const outstanding = directSales.reduce((a, s) => a + s.due, 0) + processedSales.reduce((a, s) => a + s.due, 0);
+    const realizedProfit = totalRevenue - costOfSold;
+    // Processing cost allocated to this lot (approx: batch milling costs × share).
+    let processingCostAllocated = 0;
+    if (myBatchIds.length) {
+      const mcRows = await db('milling_costs').whereIn('batch_id', myBatchIds).select('batch_id', 'amount');
+      const mcByBatch = {}; for (const m of mcRows) mcByBatch[m.batch_id] = (mcByBatch[m.batch_id] || 0) + num(m.amount);
+      const mb = await db('milling_batches').whereIn('id', myBatchIds).select('id', 'manual_milling_cost_pkr', 'manual_other_expenses_pkr');
+      for (const b of mb) mcByBatch[b.id] = (mcByBatch[b.id] || 0) + num(b.manual_milling_cost_pkr) + num(b.manual_other_expenses_pkr);
+      for (const r of srcRows) { const share = shareOf(r.batch_id, num(r.qty_mt)); processingCostAllocated += (mcByBatch[r.batch_id] || 0) * share; }
+    }
+    const remainingStockValue = remainingKg * lotCostPerKg;
+    // Expected sale rate ≈ realised avg sale rate, else the lot's own rate (approx).
+    const soldKgAll = soldWithoutProcessingKg + soldAfterProcessingKg;
+    const avgSaleRate = soldKgAll > 0 ? totalRevenue / soldKgAll : num(lot.rate_per_kg) || lotCostPerKg;
+    const expectedProfitRemaining = remainingKg > 0 ? (remainingKg * avgSaleRate) - remainingStockValue : 0;
+
+    const q = lot.quality_json || {};
     return {
       lot: {
         id: lot.id, lotNo: lot.lot_no, type: lot.type, entity: lot.entity,
-        riceType: lot.product_name || lot.item_name, variety: lot.variety, grade: lot.grade,
-        supplier: lot.supplier_name, supplierId: lot.supplier_id, warehouse: lot.warehouse_name,
-        receivedKg: num(lot.received_net_weight_kg) || num(lot.net_weight_kg), currentKg: num(lot.net_weight_kg),
+        riceType: lot.variety || lot.product_name || lot.item_name, variety: lot.variety, grade: lot.grade,
+        supplier: lot.supplier_name, supplierId: lot.supplier_id,
+        supplierHref: lot.supplier_id ? `/finance/statements?type=supplier&id=${lot.supplier_id}` : null,
+        warehouse: lot.warehouse_name,
+        truck: (vehs[0] && vehs[0].vehicle_no) || null, driver: (vehs[0] && vehs[0].driver_name) || null,
+        vehicles: vehs.map(v => ({ vehicleNo: v.vehicle_no, driverName: v.driver_name || null, weightMt: num(v.weight_mt), totalBags: v.total_bags || null, arrivalDate: v.arrival_date || null })),
+        moisturePct: lot.moisture_pct != null ? num(lot.moisture_pct) : (q.moisture != null ? num(q.moisture) : null),
+        brokenPct: lot.broken_pct != null ? num(lot.broken_pct) : null,
+        bags: lot.total_bags != null ? Number(lot.total_bags) : null, bagWeightKg: num(lot.bag_weight_kg) || null,
+        receivedKg, currentKg: remainingKg,
         availableKg: num(lot.available_qty) * 1000, reservedKg: num(lot.reserved_qty) * 1000,
-        costPerKg: num(lot.landed_cost_per_kg) || num(lot.rate_per_kg), valuePkr: num(lot.landed_cost_total),
+        ratePerKg: num(lot.rate_per_kg), costPerKg: lotCostPerKg, valuePkr: num(lot.landed_cost_total) || num(lot.purchase_amount),
         paymentStatus: lot.payment_status, paidAmount: num(lot.paid_amount), dueAmount: num(lot.due_amount),
         purchaseDate: lot.purchase_date || lot.created_at,
+        purchaseInvoiceHref: lot.type === 'raw' ? `/lot-inventory/${lot.id}/purchase-invoice` : null,
+        lotDetailHref: `/lot-inventory/${lot.id}`,
       },
+      quantitySummary: {
+        purchasedKg: receivedKg, sentForMillingKg, soldWithoutProcessingKg, finishedProducedKg,
+        soldAfterProcessingKg, reservedKg: num(lot.reserved_qty) * 1000, adjustedKg, processingLossKg, remainingKg,
+      },
+      financialSummary: {
+        purchaseValue: num(lot.landed_cost_total) || num(lot.purchase_amount),
+        processingCostAllocated, totalCostOfSold: costOfSold,
+        directRevenue, processedRevenue, totalRevenue,
+        paymentReceived, outstanding, realizedProfit,
+        realizedProfitPct: totalRevenue > 0 ? (realizedProfit / totalRevenue) * 100 : 0,
+        remainingStockValue, expectedProfitRemaining,
+        costBasis: 'Landed cost per kg (residual costing); processing cost allocated by batch share — approximate where blended.',
+      },
+      millingHistory, outputs, directSales, processedSales,
       events,
-      totals: { events: events.length, inKg: totIn, outKg: totOut, balanceKg: num(lot.net_weight_kg) },
+      totals: { events: events.length, inKg: totIn, outKg: totOut, balanceKg: remainingKg },
     };
   },
 

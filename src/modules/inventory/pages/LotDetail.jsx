@@ -302,6 +302,10 @@ export default function LotDetail() {
             <FileText className="w-4 h-4" /> Purchase Invoice
           </Link>
         )}
+        {/* Complete Lot 360 / Lot Ledger — full life of the lot (admin/finance). */}
+        <Link to={`/reports/lot-ledger/${lot.id}`} className="btn btn-sm btn-secondary">
+          <BarChart3 className="w-4 h-4" /> Lot 360 / Ledger
+        </Link>
         {/* Move finished/by-product stock from the mill entity to export. */}
         {(lot.type === 'finished' || lot.type === 'byproduct')
           && lot.entity === 'mill'
