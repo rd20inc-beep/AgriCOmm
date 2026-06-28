@@ -36,6 +36,10 @@ export const reportingApi = {
   deleteSavedReport: (id) => api.delete(`/api/reporting/saved/${id}`),
   exportReport: (data) => api.post('/api/reporting/export', data),
 };
+export const aiApi = {
+  status: () => api.get('/api/ai/status'),
+  query: (question) => api.post('/api/ai/query', { question }),
+};
 export const intelligenceApi = {
   scanExceptions: () => api.post('/api/intelligence/exceptions/scan'),
   exceptionStats: () => api.get('/api/intelligence/exceptions/stats'),

@@ -15,6 +15,12 @@ const db = require('../../config/database');
 const config = require('../../config');
 const ai = require('./ai.service');
 const accountingService = require('../accounting/accounting.service');
+const { denyRoles } = require('../../middleware/rbac');
+
+// The free-form NL→SQL query (and the ledger/anomaly endpoints) can surface
+// finance data, so the finance-free Mill Operator is blocked. Additive — only
+// this role is affected; /status stays open so the UI can show its state.
+const noFinanceForOperator = denyRoles('Mill Operator');
 
 const OFF = { success: true, data: { aiEnabled: false, message: 'AI is off. Set OPENAI_API_KEY in the server environment to enable AI features.' } };
 
@@ -39,7 +45,7 @@ async function schemaContext() {
 const WRITE_RE = /\b(insert|update|delete|drop|alter|truncate|create|grant|revoke|comment|copy|merge|call|do)\b/i;
 
 // ── 1) Natural-language report query ──
-router.post('/query', async (req, res) => {
+router.post('/query', noFinanceForOperator, async (req, res) => {
   try {
     if (!ai.enabled()) return res.json(OFF);
     const question = String(req.body.question || '').trim();
@@ -82,7 +88,7 @@ router.post('/query', async (req, res) => {
 });
 
 // ── 2) Draft a customer / supplier email from their ledger ──
-router.post('/draft', async (req, res) => {
+router.post('/draft', noFinanceForOperator, async (req, res) => {
   try {
     if (!ai.enabled()) return res.json(OFF);
     const { party_type, party_id, kind = 'statement', instructions } = req.body;
@@ -156,7 +162,7 @@ async function gatherSignals() {
   return { as_of: todayIso, trial_balance: tb, unbalanced_journals: unbalancedJournals, negative_stock: negativeStock, negative_bank_balances: negativeBanks, recent_payroll_runs: recentPayrollRuns, top_recent_expenses: topRecentExpenses, overdue_payables: overduePayables };
 }
 
-router.get('/anomalies', async (req, res) => {
+router.get('/anomalies', noFinanceForOperator, async (req, res) => {
   try {
     if (!ai.enabled()) return res.json(OFF);
     const signals = await gatherSignals();
@@ -175,7 +181,7 @@ router.get('/anomalies', async (req, res) => {
 
 // ── 4) Auto-categorise an expense from its free-text description ──
 const EXPENSE_CATS = ['salaries', 'utilities', 'rent', 'maintenance', 'insurance', 'transport', 'fuel', 'packaging', 'inspection', 'freight', 'commission', 'miscellaneous'];
-router.post('/categorize-expense', async (req, res) => {
+router.post('/categorize-expense', noFinanceForOperator, async (req, res) => {
   try {
     if (!ai.enabled()) return res.json(OFF);
     const description = String(req.body.description || '').trim();
@@ -199,7 +205,7 @@ router.post('/categorize-expense', async (req, res) => {
 
 // ── 5) Plain-English narrative summary of a computed report ──
 const SUMMARY_KINDS = { pnl: 'cash-basis Profit & Loss', pnl_accrual: 'accrual-basis Profit & Loss', cashflow: 'Cash Flow' };
-router.post('/summarize-report', async (req, res) => {
+router.post('/summarize-report', noFinanceForOperator, async (req, res) => {
   try {
     if (!ai.enabled()) return res.json(OFF);
     const kind = String(req.body.kind || '').trim();

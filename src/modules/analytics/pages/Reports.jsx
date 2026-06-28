@@ -22,7 +22,7 @@ import {
   useOperatorProductivity, useUtilityConsumption, useRecoveryByVariety,
   useSavedReports, useSaveReport, useDeleteSavedReport, useWarehouses,
 } from '../../../api/queries';
-import { reportingApi } from '../api/services';
+import { reportingApi, aiApi } from '../api/services';
 import { exportLedgerCSV, printLedger } from '../utils/ledgerExport';
 import SlideDrawer from '../../../components/SlideDrawer';
 import TransactionDocument from '../../../components/TransactionDocument';
@@ -296,6 +296,94 @@ function ScheduledEmailsManager() {
   );
 }
 
+// AI report analyst — ask a question in plain English; the backend turns it
+// into a safe read-only query and returns the answer table + the SQL it ran.
+// Reuses the existing /api/ai endpoints (opt-in via OPENAI_API_KEY).
+const AI_SAMPLES = [
+  'Top 5 customers by sales value this month',
+  'Total finished rice on hand by grade',
+  'Which suppliers have the most outstanding payable?',
+  'Average milling yield by variety',
+];
+function AiAnalystDrawer() {
+  const [q, setQ] = useState('');
+  const [res, setRes] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState(null);
+  const [showSql, setShowSql] = useState(false);
+  const [status, setStatus] = useState(null);
+  useEffect(() => { aiApi.status().then(r => setStatus(r?.data || r)).catch(() => setStatus({ enabled: false })); }, []);
+
+  const ask = async (question) => {
+    const Q = (question ?? q).trim();
+    if (!Q) return;
+    if (question) setQ(question);
+    setLoading(true); setErr(null); setRes(null);
+    try {
+      const r = await aiApi.query(Q);
+      const d = r?.data || r;
+      if (d && d.aiEnabled === false) { setErr(d.message || 'AI is not configured on the server.'); }
+      else setRes(d);
+    } catch (e) { setErr(e?.message || 'Query failed — try rephrasing.'); }
+    finally { setLoading(false); }
+  };
+
+  const aiOff = status && status.enabled === false;
+  return (
+    <div className="space-y-4">
+      {aiOff && (
+        <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+          AI is not configured on the server (set <code>OPENAI_API_KEY</code>). You can still type a question; it will work once enabled.
+        </div>
+      )}
+      <div>
+        <textarea value={q} onChange={e => setQ(e.target.value)} rows={2}
+          onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) ask(); }}
+          placeholder="Ask about your data — e.g. “total sales by customer this month”"
+          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400" />
+        <div className="flex items-center justify-between mt-2">
+          <div className="flex flex-wrap gap-1.5">
+            {AI_SAMPLES.map(s => <button key={s} onClick={() => ask(s)} className="text-[11px] px-2 py-1 rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200">{s}</button>)}
+          </div>
+          <button onClick={() => ask()} disabled={loading || !q.trim()}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 shrink-0">
+            <Search size={14} /> {loading ? 'Thinking…' : 'Ask'}
+          </button>
+        </div>
+      </div>
+
+      {err && <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-700">{err}</div>}
+
+      {res && (
+        <div className="rounded-lg border border-gray-200 overflow-hidden">
+          {res.explanation && <p className="px-3 py-2 text-sm text-gray-700 border-b border-gray-100 bg-gray-50">{res.explanation}</p>}
+          <div className="overflow-x-auto max-h-[50vh]">
+            <table className="w-full text-xs">
+              <thead className="bg-gray-50 text-gray-500 sticky top-0">
+                <tr>{(res.columns || []).map(c => <th key={c} className="px-2 py-1.5 text-left font-medium whitespace-nowrap">{c}</th>)}</tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {(res.rows || []).map((row, i) => (
+                  <tr key={i} className="hover:bg-gray-50">
+                    {(res.columns || []).map(c => <td key={c} className="px-2 py-1.5 whitespace-nowrap">{row[c] == null ? '—' : String(row[c])}</td>)}
+                  </tr>
+                ))}
+                {(res.rows || []).length === 0 && <tr><td colSpan={(res.columns || []).length || 1} className="px-2 py-6 text-center text-gray-400">No rows.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex items-center justify-between px-3 py-1.5 border-t border-gray-100 bg-gray-50">
+            <span className="text-[11px] text-gray-400">{res.rowCount ?? (res.rows || []).length} row{(res.rowCount ?? (res.rows || []).length) === 1 ? '' : 's'}</span>
+            <button onClick={() => setShowSql(s => !s)} className="text-[11px] text-blue-600 hover:underline">{showSql ? 'Hide' : 'Show'} SQL</button>
+          </div>
+          {showSql && <pre className="px-3 py-2 bg-gray-900 text-gray-100 text-[11px] overflow-x-auto">{res.sql}</pre>}
+        </div>
+      )}
+      <p className="text-[11px] text-gray-400">AI generates a read-only query from your question. Always sanity-check the numbers against the dashboards.</p>
+    </div>
+  );
+}
+
 export default function Reports() {
   const { user } = useAuth();
   const { companyProfileData } = useApp();
@@ -322,6 +410,7 @@ export default function Reports() {
   const [doc, setDoc] = useState(null); // { kind, title, subtitle, data }
   const openDoc = (d) => setDoc(d);
   const [schedOpen, setSchedOpen] = useState(false); // scheduled-emails drawer
+  const [aiOpen, setAiOpen] = useState(false); // AI analyst drawer
 
   // Tab + date range live in the URL (?tab=&range=) so views are deep-linkable,
   // bookmarkable and shareable, and the browser back button moves between tabs.
@@ -408,6 +497,12 @@ export default function Reports() {
               className="bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors">
               <RefreshCw size={12} /> Refresh
             </button>
+            {!operatorScoped && (
+              <button onClick={() => setAiOpen(true)} title="Ask AI about your data"
+                className="bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors">
+                <Search size={12} /> Ask AI
+              </button>
+            )}
             {!operatorScoped && (
               <button onClick={() => setSchedOpen(true)} title="Schedule reports by email"
                 className="bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors">
@@ -538,6 +633,11 @@ export default function Reports() {
       {/* Scheduled report emails manager */}
       <SlideDrawer open={schedOpen} onClose={() => setSchedOpen(false)} title="Scheduled report emails" subtitle="Email a report on a schedule" icon={Mail} size="lg">
         {schedOpen && <ScheduledEmailsManager />}
+      </SlideDrawer>
+
+      {/* AI report analyst */}
+      <SlideDrawer open={aiOpen} onClose={() => setAiOpen(false)} title="Ask AI" subtitle="Natural-language questions about your data" icon={Search} size="lg">
+        {aiOpen && <AiAnalystDrawer />}
       </SlideDrawer>
     </div>
   );
