@@ -398,6 +398,80 @@ module.exports = {
         timeline.push({ kind: 'payment', date: p.payment_date, paymentNo: p.payment_no, mode: p.payment_method, reference: p.bank_reference || null, cleared: p.cleared !== false, amount: num(p.amount), balance: bal });
       }
 
+      // Produced by-product pricing (INTERNAL/ADMIN ONLY — gated by role, mirrors
+      // the sales invoice): the per-grade output valuation of the milling batches
+      // this purchased lot fed, attributed by the lot's share of each batch's
+      // input (same basis as Lot/Batch 360). Excluded for non-admin viewers so a
+      // supplier-facing GRN print never exposes our downstream valuation/recovery.
+      const ADMIN_ROLES = ['Super Admin', 'Owner', 'Finance Manager', 'Mill Manager'];
+      let roleName = req.user && req.user._roleName;
+      if (!roleName && req.user && req.user.role_id) {
+        const r = await db('roles').where({ id: req.user.role_id }).select('name').first();
+        roleName = r && r.name;
+      }
+      let producedByproducts = [];
+      if (ADMIN_ROLES.includes(roleName)) {
+        const srcRows = await db('batch_source_lots as bsl').leftJoin('milling_batches as mb', 'mb.id', 'bsl.batch_id')
+          .where('bsl.lot_id', lot.id).select('bsl.batch_id', 'bsl.qty_mt', 'mb.batch_no');
+        const myBatchIds = [...new Set(srcRows.map(r => r.batch_id).filter(Boolean))];
+        if (myBatchIds.length) {
+          const allSrc = await db('batch_source_lots').whereIn('batch_id', myBatchIds).select('batch_id', 'qty_mt');
+          const batchTotalQty = {}; for (const x of allSrc) batchTotalQty[x.batch_id] = (batchTotalQty[x.batch_id] || 0) + num(x.qty_mt);
+          const myQtyByBatch = {}; const batchNoById = {};
+          for (const r of srcRows) { myQtyByBatch[r.batch_id] = (myQtyByBatch[r.batch_id] || 0) + num(r.qty_mt); batchNoById[r.batch_id] = r.batch_no; }
+          const priceBatches = await db('milling_batches').whereIn('id', myBatchIds)
+            .select('id', 'batch_no', 'finished_price_per_mt', 'b1_price_per_mt', 'b2_price_per_mt', 'b3_price_per_mt',
+              'csr_price_per_mt', 'short_grain_price_per_mt', 'broken_price_per_mt', 'powder_price_per_mt',
+              'sweeping_price_per_mt', 'sortex_rejects_price_per_mt');
+          const priceById = {}; for (const b of priceBatches) priceById[b.id] = b;
+          const outLots = await db('inventory_lots as l').leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
+            .whereIn('l.batch_ref', myBatchIds.map(b => `batch-${b}`)).whereIn('l.type', ['finished', 'byproduct'])
+            .select('l.id', 'l.lot_no', 'l.batch_ref', 'l.type', 'l.item_name', 'l.grade', 'l.variety',
+              'l.net_weight_kg', 'l.received_net_weight_kg', 'l.landed_cost_per_kg', 'w.name as warehouse_name');
+          const priceForOutput = (o, b) => {
+            const g = String(o.grade || '').toUpperCase();
+            const n = String(o.item_name || '').toLowerCase();
+            let perMt = 0;
+            if (o.type === 'finished') perMt = num(b.finished_price_per_mt);
+            else if (g === 'B1') perMt = num(b.b1_price_per_mt);
+            else if (g === 'B2') perMt = num(b.b2_price_per_mt);
+            else if (g === 'B3') perMt = num(b.b3_price_per_mt);
+            else if (g === 'CSR') perMt = num(b.csr_price_per_mt);
+            else if (g === 'SHORT GRAIN') perMt = num(b.short_grain_price_per_mt);
+            else if (n.includes('powder')) perMt = num(b.powder_price_per_mt);
+            else if (n.includes('sweep')) perMt = num(b.sweeping_price_per_mt);
+            else if (n.includes('sortex')) perMt = num(b.sortex_rejects_price_per_mt);
+            else if (n.includes('broken')) perMt = num(b.broken_price_per_mt);
+            return perMt / 1000;
+          };
+          const byBatch = {};
+          for (const o of outLots) {
+            const bid = parseInt(String(o.batch_ref).replace(/^batch-/, ''), 10);
+            const b = priceById[bid] || {};
+            const tot = batchTotalQty[bid] || myQtyByBatch[bid] || 0;
+            const share = tot > 0 ? (myQtyByBatch[bid] / tot) : 1;
+            const produced = (num(o.received_net_weight_kg) || num(o.net_weight_kg)) * share;
+            const salePerKg = priceForOutput(o, b);
+            (byBatch[bid] = byBatch[bid] || []).push({
+              lotId: o.id, lotNo: o.lot_no, type: o.type,
+              productGrade: o.grade || o.item_name || '—', riceType: o.variety || o.item_name || '—',
+              producedKg: produced, costPerKg: num(o.landed_cost_per_kg),
+              salePricePerKg: salePerKg, recoveryValue: produced * salePerKg,
+              warehouse: o.warehouse_name || null, href: `/lot-inventory/${o.id}`,
+            });
+          }
+          producedByproducts = myBatchIds.map(bid => {
+            const tot = batchTotalQty[bid] || myQtyByBatch[bid] || 0;
+            return {
+              batchId: bid, batchNo: batchNoById[bid] || `#${bid}`, batchHref: `/milling/${bid}`,
+              sharePct: tot > 0 ? (myQtyByBatch[bid] / tot) * 100 : 100,
+              outputs: (byBatch[bid] || []).sort((a, c) => (a.type === 'byproduct' ? 0 : 1) - (c.type === 'byproduct' ? 0 : 1)),
+              byproductRecovery: (byBatch[bid] || []).filter(o => o.type === 'byproduct').reduce((s, o) => s + o.recoveryValue, 0),
+            };
+          }).filter(x => x.outputs.length);
+        }
+      }
+
       return res.json({
         success: true,
         data: {
@@ -426,6 +500,7 @@ module.exports = {
           intakeVehicles: vehs.map(v => ({ vehicleNo: v.vehicle_no, driverName: v.driver_name || null, driverPhone: v.driver_phone || null, weightMt: num(v.weight_mt), totalBags: v.total_bags != null ? Number(v.total_bags) : null, arrivalDate: v.arrival_date || null })),
           payments: timeline,
           payable: payable ? { payNo: payable.pay_no, outstanding: num(payable.outstanding), status: payable.status } : null,
+          producedByproducts, // INTERNAL/ADMIN ONLY — empty for non-admin viewers
         },
       });
     } catch (err) {

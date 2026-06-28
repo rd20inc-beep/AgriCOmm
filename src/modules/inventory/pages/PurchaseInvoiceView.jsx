@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Printer, Truck, Package, BookUser, AlertTriangle, ShoppingCart } from 'lucide-react';
+import { ArrowLeft, Printer, Truck, Package, BookUser, AlertTriangle, ShoppingCart, Factory } from 'lucide-react';
 import { lotInventoryApi } from '../../../api/services';
 import { useApp } from '../../../context/AppContext';
 import { printPurchaseInvoice } from '../../localSales/utils/invoicePrint';
@@ -33,7 +33,7 @@ export default function PurchaseInvoiceView() {
     </div>
   );
 
-  const { purchase: p, costs = {}, intakeVehicles = [], payments = [] } = data;
+  const { purchase: p, costs = {}, intakeVehicles = [], payments = [], producedByproducts = [] } = data;
 
   const onPrint = () => { if (!printPurchaseInvoice(data, companyProfileData)) addToast?.('Pop-up blocked — allow pop-ups to print.', 'error'); };
 
@@ -123,6 +123,53 @@ export default function PurchaseInvoiceView() {
             : <span className="text-gray-400">No intake vehicle recorded for this lot.</span>}
         </div>
       </div>
+
+      {/* Produced by-product pricing — INTERNAL/ADMIN ONLY (server omits for non-admin) */}
+      {producedByproducts.length > 0 && (
+        <div className="bg-white rounded-xl border border-amber-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-amber-100 bg-amber-50/60 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-700 inline-flex items-center gap-1.5"><Factory size={15} /> Produced from this lot — by-product pricing</h3>
+            <span className="text-[10px] uppercase tracking-wider text-amber-700 font-semibold bg-amber-100 rounded px-1.5 py-0.5">Internal — not for supplier</span>
+          </div>
+          {producedByproducts.map((bp) => (
+            <div key={bp.batchId} className="border-b border-gray-100 last:border-0">
+              <div className="px-4 pt-3 flex items-center justify-between flex-wrap gap-2">
+                <Link to={bp.batchHref} className="text-sm font-medium text-blue-600 hover:underline">Batch {bp.batchNo}{bp.sharePct < 99.5 ? ` · ${bp.sharePct.toFixed(0)}% of this lot` : ''}</Link>
+                {bp.byproductRecovery > 0 && <span className="text-xs text-emerald-700">By-product recovery {pkr(bp.byproductRecovery)}</span>}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-gray-500 text-xs">
+                    <tr>
+                      <th className="px-4 py-2 text-left font-medium">Product / grade</th>
+                      <th className="px-4 py-2 text-left font-medium">Type</th>
+                      <th className="px-4 py-2 text-right font-medium">Produced</th>
+                      <th className="px-4 py-2 text-right font-medium">Cost/kg</th>
+                      <th className="px-4 py-2 text-right font-medium">Sale price/kg</th>
+                      <th className="px-4 py-2 text-right font-medium">Recovery value</th>
+                      <th className="px-4 py-2 text-left font-medium">Warehouse</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {bp.outputs.map((o) => (
+                      <tr key={o.lotId}>
+                        <td className="px-4 py-2"><Link to={o.href} className="text-blue-600 hover:underline">{o.productGrade}</Link></td>
+                        <td className="px-4 py-2 text-gray-600">{o.type === 'byproduct' ? 'by-product' : 'finished'}</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{Math.round(o.producedKg).toLocaleString()} kg</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{o.costPerKg ? pkr(o.costPerKg) : '—'}</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{o.salePricePerKg ? pkr(o.salePricePerKg) : '—'}</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{o.recoveryValue ? pkr(o.recoveryValue) : '—'}</td>
+                        <td className="px-4 py-2 text-gray-600">{o.warehouse || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+          <p className="px-4 py-2 text-[11px] text-gray-400">Per-grade valuation of the milling batch(es) this purchased rice fed, attributed by this lot's share (set at yield, same basis as Lot/Batch 360). By-product recovery is credited back into the finished cost under residual costing. Shown to authorized staff only — excluded from non-admin views and supplier-facing copies.</p>
+        </div>
+      )}
 
       {/* Payment timeline */}
       <div className="bg-white rounded-xl border border-gray-200 p-4">

@@ -208,7 +208,7 @@ export function printAdminInvoice(data, company) {
 // Purchase Invoice / GRN for a purchased rice lot — supplier, item, intake
 // vehicle(s), landed cost, supplier payment. Mirrors the sales invoice layout.
 export function printPurchaseInvoice(data, company) {
-  const { purchase: p, costs = {}, intakeVehicles = [], payments = [] } = data;
+  const { purchase: p, costs = {}, intakeVehicles = [], payments = [], producedByproducts = [] } = data;
   const vehRows = (intakeVehicles || []).map(v => `<tr>
     <td>${esc(v.vehicleNo)}</td><td>${esc(v.driverName || '—')}</td>
     <td class="r">${(v.weightMt || 0).toFixed(2)}</td><td class="r">${v.totalBags != null ? v.totalBags : '—'}</td><td>${dt(v.arrivalDate)}</td>
@@ -257,6 +257,13 @@ export function printPurchaseInvoice(data, company) {
       ${vehRows ? `<table><thead><tr><th>Vehicle</th><th>Driver</th><th class="r">Weight (MT)</th><th class="r">Bags</th><th>Arrived</th></tr></thead><tbody>${vehRows}</tbody></table>`
         : '<div class="note">No intake vehicle recorded for this lot.</div>'}
     </div>
+    ${(producedByproducts || []).length ? `<div class="banner">INTERNAL — PRODUCED BY-PRODUCT PRICING · NOT FOR SUPPLIER</div>` + (producedByproducts).map(bp => `<div class="sec"><h4>Produced — Batch ${esc(bp.batchNo)}${bp.sharePct < 99.5 ? ` (${bp.sharePct.toFixed(0)}% of this lot)` : ''} — By-product Pricing</h4>
+      <table>
+        <thead><tr><th>Product / Grade</th><th>Type</th><th class="r">Produced</th><th class="r">Cost/kg</th><th class="r">Sale price/kg</th><th class="r">Recovery</th><th>Warehouse</th></tr></thead>
+        <tbody>${bp.outputs.map(o => `<tr><td>${esc(o.productGrade)}</td><td>${o.type === 'byproduct' ? 'by-product' : 'finished'}</td><td class="r">${n0(o.producedKg)} kg</td><td class="r">${o.costPerKg ? pkr(o.costPerKg) : '—'}</td><td class="r">${o.salePricePerKg ? pkr(o.salePricePerKg) : '—'}</td><td class="r">${o.recoveryValue ? pkr(o.recoveryValue) : '—'}</td><td>${esc(o.warehouse || '—')}</td></tr>`).join('')}</tbody>
+      </table>
+      ${bp.byproductRecovery > 0 ? `<div class="note">By-product recovery (valued): ${pkr(bp.byproductRecovery)} — credited back into the finished cost under residual costing.</div>` : ''}
+    </div>`).join('') : ''}
     ${payRows ? `<div class="sec"><h4>Payment Timeline</h4><table><thead><tr><th>Date</th><th>Ref</th><th>Mode</th><th class="r">Amount</th><th class="r">Balance</th></tr></thead><tbody>${payRows}</tbody></table></div>` : ''}
     <div class="sign"><div>Received By</div><div>Checked By</div><div>Approved By</div><div>Supplier Signature</div></div>
     <div class="note">Goods received note / purchase record.</div>
