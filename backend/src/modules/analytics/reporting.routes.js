@@ -19,6 +19,7 @@ router.delete('/scheduled-reports/:id', authorize('reports', 'view'), noFinanceF
 router.post('/scheduled-reports/:id/run', authorize('reports', 'view'), noFinanceForOperator, controller.runScheduledReport);
 router.get('/lot-ledger/:id', authorize('reports', 'view'), controller.lotLedger);
 router.get('/batch-ledger/:id', authorize('reports', 'view'), controller.batchLedger);
+router.get('/invoice-ledger', authorize('reports', 'view'), noFinanceForOperator, controller.invoiceLedger);
 router.get('/sale-detail/:id', authorize('reports', 'view'), noFinanceForOperator, controller.saleDetail);
 router.get('/inventory-ledger', authorize('reports', 'view'), controller.inventoryLedger);
 router.get('/finished-goods-ledger', authorize('reports', 'view'), controller.finishedGoodsLedger);

@@ -66,6 +66,7 @@ const Documents = lazyWithReload(() => import('./modules/documents/pages/Documen
 const Reports = lazyWithReload(() => import('./modules/analytics/pages/Reports'));
 const PrintableReports = lazyWithReload(() => import('./modules/analytics/pages/PrintableReports'));
 const LotReport = lazyWithReload(() => import('./modules/analytics/pages/LotReport'));
+const InvoiceLedger = lazyWithReload(() => import('./modules/analytics/pages/InvoiceLedger'));
 const StandalonePrintReport = lazyWithReload(() => import('./modules/analytics/pages/StandalonePrintReport'));
 const Approvals = lazyWithReload(() => import('./modules/admin/pages/Approvals'));
 const AuditLog = lazyWithReload(() => import('./modules/admin/pages/AuditLog'));
@@ -146,6 +147,7 @@ function ExportRoutes() {
         <Route path="/reports" element={<Reports />} />
         <Route path="/reports/print" element={<PrintableReports />} />
         <Route path="/reports/lots" element={<LotReport />} />
+        <Route path="/reports/invoices" element={<InvoiceLedger />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </ExportLayout>
@@ -183,6 +185,7 @@ function MillRoutes() {
         <Route path="/reports" element={<Reports />} />
         <Route path="/reports/print" element={<PrintableReports />} />
         <Route path="/reports/lots" element={<LotReport />} />
+        <Route path="/reports/invoices" element={<InvoiceLedger />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </MillLayout>
@@ -227,6 +230,7 @@ function StandardRoutes() {
         <Route path="/reports" element={<ProtectedRoute module="reports" action="view"><Reports /></ProtectedRoute>} />
         <Route path="/reports/print" element={<ProtectedRoute module="reports" action="view"><PrintableReports /></ProtectedRoute>} />
         <Route path="/reports/lots" element={<ProtectedRoute module="reports" action="view"><LotReport /></ProtectedRoute>} />
+        <Route path="/reports/invoices" element={<ProtectedRoute module="reports" action="view"><InvoiceLedger /></ProtectedRoute>} />
         <Route path="/exceptions" element={<ProtectedRoute module="admin" action="view"><ExceptionDashboard /></ProtectedRoute>} />
         <Route path="/ai" element={<AiAssistant />} />
         <Route path="/intelligence" element={<ProtectedRoute anyOf={[{ module: 'finance', action: 'view' }, { module: 'admin', action: 'view' }]}><Intelligence /></ProtectedRoute>} />

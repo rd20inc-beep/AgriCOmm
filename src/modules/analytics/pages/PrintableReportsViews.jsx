@@ -630,17 +630,20 @@ export function SalesLedgerView({ data, companyName, range }) {
       ]} />
       <Section title="Local Sales">
         <Table
-          head={['Sale No', 'Date', 'Customer', 'Item', 'Qty (MT)', 'kg', 'Per kg', 'Katta', 'Value (PKR)', 'Payment']}
-          align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'right', 'right', 'left']}
+          head={['Sale No', 'Date', 'Customer', 'Item', 'Lot', 'Batch', 'Warehouse', 'Qty (MT)', 'kg', 'Per kg', 'Katta', 'Value (PKR)', 'Payment']}
+          align={['left', 'left', 'left', 'left', 'left', 'left', 'left', 'right', 'right', 'right', 'right', 'right', 'left']}
           rows={local.map(r => [
             r.lotId ? <RefLink to={`/lot-inventory/${r.lotId}`}>{r.ref}</RefLink> : r.ref,
             fmtDate(r.date),
             r.customerId ? <RefLink to={`/finance/statements?type=customer&id=${r.customerId}`}>{r.customer}</RefLink> : (r.customer || '—'),
             r.item || '—',
+            r.lotId ? <RefLink to={`/lot-inventory/${r.lotId}`}>{r.lotNo || '—'}</RefLink> : (r.lotNo || '—'),
+            r.batchNo || '—',
+            r.warehouse || '—',
             fmtMt(r.mt), fmtKg(r.mt * 1000), fmtPkr(r.ratePerKg), fmtKg(r.bags), fmtPkr(r.valuePkr), r.paymentStatus || '—',
           ])}
           empty="No local sales."
-          totalRow={['', '', '', 'TOTAL', fmtMt(totals.localMt), fmtKg(totals.localMt * 1000), '', fmtKg(local.reduce((s, r) => s + (parseFloat(r.bags) || 0), 0)), fmtPkr(totals.localPkr), '']}
+          totalRow={['', '', '', 'TOTAL', '', '', '', fmtMt(totals.localMt), fmtKg(totals.localMt * 1000), '', fmtKg(local.reduce((s, r) => s + (parseFloat(r.bags) || 0), 0)), fmtPkr(totals.localPkr), '']}
         />
       </Section>
       <Section title="Export Orders">

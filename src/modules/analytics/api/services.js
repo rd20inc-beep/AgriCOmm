@@ -29,6 +29,7 @@ export const reportingApi = {
   lotLedger: (id) => api.get(`/api/reporting/lot-ledger/${id}`),
   batchLedger: (id) => api.get(`/api/reporting/batch-ledger/${id}`),
   saleDetail: (id) => api.get(`/api/reporting/sale-detail/${id}`),
+  invoiceLedger: (params) => api.get('/api/reporting/invoice-ledger', params),
   inventoryLedger: (params) => api.get('/api/reporting/inventory-ledger', params),
   finishedGoodsLedger: (params) => api.get('/api/reporting/finished-goods-ledger', params),
   lotTracker: (params) => api.get('/api/reporting/lot-tracker', params),

@@ -1139,6 +1139,111 @@ const reportingService = {
    * items (rows sharing sale_group_no), the payment trail (payments linked to
    * those item ids) and dispatch info. Read-only.
    */
+  /**
+   * Invoice Ledger — one row per local-sale invoice (multi-line sales grouped
+   * by sale_group_no), searchable by invoice no / customer / rice type / lot /
+   * batch / truck / payment reference, filterable by date, payment status and
+   * outstanding-only. Each row links to the Invoice 360 + customer ledger.
+   * Read-only. Commercial figures only (no COGS/margin).
+   */
+  async getInvoiceLedger({ q, from, to, status, outstanding, entity, limit = 500 } = {}) {
+    const num = (v) => parseFloat(v) || 0;
+    const cap = Math.min(parseInt(limit, 10) || 500, 2000);
+    const term = String(q || '').trim();
+
+    // Resolve batch numbers matching the search term → their lot batch_ref tags.
+    let batchRefs = [];
+    if (term) {
+      const bms = await db('milling_batches').where('batch_no', 'ilike', `%${term}%`).select('id');
+      batchRefs = bms.map(b => `batch-${b.id}`);
+    }
+
+    let qb = db('local_sales as ls')
+      .leftJoin('customers as c', 'ls.customer_id', 'c.id')
+      .leftJoin('inventory_lots as il', 'ls.lot_id', 'il.id')
+      .leftJoin('warehouses as w', 'il.warehouse_id', 'w.id');
+    if (entity) qb = qb.where('ls.entity', entity);
+    if (from) qb = qb.where('ls.sale_date', '>=', from);
+    if (to) qb = qb.where('ls.sale_date', '<=', to);
+    if (outstanding === '1' || outstanding === true || outstanding === 'true') qb = qb.where('ls.due_amount', '>', 0);
+    if (term) {
+      const like = `%${term}%`;
+      qb = qb.where(function () {
+        this.where('ls.sale_no', 'ilike', like)
+          .orWhere('ls.sale_group_no', 'ilike', like)
+          .orWhere('c.name', 'ilike', like)
+          .orWhere('ls.buyer_name', 'ilike', like)
+          .orWhere('ls.item_name', 'ilike', like)
+          .orWhere('ls.lot_no', 'ilike', like)
+          .orWhere('il.lot_no', 'ilike', like)
+          .orWhere('ls.vehicle_no', 'ilike', like)
+          .orWhere('ls.payment_reference', 'ilike', like);
+        if (batchRefs.length) this.orWhereIn('il.batch_ref', batchRefs);
+      });
+    }
+    const rows = await qb.select(
+      'ls.id', 'ls.sale_no', 'ls.sale_group_no', 'ls.sale_date', 'ls.item_name',
+      'ls.quantity_kg', 'ls.total_amount', 'ls.paid_amount', 'ls.due_amount',
+      'ls.vehicle_no', 'ls.dispatched', 'ls.customer_id', 'ls.lot_no',
+      db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer"),
+      'il.lot_no as lot_ref', 'il.batch_ref', 'w.name as warehouse_name',
+    ).orderBy('ls.id', 'desc').limit(cap * 4);
+
+    // Group lines into one row per invoice (sale_group_no, else sale_no).
+    const groups = {}; const allRefs = new Set();
+    for (const r of rows) {
+      const key = r.sale_group_no || r.sale_no;
+      const g = groups[key] || (groups[key] = {
+        key, minId: r.id, date: r.sale_date, customer: r.customer, customerId: r.customer_id || null,
+        total: 0, received: 0, outstanding: 0, qtyKg: 0,
+        items: new Set(), lots: new Set(), refs: new Set(), warehouses: new Set(),
+        vehicle: r.vehicle_no || null, dispatched: false,
+      });
+      g.minId = Math.min(g.minId, r.id);
+      g.total += num(r.total_amount); g.received += num(r.paid_amount); g.outstanding += num(r.due_amount);
+      g.qtyKg += num(r.quantity_kg);
+      if (r.item_name) g.items.add(r.item_name);
+      const lot = r.lot_no || r.lot_ref; if (lot) g.lots.add(lot);
+      if (r.batch_ref) { g.refs.add(r.batch_ref); allRefs.add(r.batch_ref); }
+      if (r.warehouse_name) g.warehouses.add(r.warehouse_name);
+      if (r.vehicle_no && !g.vehicle) g.vehicle = r.vehicle_no;
+      if (r.dispatched) g.dispatched = true;
+    }
+
+    const batchIds = [...allRefs].map(ref => parseInt(String(ref).replace(/^batch-/, ''), 10)).filter(Boolean);
+    const batchNoByRef = {};
+    if (batchIds.length) {
+      const bs = await db('milling_batches').whereIn('id', batchIds).select('id', 'batch_no');
+      const byId = Object.fromEntries(bs.map(b => [b.id, b.batch_no]));
+      for (const ref of allRefs) { const id = parseInt(String(ref).replace(/^batch-/, ''), 10); if (byId[id]) batchNoByRef[ref] = byId[id]; }
+    }
+
+    let invoices = Object.values(groups).map(g => ({
+      id: g.minId, invoiceNo: g.key, isGroup: [...g.lots].length + g.items.size > 1 || g.refs.size > 1 || false,
+      date: g.date, customer: g.customer, customerId: g.customerId,
+      items: [...g.items], lots: [...g.lots],
+      batches: [...g.refs].map(ref => batchNoByRef[ref]).filter(Boolean),
+      warehouses: [...g.warehouses], vehicle: g.vehicle, dispatched: g.dispatched,
+      qtyKg: g.qtyKg, total: g.total, received: g.received, outstanding: g.outstanding,
+      paymentStatus: g.outstanding > 0.01 ? (g.received > 0.01 ? 'Partial' : 'Unpaid') : 'Paid',
+      href: `/local-sales/${g.minId}/invoice`,
+      customerHref: g.customerId ? `/finance/statements?type=customer&id=${g.customerId}` : null,
+    }));
+    if (status) invoices = invoices.filter(i => i.paymentStatus === status);
+    invoices.sort((a, b) => b.id - a.id);
+    invoices = invoices.slice(0, cap);
+
+    return {
+      rows: invoices,
+      totals: {
+        count: invoices.length,
+        total: invoices.reduce((s, i) => s + i.total, 0),
+        received: invoices.reduce((s, i) => s + i.received, 0),
+        outstanding: invoices.reduce((s, i) => s + i.outstanding, 0),
+      },
+    };
+  },
+
   async getSaleDetail(saleId) {
     const id = parseInt(saleId, 10);
     if (!id) return null;
