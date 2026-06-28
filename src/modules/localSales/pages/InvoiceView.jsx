@@ -12,9 +12,13 @@ import {
 } from 'lucide-react';
 import { localSalesApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
+import { useAuth } from '../../../context/AuthContext';
 import { useAcceptLocalSalePayment } from '../../../api/queries';
 import SlideDrawer from '../../../components/SlideDrawer';
-import TransactionDocument from '../../../components/TransactionDocument';
+import { printCustomerInvoice, printAdminInvoice } from '../utils/invoicePrint';
+
+// Roles allowed to view the admin invoice copy (mirrors the backend route gate).
+const ADMIN_INVOICE_ROLES = ['Super Admin', 'Owner', 'Finance Manager', 'Mill Manager'];
 
 const pkr = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
 const dt = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
@@ -27,7 +31,10 @@ export default function InvoiceView() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { companyProfileData, addToast } = useApp();
+  const { user } = useAuth();
+  const canSeeAdminCopy = ADMIN_INVOICE_ROLES.includes(user?.role);
   const payMutation = useAcceptLocalSalePayment();
+  const [adminBusy, setAdminBusy] = useState(false);
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['local-sales', 'invoice', id],
@@ -37,7 +44,6 @@ export default function InvoiceView() {
     },
   });
 
-  const [printOpen, setPrintOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
   const [payForm, setPayForm] = useState({ amount: '', payment_method: 'cash', reference: '', payment_date: new Date().toISOString().slice(0, 10), due_date: '', collection_location: 'Mill' });
 
@@ -52,13 +58,18 @@ export default function InvoiceView() {
   const { sale, items = [], payments = [], dispatch = {}, totals = {} } = data;
   const primary = items.find(i => i.lotId) || items[0] || {};
 
-  // Map to the existing invoice print template (no COGS/margin).
-  const invoiceDocData = {
-    saleNo: sale.invoiceNo, saleDate: sale.date, customerName: sale.customer,
-    items: items.map(i => ({ itemName: i.gradeProduct, itemType: i.itemType, quantityKg: i.quantityKg, ratePerKg: i.ratePerKg, totalAmount: i.amount })),
-    paidAmount: sale.received, dueAmount: sale.outstanding,
-    paymentStatus: sale.paymentStatus, paymentMode: sale.paymentMode,
-    collectionLocation: dispatch.collectionLocation, vehicleNo: dispatch.vehicleNo, driverName: dispatch.driverName,
+  const onPrintCustomer = () => {
+    if (!printCustomerInvoice(data, companyProfileData)) addToast?.('Pop-up blocked — allow pop-ups to print.', 'error');
+  };
+  const onPrintAdmin = async () => {
+    setAdminBusy(true);
+    try {
+      const res = await localSalesApi.getInvoiceAdmin(sale.id);
+      const adminData = res?.data || res;
+      if (!printAdminInvoice(adminData, companyProfileData)) addToast?.('Pop-up blocked — allow pop-ups to print.', 'error');
+    } catch (e) {
+      addToast?.(e?.status === 403 ? 'You are not permitted to view the admin copy.' : (e?.message || 'Could not load admin copy.'), 'error');
+    } finally { setAdminBusy(false); }
   };
 
   const submitPayment = async () => {
@@ -97,8 +108,8 @@ export default function InvoiceView() {
           {sale.saleGroupNo && sale.saleGroupNo !== sale.invoiceNo && <p className="text-xs text-gray-400">Group {sale.saleGroupNo}</p>}
         </div>
         <div className="flex flex-wrap gap-2">
-          <ActionBtn icon={Printer} label="Print customer invoice" tone="primary" onClick={() => setPrintOpen(true)} />
-          <ActionBtn icon={ShieldCheck} label="Admin copy" onClick={() => addToast?.('Admin copy (with cost & margin) is planned for a later phase.', 'info')} />
+          <ActionBtn icon={Printer} label="Print customer invoice" tone="primary" onClick={onPrintCustomer} />
+          {canSeeAdminCopy && <ActionBtn icon={ShieldCheck} label={adminBusy ? 'Preparing…' : 'Print admin copy'} onClick={onPrintAdmin} disabled={adminBusy} />}
           {sale.outstanding > 0.01 && <ActionBtn icon={Wallet} label="Record payment" onClick={() => { setPayForm(f => ({ ...f, amount: String(Math.round(sale.outstanding)) })); setPayOpen(true); }} />}
         </div>
       </div>
@@ -198,11 +209,6 @@ export default function InvoiceView() {
         {primary.finishedGoodsHref && <ActionBtn icon={Package} label="Lot ledger" to={primary.finishedGoodsHref} />}
         {primary.batchHref && <ActionBtn icon={Factory} label="Batch ledger" to={primary.batchHref} />}
       </div>
-
-      {/* Print drawer (reuses the existing invoice template) */}
-      <SlideDrawer open={printOpen} onClose={() => setPrintOpen(false)} title={`Customer Invoice — ${sale.invoiceNo}`} subtitle="Print or save as PDF" icon={FileText} size="lg">
-        {printOpen && <TransactionDocument kind="invoice" data={invoiceDocData} companyProfile={companyProfileData} />}
-      </SlideDrawer>
 
       {/* Record payment modal */}
       <SlideDrawer open={payOpen} onClose={() => setPayOpen(false)} title="Record payment" subtitle={`Against invoice ${sale.invoiceNo}`} icon={Wallet} size="md">

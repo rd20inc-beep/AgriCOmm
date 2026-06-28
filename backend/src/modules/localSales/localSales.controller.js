@@ -41,6 +41,179 @@ async function postReceiptToAccount(trx, { accountId, amount, paymentId, referen
   });
 }
 
+// Assemble the Invoice 360 payload for one local sale (the sale row IS the
+// invoice). `includeAdmin` adds internal financials (COGS/margin/remaining
+// stock) + linked records — callers MUST gate that on role. Returns null if
+// the sale is not found. Read-only; no create/stock/payment side effects.
+async function assembleInvoice(id, includeAdmin = false) {
+  const num = (v) => parseFloat(v) || 0;
+  const isNumeric = /^\d+$/.test(String(id));
+
+  const base = await db('local_sales as ls')
+    .leftJoin('customers as c', 'ls.customer_id', 'c.id')
+    .leftJoin('users as u', 'u.id', 'ls.created_by')
+    .where(isNumeric ? { 'ls.id': parseInt(id, 10) } : { 'ls.sale_no': id })
+    .select('ls.*', 'c.name as customer_name', 'c.phone as customer_phone',
+      'c.address as customer_address', 'c.contact_person as customer_contact',
+      'u.full_name as created_by_name')
+    .first();
+  if (!base) return null;
+
+  const itemQuery = db('local_sales as ls')
+    .leftJoin('inventory_lots as il', 'ls.lot_id', 'il.id')
+    .leftJoin('warehouses as w', 'il.warehouse_id', 'w.id');
+  if (base.sale_group_no) itemQuery.where('ls.sale_group_no', base.sale_group_no);
+  else itemQuery.where('ls.id', base.id);
+  const rows = await itemQuery.select(
+    'ls.id', 'ls.sale_no', 'ls.item_name', 'ls.item_type', 'ls.quantity_kg', 'ls.quantity_bags',
+    'ls.bag_weight_kg', 'ls.rate_per_kg', 'ls.rate_input', 'ls.rate_unit', 'ls.quantity_unit',
+    'ls.total_amount', 'ls.lot_id', 'ls.lot_no',
+    // admin-only financial columns (selected always, exposed only when includeAdmin)
+    'ls.cost_per_kg', 'ls.landed_cost_total', 'ls.cogs_total_pkr', 'ls.gross_profit', 'ls.margin_pct',
+    'il.lot_no as lot_ref', 'il.type as lot_type', 'il.variety as lot_variety',
+    'il.grade as lot_grade', 'il.item_name as lot_item_name', 'il.warehouse_id', 'il.batch_ref',
+    'il.processing_type', 'il.available_qty as lot_available_qty', 'il.net_weight_kg as lot_net_weight_kg',
+    'w.name as warehouse_name',
+  ).orderBy('ls.id', 'asc');
+
+  // Resolve source batches + their source purchased rice lots for milled output.
+  const batchIds = [...new Set(rows
+    .map(r => (r.batch_ref ? parseInt(String(r.batch_ref).replace(/^batch-/, ''), 10) : null))
+    .filter(Boolean))];
+  const batchById = {}; const srcByBatch = {};
+  if (batchIds.length) {
+    const batches = await db('milling_batches').whereIn('id', batchIds).select('id', 'batch_no');
+    for (const b of batches) batchById[b.id] = b;
+    const srcs = await db('batch_source_lots as bsl')
+      .leftJoin('inventory_lots as src', 'bsl.lot_id', 'src.id')
+      .leftJoin('suppliers as s', 'src.supplier_id', 's.id')
+      .whereIn('bsl.batch_id', batchIds)
+      .select('bsl.batch_id', 'bsl.qty_mt', 'src.id as lot_id', 'src.lot_no',
+        db.raw("COALESCE(s.name, '—') as supplier"));
+    for (const s of srcs) (srcByBatch[s.batch_id] = srcByBatch[s.batch_id] || []).push({
+      lotId: s.lot_id, lotNo: s.lot_no, supplier: s.supplier, qtyMt: num(s.qty_mt),
+      href: s.lot_id ? `/lot-inventory/${s.lot_id}` : null,
+    });
+  }
+
+  const items = rows.map(r => {
+    const batchId = r.batch_ref ? parseInt(String(r.batch_ref).replace(/^batch-/, ''), 10) : null;
+    const b = batchId ? batchById[batchId] : null;
+    const item = {
+      id: r.id, saleNo: r.sale_no,
+      riceType: r.lot_variety || r.lot_item_name || r.item_name || '—',
+      gradeProduct: r.item_name || r.lot_grade || '—',
+      itemType: r.item_type || null,
+      quantityKg: num(r.quantity_kg), quantityMt: num(r.quantity_kg) / 1000,
+      unit: r.quantity_unit || 'kg', bags: r.quantity_bags != null ? Number(r.quantity_bags) : null,
+      bagWeightKg: num(r.bag_weight_kg) || null,
+      ratePerKg: num(r.rate_per_kg), rateInput: num(r.rate_input), rateUnit: r.rate_unit || 'kg',
+      amount: num(r.total_amount),
+      lotId: r.lot_id, lotNo: r.lot_no || r.lot_ref || null,
+      lotType: r.lot_type || null, warehouse: r.warehouse_name || null,
+      isBlend: r.processing_type === 'blended',
+      batchId: b ? b.id : null, batchNo: b ? b.batch_no : null,
+      batchHref: b ? `/milling/${b.id}` : null,
+      finishedGoodsHref: r.lot_id ? `/lot-inventory/${r.lot_id}` : null,
+      sourceLots: batchId ? (srcByBatch[batchId] || []) : [],
+    };
+    if (includeAdmin) {
+      const cogs = num(r.cogs_total_pkr) || num(r.landed_cost_total) || num(r.cost_per_kg) * num(r.quantity_kg);
+      item.costPerKg = num(r.cost_per_kg);
+      item.cogs = cogs;
+      item.grossMargin = num(r.total_amount) - cogs;
+      item.marginPct = num(r.total_amount) > 0 ? ((num(r.total_amount) - cogs) / num(r.total_amount)) * 100 : 0;
+      item.remainingStockKg = num(r.lot_net_weight_kg) || num(r.lot_available_qty) * 1000;
+    }
+    return item;
+  });
+
+  // Payment timeline with running balance.
+  const itemIds = rows.map(r => r.id);
+  let pays = await db('payments').whereIn('local_sale_id', itemIds.length ? itemIds : [base.id])
+    .select('id', 'payment_no', 'payment_date', 'payment_method', 'amount', 'bank_reference', 'cleared', 'notes')
+    .orderBy('payment_date', 'asc').orderBy('id', 'asc');
+  if (pays.length === 0 && base.sale_no) {
+    pays = await db('payments').where('notes', 'ilike', `%${base.sale_no}%`)
+      .select('id', 'payment_no', 'payment_date', 'payment_method', 'amount', 'bank_reference', 'cleared', 'notes')
+      .orderBy('payment_date', 'asc').orderBy('id', 'asc');
+  }
+
+  const grandTotal = items.reduce((s, i) => s + i.amount, 0);
+  const timeline = [{ kind: 'created', date: base.sale_date || base.created_at, label: 'Invoice created', amount: grandTotal, balance: grandTotal }];
+  let bal = grandTotal;
+  for (const p of pays) {
+    bal = Math.max(0, bal - num(p.amount));
+    timeline.push({
+      kind: 'payment', date: p.payment_date, paymentNo: p.payment_no,
+      mode: p.payment_method, reference: p.bank_reference || null,
+      cleared: p.cleared !== false, amount: num(p.amount), balance: bal,
+    });
+  }
+
+  const outstanding = num(base.due_amount);
+  const today = new Date().toISOString().slice(0, 10);
+  const dueIso = base.due_date ? new Date(base.due_date).toISOString().slice(0, 10) : null;
+  const overdue = outstanding > 0.01 && !!dueIso && dueIso < today;
+
+  const data = {
+    sale: {
+      id: base.id, invoiceNo: base.sale_no, saleGroupNo: base.sale_group_no,
+      customerId: base.customer_id || null,
+      customer: base.customer_name || base.buyer_name || 'Walk-in customer',
+      customerPhone: base.customer_phone || base.buyer_phone || null,
+      customerAddress: base.customer_address || base.buyer_address || null,
+      customerContact: base.customer_contact || null,
+      date: base.sale_date || base.created_at,
+      paymentStatus: base.payment_status, paymentMode: base.payment_mode,
+      total: grandTotal, received: num(base.paid_amount), outstanding,
+      dueDate: base.due_date || null, overdue,
+      createdByName: base.created_by_name || null, notes: base.notes || null,
+    },
+    items,
+    payments: timeline,
+    dispatch: {
+      dispatched: !!base.dispatched,
+      deliveryStatus: base.dispatched ? 'Dispatched' : 'Not dispatched',
+      dispatchDate: base.dispatch_date || null,
+      vehicleNo: base.vehicle_no || null, driverName: base.driver_name || null,
+      collectionLocation: base.collection_location || null,
+    },
+    totals: {
+      quantityKg: items.reduce((s, i) => s + i.quantityKg, 0),
+      bags: items.reduce((s, i) => s + (i.bags || 0), 0),
+      total: grandTotal, received: num(base.paid_amount), outstanding,
+    },
+  };
+
+  if (includeAdmin) {
+    const saleNos = [...new Set(rows.map(r => r.sale_no).filter(Boolean))];
+    const cogsTotal = items.reduce((s, i) => s + (i.cogs || 0), 0);
+    const [receivables, movements, lotTxns] = await Promise.all([
+      db('receivables').whereIn('local_sale_id', itemIds.length ? itemIds : [base.id])
+        .select('recv_no', 'type', 'expected_amount', 'received_amount', 'outstanding', 'status', 'due_date'),
+      saleNos.length ? db('inventory_movements').whereIn('linked_ref', saleNos)
+        .select('id', 'movement_type', 'qty', 'total_cost', 'lot_id', 'created_at')
+        .orderBy('created_at', 'asc') : [],
+      saleNos.length ? db('lot_transactions').whereIn('reference_no', saleNos)
+        .select('transaction_no', 'transaction_type', 'quantity_kg', 'balance_kg', 'transaction_date')
+        .orderBy('transaction_date', 'asc') : [],
+    ]);
+    data.financials = {
+      salesAmount: grandTotal, cogsTotal,
+      grossMargin: grandTotal - cogsTotal,
+      marginPct: grandTotal > 0 ? ((grandTotal - cogsTotal) / grandTotal) * 100 : 0,
+    };
+    data.linked = {
+      receivables: receivables.map(r => ({ recvNo: r.recv_no, type: r.type, expected: num(r.expected_amount), received: num(r.received_amount), outstanding: num(r.outstanding), status: r.status, dueDate: r.due_date })),
+      inventoryMovements: movements.map(m => ({ id: m.id, type: m.movement_type, qtyKg: num(m.qty) * 1000, costPkr: num(m.total_cost), lotId: m.lot_id, date: m.created_at })),
+      lotTransactions: lotTxns.map(t => ({ txnNo: t.transaction_no, type: t.transaction_type, qtyKg: num(t.quantity_kg), balanceKg: num(t.balance_kg), date: t.transaction_date })),
+    };
+  }
+
+  return data;
+}
+
 module.exports = {
 
   // List all local sales
@@ -456,147 +629,28 @@ module.exports = {
     }
   },
 
-  // Invoice 360 — a richer, read-only view of one local sale (the sale row IS
-  // the invoice). Returns the invoice header, all line items (multi-line sales
-  // share a sale_group_no), stock traceability (source lot · batch · warehouse ·
-  // source purchased rice lots), a payment timeline with running balance, and
-  // the dispatch block. Deliberately EXCLUDES COGS/margin — those stay in the
-  // finance-gated Sale 360. Read-only; touches no create/stock/payment logic.
+  // Invoice 360 (customer-safe) — header, line items, stock traceability,
+  // payment timeline, dispatch. EXCLUDES COGS/margin. Read-only.
   async getInvoice(req, res) {
     try {
-      const { id } = req.params;
-      const num = (v) => parseFloat(v) || 0;
-      const isNumeric = /^\d+$/.test(id);
+      const data = await assembleInvoice(req.params.id, false);
+      if (!data) return res.status(404).json({ success: false, message: 'Sale not found.' });
+      return res.json({ success: true, data });
+    } catch (err) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
 
-      const base = await db('local_sales as ls')
-        .leftJoin('customers as c', 'ls.customer_id', 'c.id')
-        .leftJoin('users as u', 'u.id', 'ls.created_by')
-        .where(isNumeric ? { 'ls.id': parseInt(id, 10) } : { 'ls.sale_no': id })
-        .select('ls.*', 'c.name as customer_name', 'c.phone as customer_phone',
-          'c.address as customer_address', 'c.contact_person as customer_contact',
-          'u.full_name as created_by_name')
-        .first();
-      if (!base) return res.status(404).json({ success: false, message: 'Sale not found.' });
-
-      // All line items of this invoice (multi-line sales share sale_group_no).
-      const itemQuery = db('local_sales as ls')
-        .leftJoin('inventory_lots as il', 'ls.lot_id', 'il.id')
-        .leftJoin('warehouses as w', 'il.warehouse_id', 'w.id');
-      if (base.sale_group_no) itemQuery.where('ls.sale_group_no', base.sale_group_no);
-      else itemQuery.where('ls.id', base.id);
-      const rows = await itemQuery.select(
-        'ls.id', 'ls.sale_no', 'ls.item_name', 'ls.item_type', 'ls.quantity_kg', 'ls.quantity_bags',
-        'ls.bag_weight_kg', 'ls.rate_per_kg', 'ls.rate_input', 'ls.rate_unit', 'ls.quantity_unit',
-        'ls.total_amount', 'ls.lot_id', 'ls.lot_no',
-        'il.lot_no as lot_ref', 'il.type as lot_type', 'il.variety as lot_variety',
-        'il.grade as lot_grade', 'il.item_name as lot_item_name', 'il.warehouse_id', 'il.batch_ref',
-        'il.processing_type', 'w.name as warehouse_name',
-      ).orderBy('ls.id', 'asc');
-
-      // Resolve source batches + their source purchased rice lots for milled output.
-      const batchIds = [...new Set(rows
-        .map(r => (r.batch_ref ? parseInt(String(r.batch_ref).replace(/^batch-/, ''), 10) : null))
-        .filter(Boolean))];
-      const batchById = {}; const srcByBatch = {};
-      if (batchIds.length) {
-        const batches = await db('milling_batches').whereIn('id', batchIds).select('id', 'batch_no');
-        for (const b of batches) batchById[b.id] = b;
-        const srcs = await db('batch_source_lots as bsl')
-          .leftJoin('inventory_lots as src', 'bsl.lot_id', 'src.id')
-          .leftJoin('suppliers as s', 'src.supplier_id', 's.id')
-          .whereIn('bsl.batch_id', batchIds)
-          .select('bsl.batch_id', 'bsl.qty_mt', 'src.id as lot_id', 'src.lot_no',
-            db.raw("COALESCE(s.name, '—') as supplier"));
-        for (const s of srcs) (srcByBatch[s.batch_id] = srcByBatch[s.batch_id] || []).push({
-          lotId: s.lot_id, lotNo: s.lot_no, supplier: s.supplier, qtyMt: num(s.qty_mt),
-          href: s.lot_id ? `/lot-inventory/${s.lot_id}` : null,
-        });
-      }
-
-      const items = rows.map(r => {
-        const batchId = r.batch_ref ? parseInt(String(r.batch_ref).replace(/^batch-/, ''), 10) : null;
-        const b = batchId ? batchById[batchId] : null;
-        return {
-          id: r.id, saleNo: r.sale_no,
-          riceType: r.lot_variety || r.lot_item_name || r.item_name || '—',
-          gradeProduct: r.item_name || r.lot_grade || '—',
-          itemType: r.item_type || null,
-          quantityKg: num(r.quantity_kg), quantityMt: num(r.quantity_kg) / 1000,
-          unit: r.quantity_unit || 'kg', bags: r.quantity_bags != null ? Number(r.quantity_bags) : null,
-          bagWeightKg: num(r.bag_weight_kg) || null,
-          ratePerKg: num(r.rate_per_kg), rateInput: num(r.rate_input), rateUnit: r.rate_unit || 'kg',
-          amount: num(r.total_amount),
-          // Traceability
-          lotId: r.lot_id, lotNo: r.lot_no || r.lot_ref || null,
-          lotType: r.lot_type || null, warehouse: r.warehouse_name || null,
-          isBlend: r.processing_type === 'blended',
-          batchId: b ? b.id : null, batchNo: b ? b.batch_no : null,
-          batchHref: b ? `/milling/${b.id}` : null,
-          finishedGoodsHref: r.lot_id ? `/lot-inventory/${r.lot_id}` : null,
-          sourceLots: batchId ? (srcByBatch[batchId] || []) : [],
-        };
-      });
-
-      // Payment timeline with running balance.
-      const itemIds = rows.map(r => r.id);
-      let pays = await db('payments').whereIn('local_sale_id', itemIds.length ? itemIds : [base.id])
-        .select('id', 'payment_no', 'payment_date', 'payment_method', 'amount', 'bank_reference', 'cleared', 'notes')
-        .orderBy('payment_date', 'asc').orderBy('id', 'asc');
-      if (pays.length === 0 && base.sale_no) {
-        pays = await db('payments').where('notes', 'ilike', `%${base.sale_no}%`)
-          .select('id', 'payment_no', 'payment_date', 'payment_method', 'amount', 'bank_reference', 'cleared', 'notes')
-          .orderBy('payment_date', 'asc').orderBy('id', 'asc');
-      }
-
-      const grandTotal = items.reduce((s, i) => s + i.amount, 0);
-      const timeline = [{ kind: 'created', date: base.sale_date || base.created_at, label: 'Invoice created', amount: grandTotal, balance: grandTotal }];
-      let bal = grandTotal;
-      for (const p of pays) {
-        bal = Math.max(0, bal - num(p.amount));
-        timeline.push({
-          kind: 'payment', date: p.payment_date, paymentNo: p.payment_no,
-          mode: p.payment_method, reference: p.bank_reference || null,
-          cleared: p.cleared !== false, amount: num(p.amount), balance: bal,
-        });
-      }
-
-      const outstanding = num(base.due_amount);
-      const today = new Date().toISOString().slice(0, 10);
-      const dueIso = base.due_date ? new Date(base.due_date).toISOString().slice(0, 10) : null;
-      const overdue = outstanding > 0.01 && !!dueIso && dueIso < today;
-
-      return res.json({
-        success: true,
-        data: {
-          sale: {
-            id: base.id, invoiceNo: base.sale_no, saleGroupNo: base.sale_group_no,
-            customerId: base.customer_id || null,
-            customer: base.customer_name || base.buyer_name || 'Walk-in customer',
-            customerPhone: base.customer_phone || base.buyer_phone || null,
-            customerAddress: base.customer_address || base.buyer_address || null,
-            customerContact: base.customer_contact || null,
-            date: base.sale_date || base.created_at,
-            paymentStatus: base.payment_status, paymentMode: base.payment_mode,
-            total: grandTotal, received: num(base.paid_amount), outstanding,
-            dueDate: base.due_date || null, overdue,
-            createdByName: base.created_by_name || null, notes: base.notes || null,
-          },
-          items,
-          payments: timeline,
-          dispatch: {
-            dispatched: !!base.dispatched,
-            deliveryStatus: base.dispatched ? 'Dispatched' : 'Not dispatched',
-            dispatchDate: base.dispatch_date || null,
-            vehicleNo: base.vehicle_no || null, driverName: base.driver_name || null,
-            collectionLocation: base.collection_location || null,
-          },
-          totals: {
-            quantityKg: items.reduce((s, i) => s + i.quantityKg, 0),
-            bags: items.reduce((s, i) => s + (i.bags || 0), 0),
-            total: grandTotal, received: num(base.paid_amount), outstanding,
-          },
-        },
-      });
+  // Admin invoice copy — everything in getInvoice PLUS internal financials
+  // (cost/kg · COGS · gross margin · margin % · remaining stock) and linked
+  // records (receivables · inventory movements · lot transactions). Route is
+  // role-gated (Owner / Super Admin / Finance Manager / Mill Manager) so this
+  // is never exposed to Mill Operator, customers or unauthorized users.
+  async getInvoiceAdmin(req, res) {
+    try {
+      const data = await assembleInvoice(req.params.id, true);
+      if (!data) return res.status(404).json({ success: false, message: 'Sale not found.' });
+      return res.json({ success: true, data });
     } catch (err) {
       return res.status(500).json({ success: false, message: err.message });
     }
