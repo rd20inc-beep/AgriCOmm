@@ -20,7 +20,7 @@ import {
   useCashForecast, useKpiBenchmarks, useMillEfficiency, useRecoveryLeaderboard,
   useStockValuation, useStockTurnover,
   useOperatorProductivity, useUtilityConsumption, useRecoveryByVariety,
-  useSavedReports, useSaveReport, useDeleteSavedReport,
+  useSavedReports, useSaveReport, useDeleteSavedReport, useWarehouses,
 } from '../../../api/queries';
 import { reportingApi } from '../api/services';
 import { exportLedgerCSV, printLedger } from '../utils/ledgerExport';
@@ -2108,26 +2108,36 @@ function FinishedGoodsLedgerSection({ entity, hideValue }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [exp, setExp] = useState({});
+  const [type, setType] = useState('');
   useEffect(() => {
     setLoading(true);
-    reportingApi.finishedGoodsLedger(entity ? { entity } : {})
+    reportingApi.finishedGoodsLedger({ ...(entity ? { entity } : {}), ...(type ? { type } : {}) })
       .then(res => setData(res?.rows ? res : (res?.data || res)))
       .catch(() => setData({ rows: [] }))
       .finally(() => setLoading(false));
-  }, [entity]);
+  }, [entity, type]);
   const rows = data?.rows || [];
   const g = data?.grand || {};
   if (loading) return <Skeleton />;
-  if (rows.length === 0) return null;
+  if (rows.length === 0 && !type) return null;
   const kg = (v) => `${Math.round(v || 0).toLocaleString()} kg`;
   return (
     <div className="space-y-2">
       <div className="flex items-start justify-between gap-2 flex-wrap">
         <SectionHeader title="Finished Goods Ledger" subtitle={`Finished &amp; by-product stock register — produced, sold, on-hand, reserved${hideValue ? '' : ', value'}`} />
-        <LedgerExportBar title="Finished Goods Ledger" subtitle={hideValue ? 'On-hand finished &amp; by-product stock' : 'On-hand finished &amp; by-product stock at cost'}
-          fileBase="finished-goods-ledger" rows={rows} columns={hideValue ? FINISHED_GOODS_COLS.filter(c => c.label !== 'Value (PKR)') : FINISHED_GOODS_COLS}
-          footerNote={hideValue ? 'By-products grouped by grade; finished by product.' : 'Value = on-hand kg × cost/kg. By-products grouped by grade; finished by product.'} />
+        <div className="flex items-center gap-2">
+          <select value={type} onChange={e => setType(e.target.value)}
+            className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 outline-none">
+            <option value="">All outputs</option>
+            <option value="finished">Finished only</option>
+            <option value="byproduct">By-products only</option>
+          </select>
+          <LedgerExportBar title="Finished Goods Ledger" subtitle={hideValue ? 'On-hand finished &amp; by-product stock' : 'On-hand finished &amp; by-product stock at cost'}
+            fileBase="finished-goods-ledger" rows={rows} columns={hideValue ? FINISHED_GOODS_COLS.filter(c => c.label !== 'Value (PKR)') : FINISHED_GOODS_COLS}
+            footerNote={hideValue ? 'By-products grouped by grade; finished by product.' : 'Value = on-hand kg × cost/kg. By-products grouped by grade; finished by product.'} />
+        </div>
       </div>
+      {rows.length === 0 ? <Empty msg="No outputs match this filter." /> : (
       <div className="rounded-lg border border-gray-200 overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-gray-500 text-xs">
@@ -2167,6 +2177,7 @@ function FinishedGoodsLedgerSection({ entity, hideValue }) {
           </tbody>
         </table>
       </div>
+      )}
     </div>
   );
 }
@@ -2177,13 +2188,15 @@ function InventoryMovementLedgerSection({ entity, hideValue }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [type, setType] = useState('');
+  const [warehouseId, setWarehouseId] = useState('');
+  const { data: warehouses = [] } = useWarehouses();
   useEffect(() => {
     setLoading(true);
-    reportingApi.inventoryLedger({ ...(entity ? { entity } : {}), ...(type ? { movementType: type } : {}), limit: 200 })
+    reportingApi.inventoryLedger({ ...(entity ? { entity } : {}), ...(type ? { movementType: type } : {}), ...(warehouseId ? { warehouseId } : {}), limit: 200 })
       .then(res => setData(res?.rows ? res : (res?.data || res)))
       .catch(() => setData({ rows: [] }))
       .finally(() => setLoading(false));
-  }, [entity, type]);
+  }, [entity, type, warehouseId]);
   const rows = data?.rows || [];
   const types = [
     ['', 'All movements'], ['purchase_receipt', 'Purchase received'], ['production_issue', 'Issued to milling'],
@@ -2196,13 +2209,21 @@ function InventoryMovementLedgerSection({ entity, hideValue }) {
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <SectionHeader title="Inventory Movement Ledger" subtitle="Every stock movement — newest first" />
         <div className="flex items-center gap-2">
+          {warehouses.length > 0 && (
+            <select value={warehouseId} onChange={e => setWarehouseId(e.target.value)}
+              className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 outline-none">
+              <option value="">All warehouses</option>
+              {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+            </select>
+          )}
           <select value={type} onChange={e => setType(e.target.value)}
             className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 outline-none">
             {types.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
           <LedgerExportBar title="Inventory Movement Ledger"
-            subtitle={`Stock movements${type ? ` · ${(types.find(t => t[0] === type) || [])[1]}` : ''}`}
-            meta={[`${rows.length} rows`]} fileBase="inventory-movement-ledger" rows={rows} columns={hideValue ? INVENTORY_LEDGER_COLS.filter(c => c.label !== 'Cost (PKR)') : INVENTORY_LEDGER_COLS}
+            subtitle={`Stock movements${type ? ` · ${(types.find(t => t[0] === type) || [])[1]}` : ''}${warehouseId ? ` · ${(warehouses.find(w => String(w.id) === String(warehouseId)) || {}).name || ''}` : ''}`}
+            meta={[`${rows.length} rows`, ...(warehouseId ? [`Warehouse: ${(warehouses.find(w => String(w.id) === String(warehouseId)) || {}).name || warehouseId}`] : [])]}
+            fileBase="inventory-movement-ledger" rows={rows} columns={hideValue ? INVENTORY_LEDGER_COLS.filter(c => c.label !== 'Cost (PKR)') : INVENTORY_LEDGER_COLS}
             footerNote="Source: inventory_movements. + inbound, − outbound." />
         </div>
       </div>

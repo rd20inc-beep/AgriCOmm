@@ -1211,7 +1211,7 @@ const reportingService = {
    * reference context + a link target. Read-only.
    * Filters: dateFrom, dateTo, movementType, entity, lotId.
    */
-  async getInventoryLedger({ dateFrom, dateTo, movementType, entity, lotId, limit = 300 } = {}) {
+  async getInventoryLedger({ dateFrom, dateTo, movementType, entity, lotId, warehouseId, limit = 300 } = {}) {
     const num = (v) => parseFloat(v) || 0;
     const cap = Math.min(parseInt(limit, 10) || 300, 1000);
     let q = db('inventory_movements as m')
@@ -1224,6 +1224,7 @@ const reportingService = {
     if (movementType) q = q.where('m.movement_type', movementType);
     if (entity) q = q.where(function () { this.where('m.source_entity', entity).orWhere('m.dest_entity', entity).orWhere('l.entity', entity); });
     if (lotId) q = q.where('m.lot_id', parseInt(lotId, 10));
+    if (warehouseId) { const w = parseInt(warehouseId, 10); q = q.where(function () { this.where('m.from_warehouse_id', w).orWhere('m.to_warehouse_id', w).orWhere('l.warehouse_id', w); }); }
     const rows = await q.select(
       'm.id', 'm.created_at', 'm.movement_type', 'm.qty', 'm.total_cost', 'm.cost_per_unit',
       'm.lot_id', 'm.batch_id', 'm.order_id', 'm.linked_ref', 'm.source_entity', 'm.dest_entity', 'm.notes',
@@ -1264,11 +1265,11 @@ const reportingService = {
    * by grade/output, with produced (original intake), sold, on-hand,
    * reserved and on-hand value. Read-only.
    */
-  async getFinishedGoodsLedger({ entity } = {}) {
+  async getFinishedGoodsLedger({ entity, type } = {}) {
     const num = (v) => parseFloat(v) || 0;
     let q = db('inventory_lots as l')
       .leftJoin('products as p', 'l.product_id', 'p.id')
-      .whereIn('l.type', ['finished', 'byproduct']);
+      .whereIn('l.type', (type === 'finished' || type === 'byproduct') ? [type] : ['finished', 'byproduct']);
     if (entity) q = q.where('l.entity', entity);
     const lots = await q.select(
       'l.id', 'l.lot_no', 'l.type', 'l.item_name', 'l.grade', 'l.variety', 'l.processing_type',
