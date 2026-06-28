@@ -242,6 +242,57 @@ async function assembleInvoice(id, includeAdmin = false) {
       inventoryMovements: movements.map(m => ({ id: m.id, type: m.movement_type, qtyKg: num(m.qty) * 1000, costPkr: num(m.total_cost), lotId: m.lot_id, date: m.created_at })),
       lotTransactions: lotTxns.map(t => ({ txnNo: t.transaction_no, type: t.transaction_type, qtyKg: num(t.quantity_kg), balanceKg: num(t.balance_kg), date: t.transaction_date })),
     };
+
+    // Source-batch by-product pricing (INTERNAL/ADMIN ONLY — never on the
+    // customer copy): for each milling batch that produced the sold rice, the
+    // per-grade output valuation set at yield (same basis as Batch 360).
+    if (batchIds.length) {
+      const priceBatches = await db('milling_batches').whereIn('id', batchIds)
+        .select('id', 'batch_no', 'finished_price_per_mt', 'b1_price_per_mt', 'b2_price_per_mt', 'b3_price_per_mt',
+          'csr_price_per_mt', 'short_grain_price_per_mt', 'broken_price_per_mt', 'powder_price_per_mt',
+          'sweeping_price_per_mt', 'sortex_rejects_price_per_mt');
+      const priceById = {}; for (const b of priceBatches) priceById[b.id] = b;
+      const outRefs = batchIds.map(bid => `batch-${bid}`);
+      const outLots = await db('inventory_lots as l').leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
+        .whereIn('l.batch_ref', outRefs).whereIn('l.type', ['finished', 'byproduct'])
+        .select('l.id', 'l.lot_no', 'l.batch_ref', 'l.type', 'l.item_name', 'l.grade', 'l.variety',
+          'l.net_weight_kg', 'l.received_net_weight_kg', 'l.landed_cost_per_kg', 'w.name as warehouse_name');
+      const priceForOutput = (o, b) => {
+        const g = String(o.grade || '').toUpperCase();
+        const n = String(o.item_name || '').toLowerCase();
+        let perMt = 0;
+        if (o.type === 'finished') perMt = num(b.finished_price_per_mt);
+        else if (g === 'B1') perMt = num(b.b1_price_per_mt);
+        else if (g === 'B2') perMt = num(b.b2_price_per_mt);
+        else if (g === 'B3') perMt = num(b.b3_price_per_mt);
+        else if (g === 'CSR') perMt = num(b.csr_price_per_mt);
+        else if (g === 'SHORT GRAIN') perMt = num(b.short_grain_price_per_mt);
+        else if (n.includes('powder')) perMt = num(b.powder_price_per_mt);
+        else if (n.includes('sweep')) perMt = num(b.sweeping_price_per_mt);
+        else if (n.includes('sortex')) perMt = num(b.sortex_rejects_price_per_mt);
+        else if (n.includes('broken')) perMt = num(b.broken_price_per_mt);
+        return perMt / 1000;
+      };
+      const byBatch = {};
+      for (const o of outLots) {
+        const bid = parseInt(String(o.batch_ref).replace(/^batch-/, ''), 10);
+        const b = priceById[bid] || {};
+        const produced = num(o.received_net_weight_kg) || num(o.net_weight_kg);
+        const salePerKg = priceForOutput(o, b);
+        (byBatch[bid] = byBatch[bid] || []).push({
+          lotId: o.id, lotNo: o.lot_no, type: o.type,
+          productGrade: o.grade || o.item_name || '—', riceType: o.variety || o.item_name || '—',
+          producedKg: produced, costPerKg: num(o.landed_cost_per_kg),
+          salePricePerKg: salePerKg, recoveryValue: produced * salePerKg,
+          warehouse: o.warehouse_name || null, href: `/lot-inventory/${o.id}`,
+        });
+      }
+      data.batchByproducts = batchIds.map(bid => ({
+        batchId: bid, batchNo: (batchById[bid] || {}).batch_no || `#${bid}`, batchHref: `/milling/${bid}`,
+        outputs: (byBatch[bid] || []).sort((a, c) => (a.type === 'byproduct' ? 0 : 1) - (c.type === 'byproduct' ? 0 : 1)),
+        byproductRecovery: (byBatch[bid] || []).filter(o => o.type === 'byproduct').reduce((s, o) => s + o.recoveryValue, 0),
+      })).filter(x => x.outputs.length);
+    }
   }
 
   return data;

@@ -44,6 +44,17 @@ export default function InvoiceView() {
     },
   });
 
+  // Admin-only enrichment (source-batch by-product pricing etc.). Fetched from
+  // the role-gated endpoint so internal valuation never enters the customer copy.
+  const { data: adminData } = useQuery({
+    queryKey: ['local-sales', 'invoice-admin', id],
+    enabled: canSeeAdminCopy && !!id,
+    queryFn: async () => {
+      const res = await localSalesApi.getInvoiceAdmin(id);
+      return res?.data || res;
+    },
+  });
+
   const [payOpen, setPayOpen] = useState(false);
   const [payForm, setPayForm] = useState({ amount: '', payment_method: 'cash', reference: '', payment_date: new Date().toISOString().slice(0, 10), due_date: '', collection_location: 'Mill' });
   const [template, setTemplate] = useState('standard'); // print template: standard | compact
@@ -197,6 +208,53 @@ export default function InvoiceView() {
         </div>
         <p className="px-4 py-2 text-[11px] text-gray-400">Expand a row to trace its source lot, batch, warehouse and source purchased rice lots.</p>
       </div>
+
+      {/* Source-batch by-product pricing — INTERNAL/ADMIN ONLY (never on the customer copy) */}
+      {canSeeAdminCopy && (adminData?.batchByproducts || []).length > 0 && (
+        <div className="bg-white rounded-xl border border-amber-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-amber-100 bg-amber-50/60 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-700 inline-flex items-center gap-1.5"><Factory size={15} /> Source batch — by-product pricing</h3>
+            <span className="text-[10px] uppercase tracking-wider text-amber-700 font-semibold bg-amber-100 rounded px-1.5 py-0.5">Internal — not on customer copy</span>
+          </div>
+          {adminData.batchByproducts.map((bp) => (
+            <div key={bp.batchId} className="border-b border-gray-100 last:border-0">
+              <div className="px-4 pt-3 flex items-center justify-between flex-wrap gap-2">
+                <Link to={bp.batchHref} className="text-sm font-medium text-blue-600 hover:underline inline-flex items-center gap-1.5">Batch {bp.batchNo}</Link>
+                {bp.byproductRecovery > 0 && <span className="text-xs text-emerald-700">By-product recovery {pkr(bp.byproductRecovery)}</span>}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-gray-500 text-xs">
+                    <tr>
+                      <th className="px-4 py-2 text-left font-medium">Product / grade</th>
+                      <th className="px-4 py-2 text-left font-medium">Type</th>
+                      <th className="px-4 py-2 text-right font-medium">Produced</th>
+                      <th className="px-4 py-2 text-right font-medium">Cost/kg</th>
+                      <th className="px-4 py-2 text-right font-medium">Sale price/kg</th>
+                      <th className="px-4 py-2 text-right font-medium">Recovery value</th>
+                      <th className="px-4 py-2 text-left font-medium">Warehouse</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {bp.outputs.map((o) => (
+                      <tr key={o.lotId}>
+                        <td className="px-4 py-2"><Link to={o.href} className="text-blue-600 hover:underline">{o.productGrade}</Link></td>
+                        <td className="px-4 py-2 text-gray-600">{o.type === 'byproduct' ? 'by-product' : 'finished'}</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{Math.round(o.producedKg).toLocaleString()} kg</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{o.costPerKg ? pkr(o.costPerKg) : '—'}</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{o.salePricePerKg ? pkr(o.salePricePerKg) : '—'}</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{o.recoveryValue ? pkr(o.recoveryValue) : '—'}</td>
+                        <td className="px-4 py-2 text-gray-600">{o.warehouse || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+          <p className="px-4 py-2 text-[11px] text-gray-400">Per-grade valuation of the milling batch that produced the sold rice (set at yield, same basis as Batch 360). By-product recovery is credited back into the finished cost under residual costing. Shown to authorized staff only — excluded from the customer invoice.</p>
+        </div>
+      )}
 
       {/* Payment timeline */}
       <div className="bg-white rounded-xl border border-gray-200 p-4">

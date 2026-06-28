@@ -168,6 +168,13 @@ export function printAdminInvoice(data, company) {
       </table>
       ${items.some(i => (i.sourceLots || []).length) ? `<div class="note">Source purchased rice lots: ${items.flatMap(i => (i.sourceLots || []).map(s => `${esc(s.lotNo)}${s.supplier && s.supplier !== '—' ? ` (${esc(s.supplier)})` : ''}`)).join('; ')}</div>` : ''}
     </div>
+    ${(data.batchByproducts || []).length ? (data.batchByproducts).map(bp => `<div class="sec"><h4>Source Batch ${esc(bp.batchNo)} — By-product Pricing</h4>
+      <table>
+        <thead><tr><th>Product / Grade</th><th>Type</th><th class="r">Produced</th><th class="r">Cost/kg</th><th class="r">Sale price/kg</th><th class="r">Recovery</th><th>Warehouse</th></tr></thead>
+        <tbody>${bp.outputs.map(o => `<tr><td>${esc(o.productGrade)}</td><td>${o.type === 'byproduct' ? 'by-product' : 'finished'}</td><td class="r">${n0(o.producedKg)} kg</td><td class="r">${o.costPerKg ? pkr(o.costPerKg) : '—'}</td><td class="r">${o.salePricePerKg ? pkr(o.salePricePerKg) : '—'}</td><td class="r">${o.recoveryValue ? pkr(o.recoveryValue) : '—'}</td><td>${esc(o.warehouse || '—')}</td></tr>`).join('')}</tbody>
+      </table>
+      ${bp.byproductRecovery > 0 ? `<div class="note">By-product recovery (valued): ${pkr(bp.byproductRecovery)} — credited back into the finished cost under residual costing.</div>` : ''}
+    </div>`).join('') : ''}
     <div class="sec"><h4>Financials</h4>
       <table class="totals" style="width:320px">
         <tr><td>Sales amount</td><td class="r">${pkr(financials.salesAmount ?? totals.total)}</td></tr>
