@@ -1286,7 +1286,10 @@ const reportingService = {
     const outById = Object.fromEntries(outputs.map(o => [o.id, o]));
 
     const inputMt = sources.reduce((s, r) => s + num(r.qty_mt), 0);
-    const rawCost = sources.reduce((s, r) => s + num(r.cost_total_pkr), 0);
+    // Prefer per-source-lot cost; fall back to the batch's raw_cost_total when
+    // source rows carry no cost (older/backfilled lineage).
+    const rawCostFromSources = sources.reduce((s, r) => s + num(r.cost_total_pkr), 0);
+    const rawCost = rawCostFromSources > 0 ? rawCostFromSources : num(batch.raw_cost_total);
     const processingCost = num(batch.manual_milling_cost_pkr) + num(batch.manual_other_expenses_pkr)
       + costs.filter(c => c.category !== 'raw_rice').reduce((s, c) => s + num(c.amount), 0);
     const inputCostPkr = rawCost + processingCost;
