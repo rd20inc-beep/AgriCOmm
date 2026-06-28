@@ -384,6 +384,205 @@ function AiAnalystDrawer() {
   );
 }
 
+// ─── Self-serve report builder ──────────────────────────────────────────
+// Pick a dataset, choose columns, filter + sort, preview, then export / print
+// (reuses LedgerExportBar) or save the layout (localStorage). Bounded — it
+// composes existing report datasets rather than being a full BI query tool
+// (the "Ask AI" analyst covers free-form questions).
+const RB_NUM = (v) => { const n = parseFloat(v); return isNaN(n) ? '' : Math.round(n).toLocaleString(); };
+const RB_DATE = (v) => v ? new Date(v).toLocaleDateString('en-GB') : '';
+const REPORT_DATASETS = {
+  lots: {
+    label: 'Purchased lots',
+    load: async () => { const r = await reportingApi.lotTracker(); return (r?.data?.rows || r?.rows || []); },
+    columns: [
+      { key: 'lotNo', label: 'Lot', accessor: r => r.lotNo },
+      { key: 'date', label: 'Date', accessor: r => RB_DATE(r.date) },
+      { key: 'supplier', label: 'Supplier', accessor: r => r.supplier },
+      { key: 'riceType', label: 'Rice type', accessor: r => r.riceType },
+      { key: 'variety', label: 'Variety', accessor: r => r.variety },
+      { key: 'grade', label: 'Grade', accessor: r => r.grade },
+      { key: 'warehouse', label: 'Warehouse', accessor: r => r.warehouse },
+      { key: 'receivedKg', label: 'Received (kg)', accessor: r => RB_NUM(r.receivedKg), align: 'right' },
+      { key: 'ratePerKg', label: 'Rate/kg', accessor: r => RB_NUM(r.ratePerKg), align: 'right' },
+      { key: 'landedTotal', label: 'Landed total', accessor: r => RB_NUM(r.landedTotal), align: 'right' },
+      { key: 'soldKg', label: 'Sold (kg)', accessor: r => RB_NUM(r.soldKg), align: 'right' },
+      { key: 'milledKg', label: 'Milled (kg)', accessor: r => RB_NUM(r.milledKg), align: 'right' },
+      { key: 'status', label: 'Status', accessor: r => r.status },
+    ],
+  },
+  sales: {
+    label: 'Local sales',
+    load: async () => { const r = await reportingApi.salesTracker(); return (r?.data?.rows || r?.rows || []); },
+    columns: [
+      { key: 'saleNo', label: 'Sale', accessor: r => r.saleNo },
+      { key: 'saleDate', label: 'Date', accessor: r => RB_DATE(r.saleDate) },
+      { key: 'customer', label: 'Customer', accessor: r => r.customer || r.customerName },
+      { key: 'itemName', label: 'Item', accessor: r => r.itemName },
+      { key: 'quantityKg', label: 'Qty (kg)', accessor: r => RB_NUM(r.quantityKg), align: 'right' },
+      { key: 'ratePerKg', label: 'Rate/kg', accessor: r => RB_NUM(r.ratePerKg), align: 'right' },
+      { key: 'totalAmount', label: 'Value', accessor: r => RB_NUM(r.totalAmount), align: 'right' },
+      { key: 'paidAmount', label: 'Received', accessor: r => RB_NUM(r.paidAmount), align: 'right' },
+      { key: 'dueAmount', label: 'Outstanding', accessor: r => RB_NUM(r.dueAmount), align: 'right' },
+      { key: 'margin', label: 'Margin', accessor: r => RB_NUM(r.margin), align: 'right' },
+      { key: 'paymentStatus', label: 'Payment', accessor: r => r.paymentStatus },
+    ],
+  },
+  finished_goods: {
+    label: 'Finished goods stock',
+    load: async () => { const r = await reportingApi.finishedGoodsLedger(); return (r?.rows || r?.data?.rows || []); },
+    columns: [
+      { key: 'key', label: 'Output', accessor: r => r.key },
+      { key: 'type', label: 'Type', accessor: r => r.type === 'byproduct' ? 'by-product' : 'finished' },
+      { key: 'producedKg', label: 'Produced (kg)', accessor: r => RB_NUM(r.producedKg), align: 'right' },
+      { key: 'soldKg', label: 'Sold (kg)', accessor: r => RB_NUM(r.soldKg), align: 'right' },
+      { key: 'onHandKg', label: 'On hand (kg)', accessor: r => RB_NUM(r.onHandKg), align: 'right' },
+      { key: 'reservedKg', label: 'Reserved (kg)', accessor: r => RB_NUM(r.reservedKg), align: 'right' },
+      { key: 'valuePkr', label: 'Value', accessor: r => RB_NUM(r.valuePkr), align: 'right' },
+    ],
+  },
+  inventory_movements: {
+    label: 'Inventory movements',
+    load: async () => { const r = await reportingApi.inventoryLedger({ limit: 500 }); return (r?.rows || r?.data?.rows || []); },
+    columns: [
+      { key: 'date', label: 'Date', accessor: r => RB_DATE(r.date) },
+      { key: 'label', label: 'Movement', accessor: r => r.label },
+      { key: 'lotNo', label: 'Lot', accessor: r => r.lotNo || r.batchNo },
+      { key: 'fromWh', label: 'From', accessor: r => r.fromWh },
+      { key: 'toWh', label: 'To', accessor: r => r.toWh },
+      { key: 'direction', label: 'Dir', accessor: r => r.direction },
+      { key: 'qtyKg', label: 'Qty (kg)', accessor: r => RB_NUM(r.qtyKg), align: 'right' },
+      { key: 'costPkr', label: 'Cost', accessor: r => RB_NUM(r.costPkr), align: 'right' },
+    ],
+  },
+};
+const RB_LAYOUTS_KEY = 'rf_report_builder_layouts';
+
+function ReportBuilderDrawer() {
+  const [datasetKey, setDatasetKey] = useState('lots');
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState(REPORT_DATASETS.lots.columns.map(c => c.key));
+  const [filterText, setFilterText] = useState('');
+  const [sortKey, setSortKey] = useState('');
+  const [sortDir, setSortDir] = useState('asc');
+  const [layouts, setLayouts] = useState(() => { try { return JSON.parse(localStorage.getItem(RB_LAYOUTS_KEY) || '{}'); } catch { return {}; } });
+
+  const ds = REPORT_DATASETS[datasetKey];
+  useEffect(() => {
+    setLoading(true);
+    ds.load().then(r => setRows(Array.isArray(r) ? r : [])).catch(() => setRows([])).finally(() => setLoading(false));
+  }, [datasetKey]); // eslint-disable-line
+
+  const cols = ds.columns.filter(c => selected.includes(c.key));
+  const view = useMemo(() => {
+    let v = rows;
+    const f = filterText.trim().toLowerCase();
+    if (f) v = v.filter(row => cols.some(c => String(c.accessor(row) ?? '').toLowerCase().includes(f)));
+    if (sortKey) {
+      const col = ds.columns.find(c => c.key === sortKey);
+      if (col) v = [...v].sort((a, b) => {
+        const av = col.accessor(a), bv = col.accessor(b);
+        const an = parseFloat(String(av).replace(/,/g, '')), bn = parseFloat(String(bv).replace(/,/g, ''));
+        const cmp = (!isNaN(an) && !isNaN(bn)) ? an - bn : String(av).localeCompare(String(bv));
+        return sortDir === 'asc' ? cmp : -cmp;
+      });
+    }
+    return v;
+  }, [rows, filterText, sortKey, sortDir, selected, datasetKey]); // eslint-disable-line
+
+  const toggleCol = (k) => setSelected(s => s.includes(k) ? s.filter(x => x !== k) : [...ds.columns.map(c => c.key).filter(c => s.includes(c) || c === k)]);
+  const switchDataset = (k) => { setDatasetKey(k); setSelected(REPORT_DATASETS[k].columns.map(c => c.key)); setSortKey(''); setFilterText(''); };
+
+  const persist = (next) => { setLayouts(next); try { localStorage.setItem(RB_LAYOUTS_KEY, JSON.stringify(next)); } catch (e) { /* ignore */ } };
+  const saveLayout = () => { const name = window.prompt('Save this layout as:'); if (!name) return; persist({ ...layouts, [name]: { datasetKey, selected, sortKey, sortDir } }); };
+  const loadLayout = (name) => { const l = layouts[name]; if (!l) return; setDatasetKey(l.datasetKey); setSelected(l.selected); setSortKey(l.sortKey || ''); setSortDir(l.sortDir || 'asc'); };
+  const delLayout = (name) => { const n = { ...layouts }; delete n[name]; persist(n); };
+
+  return (
+    <div className="space-y-4">
+      {/* Controls */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <label className="block">
+          <span className="text-xs text-gray-500">Dataset</span>
+          <select value={datasetKey} onChange={e => switchDataset(e.target.value)} className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-2 bg-white outline-none">
+            {Object.entries(REPORT_DATASETS).map(([k, d]) => <option key={k} value={k}>{d.label}</option>)}
+          </select>
+        </label>
+        <label className="block">
+          <span className="text-xs text-gray-500">Filter (any selected column)</span>
+          <input value={filterText} onChange={e => setFilterText(e.target.value)} placeholder="Type to filter…" className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-2 outline-none" />
+        </label>
+      </div>
+
+      {/* Column picker */}
+      <div>
+        <span className="text-xs text-gray-500">Columns</span>
+        <div className="mt-1 flex flex-wrap gap-1.5">
+          {ds.columns.map(c => (
+            <button key={c.key} onClick={() => toggleCol(c.key)}
+              className={`text-[11px] px-2 py-1 rounded-full border ${selected.includes(c.key) ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:border-blue-400'}`}>
+              {c.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Sort + actions */}
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div className="flex items-end gap-2">
+          <label className="block">
+            <span className="text-xs text-gray-500">Sort by</span>
+            <select value={sortKey} onChange={e => setSortKey(e.target.value)} className="mt-1 text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-white outline-none">
+              <option value="">—</option>
+              {cols.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+            </select>
+          </label>
+          <button onClick={() => setSortDir(d => d === 'asc' ? 'desc' : 'asc')} disabled={!sortKey}
+            className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 disabled:opacity-40">{sortDir === 'asc' ? '↑ Asc' : '↓ Desc'}</button>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={saveLayout} className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50"><Star size={13} /> Save layout</button>
+          <LedgerExportBar title={`Custom Report — ${ds.label}`} subtitle={filterText ? `Filtered: "${filterText}"` : null}
+            meta={[`${view.length} rows`]} fileBase={`custom-${datasetKey}`} rows={view} columns={cols} />
+        </div>
+      </div>
+
+      {/* Saved layouts */}
+      {Object.keys(layouts).length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {Object.keys(layouts).map(name => (
+            <span key={name} className="inline-flex items-center gap-1 text-[11px] bg-gray-100 rounded-full pl-2.5 pr-1 py-0.5">
+              <button onClick={() => loadLayout(name)} className="text-gray-700 hover:text-blue-600">{name}</button>
+              <button onClick={() => delLayout(name)} className="text-gray-300 hover:text-rose-500"><Trash2 size={11} /></button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Preview */}
+      {loading ? <Skeleton /> : (
+        <div className="rounded-lg border border-gray-200 overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 text-gray-500 sticky top-0">
+              <tr>{cols.map(c => <th key={c.key} className={`px-2 py-1.5 font-medium ${c.align === 'right' ? 'text-right' : 'text-left'}`}>{c.label}</th>)}</tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {view.slice(0, 300).map((row, i) => (
+                <tr key={i} className="hover:bg-gray-50">
+                  {cols.map(c => <td key={c.key} className={`px-2 py-1.5 whitespace-nowrap ${c.align === 'right' ? 'text-right tabular-nums' : ''}`}>{c.accessor(row) || '—'}</td>)}
+                </tr>
+              ))}
+              {view.length === 0 && <tr><td colSpan={cols.length || 1} className="px-2 py-6 text-center text-gray-400">No rows.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {view.length > 300 && <p className="text-[11px] text-gray-400">Showing first 300 of {view.length} rows — export for the full set.</p>}
+    </div>
+  );
+}
+
 export default function Reports() {
   const { user } = useAuth();
   const { companyProfileData } = useApp();
@@ -411,6 +610,7 @@ export default function Reports() {
   const openDoc = (d) => setDoc(d);
   const [schedOpen, setSchedOpen] = useState(false); // scheduled-emails drawer
   const [aiOpen, setAiOpen] = useState(false); // AI analyst drawer
+  const [builderOpen, setBuilderOpen] = useState(false); // report builder drawer
 
   // Tab + date range live in the URL (?tab=&range=) so views are deep-linkable,
   // bookmarkable and shareable, and the browser back button moves between tabs.
@@ -497,6 +697,12 @@ export default function Reports() {
               className="bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors">
               <RefreshCw size={12} /> Refresh
             </button>
+            {!operatorScoped && (
+              <button onClick={() => setBuilderOpen(true)} title="Build a custom report"
+                className="bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors">
+                <Layers size={12} /> Build
+              </button>
+            )}
             {!operatorScoped && (
               <button onClick={() => setAiOpen(true)} title="Ask AI about your data"
                 className="bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors">
@@ -638,6 +844,11 @@ export default function Reports() {
       {/* AI report analyst */}
       <SlideDrawer open={aiOpen} onClose={() => setAiOpen(false)} title="Ask AI" subtitle="Natural-language questions about your data" icon={Search} size="lg">
         {aiOpen && <AiAnalystDrawer />}
+      </SlideDrawer>
+
+      {/* Self-serve report builder */}
+      <SlideDrawer open={builderOpen} onClose={() => setBuilderOpen(false)} title="Report Builder" subtitle="Pick a dataset, columns, filter & sort — then export" icon={Layers} size="3xl">
+        {builderOpen && <ReportBuilderDrawer />}
       </SlideDrawer>
     </div>
   );
