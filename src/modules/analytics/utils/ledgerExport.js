@@ -133,3 +133,72 @@ export function printLotLedger(data, { companyName = 'AGRI COMMODITIES', generat
   w.document.open(); w.document.write(html); w.document.close(); w.focus();
   return true;
 }
+
+// Full multi-section Batch 360 print (inputs → processing → outputs → sales →
+// financials), A4. data = the /reporting/batch-ledger/:id payload.
+export function printBatchLedger(data, { companyName = 'AGRI COMMODITIES', generatedBy } = {}) {
+  const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const pkr = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
+  const kg = (v) => `${Math.round(parseFloat(v) || 0).toLocaleString()} kg`;
+  const mt = (v) => `${(parseFloat(v) || 0).toFixed(2)} MT`;
+  const dd = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+  const { batch: b = {}, inputs = [], outputs = [], sales = [], costs = [], manualCosts: mc = {}, yieldSummary: ys = {}, financialSummary: fs = {} } = data;
+  const now = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const kv = (rows) => `<table class="kv">${rows.filter(Boolean).map(([k, v]) => `<tr><td class="k">${e(k)}</td><td class="v">${v}</td></tr>`).join('')}</table>`;
+  const tbl = (head, rows) => `<table><thead><tr>${head.map(h => `<th style="text-align:${h.r ? 'right' : 'left'}">${e(h.t || h)}</th>`).join('')}</tr></thead><tbody>${rows.length ? rows.map(r => `<tr>${r.map((c, i) => `<td style="text-align:${head[i] && head[i].r ? 'right' : 'left'}">${c}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="${head.length}" style="color:#9ca3af">None</td></tr>`}</tbody></table>`;
+  const costRows = [
+    mc.milling ? ['Milling fee (manual)', pkr(mc.milling)] : null,
+    mc.other ? ['Other expenses (manual)', pkr(mc.other)] : null,
+    ...costs.filter(c => c.category !== 'raw_rice').map(c => [`${(c.category || 'cost')}${c.notes ? ' · ' + c.notes : ''}`, pkr(c.amount)]),
+  ].filter(Boolean);
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Batch ${e(b.batchNo)}</title><style>
+    *{box-sizing:border-box} body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#111827;margin:0;font-size:11px}
+    .page{padding:12mm} .hdr{border-bottom:2px solid #111827;padding-bottom:8px;display:flex;justify-content:space-between}
+    .co{font-size:18px;font-weight:800} .title{font-size:15px;font-weight:800;text-align:right} .muted{color:#6b7280;font-size:10px}
+    h4{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#374151;margin:16px 0 5px;border-bottom:1px solid #e5e7eb;padding-bottom:3px}
+    table{width:100%;border-collapse:collapse;margin-top:3px} th{background:#f3f4f6;font-size:9px;text-transform:uppercase;color:#374151;padding:5px 7px;border-bottom:1px solid #d1d5db}
+    td{padding:4px 7px;border-bottom:1px solid #f0f0f0} tbody tr:nth-child(even) td{background:#fafafa}
+    table.kv{width:auto} table.kv td{border:0;padding:2px 10px 2px 0} table.kv .k{color:#6b7280} table.kv .v{font-weight:600}
+    .grid2{display:flex;gap:32px} .grid2>div{flex:1}
+    @media print{.page{padding:10mm}@page{size:A4 portrait;margin:0}}
+  </style></head><body><div class="page">
+    <div class="hdr"><div><div class="co">${e(companyName)}</div><div class="muted">Complete Batch Ledger / Batch 360</div></div>
+      <div><div class="title">BATCH ${e(b.batchNo)}</div><div class="muted">${e(b.product || '')}${b.isBlend ? ' · blend' : ''}</div><div class="muted">${generatedBy ? 'By ' + e(generatedBy) + ' · ' : ''}${e(now)}</div></div></div>
+    <div class="grid2"><div>${kv([
+      ['Status', e(b.status || '—')], ['Type', b.isBlend ? 'Blend' : 'Milling'], ['Product', e(b.product || '—')],
+      ['Operator', e(b.operator || '—')], ['Machine line', e(b.machineLine || '—')], ['Shift', e(b.shift || '—')],
+    ])}</div><div>${kv([
+      ['Created', dd(b.createdAt)], ['Completed', dd(b.completedAt)], ['Processing hours', b.processingHours || '—'],
+      ['Input', mt(ys.inputMt)], ['Finished', mt(ys.finishedMt)], ['Yield', `${(parseFloat(ys.yieldPct) || 0).toFixed(1)}%`],
+    ])}</div></div>
+
+    <h4>Yield Summary</h4>
+    ${kv([['Input', mt(ys.inputMt)], ['Finished', mt(ys.finishedMt)], ['By-product', mt(ys.byproductMt)], ['Total output', mt(ys.totalOutputMt)], ['Processing loss', mt(ys.lossMt)], ['Yield %', `${(parseFloat(ys.yieldPct) || 0).toFixed(1)}%`]])}
+
+    <h4>Financial Summary</h4>
+    ${kv([
+      ['Raw rice cost', pkr(fs.rawCost)], ['Processing cost', pkr(fs.processingCost)], ['Total input cost', pkr(fs.totalInputCost)],
+      ['Output value (at cost)', pkr(fs.outputValue)], ['By-product recovery (valued)', pkr(fs.byproductRecovery)], ['Revenue (sold output)', pkr(fs.revenue)], ['Cost of sold (COGS)', pkr(fs.cogsOfSold)],
+      ['Realized profit', `${pkr(fs.realizedProfit)} (${(parseFloat(fs.realizedProfitPct) || 0).toFixed(1)}%)`],
+      ['Payment received', pkr(fs.paymentReceived)], ['Outstanding', pkr(fs.outstanding)],
+      ['On-hand output value', pkr(fs.onHandValue)], ['Expected profit on remaining', pkr(fs.expectedProfitRemaining)],
+    ])}
+    <div class="muted" style="margin-top:4px">${e(fs.costBasis || '')}</div>
+
+    <h4>Inputs — source rice lots</h4>
+    ${tbl([{ t: 'Lot' }, { t: 'Rice' }, { t: 'Supplier' }, { t: 'Qty', r: 1 }, { t: 'Cost', r: 1 }], inputs.map(i => [e(i.lotNo || '—'), e(i.item || i.variety || '—'), e(i.supplier || '—'), mt(i.qtyMt), pkr(i.costTotalPkr)]))}
+
+    <h4>Processing costs</h4>
+    ${costRows.length ? kv(costRows) : '<div class="muted">No recorded processing costs.</div>'}
+
+    <h4>Output produced &amp; by-product pricing</h4>
+    ${tbl([{ t: 'Lot' }, { t: 'Product / Grade' }, { t: 'Type' }, { t: 'Produced', r: 1 }, { t: 'Sold', r: 1 }, { t: 'Remaining', r: 1 }, { t: 'Cost/kg', r: 1 }, { t: 'Sale price/kg', r: 1 }, { t: 'Recovery', r: 1 }], outputs.map(o => [e(o.lotNo), e(o.item), o.type === 'byproduct' ? 'by-product' : 'finished', kg(o.producedKg), kg(o.soldKg), kg(o.remainingKg), o.costPerKg ? pkr(o.costPerKg) : '—', o.salePricePerKg ? pkr(o.salePricePerKg) : '—', o.recoveryValue ? pkr(o.recoveryValue) : '—']))}
+
+    <h4>Sales from this batch</h4>
+    ${tbl([{ t: 'Date' }, { t: 'Invoice' }, { t: 'Customer' }, { t: 'Product' }, { t: 'Qty', r: 1 }, { t: 'Amount', r: 1 }], sales.map(s => [dd(s.date), e(s.invoice), e(s.customer), e(s.product || '—'), kg(s.qtyKg), pkr(s.amount)]))}
+  </div><script>window.addEventListener('load',function(){setTimeout(function(){window.focus();window.print();},350)});<\/script></body></html>`;
+  const w = window.open('', '_blank', 'width=980,height=1200');
+  if (!w) return false;
+  w.document.open(); w.document.write(html); w.document.close(); w.focus();
+  return true;
+}

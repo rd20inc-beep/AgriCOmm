@@ -1238,22 +1238,25 @@ const reportingService = {
    * milling_batches / batch_source_lots / milling_costs / inventory_lots.
    */
   async getBatchLedger(batchId) {
-    const id = parseInt(batchId, 10);
-    if (!id) return null;
     const num = (v) => parseFloat(v) || 0;
+    const isNumeric = /^\d+$/.test(String(batchId));
 
-    const batch = await db('milling_batches as mb')
+    let batch = await db('milling_batches as mb')
       .leftJoin('suppliers as s', 'mb.supplier_id', 's.id')
       .leftJoin('products as p', 'mb.product_id', 'p.id')
       .leftJoin('export_orders as eo', 'mb.linked_export_order_id', 'eo.id')
-      .where('mb.id', id)
+      .where(isNumeric ? { 'mb.id': parseInt(batchId, 10) } : { 'mb.batch_no': batchId })
       .select('mb.id', 'mb.batch_no', 'mb.status', 'mb.processing_type', 'mb.raw_qty_mt',
         'mb.actual_finished_mt', 'mb.yield_pct', 'mb.operator_name', 'mb.machine_line', 'mb.shift',
         'mb.processing_hours', 'mb.created_at', 'mb.completed_at', 'mb.manual_milling_cost_pkr',
         'mb.manual_other_expenses_pkr', 'mb.raw_cost_total', 'mb.total_cost_per_kg_finished',
+        'mb.finished_price_per_mt', 'mb.b1_price_per_mt', 'mb.b2_price_per_mt', 'mb.b3_price_per_mt',
+        'mb.csr_price_per_mt', 'mb.short_grain_price_per_mt', 'mb.broken_price_per_mt',
+        'mb.powder_price_per_mt', 'mb.sweeping_price_per_mt', 'mb.sortex_rejects_price_per_mt',
         'mb.supplier_id', 's.name as supplier_name', 'p.name as product_name', 'eo.product_name as order_product')
       .first();
     if (!batch) return null;
+    const id = batch.id;
 
     const [sources, costs, outputs] = await Promise.all([
       db('batch_source_lots as bsl')
@@ -1261,33 +1264,126 @@ const reportingService = {
         .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
         .where('bsl.batch_id', id)
         .select('bsl.lot_id', 'bsl.qty_mt', 'bsl.unit_cost_pkr', 'bsl.cost_total_pkr', 'bsl.ratio_pct',
-          'l.lot_no', 'l.item_name', 'l.variety', db.raw("COALESCE(s.name,'—') as supplier")),
+          'l.lot_no', 'l.item_name', 'l.variety', 'l.supplier_id', db.raw("COALESCE(s.name,'—') as supplier")),
       db('milling_costs').where('batch_id', id).select('id', 'category', 'amount', 'notes', 'created_at').orderBy('id', 'asc'),
-      db('inventory_lots').where('batch_ref', `batch-${id}`).whereIn('type', ['finished', 'byproduct'])
-        .select('id', 'lot_no', 'type', 'item_name', 'grade', 'net_weight_kg', 'received_net_weight_kg', 'landed_cost_per_kg', 'landed_cost_total'),
+      db('inventory_lots as l').leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
+        .where('l.batch_ref', `batch-${id}`).whereIn('l.type', ['finished', 'byproduct'])
+        .select('l.id', 'l.lot_no', 'l.type', 'l.item_name', 'l.grade', 'l.variety', 'l.net_weight_kg',
+          'l.received_net_weight_kg', 'l.sold_weight_kg', 'l.reserved_qty', 'l.landed_cost_per_kg', 'l.landed_cost_total', 'w.name as warehouse_name'),
     ]);
 
+    // Sales of this batch's output lots.
+    const outIds = outputs.map(o => o.id);
+    let outSales = [];
+    if (outIds.length) {
+      outSales = await db('local_sales as ls').leftJoin('customers as c', 'ls.customer_id', 'c.id')
+        .whereIn('ls.lot_id', outIds)
+        .select('ls.id', 'ls.sale_no', 'ls.sale_date', 'ls.lot_id', 'ls.item_name', 'ls.quantity_kg',
+          'ls.total_amount', 'ls.paid_amount', 'ls.due_amount', 'ls.payment_status', 'ls.customer_id',
+          db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer"))
+        .orderBy('ls.sale_date', 'asc');
+    }
+    const outById = Object.fromEntries(outputs.map(o => [o.id, o]));
+
     const inputMt = sources.reduce((s, r) => s + num(r.qty_mt), 0);
-    const inputCostPkr = sources.reduce((s, r) => s + num(r.cost_total_pkr), 0)
-      + num(batch.manual_milling_cost_pkr) + num(batch.manual_other_expenses_pkr)
-      + costs.reduce((s, c) => s + num(c.amount), 0);
+    const rawCost = sources.reduce((s, r) => s + num(r.cost_total_pkr), 0);
+    const processingCost = num(batch.manual_milling_cost_pkr) + num(batch.manual_other_expenses_pkr)
+      + costs.filter(c => c.category !== 'raw_rice').reduce((s, c) => s + num(c.amount), 0);
+    const inputCostPkr = rawCost + processingCost;
     const outputKg = outputs.reduce((s, o) => s + (num(o.received_net_weight_kg) || num(o.net_weight_kg)), 0);
+
+    // Per-grade by-product / finished valuation price (per kg) set at yield.
+    const priceForOutput = (o) => {
+      const g = String(o.grade || '').toUpperCase();
+      const n = String(o.item_name || '').toLowerCase();
+      let perMt = 0;
+      if (o.type === 'finished') perMt = num(batch.finished_price_per_mt);
+      else if (g === 'B1') perMt = num(batch.b1_price_per_mt);
+      else if (g === 'B2') perMt = num(batch.b2_price_per_mt);
+      else if (g === 'B3') perMt = num(batch.b3_price_per_mt);
+      else if (g === 'CSR') perMt = num(batch.csr_price_per_mt);
+      else if (g === 'SHORT GRAIN') perMt = num(batch.short_grain_price_per_mt);
+      else if (n.includes('powder')) perMt = num(batch.powder_price_per_mt);
+      else if (n.includes('sweep')) perMt = num(batch.sweeping_price_per_mt);
+      else if (n.includes('sortex')) perMt = num(batch.sortex_rejects_price_per_mt);
+      else if (n.includes('broken')) perMt = num(batch.broken_price_per_mt);
+      return perMt / 1000;
+    };
+
+    const outputRows = outputs.map(o => {
+      const produced = num(o.received_net_weight_kg) || num(o.net_weight_kg);
+      const remaining = num(o.net_weight_kg);
+      const sold = num(o.sold_weight_kg) || Math.max(0, produced - remaining);
+      const cpk = num(o.landed_cost_per_kg);
+      const salePerKg = priceForOutput(o);
+      return {
+        lotId: o.id, lotNo: o.lot_no, type: o.type, item: o.grade || o.item_name, riceType: o.variety || o.item_name,
+        kg: produced, producedKg: produced, soldKg: sold, remainingKg: remaining, reservedKg: num(o.reserved_qty) * 1000,
+        costPerKg: cpk, valuePkr: num(o.landed_cost_total), onHandValue: remaining * cpk,
+        salePricePerKg: salePerKg, recoveryValue: produced * salePerKg,
+        warehouse: o.warehouse_name || null, href: `/lot-inventory/${o.id}`,
+      };
+    });
+
+    const sales = outSales.map(s => {
+      const om = outById[s.lot_id] || {}; const cpk = num(om.landed_cost_per_kg); const kg = num(s.quantity_kg);
+      return {
+        date: s.sale_date, invoice: s.sale_no, saleId: s.id, href: `/local-sales/${s.id}/invoice`,
+        customer: s.customer, customerId: s.customer_id || null,
+        product: om.grade || om.item_name || s.item_name, qtyKg: kg, amount: num(s.total_amount),
+        paid: num(s.paid_amount), due: num(s.due_amount), cost: cpk * kg, paymentStatus: s.payment_status,
+      };
+    });
+
+    // Yield summary.
+    const finishedMt = outputRows.filter(o => o.type === 'finished').reduce((s, o) => s + o.producedKg, 0) / 1000;
+    const byproductMt = outputRows.filter(o => o.type === 'byproduct').reduce((s, o) => s + o.producedKg, 0) / 1000;
+    const totalOutputMt = outputKg / 1000;
+    const lossMt = Math.max(0, inputMt - totalOutputMt);
+
+    // Financial summary.
+    const revenue = sales.reduce((s, x) => s + x.amount, 0);
+    const cogsOfSold = sales.reduce((s, x) => s + x.cost, 0);
+    const paymentReceived = sales.reduce((s, x) => s + x.paid, 0);
+    const outstanding = sales.reduce((s, x) => s + x.due, 0);
+    const realizedProfit = revenue - cogsOfSold;
+    const onHandValue = outputRows.reduce((s, o) => s + o.onHandValue, 0);
+    const remainingKg = outputRows.reduce((s, o) => s + o.remainingKg, 0);
+    const soldKg = sales.reduce((s, x) => s + x.qtyKg, 0);
+    const avgSaleRate = soldKg > 0 ? revenue / soldKg : 0;
+    const expectedProfitRemaining = remainingKg > 0 && avgSaleRate > 0 ? (remainingKg * avgSaleRate) - onHandValue : 0;
+
+    const suppliers = [];
+    const seenSup = new Set();
+    for (const r of sources) { if (r.supplier_id && !seenSup.has(r.supplier_id)) { seenSup.add(r.supplier_id); suppliers.push({ id: r.supplier_id, name: r.supplier, href: `/finance/statements?type=supplier&id=${r.supplier_id}` }); } }
 
     return {
       batch: {
         id: batch.id, batchNo: batch.batch_no, status: batch.status, processingType: batch.processing_type,
         isBlend: batch.processing_type === 'blended',
         product: batch.product_name || batch.order_product, supplier: batch.supplier_name, supplierId: batch.supplier_id,
+        suppliers,
         rawQtyMt: num(batch.raw_qty_mt), finishedMt: num(batch.actual_finished_mt), yieldPct: num(batch.yield_pct),
         operator: batch.operator_name, machineLine: batch.machine_line, shift: batch.shift,
         processingHours: num(batch.processing_hours), createdAt: batch.created_at, completedAt: batch.completed_at,
         totalCostPerKgFinished: num(batch.total_cost_per_kg_finished),
+        href: `/milling/${batch.id}`,
       },
-      inputs: sources.map(r => ({ lotId: r.lot_id, lotNo: r.lot_no, item: r.item_name, variety: r.variety, supplier: r.supplier, qtyMt: num(r.qty_mt), unitCostPkr: num(r.unit_cost_pkr), costTotalPkr: num(r.cost_total_pkr), ratioPct: num(r.ratio_pct), href: r.lot_id ? `/lot-inventory/${r.lot_id}` : null })),
+      inputs: sources.map(r => ({ lotId: r.lot_id, lotNo: r.lot_no, item: r.item_name, variety: r.variety, supplier: r.supplier, supplierId: r.supplier_id || null, qtyMt: num(r.qty_mt), unitCostPkr: num(r.unit_cost_pkr), costTotalPkr: num(r.cost_total_pkr), ratioPct: num(r.ratio_pct), href: r.lot_id ? `/lot-inventory/${r.lot_id}` : null, supplierHref: r.supplier_id ? `/finance/statements?type=supplier&id=${r.supplier_id}` : null })),
       costs: costs.map(c => ({ id: c.id, category: c.category, amount: num(c.amount), notes: c.notes })),
       manualCosts: { milling: num(batch.manual_milling_cost_pkr), other: num(batch.manual_other_expenses_pkr) },
-      outputs: outputs.map(o => ({ lotId: o.id, lotNo: o.lot_no, type: o.type, item: o.grade || o.item_name, kg: num(o.received_net_weight_kg) || num(o.net_weight_kg), costPerKg: num(o.landed_cost_per_kg), valuePkr: num(o.landed_cost_total), href: `/lot-inventory/${o.id}` })),
-      totals: { inputMt, inputCostPkr, outputKg, outputMt: outputKg / 1000, lossMt: Math.max(0, inputMt - outputKg / 1000) },
+      outputs: outputRows,
+      sales,
+      yieldSummary: { inputMt, finishedMt, byproductMt, totalOutputMt, lossMt, yieldPct: inputMt > 0 ? (finishedMt / inputMt) * 100 : num(batch.yield_pct) },
+      financialSummary: {
+        rawCost, processingCost, totalInputCost: inputCostPkr,
+        outputValue: outputRows.reduce((s, o) => s + o.valuePkr, 0),
+        revenue, cogsOfSold, realizedProfit, realizedProfitPct: revenue > 0 ? (realizedProfit / revenue) * 100 : 0,
+        paymentReceived, outstanding, onHandValue, remainingKg, expectedProfitRemaining,
+        byproductRecovery: outputRows.filter(o => o.type === 'byproduct').reduce((s, o) => s + o.recoveryValue, 0),
+        costBasis: 'Residual costing: output cost/kg distributes net purchase (raw + processing) less by-product credit (by-products valued at the per-grade sale price below). Processing cost excludes the input-rice cost.',
+      },
+      totals: { inputMt, inputCostPkr, outputKg, outputMt: totalOutputMt, lossMt },
     };
   },
 

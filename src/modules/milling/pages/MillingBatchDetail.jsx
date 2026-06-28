@@ -623,9 +623,14 @@ export default function MillingBatchDetail() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <Link to="/milling" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-3">
-          <ArrowLeft size={16} /> Back to Milling Dashboard
-        </Link>
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <Link to="/milling" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
+            <ArrowLeft size={16} /> Back to Milling Dashboard
+          </Link>
+          <Link to={`/reports/batch-ledger/${batch.dbId || batch.id}`} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
+            <BarChart3 size={14} /> Batch 360 / Ledger
+          </Link>
+        </div>
         <div className="flex flex-col sm:flex-row items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-3">

@@ -1616,10 +1616,16 @@ function BatchMarginBreakdown({ b }) {
       {/* Full processing ledger — inputs / costs / outputs (Phase 2) */}
       <BatchLedgerSection batchId={b.id} />
 
-      <button onClick={() => navigate(`/milling/${b.id}`)}
-        className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
-        <ExternalLink size={14} /> Open batch detail
-      </button>
+      <div className="flex flex-wrap gap-2">
+        <Link to={`/reports/batch-ledger/${b.id}`}
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">
+          <Factory size={14} /> Open complete Batch 360
+        </Link>
+        <button onClick={() => navigate(`/milling/${b.id}`)}
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
+          <ExternalLink size={14} /> Open batch detail
+        </button>
+      </div>
     </div>
   );
 }
