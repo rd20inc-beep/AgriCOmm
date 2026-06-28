@@ -1760,8 +1760,8 @@ function LotsTab({ params, statementHref, openDoc }) {
         <SummaryCell label="Landed value" value={fmtPKR(totValue)} />
       </div>
       <Table
-        head={['Date', 'Lot', 'Supplier', 'Rice Type', 'Received', 'Landed', 'Status', 'Value', 'Margin']}
-        align={['left', 'left', 'left', 'left', 'right', 'right', 'left', 'right', 'right']}
+        head={['Date', 'Lot', 'Supplier', 'Rice Type', 'Received', 'Landed', 'Status', 'Value', 'Margin', 'Lot 360']}
+        align={['left', 'left', 'left', 'left', 'right', 'right', 'left', 'right', 'right', 'center']}
         rowClick={rows.map(r => () => openDoc?.({ kind: 'lot', title: r.lotNo, subtitle: r.supplier, data: r }))}
         rows={rows.map(r => {
           const href = statementHref?.('supplier', r.supplierId);
@@ -1777,6 +1777,10 @@ function LotsTab({ params, statementHref, openDoc }) {
             r.hasSales
               ? <span className="inline-flex flex-col items-end leading-tight"><ProfitCell v={r.realizedMargin} /><span className={`text-[10px] ${(parseFloat(r.realizedMarginPct) || 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{(parseFloat(r.realizedMarginPct) || 0).toFixed(1)}%</span></span>
               : <span className="text-gray-400">—</span>,
+            <Link to={`/reports/lot-ledger/${r.lotId}`} onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-700 bg-blue-50 rounded hover:bg-blue-100 whitespace-nowrap">
+              <Layers size={12} /> Lot 360
+            </Link>,
           ];
         })}
       />
