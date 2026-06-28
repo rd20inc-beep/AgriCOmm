@@ -113,6 +113,16 @@ const reportingController = {
     }
   },
 
+  async payrollPending(req, res) {
+    try {
+      const data = await reportingService.getPayrollPending();
+      return res.json({ success: true, ...data });
+    } catch (err) {
+      console.error('Payroll pending error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
   async saleDetail(req, res) {
     try {
       const data = await reportingService.getSaleDetail(req.params.id);

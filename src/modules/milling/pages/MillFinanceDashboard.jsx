@@ -4,7 +4,7 @@ import {
   DollarSign, Users, Zap, Shield, TrendingUp, TrendingDown, AlertTriangle,
   Plus, UserPlus, Package, Factory, Wallet, ArrowUpRight, ArrowDownRight, Printer,
   Building2, Banknote, Receipt, Layers, Truck, ExternalLink,
-  Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X, FileText, RefreshCw, Sparkles, ArrowLeftRight, Inbox, Check, ShoppingCart,
+  Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X, FileText, RefreshCw, Sparkles, ArrowLeftRight, Inbox, Check, ShoppingCart, Clock,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
@@ -15,6 +15,7 @@ import {
   useDeleteWorkerAdvance, useAdvanceLedger,
   usePayrollSummary, useRecordAttendance, useAttendance, useBulkAttendance, useAttendanceHolidays, useInventory, useExpenseVendors,
   usePayrollRuns, usePostPayrollRun, useDeletePayrollRun, usePayrollRun, usePayrollReport,
+  useApprovePayrollRun, usePayPayrollRun, useVoidPayrollRun,
   usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow, useAcceptFundTransfer,
   useMillLotCosts, useLocalSales, useRecordPayment, usePayablePayments,
 } from '../../../api/queries';
@@ -196,6 +197,9 @@ export default function MillFinanceDashboard() {
   const { data: payrollRuns = [] } = usePayrollRuns();
   const postRunMut = usePostPayrollRun();
   const deleteRunMut = useDeletePayrollRun();
+  const approveRunMut = useApprovePayrollRun();
+  const payRunMut = usePayPayrollRun();
+  const voidRunMut = useVoidPayrollRun();
   const [showRunDrawer, setShowRunDrawer] = useState(false);
   const [runPreselect, setRunPreselect] = useState(null); // worker id to pre-select in the run drawer (per-row Pay)
   const [payslipsRunId, setPayslipsRunId] = useState(null); // open the payslips panel for a run
@@ -219,8 +223,11 @@ export default function MillFinanceDashboard() {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [payCustomer, setPayCustomer] = useState(null);
   // Pay a supplier with the same drawer the Finance dashboard uses.
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   const canPay = hasPermission('finance', 'confirm_payment');
+  // Approval workflow: only Owner / Super Admin / Finance Manager approve & pay
+  // payroll runs (Mill Manager only prepares).
+  const canApprovePayroll = ['Owner', 'Super Admin', 'Finance Manager'].includes(user?.role);
   const [payParty, setPayParty] = useState(null);
   const [paySupplier, setPaySupplier] = useState(null);
   const [payExpense, setPayExpense] = useState(null); // pay a specific mill expense
@@ -271,11 +278,14 @@ export default function MillFinanceDashboard() {
   const advancesOutstandingTotal = workers.reduce((s, w) => s + (parseFloat(w.advanceOutstanding) || 0), 0);
   // Multiple runs per month are allowed (pay employees separately) — track this
   // month's runs, who's still unpaid, and how much was already paid out.
-  const monthRuns = payrollRuns.filter(r => r.period === payrollMonth);
-  const paidThisMonth = monthRuns.reduce((s, r) => s + (parseFloat(r.netTotal) || 0), 0);
+  const monthRuns = payrollRuns.filter(r => r.period === payrollMonth && r.status !== 'voided');
+  const isPaidStatus = (s) => s === 'paid' || s === 'posted';
+  const paidThisMonth = monthRuns.filter(r => isPaidStatus(r.status)).reduce((s, r) => s + (parseFloat(r.netTotal) || 0), 0);
+  const pendingRuns = monthRuns.filter(r => r.status === 'prepared' || r.status === 'approved');
   const paidCount = payrollData?.paidCount || 0;
   const unpaidNet = payrollData?.unpaidNet ?? payrollTotal;
-  const unpaidEmployees = payrollSummary.filter(w => !w.paid && w.grossPay > 0);
+  // "Unpaid" for preparing a NEW run = employees not already in any run this month.
+  const unpaidEmployees = payrollSummary.filter(w => !w.committed && w.grossPay > 0);
   const anyUnpaid = unpaidEmployees.length > 0;
 
   const [activeTab, setActiveTab] = useState('overview');
@@ -1500,7 +1510,7 @@ export default function MillFinanceDashboard() {
                   onClick={() => openRunDrawer(null)}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
                 >
-                  <Wallet className="w-3.5 h-3.5" /> {monthRuns.length ? 'Pay Remaining' : 'Post Payroll Run'}
+                  <Wallet className="w-3.5 h-3.5" /> {monthRuns.length ? 'Prepare Remaining' : 'Prepare Payroll Run'}
                 </button>
               )}
               <button onClick={() => openWorkerDrawer(null)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-700">
@@ -1519,18 +1529,36 @@ export default function MillFinanceDashboard() {
           ) : payrollView === 'reports' ? (
             <PayrollReport companyProfile={companyProfileData} onOpenRun={(id) => setPayslipsRunId(id)} />
           ) : (<>
-          {monthRuns.length > 0 && (
+          {pendingRuns.length > 0 && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 space-y-2">
+              <div className="flex items-center gap-2 text-sm text-amber-800">
+                <Clock className="w-4 h-4" />
+                <span><span className="font-semibold">{pendingRuns.length} payroll run{pendingRuns.length > 1 ? 's' : ''} pending</span> approval/payment ({PKR(pendingRuns.reduce((s, r) => s + (parseFloat(r.netTotal) || 0), 0))}).{!canApprovePayroll ? ' Finance/Owner must approve & pay.' : ''}</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {pendingRuns.map(r => (
+                  <div key={r.id} className="inline-flex items-center gap-2 bg-white border border-amber-200 rounded-lg px-2.5 py-1 text-xs">
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${r.status === 'approved' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>{r.status}</span>
+                    <span className="text-gray-600">{r.employeeCount} emp · <span className="font-semibold tabular-nums">{PKR(r.netTotal)}</span> · {fmtDate(r.payDate)}</span>
+                    <button onClick={() => setPayslipsRunId(r.id)} className="text-blue-700 font-medium hover:underline">review</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {monthRuns.some(r => isPaidStatus(r.status)) && (
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 space-y-2">
               <div className="flex items-center gap-2 text-sm text-emerald-800">
                 <Receipt className="w-4 h-4" />
-                <span><span className="font-semibold">{PKR(paidThisMonth)} paid</span> to {paidCount} employee(s) across {monthRuns.length} run{monthRuns.length > 1 ? 's' : ''} this month{anyUnpaid ? ` · ${unpaidEmployees.length} still to pay` : ' · all paid'}.</span>
+                <span><span className="font-semibold">{PKR(paidThisMonth)} paid</span> to {paidCount} employee(s) this month{anyUnpaid ? ` · ${unpaidEmployees.length} still to prepare` : ''}.</span>
               </div>
               <div className="flex flex-wrap gap-2">
-                {monthRuns.map(r => (
+                {monthRuns.filter(r => isPaidStatus(r.status)).map(r => (
                   <div key={r.id} className="inline-flex items-center gap-2 bg-white border border-emerald-200 rounded-lg px-2.5 py-1 text-xs">
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700">paid</span>
                     <span className="text-gray-600">{r.employeeCount} emp · <span className="font-semibold tabular-nums">{PKR(r.netTotal)}</span> · {r.payMethod === 'bank' ? (r.bankName || 'bank') : 'cash'} · {fmtDate(r.payDate)}</span>
                     <button onClick={() => setPayslipsRunId(r.id)} className="text-emerald-700 font-medium hover:underline">payslips</button>
-                    <button onClick={() => handleDeleteRun(r)} disabled={deleteRunMut.isPending} className="text-rose-500 hover:text-rose-700 disabled:opacity-50">undo</button>
+                    {canApprovePayroll && <button onClick={() => handleDeleteRun(r)} disabled={deleteRunMut.isPending} className="text-rose-500 hover:text-rose-700 disabled:opacity-50">undo</button>}
                   </div>
                 ))}
               </div>
@@ -2147,20 +2175,27 @@ export default function MillFinanceDashboard() {
           employees={unpaidEmployees}
           preselectId={runPreselect}
           onClose={() => { setShowRunDrawer(false); setRunPreselect(null); }}
-          onPosted={(run) => { setShowRunDrawer(false); setRunPreselect(null); addToast(`Payroll posted — ${PKR(run.netTotal)} paid`, 'success'); setPayslipsRunId(run.id); }}
+          onPosted={(run) => { setShowRunDrawer(false); setRunPreselect(null); addToast(`Payroll run prepared — ${PKR(run.netTotal)} pending approval`, 'success'); setPayslipsRunId(run.id); }}
           postRunMut={postRunMut}
           addToast={addToast}
         />
       )}
 
-      {/* ─── PAYSLIPS PANEL ────────────────────────────────────────── */}
+      {/* ─── PAYSLIPS / RUN PANEL ──────────────────────────────────── */}
       {payslipsRunId && (
         <PayslipsPanel
           runId={payslipsRunId}
           companyProfile={companyProfileData}
+          canApprove={canApprovePayroll}
           onClose={() => setPayslipsRunId(null)}
           onUndo={(run) => { setPayslipsRunId(null); handleDeleteRun(run); }}
+          onApprove={async (run) => { try { await approveRunMut.mutateAsync(run.id); addToast('Payroll run approved', 'success'); } catch (e) { addToast(e.message, 'error'); } }}
+          onPay={async (run) => { try { await payRunMut.mutateAsync(run.id); addToast(`Payroll paid — ${PKR(run.netTotal)}`, 'success'); } catch (e) { addToast(e.message, 'error'); } }}
+          onVoid={async (run) => { try { await voidRunMut.mutateAsync({ id: run.id, reason: null }); addToast('Payroll run voided', 'success'); setPayslipsRunId(null); } catch (e) { addToast(e.message, 'error'); } }}
           deleteRunMut={deleteRunMut}
+          approveRunMut={approveRunMut}
+          payRunMut={payRunMut}
+          voidRunMut={voidRunMut}
         />
       )}
 
@@ -2885,8 +2920,8 @@ function PayrollRunDrawer({ month, employees, preselectId, onClose, onPosted, po
     <SlideDrawer
       open
       onClose={onClose}
-      title="Post Payroll Run"
-      subtitle={`Pay employees for ${month}`}
+      title="Prepare Payroll Run"
+      subtitle={`Prepare ${month} payroll for approval`}
       icon={Wallet}
       size="xl"
       footer={
@@ -2894,8 +2929,8 @@ function PayrollRunDrawer({ month, employees, preselectId, onClose, onPosted, po
           <span className="text-xs text-gray-500">{included.length} selected · advance cleared {PKR(totalAdvance)}</span>
           <div className="flex gap-2">
             <button onClick={onClose} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
-            <button onClick={post} disabled={postRunMut.isPending || !included.length} className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">
-              {postRunMut.isPending ? 'Posting…' : `Pay ${PKR(totalNet)}`}
+            <button onClick={post} disabled={postRunMut.isPending || !included.length} className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              {postRunMut.isPending ? 'Preparing…' : `Prepare run · ${PKR(totalNet)}`}
             </button>
           </div>
         </div>
@@ -2995,38 +3030,59 @@ function PayrollRunDrawer({ month, employees, preselectId, onClose, onPosted, po
             </table>
           </div>
         </div>
-        <p className="text-[11px] text-gray-400">Pays each ticked employee the amount shown (from Mill Cash) — posts to Money Out / GL, generates a payslip, and clears the advance you entered. You can run payroll again later to pay the rest.</p>
+        <p className="text-[11px] text-gray-400">Prepares a payroll run for the ticked employees — it must then be <span className="font-medium">Approved</span> and <span className="font-medium">Paid</span> (by Finance/Owner) before any cash/GL posts. Advances are only recovered when the run is paid.</p>
       </div>
     </SlideDrawer>
   );
 }
 
-// View/print payslips for a posted run.
-function PayslipsPanel({ runId, companyProfile, onClose, onUndo, deleteRunMut }) {
+// Run panel: review a run's payslip lines, see its approval status, and (for
+// Finance/Owner) Approve → Pay → or Void. Paid runs can be Undone (reversed).
+const RUN_STATUS_TONE = { prepared: 'bg-amber-100 text-amber-700', approved: 'bg-blue-100 text-blue-700', paid: 'bg-emerald-100 text-emerald-700', posted: 'bg-emerald-100 text-emerald-700', voided: 'bg-gray-100 text-gray-500' };
+function PayslipsPanel({ runId, companyProfile, canApprove, onClose, onUndo, onApprove, onPay, onVoid, deleteRunMut, approveRunMut, payRunMut, voidRunMut }) {
   const { data, isLoading } = usePayrollRun(runId);
   const run = data?.run;
   const lines = data?.lines || [];
+  const st = run?.status;
+  const isPaid = st === 'paid' || st === 'posted';
+  const busy = approveRunMut?.isPending || payRunMut?.isPending || voidRunMut?.isPending || deleteRunMut?.isPending;
   return (
     <SlideDrawer
       open
       onClose={onClose}
-      title="Payslips"
-      subtitle={run ? `${run.period} · ${PKR(run.netTotal)} paid via ${run.payMethod === 'bank' ? (run.bankName || 'bank') : 'cash'}` : ''}
+      title={isPaid ? 'Payslips' : 'Payroll Run'}
+      subtitle={run ? `${run.period} · ${PKR(run.netTotal)} · ${run.payMethod === 'bank' ? (run.bankName || 'bank') : 'cash'}` : ''}
       icon={Receipt}
       size="lg"
       footer={run && (
-        <div className="flex justify-between gap-2">
-          <button onClick={() => onUndo(run)} disabled={deleteRunMut.isPending} className="px-4 py-2 text-sm text-rose-600 bg-rose-50 rounded-lg hover:bg-rose-100 disabled:opacity-50">Undo run</button>
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex gap-2">
+            {/* Workflow actions (Finance/Owner only) */}
+            {canApprove && st === 'prepared' && <button onClick={() => onApprove(run)} disabled={busy} className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">Approve</button>}
+            {canApprove && st === 'approved' && <button onClick={() => onPay(run)} disabled={busy} className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">Pay {PKR(run.netTotal)}</button>}
+            {canApprove && (st === 'prepared' || st === 'approved') && <button onClick={() => onVoid(run)} disabled={busy} className="px-4 py-2 text-sm text-rose-600 bg-rose-50 rounded-lg hover:bg-rose-100 disabled:opacity-50">Void</button>}
+            {canApprove && isPaid && <button onClick={() => onUndo(run)} disabled={busy} className="px-4 py-2 text-sm text-rose-600 bg-rose-50 rounded-lg hover:bg-rose-100 disabled:opacity-50">Undo run</button>}
+          </div>
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Close</button>
         </div>
       )}
     >
       {isLoading ? <p className="text-sm text-gray-400">Loading…</p> : !run ? <p className="text-sm text-gray-400">Run not found.</p> : (
-        <div className="space-y-2">
-          <div className="grid grid-cols-3 gap-2 mb-2">
+        <div className="space-y-3">
+          {/* Status + workflow trail */}
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <span className={`px-2 py-0.5 rounded-full text-xs font-semibold capitalize ${RUN_STATUS_TONE[st] || 'bg-gray-100 text-gray-600'}`}>{st}</span>
+            <div className="text-[11px] text-gray-400">
+              {run.preparedByName ? `Prepared by ${run.preparedByName}` : ''}
+              {run.approvedByName ? ` · Approved by ${run.approvedByName}` : ''}
+              {run.paidByName ? ` · Paid by ${run.paidByName}` : ''}
+            </div>
+          </div>
+          {!isPaid && <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5 text-xs text-amber-800">{st === 'prepared' ? 'Pending approval — no cash/GL has posted yet.' : 'Approved — pending payment. Cash/GL posts and advances are recovered when you Pay.'}{!canApprove ? ' Finance/Owner must complete this.' : ''}</div>}
+          <div className="grid grid-cols-3 gap-2">
             <div className="rounded-lg bg-gray-50 p-2.5"><div className="text-[10px] text-gray-400 uppercase">Gross</div><div className="text-sm font-semibold tabular-nums">{PKR(run.grossTotal)}</div></div>
             <div className="rounded-lg bg-amber-50 p-2.5"><div className="text-[10px] text-amber-500 uppercase">Advances</div><div className="text-sm font-semibold tabular-nums text-amber-700">−{PKR(run.advanceTotal)}</div></div>
-            <div className="rounded-lg bg-emerald-50 p-2.5"><div className="text-[10px] text-emerald-500 uppercase">Net paid</div><div className="text-sm font-semibold tabular-nums text-emerald-700">{PKR(run.netTotal)}</div></div>
+            <div className="rounded-lg bg-emerald-50 p-2.5"><div className="text-[10px] text-emerald-500 uppercase">{isPaid ? 'Net paid' : 'Net to pay'}</div><div className="text-sm font-semibold tabular-nums text-emerald-700">{PKR(run.netTotal)}</div></div>
           </div>
           {lines.map(l => (
             <div key={l.id} className="rounded-lg border border-gray-200 p-3 flex items-center justify-between">
@@ -3036,9 +3092,11 @@ function PayslipsPanel({ runId, companyProfile, onClose, onUndo, deleteRunMut })
                   Gross {PKR(l.grossPay)}{parseFloat(l.advanceDeducted) > 0 ? ` · advance −${PKR(l.advanceDeducted)}` : ''} · <span className="text-emerald-700 font-medium">net {PKR(l.netPay)}</span>
                 </div>
               </div>
-              <button onClick={() => printPayslip(run, l, companyProfile)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
-                <Printer className="w-3.5 h-3.5" /> Payslip
-              </button>
+              {isPaid && (
+                <button onClick={() => printPayslip(run, l, companyProfile)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
+                  <Printer className="w-3.5 h-3.5" /> Payslip
+                </button>
+              )}
             </div>
           ))}
         </div>

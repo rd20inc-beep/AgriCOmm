@@ -2985,7 +2985,8 @@ const reportingService = {
     let q = db('mill_payroll_lines as l')
       .join('mill_payroll_runs as r', 'r.id', 'l.run_id')
       .leftJoin('mill_workers as w', 'w.id', 'l.worker_id')
-      .leftJoin('bank_accounts as b', 'b.id', 'r.bank_account_id');
+      .leftJoin('bank_accounts as b', 'b.id', 'r.bank_account_id')
+      .whereIn('r.status', ['paid', 'posted']); // only actually-paid runs
     if (month) q = q.where('r.period', month);
     if (from) q = q.where('r.period', '>=', from);
     if (to) q = q.where('r.period', '<=', to);
@@ -3022,7 +3023,7 @@ const reportingService = {
   async getPayrollOverview({ month } = {}) {
     const num = (v) => parseFloat(v) || 0;
     const period = /^\d{4}-\d{2}$/.test(month || '') ? month : new Date().toISOString().slice(0, 7);
-    const runAgg = await db('mill_payroll_runs').where('period', period)
+    const runAgg = await db('mill_payroll_runs').where('period', period).whereIn('status', ['paid', 'posted'])
       .select(db.raw('COALESCE(SUM(net_total),0) as net'), db.raw('COALESCE(SUM(gross_total),0) as gross'), db.raw('COALESCE(SUM(advance_total),0) as advance'), db.raw('COUNT(*) as runs')).first();
     const advOut = await db('mill_worker_advances').where('status', 'outstanding')
       .select(db.raw('COALESCE(SUM(amount - recovered_amount),0) as outstanding')).first();
@@ -3035,7 +3036,7 @@ const reportingService = {
       .whereRaw("TO_CHAR(expense_date, 'YYYY-MM') = ?", [period])
       .select(db.raw('COALESCE(SUM(COALESCE(amount_pkr, amount)),0) as total')).first();
     // 6-month net payroll trend.
-    const trendRows = await db('mill_payroll_runs')
+    const trendRows = await db('mill_payroll_runs').whereIn('status', ['paid', 'posted'])
       .select('period', db.raw('COALESCE(SUM(net_total),0) as net'))
       .groupBy('period').orderBy('period', 'desc').limit(6);
     const salaryTotal = num(salaryExp.total); const allTotal = num(allExp.total);
@@ -3050,6 +3051,27 @@ const reportingService = {
       salaryExpenseThisMonth: Math.round(salaryTotal),
       payrollPctOfExpenses: allTotal > 0 ? Math.round((salaryTotal / allTotal) * 1000) / 10 : 0,
       trend: trendRows.map((t) => ({ period: t.period, net: Math.round(num(t.net)) })).reverse(),
+    };
+  },
+
+  // ── Payroll runs awaiting approval/payment (for the Finance approval card). ──
+  // Read-only; returns Prepared + Approved runs so Finance/Owner can act on them.
+  async getPayrollPending() {
+    const num = (v) => parseFloat(v) || 0;
+    const runs = await db('mill_payroll_runs as r')
+      .leftJoin('users as up', 'up.id', 'r.created_by')
+      .leftJoin('users as ua', 'ua.id', 'r.approved_by')
+      .whereIn('r.status', ['prepared', 'approved'])
+      .orderBy('r.created_at', 'asc')
+      .select('r.id', 'r.period', 'r.pay_date', 'r.pay_method', 'r.status', 'r.gross_total', 'r.advance_total', 'r.net_total', 'r.employee_count', 'r.created_at', 'up.full_name as prepared_by_name', 'ua.full_name as approved_by_name');
+    return {
+      runs: runs.map((r) => ({
+        id: r.id, period: r.period, payDate: r.pay_date, payMethod: r.pay_method, status: r.status,
+        gross: Math.round(num(r.gross_total)), advance: Math.round(num(r.advance_total)), net: Math.round(num(r.net_total)),
+        employeeCount: r.employee_count, preparedBy: r.prepared_by_name || null, approvedBy: r.approved_by_name || null, preparedAt: r.created_at,
+      })),
+      count: runs.length,
+      netPending: runs.reduce((s, r) => s + num(r.net_total), 0),
     };
   },
 };

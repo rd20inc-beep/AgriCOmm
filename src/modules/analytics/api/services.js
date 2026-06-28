@@ -32,6 +32,7 @@ export const reportingApi = {
   invoiceLedger: (params) => api.get('/api/reporting/invoice-ledger', params),
   payrollLedger: (params) => api.get('/api/reporting/payroll-ledger', params),
   payrollOverview: (params) => api.get('/api/reporting/payroll-overview', params),
+  payrollPending: () => api.get('/api/reporting/payroll-pending'),
   inventoryLedger: (params) => api.get('/api/reporting/inventory-ledger', params),
   finishedGoodsLedger: (params) => api.get('/api/reporting/finished-goods-ledger', params),
   lotTracker: (params) => api.get('/api/reporting/lot-tracker', params),

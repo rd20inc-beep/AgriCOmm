@@ -1350,25 +1350,36 @@ async function unrecoverAdvancesForWorker(trx, workerId, amount) {
 // per-employee salary expense (business_expenses category 'salaries' tagged to
 // the employee). This stops a salary being paid twice across the two flows
 // (e.g. a manual salary expense and then a payroll run for the same month).
-async function paidWorkerIdsForPeriod(month) {
+// Per-worker payroll commitment for a month. A worker is 'paid' if in a paid/
+// posted run (or a salary expense), or 'committed' if already in a Prepared/
+// Approved run for the month (so they can't be added to a second run). Voided
+// runs free their workers. Returns Map(workerId → 'paid' | 'committed').
+async function committedWorkerStatus(month) {
   const lineRows = await db('mill_payroll_lines as pl')
     .join('mill_payroll_runs as r', 'pl.run_id', 'r.id')
-    .where('r.period', month).whereNotNull('pl.worker_id')
-    .distinct('pl.worker_id').select('pl.worker_id');
+    .where('r.period', month).whereNot('r.status', 'voided').whereNotNull('pl.worker_id')
+    .select('pl.worker_id', 'r.status');
   const expRows = await db('business_expenses')
     .where('expense_type', 'mill').where('category', 'salaries').whereNotNull('employee_id')
     .whereRaw("TO_CHAR(expense_date, 'YYYY-MM') = ?", [month])
     .distinct('employee_id').select('employee_id as worker_id');
-  return new Set([...lineRows, ...expRows].map((r) => r.worker_id));
+  const map = new Map();
+  for (const r of lineRows) {
+    const isPaid = r.status === 'paid' || r.status === 'posted';
+    const cur = map.get(r.worker_id);
+    if (isPaid || cur !== 'paid') map.set(r.worker_id, isPaid ? 'paid' : 'committed');
+  }
+  for (const e of expRows) map.set(e.worker_id, 'paid');
+  return map;
 }
 
 router.get('/payroll/summary', authorize('milling', 'view'), async (req, res) => {
   try {
     const data = await computePayrollSummary(req.query.month);
-    const paid = await paidWorkerIdsForPeriod(req.query.month);
-    data.summary = data.summary.map((w) => ({ ...w, paid: paid.has(w.id) }));
-    // Net still owed = only employees not yet paid this period.
-    data.unpaidNet = data.summary.filter((w) => !w.paid).reduce((s, w) => s + w.netPay, 0);
+    const status = await committedWorkerStatus(req.query.month);
+    data.summary = data.summary.map((w) => ({ ...w, paid: status.get(w.id) === 'paid', committed: status.has(w.id), runStatus: status.get(w.id) || null }));
+    // Net still owed = employees not yet in any run this period.
+    data.unpaidNet = data.summary.filter((w) => !w.committed).reduce((s, w) => s + w.netPay, 0);
     data.paidCount = data.summary.filter((w) => w.paid).length;
     return res.json({ success: true, data });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
@@ -1379,8 +1390,11 @@ router.get('/payroll/runs', authorize('milling', 'view'), async (req, res) => {
   try {
     const runs = await db('mill_payroll_runs as r')
       .leftJoin('bank_accounts as ba', 'r.bank_account_id', 'ba.id')
-      .select('r.*', 'ba.name as bank_name')
-      .orderBy('r.period', 'desc');
+      .leftJoin('users as up', 'up.id', 'r.created_by')
+      .leftJoin('users as ua', 'ua.id', 'r.approved_by')
+      .leftJoin('users as upd', 'upd.id', 'r.paid_by')
+      .select('r.*', 'ba.name as bank_name', 'up.full_name as prepared_by_name', 'ua.full_name as approved_by_name', 'upd.full_name as paid_by_name')
+      .orderBy('r.period', 'desc').orderBy('r.id', 'desc');
     return res.json({ success: true, data: { runs } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
@@ -1420,7 +1434,10 @@ router.get('/payroll/runs/:id', authorize('milling', 'view'), async (req, res) =
   try {
     const run = await db('mill_payroll_runs as r')
       .leftJoin('bank_accounts as ba', 'r.bank_account_id', 'ba.id')
-      .select('r.*', 'ba.name as bank_name')
+      .leftJoin('users as up', 'up.id', 'r.created_by')
+      .leftJoin('users as ua', 'ua.id', 'r.approved_by')
+      .leftJoin('users as upd', 'upd.id', 'r.paid_by')
+      .select('r.*', 'ba.name as bank_name', 'up.full_name as prepared_by_name', 'ua.full_name as approved_by_name', 'upd.full_name as paid_by_name')
       .where('r.id', req.params.id).first();
     if (!run) return res.status(404).json({ success: false, message: 'Payroll run not found.' });
     const lines = await db('mill_payroll_lines').where('run_id', run.id).orderBy('worker_name');
@@ -1436,14 +1453,21 @@ router.get('/payroll/runs/:id', authorize('milling', 'view'), async (req, res) =
 // paid at the computed net. The server always recomputes gross/basic from
 // attendance, clamps the advance to what's outstanding, and blocks anyone already
 // paid this period — so the saved numbers stay trustworthy.
-router.post('/payroll/run', authorize('milling', 'create'), noPayrollForOperator, async (req, res) => {
+// PREPARE a payroll run (approval workflow step 1). Computes + snapshots the
+// payslip lines and creates the run as 'prepared' — NO cash/GL posting and NO
+// advance recovery yet (both happen at /pay). The run must then be Approved and
+// Paid. (Gate: milling.create, not Mill Operator — preparers are Mill Manager/
+// admins; finance/owner approve & pay below.)
+router.post('/payroll/run', authorize('milling', 'create'), noPayrollForOperator,
+  auditAction('prepare', 'mill_payroll_run', (req, data) => data.data?.run?.id),
+  async (req, res) => {
   try {
     const { month, pay_method, bank_account_id, pay_date, notes, lines } = req.body;
     if (!/^\d{4}-\d{2}$/.test(month || '')) return res.status(400).json({ success: false, message: 'A valid month (YYYY-MM) is required.' });
 
     const { summary } = await computePayrollSummary(month);
     const byId = new Map(summary.map((w) => [w.id, w]));
-    const alreadyPaid = await paidWorkerIdsForPeriod(month);
+    const committed = await committedWorkerStatus(month);
 
     // Resolve which employees to pay + how much.
     let toPay;
@@ -1452,7 +1476,7 @@ router.post('/payroll/run', authorize('milling', 'create'), noPayrollForOperator
       for (const ln of lines) {
         const w = byId.get(ln.worker_id);
         if (!w) continue; // not an active employee this month
-        if (alreadyPaid.has(w.id)) return res.status(409).json({ success: false, message: `${w.name} has already been paid for ${month}.` });
+        if (committed.has(w.id)) return res.status(409).json({ success: false, message: `${w.name} is already in a payroll run for ${month}.` });
         // Per-line override: admin may use the scheduled amount, reduce it, skip
         // it (0), or enter a manual deduction — always capped to outstanding & gross.
         const requested = ln.advance_deducted != null && ln.advance_deducted !== ''
@@ -1466,9 +1490,9 @@ router.post('/payroll/run', authorize('milling', 'create'), noPayrollForOperator
         toPay.push({ ...w, advanceDeduction: advanceDeducted, netPay, skipReason: changed ? (ln.skip_reason || ln.reason || null) : null });
       }
     } else {
-      toPay = summary.filter((w) => !alreadyPaid.has(w.id));
+      toPay = summary.filter((w) => !committed.has(w.id));
     }
-    if (!toPay.length) return res.status(400).json({ success: false, message: 'No employees selected to pay (or everyone is already paid for this month).' });
+    if (!toPay.length) return res.status(400).json({ success: false, message: 'No employees to prepare (everyone is already in a run for this month).' });
 
     const grossTotal = toPay.reduce((s, w) => s + w.grossPay, 0);
     const advanceTotal = toPay.reduce((s, w) => s + w.advanceDeduction, 0);
@@ -1476,49 +1500,97 @@ router.post('/payroll/run', authorize('milling', 'create'), noPayrollForOperator
 
     const method = pay_method === 'bank' ? 'bank' : 'cash';
     const payDate = pay_date || new Date().toISOString().split('T')[0];
-    // Cash payroll draws from the Mill's own cash float (Mill Cash); bank
-    // payments use the chosen account.
     let acctId = method === 'bank' ? (bank_account_id || null) : null;
-    if (method === 'cash' && !acctId) {
-      acctId = await resolveCashAccountId(db, { entity: 'mill' });
-    }
+    if (method === 'cash' && !acctId) acctId = await resolveCashAccountId(db, { entity: 'mill' });
+
+    // Record the PREPARED run + payslip lines. No expense, no recovery yet.
+    const run = await db.transaction(async (trx) => {
+      const [r] = await trx('mill_payroll_runs').insert({
+        period: month, pay_date: payDate, pay_method: method, bank_account_id: acctId,
+        gross_total: grossTotal, advance_total: advanceTotal, net_total: netTotal,
+        employee_count: toPay.length, expense_id: null,
+        status: 'prepared', notes: notes || null, created_by: req.user?.id || null,
+      }).returning('*');
+      for (const w of toPay) {
+        await trx('mill_payroll_lines').insert({
+          run_id: r.id, worker_id: w.id, worker_name: w.name, role: w.role, pay_type: w.pay_type,
+          effective_days: w.effectiveDays || 0, ot_hours: w.totalOT || 0,
+          basic_pay: w.basicPay, ot_pay: w.otPay, gross_pay: w.grossPay,
+          advance_deducted: w.advanceDeduction, net_pay: w.netPay, skip_reason: w.skipReason || null,
+        });
+      }
+      return r;
+    });
+    return res.json({ success: true, data: { run } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// APPROVE a prepared run (step 2). Finance/Owner only. No money moves yet.
+router.post('/payroll/runs/:id/approve', authorizeRole('Owner', 'Super Admin', 'Finance Manager'),
+  auditAction('approve', 'mill_payroll_run', (req) => req.params.id),
+  async (req, res) => {
+  try {
+    const run = await db('mill_payroll_runs').where('id', req.params.id).first();
+    if (!run) return res.status(404).json({ success: false, message: 'Payroll run not found.' });
+    if (run.status !== 'prepared') return res.status(409).json({ success: false, message: `Only a Prepared run can be approved (this run is ${run.status}).` });
+    const [updated] = await db('mill_payroll_runs').where('id', run.id)
+      .update({ status: 'approved', approved_by: req.user?.id || null, approved_at: db.fn.now(), updated_at: db.fn.now() }).returning('*');
+    return res.json({ success: true, data: { run: updated } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// PAY an approved run (step 3) — NOW the cash/GL posting + advance recovery
+// happen. Finance/Owner only. Must be Approved first.
+router.post('/payroll/runs/:id/pay', authorizeRole('Owner', 'Super Admin', 'Finance Manager'),
+  auditAction('pay', 'mill_payroll_run', (req) => req.params.id),
+  async (req, res) => {
+  try {
+    const run = await db('mill_payroll_runs').where('id', req.params.id).first();
+    if (!run) return res.status(404).json({ success: false, message: 'Payroll run not found.' });
+    if (run.status !== 'approved') return res.status(409).json({ success: false, message: `Only an Approved run can be paid (this run is ${run.status}).` });
+    const lines = await db('mill_payroll_lines').where('run_id', run.id);
+    const netTotal = parseFloat(run.net_total) || 0;
 
     // 1) Pay out the net total as a paid salaries expense (cash/bank + GL).
     let expense = null;
     if (netTotal > 0) {
       expense = await expensesService.create({
         expense_type: 'mill', category: 'salaries', amount: netTotal, currency: 'PKR',
-        expense_date: payDate,
-        description: `Salaries — payroll run ${month}`,
-        notes: notes || `Payroll ${month}: ${toPay.length} employee(s) · gross ${grossTotal} · advances ${advanceTotal} · net ${netTotal}`,
-        pay_now: true, bank_account_id: acctId,
-        payment_method: method,
+        expense_date: run.pay_date,
+        description: `Salaries — payroll run ${run.period}`,
+        notes: run.notes || `Payroll ${run.period}: ${run.employee_count} employee(s) · net ${netTotal}`,
+        pay_now: true, bank_account_id: run.bank_account_id,
+        payment_method: run.pay_method || 'cash',
       }, req.user?.id);
     }
 
-    // 2) Record the run + payslip lines, and recover deducted advances.
-    const run = await db.transaction(async (trx) => {
-      const [r] = await trx('mill_payroll_runs').insert({
-        period: month, pay_date: payDate, pay_method: method, bank_account_id: acctId,
-        gross_total: grossTotal, advance_total: advanceTotal, net_total: netTotal,
-        employee_count: toPay.length, expense_id: expense?.id || null,
-        status: 'posted', notes: notes || null, created_by: req.user?.id || null,
-      }).returning('*');
-      for (const w of toPay) {
-        const [line] = await trx('mill_payroll_lines').insert({
-          run_id: r.id, worker_id: w.id, worker_name: w.name, role: w.role, pay_type: w.pay_type,
-          effective_days: w.effectiveDays || 0, ot_hours: w.totalOT || 0,
-          basic_pay: w.basicPay, ot_pay: w.otPay, gross_pay: w.grossPay,
-          advance_deducted: w.advanceDeduction, net_pay: w.netPay,
-        }).returning('id');
-        const lineId = line?.id || line;
-        if (w.advanceDeduction > 0) await recoverAdvancesForWorker(trx, w.id, w.advanceDeduction, { period: month, runId: r.id, lineId });
-        // Reduced/skipped vs the schedule, with a reason → mark this period's rows skipped.
-        if (w.skipReason) await markPeriodSkipped(trx, w.id, month, w.skipReason);
+    // 2) Recover the advances each line cleared + mark the run Paid.
+    const updated = await db.transaction(async (trx) => {
+      for (const l of lines) {
+        const ded = parseFloat(l.advance_deducted) || 0;
+        if (ded > 0 && l.worker_id) await recoverAdvancesForWorker(trx, l.worker_id, ded, { period: run.period, runId: run.id, lineId: l.id });
+        if (l.skip_reason && l.worker_id) await markPeriodSkipped(trx, l.worker_id, run.period, l.skip_reason);
       }
+      const [r] = await trx('mill_payroll_runs').where('id', run.id)
+        .update({ status: 'paid', expense_id: expense?.id || null, paid_by: req.user?.id || null, paid_at: trx.fn.now(), updated_at: trx.fn.now() }).returning('*');
       return r;
     });
-    return res.json({ success: true, data: { run } });
+    return res.json({ success: true, data: { run: updated } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// VOID a Prepared/Approved run (before payment). Nothing posted yet, so just
+// mark it voided — frees its workers for a new run. (Paid runs use DELETE.)
+router.post('/payroll/runs/:id/void', authorizeRole('Owner', 'Super Admin', 'Finance Manager'),
+  auditAction('void', 'mill_payroll_run', (req) => req.params.id),
+  async (req, res) => {
+  try {
+    const run = await db('mill_payroll_runs').where('id', req.params.id).first();
+    if (!run) return res.status(404).json({ success: false, message: 'Payroll run not found.' });
+    if (!['prepared', 'approved'].includes(run.status)) return res.status(409).json({ success: false, message: `Only a Prepared/Approved run can be voided (this run is ${run.status}). Use delete to reverse a paid run.` });
+    const [updated] = await db('mill_payroll_runs').where('id', run.id)
+      .update({ status: 'voided', voided_by: req.user?.id || null, voided_at: db.fn.now(), void_reason: req.body?.reason || null, updated_at: db.fn.now() }).returning('*');
+    return res.json({ success: true, data: { run: updated } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -1528,6 +1600,12 @@ router.delete('/payroll/runs/:id', authorize('milling', 'delete'), noPayrollForO
   try {
     const run = await db('mill_payroll_runs').where('id', req.params.id).first();
     if (!run) return res.status(404).json({ success: false, message: 'Payroll run not found.' });
+    // A Prepared/Approved/Voided run never posted money or recovered advances —
+    // just delete it (lines cascade). Only paid/posted runs need reversal.
+    if (!['paid', 'posted'].includes(run.status)) {
+      await db('mill_payroll_runs').where('id', run.id).del();
+      return res.json({ success: true, data: { deleted: run.id } });
+    }
     await db.transaction(async (trx) => {
       // Precise reversal via the schedule rows this run recovered (new runs);
       // fall back to amount-based reversal for legacy runs without schedule rows.

@@ -1449,6 +1449,20 @@ export function useDeletePayrollRun() {
   });
 }
 
+// Approval workflow: approve / pay / void a payroll run.
+export function useApprovePayrollRun() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id) => millingApi.approvePayrollRun(id), onSuccess: () => { invalidatePayroll(qc); qc.invalidateQueries({ queryKey: ['payroll-pending'] }); } });
+}
+export function usePayPayrollRun() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id) => millingApi.payPayrollRun(id), onSuccess: () => { invalidatePayroll(qc); qc.invalidateQueries({ queryKey: ['payroll-pending'] }); } });
+}
+export function useVoidPayrollRun() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: ({ id, reason }) => millingApi.voidPayrollRun(id, reason), onSuccess: () => { invalidatePayroll(qc); qc.invalidateQueries({ queryKey: ['payroll-pending'] }); } });
+}
+
 export function useMills() {
   return useQuery({
     queryKey: ['mills'],

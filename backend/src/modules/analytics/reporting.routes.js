@@ -22,6 +22,7 @@ router.get('/batch-ledger/:id', authorize('reports', 'view'), controller.batchLe
 router.get('/invoice-ledger', authorize('reports', 'view'), noFinanceForOperator, controller.invoiceLedger);
 router.get('/payroll-ledger', authorize('reports', 'view'), noFinanceForOperator, controller.payrollLedger);
 router.get('/payroll-overview', authorize('reports', 'view'), noFinanceForOperator, controller.payrollOverview);
+router.get('/payroll-pending', authorize('reports', 'view'), noFinanceForOperator, controller.payrollPending);
 router.get('/sale-detail/:id', authorize('reports', 'view'), noFinanceForOperator, controller.saleDetail);
 router.get('/inventory-ledger', authorize('reports', 'view'), controller.inventoryLedger);
 router.get('/finished-goods-ledger', authorize('reports', 'view'), controller.finishedGoodsLedger);

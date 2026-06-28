@@ -1136,10 +1136,13 @@ COL mill_payroll_lines.ot_pay:numeric:NOT NULL
 COL mill_payroll_lines.pay_type:character varying:NULL
 COL mill_payroll_lines.role:character varying:NULL
 COL mill_payroll_lines.run_id:integer:NOT NULL
+COL mill_payroll_lines.skip_reason:text:NULL
 COL mill_payroll_lines.updated_at:timestamp with time zone:NOT NULL
 COL mill_payroll_lines.worker_id:integer:NULL
 COL mill_payroll_lines.worker_name:character varying:NOT NULL
 COL mill_payroll_runs.advance_total:numeric:NOT NULL
+COL mill_payroll_runs.approved_at:timestamp with time zone:NULL
+COL mill_payroll_runs.approved_by:integer:NULL
 COL mill_payroll_runs.bank_account_id:integer:NULL
 COL mill_payroll_runs.created_at:timestamp with time zone:NOT NULL
 COL mill_payroll_runs.created_by:integer:NULL
@@ -1149,11 +1152,16 @@ COL mill_payroll_runs.gross_total:numeric:NOT NULL
 COL mill_payroll_runs.id:integer:NOT NULL
 COL mill_payroll_runs.net_total:numeric:NOT NULL
 COL mill_payroll_runs.notes:text:NULL
+COL mill_payroll_runs.paid_at:timestamp with time zone:NULL
+COL mill_payroll_runs.paid_by:integer:NULL
 COL mill_payroll_runs.pay_date:date:NOT NULL
 COL mill_payroll_runs.pay_method:character varying:NOT NULL
 COL mill_payroll_runs.period:character varying:NOT NULL
 COL mill_payroll_runs.status:character varying:NOT NULL
 COL mill_payroll_runs.updated_at:timestamp with time zone:NOT NULL
+COL mill_payroll_runs.void_reason:text:NULL
+COL mill_payroll_runs.voided_at:timestamp with time zone:NULL
+COL mill_payroll_runs.voided_by:integer:NULL
 COL mill_performance.avg_bran_pct:numeric:NULL
 COL mill_performance.avg_broken_pct:numeric:NULL
 COL mill_performance.avg_cost_per_mt:numeric:NULL

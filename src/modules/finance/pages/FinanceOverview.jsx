@@ -2,6 +2,8 @@ import { useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { reportingApi } from '../../analytics/api/services';
+import { useAuth } from '../../../context/AuthContext';
+import { useApprovePayrollRun, usePayPayrollRun } from '../../../api/queries';
 import {
   Landmark, ArrowDownLeft, ArrowUpRight,
   TrendingUp, TrendingDown, AlertTriangle,
@@ -199,6 +201,9 @@ export default function FinanceOverview() {
           hintBad={(summary.collectionRate || 0) < 80}
         />
       </div>
+
+      {/* ─── PAYROLL APPROVALS (Finance/Owner only, when pending) ──── */}
+      <PayrollApprovalsCard fmtPKR={fmtPKR} />
 
       {/* ─── PAYROLL SUMMARY (consolidated from mill payroll) ──────── */}
       <PayrollSummaryStrip navigate={navigate} fmtPKR={fmtPKR} />
@@ -677,6 +682,50 @@ function PayrollSummaryStrip({ navigate, fmtPKR }) {
         ))}
       </div>
       <p className="text-[11px] text-gray-400 mt-2">Operational payroll (employees, attendance, runs, advances) lives in Mill Finance → Payroll.</p>
+    </div>
+  );
+}
+
+// Pending payroll approvals — Finance/Owner can Approve a Prepared run or Pay an
+// Approved one without leaving the Finance dashboard. Hidden for non-approvers /
+// when nothing is pending. Calls the role-gated milling approve/pay endpoints.
+function PayrollApprovalsCard({ fmtPKR }) {
+  const { user } = useAuth();
+  const canApprove = ['Owner', 'Super Admin', 'Finance Manager'].includes(user?.role);
+  const approveMut = useApprovePayrollRun();
+  const payMut = usePayPayrollRun();
+  const { data, isError, refetch } = useQuery({
+    queryKey: ['payroll-pending'],
+    enabled: canApprove,
+    queryFn: async () => { const res = await reportingApi.payrollPending(); return res?.runs ? res : (res?.data || res); },
+    retry: false,
+  });
+  if (!canApprove || isError) return null;
+  const runs = data?.runs || [];
+  if (!runs.length) return null;
+  const busy = approveMut.isPending || payMut.isPending;
+  return (
+    <div className="bg-white rounded-xl border border-amber-200 p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-gray-900 inline-flex items-center gap-2"><Clock size={16} className="text-amber-600" /> Payroll awaiting approval</h3>
+        <span className="text-xs text-amber-700 font-medium">{fmtPKR(data?.netPending || 0)} pending</span>
+      </div>
+      <div className="space-y-2">
+        {runs.map((r) => (
+          <div key={r.id} className="flex items-center justify-between flex-wrap gap-2 rounded-lg border border-gray-100 bg-gray-50/50 px-3 py-2">
+            <div className="text-sm text-gray-700">
+              <span className={`mr-2 px-1.5 py-0.5 rounded text-[10px] font-semibold capitalize ${r.status === 'approved' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>{r.status}</span>
+              <span className="font-medium">{r.period}</span> · {r.employeeCount} emp · <span className="tabular-nums font-semibold">{fmtPKR(r.net)}</span>
+              <span className="text-[11px] text-gray-400"> · prepared by {r.preparedBy || '—'}</span>
+            </div>
+            <div className="flex gap-2">
+              {r.status === 'prepared' && <button disabled={busy} onClick={() => approveMut.mutate(r.id)} className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">Approve</button>}
+              {r.status === 'approved' && <button disabled={busy} onClick={() => payMut.mutate(r.id, { onSuccess: () => refetch() })} className="px-3 py-1.5 text-xs font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">Pay {fmtPKR(r.net)}</button>}
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="text-[11px] text-gray-400 mt-2">Approving has no financial effect; paying posts the salary expense to Money Out / GL and recovers scheduled advances. Prepare runs in Mill Finance → Payroll.</p>
     </div>
   );
 }
