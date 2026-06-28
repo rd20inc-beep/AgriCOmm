@@ -75,6 +75,7 @@ const StockSummary = lazyWithReload(() => import('./modules/inventory/pages/Stoc
 const StockCount = lazyWithReload(() => import('./modules/inventory/pages/StockCount'));
 const LocalSales = lazyWithReload(() => import('./modules/localSales/pages/LocalSales'));
 const LotDetail = lazyWithReload(() => import('./modules/inventory/pages/LotDetail'));
+const PurchaseInvoiceView = lazyWithReload(() => import('./modules/inventory/pages/PurchaseInvoiceView'));
 const ExceptionDashboard = lazyWithReload(() => import('./modules/analytics/pages/ExceptionDashboard'));
 const AiAssistant = lazyWithReload(() => import('./modules/ai/pages/AiAssistant'));
 const Intelligence = lazyWithReload(() => import('./modules/analytics/pages/Intelligence'));
@@ -177,6 +178,7 @@ function MillRoutes() {
         <Route path="/lot-inventory" element={<LotInventory />} />
         <Route path="/stock-summary" element={<StockSummary />} />
         <Route path="/stock-count" element={<StockCount />} />
+        <Route path="/lot-inventory/:id/purchase-invoice" element={<PurchaseInvoiceView />} />
         <Route path="/lot-inventory/:id" element={<LotDetail />} />
         <Route path="/local-sales" element={<LocalSales />} />
         <Route path="/local-sales/:id/invoice" element={<InvoiceView />} />
@@ -217,6 +219,7 @@ function StandardRoutes() {
         <Route path="/local-sales/:id/invoice" element={<ProtectedRoute module="inventory" action="view"><InvoiceView /></ProtectedRoute>} />
         <Route path="/local-sales/:id/print" element={<ProtectedRoute module="inventory" action="view"><InvoiceView /></ProtectedRoute>} />
         <Route path="/local-sales/:id" element={<ProtectedRoute module="inventory" action="view"><LocalSaleDetail /></ProtectedRoute>} />
+        <Route path="/lot-inventory/:id/purchase-invoice" element={<ProtectedRoute module="inventory" action="view"><PurchaseInvoiceView /></ProtectedRoute>} />
         <Route path="/lot-inventory/:id" element={<ProtectedRoute module="inventory" action="view"><LotDetail /></ProtectedRoute>} />
         <Route path="/documents" element={<ProtectedRoute module="documents" action="view"><Documents /></ProtectedRoute>} />
         {/* Mill Store — was previously only in MillRoutes, so non-Mill-Manager

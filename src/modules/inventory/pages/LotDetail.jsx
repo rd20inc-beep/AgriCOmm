@@ -296,6 +296,12 @@ export default function LotDetail() {
             <Plus className="w-4 h-4" /> Add Purchase
           </button>
         )}
+        {/* Purchase Invoice / GRN — for purchased rice lots. */}
+        {lot.type === 'raw' && (
+          <Link to={`/lot-inventory/${lot.id}/purchase-invoice`} className="btn btn-sm btn-secondary">
+            <FileText className="w-4 h-4" /> Purchase Invoice
+          </Link>
+        )}
         {/* Move finished/by-product stock from the mill entity to export. */}
         {(lot.type === 'finished' || lot.type === 'byproduct')
           && lot.entity === 'mill'

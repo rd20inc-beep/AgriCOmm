@@ -13,6 +13,7 @@ export const lotInventoryApi = {
   listLots: (params) => api.get('/api/lot-inventory/lots', params),
   getLot: (id) => api.get(`/api/lot-inventory/lots/${id}`),
   getLotTransactions: (id) => api.get(`/api/lot-inventory/lots/${id}/transactions`),
+  getPurchaseInvoice: (id) => api.get(`/api/lot-inventory/lots/${id}/purchase-invoice`),
   createPurchaseLot: (data) => api.post('/api/lot-inventory/lots/purchase', data),
   addPurchaseToLot: (id, data) => api.post(`/api/lot-inventory/lots/${id}/add-purchase`, data),
   // Lot-level vehicles + multi-pass Start Milling

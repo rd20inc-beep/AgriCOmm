@@ -40,6 +40,7 @@ router.get('/lots', authorize('inventory', 'view'), controller.listLots);
 router.get('/lots-report', authorize('inventory', 'view'), controller.getLotsReport);
 router.get('/lots/:id', authorize('inventory', 'view'), controller.getLotDetail);
 router.get('/lots/:id/transactions', authorize('inventory', 'view'), controller.getLotTransactions);
+router.get('/lots/:id/purchase-invoice', authorize('inventory', 'view'), controller.getPurchaseInvoice);
 
 // Create lot from purchase
 router.post(

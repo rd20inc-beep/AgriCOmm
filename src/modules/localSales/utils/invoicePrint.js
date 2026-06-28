@@ -197,3 +197,62 @@ export function printAdminInvoice(data, company) {
   `;
   return openPrint(`Admin Invoice ${sale.invoiceNo}`, inner);
 }
+
+// Purchase Invoice / GRN for a purchased rice lot — supplier, item, intake
+// vehicle(s), landed cost, supplier payment. Mirrors the sales invoice layout.
+export function printPurchaseInvoice(data, company) {
+  const { purchase: p, costs = {}, intakeVehicles = [], payments = [] } = data;
+  const vehRows = (intakeVehicles || []).map(v => `<tr>
+    <td>${esc(v.vehicleNo)}</td><td>${esc(v.driverName || '—')}</td>
+    <td class="r">${(v.weightMt || 0).toFixed(2)}</td><td class="r">${v.totalBags != null ? v.totalBags : '—'}</td><td>${dt(v.arrivalDate)}</td>
+  </tr>`).join('');
+  const payRows = (payments || []).map(e => `<tr>
+    <td>${dt(e.date)}</td><td>${e.kind === 'created' ? 'Purchase recorded' : esc(e.paymentNo || 'Payment')}</td>
+    <td>${e.kind === 'created' ? '—' : esc((e.mode || '').replace(/_/g, ' '))}${e.reference ? ` · ${esc(e.reference)}` : ''}</td>
+    <td class="r">${e.kind === 'payment' ? '−' + pkr(e.amount) : pkr(e.amount)}</td><td class="r">${pkr(e.balance)}</td>
+  </tr>`).join('');
+  const inner = `
+    <div class="row">
+      <div>${companyBlock(company)}</div>
+      <div><div class="doc-title">PURCHASE INVOICE</div><div class="doc-sub">${esc(p.purchaseNo)}</div><div class="doc-sub">${dt(p.date)}</div></div>
+    </div>
+    <hr class="hr"/>
+    <div class="meta">
+      <span><span class="k">Supplier</span><br/><span class="v">${esc(p.supplier)}</span></span>
+      <span><span class="k">Payment status</span><br/><span class="v">${esc(p.paymentStatus || '—')}</span></span>
+      <span><span class="k">Phone</span><br/><span class="v">${esc(p.supplierPhone || '—')}</span></span>
+      <span><span class="k">Warehouse</span><br/><span class="v">${esc(p.warehouse || '—')}</span></span>
+      <span><span class="k">Address</span><br/><span class="v">${esc(p.supplierAddress || '—')}</span></span>
+      <span><span class="k">Lot no</span><br/><span class="v">${esc(p.purchaseNo)}</span></span>
+    </div>
+    <table>
+      <thead><tr><th>Rice Type</th><th>Grade</th><th class="r">Quantity</th><th class="r">Bags</th><th class="r">Rate</th><th class="r">Amount</th></tr></thead>
+      <tbody><tr>
+        <td>${esc(p.riceType)}</td><td>${esc(p.grade || '—')}</td>
+        <td class="r">${n0(p.quantityKg)} kg<div class="muted">${(p.quantityMt || 0).toFixed(2)} MT</div></td>
+        <td class="r">${p.bags != null ? n0(p.bags) : '—'}${p.bagWeightKg ? `<div class="muted">${p.bagWeightKg} kg</div>` : ''}</td>
+        <td class="r">${p.ratePerKg > 0 ? pkr(p.ratePerKg) + '/kg' : '—'}</td>
+        <td class="r">${pkr(p.amount)}</td>
+      </tr></tbody>
+    </table>
+    <table class="totals">
+      <tr><td>Rice cost</td><td class="r">${pkr(costs.riceCost ?? p.amount)}</td></tr>
+      ${costs.transport ? `<tr><td>Transport${costs.transportVendor ? ' (' + esc(costs.transportVendor) + ')' : ''}</td><td class="r">${pkr(costs.transport)}</td></tr>` : ''}
+      ${costs.unloading ? `<tr><td>Unloading</td><td class="r">${pkr(costs.unloading)}</td></tr>` : ''}
+      ${costs.labor ? `<tr><td>Labour</td><td class="r">${pkr(costs.labor)}</td></tr>` : ''}
+      ${costs.packing ? `<tr><td>Packing</td><td class="r">${pkr(costs.packing)}</td></tr>` : ''}
+      ${costs.other ? `<tr><td>Other</td><td class="r">${pkr(costs.other)}</td></tr>` : ''}
+      <tr class="grand"><td>Landed total</td><td class="r">${pkr(p.landedTotal)}</td></tr>
+      <tr><td>Paid</td><td class="r">${pkr(p.paid)}</td></tr>
+      <tr><td>Outstanding</td><td class="r">${pkr(p.outstanding)}</td></tr>
+    </table>
+    <div class="sec"><h4>Inbound (purchase) vehicles</h4>
+      ${vehRows ? `<table><thead><tr><th>Vehicle</th><th>Driver</th><th class="r">Weight (MT)</th><th class="r">Bags</th><th>Arrived</th></tr></thead><tbody>${vehRows}</tbody></table>`
+        : '<div class="note">No intake vehicle recorded for this lot.</div>'}
+    </div>
+    ${payRows ? `<div class="sec"><h4>Payment Timeline</h4><table><thead><tr><th>Date</th><th>Ref</th><th>Mode</th><th class="r">Amount</th><th class="r">Balance</th></tr></thead><tbody>${payRows}</tbody></table></div>` : ''}
+    <div class="sign"><div>Received By</div><div>Checked By</div><div>Approved By</div><div>Supplier Signature</div></div>
+    <div class="note">Goods received note / purchase record.</div>
+  `;
+  return openPrint(`Purchase ${p.purchaseNo}`, inner);
+}

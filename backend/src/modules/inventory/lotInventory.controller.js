@@ -334,6 +334,96 @@ module.exports = {
     }
   },
 
+  // Purchase Invoice / GRN for a purchased rice lot — mirrors the sales invoice
+  // (header, item, intake vehicle(s), supplier payment timeline, traceability).
+  // Read-only; raw (purchased) lots only. No change to purchase/stock/payable
+  // logic — it just assembles what already exists.
+  async getPurchaseInvoice(req, res) {
+    try {
+      const { id } = req.params;
+      const num = (v) => parseFloat(v) || 0;
+      const isNumeric = /^\d+$/.test(id);
+      const lot = await db('inventory_lots as l')
+        .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
+        .leftJoin('products as p', 'l.product_id', 'p.id')
+        .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
+        .leftJoin('suppliers as tv', 'l.transport_vendor_id', 'tv.id')
+        .where(isNumeric ? { 'l.id': +id } : { 'l.lot_no': id })
+        .select('l.*', 'w.name as warehouse_name', 'p.name as product_name',
+          's.name as supplier_name', 's.phone as supplier_phone', 's.address as supplier_address', 's.email as supplier_email',
+          'tv.name as transport_vendor_name')
+        .first();
+      if (!lot) return res.status(404).json({ success: false, message: 'Lot not found.' });
+      if (lot.type !== 'raw') {
+        return res.status(400).json({ success: false, message: 'A purchase invoice is only available for purchased rice lots.' });
+      }
+
+      const vehs = await db('milling_vehicle_arrivals').where('lot_id', lot.id)
+        .select('vehicle_no', 'driver_name', 'driver_phone', 'weight_mt', 'total_bags', 'arrival_date')
+        .orderBy('id', 'asc');
+
+      // Supplier payable for this lot (auto-created with linked_ref = lot_no).
+      const payable = await db('payables')
+        .where('linked_ref', lot.lot_no).andWhere('category', 'Raw Material').first();
+      const pays = await db('payments')
+        .where(function () {
+          this.where(function () { this.where('source_table', 'inventory_lots').andWhere('source_id', lot.id); });
+          if (payable) this.orWhere('linked_payable_id', payable.id);
+          this.orWhere('notes', 'ilike', `%${lot.lot_no}%`);
+        })
+        .andWhere('type', 'payment')
+        .select('id', 'payment_no', 'payment_date', 'payment_method', 'amount', 'bank_reference', 'cleared', 'notes')
+        .orderBy('payment_date', 'asc').orderBy('id', 'asc');
+
+      const qtyKg = num(lot.received_net_weight_kg) || num(lot.net_weight_kg);
+      const amount = num(lot.purchase_amount) || num(lot.rate_per_kg) * qtyKg;
+      const landed = num(lot.landed_cost_total) || amount;
+      const paid = num(lot.paid_amount);
+      const outstanding = num(lot.due_amount);
+
+      const timeline = [{ kind: 'created', date: lot.purchase_date || lot.created_at, label: 'Purchase recorded', amount: landed, balance: landed }];
+      let bal = landed;
+      for (const p of pays) {
+        bal = Math.max(0, bal - num(p.amount));
+        timeline.push({ kind: 'payment', date: p.payment_date, paymentNo: p.payment_no, mode: p.payment_method, reference: p.bank_reference || null, cleared: p.cleared !== false, amount: num(p.amount), balance: bal });
+      }
+
+      return res.json({
+        success: true,
+        data: {
+          purchase: {
+            id: lot.id, purchaseNo: lot.lot_no, date: lot.purchase_date || lot.created_at,
+            supplier: lot.supplier_name || '—', supplierId: lot.supplier_id || null,
+            supplierPhone: lot.supplier_phone || null, supplierAddress: lot.supplier_address || null,
+            warehouse: lot.warehouse_name || null,
+            riceType: lot.variety || lot.product_name || lot.item_name || '—',
+            variety: lot.variety || null, grade: lot.grade || null,
+            quantityKg: qtyKg, quantityMt: qtyKg / 1000,
+            bags: lot.total_bags != null ? Number(lot.total_bags) : null, bagWeightKg: num(lot.bag_weight_kg) || null,
+            ratePerKg: num(lot.rate_per_kg), landedCostPerKg: num(lot.landed_cost_per_kg),
+            amount, landedTotal: landed, paymentStatus: lot.payment_status,
+            paid, outstanding,
+            supplierHref: lot.supplier_id ? `/finance/statements?type=supplier&id=${lot.supplier_id}` : null,
+            lotHref: `/lot-inventory/${lot.id}`,
+          },
+          costs: {
+            riceCost: num(lot.purchase_amount) || num(lot.rate_per_kg) * qtyKg,
+            transport: num(lot.transport_cost), transportVendor: lot.transport_vendor_name || null,
+            unloading: num(lot.unloading_cost), labor: num(lot.labor_cost),
+            packing: num(lot.packing_cost), other: num(lot.other_cost),
+            landedTotal: landed,
+          },
+          intakeVehicles: vehs.map(v => ({ vehicleNo: v.vehicle_no, driverName: v.driver_name || null, driverPhone: v.driver_phone || null, weightMt: num(v.weight_mt), totalBags: v.total_bags != null ? Number(v.total_bags) : null, arrivalDate: v.arrival_date || null })),
+          payments: timeline,
+          payable: payable ? { payNo: payable.pay_no, outstanding: num(payable.outstanding), status: payable.status } : null,
+        },
+      });
+    } catch (err) {
+      console.error('getPurchaseInvoice error:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
   // ─── Multi-lot printable report ───
   // Returns the FULL detail bundle for several lots at once so the Lot Reports
   // page can render/print one or many lots. Accepts either an explicit list of
