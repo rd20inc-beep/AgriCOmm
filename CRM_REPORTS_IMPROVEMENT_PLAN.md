@@ -302,8 +302,14 @@ Stock Value     = on-hand qty × cost/kg   (NOT frozen landed_cost_total)
 - ✅ Production-only operator dashboard (`operatorScoped`): Reports limited to Production · Quality · Inventory; money KPI strip hidden; Inventory shown quantity-only (no value/cost columns anywhere, incl. CSV/print). Production-view banner.
 - Owner/Super Admin/Finance keep full reports; Mill Manager keeps its existing finance-capable mill view (it legitimately holds finance perms — the plan matrix's finance-free "Mill Manager" column is realised as the new Mill Operator). Assign users to the new role via Admin → Users (it appears automatically in the role list).
 
-### Phase 5 — Future (explicitly out of scope now)
-Self-serve report builder · configurable widgets · scheduled/emailed reports · full AI analyst · mobile reporting app · analytics warehouse · multi-branch.
+### Phase 5 — Advanced (built on request)
+- ✅ **Scheduled / emailed reports** (shipped #73, prod-verified): reuses the hourly scheduler (`scheduled_tasks` task_type='report_email') + nodemailer; CRUD + send-now from a "Schedule" drawer in Reports. 4 report types; cadence daily/weekly/monthly.
+- ✅ **AI report analyst** (shipped #73, prod-verified): surfaces the existing `/api/ai` NL→read-only-SQL analyst in an "Ask AI" drawer (answer table + explanation + SQL); `/api/ai/*` data routes hardened with `denyRoles('Mill Operator')`.
+- ✅ **Self-serve report builder** (shipped #73, prod-verified): "Build" drawer — pick dataset (lots/sales/finished goods/inventory movements) · choose columns · filter · sort · preview · CSV/print (LedgerExportBar) · save layouts (localStorage).
+- ⛔ **Not built (out of scope / inappropriate):** mobile reporting app + analytics warehouse (separate products / infra); multi-branch (contradicts the single-entity mill+export data model and the brief's "no multi-branch"). Configurable dashboard widgets folded into the report builder + saved views.
+
+### Deferred (minor)
+- Universal filter bar across *every* tab/endpoint — done where high-value (inventory ledger warehouse filter, finished-goods type filter; range + global search elsewhere). Further per-endpoint dimensions to be added only on concrete need (avoids over-engineering for the data sizes).
 
 ---
 
