@@ -1316,6 +1316,15 @@ export function useWorkerLedger(workerId) {
   });
 }
 
+// One advance's recovery plan, schedule rows and debit/credit ledger.
+export function useAdvanceLedger(advanceId) {
+  return useQuery({
+    queryKey: ['advance-ledger', advanceId],
+    enabled: !!advanceId,
+    queryFn: async () => { const res = await millingApi.advanceLedger(advanceId); return res?.data || res || {}; },
+  });
+}
+
 export function useCreateWorkerAdvance() {
   const qc = useQueryClient();
   return useMutation({

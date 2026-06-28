@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, Fragment } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   DollarSign, Users, Zap, Shield, TrendingUp, TrendingDown, AlertTriangle,
@@ -12,7 +12,7 @@ import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import {
   useMillExpenses, useCreateMillExpense, useRecurringExpenses, useMaterializeRecurring, useRunDueRecurring, useCategorizeExpense, useMillWorkers, useCreateMillWorker,
   useUpdateMillWorker, useDeleteMillWorker, useCreateWorkerAdvance, useWorkerAdvances, useWorkerLedger,
-  useDeleteWorkerAdvance,
+  useDeleteWorkerAdvance, useAdvanceLedger,
   usePayrollSummary, useRecordAttendance, useAttendance, useBulkAttendance, useAttendanceHolidays, useInventory, useExpenseVendors,
   usePayrollRuns, usePostPayrollRun, useDeletePayrollRun, usePayrollRun, usePayrollReport,
   usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow, useAcceptFundTransfer,
@@ -298,7 +298,7 @@ export default function MillFinanceDashboard() {
   const EMPTY_WORKER = { id: null, name: '', role: 'laborer', pay_type: 'daily', daily_wage: '', monthly_salary: '', phone: '', cnic: '', joined_date: new Date().toISOString().split('T')[0], notes: '' };
   const [workerForm, setWorkerForm] = useState(EMPTY_WORKER);
   const [advanceTarget, setAdvanceTarget] = useState(null); // worker we're giving an advance to
-  const [advanceForm, setAdvanceForm] = useState({ amount: '', advance_date: new Date().toISOString().split('T')[0], payment_method: 'cash', notes: '' });
+  const [advanceForm, setAdvanceForm] = useState({ amount: '', advance_date: new Date().toISOString().split('T')[0], payment_method: 'cash', notes: '', recovery_method: 'full_next_salary', recovery_start_period: '', installment_amount: '', installment_count: '', deduction_percent: '' });
   const [deleteWorkerTarget, setDeleteWorkerTarget] = useState(null); // confirm-delete state
   const [advancesPanelWorker, setAdvancesPanelWorker] = useState(null); // view advances drawer
   const [ledgerWorker, setLedgerWorker] = useState(null); // per-employee ledger drawer
@@ -569,7 +569,7 @@ export default function MillFinanceDashboard() {
 
   function openAdvanceDrawer(worker) {
     setAdvanceTarget(worker);
-    setAdvanceForm({ amount: '', advance_date: new Date().toISOString().split('T')[0], payment_method: 'cash', notes: '' });
+    setAdvanceForm({ amount: '', advance_date: new Date().toISOString().split('T')[0], payment_method: 'cash', notes: '', recovery_method: 'full_next_salary', recovery_start_period: '', installment_amount: '', installment_count: '', deduction_percent: '' });
   }
 
   async function handleGiveAdvance() {
@@ -2046,13 +2046,85 @@ export default function MillFinanceDashboard() {
               </select>
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Notes</label>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Reason / Notes</label>
               <textarea
                 rows={2}
                 value={advanceForm.notes}
                 onChange={e => setAdvanceForm(p => ({ ...p, notes: e.target.value }))}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
               />
+            </div>
+
+            {/* Recovery plan — deduct over multiple salaries */}
+            <div className="rounded-lg border border-gray-200 p-3 space-y-3">
+              <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Recovery plan</p>
+              <div className="space-y-1.5">
+                {[
+                  ['full_next_salary', 'Deduct full amount from next salary'],
+                  ['fixed_installment', 'Fixed monthly installments'],
+                  ['salary_percentage', 'Percentage of salary'],
+                  ['manual', 'Manual deduction during payroll'],
+                ].map(([val, label]) => (
+                  <label key={val} className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input type="radio" name="recovery_method" checked={advanceForm.recovery_method === val}
+                      onChange={() => setAdvanceForm(p => ({ ...p, recovery_method: val }))} />
+                    <span>{label}</span>
+                  </label>
+                ))}
+              </div>
+
+              {(advanceForm.recovery_method === 'fixed_installment' || advanceForm.recovery_method === 'salary_percentage') && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Recovery start month</label>
+                    <input type="month" value={advanceForm.recovery_start_period}
+                      onChange={e => setAdvanceForm(p => ({ ...p, recovery_start_period: e.target.value }))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900" />
+                  </div>
+                  {advanceForm.recovery_method === 'fixed_installment' && (
+                    <>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Installment (PKR)</label>
+                        <input type="number" min="0" value={advanceForm.installment_amount}
+                          onChange={e => setAdvanceForm(p => ({ ...p, installment_amount: e.target.value }))}
+                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900 tabular-nums" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1"># Installments</label>
+                        <input type="number" min="1" value={advanceForm.installment_count}
+                          onChange={e => setAdvanceForm(p => ({ ...p, installment_count: e.target.value }))}
+                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900 tabular-nums" />
+                      </div>
+                    </>
+                  )}
+                  {advanceForm.recovery_method === 'salary_percentage' && (
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Deduction %</label>
+                      <input type="number" min="0" max="100" value={advanceForm.deduction_percent}
+                        onChange={e => setAdvanceForm(p => ({ ...p, deduction_percent: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900 tabular-nums" />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Preview */}
+              {(() => {
+                const amt = parseFloat(advanceForm.amount) || 0;
+                if (!amt) return null;
+                let line = null;
+                if (advanceForm.recovery_method === 'full_next_salary') line = `Recovery: full Rs ${amt.toLocaleString()} from the next payroll.`;
+                else if (advanceForm.recovery_method === 'manual') line = 'Recovery: admin enters the deduction manually each payroll.';
+                else if (advanceForm.recovery_method === 'fixed_installment') {
+                  const inst = parseFloat(advanceForm.installment_amount) || 0;
+                  const cnt = parseInt(advanceForm.installment_count, 10) || (inst > 0 ? Math.ceil(amt / inst) : 0);
+                  if (inst > 0 && cnt > 0) line = `Recovery: Rs ${inst.toLocaleString()} per month for ${cnt} month(s)${advanceForm.recovery_start_period ? `, from ${advanceForm.recovery_start_period}` : ''}.`;
+                } else if (advanceForm.recovery_method === 'salary_percentage') {
+                  const pct = parseFloat(advanceForm.deduction_percent) || 0;
+                  if (pct > 0) line = `Recovery: ${pct}% of each salary${advanceForm.recovery_start_period ? `, from ${advanceForm.recovery_start_period}` : ''}, until Rs ${amt.toLocaleString()} is recovered.`;
+                }
+                return line ? <div className="rounded-md bg-blue-50 border border-blue-100 p-2 text-xs text-blue-800">{line}</div> : null;
+              })()}
             </div>
           </div>
         )}
@@ -2562,11 +2634,28 @@ function EmployeeAttendanceGrid({ month, employees, recordAttMut, addToast }) {
   );
 }
 
+// Human label for an advance's recovery plan (camelCase from the API layer).
+const RECOVERY_LABELS = {
+  full_next_salary: 'Full next salary', fixed_installment: 'Fixed installments',
+  salary_percentage: 'Percentage of salary', manual: 'Manual deduction',
+};
+function recoveryPlanLine(a) {
+  const m = a.recoveryMethod || a.recovery_method || 'full_next_salary';
+  if (m === 'fixed_installment') {
+    const inst = a.installmentAmount || a.installment_amount; const cnt = a.installmentCount || a.installment_count;
+    return `Fixed installments${inst ? ` · ${PKR(inst)}/mo` : ''}${cnt ? ` × ${cnt}` : ''}`;
+  }
+  if (m === 'salary_percentage') { const p = a.deductionPercent || a.deduction_percent; return `Percentage of salary${p ? ` · ${p}%` : ''}`; }
+  if (m === 'manual') return 'Manual deduction';
+  return 'Full next salary';
+}
+
 // Right-side panel listing a worker's advances, with a delete (unwind) action.
 function WorkerAdvancesPanel({ worker, onClose, onGiveAdvance, addToast }) {
   const { data: advances = [], isLoading } = useWorkerAdvances(worker.id);
   const deleteAdvanceMut = useDeleteWorkerAdvance();
   const [confirmId, setConfirmId] = useState(null);
+  const [ledgerId, setLedgerId] = useState(null);
   const outstanding = advances
     .filter(a => a.status === 'outstanding')
     .reduce((s, a) => s + ((parseFloat(a.amount) || 0) - (parseFloat(a.recoveredAmount) || 0)), 0);
@@ -2624,10 +2713,78 @@ function WorkerAdvancesPanel({ worker, onClose, onGiveAdvance, addToast }) {
                   )}
                 </div>
               </div>
-              {a.notes && <div className="text-xs text-gray-500 mt-1.5">{a.notes}</div>}
+              <div className="flex items-center justify-between mt-1.5">
+                <span className="text-[11px] text-gray-500">{recoveryPlanLine(a)}</span>
+                <button onClick={() => setLedgerId(a.id)} className="text-[11px] text-blue-600 hover:underline">Advance ledger →</button>
+              </div>
+              {a.notes && <div className="text-xs text-gray-500 mt-1">{a.notes}</div>}
             </div>
             );
           })}
+        </div>
+      )}
+      {ledgerId && <AdvanceLedgerDrawer advanceId={ledgerId} onClose={() => setLedgerId(null)} />}
+    </SlideDrawer>
+  );
+}
+
+// One advance's recovery plan, schedule and debit/credit ledger.
+function AdvanceLedgerDrawer({ advanceId, onClose }) {
+  const { data, isLoading } = useAdvanceLedger(advanceId);
+  const a = data?.advance || {};
+  const schedule = data?.schedule || [];
+  const entries = data?.entries || [];
+  const out = data?.outstanding != null ? data.outstanding : Math.max(0, (parseFloat(a.amount) || 0) - (parseFloat(a.recovered_amount) || 0));
+  const SCH_TONE = { pending: 'bg-gray-100 text-gray-600', partially_recovered: 'bg-amber-100 text-amber-700', recovered: 'bg-emerald-100 text-emerald-700', skipped: 'bg-rose-100 text-rose-700', cancelled: 'bg-gray-100 text-gray-400' };
+  return (
+    <SlideDrawer open onClose={onClose} title="Advance Ledger" subtitle={a.worker_name || ''} icon={HandCoins} size="lg">
+      {isLoading ? <p className="text-sm text-gray-400">Loading…</p> : (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div><p className="text-[11px] uppercase tracking-wider text-gray-400">Advance</p><p className="font-medium">{PKR(a.amount)}</p></div>
+            <div><p className="text-[11px] uppercase tracking-wider text-gray-400">Date</p><p className="font-medium">{fmtDate(a.advance_date)}</p></div>
+            <div><p className="text-[11px] uppercase tracking-wider text-gray-400">Recovery</p><p className="font-medium">{RECOVERY_LABELS[a.recovery_method] || a.recovery_method || '—'}</p></div>
+            <div><p className="text-[11px] uppercase tracking-wider text-gray-400">Outstanding</p><p className={`font-medium ${out > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>{PKR(out)}</p></div>
+          </div>
+
+          {schedule.length > 0 && (
+            <div className="rounded-lg border border-gray-200 overflow-hidden">
+              <div className="px-3 py-2 border-b border-gray-100 text-xs font-semibold text-gray-700">Recovery schedule</div>
+              <table className="w-full text-xs">
+                <thead className="text-gray-500"><tr><th className="text-left px-3 py-1.5">Period</th><th className="text-right px-3 py-1.5">Scheduled</th><th className="text-right px-3 py-1.5">Recovered</th><th className="text-left px-3 py-1.5">Status</th><th className="text-left px-3 py-1.5">Run</th></tr></thead>
+                <tbody className="divide-y divide-gray-100">
+                  {schedule.map(s => (
+                    <tr key={s.id}>
+                      <td className="px-3 py-1.5">{s.period}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">{PKR(s.scheduled_amount)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">{PKR(s.recovered_amount)}</td>
+                      <td className="px-3 py-1.5"><span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${SCH_TONE[s.status] || 'bg-gray-100 text-gray-600'}`}>{String(s.status || '').replace('_', ' ')}</span>{s.skip_reason ? <span className="ml-1 text-[10px] text-gray-400" title={s.skip_reason}>ⓘ</span> : null}</td>
+                      <td className="px-3 py-1.5 text-gray-500">{s.payroll_run_id ? `PR-${s.payroll_run_id}` : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="rounded-lg border border-gray-200 overflow-hidden">
+            <div className="px-3 py-2 border-b border-gray-100 text-xs font-semibold text-gray-700">Transactions</div>
+            <table className="w-full text-xs">
+              <thead className="text-gray-500"><tr><th className="text-left px-3 py-1.5">Date</th><th className="text-left px-3 py-1.5">Description</th><th className="text-right px-3 py-1.5">Debit</th><th className="text-right px-3 py-1.5">Credit</th><th className="text-right px-3 py-1.5">Balance</th></tr></thead>
+              <tbody className="divide-y divide-gray-100">
+                {entries.map((e, i) => (
+                  <tr key={i}>
+                    <td className="px-3 py-1.5">{fmtDate(e.date)}</td>
+                    <td className="px-3 py-1.5">{e.description}{e.ref ? <span className="text-gray-400"> · {e.ref}</span> : ''}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{e.debit ? PKR(e.debit) : '—'}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{e.credit ? PKR(e.credit) : '—'}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums font-medium">{PKR(e.balance)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[11px] text-gray-400">Debit = advance paid out; Credit = recovered from salary. Balance = remaining advance.</p>
         </div>
       )}
     </SlideDrawer>
@@ -2679,29 +2836,37 @@ function PayrollRunDrawer({ month, employees, preselectId, onClose, onPosted, po
   // One editable row per unpaid employee: include, advance-to-clear, and the
   // amount actually being paid (defaults to gross − advance, both overridable).
   const [rows, setRows] = useState(() => employees.map(w => {
-    const advance = Math.round(Math.min(w.advanceOutstanding || 0, w.grossPay || 0));
+    // Default deduction = the SCHEDULED amount for this month (recovery plan),
+    // not the full outstanding. Admin can still reduce / skip / enter manually.
+    const scheduled = Math.round(w.advanceScheduled != null ? w.advanceScheduled : Math.min(w.advanceOutstanding || 0, w.grossPay || 0));
     return {
       id: w.id, name: w.name, role: w.role, gross: w.grossPay || 0,
       outstanding: Math.round(w.advanceOutstanding || 0),
+      scheduled,
       include: preselectId ? w.id === preselectId : true,
-      advance, net: Math.max(0, (w.grossPay || 0) - advance),
+      advance: scheduled, net: Math.max(0, (w.grossPay || 0) - scheduled), reason: '',
     };
   }));
 
   const setRow = (id, patch) => setRows(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
   // Changing the advance-to-clear re-derives the net (still editable afterwards).
   const onAdvance = (r, raw) => {
-    const advance = Math.max(0, Math.min(Math.round(parseFloat(raw) || 0), r.outstanding));
+    const advance = Math.max(0, Math.min(Math.round(parseFloat(raw) || 0), r.outstanding, r.gross));
     setRow(r.id, { advance, net: Math.max(0, r.gross - advance) });
   };
   const onNet = (r, raw) => setRow(r.id, { net: Math.max(0, Math.round(parseFloat(raw) || 0)) });
+  const useScheduled = (r) => setRow(r.id, { advance: r.scheduled, net: Math.max(0, r.gross - r.scheduled), reason: '' });
+  const skipRow = (r) => setRow(r.id, { advance: 0, net: r.gross });
 
   const included = rows.filter(r => r.include);
   const totalNet = included.reduce((s, r) => s + r.net, 0);
   const totalAdvance = included.reduce((s, r) => s + r.advance, 0);
+  // A reason is required where the deduction was changed away from the schedule.
+  const needsReason = included.filter(r => Math.round(r.advance) !== Math.round(r.scheduled) && !String(r.reason || '').trim());
 
   async function post() {
     if (!included.length) { addToast('Select at least one employee to pay', 'error'); return; }
+    if (needsReason.length) { addToast(`Add a reason for the changed deduction: ${needsReason.map(r => r.name).join(', ')}`, 'error'); return; }
     try {
       // Mill payroll is always paid from Mill Cash.
       const res = await postRunMut.mutateAsync({
@@ -2709,7 +2874,7 @@ function PayrollRunDrawer({ month, employees, preselectId, onClose, onPosted, po
         pay_method: 'cash',
         bank_account_id: null,
         pay_date: form.pay_date,
-        lines: included.map(r => ({ worker_id: r.id, net_pay: r.net, advance_deducted: r.advance })),
+        lines: included.map(r => ({ worker_id: r.id, net_pay: r.net, advance_deducted: r.advance, skip_reason: Math.round(r.advance) !== Math.round(r.scheduled) ? (r.reason || null) : null })),
       });
       const raw = res?.data?.run || {};
       onPosted({ id: raw.id, period: raw.period, netTotal: raw.net_total });
@@ -2763,26 +2928,38 @@ function PayrollRunDrawer({ month, employees, preselectId, onClose, onPosted, po
                   <th className="text-left px-3 py-2 w-8"></th>
                   <th className="text-left px-3 py-2">Employee</th>
                   <th className="text-right px-3 py-2">Gross</th>
-                  <th className="text-right px-3 py-2">Clear advance</th>
+                  <th className="text-right px-3 py-2">Advance out</th>
+                  <th className="text-right px-3 py-2">Scheduled</th>
+                  <th className="text-right px-3 py-2">Deducting</th>
                   <th className="text-right px-3 py-2">Paying now</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {rows.map(r => (
-                  <tr key={r.id} className={r.include ? '' : 'opacity-40'}>
+                {rows.map(r => {
+                  const changed = Math.round(r.advance) !== Math.round(r.scheduled);
+                  return (
+                  <Fragment key={r.id}>
+                  <tr className={r.include ? '' : 'opacity-40'}>
                     <td className="px-3 py-1.5">
                       <input type="checkbox" checked={r.include} onChange={e => setRow(r.id, { include: e.target.checked })} className="rounded border-gray-300" />
                     </td>
                     <td className="px-3 py-1.5">
                       <div className="text-gray-800 font-medium">{r.name}</div>
-                      {r.outstanding > 0 && <div className="text-[10px] text-amber-600">advance {PKR(r.outstanding)} outstanding</div>}
+                      {r.include && r.outstanding > 0 && (
+                        <div className="flex gap-2 mt-0.5">
+                          <button onClick={() => useScheduled(r)} className="text-[10px] text-blue-600 hover:underline">Use scheduled</button>
+                          <button onClick={() => skipRow(r)} className="text-[10px] text-rose-600 hover:underline">Skip this month</button>
+                        </div>
+                      )}
                     </td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-gray-600">{PKR(r.gross)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-amber-700">{r.outstanding > 0 ? PKR(r.outstanding) : '—'}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-gray-500">{r.outstanding > 0 ? PKR(r.scheduled) : '—'}</td>
                     <td className="px-3 py-1.5 text-right">
                       {r.outstanding > 0 ? (
-                        <input type="number" min="0" max={r.outstanding} value={r.advance} disabled={!r.include}
+                        <input type="number" min="0" max={Math.min(r.outstanding, r.gross)} value={r.advance} disabled={!r.include}
                           onChange={e => onAdvance(r, e.target.value)}
-                          className="w-24 border border-gray-200 rounded px-2 py-1 text-right tabular-nums focus:outline-none focus:border-gray-900 disabled:bg-gray-50" />
+                          className={`w-24 border rounded px-2 py-1 text-right tabular-nums focus:outline-none focus:border-gray-900 disabled:bg-gray-50 ${changed ? 'border-amber-400 bg-amber-50' : 'border-gray-200'}`} />
                       ) : <span className="text-gray-300">—</span>}
                     </td>
                     <td className="px-3 py-1.5 text-right">
@@ -2791,14 +2968,25 @@ function PayrollRunDrawer({ month, employees, preselectId, onClose, onPosted, po
                         className="w-28 border border-gray-200 rounded px-2 py-1 text-right tabular-nums font-medium focus:outline-none focus:border-gray-900 disabled:bg-gray-50" />
                     </td>
                   </tr>
-                ))}
-                {rows.length === 0 && <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-400">Everyone is already paid for this month, or no one has pay due — mark attendance / set salaries first.</td></tr>}
+                  {r.include && changed && (
+                    <tr>
+                      <td></td>
+                      <td colSpan={6} className="px-3 pb-2">
+                        <input type="text" value={r.reason} placeholder="Reason for changed/skipped deduction (required)"
+                          onChange={e => setRow(r.id, { reason: e.target.value })}
+                          className="w-full border border-amber-300 bg-amber-50/40 rounded px-2 py-1 text-xs focus:outline-none focus:border-amber-500" />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
+                ); })}
+                {rows.length === 0 && <tr><td colSpan={7} className="px-3 py-6 text-center text-gray-400">Everyone is already paid for this month, or no one has pay due — mark attendance / set salaries first.</td></tr>}
               </tbody>
               {included.length > 0 && (
                 <tfoot>
                   <tr className="bg-gray-50 font-semibold text-gray-800">
                     <td></td><td className="px-3 py-2">Total ({included.length})</td>
-                    <td></td>
+                    <td></td><td></td><td></td>
                     <td className="px-3 py-2 text-right tabular-nums text-amber-700">{totalAdvance ? `−${PKR(totalAdvance)}` : '—'}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{PKR(totalNet)}</td>
                   </tr>
@@ -2998,6 +3186,17 @@ const LEDGER_TYPE_STYLE = {
   payroll: 'bg-emerald-100 text-emerald-700',
   other: 'bg-gray-100 text-gray-600',
 };
+// Compact labelled stat for the employee-ledger summary grid.
+function Sm({ label, value, tone = 'gray' }) {
+  const t = { gray: 'text-gray-900 border-gray-200 bg-gray-50', amber: 'text-amber-700 border-amber-200 bg-amber-50', emerald: 'text-emerald-700 border-emerald-200 bg-emerald-50', rose: 'text-rose-600 border-rose-200 bg-rose-50' }[tone] || 'text-gray-900 border-gray-200 bg-gray-50';
+  return (
+    <div className={`rounded-lg border p-2.5 ${t}`}>
+      <p className="text-[10px] uppercase tracking-wider opacity-70">{label}</p>
+      <p className="text-sm font-bold tabular-nums">{value}</p>
+    </div>
+  );
+}
+
 function EmployeeLedgerDrawer({ worker, onClose }) {
   const { data, isLoading } = useWorkerLedger(worker?.id);
   const rs = (n) => `Rs ${Math.round(parseFloat(n) || 0).toLocaleString()}`;
@@ -3013,17 +3212,18 @@ function EmployeeLedgerDrawer({ worker, onClose }) {
     >
       {!worker ? null : isLoading ? (
         <p className="text-sm text-gray-400 py-8 text-center">Loading…</p>
-      ) : (
+      ) : (() => {
+        const sm = data?.summary || {};
+        const bal = data?.currentBalance != null ? data.currentBalance : (sm.currentBalance || 0);
+        return (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-gray-50 rounded-lg border border-gray-200 p-3">
-              <p className="text-[11px] text-gray-500 uppercase">Total paid</p>
-              <p className="text-lg font-bold text-gray-900">{rs(data?.total)}</p>
-            </div>
-            <div className="bg-amber-50 rounded-lg border border-amber-200 p-3">
-              <p className="text-[11px] text-amber-600 uppercase">Advance outstanding</p>
-              <p className="text-lg font-bold text-amber-700">{rs(data?.advanceOutstanding)}</p>
-            </div>
+          <div className="grid grid-cols-3 gap-3">
+            <Sm label="Salary earned" value={rs(sm.salaryEarned)} />
+            <Sm label="Salary paid" value={rs(sm.salaryPaid)} />
+            <Sm label="Advances taken" value={rs(sm.advancesTaken)} />
+            <Sm label="Advance deducted" value={rs(sm.advanceDeducted)} />
+            <Sm label="Advance outstanding" value={rs(sm.advanceOutstanding)} tone="amber" />
+            <Sm label={bal >= 0 ? 'Salary payable' : 'Owes company'} value={rs(Math.abs(bal))} tone={bal > 0 ? 'emerald' : bal < 0 ? 'rose' : 'gray'} />
           </div>
 
           {entries.length === 0 ? (
@@ -3034,33 +3234,30 @@ function EmployeeLedgerDrawer({ worker, onClose }) {
                 <thead className="bg-gray-50 text-[11px] text-gray-500 uppercase">
                   <tr>
                     <th className="text-left px-3 py-2">Date</th>
-                    <th className="text-left px-3 py-2">Type</th>
-                    <th className="text-left px-3 py-2">Detail</th>
-                    <th className="text-right px-3 py-2">Amount</th>
+                    <th className="text-left px-3 py-2">Description</th>
+                    <th className="text-right px-3 py-2">Debit</th>
+                    <th className="text-right px-3 py-2">Credit</th>
+                    <th className="text-right px-3 py-2">Balance</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {entries.map((e, i) => (
                     <tr key={i} className="hover:bg-gray-50">
                       <td className="px-3 py-2 whitespace-nowrap text-gray-600">{e.date ? new Date(e.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</td>
-                      <td className="px-3 py-2"><span className={`text-[11px] px-2 py-0.5 rounded-full ${LEDGER_TYPE_STYLE[e.type] || 'bg-gray-100 text-gray-600'}`}>{e.label}</span></td>
-                      <td className="px-3 py-2 text-gray-500 text-xs">{e.note || e.reference || ''}</td>
-                      <td className="px-3 py-2 text-right tabular-nums font-medium text-gray-900">{rs(e.amount)}</td>
+                      <td className="px-3 py-2 text-gray-700">{e.label}{e.note ? <span className="text-gray-400 text-xs"> · {e.note}</span> : ''}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-rose-600">{e.debit ? rs(e.debit) : '—'}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-emerald-600">{e.credit ? rs(e.credit) : '—'}</td>
+                      <td className={`px-3 py-2 text-right tabular-nums font-medium ${e.balance < 0 ? 'text-rose-600' : 'text-gray-900'}`}>{rs(e.balance)}</td>
                     </tr>
                   ))}
                 </tbody>
-                <tfoot>
-                  <tr className="border-t-2 border-gray-300 bg-gray-50 font-semibold">
-                    <td className="px-3 py-2" colSpan={3}>Total paid to {worker.name}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-gray-900">{rs(data?.total)}</td>
-                  </tr>
-                </tfoot>
               </table>
             </div>
           )}
-          <p className="text-[11px] text-gray-400">Includes salary advances, payroll net pay, and any other disbursement booked to this employee.</p>
+          <p className="text-[11px] text-gray-400">Debit = paid to employee (advance / net salary); Credit = salary earned (gross). Balance &gt; 0 → salary still payable; balance &lt; 0 → employee owes the company (outstanding advance).</p>
         </div>
-      )}
+        );
+      })()}
     </SlideDrawer>
   );
 }

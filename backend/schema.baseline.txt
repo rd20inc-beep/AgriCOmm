@@ -1231,14 +1231,33 @@ COL mill_stock_movements.reference_id:integer:NULL
 COL mill_stock_movements.reference_type:character varying:NULL
 COL mill_stock_movements.total_cost:numeric:NULL
 COL mill_stock_movements.warehouse_id:integer:NULL
+COL mill_worker_advance_recovery_schedule.advance_id:integer:NOT NULL
+COL mill_worker_advance_recovery_schedule.created_at:timestamp with time zone:NOT NULL
+COL mill_worker_advance_recovery_schedule.id:integer:NOT NULL
+COL mill_worker_advance_recovery_schedule.payroll_line_id:integer:NULL
+COL mill_worker_advance_recovery_schedule.payroll_run_id:integer:NULL
+COL mill_worker_advance_recovery_schedule.period:character varying:NOT NULL
+COL mill_worker_advance_recovery_schedule.recovered_amount:numeric:NOT NULL
+COL mill_worker_advance_recovery_schedule.recovered_at:timestamp with time zone:NULL
+COL mill_worker_advance_recovery_schedule.scheduled_amount:numeric:NOT NULL
+COL mill_worker_advance_recovery_schedule.skip_reason:text:NULL
+COL mill_worker_advance_recovery_schedule.status:character varying:NOT NULL
+COL mill_worker_advance_recovery_schedule.updated_at:timestamp with time zone:NOT NULL
+COL mill_worker_advance_recovery_schedule.worker_id:integer:NULL
 COL mill_worker_advances.advance_date:date:NOT NULL
 COL mill_worker_advances.amount:numeric:NOT NULL
+COL mill_worker_advances.auto_deduct:boolean:NOT NULL
 COL mill_worker_advances.created_at:timestamp with time zone:NOT NULL
 COL mill_worker_advances.created_by:integer:NULL
+COL mill_worker_advances.deduction_percent:numeric:NULL
 COL mill_worker_advances.expense_id:integer:NULL
 COL mill_worker_advances.id:integer:NOT NULL
+COL mill_worker_advances.installment_amount:numeric:NULL
+COL mill_worker_advances.installment_count:integer:NULL
 COL mill_worker_advances.notes:text:NULL
 COL mill_worker_advances.recovered_amount:numeric:NOT NULL
+COL mill_worker_advances.recovery_method:character varying:NOT NULL
+COL mill_worker_advances.recovery_start_period:character varying:NULL
 COL mill_worker_advances.status:character varying:NOT NULL
 COL mill_worker_advances.updated_at:timestamp with time zone:NOT NULL
 COL mill_worker_advances.worker_id:integer:NOT NULL
@@ -2499,6 +2518,11 @@ CON mill_stock_movements.mill_stock_movements_performed_by_foreign(f)
 CON mill_stock_movements.mill_stock_movements_pkey(p)
 CON mill_stock_movements.mill_stock_movements_type_chk(c)
 CON mill_stock_movements.mill_stock_movements_warehouse_id_foreign(f)
+CON mill_worker_advance_recovery_schedule.mill_worker_advance_recovery_schedule_advance_id_foreign(f)
+CON mill_worker_advance_recovery_schedule.mill_worker_advance_recovery_schedule_payroll_line_id_foreign(f)
+CON mill_worker_advance_recovery_schedule.mill_worker_advance_recovery_schedule_payroll_run_id_foreign(f)
+CON mill_worker_advance_recovery_schedule.mill_worker_advance_recovery_schedule_pkey(p)
+CON mill_worker_advance_recovery_schedule.mill_worker_advance_recovery_schedule_worker_id_foreign(f)
 CON mill_worker_advances.mill_worker_advances_expense_id_foreign(f)
 CON mill_worker_advances.mill_worker_advances_pkey(p)
 CON mill_worker_advances.mill_worker_advances_worker_id_foreign(f)

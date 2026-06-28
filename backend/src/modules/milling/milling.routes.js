@@ -4,7 +4,10 @@ const db = require('../../config/database');
 const controller = require('../../controllers/millingController');
 const advancedController = require('../../controllers/millingAdvancedController');
 const authorize = require('../../middleware/rbac');
-const { authorizeRole } = require('../../middleware/rbac');
+const { authorizeRole, denyRoles } = require('../../middleware/rbac');
+// Mill Operator must never pay salaries or give advances (payroll is a finance
+// action, not production). Applied to payroll WRITE routes below.
+const noPayrollForOperator = denyRoles('Mill Operator');
 const auditAction = require('../../middleware/audit');
 const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
@@ -732,6 +735,63 @@ function normalizeWorkerPay(body) {
   return { pay_type, monthly_salary, daily_wage };
 }
 
+// ── Advance recovery plan ───────────────────────────────────────────────────
+const RECOVERY_METHODS = ['full_next_salary', 'fixed_installment', 'salary_percentage', 'manual'];
+
+// month string (YYYY-MM) helpers
+function addMonths(period, n) {
+  const y = Number(period.slice(0, 4)); const m = Number(period.slice(5, 7));
+  const d = new Date(Date.UTC(y, (m - 1) + n, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+function monthOf(dateStr) { return String(dateStr || '').slice(0, 7); }
+
+// Normalize the recovery plan from the advance form. Back-compatible default is
+// full_next_salary (= reproduce the legacy "deduct next salary" behaviour).
+function buildRecoveryPlan(body, amount, advanceDate) {
+  let method = RECOVERY_METHODS.includes(body.recovery_method) ? body.recovery_method : 'full_next_salary';
+  // Recovery starts the month AFTER the advance unless the admin set a month.
+  const defaultStart = addMonths(monthOf(advanceDate) || new Date().toISOString().slice(0, 7), 1);
+  let recovery_start_period = /^\d{4}-\d{2}$/.test(body.recovery_start_period || '') ? body.recovery_start_period : defaultStart;
+  let installment_amount = body.installment_amount != null && body.installment_amount !== '' ? parseFloat(body.installment_amount) : null;
+  let installment_count = body.installment_count != null && body.installment_count !== '' ? parseInt(body.installment_count, 10) : null;
+  let deduction_percent = body.deduction_percent != null && body.deduction_percent !== '' ? parseFloat(body.deduction_percent) : null;
+  let auto_deduct = body.auto_deduct !== undefined ? !!body.auto_deduct : true;
+
+  if (method === 'fixed_installment') {
+    if (!(installment_amount > 0) && installment_count > 0) installment_amount = Math.round((amount / installment_count) * 100) / 100;
+    if (!(installment_amount > 0)) throw new Error('Fixed installment recovery needs a positive installment amount.');
+    if (!(installment_count > 0)) installment_count = Math.max(1, Math.ceil(amount / installment_amount));
+    deduction_percent = null;
+  } else if (method === 'salary_percentage') {
+    if (!(deduction_percent > 0 && deduction_percent <= 100)) throw new Error('Percentage recovery needs a deduction percent between 0 and 100.');
+    installment_amount = null; installment_count = null;
+  } else if (method === 'manual') {
+    auto_deduct = false; installment_amount = null; installment_count = null; deduction_percent = null; recovery_start_period = null;
+  } else { // full_next_salary
+    installment_amount = null; installment_count = null; deduction_percent = null; recovery_start_period = null;
+  }
+  return { recovery_method: method, recovery_start_period, installment_amount, installment_count, deduction_percent, auto_deduct };
+}
+
+// Pre-generate the planned installment rows for a fixed_installment advance so
+// the admin can see exactly which month recovers which amount. The last row
+// carries any rounding remainder so the rows sum to the advance amount.
+function plannedScheduleRows(advance) {
+  if (advance.recovery_method !== 'fixed_installment') return [];
+  const amount = parseFloat(advance.amount) || 0;
+  const inst = parseFloat(advance.installment_amount) || 0;
+  const count = parseInt(advance.installment_count, 10) || (inst > 0 ? Math.ceil(amount / inst) : 1);
+  const rows = []; let remaining = amount; let period = advance.recovery_start_period || addMonths(monthOf(advance.advance_date), 1);
+  for (let i = 0; i < count && remaining > 0.001; i += 1) {
+    const sched = i === count - 1 ? remaining : Math.min(inst, remaining);
+    rows.push({ advance_id: advance.id, worker_id: advance.worker_id, period, scheduled_amount: Math.round(sched * 100) / 100, status: 'pending' });
+    remaining = Math.round((remaining - sched) * 100) / 100;
+    period = addMonths(period, 1);
+  }
+  return rows;
+}
+
 router.post('/workers', authorize('milling', 'create'), async (req, res) => {
   try {
     const { name, role, phone, cnic, joined_date, mill_id, notes } = req.body;
@@ -844,39 +904,63 @@ router.get('/workers/:id/ledger', authorize('milling', 'view'), async (req, res)
     if (advanceExpenseIds.length) otherExpQ = otherExpQ.whereNotIn('id', advanceExpenseIds);
     const otherExp = await otherExpQ.select('id', 'expense_no', 'expense_date', 'amount', 'amount_pkr', 'description', 'category');
 
-    const entries = [
+    // Double-entry employee ledger from the COMPANY's view of net liability to
+    // the worker. credit = we owe them (salary earned); debit = we paid them
+    // (advance given, salary paid). Running balance > 0 → salary still payable;
+    // balance < 0 → worker owes us (outstanding advance not yet recovered).
+    const raw = [
       ...advances.map((a) => ({
-        date: a.advance_date, type: 'advance', label: 'Salary advance',
-        amount: parseFloat(a.amount) || 0, reference: a.expense_id ? `ADV-${a.id}` : null,
-        note: a.notes || null, status: a.status, recovered: parseFloat(a.recovered_amount) || 0,
+        date: a.advance_date, ord: 1, type: 'advance', label: 'Advance given',
+        reference: a.expense_id ? `ADV-${a.id}` : null, note: a.notes || null,
+        debit: parseFloat(a.amount) || 0, credit: 0,
+        // legacy alias kept so older UI keeps rendering
+        amount: parseFloat(a.amount) || 0, status: a.status, recovered: parseFloat(a.recovered_amount) || 0,
       })),
-      ...payLines.map((p) => ({
-        date: p.pay_date, type: 'payroll', label: `Payroll ${p.period}`,
-        amount: parseFloat(p.net_pay) || 0, reference: p.period,
-        note: `Gross ${Math.round(parseFloat(p.gross_pay) || 0).toLocaleString()}${parseFloat(p.advance_deducted) > 0 ? ` − advance ${Math.round(parseFloat(p.advance_deducted)).toLocaleString()}` : ''} via ${p.pay_method || 'cash'}`,
-      })),
+      ...payLines.flatMap((p) => {
+        const gross = parseFloat(p.gross_pay) || 0; const net = parseFloat(p.net_pay) || 0; const adv = parseFloat(p.advance_deducted) || 0;
+        return [
+          { date: p.pay_date, ord: 0, type: 'salary_earned', label: `Salary earned ${p.period}`, reference: p.period, debit: 0, credit: gross, amount: gross, note: 'Gross salary' },
+          { date: p.pay_date, ord: 2, type: 'salary_paid', label: `Salary paid ${p.period}`, reference: p.period, debit: net, credit: 0, amount: net, note: `${adv > 0 ? `incl. advance recovered ${Math.round(adv).toLocaleString()} · ` : ''}via ${p.pay_method || 'cash'}` },
+        ];
+      }),
       ...otherExp.map((e) => ({
-        date: e.expense_date, type: 'other', label: e.description || 'Disbursement',
-        amount: parseFloat(e.amount_pkr) || parseFloat(e.amount) || 0, reference: e.expense_no, note: e.category,
+        date: e.expense_date, ord: 1, type: 'other', label: e.description || 'Disbursement',
+        reference: e.expense_no, note: e.category, debit: parseFloat(e.amount_pkr) || parseFloat(e.amount) || 0, credit: 0,
+        amount: parseFloat(e.amount_pkr) || parseFloat(e.amount) || 0,
       })),
-    ].sort((a, b) => new Date(b.date) - new Date(a.date) || 0);
+    ].sort((a, b) => (new Date(a.date) - new Date(b.date)) || (a.ord - b.ord));
 
-    const total = entries.reduce((s, e) => s + e.amount, 0);
-    const advanceOutstanding = advances.reduce((s, a) => s + Math.max(0, (parseFloat(a.amount) || 0) - (parseFloat(a.recovered_amount) || 0)), 0);
+    let bal = 0;
+    const entries = raw.map((e) => { bal += (e.credit || 0) - (e.debit || 0); return { ...e, balance: Math.round(bal) }; });
 
-    return res.json({ success: true, data: { worker, entries, total, advanceOutstanding, count: entries.length } });
+    const summary = {
+      salaryEarned: Math.round(payLines.reduce((s, p) => s + (parseFloat(p.gross_pay) || 0), 0)),
+      advancesTaken: Math.round(advances.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0)),
+      advanceDeducted: Math.round(payLines.reduce((s, p) => s + (parseFloat(p.advance_deducted) || 0), 0)),
+      salaryPaid: Math.round(payLines.reduce((s, p) => s + (parseFloat(p.net_pay) || 0), 0)),
+      advanceOutstanding: Math.round(advances.reduce((s, a) => s + Math.max(0, (parseFloat(a.amount) || 0) - (parseFloat(a.recovered_amount) || 0)), 0)),
+      currentBalance: Math.round(bal),
+    };
+    // entries displayed newest-first; balance already computed chronologically
+    const displayEntries = [...entries].reverse();
+
+    return res.json({ success: true, data: { worker, entries: displayEntries, summary, total: summary.salaryPaid, advanceOutstanding: summary.advanceOutstanding, currentBalance: summary.currentBalance, count: entries.length } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
 // Record a salary advance: real cash-out (business_expense, category 'salaries',
 // paid now → Money Out / GL) PLUS a tracked advance row that nets off payroll.
-router.post('/workers/:id/advances', authorize('milling', 'create'), async (req, res) => {
+router.post('/workers/:id/advances', authorize('milling', 'create'), noPayrollForOperator, async (req, res) => {
   try {
     const worker = await db('mill_workers').where('id', req.params.id).first();
     if (!worker) return res.status(404).json({ success: false, message: 'Worker not found.' });
     const amount = parseFloat(req.body.amount);
     if (!(amount > 0)) return res.status(400).json({ success: false, message: 'A positive advance amount is required.' });
     const advance_date = req.body.advance_date || new Date().toISOString().split('T')[0];
+    let plan;
+    try { plan = buildRecoveryPlan(req.body, amount, advance_date); }
+    catch (e) { return res.status(400).json({ success: false, message: e.message }); }
+
     const expense = await expensesService.create({
       expense_type: 'mill', category: 'salaries', amount, currency: 'PKR',
       expense_date: advance_date,
@@ -888,19 +972,55 @@ router.post('/workers/:id/advances', authorize('milling', 'create'), async (req,
       payment_method: req.body.payment_method || 'cash',
       payment_reference: req.body.payment_reference || null,
     }, req.user?.id);
-    const [advance] = await db('mill_worker_advances').insert({
-      worker_id: worker.id, advance_date, amount,
-      recovered_amount: 0, status: 'outstanding',
-      expense_id: expense?.id || null,
-      notes: req.body.notes || null,
-      created_by: req.user?.id || null,
-    }).returning('*');
+
+    const advance = await db.transaction(async (trx) => {
+      const [a] = await trx('mill_worker_advances').insert({
+        worker_id: worker.id, advance_date, amount,
+        recovered_amount: 0, status: 'outstanding',
+        expense_id: expense?.id || null,
+        notes: req.body.notes || null,
+        created_by: req.user?.id || null,
+        ...plan,
+      }).returning('*');
+      const rows = plannedScheduleRows(a);
+      if (rows.length) await trx('mill_worker_advance_recovery_schedule').insert(rows);
+      return a;
+    });
     return res.json({ success: true, data: { advance } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
+// Advance ledger — one advance, its recovery plan, its schedule rows and a
+// debit/credit transaction view (advance given = debit; each recovery = credit).
+router.get('/advances/:id/ledger', authorize('milling', 'view'), async (req, res) => {
+  try {
+    const advance = await db('mill_worker_advances as a')
+      .leftJoin('mill_workers as w', 'w.id', 'a.worker_id')
+      .where('a.id', req.params.id)
+      .select('a.*', 'w.name as worker_name', 'w.role as worker_role').first();
+    if (!advance) return res.status(404).json({ success: false, message: 'Advance not found.' });
+    const schedule = await db('mill_worker_advance_recovery_schedule as s')
+      .leftJoin('mill_payroll_runs as r', 'r.id', 's.payroll_run_id')
+      .where('s.advance_id', advance.id)
+      .orderBy('s.period', 'asc').orderBy('s.id', 'asc')
+      .select('s.*', 'r.pay_date as run_pay_date');
+    const amount = parseFloat(advance.amount) || 0;
+    const recovered = parseFloat(advance.recovered_amount) || 0;
+    // Debit/credit ledger: advance given (debit), each recovery (credit). Balance = remaining advance.
+    const entries = [{ date: advance.advance_date, description: 'Advance given', ref: advance.expense_id ? `ADV-${advance.id}` : null, debit: amount, credit: 0 }];
+    for (const s of schedule) {
+      if (parseFloat(s.recovered_amount) > 0) {
+        entries.push({ date: s.recovered_at || s.run_pay_date || `${s.period}-28`, description: `Payroll deduction ${s.period}`, ref: s.payroll_run_id ? `PR-${s.payroll_run_id}` : null, debit: 0, credit: parseFloat(s.recovered_amount) || 0 });
+      }
+    }
+    entries.sort((a, b) => new Date(a.date) - new Date(b.date) || 0);
+    let bal = 0; for (const e of entries) { bal += e.debit - e.credit; e.balance = Math.round(bal); }
+    return res.json({ success: true, data: { advance, schedule, entries, outstanding: Math.max(0, Math.round(amount - recovered)) } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
 // Delete an advance — unwinds its cash-out and removes the record.
-router.delete('/advances/:id', authorize('milling', 'delete'), async (req, res) => {
+router.delete('/advances/:id', authorize('milling', 'delete'), noPayrollForOperator, async (req, res) => {
   try {
     const advance = await db('mill_worker_advances').where('id', req.params.id).first();
     if (!advance) return res.status(404).json({ success: false, message: 'Advance not found.' });
@@ -1055,15 +1175,28 @@ async function computePayrollSummary(month) {
     ? new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).toISOString().split('T')[0]
     : new Date().toISOString().split('T')[0];
 
+  const period = month || startDate.slice(0, 7);
   const workers = await db('mill_workers').where('is_active', true).orderBy('name');
   const attendance = await db('mill_attendance')
     .where('date', '>=', startDate).where('date', '<=', endDate);
-  // Outstanding advances net off net pay (the cash already went out when given).
-  const advRows = workers.length ? await db('mill_worker_advances')
+
+  // Outstanding advances (full rows so we can read each one's recovery plan).
+  const advances = workers.length ? await db('mill_worker_advances')
     .whereIn('worker_id', workers.map((w) => w.id)).where('status', 'outstanding')
-    .groupBy('worker_id')
-    .select('worker_id', db.raw('COALESCE(SUM(amount - recovered_amount), 0) as outstanding')) : [];
-  const advMap = new Map(advRows.map((r) => [r.worker_id, parseFloat(r.outstanding) || 0]));
+    .orderBy('advance_date', 'asc').orderBy('id', 'asc') : [];
+  const advByWorker = new Map();
+  for (const a of advances) { (advByWorker.get(a.worker_id) || advByWorker.set(a.worker_id, []).get(a.worker_id)).push(a); }
+
+  // Due fixed-installment schedule rows up to and including this period.
+  const advIds = advances.map((a) => a.id);
+  const schedRows = advIds.length ? await db('mill_worker_advance_recovery_schedule')
+    .whereIn('advance_id', advIds).where('period', '<=', period)
+    .whereIn('status', ['pending', 'partially_recovered']) : [];
+  const schedDueByAdvance = new Map();
+  for (const s of schedRows) {
+    const due = (parseFloat(s.scheduled_amount) || 0) - (parseFloat(s.recovered_amount) || 0);
+    if (due > 0) schedDueByAdvance.set(s.advance_id, (schedDueByAdvance.get(s.advance_id) || 0) + due);
+  }
 
   const summary = workers.map(w => {
     const records = attendance.filter(a => a.worker_id === w.id);
@@ -1079,14 +1212,35 @@ async function computePayrollSummary(month) {
       : effectiveDays * dailyWage;
     const otPay = totalOT * (dailyWage / 8 * 1.5);
     const gross = basicPay + otPay;
-    const advanceOutstanding = advMap.get(w.id) || 0;
-    // Recover advances against this run's gross, but never below zero.
-    const advanceDeduction = Math.min(advanceOutstanding, gross);
+
+    const myAdvances = advByWorker.get(w.id) || [];
+    const advanceOutstanding = myAdvances.reduce((s, a) => s + Math.max(0, (parseFloat(a.amount) || 0) - (parseFloat(a.recovered_amount) || 0)), 0);
+
+    // Scheduled deduction for THIS period — depends on each advance's recovery
+    // method. Capped so net pay never goes negative.
+    let remainingGross = gross; let scheduled = 0;
+    for (const a of myAdvances) {
+      if (remainingGross <= 0) break;
+      const out = Math.max(0, (parseFloat(a.amount) || 0) - (parseFloat(a.recovered_amount) || 0));
+      if (out <= 0) continue;
+      let due = 0;
+      const m = a.recovery_method || 'full_next_salary';
+      if (m === 'full_next_salary') due = out;
+      else if (m === 'fixed_installment') due = schedDueByAdvance.get(a.id) || 0;
+      else if (m === 'salary_percentage') {
+        const eligible = !a.recovery_start_period || period >= a.recovery_start_period;
+        due = eligible ? Math.round((gross * (parseFloat(a.deduction_percent) || 0)) / 100) : 0;
+      } else if (m === 'manual') due = 0; // admin enters during the run
+      const applied = Math.min(due, out, remainingGross);
+      scheduled += applied; remainingGross -= applied;
+    }
+    const advanceDeduction = Math.min(scheduled, gross);
     return {
       ...w, daysPresent, halfDays, effectiveDays, totalOT,
       basicPay: Math.round(basicPay), otPay: Math.round(otPay),
       grossPay: Math.round(gross),
       advanceOutstanding: Math.round(advanceOutstanding),
+      advanceScheduled: Math.round(advanceDeduction),
       advanceDeduction: Math.round(advanceDeduction),
       netPay: Math.round(gross - advanceDeduction),
       totalPay: Math.round(gross - advanceDeduction), // back-compat alias
@@ -1102,15 +1256,17 @@ async function computePayrollSummary(month) {
 // Apply `amount` of recovery to a worker's outstanding advances, oldest first —
 // so a posted payroll run closes out the advances it deducted (otherwise the
 // same advance would be deducted again every following month).
-async function recoverAdvancesForWorker(trx, workerId, amount) {
+async function recoverAdvancesForWorker(trx, workerId, amount, ctx = {}) {
   let remaining = parseFloat(amount) || 0;
   if (remaining <= 0) return;
+  const { period, runId = null, lineId = null } = ctx;
   const advs = await trx('mill_worker_advances')
     .where({ worker_id: workerId, status: 'outstanding' })
     .orderBy('advance_date', 'asc').orderBy('id', 'asc');
   for (const a of advs) {
     if (remaining <= 0) break;
     const out = (parseFloat(a.amount) || 0) - (parseFloat(a.recovered_amount) || 0);
+    if (out <= 0) continue;
     const applied = Math.min(out, remaining);
     const newRecovered = (parseFloat(a.recovered_amount) || 0) + applied;
     await trx('mill_worker_advances').where('id', a.id).update({
@@ -1118,8 +1274,53 @@ async function recoverAdvancesForWorker(trx, workerId, amount) {
       status: newRecovered >= (parseFloat(a.amount) || 0) - 0.01 ? 'recovered' : 'outstanding',
       updated_at: trx.fn.now(),
     });
+    if (period) await applyRecoveryToSchedule(trx, a, period, applied, runId, lineId);
     remaining -= applied;
   }
+}
+
+// Reflect a recovery on the advance's schedule. fixed_installment consumes its
+// pre-generated pending rows (period asc); other methods get an actual-recovery
+// row stamped with the run, so every recovery is visible and reversible.
+async function applyRecoveryToSchedule(trx, advance, period, applied, runId, lineId) {
+  let left = parseFloat(applied) || 0;
+  if (left <= 0) return;
+  if (advance.recovery_method === 'fixed_installment') {
+    const rows = await trx('mill_worker_advance_recovery_schedule')
+      .where('advance_id', advance.id).whereIn('status', ['pending', 'partially_recovered'])
+      .where('period', '<=', period).orderBy('period', 'asc').orderBy('id', 'asc');
+    for (const r of rows) {
+      if (left <= 0) break;
+      const due = (parseFloat(r.scheduled_amount) || 0) - (parseFloat(r.recovered_amount) || 0);
+      const take = Math.min(due, left);
+      const newRec = (parseFloat(r.recovered_amount) || 0) + take;
+      await trx('mill_worker_advance_recovery_schedule').where('id', r.id).update({
+        recovered_amount: newRec,
+        status: newRec >= (parseFloat(r.scheduled_amount) || 0) - 0.01 ? 'recovered' : 'partially_recovered',
+        payroll_run_id: runId, payroll_line_id: lineId, recovered_at: trx.fn.now(), updated_at: trx.fn.now(),
+      });
+      left -= take;
+    }
+  }
+  // For non-fixed methods (full/percentage/manual) the recovery has no planned
+  // row, so record an actual-recovery row stamped with the run. (fixed_installment
+  // only ever consumes its planned rows above, so reversal stays unambiguous.)
+  if (left > 0.001 && advance.recovery_method !== 'fixed_installment') {
+    await trx('mill_worker_advance_recovery_schedule').insert({
+      advance_id: advance.id, worker_id: advance.worker_id, period,
+      scheduled_amount: Math.round(left * 100) / 100, recovered_amount: Math.round(left * 100) / 100,
+      status: 'recovered', payroll_run_id: runId, payroll_line_id: lineId, recovered_at: trx.fn.now(),
+    });
+  }
+}
+
+// Mark this period's still-pending fixed-installment rows as skipped (admin
+// reduced/skipped the deduction with a reason). Leaves the advance outstanding.
+async function markPeriodSkipped(trx, workerId, period, reason) {
+  await trx('mill_worker_advance_recovery_schedule as s')
+    .whereIn('s.advance_id', trx('mill_worker_advances').where('worker_id', workerId).select('id'))
+    .where('s.period', period).whereIn('s.status', ['pending', 'partially_recovered'])
+    .update({ status: 'skipped', skip_reason: reason || 'Skipped during payroll run', updated_at: trx.fn.now() });
 }
 
 // Reverse `amount` of recovery (when a run is deleted) — newest recovery first.
@@ -1235,7 +1436,7 @@ router.get('/payroll/runs/:id', authorize('milling', 'view'), async (req, res) =
 // paid at the computed net. The server always recomputes gross/basic from
 // attendance, clamps the advance to what's outstanding, and blocks anyone already
 // paid this period — so the saved numbers stay trustworthy.
-router.post('/payroll/run', authorize('milling', 'create'), async (req, res) => {
+router.post('/payroll/run', authorize('milling', 'create'), noPayrollForOperator, async (req, res) => {
   try {
     const { month, pay_method, bank_account_id, pay_date, notes, lines } = req.body;
     if (!/^\d{4}-\d{2}$/.test(month || '')) return res.status(400).json({ success: false, message: 'A valid month (YYYY-MM) is required.' });
@@ -1252,11 +1453,17 @@ router.post('/payroll/run', authorize('milling', 'create'), async (req, res) => 
         const w = byId.get(ln.worker_id);
         if (!w) continue; // not an active employee this month
         if (alreadyPaid.has(w.id)) return res.status(409).json({ success: false, message: `${w.name} has already been paid for ${month}.` });
-        const advanceDeducted = Math.max(0, Math.min(parseFloat(ln.advance_deducted) || 0, w.advanceOutstanding));
+        // Per-line override: admin may use the scheduled amount, reduce it, skip
+        // it (0), or enter a manual deduction — always capped to outstanding & gross.
+        const requested = ln.advance_deducted != null && ln.advance_deducted !== ''
+          ? parseFloat(ln.advance_deducted) : w.advanceDeduction;
+        const advanceDeducted = Math.max(0, Math.min(requested || 0, w.advanceOutstanding, w.grossPay));
         const netPay = ln.net_pay != null && ln.net_pay !== ''
           ? Math.max(0, Math.round(parseFloat(ln.net_pay)))
           : Math.max(0, w.grossPay - advanceDeducted);
-        toPay.push({ ...w, advanceDeduction: advanceDeducted, netPay });
+        // A reason is recorded when the deduction was changed away from the schedule.
+        const changed = Math.round(advanceDeducted) !== Math.round(w.advanceScheduled != null ? w.advanceScheduled : w.advanceDeduction);
+        toPay.push({ ...w, advanceDeduction: advanceDeducted, netPay, skipReason: changed ? (ln.skip_reason || ln.reason || null) : null });
       }
     } else {
       toPay = summary.filter((w) => !alreadyPaid.has(w.id));
@@ -1298,13 +1505,16 @@ router.post('/payroll/run', authorize('milling', 'create'), async (req, res) => 
         status: 'posted', notes: notes || null, created_by: req.user?.id || null,
       }).returning('*');
       for (const w of toPay) {
-        await trx('mill_payroll_lines').insert({
+        const [line] = await trx('mill_payroll_lines').insert({
           run_id: r.id, worker_id: w.id, worker_name: w.name, role: w.role, pay_type: w.pay_type,
           effective_days: w.effectiveDays || 0, ot_hours: w.totalOT || 0,
           basic_pay: w.basicPay, ot_pay: w.otPay, gross_pay: w.grossPay,
           advance_deducted: w.advanceDeduction, net_pay: w.netPay,
-        });
-        if (w.advanceDeduction > 0) await recoverAdvancesForWorker(trx, w.id, w.advanceDeduction);
+        }).returning('id');
+        const lineId = line?.id || line;
+        if (w.advanceDeduction > 0) await recoverAdvancesForWorker(trx, w.id, w.advanceDeduction, { period: month, runId: r.id, lineId });
+        // Reduced/skipped vs the schedule, with a reason → mark this period's rows skipped.
+        if (w.skipReason) await markPeriodSkipped(trx, w.id, month, w.skipReason);
       }
       return r;
     });
@@ -1314,15 +1524,40 @@ router.post('/payroll/run', authorize('milling', 'create'), async (req, res) => 
 
 // Undo a payroll run — reverse its cash-out (+ GL), restore the advances it
 // recovered to outstanding, and delete the run (lines cascade).
-router.delete('/payroll/runs/:id', authorize('milling', 'delete'), async (req, res) => {
+router.delete('/payroll/runs/:id', authorize('milling', 'delete'), noPayrollForOperator, async (req, res) => {
   try {
     const run = await db('mill_payroll_runs').where('id', req.params.id).first();
     if (!run) return res.status(404).json({ success: false, message: 'Payroll run not found.' });
     await db.transaction(async (trx) => {
-      const lines = await trx('mill_payroll_lines').where('run_id', run.id);
-      for (const l of lines) {
-        if (parseFloat(l.advance_deducted) > 0 && l.worker_id) {
-          await unrecoverAdvancesForWorker(trx, l.worker_id, l.advance_deducted);
+      // Precise reversal via the schedule rows this run recovered (new runs);
+      // fall back to amount-based reversal for legacy runs without schedule rows.
+      const schedRows = await trx('mill_worker_advance_recovery_schedule').where('payroll_run_id', run.id);
+      if (schedRows.length) {
+        for (const s of schedRows) {
+          const rec = parseFloat(s.recovered_amount) || 0;
+          const adv = await trx('mill_worker_advances').where('id', s.advance_id).first();
+          if (adv && rec > 0) {
+            const newRec = Math.max(0, (parseFloat(adv.recovered_amount) || 0) - rec);
+            await trx('mill_worker_advances').where('id', adv.id).update({
+              recovered_amount: newRec,
+              status: newRec >= (parseFloat(adv.amount) || 0) - 0.01 ? 'recovered' : 'outstanding',
+              updated_at: trx.fn.now(),
+            });
+          }
+          if (adv && adv.recovery_method === 'fixed_installment') {
+            await trx('mill_worker_advance_recovery_schedule').where('id', s.id).update({
+              recovered_amount: 0, status: 'pending', payroll_run_id: null, payroll_line_id: null, recovered_at: null, updated_at: trx.fn.now(),
+            });
+          } else {
+            await trx('mill_worker_advance_recovery_schedule').where('id', s.id).del();
+          }
+        }
+      } else {
+        const lines = await trx('mill_payroll_lines').where('run_id', run.id);
+        for (const l of lines) {
+          if (parseFloat(l.advance_deducted) > 0 && l.worker_id) {
+            await unrecoverAdvancesForWorker(trx, l.worker_id, l.advance_deducted);
+          }
         }
       }
       await unwindAdvanceExpense(trx, run.expense_id); // reverse cash-out + GL

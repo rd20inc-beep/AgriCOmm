@@ -29,6 +29,7 @@ export const millingApi = {
   workerLedger: (id) => api.get(`/api/milling/workers/${id}/ledger`),
   createWorkerAdvance: (id, data) => api.post(`/api/milling/workers/${id}/advances`, data),
   deleteWorkerAdvance: (id) => api.delete(`/api/milling/advances/${id}`),
+  advanceLedger: (id) => api.get(`/api/milling/advances/${id}/ledger`),
   listAttendance: (params) => api.get('/api/milling/attendance', params),
   recordAttendance: (data) => api.post('/api/milling/attendance', data),
   bulkAttendance: (data) => api.post('/api/milling/attendance/bulk', data),
