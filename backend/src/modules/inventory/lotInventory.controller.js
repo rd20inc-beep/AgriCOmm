@@ -363,23 +363,33 @@ module.exports = {
         .orderBy('id', 'asc');
 
       // Supplier payable for this lot (auto-created with linked_ref = lot_no).
+      // The payable is the source of truth for what's been paid — the lot's own
+      // paid_amount/due_amount can be stale (not synced on later finance payments).
       const payable = await db('payables')
         .where('linked_ref', lot.lot_no).andWhere('category', 'Raw Material').first();
       const pays = await db('payments')
-        .where(function () {
-          this.where(function () { this.where('source_table', 'inventory_lots').andWhere('source_id', lot.id); });
-          if (payable) this.orWhere('linked_payable_id', payable.id);
-          this.orWhere('notes', 'ilike', `%${lot.lot_no}%`);
-        })
         .andWhere('type', 'payment')
+        .where(function () {
+          if (payable) {
+            this.where('linked_payable_id', payable.id)
+              .orWhere(function () { this.where('source_table', 'inventory_lots').andWhere('source_id', lot.id); });
+          } else {
+            // Legacy fallback only when no payable exists.
+            this.where(function () { this.where('source_table', 'inventory_lots').andWhere('source_id', lot.id); })
+              .orWhere('notes', 'ilike', `%${lot.lot_no}%`);
+          }
+        })
         .select('id', 'payment_no', 'payment_date', 'payment_method', 'amount', 'bank_reference', 'cleared', 'notes')
         .orderBy('payment_date', 'asc').orderBy('id', 'asc');
 
       const qtyKg = num(lot.received_net_weight_kg) || num(lot.net_weight_kg);
       const amount = num(lot.purchase_amount) || num(lot.rate_per_kg) * qtyKg;
-      const landed = num(lot.landed_cost_total) || amount;
-      const paid = num(lot.paid_amount);
-      const outstanding = num(lot.due_amount);
+      const landed = payable ? num(payable.original_amount) || num(lot.landed_cost_total) || amount
+        : num(lot.landed_cost_total) || amount;
+      // Prefer the payable (authoritative); fall back to the lot's own fields.
+      const paid = payable ? num(payable.paid_amount) : num(lot.paid_amount);
+      const outstanding = payable ? num(payable.outstanding) : num(lot.due_amount);
+      const paymentStatus = payable ? payable.status : lot.payment_status;
 
       const timeline = [{ kind: 'created', date: lot.purchase_date || lot.created_at, label: 'Purchase recorded', amount: landed, balance: landed }];
       let bal = landed;
@@ -401,7 +411,7 @@ module.exports = {
             quantityKg: qtyKg, quantityMt: qtyKg / 1000,
             bags: lot.total_bags != null ? Number(lot.total_bags) : null, bagWeightKg: num(lot.bag_weight_kg) || null,
             ratePerKg: num(lot.rate_per_kg), landedCostPerKg: num(lot.landed_cost_per_kg),
-            amount, landedTotal: landed, paymentStatus: lot.payment_status,
+            amount, landedTotal: landed, paymentStatus,
             paid, outstanding,
             supplierHref: lot.supplier_id ? `/finance/statements?type=supplier&id=${lot.supplier_id}` : null,
             lotHref: `/lot-inventory/${lot.id}`,
