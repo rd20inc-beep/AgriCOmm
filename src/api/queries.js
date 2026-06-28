@@ -1424,8 +1424,11 @@ export function usePayrollReport(params = {}) {
 // employees/advances (recovered), and the money trails (expense/payable/banks).
 function invalidatePayroll(qc) {
   qc.invalidateQueries({ queryKey: ['payroll-runs'] });
+  qc.invalidateQueries({ queryKey: ['payroll-run'] }); // open run panel (approve/pay/void state)
   qc.invalidateQueries({ queryKey: ['payroll-report'] });
   qc.invalidateQueries({ queryKey: ['payroll-summary'] });
+  qc.invalidateQueries({ queryKey: ['advance-ledger'] }); // recovery applied at pay
+  qc.invalidateQueries({ queryKey: ['worker-ledger'] });
   qc.invalidateQueries({ queryKey: ['mill-workers'] });
   qc.invalidateQueries({ queryKey: ['mill-expenses'] });
   qc.invalidateQueries({ queryKey: ['payables'] });
