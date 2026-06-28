@@ -1,5 +1,5 @@
 import React from 'react';
-import { DollarSign, Plus } from 'lucide-react';
+import { DollarSign, Plus, Factory } from 'lucide-react';
 
 export default function FinancialsTab({ order, formatCurrency, formatPKR, totalCosts, grossProfit, marginPct, onConfirmAdvance, onRequestBalance, onAddExpense, onAddReceivable, canConfirmAdvance, canRequestBalance, exportCostCategories }) {
   const formatCost = formatPKR || formatCurrency;
@@ -102,6 +102,53 @@ export default function FinancialsTab({ order, formatCurrency, formatPKR, totalC
           <p className="text-xs text-gray-400 italic pt-1">Profit converts contract value to PKR at the order's booked FX rate, then subtracts PKR costs.</p>
         </div>
       </div>
+
+      {/* Source-batch by-product pricing — INTERNAL/ADMIN ONLY (server omits for non-admin; never on customer docs) */}
+      {(order.batchByproducts || []).length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-amber-200 overflow-hidden">
+          <div className="px-6 py-3 border-b border-amber-100 bg-amber-50/60 flex items-center justify-between flex-wrap gap-2">
+            <h3 className="text-sm font-semibold text-gray-700 inline-flex items-center gap-1.5"><Factory className="w-4 h-4" /> Source batch — by-product pricing</h3>
+            <span className="text-[10px] uppercase tracking-wider text-amber-700 font-semibold bg-amber-100 rounded px-1.5 py-0.5">Internal — not on customer documents</span>
+          </div>
+          {order.batchByproducts.map((bp) => (
+            <div key={bp.batchId} className="border-b border-gray-100 last:border-0">
+              <div className="px-6 pt-3 flex items-center justify-between flex-wrap gap-2">
+                <a href={bp.batchHref} className="text-sm font-medium text-blue-600 hover:underline">Batch {bp.batchNo}</a>
+                {bp.byproductRecovery > 0 && <span className="text-xs text-emerald-700">By-product recovery {formatCost(bp.byproductRecovery)}</span>}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-gray-500 text-xs">
+                    <tr>
+                      <th className="px-6 py-2 text-left font-medium">Product / grade</th>
+                      <th className="px-3 py-2 text-left font-medium">Type</th>
+                      <th className="px-3 py-2 text-right font-medium">Produced</th>
+                      <th className="px-3 py-2 text-right font-medium">Cost/kg</th>
+                      <th className="px-3 py-2 text-right font-medium">Sale price/kg</th>
+                      <th className="px-3 py-2 text-right font-medium">Recovery value</th>
+                      <th className="px-3 py-2 text-left font-medium">Warehouse</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {bp.outputs.map((o) => (
+                      <tr key={o.lotId}>
+                        <td className="px-6 py-2"><a href={o.href} className="text-blue-600 hover:underline">{o.productGrade}</a></td>
+                        <td className="px-3 py-2 text-gray-600">{o.type === 'byproduct' ? 'by-product' : 'finished'}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{Math.round(o.producedKg).toLocaleString()} kg</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{o.costPerKg ? formatCost(o.costPerKg) : '—'}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{o.salePricePerKg ? formatCost(o.salePricePerKg) : '—'}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{o.recoveryValue ? formatCost(o.recoveryValue) : '—'}</td>
+                        <td className="px-3 py-2 text-gray-600">{o.warehouse || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+          <p className="px-6 py-2 text-[11px] text-gray-400">Per-grade valuation of the milling batch that produced the exported rice (set at yield, same basis as Batch 360). By-product recovery is credited back into the finished cost under residual costing. Authorized staff only — excluded from the customer-facing export documents.</p>
+        </div>
+      )}
 
       {/* Action Buttons */}
       <div className="flex items-center gap-3">

@@ -219,6 +219,8 @@ export function transformOrder(dbOrder) {
     })),
     // Purchase lots allocated to this order
     purchaseLots: dbOrder.purchaseLots || [],
+    // Source-batch by-product pricing (internal/admin-only; empty for non-admin)
+    batchByproducts: dbOrder.batchByproducts || [],
     // Costs — convert array to keyed object if needed
     costs: transformCosts(dbOrder.costs),
     // Documents — convert array to keyed object if needed

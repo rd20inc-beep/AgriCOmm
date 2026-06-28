@@ -62,6 +62,7 @@ export function useExportOrder(id) {
         status_history: res?.data?.statusHistory || order.status_history,
         packingLines: res?.data?.packingLines || [],
         purchaseLots: res?.data?.purchaseLots || [],
+        batchByproducts: res?.data?.batchByproducts || [],
       };
       return transformOrder(raw);
     },
