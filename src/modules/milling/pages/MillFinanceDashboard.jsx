@@ -16,6 +16,7 @@ import {
   usePayrollSummary, useRecordAttendance, useAttendance, useBulkAttendance, useAttendanceHolidays, useInventory, useExpenseVendors,
   usePayrollRuns, usePostPayrollRun, useDeletePayrollRun, usePayrollRun, usePayrollReport,
   useApprovePayrollRun, usePayPayrollRun, useVoidPayrollRun,
+  usePayrollSchedule, useSavePayrollSchedule, useRunPayrollNow,
   usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow, useAcceptFundTransfer,
   useMillLotCosts, useLocalSales, useRecordPayment, usePayablePayments,
 } from '../../../api/queries';
@@ -203,6 +204,8 @@ export default function MillFinanceDashboard() {
   const [showRunDrawer, setShowRunDrawer] = useState(false);
   const [runPreselect, setRunPreselect] = useState(null); // worker id to pre-select in the run drawer (per-row Pay)
   const [payslipsRunId, setPayslipsRunId] = useState(null); // open the payslips panel for a run
+  const [showScheduleDrawer, setShowScheduleDrawer] = useState(false);
+  const runNowMut = useRunPayrollNow();
 
   function openRunDrawer(preselectId = null) { setRunPreselect(preselectId); setShowRunDrawer(true); }
 
@@ -1513,6 +1516,11 @@ export default function MillFinanceDashboard() {
                   <Wallet className="w-3.5 h-3.5" /> {monthRuns.length ? 'Prepare Remaining' : 'Prepare Payroll Run'}
                 </button>
               )}
+              {payrollView === 'payroll' && (
+                <button onClick={() => setShowScheduleDrawer(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 bg-white hover:bg-gray-50">
+                  <Clock className="w-3.5 h-3.5" /> Schedule
+                </button>
+              )}
               <button onClick={() => openWorkerDrawer(null)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-700">
                 <UserPlus className="w-3.5 h-3.5" /> Add Employee
               </button>
@@ -2177,6 +2185,24 @@ export default function MillFinanceDashboard() {
           onClose={() => { setShowRunDrawer(false); setRunPreselect(null); }}
           onPosted={(run) => { setShowRunDrawer(false); setRunPreselect(null); addToast(`Payroll run prepared — ${PKR(run.netTotal)} pending approval`, 'success'); setPayslipsRunId(run.id); }}
           postRunMut={postRunMut}
+          addToast={addToast}
+        />
+      )}
+
+      {/* ─── PAYROLL SCHEDULE DRAWER ───────────────────────────────── */}
+      {showScheduleDrawer && (
+        <PayrollScheduleDrawer
+          canManage={canApprovePayroll}
+          onClose={() => setShowScheduleDrawer(false)}
+          onRunNow={async () => {
+            try {
+              const res = await runNowMut.mutateAsync({ month: payrollMonth });
+              const r = res?.data || res;
+              if (r?.prepared && r?.run) { addToast(`Prepared payroll for ${r.run.period || payrollMonth}`, 'success'); setShowScheduleDrawer(false); setPayslipsRunId(r.run.id); }
+              else addToast(r?.message || 'Everyone is already in a run this month.', 'info');
+            } catch (e) { addToast(e.message, 'error'); }
+          }}
+          runNowBusy={runNowMut.isPending}
           addToast={addToast}
         />
       )}
@@ -3032,6 +3058,73 @@ function PayrollRunDrawer({ month, employees, preselectId, onClose, onPosted, po
         </div>
         <p className="text-[11px] text-gray-400">Prepares a payroll run for the ticked employees — it must then be <span className="font-medium">Approved</span> and <span className="font-medium">Paid</span> (by Finance/Owner) before any cash/GL posts. Advances are only recovered when the run is paid.</p>
       </div>
+    </SlideDrawer>
+  );
+}
+
+// Schedule monthly payroll auto-prepare. The scheduler PREPARES a run on the
+// chosen day each month into the approval queue — it never auto-approves/pays.
+function PayrollScheduleDrawer({ canManage, onClose, onRunNow, runNowBusy, addToast }) {
+  const { data: schedule, isLoading } = usePayrollSchedule();
+  const saveMut = useSavePayrollSchedule();
+  const [form, setForm] = useState(null);
+  useEffect(() => {
+    if (schedule !== undefined) setForm({
+      active: schedule?.active ?? false,
+      day_of_month: schedule?.dayOfMonth ?? 28,
+      pay_method: schedule?.payMethod ?? 'cash',
+      notes: schedule?.notes ?? '',
+    });
+  }, [schedule]);
+  const f = form || { active: false, day_of_month: 28, pay_method: 'cash', notes: '' };
+  const save = async (patch) => {
+    const next = { ...f, ...patch };
+    setForm(next);
+    if (!canManage) return;
+    try { await saveMut.mutateAsync(next); addToast('Payroll schedule saved', 'success'); }
+    catch (e) { addToast(e.message, 'error'); }
+  };
+  return (
+    <SlideDrawer open onClose={onClose} title="Schedule Monthly Payroll" subtitle="Auto-prepare payroll into the approval queue" icon={Clock} size="md">
+      {isLoading || !form ? <p className="text-sm text-gray-400">Loading…</p> : (
+        <div className="space-y-4">
+          <div className="rounded-lg bg-blue-50 border border-blue-100 p-3 text-xs text-blue-800">
+            On the chosen day each month the system <span className="font-medium">prepares</span> a payroll run for all active employees and drops it in the approval queue. It never auto-approves or pays — Finance/Owner still <span className="font-medium">Approve → Pay</span>.
+          </div>
+
+          <label className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 p-3">
+            <span className="text-sm font-medium text-gray-800">Auto-prepare each month</span>
+            <input type="checkbox" disabled={!canManage} checked={f.active} onChange={e => save({ active: e.target.checked })} className="w-4 h-4 rounded border-gray-300" />
+          </label>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Prepare on day</label>
+              <select disabled={!canManage} value={f.day_of_month} onChange={e => save({ day_of_month: parseInt(e.target.value, 10) })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white disabled:bg-gray-50">
+                {Array.from({ length: 28 }, (_, i) => i + 1).map(d => <option key={d} value={d}>{d}{['1','21'].includes(String(d))?'st':['2','22'].includes(String(d))?'nd':['3','23'].includes(String(d))?'rd':'th'} of the month</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Pay via</label>
+              <select disabled value={f.pay_method} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-500">
+                <option value="cash">Mill Cash</option>
+              </select>
+            </div>
+          </div>
+
+          {schedule?.nextRun && f.active && (
+            <div className="text-xs text-gray-500">Next auto-prepare: <span className="font-medium text-gray-700">{fmtDate(schedule.nextRun)}</span>{schedule.lastRun ? ` · last ran ${fmtDate(schedule.lastRun)} (${schedule.lastStatus || '—'})` : ''}</div>
+          )}
+          {!canManage && <p className="text-[11px] text-amber-600">Only Finance/Owner can change the schedule. You can still prepare now.</p>}
+
+          <div className="pt-2 border-t border-gray-100">
+            <button onClick={onRunNow} disabled={runNowBusy} className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              <Wallet className="w-4 h-4" /> {runNowBusy ? 'Preparing…' : 'Prepare this month now'}
+            </button>
+            <p className="text-[11px] text-gray-400 mt-1.5 text-center">Prepares the current month immediately (skips anyone already in a run).</p>
+          </div>
+        </div>
+      )}
     </SlideDrawer>
   );
 }

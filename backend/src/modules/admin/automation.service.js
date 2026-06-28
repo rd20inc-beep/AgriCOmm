@@ -69,6 +69,9 @@ const automationService = {
         case 'recurring_expense':
           result = await this.materializeDueRecurringExpenses();
           break;
+        case 'payroll_prepare':
+          result = await this.runScheduledPayrollPrepare(task);
+          break;
         case 'report_email':
           result = await this.runReportEmail(task);
           break;
@@ -792,6 +795,24 @@ const automationService = {
       }
     }
     return { processed: created, details: { created, items } };
+  },
+
+  // Auto-PREPARE the current month's payroll for every not-yet-committed active
+  // employee. Lands in the approval queue as a 'prepared' run — NEVER auto-
+  // approved or auto-paid (cash/GL + advance recovery still need a human Pay).
+  // Idempotent: re-running in the same month prepares nobody new (everyone is
+  // already committed), so it returns processed:0 rather than erroring.
+  async runScheduledPayrollPrepare(task) {
+    const payroll = require('../milling/payroll.service');
+    let cfg = {}; try { cfg = typeof task.config === 'string' ? JSON.parse(task.config) : (task.config || {}); } catch (e) { cfg = {}; }
+    const period = new Date().toISOString().slice(0, 7); // current month
+    try {
+      const run = await payroll.preparePayrollRun({ month: period, pay_method: cfg.pay_method || 'cash', notes: `Auto-prepared monthly payroll ${period}` }, cfg.created_by || 1);
+      return { processed: run.employee_count || 0, details: { runId: run.id, period, employees: run.employee_count, net: run.net_total } };
+    } catch (e) {
+      if (e.code === 'NONE') return { processed: 0, details: { period, message: 'All active employees already in a run for this period.' } };
+      throw e;
+    }
   },
 
   async runDueScheduledTasks() {

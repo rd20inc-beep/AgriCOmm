@@ -1452,6 +1452,19 @@ export function useDeletePayrollRun() {
   });
 }
 
+// Scheduled / recurring monthly payroll.
+export function usePayrollSchedule() {
+  return useQuery({ queryKey: ['payroll-schedule'], queryFn: async () => { const res = await millingApi.getPayrollSchedule(); return transformKeys(unwrap(res, 'schedule') || null); } });
+}
+export function useSavePayrollSchedule() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (data) => millingApi.savePayrollSchedule(data), onSuccess: () => qc.invalidateQueries({ queryKey: ['payroll-schedule'] }) });
+}
+export function useRunPayrollNow() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (data) => millingApi.runPayrollNow(data), onSuccess: () => { invalidatePayroll(qc); qc.invalidateQueries({ queryKey: ['payroll-pending'] }); } });
+}
+
 // Approval workflow: approve / pay / void a payroll run.
 export function useApprovePayrollRun() {
   const qc = useQueryClient();
