@@ -228,16 +228,25 @@ export default function InvoiceView() {
         </ol>
       </div>
 
-      {/* Dispatch */}
+      {/* Dispatch + intake (purchase) vehicles */}
       <div className="bg-white rounded-xl border border-gray-200 p-4">
-        <h3 className="text-sm font-semibold text-gray-700 mb-3 inline-flex items-center gap-1.5"><Truck size={15} /> Dispatch</h3>
-        <div className="flex flex-wrap gap-2 text-xs">
+        <h3 className="text-sm font-semibold text-gray-700 mb-3 inline-flex items-center gap-1.5"><Truck size={15} /> Vehicles &amp; dispatch</h3>
+        <p className="text-[11px] uppercase tracking-wider text-gray-400 mb-1">Outbound (sold / dispatch)</p>
+        <div className="flex flex-wrap gap-2 text-xs mb-3">
           <Chip tone={dispatch.dispatched ? 'emerald' : 'gray'}>{dispatch.deliveryStatus}</Chip>
           {dispatch.dispatchDate && <Chip>{dt(dispatch.dispatchDate)}</Chip>}
           {dispatch.vehicleNo && <Chip>Truck {dispatch.vehicleNo}</Chip>}
           {dispatch.driverName && <Chip>Driver {dispatch.driverName}</Chip>}
           {dispatch.collectionLocation && <Chip>Collected at {dispatch.collectionLocation}</Chip>}
           {!dispatch.dispatchDate && !dispatch.vehicleNo && !dispatch.driverName && <span className="text-gray-400">No dispatch details recorded.</span>}
+        </div>
+        <p className="text-[11px] uppercase tracking-wider text-gray-400 mb-1">Inbound (purchased / received)</p>
+        <div className="flex flex-wrap gap-2 text-xs">
+          {(dispatch.intakeVehicles || []).length > 0
+            ? dispatch.intakeVehicles.map((v, i) => (
+                <Chip key={i}>Truck {v.vehicleNo}{v.driverName ? ` · ${v.driverName}` : ''}{v.weightMt ? ` · ${v.weightMt} MT` : ''}{v.arrivalDate ? ` · ${dt(v.arrivalDate)}` : ''}</Chip>
+              ))
+            : <span className="text-gray-400">No purchase/intake vehicle recorded for the source lot.</span>}
         </div>
       </div>
 
@@ -298,7 +307,7 @@ export default function InvoiceView() {
 
 function ItemRow({ it }) {
   const [open, setOpen] = useState(false);
-  const hasTrace = it.lotNo || it.batchNo || it.warehouse || (it.sourceLots || []).length;
+  const hasTrace = it.lotNo || it.batchNo || it.warehouse || (it.sourceLots || []).length || (it.intakeVehicles || []).length;
   return (
     <>
       <tr className={`hover:bg-gray-50 ${hasTrace ? 'cursor-pointer' : ''}`} onClick={() => hasTrace && setOpen(o => !o)}>
@@ -326,6 +335,14 @@ function ItemRow({ it }) {
                 Source purchased rice lots:
                 {it.sourceLots.map((s, i) => (
                   <span key={i}>{i > 0 ? ',' : ''} {s.href ? <Link to={s.href} className="font-mono text-blue-600 hover:underline">{s.lotNo}</Link> : <span className="font-mono">{s.lotNo}</span>}{s.supplier && s.supplier !== '—' ? ` (${s.supplier})` : ''}</span>
+                ))}
+              </div>
+            )}
+            {(it.intakeVehicles || []).length > 0 && (
+              <div className="mt-1.5 text-gray-600">
+                Purchased / received on:
+                {it.intakeVehicles.map((v, i) => (
+                  <span key={i} className="text-gray-800">{i > 0 ? ', ' : ' '}{v.vehicleNo}{v.driverName ? ` (${v.driverName})` : ''}{v.weightMt ? ` · ${v.weightMt} MT` : ''}{v.arrivalDate ? ` · ${dt(v.arrivalDate)}` : ''}</span>
                 ))}
               </div>
             )}

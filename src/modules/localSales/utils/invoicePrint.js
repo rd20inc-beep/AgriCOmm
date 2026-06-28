@@ -10,6 +10,8 @@ const pkr = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
 const dt = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 const n0 = (v) => `${Math.round(parseFloat(v) || 0).toLocaleString()}`;
 const pct = (v) => `${(parseFloat(v) || 0).toFixed(1)}%`;
+// Distinct inbound/purchase vehicle numbers for the invoice's source lots.
+const inVehNos = (dispatch) => (dispatch?.intakeVehicles || []).map(v => v.vehicleNo).filter(Boolean).join(', ');
 
 function companyBlock(co) {
   const name = co?.legalName || co?.name || 'AGRI COMMODITIES';
@@ -115,15 +117,16 @@ export function printCustomerInvoice(data, company, opts = {}) {
       <tr><td>Outstanding</td><td class="r">${pkr(totals.outstanding)}</td></tr>
     </table>
     ${compact
-      ? `<div class="note"><b>Dispatch:</b> ${[items[0]?.warehouse, dispatch.deliveryStatus, dispatch.vehicleNo ? 'Truck ' + esc(dispatch.vehicleNo) : '', dispatch.driverName, dispatch.dispatchDate ? dt(dispatch.dispatchDate) : ''].filter(Boolean).map(esc).join(' &middot; ') || '—'}</div>`
+      ? `<div class="note"><b>Dispatch:</b> ${[items[0]?.warehouse, dispatch.deliveryStatus, dispatch.vehicleNo ? 'Out: ' + esc(dispatch.vehicleNo) : '', dispatch.driverName, dispatch.dispatchDate ? dt(dispatch.dispatchDate) : '', inVehNos(dispatch) ? 'In: ' + esc(inVehNos(dispatch)) : ''].filter(Boolean).map(esc).join(' &middot; ') || '—'}</div>`
       : `<div class="sec"><h4>Dispatch</h4>
       <div class="kv">
         <span><b>Warehouse:</b> ${esc(items[0]?.warehouse || '—')}</span>
         <span><b>Delivery status:</b> ${esc(dispatch.deliveryStatus || '—')}</span>
-        <span><b>Truck no:</b> ${esc(dispatch.vehicleNo || '—')}</span>
+        <span><b>Outbound vehicle (sold):</b> ${esc(dispatch.vehicleNo || '—')}</span>
         <span><b>Dispatch date:</b> ${dt(dispatch.dispatchDate)}</span>
         <span><b>Driver:</b> ${esc(dispatch.driverName || '—')}</span>
         <span><b>Collected at:</b> ${esc(dispatch.collectionLocation || '—')}</span>
+        <span><b>Inbound vehicle (purchased):</b> ${esc(inVehNos(dispatch) || '—')}</span>
       </div>
     </div>`}
     ${sale.notes ? `<div class="sec"><h4>Terms / Remarks</h4><div>${esc(sale.notes)}</div></div>` : ''}
@@ -182,9 +185,14 @@ export function printAdminInvoice(data, company) {
         <span><b>Payments:</b> ${(payments || []).filter(p => p.kind === 'payment').length}</span>
         <span><b>Inventory movements:</b> ${(linked.inventoryMovements || []).length}</span>
         <span><b>Lot transactions:</b> ${(linked.lotTransactions || []).length}</span>
-        <span><b>Dispatch:</b> ${esc(dispatch.deliveryStatus || '—')}${dispatch.vehicleNo ? ` · ${esc(dispatch.vehicleNo)}` : ''}</span>
+        <span><b>Outbound vehicle (sold):</b> ${esc(dispatch.deliveryStatus || '—')}${dispatch.vehicleNo ? ` · ${esc(dispatch.vehicleNo)}` : ''}${dispatch.driverName ? ` · ${esc(dispatch.driverName)}` : ''}</span>
+        <span><b>Inbound vehicle (purchased):</b> ${esc(inVehNos(dispatch) || '—')}</span>
       </div>
     </div>
+    ${(dispatch.intakeVehicles || []).length ? `<div class="sec"><h4>Purchase / Intake Vehicles</h4>
+      <table><thead><tr><th>Vehicle</th><th>Driver</th><th class="r">Weight (MT)</th><th class="r">Bags</th><th>Arrived</th></tr></thead>
+        <tbody>${dispatch.intakeVehicles.map(v => `<tr><td>${esc(v.vehicleNo)}</td><td>${esc(v.driverName || '—')}</td><td class="r">${(v.weightMt || 0).toFixed(2)}</td><td class="r">${v.totalBags != null ? v.totalBags : '—'}</td><td>${dt(v.arrivalDate)}</td></tr>`).join('')}</tbody></table>
+    </div>` : ''}
     <div class="sign"><div>Prepared By</div><div>Checked By</div><div>Approved By</div></div>
   `;
   return openPrint(`Admin Invoice ${sale.invoiceNo}`, inner);

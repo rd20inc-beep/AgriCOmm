@@ -128,6 +128,37 @@ async function assembleInvoice(id, includeAdmin = false) {
     return item;
   });
 
+  // Intake (purchase) vehicles — the trucks each item's source rice lot(s)
+  // arrived on (milling_vehicle_arrivals, scoped by lot or batch). Surfaced for
+  // traceability alongside the outbound sale/dispatch vehicle.
+  const arrLotIds = new Set(); const arrBatchIds = new Set();
+  for (const it of items) {
+    if (it.lotId) arrLotIds.add(it.lotId);
+    if (it.batchId) arrBatchIds.add(it.batchId);
+    for (const sl of (it.sourceLots || [])) if (sl.lotId) arrLotIds.add(sl.lotId);
+  }
+  let arrivals = [];
+  if (arrLotIds.size || arrBatchIds.size) {
+    arrivals = await db('milling_vehicle_arrivals')
+      .where(function () {
+        if (arrLotIds.size) this.whereIn('lot_id', [...arrLotIds]);
+        if (arrBatchIds.size) this.orWhereIn('batch_id', [...arrBatchIds]);
+      })
+      .select('id', 'lot_id', 'batch_id', 'vehicle_no', 'driver_name', 'driver_phone', 'weight_mt', 'total_bags', 'arrival_date');
+  }
+  const fmtVeh = (a) => ({ vehicleNo: a.vehicle_no, driverName: a.driver_name || null, driverPhone: a.driver_phone || null, weightMt: num(a.weight_mt), totalBags: a.total_bags || null, arrivalDate: a.arrival_date || null });
+  for (const it of items) {
+    const srcIds = new Set((it.sourceLots || []).map(s => s.lotId).filter(Boolean));
+    if (it.lotId) srcIds.add(it.lotId);
+    const seen = new Set();
+    it.intakeVehicles = arrivals
+      .filter(a => (a.lot_id && srcIds.has(a.lot_id)) || (it.batchId && a.batch_id === it.batchId))
+      .filter(a => { const k = a.vehicle_no || a.id; if (seen.has(k)) return false; seen.add(k); return true; })
+      .map(fmtVeh);
+  }
+  const aggSeen = new Set(); const intakeVehicles = [];
+  for (const it of items) for (const v of it.intakeVehicles) { if (v.vehicleNo && !aggSeen.has(v.vehicleNo)) { aggSeen.add(v.vehicleNo); intakeVehicles.push(v); } }
+
   // Payment timeline with running balance.
   const itemIds = rows.map(r => r.id);
   let pays = await db('payments').whereIn('local_sale_id', itemIds.length ? itemIds : [base.id])
@@ -179,6 +210,7 @@ async function assembleInvoice(id, includeAdmin = false) {
       dispatchDate: base.dispatch_date || null,
       vehicleNo: base.vehicle_no || null, driverName: base.driver_name || null,
       collectionLocation: base.collection_location || null,
+      intakeVehicles, // trucks the source rice lot(s) were purchased/received on
     },
     totals: {
       quantityKg: items.reduce((s, i) => s + i.quantityKg, 0),
