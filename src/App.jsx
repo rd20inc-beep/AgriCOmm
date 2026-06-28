@@ -68,6 +68,7 @@ const PrintableReports = lazyWithReload(() => import('./modules/analytics/pages/
 const LotReport = lazyWithReload(() => import('./modules/analytics/pages/LotReport'));
 const InvoiceLedger = lazyWithReload(() => import('./modules/analytics/pages/InvoiceLedger'));
 const PayrollLedger = lazyWithReload(() => import('./modules/analytics/pages/PayrollLedger'));
+const PayrollAnalytics = lazyWithReload(() => import('./modules/analytics/pages/PayrollAnalytics'));
 const LotLedger = lazyWithReload(() => import('./modules/analytics/pages/LotLedger'));
 const BatchLedger = lazyWithReload(() => import('./modules/analytics/pages/BatchLedger'));
 const StandalonePrintReport = lazyWithReload(() => import('./modules/analytics/pages/StandalonePrintReport'));
@@ -153,6 +154,7 @@ function ExportRoutes() {
         <Route path="/reports/lots" element={<LotReport />} />
         <Route path="/reports/invoices" element={<InvoiceLedger />} />
         <Route path="/reports/payroll" element={<PayrollLedger />} />
+        <Route path="/reports/payroll-analytics" element={<PayrollAnalytics />} />
         <Route path="/reports/lot-ledger/:id" element={<LotLedger />} />
         <Route path="/reports/batch-ledger/:id" element={<BatchLedger />} />
         <Route path="*" element={<Navigate to="/" replace />} />
@@ -195,6 +197,7 @@ function MillRoutes() {
         <Route path="/reports/lots" element={<LotReport />} />
         <Route path="/reports/invoices" element={<InvoiceLedger />} />
         <Route path="/reports/payroll" element={<PayrollLedger />} />
+        <Route path="/reports/payroll-analytics" element={<PayrollAnalytics />} />
         <Route path="/reports/lot-ledger/:id" element={<LotLedger />} />
         <Route path="/reports/batch-ledger/:id" element={<BatchLedger />} />
         <Route path="*" element={<Navigate to="/" replace />} />
@@ -244,6 +247,7 @@ function StandardRoutes() {
         <Route path="/reports/lots" element={<ProtectedRoute module="reports" action="view"><LotReport /></ProtectedRoute>} />
         <Route path="/reports/invoices" element={<ProtectedRoute module="reports" action="view"><InvoiceLedger /></ProtectedRoute>} />
         <Route path="/reports/payroll" element={<ProtectedRoute module="reports" action="view"><PayrollLedger /></ProtectedRoute>} />
+        <Route path="/reports/payroll-analytics" element={<ProtectedRoute module="reports" action="view"><PayrollAnalytics /></ProtectedRoute>} />
         <Route path="/reports/lot-ledger/:id" element={<ProtectedRoute module="reports" action="view"><LotLedger /></ProtectedRoute>} />
         <Route path="/reports/batch-ledger/:id" element={<ProtectedRoute module="reports" action="view"><BatchLedger /></ProtectedRoute>} />
         <Route path="/exceptions" element={<ProtectedRoute module="admin" action="view"><ExceptionDashboard /></ProtectedRoute>} />

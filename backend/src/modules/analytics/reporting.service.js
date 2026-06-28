@@ -3074,6 +3074,66 @@ const reportingService = {
       netPending: runs.reduce((s, r) => s + num(r.net_total), 0),
     };
   },
+
+  // ── Payroll analytics (dashboard): trend, cost-by-role, advances, headcount,
+  // top earners — over a YYYY-MM range (default last 12 months). Paid/posted
+  // runs only. Read-only over the mill payroll tables.
+  async getPayrollAnalytics({ from, to } = {}) {
+    const num = (v) => parseFloat(v) || 0;
+    const addMonth = (p, n) => { const y = +p.slice(0, 4); const m = +p.slice(5, 7); const d = new Date(Date.UTC(y, m - 1 + n, 1)); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`; };
+    const toM = /^\d{4}-\d{2}$/.test(to || '') ? to : new Date().toISOString().slice(0, 7);
+    const fromM = /^\d{4}-\d{2}$/.test(from || '') ? from : addMonth(toM, -11);
+    // List of periods in range (cap 36).
+    const periods = []; let p = fromM; for (let i = 0; i < 36 && p <= toM; i += 1) { periods.push(p); p = addMonth(p, 1); }
+
+    const runs = await db('mill_payroll_runs').whereIn('status', ['paid', 'posted'])
+      .where('period', '>=', fromM).where('period', '<=', toM)
+      .select('id', 'period', 'gross_total', 'advance_total', 'net_total', 'employee_count');
+    const runIds = runs.map((r) => r.id);
+    const lines = runIds.length ? await db('mill_payroll_lines as l').join('mill_payroll_runs as r', 'r.id', 'l.run_id')
+      .whereIn('l.run_id', runIds)
+      .select('l.worker_id', 'l.worker_name', 'l.role', 'l.pay_type', 'l.gross_pay', 'l.net_pay', 'l.advance_deducted', 'l.ot_hours', 'r.period') : [];
+
+    // Monthly trend (fill zeros for empty months).
+    const byPeriod = {}; for (const r of runs) { const b = byPeriod[r.period] || (byPeriod[r.period] = { gross: 0, net: 0, advance: 0, employees: 0 }); b.gross += num(r.gross_total); b.net += num(r.net_total); b.advance += num(r.advance_total); b.employees += r.employee_count; }
+    const trend = periods.map((per) => ({ period: per, gross: Math.round((byPeriod[per] || {}).gross || 0), net: Math.round((byPeriod[per] || {}).net || 0), advance: Math.round((byPeriod[per] || {}).advance || 0), employees: (byPeriod[per] || {}).employees || 0 }));
+
+    // Cost by role (range).
+    const roleMap = {};
+    for (const l of lines) { const k = l.role || '—'; const b = roleMap[k] || (roleMap[k] = { role: k, gross: 0, net: 0, advance: 0, ot: 0, workers: new Set() }); b.gross += num(l.gross_pay); b.net += num(l.net_pay); b.advance += num(l.advance_deducted); b.ot += num(l.ot_hours); b.workers.add(l.worker_id); }
+    const byRole = Object.values(roleMap).map((b) => ({ role: b.role, employees: b.workers.size, gross: Math.round(b.gross), net: Math.round(b.net), advance: Math.round(b.advance), otHours: Math.round(b.ot) })).sort((a, b) => b.net - a.net);
+
+    // Top earners (range).
+    const earnMap = {};
+    for (const l of lines) { const k = `${l.worker_id || l.worker_name}`; const b = earnMap[k] || (earnMap[k] = { name: l.worker_name, role: l.role, workerId: l.worker_id, net: 0, runs: 0 }); b.net += num(l.net_pay); b.runs += 1; }
+    const topEarners = Object.values(earnMap).map((e) => ({ ...e, net: Math.round(e.net) })).sort((a, b) => b.net - a.net).slice(0, 8);
+
+    // Headcount (current) + advances.
+    const workers = await db('mill_workers').select('is_active', 'pay_type');
+    const activeWorkers = workers.filter((w) => w.is_active).length;
+    const byPayType = { daily: workers.filter((w) => w.is_active && w.pay_type !== 'monthly').length, monthly: workers.filter((w) => w.is_active && w.pay_type === 'monthly').length };
+    const advGivenRow = await db('mill_worker_advances').whereRaw("TO_CHAR(advance_date,'YYYY-MM') >= ?", [fromM]).whereRaw("TO_CHAR(advance_date,'YYYY-MM') <= ?", [toM]).select(db.raw('COALESCE(SUM(amount),0) as given')).first();
+    const advOutRow = await db('mill_worker_advances').where('status', 'outstanding').select(db.raw('COALESCE(SUM(amount - recovered_amount),0) as outstanding')).first();
+
+    const totalGross = runs.reduce((s, r) => s + num(r.gross_total), 0);
+    const totalNet = runs.reduce((s, r) => s + num(r.net_total), 0);
+    const totalAdvanceRecovered = runs.reduce((s, r) => s + num(r.advance_total), 0);
+    const paidEmployees = new Set(lines.map((l) => l.worker_id)).size;
+    const given = num(advGivenRow.given);
+
+    return {
+      range: { from: fromM, to: toM },
+      summary: {
+        totalGross: Math.round(totalGross), totalNet: Math.round(totalNet), totalAdvanceRecovered: Math.round(totalAdvanceRecovered),
+        runs: runs.length, paidEmployees, activeWorkers, byPayType,
+        avgNetPerEmployee: paidEmployees ? Math.round(totalNet / paidEmployees) : 0,
+        avgNetPerMonth: periods.length ? Math.round(totalNet / periods.length) : 0,
+        advancesGiven: Math.round(given), advancesOutstanding: Math.round(num(advOutRow.outstanding)),
+        advanceRecoveryRate: given > 0 ? Math.round((totalAdvanceRecovered / given) * 1000) / 10 : 0,
+      },
+      trend, byRole, topEarners,
+    };
+  },
 };
 
 module.exports = reportingService;

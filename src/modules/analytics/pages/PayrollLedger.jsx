@@ -62,6 +62,7 @@ export default function PayrollLedger() {
           <p className="text-xs text-gray-400">Every salary payment, per employee per run. Commercial figures from mill payroll.</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Link to="/reports/payroll-analytics" className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-white text-gray-700 border border-gray-200 hover:bg-gray-50"><Users size={14} /> Analytics</Link>
           <button onClick={() => exportLedgerCSV({ filename: `payroll-ledger_${stamp}.csv`, columns: COLS, rows })} disabled={!rows.length}
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-white text-gray-700 border border-gray-200 hover:bg-gray-50 disabled:opacity-50"><Download size={14} /> Export CSV</button>
           <button onClick={() => printLedger({ companyName: companyProfileData?.legalName || companyProfileData?.name, title: 'Payroll Ledger', subtitle: 'Salary payments by employee', meta: exportMeta, columns: COLS, rows, generatedBy: user?.name || user?.email, footerNote: 'Mill payroll — salary figures.' })} disabled={!rows.length}

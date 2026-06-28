@@ -670,7 +670,10 @@ function PayrollSummaryStrip({ navigate, fmtPKR }) {
     <div className="bg-white rounded-xl border border-gray-200 p-4">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold text-gray-700">Payroll summary · {month}</h3>
-        <Link to="/reports/payroll" className="text-xs text-blue-600 hover:underline">Payroll ledger →</Link>
+        <div className="flex items-center gap-3">
+          <Link to="/reports/payroll-analytics" className="text-xs text-blue-600 hover:underline">Analytics →</Link>
+          <Link to="/reports/payroll" className="text-xs text-blue-600 hover:underline">Ledger →</Link>
+        </div>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         {cards.map((c, i) => (

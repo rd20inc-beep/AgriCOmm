@@ -123,6 +123,16 @@ const reportingController = {
     }
   },
 
+  async payrollAnalytics(req, res) {
+    try {
+      const data = await reportingService.getPayrollAnalytics(req.query || {});
+      return res.json({ success: true, ...data });
+    } catch (err) {
+      console.error('Payroll analytics error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
   async saleDetail(req, res) {
     try {
       const data = await reportingService.getSaleDetail(req.params.id);
