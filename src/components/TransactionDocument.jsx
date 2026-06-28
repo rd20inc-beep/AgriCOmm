@@ -41,11 +41,14 @@ function model(kind, d) {
       total, paid: parseFloat(d.paidAmount) || 0, balance: parseFloat(d.dueAmount) || 0,
       status: d.paymentStatus, method: d.paymentMode || d.payment_mode,
       reference: d.paymentReference || d.payment_reference,
-      extra: [
-        d.collectionLocation || d.collection_location ? ['Collection', d.collectionLocation || d.collection_location] : null,
-        d.vehicleNo ? ['Vehicle', d.vehicleNo] : null,
-        d.driverName ? ['Driver', d.driverName] : null,
-      ].filter(Boolean),
+      dispatch: {
+        warehouse: d.warehouse || d.warehouseName || d.warehouse_name || null,
+        truck: d.vehicleNo || d.vehicle_no || null,
+        driver: d.driverName || d.driver_name || null,
+        dispatchDate: d.dispatchDate || d.dispatch_date || null,
+        deliveryStatus: (d.dispatched != null) ? (d.dispatched ? 'Dispatched' : 'Not dispatched') : (d.deliveryStatus || null),
+        collection: d.collectionLocation || d.collection_location || null,
+      },
     };
   }
   if (kind === 'voucher') {
@@ -188,11 +191,25 @@ export default function TransactionDocument({ kind = 'receipt', data, companyPro
         </div>
 
         {/* Payment meta (invoice) */}
-        {(m.method || m.reference || (m.extra && m.extra.length > 0)) && (
+        {(m.method || m.reference) && (
           <div className="mt-3 pt-3 border-t border-gray-100 grid grid-cols-2 gap-x-6 gap-y-1 text-[12px]">
             {m.method && <div className="flex justify-between"><span className="text-gray-500">Payment method</span><span className="text-gray-800">{METHOD[m.method] || m.method}</span></div>}
             {m.reference && <div className="flex justify-between"><span className="text-gray-500">Reference</span><span className="text-gray-800">{m.reference}</span></div>}
-            {(m.extra || []).map(([k, v], i) => <div key={i} className="flex justify-between"><span className="text-gray-500">{k}</span><span className="text-gray-800">{v}</span></div>)}
+          </div>
+        )}
+
+        {/* Dispatch (invoice) — warehouse, truck, driver, dispatch date, delivery status */}
+        {m.dispatch && (m.dispatch.warehouse || m.dispatch.truck || m.dispatch.driver || m.dispatch.dispatchDate || m.dispatch.deliveryStatus || m.dispatch.collection) && (
+          <div className="mt-3 pt-3 border-t border-gray-100">
+            <div className="text-[10px] uppercase tracking-wide text-gray-400 mb-1">Dispatch</div>
+            <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-[12px]">
+              {m.dispatch.warehouse && <div className="flex justify-between"><span className="text-gray-500">Warehouse</span><span className="text-gray-800">{m.dispatch.warehouse}</span></div>}
+              {m.dispatch.deliveryStatus && <div className="flex justify-between"><span className="text-gray-500">Delivery status</span><span className="text-gray-800">{m.dispatch.deliveryStatus}</span></div>}
+              {m.dispatch.truck && <div className="flex justify-between"><span className="text-gray-500">Truck no</span><span className="text-gray-800">{m.dispatch.truck}</span></div>}
+              {m.dispatch.dispatchDate && <div className="flex justify-between"><span className="text-gray-500">Dispatch date</span><span className="text-gray-800">{dt(m.dispatch.dispatchDate)}</span></div>}
+              {m.dispatch.driver && <div className="flex justify-between"><span className="text-gray-500">Driver</span><span className="text-gray-800">{m.dispatch.driver}</span></div>}
+              {m.dispatch.collection && <div className="flex justify-between"><span className="text-gray-500">Collected at</span><span className="text-gray-800">{m.dispatch.collection}</span></div>}
+            </div>
           </div>
         )}
 

@@ -1479,6 +1479,7 @@ const reportingController = {
       let q = db('local_sales as ls')
         .leftJoin('customers as c', 'ls.customer_id', 'c.id')
         .leftJoin('inventory_lots as il', 'ls.lot_id', 'il.id')
+        .leftJoin('warehouses as wh', 'il.warehouse_id', 'wh.id')
         .leftJoin('suppliers as sup', 'il.supplier_id', 'sup.id');
       if (entity) q = q.where('ls.entity', entity);
       if (from) q = q.where('ls.sale_date', '>=', from);
@@ -1487,8 +1488,9 @@ const reportingController = {
         'ls.id', 'ls.sale_no', 'ls.sale_date', 'ls.item_name', 'ls.item_type', 'ls.quantity_kg', 'ls.quantity_bags',
         'ls.rate_per_kg', 'ls.total_amount', 'ls.paid_amount', 'ls.due_amount', 'ls.payment_status', 'ls.payment_mode',
         'ls.collection_location', 'ls.lot_id', 'ls.customer_id', db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer"),
+        'ls.vehicle_no', 'ls.driver_name', 'ls.dispatch_date', 'ls.dispatched',
         'il.lot_no', 'il.type as lot_type', 'il.landed_cost_per_kg', 'il.batch_ref',
-        'il.supplier_id as lot_supplier_id', 'sup.name as lot_supplier',
+        'il.supplier_id as lot_supplier_id', 'sup.name as lot_supplier', 'wh.name as warehouse_name',
       ).orderBy('ls.sale_date', 'desc');
 
       // Provenance for sold MILLED output: batch → raw source lots + suppliers.
@@ -1534,6 +1536,9 @@ const reportingController = {
           itemName: s.item_name, itemType: s.item_type, quantityKg: kg, quantityBags: s.quantity_bags,
           ratePerKg: num(s.rate_per_kg), totalAmount: total, paidAmount: num(s.paid_amount), dueAmount: num(s.due_amount),
           paymentStatus: s.payment_status, paymentMode: s.payment_mode, collectionLocation: s.collection_location,
+          vehicleNo: s.vehicle_no || null, driverName: s.driver_name || null,
+          dispatchDate: s.dispatch_date || null, dispatched: !!s.dispatched,
+          warehouseName: s.warehouse_name || null,
           lotId: s.lot_id, lotNo: s.lot_no, lotType: s.lot_type,
           soldCostPerKg: cpk, cost, margin, marginPct,
           provenance,

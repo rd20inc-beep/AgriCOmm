@@ -586,6 +586,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
         paymentStatus: due <= 0.01 ? 'Paid' : (paid > 0 ? 'Partial' : 'Unpaid'),
         paymentMode: effectiveMode, paymentReference: payload.payment_reference,
         collectionLocation: payload.collection_location, vehicleNo: form.vehicle_no, driverName: form.driver_name,
+        dispatched: true, dispatchDate: new Date().toISOString(),
       });
       onClose();
       reset();
