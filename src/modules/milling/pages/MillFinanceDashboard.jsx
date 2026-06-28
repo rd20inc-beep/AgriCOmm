@@ -315,7 +315,7 @@ export default function MillFinanceDashboard() {
   const [showTransfer, setShowTransfer] = useState(false);
   const EMPTY_EXP = { category: 'salaries', vendor_preset: '', vendor_name: '', subcategory: '', employee_id: '', is_recurring: false, recurrence: 'monthly', description: '', amount: '', expense_date: new Date().toISOString().split('T')[0], reference: '', notes: '' };
   const [expForm, setExpForm] = useState(EMPTY_EXP);
-  const EMPTY_WORKER = { id: null, name: '', role: 'laborer', pay_type: 'daily', daily_wage: '', monthly_salary: '', phone: '', cnic: '', joined_date: new Date().toISOString().split('T')[0], notes: '' };
+  const EMPTY_WORKER = { id: null, name: '', role: 'laborer', pay_type: 'daily', daily_wage: '', monthly_salary: '', ot_rate_per_hour: '', phone: '', cnic: '', joined_date: new Date().toISOString().split('T')[0], notes: '' };
   const [workerForm, setWorkerForm] = useState(EMPTY_WORKER);
   const [advanceTarget, setAdvanceTarget] = useState(null); // worker we're giving an advance to
   const [advanceForm, setAdvanceForm] = useState({ amount: '', advance_date: new Date().toISOString().split('T')[0], payment_method: 'cash', notes: '', recovery_method: 'full_next_salary', recovery_start_period: '', installment_amount: '', installment_count: '', deduction_percent: '' });
@@ -536,6 +536,7 @@ export default function MillFinanceDashboard() {
         pay_type: worker.payType || 'daily',
         daily_wage: worker.dailyWage != null ? String(worker.dailyWage) : '',
         monthly_salary: worker.monthlySalary != null ? String(worker.monthlySalary) : '',
+        ot_rate_per_hour: worker.otRatePerHour != null ? String(worker.otRatePerHour) : '',
         phone: worker.phone || '', cnic: worker.cnic || '',
         joined_date: worker.joinedDate ? String(worker.joinedDate).slice(0, 10) : '',
         notes: worker.notes || '',
@@ -553,6 +554,7 @@ export default function MillFinanceDashboard() {
     const payload = {
       name: workerForm.name.trim(), role: workerForm.role, pay_type: workerForm.pay_type,
       daily_wage: workerForm.daily_wage || null, monthly_salary: workerForm.monthly_salary || null,
+      ot_rate_per_hour: workerForm.ot_rate_per_hour || null,
       phone: workerForm.phone || null, cnic: workerForm.cnic || null,
       joined_date: workerForm.joined_date || null, notes: workerForm.notes || null,
     };
@@ -1987,6 +1989,17 @@ export default function MillFinanceDashboard() {
               </div>
             )}
             <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Overtime rate / hour (PKR)</label>
+              <input
+                type="number" min="0"
+                placeholder="Default: 1.5× hourly"
+                value={workerForm.ot_rate_per_hour}
+                onChange={e => setWorkerForm(p => ({ ...p, ot_rate_per_hour: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900 tabular-nums"
+              />
+              <p className="text-[11px] text-gray-400 mt-1">Leave blank to use 1.5× the daily hourly rate.</p>
+            </div>
+            <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Phone</label>
               <input
                 type="text"
@@ -2576,6 +2589,17 @@ function EmployeeAttendanceGrid({ month, employees, recordAttMut, addToast }) {
     const st = statusOf(emp.id, d);
     return s + (st === 'present' ? 1 : st === 'half_day' ? 0.5 : 0);
   }, 0);
+  // Total OT hours logged this month for an employee (from saved attendance).
+  const otHours = (emp) => dates.reduce((s, d) => s + (parseFloat(fetchedMap[`${emp.id}|${d}`]?.overtimeHours) || 0), 0);
+  const [otWorker, setOtWorker] = useState(null); // open the OT editor for this worker
+
+  // Aggregate attendance stats for the summary strip.
+  const stat = active.reduce((a, emp) => {
+    for (const d of dates) { const st = statusOf(emp.id, d); if (st === 'present') a.present += 1; else if (st === 'half_day') a.half += 1; else if (st === 'absent') a.absent += 1; else if (st === 'leave') a.leave += 1; }
+    a.ot += otHours(emp); return a;
+  }, { present: 0, half: 0, absent: 0, leave: 0, ot: 0 });
+  const markedCells = stat.present + stat.half + stat.absent + stat.leave;
+  const attendanceRate = markedCells > 0 ? Math.round(((stat.present + stat.half * 0.5) / markedCells) * 100) : 0;
 
   if (active.length === 0) {
     return <div className="bg-white rounded-xl border border-gray-100 px-4 py-10 text-center text-sm text-gray-400">No active employees to mark attendance for.</div>;
@@ -2583,6 +2607,16 @@ function EmployeeAttendanceGrid({ month, employees, recordAttMut, addToast }) {
 
   return (
     <div className="space-y-3">
+      {/* Attendance summary */}
+      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+        <Sm label="Employees" value={String(active.length)} />
+        <Sm label="Present days" value={String(stat.present)} tone="emerald" />
+        <Sm label="Half days" value={String(stat.half)} tone="amber" />
+        <Sm label="Absent / leave" value={`${stat.absent} / ${stat.leave}`} tone="rose" />
+        <Sm label="Attendance %" value={`${attendanceRate}%`} />
+        <Sm label="Overtime hrs" value={`${Math.round(stat.ot * 10) / 10}`} tone="amber" />
+      </div>
+
       {/* Toolbar: quick actions + legend */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2">
@@ -2669,6 +2703,7 @@ function EmployeeAttendanceGrid({ month, employees, recordAttMut, addToast }) {
                 );
               })}
               <th className="px-3 py-2 font-medium text-right min-w-[64px]">Days</th>
+              <th className="px-3 py-2 font-medium text-right min-w-[64px] no-print">OT hrs</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -2697,6 +2732,11 @@ function EmployeeAttendanceGrid({ month, employees, recordAttMut, addToast }) {
                   );
                 })}
                 <td className="px-3 py-1.5 text-right font-semibold tabular-nums text-gray-800">{effectiveDays(emp)}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums no-print">
+                  <button onClick={() => setOtWorker(emp)} title="Log overtime hours" className={`px-1.5 py-0.5 rounded text-xs font-medium ${otHours(emp) > 0 ? 'bg-amber-100 text-amber-700 hover:bg-amber-200' : 'text-blue-600 hover:bg-blue-50'}`}>
+                    {otHours(emp) > 0 ? `${Math.round(otHours(emp) * 10) / 10}h` : '+ OT'}
+                  </button>
+                </td>
               </tr>
               );
             })}
@@ -2704,7 +2744,65 @@ function EmployeeAttendanceGrid({ month, employees, recordAttMut, addToast }) {
         </table>
         )}
       </div>
+      {otWorker && (
+        <OvertimeEditor worker={otWorker} dates={dates} statusOf={statusOf}
+          otFor={(d) => parseFloat(fetchedMap[`${otWorker.id}|${d}`]?.overtimeHours) || 0}
+          recordAttMut={recordAttMut} addToast={addToast} onClose={() => setOtWorker(null)} />
+      )}
     </div>
+  );
+}
+
+// Per-employee overtime editor — set OT hours on the month's present/half days
+// (with a "set all" quick action). Posts via the attendance upsert; OT pay is
+// valued at the worker's ot_rate_per_hour (or 1.5× hourly) in payroll.
+function OvertimeEditor({ worker, dates, statusOf, otFor, recordAttMut, addToast, onClose }) {
+  const workDays = dates.filter(d => ['present', 'half_day'].includes(statusOf(worker.id, d)));
+  const [otMap, setOtMap] = useState(() => Object.fromEntries(workDays.map(d => [d, String(otFor(d) || '')])));
+  const [bulk, setBulk] = useState('');
+  const [saving, setSaving] = useState(false);
+  const dailyWage = parseFloat(worker.dailyWage) || (parseFloat(worker.monthlySalary) || 0) / 26;
+  const otRate = parseFloat(worker.otRatePerHour) > 0 ? parseFloat(worker.otRatePerHour) : (dailyWage / 8 * 1.5);
+  const totalOt = Object.values(otMap).reduce((s, v) => s + (parseFloat(v) || 0), 0);
+  const setAll = () => { const v = bulk; setOtMap(Object.fromEntries(workDays.map(d => [d, v]))); };
+
+  async function save() {
+    setSaving(true);
+    try {
+      for (const d of workDays) {
+        const v = Math.max(0, parseFloat(otMap[d]) || 0);
+        if (v === (otFor(d) || 0)) continue; // unchanged
+        await recordAttMut.mutateAsync({ worker_id: worker.id, date: d, status: statusOf(worker.id, d), hours_worked: statusOf(worker.id, d) === 'half_day' ? 4 : 8, overtime_hours: v });
+      }
+      addToast(`Overtime saved for ${worker.name}`, 'success'); onClose();
+    } catch (e) { addToast(e.message, 'error'); } finally { setSaving(false); }
+  }
+
+  return (
+    <SlideDrawer open onClose={onClose} title="Overtime" subtitle={`${worker.name} · ${worker.role || ''}`} icon={CalendarDays} size="md"
+      footer={<div className="flex items-center justify-between gap-2"><span className="text-xs text-gray-500">{Math.round(totalOt * 10) / 10}h × {PKR(otRate)}/h ≈ <span className="font-semibold text-amber-700">{PKR(totalOt * otRate)}</span></span>
+        <div className="flex gap-2"><button onClick={onClose} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+        <button onClick={save} disabled={saving} className="px-4 py-2 text-sm text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50">{saving ? 'Saving…' : 'Save overtime'}</button></div></div>}>
+      <div className="space-y-3">
+        <div className="rounded-lg bg-amber-50 border border-amber-100 p-3 text-xs text-amber-800">Enter overtime hours per worked day. OT is valued at {PKR(otRate)}/hour ({parseFloat(worker.otRatePerHour) > 0 ? 'fixed rate' : '1.5× hourly'}) and added to gross pay when the run is prepared.</div>
+        {workDays.length === 0 ? <p className="text-sm text-gray-400 py-6 text-center">No present/half days this month — mark attendance first.</p> : (
+          <>
+            <div className="flex items-end gap-2">
+              <div className="flex-1"><label className="block text-[11px] text-gray-500 mb-1">Set all worked days to</label><input type="number" min="0" value={bulk} onChange={e => setBulk(e.target.value)} placeholder="hours" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm tabular-nums" /></div>
+              <button onClick={setAll} className="px-3 py-2 text-sm font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-700">Apply to all</button>
+            </div>
+            <div className="rounded-lg border border-gray-200 divide-y divide-gray-100 max-h-80 overflow-y-auto">
+              {workDays.map(d => (
+                <div key={d} className="flex items-center justify-between px-3 py-1.5">
+                  <span className="text-sm text-gray-700">{new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' })}<span className="text-[10px] text-gray-400 ml-1 capitalize">{statusOf(worker.id, d) === 'half_day' ? 'half' : 'present'}</span></span>
+                  <input type="number" min="0" value={otMap[d] || ''} onChange={e => setOtMap(m => ({ ...m, [d]: e.target.value }))} placeholder="0" className="w-20 border border-gray-200 rounded px-2 py-1 text-right text-sm tabular-nums" />
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </SlideDrawer>
   );
 }
 

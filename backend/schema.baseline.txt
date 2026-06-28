@@ -1279,6 +1279,7 @@ COL mill_workers.mill_id:integer:NULL
 COL mill_workers.monthly_salary:numeric:NULL
 COL mill_workers.name:character varying:NOT NULL
 COL mill_workers.notes:text:NULL
+COL mill_workers.ot_rate_per_hour:numeric:NULL
 COL mill_workers.pay_type:character varying:NOT NULL
 COL mill_workers.phone:character varying:NULL
 COL mill_workers.role:character varying:NULL

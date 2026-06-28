@@ -802,8 +802,10 @@ router.post('/workers', authorize('payroll', 'create'), async (req, res) => {
     if (!name) return res.status(400).json({ success: false, message: 'name is required.' });
     if (pay_type === 'monthly' && !(monthly_salary > 0)) return res.status(400).json({ success: false, message: 'monthly_salary required for salaried workers.' });
     if (pay_type === 'daily' && !(daily_wage > 0)) return res.status(400).json({ success: false, message: 'daily_wage required for daily-wage workers.' });
+    const ot_rate_per_hour = req.body.ot_rate_per_hour != null && req.body.ot_rate_per_hour !== '' ? parseFloat(req.body.ot_rate_per_hour) : null;
     const [worker] = await db('mill_workers').insert({
       name, role: role || 'laborer', pay_type, monthly_salary, daily_wage,
+      ot_rate_per_hour: ot_rate_per_hour > 0 ? ot_rate_per_hour : null,
       phone: phone || null, cnic: cnic || null,
       joined_date: joined_date || new Date().toISOString().split('T')[0],
       mill_id: mill_id || null, notes: notes || null,
@@ -821,6 +823,10 @@ router.put('/workers/:id', authorize('payroll', 'edit'), async (req, res) => {
     const updates = {};
     for (const f of ['name', 'role', 'phone', 'cnic', 'joined_date', 'notes']) {
       if (req.body[f] !== undefined) updates[f] = req.body[f] || null;
+    }
+    if (req.body.ot_rate_per_hour !== undefined) {
+      const v = req.body.ot_rate_per_hour !== '' ? parseFloat(req.body.ot_rate_per_hour) : null;
+      updates.ot_rate_per_hour = v > 0 ? v : null;
     }
     if (req.body.is_active !== undefined) updates.is_active = !!req.body.is_active;
     if (req.body.pay_type !== undefined || req.body.daily_wage !== undefined || req.body.monthly_salary !== undefined) {
@@ -1084,10 +1090,12 @@ router.post('/attendance/bulk', authorize('payroll', 'create'), async (req, res)
           await trx('mill_attendance').where({ worker_id: r.worker_id, date: r.date }).del();
           applied += 1;
         } else if (VALID_ATTENDANCE.includes(r.status)) {
+          // Merge only status + hours_worked so any overtime already logged on the
+          // cell is preserved (don't clobber OT when bulk-setting Sundays/holidays).
           await trx('mill_attendance').insert({
             worker_id: r.worker_id, date: r.date, status: r.status,
             hours_worked: attHours(r.status), overtime_hours: 0,
-          }).onConflict(['worker_id', 'date']).merge();
+          }).onConflict(['worker_id', 'date']).merge(['status', 'hours_worked', 'updated_at']);
           applied += 1;
         }
       }

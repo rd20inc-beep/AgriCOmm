@@ -50,7 +50,9 @@ async function computePayrollSummary(month) {
     const basicPay = w.pay_type === 'monthly'
       ? (parseFloat(w.monthly_salary) || 0)
       : effectiveDays * dailyWage;
-    const otPay = totalOT * (dailyWage / 8 * 1.5);
+    // Overtime: per-worker ot_rate_per_hour if set, else 1.5× the daily hourly rate.
+    const otRate = parseFloat(w.ot_rate_per_hour) > 0 ? parseFloat(w.ot_rate_per_hour) : (dailyWage / 8 * 1.5);
+    const otPay = totalOT * otRate;
     const gross = basicPay + otPay;
 
     const myAdvances = advByWorker.get(w.id) || [];
