@@ -22,6 +22,7 @@ import {
 } from '../../../api/queries';
 import TransactionDocument from '../../../components/TransactionDocument';
 import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
+import { downloadCSV } from '../../../utils/csvExport';
 import StatusBadge from '../../../components/StatusBadge';
 import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import SlideDrawer from '../../../components/SlideDrawer';
@@ -2853,41 +2854,114 @@ function AdvanceLedgerDrawer({ advanceId, onClose }) {
 }
 
 // Open a printable A4 payslip for one employee's line in a posted run.
-function printPayslip(run, line, company) {
+// Net pay in words (Pakistani numbering: crore / lakh / thousand).
+function amountInWords(value) {
+  let num = Math.round(Math.abs(parseFloat(value) || 0));
+  if (num === 0) return 'Zero';
+  const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+  const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+  const two = (n) => n < 20 ? ones[n] : (tens[Math.floor(n / 10)] + (n % 10 ? ' ' + ones[n % 10] : ''));
+  const three = (n) => (Math.floor(n / 100) ? ones[Math.floor(n / 100)] + ' Hundred' + (n % 100 ? ' ' : '') : '') + (n % 100 ? two(n % 100) : '');
+  let w = '';
+  const crore = Math.floor(num / 10000000); num %= 10000000;
+  const lakh = Math.floor(num / 100000); num %= 100000;
+  const thousand = Math.floor(num / 1000); num %= 1000;
+  if (crore) w += three(crore) + ' Crore ';
+  if (lakh) w += two(lakh) + ' Lakh ';
+  if (thousand) w += two(thousand) + ' Thousand ';
+  if (num) w += three(num);
+  return w.trim();
+}
+
+const PAYSLIP_CSS = `@page{size:A4 portrait;margin:14mm}*{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box}
+  body{font-family:'Segoe UI',Tahoma,sans-serif;color:#1f2937;margin:0;font-size:12px}
+  .slip{padding:0 0 8px}.slip+.slip{page-break-before:always}
+  .hd{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111827;padding-bottom:10px}
+  .co{font-size:18px;font-weight:800;color:#1e3a5f}.muted{color:#6b7280;font-size:10.5px}
+  .doc{font-size:15px;font-weight:800;text-transform:uppercase;text-align:right}
+  .meta{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;margin:12px 0 4px}
+  .k{font-size:9px;text-transform:uppercase;letter-spacing:.4px;color:#9ca3af}.v{font-size:12.5px;font-weight:600}
+  table{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px}
+  th{text-align:left;font-size:9px;text-transform:uppercase;color:#6b7280;border-bottom:1px solid #e5e7eb;padding:4px 0}
+  td{padding:5px 0}.r{text-align:right;font-variant-numeric:tabular-nums}
+  .sec{font-size:10px;text-transform:uppercase;color:#374151;font-weight:700;margin-top:14px;border-bottom:1px solid #e5e7eb;padding-bottom:3px}
+  .net{display:flex;justify-content:space-between;align-items:center;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;margin-top:12px}
+  .net b{font-size:16px;color:#065f46}.words{font-size:10.5px;color:#6b7280;font-style:italic;margin-top:4px}
+  .sign{display:flex;justify-content:space-between;margin-top:42px;font-size:10px;color:#6b7280}
+  .sign div{text-align:center}.sign .l{width:150px;border-top:1px solid #9ca3af;padding-top:3px;margin-top:24px}`;
+
+function periodLabel(period) {
+  if (!/^\d{4}-\d{2}$/.test(period || '')) return period || '';
+  const d = new Date(Date.UTC(+period.slice(0, 4), +period.slice(5, 7) - 1, 1));
+  return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+}
+
+// One slip's HTML body — shared by single + bulk printing.
+function payslipBody(run, line, company) {
   const co = company || {};
   const name = co.legalName || co.name || 'AGRI COMMODITIES';
-  const row = (k, v, bold) => `<tr><td style="padding:6px 0;color:#6b7280">${k}</td><td style="padding:6px 0;text-align:right;font-weight:${bold ? 700 : 500};font-variant-numeric:tabular-nums">${v}</td></tr>`;
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Payslip ${line.workerName} ${run.period}</title>
-    <style>@page{size:A4 portrait;margin:16mm}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}
-    body{font-family:'Segoe UI',Tahoma,sans-serif;color:#1f2937;margin:0}
-    .hd{display:flex;justify-content:space-between;border-bottom:2px solid #111827;padding-bottom:10px}
-    .t{font-size:18px;font-weight:700;color:#1e3a5f;text-transform:uppercase}
-    table{width:100%;border-collapse:collapse;font-size:13px;margin-top:16px}
-    .net{border-top:2px solid #cbd5e1;margin-top:6px}</style></head><body>
-    <div class="hd"><div><div class="t">${name}</div>${co.address ? `<div style="font-size:11px;color:#6b7280;max-width:280px">${co.address}</div>` : ''}</div>
-    <div style="text-align:right"><div style="font-size:15px;font-weight:700;text-transform:uppercase">Salary Slip</div><div style="font-size:12px;color:#6b7280">${run.period}</div></div></div>
-    <div style="margin-top:14px"><div style="font-size:10px;text-transform:uppercase;color:#9ca3af">Employee</div>
-    <div style="font-size:15px;font-weight:600">${line.workerName}</div>
-    <div style="font-size:12px;color:#6b7280;text-transform:capitalize">${line.role || ''} · ${line.payType === 'monthly' ? 'Monthly salary' : 'Daily wage'}</div></div>
-    <table>
-      ${row('Days worked', `${line.effectiveDays} d${line.payType === 'monthly' ? ' (salary fixed)' : ''}`)}
-      ${row('Basic pay', 'Rs ' + Math.round(line.basicPay).toLocaleString())}
-      ${parseFloat(line.otPay) > 0 ? row('Overtime', 'Rs ' + Math.round(line.otPay).toLocaleString()) : ''}
-      ${row('Gross pay', 'Rs ' + Math.round(line.grossPay).toLocaleString(), true)}
-      ${parseFloat(line.advanceDeducted) > 0 ? row('Less: advance recovered', '− Rs ' + Math.round(line.advanceDeducted).toLocaleString()) : ''}
-    </table>
-    <table class="net"><tr><td style="padding:10px 0;font-weight:700;font-size:15px">Net Paid</td>
-    <td style="padding:10px 0;text-align:right;font-weight:700;font-size:15px;font-variant-numeric:tabular-nums">Rs ${Math.round(line.netPay).toLocaleString()}</td></tr></table>
-    <div style="font-size:12px;color:#6b7280;margin-top:8px">Paid via ${run.payMethod === 'bank' ? (run.bankName || 'bank transfer') : 'cash'} on ${run.payDate ? new Date(run.payDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : ''}.</div>
-    <div style="margin-top:48px;display:flex;justify-content:space-between;font-size:11px;color:#9ca3af">
-      <div>Computer-generated salary slip.</div>
-      <div style="text-align:center"><div style="width:160px;border-top:1px solid #9ca3af;padding-top:4px">Received By</div></div></div>
-    <script>window.addEventListener('load',function(){setTimeout(function(){window.focus();window.print();},250)});</script>
-    </body></html>`;
-  const w = window.open('', '_blank', 'width=820,height=1100');
-  if (!w) return;
-  w.document.write(html);
-  w.document.close();
+  const logo = co.logo ? (String(co.logo).startsWith('http') ? co.logo : `${typeof location !== 'undefined' ? location.origin : ''}${co.logo}`) : null;
+  const rs = (v) => 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString();
+  const payDate = run.payDate ? new Date(run.payDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+  const method = run.payMethod === 'bank' ? (run.bankName || 'Bank transfer') : 'Cash';
+  const ot = parseFloat(line.otPay) || 0; const adv = parseFloat(line.advanceDeducted) || 0;
+  const advBal = parseFloat(line.advanceOutstanding) || 0;
+  return `<div class="slip">
+    <div class="hd">
+      <div>${logo ? `<img src="${logo}" style="height:40px;max-width:170px;object-fit:contain;display:block;margin-bottom:5px"/>` : ''}<div class="co">${name}</div>${co.address ? `<div class="muted" style="max-width:300px">${co.address}</div>` : ''}${co.ntn ? `<div class="muted">NTN ${co.ntn}</div>` : ''}</div>
+      <div><div class="doc">Salary Slip</div><div class="muted" style="text-align:right">${periodLabel(run.period)}</div><div class="muted" style="text-align:right">Run #${run.id || ''} · ${String(run.status || 'paid')}</div></div>
+    </div>
+    <div class="meta">
+      <span><div class="k">Employee</div><div class="v">${line.workerName || '—'}</div></span>
+      <span><div class="k">Designation</div><div class="v" style="text-transform:capitalize">${line.role || '—'} · ${line.payType === 'monthly' ? 'Monthly salary' : 'Daily wage'}</div></span>
+      <span><div class="k">CNIC</div><div class="v">${line.cnic || '—'}</div></span>
+      <span><div class="k">Phone</div><div class="v">${line.phone || '—'}</div></span>
+      <span><div class="k">Pay period</div><div class="v">${periodLabel(run.period)}</div></span>
+      <span><div class="k">Pay date · method</div><div class="v">${payDate} · ${method}</div></span>
+    </div>
+
+    <div class="sec">Earnings</div>
+    <table><tbody>
+      <tr><td>Basic pay${line.payType !== 'monthly' ? ` (${line.effectiveDays || 0} day${(line.effectiveDays || 0) === 1 ? '' : 's'})` : ''}</td><td class="r">${rs(line.basicPay)}</td></tr>
+      ${ot > 0 ? `<tr><td>Overtime${parseFloat(line.otHours) ? ` (${line.otHours} hrs)` : ''}</td><td class="r">${rs(line.otPay)}</td></tr>` : ''}
+      <tr style="border-top:1px solid #e5e7eb"><td style="font-weight:700;padding-top:7px">Gross pay</td><td class="r" style="font-weight:700;padding-top:7px">${rs(line.grossPay)}</td></tr>
+    </tbody></table>
+
+    ${adv > 0 ? `<div class="sec">Deductions</div>
+    <table><tbody><tr><td>Advance recovered</td><td class="r">− ${rs(adv)}</td></tr></tbody></table>` : ''}
+
+    <div class="net"><div><div style="font-size:10px;text-transform:uppercase;color:#047857">Net Paid</div><b>${rs(line.netPay)}</b></div>
+      <div style="text-align:right;max-width:55%"><div class="words">Rupees ${amountInWords(line.netPay)} Only</div></div></div>
+
+    <div class="sec">Attendance &amp; advance</div>
+    <table><tbody>
+      <tr><td>Effective days worked</td><td class="r">${line.effectiveDays || 0}${line.payType === 'monthly' ? ' (salary fixed)' : ''}</td></tr>
+      <tr><td>Overtime hours</td><td class="r">${line.otHours || 0}</td></tr>
+      <tr><td>Advance recovered this month</td><td class="r">${rs(adv)}</td></tr>
+      <tr><td>Advance balance remaining</td><td class="r">${rs(advBal)}</td></tr>
+    </tbody></table>
+
+    <div class="sign"><div><div class="l">Received By</div></div><div><div class="l">Prepared By</div></div><div><div class="l">Authorized By</div></div></div>
+    <div class="muted" style="text-align:center;margin-top:14px">Computer-generated salary slip — ${name}.</div>
+  </div>`;
+}
+
+function openPayslipWindow(title, inner) {
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${title}</title><style>${PAYSLIP_CSS}</style></head>
+    <body>${inner}<script>window.addEventListener('load',function(){setTimeout(function(){window.focus();window.print();},300)});</script></body></html>`;
+  const w = window.open('', '_blank', 'width=840,height=1120');
+  if (!w) return false;
+  w.document.write(html); w.document.close(); return true;
+}
+
+function printPayslip(run, line, company) {
+  return openPayslipWindow(`Payslip ${line.workerName} ${run.period}`, payslipBody(run, line, company));
+}
+
+// Bulk: one print job, a page per employee.
+function printAllPayslips(run, lines, company) {
+  if (!lines || !lines.length) return false;
+  return openPayslipWindow(`Payslips ${run.period}`, lines.map((l) => payslipBody(run, l, company)).join(''));
 }
 
 // Drawer to post a payroll run: review the per-employee breakdown, then pay it
@@ -3177,6 +3251,11 @@ function PayslipsPanel({ runId, companyProfile, canApprove, onClose, onUndo, onA
             <div className="rounded-lg bg-amber-50 p-2.5"><div className="text-[10px] text-amber-500 uppercase">Advances</div><div className="text-sm font-semibold tabular-nums text-amber-700">−{PKR(run.advanceTotal)}</div></div>
             <div className="rounded-lg bg-emerald-50 p-2.5"><div className="text-[10px] text-emerald-500 uppercase">{isPaid ? 'Net paid' : 'Net to pay'}</div><div className="text-sm font-semibold tabular-nums text-emerald-700">{PKR(run.netTotal)}</div></div>
           </div>
+          {isPaid && lines.length > 0 && (
+            <button onClick={() => printAllPayslips(run, lines, companyProfile)} className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
+              <Printer className="w-3.5 h-3.5" /> Print all payslips ({lines.length})
+            </button>
+          )}
           {lines.map(l => (
             <div key={l.id} className="rounded-lg border border-gray-200 p-3 flex items-center justify-between">
               <div>
@@ -3266,9 +3345,25 @@ function PayrollReport({ companyProfile, onOpenRun }) {
           <input type="month" value={range.to} onChange={e => setRange(r => ({ ...r, to: e.target.value }))} className="border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:border-gray-900" />
           {(range.from || range.to) && <button onClick={() => setRange({ from: '', to: '' })} className="text-gray-400 hover:text-gray-700">clear</button>}
         </div>
-        <button onClick={() => printPayrollReport(runs, totals, companyProfile, rangeLabel)} disabled={!runs.length} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">
-          <Printer className="w-3.5 h-3.5" /> Print Report
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => {
+            const rows = runs.flatMap(r => (r.lines || []).map(l => ({ ...l, period: r.period, payDate: r.payDate, payMethod: r.payMethod === 'bank' ? (r.bankName || 'bank') : 'cash', runStatus: r.status })));
+            downloadCSV(rows, [
+              { label: 'Month', key: 'period' }, { label: 'Pay date', accessor: r => fmtDate(r.payDate) },
+              { label: 'Employee', key: 'workerName' }, { label: 'Role', key: 'role' },
+              { label: 'Pay type', accessor: r => r.payType === 'monthly' ? 'Monthly' : 'Daily' },
+              { label: 'Effective days', key: 'effectiveDays' }, { label: 'OT hours', key: 'otHours' },
+              { label: 'Basic', accessor: r => Math.round(r.basicPay) }, { label: 'Overtime', accessor: r => Math.round(r.otPay) },
+              { label: 'Gross', accessor: r => Math.round(r.grossPay) }, { label: 'Advance recovered', accessor: r => Math.round(r.advanceDeducted) },
+              { label: 'Net pay', accessor: r => Math.round(r.netPay) }, { label: 'Mode', key: 'payMethod' }, { label: 'Status', key: 'runStatus' },
+            ], `payroll-report_${(rangeLabel || 'all').replace(/[^\w-]+/g, '_')}.csv`);
+          }} disabled={!runs.length} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-white text-gray-700 border border-gray-200 hover:bg-gray-50 disabled:opacity-40">
+            <FileText className="w-3.5 h-3.5" /> Export CSV
+          </button>
+          <button onClick={() => printPayrollReport(runs, totals, companyProfile, rangeLabel)} disabled={!runs.length} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">
+            <Printer className="w-3.5 h-3.5" /> Print Report
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

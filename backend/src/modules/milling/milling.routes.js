@@ -1281,6 +1281,25 @@ router.get('/payroll/summary', authorize('milling', 'view'), async (req, res) =>
 });
 
 // List posted payroll runs (history) + the linked expense's bank.
+// Enrich payslip lines for printing: worker contact (cnic/phone) + the worker's
+// CURRENT outstanding advance balance (so a payslip can show "advance remaining").
+async function enrichPayslipLines(lines) {
+  const ids = [...new Set(lines.map((l) => l.worker_id).filter(Boolean))];
+  if (!ids.length) return lines.map((l) => ({ ...l, cnic: null, phone: null, advance_outstanding: 0 }));
+  const workers = await db('mill_workers').whereIn('id', ids).select('id', 'cnic', 'phone', 'joined_date');
+  const wMap = new Map(workers.map((w) => [w.id, w]));
+  const advRows = await db('mill_worker_advances').whereIn('worker_id', ids).where('status', 'outstanding')
+    .groupBy('worker_id').select('worker_id', db.raw('COALESCE(SUM(amount - recovered_amount),0) as outstanding'));
+  const advMap = new Map(advRows.map((r) => [r.worker_id, parseFloat(r.outstanding) || 0]));
+  return lines.map((l) => ({
+    ...l,
+    cnic: (wMap.get(l.worker_id) || {}).cnic || null,
+    phone: (wMap.get(l.worker_id) || {}).phone || null,
+    joined_date: (wMap.get(l.worker_id) || {}).joined_date || null,
+    advance_outstanding: advMap.get(l.worker_id) || 0,
+  }));
+}
+
 router.get('/payroll/runs', authorize('milling', 'view'), async (req, res) => {
   try {
     const runs = await db('mill_payroll_runs as r')
@@ -1308,7 +1327,7 @@ router.get('/payroll/report', authorize('milling', 'view'), async (req, res) => 
     const runs = await q;
     const runIds = runs.map((r) => r.id);
     const lines = runIds.length
-      ? await db('mill_payroll_lines').whereIn('run_id', runIds).orderBy('worker_name')
+      ? await enrichPayslipLines(await db('mill_payroll_lines').whereIn('run_id', runIds).orderBy('worker_name'))
       : [];
     const byRun = {};
     for (const l of lines) (byRun[l.run_id] = byRun[l.run_id] || []).push(l);
@@ -1335,7 +1354,7 @@ router.get('/payroll/runs/:id', authorize('milling', 'view'), async (req, res) =
       .select('r.*', 'ba.name as bank_name', 'up.full_name as prepared_by_name', 'ua.full_name as approved_by_name', 'upd.full_name as paid_by_name')
       .where('r.id', req.params.id).first();
     if (!run) return res.status(404).json({ success: false, message: 'Payroll run not found.' });
-    const lines = await db('mill_payroll_lines').where('run_id', run.id).orderBy('worker_name');
+    const lines = await enrichPayslipLines(await db('mill_payroll_lines').where('run_id', run.id).orderBy('worker_name'));
     return res.json({ success: true, data: { run, lines } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
