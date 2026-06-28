@@ -1510,8 +1510,8 @@ function MarginByBatch({ params, openDoc }) {
         <SummaryCell label="On-hand (at cost)" value={fmtPKR(totOnHand)} />
       </div>
       <Table
-        head={['Batch', 'Supplier', 'Input', 'Finished', 'Input cost', 'Output sold', 'Cost of sold', 'Margin', '%']}
-        align={['left', 'left', 'right', 'right', 'right', 'right', 'right', 'right', 'right']}
+        head={['Batch', 'Supplier', 'Input', 'Finished', 'Input cost', 'Output sold', 'Cost of sold', 'Margin', '%', 'Batch 360']}
+        align={['left', 'left', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'center']}
         rowClick={rows.map(b => () => openDoc?.({ kind: 'batchMargin', title: 'Batch Margin', subtitle: b.batchNo, data: b }))}
         rows={rows.map(b => {
           const sold = parseFloat(b.soldValue) || 0;
@@ -1526,6 +1526,10 @@ function MarginByBatch({ params, openDoc }) {
             hasSales ? fmtPKR(b.costOfSold) : '—',
             hasSales ? <ProfitCell v={b.realizedMargin} /> : <span className="text-gray-400">—</span>,
             hasSales ? <span className={`font-medium ${(parseFloat(b.realizedMarginPct) || 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{(parseFloat(b.realizedMarginPct) || 0).toFixed(1)}%</span> : '—',
+            <Link to={`/reports/batch-ledger/${b.id}`} onClick={(ev) => ev.stopPropagation()}
+              className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-700 bg-blue-50 rounded hover:bg-blue-100 whitespace-nowrap">
+              <Factory size={12} /> Batch 360
+            </Link>,
           ];
         })}
       />
