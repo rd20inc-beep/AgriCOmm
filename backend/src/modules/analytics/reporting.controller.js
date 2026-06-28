@@ -93,6 +93,26 @@ const reportingController = {
     }
   },
 
+  async payrollLedger(req, res) {
+    try {
+      const data = await reportingService.getPayrollLedger(req.query || {});
+      return res.json({ success: true, ...data });
+    } catch (err) {
+      console.error('Payroll ledger error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  async payrollOverview(req, res) {
+    try {
+      const data = await reportingService.getPayrollOverview(req.query || {});
+      return res.json({ success: true, ...data });
+    } catch (err) {
+      console.error('Payroll overview error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
   async saleDetail(req, res) {
     try {
       const data = await reportingService.getSaleDetail(req.params.id);

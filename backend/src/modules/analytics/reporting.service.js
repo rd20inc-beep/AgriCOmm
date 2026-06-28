@@ -2976,6 +2976,82 @@ const reportingService = {
 
     return record;
   },
+
+  // ── Payroll Ledger — one row per employee per payroll run, with filters. ──
+  // Read-only over mill_payroll_lines/runs/workers. Reuses existing payroll data;
+  // creates none. (Finance/Reports surface; gated reports.view, no Mill Operator.)
+  async getPayrollLedger({ from, to, month, employee, role, payMethod, status } = {}) {
+    const num = (v) => parseFloat(v) || 0;
+    let q = db('mill_payroll_lines as l')
+      .join('mill_payroll_runs as r', 'r.id', 'l.run_id')
+      .leftJoin('mill_workers as w', 'w.id', 'l.worker_id')
+      .leftJoin('bank_accounts as b', 'b.id', 'r.bank_account_id');
+    if (month) q = q.where('r.period', month);
+    if (from) q = q.where('r.period', '>=', from);
+    if (to) q = q.where('r.period', '<=', to);
+    if (employee) q = q.where('l.worker_id', parseInt(employee, 10));
+    if (role) q = q.where('l.role', role);
+    if (payMethod) q = q.where('r.pay_method', payMethod);
+    const rows = await q
+      .select('l.id', 'r.id as run_id', 'r.period', 'r.pay_date', 'r.pay_method', 'b.name as account_name',
+        'l.worker_id', 'l.worker_name', 'l.role', 'l.pay_type', 'l.effective_days', 'l.ot_hours',
+        'l.gross_pay', 'l.advance_deducted', 'l.net_pay')
+      .orderBy('r.pay_date', 'desc').orderBy('l.id', 'desc');
+    const out = rows.map((r) => ({
+      id: r.id, runId: r.run_id, period: r.period, date: r.pay_date,
+      employee: r.worker_name, workerId: r.worker_id || null, role: r.role || '—', payType: r.pay_type || '—',
+      effectiveDays: num(r.effective_days), otHours: num(r.ot_hours),
+      gross: Math.round(num(r.gross_pay)), advanceDeducted: Math.round(num(r.advance_deducted)), net: Math.round(num(r.net_pay)),
+      payMethod: r.pay_method || 'cash', account: r.account_name || (r.pay_method === 'bank' ? '—' : 'Mill Cash'),
+      status: 'Paid',
+      employeeHref: r.worker_id ? `/milling/finance` : null,
+    }));
+    const totals = {
+      count: out.length,
+      gross: out.reduce((s, r) => s + r.gross, 0),
+      advance: out.reduce((s, r) => s + r.advanceDeducted, 0),
+      net: out.reduce((s, r) => s + r.net, 0),
+    };
+    // Distinct roles for the filter dropdown.
+    const roles = [...new Set(out.map((r) => r.role).filter((x) => x && x !== '—'))];
+    return { rows: out, totals, roles };
+  },
+
+  // ── Payroll overview KPIs for the Head-Office Finance dashboard. ──
+  // Consolidated from existing mill payroll data + salary expenses; no new data.
+  async getPayrollOverview({ month } = {}) {
+    const num = (v) => parseFloat(v) || 0;
+    const period = /^\d{4}-\d{2}$/.test(month || '') ? month : new Date().toISOString().slice(0, 7);
+    const runAgg = await db('mill_payroll_runs').where('period', period)
+      .select(db.raw('COALESCE(SUM(net_total),0) as net'), db.raw('COALESCE(SUM(gross_total),0) as gross'), db.raw('COALESCE(SUM(advance_total),0) as advance'), db.raw('COUNT(*) as runs')).first();
+    const advOut = await db('mill_worker_advances').where('status', 'outstanding')
+      .select(db.raw('COALESCE(SUM(amount - recovered_amount),0) as outstanding')).first();
+    const activeWorkers = await db('mill_workers').where('is_active', true).count('* as c').first();
+    // Salary expense vs all business expenses this month (for % of expenses).
+    const salaryExp = await db('business_expenses').where('category', 'salaries')
+      .whereRaw("TO_CHAR(expense_date, 'YYYY-MM') = ?", [period])
+      .select(db.raw('COALESCE(SUM(COALESCE(amount_pkr, amount)),0) as total')).first();
+    const allExp = await db('business_expenses')
+      .whereRaw("TO_CHAR(expense_date, 'YYYY-MM') = ?", [period])
+      .select(db.raw('COALESCE(SUM(COALESCE(amount_pkr, amount)),0) as total')).first();
+    // 6-month net payroll trend.
+    const trendRows = await db('mill_payroll_runs')
+      .select('period', db.raw('COALESCE(SUM(net_total),0) as net'))
+      .groupBy('period').orderBy('period', 'desc').limit(6);
+    const salaryTotal = num(salaryExp.total); const allTotal = num(allExp.total);
+    return {
+      period,
+      paidThisMonth: Math.round(num(runAgg.net)),
+      grossThisMonth: Math.round(num(runAgg.gross)),
+      advanceRecoveredThisMonth: Math.round(num(runAgg.advance)),
+      runsThisMonth: parseInt(runAgg.runs, 10) || 0,
+      advancesOutstanding: Math.round(num(advOut.outstanding)),
+      activeWorkers: parseInt(activeWorkers.c, 10) || 0,
+      salaryExpenseThisMonth: Math.round(salaryTotal),
+      payrollPctOfExpenses: allTotal > 0 ? Math.round((salaryTotal / allTotal) * 1000) / 10 : 0,
+      trend: trendRows.map((t) => ({ period: t.period, net: Math.round(num(t.net)) })).reverse(),
+    };
+  },
 };
 
 module.exports = reportingService;

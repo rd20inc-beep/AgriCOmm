@@ -1,5 +1,7 @@
 import { useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { reportingApi } from '../../analytics/api/services';
 import {
   Landmark, ArrowDownLeft, ArrowUpRight,
   TrendingUp, TrendingDown, AlertTriangle,
@@ -197,6 +199,9 @@ export default function FinanceOverview() {
           hintBad={(summary.collectionRate || 0) < 80}
         />
       </div>
+
+      {/* ─── PAYROLL SUMMARY (consolidated from mill payroll) ──────── */}
+      <PayrollSummaryStrip navigate={navigate} fmtPKR={fmtPKR} />
 
       {/* ─── AI ANOMALY WATCH ─────────────────────────────────────── */}
       <AnomalyWatchCard />
@@ -637,3 +642,41 @@ function isOverdue(r) {
 
 // bucketize / ageDays / ageBucket / BUCKET_KEYS / BUCKET_COLORS now
 // live in ../utils/aging.js — shared with MoneyIn.
+
+// Consolidated payroll KPIs for the Head-Office Finance dashboard. Reads the
+// existing mill payroll data (reports.view) — creates no payroll data, and the
+// operational payroll stays in Mill Finance. Hidden if the endpoint is denied.
+function PayrollSummaryStrip({ navigate, fmtPKR }) {
+  const month = new Date().toISOString().slice(0, 7);
+  const { data, isError } = useQuery({
+    queryKey: ['payroll-overview', month],
+    queryFn: async () => { const res = await reportingApi.payrollOverview({ month }); return res?.period ? res : (res?.data || res); },
+    retry: false,
+  });
+  if (isError || !data) return null;
+  const cards = [
+    { label: 'Payroll this month', value: fmtPKR(data.paidThisMonth || 0), sub: `${data.runsThisMonth || 0} run(s)` },
+    { label: 'Advance recovered', value: fmtPKR(data.advanceRecoveredThisMonth || 0), sub: 'this month', tone: 'amber' },
+    { label: 'Advances outstanding', value: fmtPKR(data.advancesOutstanding || 0), sub: 'to recover', tone: 'amber' },
+    { label: 'Active mill staff', value: String(data.activeWorkers || 0), sub: 'on payroll' },
+    { label: 'Payroll % of expenses', value: `${data.payrollPctOfExpenses || 0}%`, sub: 'this month' },
+  ];
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-gray-700">Payroll summary · {month}</h3>
+        <Link to="/reports/payroll" className="text-xs text-blue-600 hover:underline">Payroll ledger →</Link>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        {cards.map((c, i) => (
+          <button key={i} onClick={() => navigate('/reports/payroll')} className="text-left rounded-lg border border-gray-100 bg-gray-50/50 p-3 hover:bg-gray-50">
+            <p className="text-[11px] uppercase tracking-wider text-gray-400">{c.label}</p>
+            <p className={`text-base font-bold ${c.tone === 'amber' ? 'text-amber-700' : 'text-gray-900'}`}>{c.value}</p>
+            <p className="text-[10px] text-gray-400">{c.sub}</p>
+          </button>
+        ))}
+      </div>
+      <p className="text-[11px] text-gray-400 mt-2">Operational payroll (employees, attendance, runs, advances) lives in Mill Finance → Payroll.</p>
+    </div>
+  );
+}
