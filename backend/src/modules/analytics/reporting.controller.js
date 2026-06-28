@@ -114,6 +114,48 @@ const reportingController = {
     }
   },
 
+  async listScheduledReports(req, res) {
+    try {
+      const data = await reportingService.listScheduledReportEmails();
+      return res.json({ success: true, rows: data, types: reportingService.SCHEDULED_REPORT_TYPES });
+    } catch (err) {
+      console.error('List scheduled reports error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  async createScheduledReport(req, res) {
+    try {
+      const { reportType, frequency, recipients, filters } = req.body || {};
+      const data = await reportingService.createScheduledReportEmail({ reportType, frequency, recipients, filters });
+      return res.json({ success: true, ...data });
+    } catch (err) {
+      console.error('Create scheduled report error:', err);
+      return res.status(400).json({ success: false, message: err.message || 'Could not create scheduled report.' });
+    }
+  },
+
+  async deleteScheduledReport(req, res) {
+    try {
+      await reportingService.deleteScheduledReportEmail(req.params.id);
+      return res.json({ success: true });
+    } catch (err) {
+      console.error('Delete scheduled report error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  async runScheduledReport(req, res) {
+    try {
+      const automationService = require('../admin/automation.service');
+      const result = await automationService.runTask(parseInt(req.params.id, 10));
+      return res.json({ success: true, result });
+    } catch (err) {
+      console.error('Run scheduled report error:', err);
+      return res.status(500).json({ success: false, message: err.message || 'Internal server error.' });
+    }
+  },
+
   async globalSearch(req, res) {
     try {
       const { q, entity, limit } = req.query;

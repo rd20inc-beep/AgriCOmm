@@ -69,6 +69,9 @@ const automationService = {
         case 'recurring_expense':
           result = await this.materializeDueRecurringExpenses();
           break;
+        case 'report_email':
+          result = await this.runReportEmail(task);
+          break;
         default:
           result = { processed: 0, details: { message: `Unknown task type: ${task.task_type}` } };
       }
@@ -94,6 +97,37 @@ const automationService = {
 
     await db('task_execution_log').insert(logEntry);
     return logEntry;
+  },
+
+  // ============================================================
+  // Scheduled report email — generate a report and email it to recipients.
+  // Config: { reportType, recipients[], frequency, filters }.
+  // ============================================================
+  async runReportEmail(task) {
+    const reportingService = require('../analytics/reporting.service');
+    let cfg = {}; try { cfg = typeof task.config === 'string' ? JSON.parse(task.config) : (task.config || {}); } catch (e) { cfg = {}; }
+    const recipients = (cfg.recipients || []).filter(Boolean);
+    if (!recipients.length) return { processed: 0, details: { message: 'No recipients configured' } };
+
+    const report = await reportingService.buildScheduledReport(cfg.reportType, cfg.filters || {});
+    if (!report) return { processed: 0, details: { message: `Unknown report type: ${cfg.reportType}` } };
+
+    let companyName = 'AGRI COMMODITIES';
+    try {
+      const cp = await db('company_profile').first();
+      if (cp) companyName = cp.legal_name || cp.name || companyName;
+    } catch (e) { /* table may not exist — use default */ }
+
+    const periodLabel = cfg.frequency ? `${cfg.frequency.charAt(0).toUpperCase()}${cfg.frequency.slice(1)} report` : null;
+    const html = reportingService.renderReportEmailHtml(report, { companyName, periodLabel });
+    const subject = `${report.title} — ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}`;
+
+    let sent = 0;
+    for (const to of recipients) {
+      try { await emailService.sendEmail({ to, subject, body: html }); sent += 1; }
+      catch (e) { console.error('Scheduled report email failed for', to, e.message); }
+    }
+    return { processed: sent, details: { reportType: cfg.reportType, recipients: recipients.length, sent, rows: (report.rows || []).length } };
   },
 
   // ============================================================
@@ -779,10 +813,18 @@ const automationService = {
         results.push({ taskId: task.id, name: task.name, status: 'Failed', error: err.message });
       }
 
-      // Update next_run (simplified: +24h for daily, +7d for weekly)
+      // Update next_run. Report-email tasks store an explicit cadence in
+      // cron_expression ('daily'|'weekly'|'monthly'); fall back to the legacy
+      // heuristic for older task rows.
       let nextRun = new Date();
-      if (task.cron_expression && task.cron_expression.includes('1')) {
-        // Weekly-ish (contains day-of-week spec)
+      const cadence = task.cron_expression;
+      if (cadence === 'monthly') {
+        nextRun.setMonth(nextRun.getMonth() + 1);
+      } else if (cadence === 'weekly') {
+        nextRun.setDate(nextRun.getDate() + 7);
+      } else if (cadence === 'daily') {
+        nextRun.setDate(nextRun.getDate() + 1);
+      } else if (cadence && cadence.includes('1')) {
         nextRun.setDate(nextRun.getDate() + 7);
       } else {
         nextRun.setDate(nextRun.getDate() + 1);

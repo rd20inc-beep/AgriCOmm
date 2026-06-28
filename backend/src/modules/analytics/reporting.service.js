@@ -1297,6 +1297,119 @@ const reportingService = {
   },
 
   // ═══════════════════════════════════════════════════════════════════
+  // SCHEDULED REPORT EMAILS (Phase 5 — reuses the existing scheduler + mailer)
+  // ═══════════════════════════════════════════════════════════════════
+
+  // The report types that can be emailed on a schedule, each resolved from an
+  // existing read-only service method into a { title, columns, rows } shape.
+  SCHEDULED_REPORT_TYPES: {
+    finished_goods: 'Finished Goods Ledger',
+    inventory_movement: 'Inventory Movement Ledger',
+    stock_aging: 'Stock Aging',
+    recovery_by_variety: 'Recovery by Variety',
+  },
+
+  async buildScheduledReport(reportType, filters = {}) {
+    const num = (v) => parseFloat(v) || 0;
+    const fmtKg = (v) => `${Math.round(num(v)).toLocaleString()} kg`;
+    const fmtPkr = (v) => `Rs ${Math.round(num(v)).toLocaleString()}`;
+    if (reportType === 'finished_goods') {
+      const d = await this.getFinishedGoodsLedger(filters);
+      return {
+        title: 'Finished Goods Ledger',
+        columns: ['Output', 'Type', 'Produced', 'Sold', 'On hand', 'Reserved', 'Value'],
+        rows: d.rows.map(r => [r.key, r.type === 'byproduct' ? 'by-product' : 'finished', fmtKg(r.producedKg), fmtKg(r.soldKg), fmtKg(r.onHandKg), fmtKg(r.reservedKg), fmtPkr(r.valuePkr)]),
+        footer: ['TOTAL', '', fmtKg(d.grand.producedKg), fmtKg(d.grand.soldKg), fmtKg(d.grand.onHandKg), fmtKg(d.grand.reservedKg), fmtPkr(d.grand.valuePkr)],
+      };
+    }
+    if (reportType === 'inventory_movement') {
+      const d = await this.getInventoryLedger({ ...filters, limit: 500 });
+      return {
+        title: 'Inventory Movement Ledger',
+        columns: ['Date', 'Movement', 'Lot', 'Where', 'Qty (kg)', 'Cost'],
+        rows: d.rows.map(r => [r.date ? new Date(r.date).toLocaleDateString('en-GB') : '', r.label, r.lotNo || r.batchNo || '', [r.fromWh, r.toWh].filter(Boolean).join(' → ') || r.reference || '', `${r.direction === 'out' ? '−' : '+'}${Math.round(r.qtyKg).toLocaleString()}`, r.costPkr > 0 ? fmtPkr(r.costPkr) : '—']),
+      };
+    }
+    if (reportType === 'stock_aging') {
+      const lots = await this.getStockAgingReport();
+      const arr = Array.isArray(lots) ? lots : (lots?.data || []);
+      return {
+        title: 'Stock Aging',
+        columns: ['Lot', 'Item', 'Type', 'Qty', 'Value', 'Days held'],
+        rows: arr.map(l => [l.lotNo || '—', l.itemName || '—', l.type || '—', `${num(l.qty).toLocaleString()} ${l.unit || 'MT'}`, fmtPkr(l.totalValue), String(l.daysInStock || 0)]),
+      };
+    }
+    if (reportType === 'recovery_by_variety') {
+      const d = await this.getRecoveryByVariety(filters);
+      return {
+        title: 'Recovery by Variety',
+        columns: ['Variety', 'Batches', 'Avg Yield', 'Broken %', 'Benchmark', 'Variance'],
+        rows: d.map(r => [r.variety, String(r.batchCount), `${r.avgYield}%`, `${r.avgBrokenPct}%`, r.benchmarkYield != null ? `${r.benchmarkYield}%` : '—', r.varianceFromBenchmark != null ? `${r.varianceFromBenchmark}%` : '—']),
+      };
+    }
+    return null;
+  },
+
+  // Render a { title, columns, rows } report into a standalone HTML email body.
+  renderReportEmailHtml({ title, columns, rows, footer }, { companyName = 'AGRI COMMODITIES', periodLabel } = {}) {
+    const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const now = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const thead = columns.map(c => `<th style="text-align:left;background:#f3f4f6;padding:6px 8px;border-bottom:1px solid #d1d5db;font-size:11px;text-transform:uppercase;color:#374151">${esc(c)}</th>`).join('');
+    const tbody = (rows || []).map(r => `<tr>${r.map(c => `<td style="padding:5px 8px;border-bottom:1px solid #f0f0f0;font-size:12px">${esc(c)}</td>`).join('')}</tr>`).join('');
+    const tfoot = footer ? `<tr>${footer.map(c => `<td style="padding:6px 8px;border-top:2px solid #d1d5db;font-size:12px;font-weight:700">${esc(c)}</td>`).join('')}</tr>` : '';
+    return `<div style="font-family:Arial,sans-serif;color:#111827">
+      <div style="border-bottom:2px solid #111827;padding-bottom:8px;margin-bottom:6px">
+        <div style="font-size:18px;font-weight:800">${esc(companyName)}</div>
+        <div style="font-size:14px;font-weight:700">${esc(title)}</div>
+        ${periodLabel ? `<div style="font-size:12px;color:#6b7280">${esc(periodLabel)}</div>` : ''}
+      </div>
+      <div style="font-size:11px;color:#6b7280;margin:6px 0 12px">Auto-generated report · ${esc(now)}</div>
+      <table style="width:100%;border-collapse:collapse"><thead><tr>${thead}</tr></thead><tbody>${tbody || `<tr><td colspan="${columns.length}" style="padding:8px;color:#9ca3af">No rows.</td></tr>`}${tfoot}</tbody></table>
+    </div>`;
+  },
+
+  // CRUD for scheduled report emails — stored as scheduled_tasks rows with
+  // task_type='report_email' and a JSON config { reportType, recipients,
+  // frequency, filters }.
+  async listScheduledReportEmails() {
+    const rows = await db('scheduled_tasks').where('task_type', 'report_email').orderBy('id', 'desc');
+    return rows.map(t => {
+      let cfg = {}; try { cfg = typeof t.config === 'string' ? JSON.parse(t.config) : (t.config || {}); } catch (e) { cfg = {}; }
+      return { id: t.id, name: t.name, reportType: cfg.reportType, reportLabel: this.SCHEDULED_REPORT_TYPES[cfg.reportType] || cfg.reportType, frequency: cfg.frequency, recipients: cfg.recipients || [], isActive: !!t.is_active, lastRun: t.last_run, lastStatus: t.last_status, nextRun: t.next_run };
+    });
+  },
+
+  async createScheduledReportEmail({ reportType, frequency, recipients, filters }) {
+    if (!this.SCHEDULED_REPORT_TYPES[reportType]) throw new Error('Unknown report type');
+    const freq = ['daily', 'weekly', 'monthly'].includes(frequency) ? frequency : 'weekly';
+    const list = (Array.isArray(recipients) ? recipients : String(recipients || '').split(','))
+      .map(s => String(s).trim()).filter(Boolean);
+    if (!list.length) throw new Error('At least one recipient email is required');
+    const label = this.SCHEDULED_REPORT_TYPES[reportType];
+    const next = new Date(); next.setDate(next.getDate() + (freq === 'daily' ? 1 : freq === 'weekly' ? 7 : 30));
+    const [row] = await db('scheduled_tasks').insert({
+      name: `Email: ${label} (${freq})`,
+      task_type: 'report_email',
+      cron_expression: freq,
+      config: JSON.stringify({ reportType, frequency: freq, recipients: list, filters: filters || {} }),
+      is_active: true,
+      next_run: next.toISOString(),
+    }).returning(['id']);
+    return { id: typeof row === 'object' ? row.id : row };
+  },
+
+  async deleteScheduledReportEmail(id) {
+    const taskId = parseInt(id, 10);
+    return db.transaction(async (trx) => {
+      const task = await trx('scheduled_tasks').where({ id: taskId, task_type: 'report_email' }).first();
+      if (!task) return 0;
+      // task_execution_log has an FK on task_id — clear run history first.
+      await trx('task_execution_log').where({ task_id: taskId }).del();
+      return trx('scheduled_tasks').where({ id: taskId }).del();
+    });
+  },
+
+  // ═══════════════════════════════════════════════════════════════════
   // GLOBAL SEARCH (reports nav helper)
   // ═══════════════════════════════════════════════════════════════════
 

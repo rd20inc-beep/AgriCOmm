@@ -12,6 +12,11 @@ const noFinanceForOperator = denyRoles('Mill Operator');
 // Executive Dashboards
 // ═══════════════════════════════════════════════════════════════════
 router.get('/search', authorize('reports', 'view'), controller.globalSearch);
+// Scheduled report emails — finance-free roles excluded (they can email finance data otherwise)
+router.get('/scheduled-reports', authorize('reports', 'view'), noFinanceForOperator, controller.listScheduledReports);
+router.post('/scheduled-reports', authorize('reports', 'view'), noFinanceForOperator, controller.createScheduledReport);
+router.delete('/scheduled-reports/:id', authorize('reports', 'view'), noFinanceForOperator, controller.deleteScheduledReport);
+router.post('/scheduled-reports/:id/run', authorize('reports', 'view'), noFinanceForOperator, controller.runScheduledReport);
 router.get('/lot-ledger/:id', authorize('reports', 'view'), controller.lotLedger);
 router.get('/batch-ledger/:id', authorize('reports', 'view'), controller.batchLedger);
 router.get('/sale-detail/:id', authorize('reports', 'view'), noFinanceForOperator, controller.saleDetail);

@@ -6,7 +6,7 @@ import {
   BarChart3, TrendingUp, Users, Globe, Package, Award, Coins, Printer, RefreshCw,
   ArrowUpRight, ArrowDownLeft, Activity, Calendar, ExternalLink, AlertTriangle, FileText,
   ShoppingCart, Truck, Receipt, Scale, ChevronDown, ChevronRight, Layers,
-  Factory, Gauge, Wallet, Star, Plus, Trash2, Hash, Search, Download,
+  Factory, Gauge, Wallet, Star, Plus, Trash2, Hash, Search, Download, Mail, Send,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell,
@@ -201,6 +201,101 @@ function LedgerExportBar({ title, subtitle, meta, columns, rows, footerNote, fil
   );
 }
 
+// Scheduled report emails manager — list, create (report · frequency ·
+// recipients), send-now, delete. Reuses the backend scheduler + mailer.
+function ScheduledEmailsManager() {
+  const [rows, setRows] = useState([]);
+  const [types, setTypes] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState({ reportType: '', frequency: 'weekly', recipients: '' });
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  const load = () => {
+    setLoading(true);
+    reportingApi.scheduledReports()
+      .then(res => { const d = res?.rows ? res : (res?.data || res); setRows(d.rows || []); setTypes(d.types || {}); })
+      .catch(() => setRows([]))
+      .finally(() => setLoading(false));
+  };
+  useEffect(() => { load(); }, []);
+
+  const create = async () => {
+    if (!form.reportType || !form.recipients.trim()) { setMsg({ t: 'err', m: 'Pick a report and add at least one recipient.' }); return; }
+    setBusy(true); setMsg(null);
+    try { await reportingApi.createScheduledReport(form); setForm({ reportType: '', frequency: 'weekly', recipients: '' }); setMsg({ t: 'ok', m: 'Schedule created.' }); load(); }
+    catch (e) { setMsg({ t: 'err', m: e?.message || 'Could not create schedule.' }); }
+    finally { setBusy(false); }
+  };
+  const runNow = async (id) => { setBusy(true); setMsg(null); try { const r = await reportingApi.runScheduledReport(id); const sent = r?.result?.items_processed ?? r?.data?.result?.items_processed; setMsg({ t: 'ok', m: `Sent now (${sent ?? 0} email${sent === 1 ? '' : 's'}).` }); load(); } catch (e) { setMsg({ t: 'err', m: e?.message || 'Send failed.' }); } finally { setBusy(false); } };
+  const del = async (id) => { setBusy(true); try { await reportingApi.deleteScheduledReport(id); load(); } catch (e) { setMsg({ t: 'err', m: 'Delete failed.' }); } finally { setBusy(false); } };
+
+  const typeEntries = Object.entries(types);
+  return (
+    <div className="space-y-5">
+      {/* Create */}
+      <div className="rounded-xl border border-gray-200 p-4 space-y-3">
+        <h4 className="text-sm font-semibold text-gray-700">New scheduled email</h4>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label className="block">
+            <span className="text-xs text-gray-500">Report</span>
+            <select value={form.reportType} onChange={e => setForm(f => ({ ...f, reportType: e.target.value }))}
+              className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-2 bg-white outline-none">
+              <option value="">Select a report…</option>
+              {typeEntries.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-xs text-gray-500">Frequency</span>
+            <select value={form.frequency} onChange={e => setForm(f => ({ ...f, frequency: e.target.value }))}
+              className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-2 bg-white outline-none">
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+            </select>
+          </label>
+        </div>
+        <label className="block">
+          <span className="text-xs text-gray-500">Recipients (comma-separated emails)</span>
+          <input value={form.recipients} onChange={e => setForm(f => ({ ...f, recipients: e.target.value }))}
+            placeholder="owner@company.com, finance@company.com"
+            className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-2 outline-none" />
+        </label>
+        {msg && <p className={`text-xs ${msg.t === 'ok' ? 'text-emerald-600' : 'text-rose-600'}`}>{msg.m}</p>}
+        <button onClick={create} disabled={busy}
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
+          <Plus size={14} /> Create schedule
+        </button>
+      </div>
+
+      {/* Existing */}
+      <div>
+        <h4 className="text-sm font-semibold text-gray-700 mb-2">Active schedules</h4>
+        {loading ? <p className="text-xs text-gray-400">Loading…</p>
+          : rows.length === 0 ? <p className="text-xs text-gray-400">No scheduled emails yet.</p>
+          : (
+            <div className="space-y-2">
+              {rows.map(r => (
+                <div key={r.id} className="rounded-lg border border-gray-200 p-3 flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-800">{r.reportLabel} <span className="text-gray-400 font-normal">· {r.frequency}</span></p>
+                    <p className="text-[11px] text-gray-500 truncate">{(r.recipients || []).join(', ')}</p>
+                    <p className="text-[11px] text-gray-400">Next: {r.nextRun ? new Date(r.nextRun).toLocaleDateString('en-GB') : '—'}{r.lastStatus ? ` · last: ${r.lastStatus}` : ''}</p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button onClick={() => runNow(r.id)} disabled={busy} title="Send now" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg disabled:opacity-50"><Send size={14} /></button>
+                    <button onClick={() => del(r.id)} disabled={busy} title="Delete" className="p-1.5 text-gray-300 hover:text-rose-500 rounded-lg disabled:opacity-50"><Trash2 size={14} /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        <p className="text-[11px] text-gray-400 mt-2">Emails are sent by the hourly scheduler when due (SMTP must be configured on the server). “Send now” triggers it immediately.</p>
+      </div>
+    </div>
+  );
+}
+
 export default function Reports() {
   const { user } = useAuth();
   const { companyProfileData } = useApp();
@@ -226,6 +321,7 @@ export default function Reports() {
   // (receipt / voucher / invoice) for whichever report row was clicked.
   const [doc, setDoc] = useState(null); // { kind, title, subtitle, data }
   const openDoc = (d) => setDoc(d);
+  const [schedOpen, setSchedOpen] = useState(false); // scheduled-emails drawer
 
   // Tab + date range live in the URL (?tab=&range=) so views are deep-linkable,
   // bookmarkable and shareable, and the browser back button moves between tabs.
@@ -312,6 +408,12 @@ export default function Reports() {
               className="bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors">
               <RefreshCw size={12} /> Refresh
             </button>
+            {!operatorScoped && (
+              <button onClick={() => setSchedOpen(true)} title="Schedule reports by email"
+                className="bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors">
+                <Mail size={12} /> Schedule
+              </button>
+            )}
             {/* Saved views */}
             <div className="relative">
               <button onClick={() => setSavedOpen(o => !o)}
@@ -431,6 +533,11 @@ export default function Reports() {
               : doc.kind === 'sale'
                 ? <SaleTrackerPanel sale={doc.data} statementHref={statementHref} companyProfile={companyProfileData} />
                 : <TransactionDocument kind={doc.kind} data={doc.data} companyProfile={companyProfileData} />)}
+      </SlideDrawer>
+
+      {/* Scheduled report emails manager */}
+      <SlideDrawer open={schedOpen} onClose={() => setSchedOpen(false)} title="Scheduled report emails" subtitle="Email a report on a schedule" icon={Mail} size="lg">
+        {schedOpen && <ScheduledEmailsManager />}
       </SlideDrawer>
     </div>
   );
