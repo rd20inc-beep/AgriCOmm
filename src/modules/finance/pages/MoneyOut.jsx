@@ -213,7 +213,7 @@ export default function MoneyOut() {
         </div>
 
       {/* Summary KPIs — totals in PKR; foreign-currency exposure shown when present */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-4 gap-3">
         <FinanceKPI icon={ArrowUpRight} title="Total Payables" value={fmtPKR(totalOutstandingPkr)}
           subtitle={totalOutstandingForeign > 0 ? `${fmtCur(totalOutstandingForeign, 'USD')} · ${payables.filter(p => p.status !== 'Paid').length} outstanding` : `${payables.filter(p => p.status !== 'Paid').length} outstanding`} status="neutral" loading={isLoading} />
         <FinanceKPI icon={AlertTriangle} title="Overdue" value={fmtPKR(overdueAmountPkr)}

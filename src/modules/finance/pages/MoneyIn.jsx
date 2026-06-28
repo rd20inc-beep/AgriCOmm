@@ -232,7 +232,7 @@ export default function MoneyIn() {
         </div>
 
       {/* Summary KPIs — totals in PKR; foreign equivalent shown when present */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-4 gap-3">
         <FinanceKPI icon={ArrowDownLeft} title="Total Receivables" value={fmtCur(totalOutstandingPkr, 'PKR')}
           subtitle={totalOutstandingForeign > 0 ? `${fmtCur(totalOutstandingForeign, 'USD')} · ${receivables.filter(r => r.status !== 'Paid').length} open` : `${receivables.filter(r => r.status !== 'Paid').length} open`} status="info" loading={isLoading} />
         <FinanceKPI icon={AlertTriangle} title="Overdue" value={fmtCur(overdueAmountPkr, 'PKR')}
