@@ -231,7 +231,13 @@ export default function MillFinanceDashboard() {
   const canPay = hasPermission('finance', 'confirm_payment');
   // Approval workflow: only Owner / Super Admin / Finance Manager approve & pay
   // payroll runs (Mill Manager only prepares).
-  const canApprovePayroll = ['Owner', 'Super Admin', 'Finance Manager'].includes(user?.role);
+  // Payroll permission module (Phase 5) — replaces the old role-name checks.
+  const canViewPayroll = hasPermission('payroll', 'view');
+  const canPreparePayroll = hasPermission('payroll', 'create');
+  const canApprovePayroll = hasPermission('payroll', 'approve'); // approve + void + schedule
+  const canPayPayroll = hasPermission('payroll', 'pay');
+  const canDeletePayroll = hasPermission('payroll', 'delete');
+  const canExportPayroll = hasPermission('payroll', 'export');
   const [payParty, setPayParty] = useState(null);
   const [paySupplier, setPaySupplier] = useState(null);
   const [payExpense, setPayExpense] = useState(null); // pay a specific mill expense
@@ -733,7 +739,7 @@ export default function MillFinanceDashboard() {
 
       {/* ─── TABS ──────────────────────────────────────────────────── */}
       <div className="flex items-center gap-1 border-b border-gray-200 overflow-x-auto">
-        {tabs.map(t => (
+        {tabs.filter(t => t.key !== 'payroll' || canViewPayroll).map(t => (
           <button
             key={t.key}
             onClick={() => setActiveTab(t.key)}
@@ -1509,7 +1515,7 @@ export default function MillFinanceDashboard() {
                   className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-gray-900"
                 />
               )}
-              {payrollView === 'payroll' && anyUnpaid && (
+              {payrollView === 'payroll' && anyUnpaid && canPreparePayroll && (
                 <button
                   onClick={() => openRunDrawer(null)}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
@@ -1517,14 +1523,16 @@ export default function MillFinanceDashboard() {
                   <Wallet className="w-3.5 h-3.5" /> {monthRuns.length ? 'Prepare Remaining' : 'Prepare Payroll Run'}
                 </button>
               )}
-              {payrollView === 'payroll' && (
+              {payrollView === 'payroll' && (canApprovePayroll || canPreparePayroll) && (
                 <button onClick={() => setShowScheduleDrawer(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 bg-white hover:bg-gray-50">
                   <Clock className="w-3.5 h-3.5" /> Schedule
                 </button>
               )}
-              <button onClick={() => openWorkerDrawer(null)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-700">
-                <UserPlus className="w-3.5 h-3.5" /> Add Employee
-              </button>
+              {canPreparePayroll && (
+                <button onClick={() => openWorkerDrawer(null)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-700">
+                  <UserPlus className="w-3.5 h-3.5" /> Add Employee
+                </button>
+              )}
             </div>
           </div>
 
@@ -1567,7 +1575,7 @@ export default function MillFinanceDashboard() {
                     <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700">paid</span>
                     <span className="text-gray-600">{r.employeeCount} emp · <span className="font-semibold tabular-nums">{PKR(r.netTotal)}</span> · {r.payMethod === 'bank' ? (r.bankName || 'bank') : 'cash'} · {fmtDate(r.payDate)}</span>
                     <button onClick={() => setPayslipsRunId(r.id)} className="text-emerald-700 font-medium hover:underline">payslips</button>
-                    {canApprovePayroll && <button onClick={() => handleDeleteRun(r)} disabled={deleteRunMut.isPending} className="text-rose-500 hover:text-rose-700 disabled:opacity-50">undo</button>}
+                    {canDeletePayroll && <button onClick={() => handleDeleteRun(r)} disabled={deleteRunMut.isPending} className="text-rose-500 hover:text-rose-700 disabled:opacity-50">undo</button>}
                   </div>
                 ))}
               </div>
@@ -1627,13 +1635,14 @@ export default function MillFinanceDashboard() {
                     </td>
                     <td className="px-4 py-3 no-print">
                       <div className="flex items-center justify-end gap-1">
-                        {p && !p.paid && p.grossPay > 0 && (
-                          <button title="Pay this employee" onClick={() => openRunDrawer(w.id)} className="p-1.5 rounded-md text-emerald-600 hover:bg-emerald-50"><Wallet className="w-3.5 h-3.5" /></button>
+                        {canPreparePayroll && p && !p.committed && p.grossPay > 0 && (
+                          <button title="Prepare for this employee" onClick={() => openRunDrawer(w.id)} className="p-1.5 rounded-md text-emerald-600 hover:bg-emerald-50"><Wallet className="w-3.5 h-3.5" /></button>
                         )}
-                        <button title="Give advance" onClick={() => openAdvanceDrawer(w)} className="p-1.5 rounded-md text-amber-600 hover:bg-amber-50"><HandCoins className="w-3.5 h-3.5" /></button>
-                        <button title="Edit" onClick={() => openWorkerDrawer(w)} className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100"><Pencil className="w-3.5 h-3.5" /></button>
-                        <button title={w.isActive ? 'Deactivate' : 'Reactivate'} onClick={() => handleToggleActive(w)} className={`p-1.5 rounded-md hover:bg-gray-100 ${w.isActive ? 'text-gray-500' : 'text-emerald-600'}`}><Power className="w-3.5 h-3.5" /></button>
-                        <button title="Delete" onClick={() => setDeleteWorkerTarget(w)} className="p-1.5 rounded-md text-rose-500 hover:bg-rose-50"><Trash2 className="w-3.5 h-3.5" /></button>
+                        {canPreparePayroll && <button title="Give advance" onClick={() => openAdvanceDrawer(w)} className="p-1.5 rounded-md text-amber-600 hover:bg-amber-50"><HandCoins className="w-3.5 h-3.5" /></button>}
+                        {canPreparePayroll && <button title="Edit" onClick={() => openWorkerDrawer(w)} className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100"><Pencil className="w-3.5 h-3.5" /></button>}
+                        {canPreparePayroll && <button title={w.isActive ? 'Deactivate' : 'Reactivate'} onClick={() => handleToggleActive(w)} className={`p-1.5 rounded-md hover:bg-gray-100 ${w.isActive ? 'text-gray-500' : 'text-emerald-600'}`}><Power className="w-3.5 h-3.5" /></button>}
+                        {canDeletePayroll && <button title="Delete" onClick={() => setDeleteWorkerTarget(w)} className="p-1.5 rounded-md text-rose-500 hover:bg-rose-50"><Trash2 className="w-3.5 h-3.5" /></button>}
+                        {!canPreparePayroll && !canDeletePayroll && <span className="text-[11px] text-gray-300">—</span>}
                       </div>
                     </td>
                   </tr>
@@ -2194,6 +2203,7 @@ export default function MillFinanceDashboard() {
       {showScheduleDrawer && (
         <PayrollScheduleDrawer
           canManage={canApprovePayroll}
+          canPrepare={canPreparePayroll}
           onClose={() => setShowScheduleDrawer(false)}
           onRunNow={async () => {
             try {
@@ -2214,6 +2224,8 @@ export default function MillFinanceDashboard() {
           runId={payslipsRunId}
           companyProfile={companyProfileData}
           canApprove={canApprovePayroll}
+          canPay={canPayPayroll}
+          canDelete={canDeletePayroll}
           onClose={() => setPayslipsRunId(null)}
           onUndo={(run) => { setPayslipsRunId(null); handleDeleteRun(run); }}
           onApprove={async (run) => { try { await approveRunMut.mutateAsync(run.id); addToast('Payroll run approved', 'success'); } catch (e) { addToast(e.message, 'error'); } }}
@@ -3138,7 +3150,7 @@ function PayrollRunDrawer({ month, employees, preselectId, onClose, onPosted, po
 
 // Schedule monthly payroll auto-prepare. The scheduler PREPARES a run on the
 // chosen day each month into the approval queue — it never auto-approves/pays.
-function PayrollScheduleDrawer({ canManage, onClose, onRunNow, runNowBusy, addToast }) {
+function PayrollScheduleDrawer({ canManage, canPrepare, onClose, onRunNow, runNowBusy, addToast }) {
   const { data: schedule, isLoading } = usePayrollSchedule();
   const saveMut = useSavePayrollSchedule();
   const [form, setForm] = useState(null);
@@ -3191,12 +3203,14 @@ function PayrollScheduleDrawer({ canManage, onClose, onRunNow, runNowBusy, addTo
           )}
           {!canManage && <p className="text-[11px] text-amber-600">Only Finance/Owner can change the schedule. You can still prepare now.</p>}
 
-          <div className="pt-2 border-t border-gray-100">
-            <button onClick={onRunNow} disabled={runNowBusy} className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
-              <Wallet className="w-4 h-4" /> {runNowBusy ? 'Preparing…' : 'Prepare this month now'}
-            </button>
-            <p className="text-[11px] text-gray-400 mt-1.5 text-center">Prepares the current month immediately (skips anyone already in a run).</p>
-          </div>
+          {canPrepare && (
+            <div className="pt-2 border-t border-gray-100">
+              <button onClick={onRunNow} disabled={runNowBusy} className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                <Wallet className="w-4 h-4" /> {runNowBusy ? 'Preparing…' : 'Prepare this month now'}
+              </button>
+              <p className="text-[11px] text-gray-400 mt-1.5 text-center">Prepares the current month immediately (skips anyone already in a run).</p>
+            </div>
+          )}
         </div>
       )}
     </SlideDrawer>
@@ -3206,7 +3220,7 @@ function PayrollScheduleDrawer({ canManage, onClose, onRunNow, runNowBusy, addTo
 // Run panel: review a run's payslip lines, see its approval status, and (for
 // Finance/Owner) Approve → Pay → or Void. Paid runs can be Undone (reversed).
 const RUN_STATUS_TONE = { prepared: 'bg-amber-100 text-amber-700', approved: 'bg-blue-100 text-blue-700', paid: 'bg-emerald-100 text-emerald-700', posted: 'bg-emerald-100 text-emerald-700', voided: 'bg-gray-100 text-gray-500' };
-function PayslipsPanel({ runId, companyProfile, canApprove, onClose, onUndo, onApprove, onPay, onVoid, deleteRunMut, approveRunMut, payRunMut, voidRunMut }) {
+function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDelete, onClose, onUndo, onApprove, onPay, onVoid, deleteRunMut, approveRunMut, payRunMut, voidRunMut }) {
   const { data, isLoading } = usePayrollRun(runId);
   const run = data?.run;
   const lines = data?.lines || [];
@@ -3226,9 +3240,9 @@ function PayslipsPanel({ runId, companyProfile, canApprove, onClose, onUndo, onA
           <div className="flex gap-2">
             {/* Workflow actions (Finance/Owner only) */}
             {canApprove && st === 'prepared' && <button onClick={() => onApprove(run)} disabled={busy} className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">Approve</button>}
-            {canApprove && st === 'approved' && <button onClick={() => onPay(run)} disabled={busy} className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">Pay {PKR(run.netTotal)}</button>}
+            {canPay && st === 'approved' && <button onClick={() => onPay(run)} disabled={busy} className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">Pay {PKR(run.netTotal)}</button>}
             {canApprove && (st === 'prepared' || st === 'approved') && <button onClick={() => onVoid(run)} disabled={busy} className="px-4 py-2 text-sm text-rose-600 bg-rose-50 rounded-lg hover:bg-rose-100 disabled:opacity-50">Void</button>}
-            {canApprove && isPaid && <button onClick={() => onUndo(run)} disabled={busy} className="px-4 py-2 text-sm text-rose-600 bg-rose-50 rounded-lg hover:bg-rose-100 disabled:opacity-50">Undo run</button>}
+            {canDelete && isPaid && <button onClick={() => onUndo(run)} disabled={busy} className="px-4 py-2 text-sm text-rose-600 bg-rose-50 rounded-lg hover:bg-rose-100 disabled:opacity-50">Undo run</button>}
           </div>
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Close</button>
         </div>

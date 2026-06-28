@@ -4,10 +4,10 @@ const db = require('../../config/database');
 const controller = require('../../controllers/millingController');
 const advancedController = require('../../controllers/millingAdvancedController');
 const authorize = require('../../middleware/rbac');
-const { authorizeRole, denyRoles } = require('../../middleware/rbac');
-// Mill Operator must never pay salaries or give advances (payroll is a finance
-// action, not production). Applied to payroll WRITE routes below.
-const noPayrollForOperator = denyRoles('Mill Operator');
+const { authorizeRole } = require('../../middleware/rbac');
+// Payroll routes are gated by the dedicated `payroll.*` permission module
+// (migration 203). Mill Operator holds no payroll permissions, so the old
+// denyRoles('Mill Operator') guard is no longer needed.
 const auditAction = require('../../middleware/audit');
 const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
@@ -718,7 +718,7 @@ async function attachAdvances(workers) {
   return workers.map((w) => ({ ...w, advance_outstanding: map.get(w.id) || 0 }));
 }
 
-router.get('/workers', authorize('milling', 'view'), async (req, res) => {
+router.get('/workers', authorize('payroll', 'view'), async (req, res) => {
   try {
     const workers = await db('mill_workers').orderBy('is_active', 'desc').orderBy('name');
     return res.json({ success: true, data: { workers: await attachAdvances(workers) } });
@@ -795,7 +795,7 @@ function plannedScheduleRows(advance) {
   return rows;
 }
 
-router.post('/workers', authorize('milling', 'create'), async (req, res) => {
+router.post('/workers', authorize('payroll', 'create'), async (req, res) => {
   try {
     const { name, role, phone, cnic, joined_date, mill_id, notes } = req.body;
     const { pay_type, monthly_salary, daily_wage } = normalizeWorkerPay(req.body);
@@ -814,7 +814,7 @@ router.post('/workers', authorize('milling', 'create'), async (req, res) => {
 
 // Edit a worker — pay type/rate, contact, or activate/deactivate. Deactivating
 // (is_active=false) keeps all history but drops them from the active payroll run.
-router.put('/workers/:id', authorize('milling', 'edit'), async (req, res) => {
+router.put('/workers/:id', authorize('payroll', 'edit'), async (req, res) => {
   try {
     const worker = await db('mill_workers').where('id', req.params.id).first();
     if (!worker) return res.status(404).json({ success: false, message: 'Worker not found.' });
@@ -861,7 +861,7 @@ async function unwindAdvanceExpense(trx, expenseId) {
 
 // Delete a worker permanently — unwinds every advance's cash-out, then cascades
 // attendance + advances (FK onDelete CASCADE) and removes the worker.
-router.delete('/workers/:id', authorize('milling', 'delete'), async (req, res) => {
+router.delete('/workers/:id', authorize('payroll', 'delete'), async (req, res) => {
   try {
     const worker = await db('mill_workers').where('id', req.params.id).first();
     if (!worker) return res.status(404).json({ success: false, message: 'Worker not found.' });
@@ -875,7 +875,7 @@ router.delete('/workers/:id', authorize('milling', 'delete'), async (req, res) =
 });
 
 // List a worker's advances (most recent first).
-router.get('/workers/:id/advances', authorize('milling', 'view'), async (req, res) => {
+router.get('/workers/:id/advances', authorize('payroll', 'view'), async (req, res) => {
   try {
     const advances = await db('mill_worker_advances').where('worker_id', req.params.id).orderBy('advance_date', 'desc').orderBy('id', 'desc');
     return res.json({ success: true, data: { advances } });
@@ -888,7 +888,7 @@ router.get('/workers/:id/advances', authorize('milling', 'view'), async (req, re
 //   • any other salary disbursement booked directly against them
 //     (business_expenses.employee_id, excluding the advances' own cash-outs so
 //      they aren't double-counted).
-router.get('/workers/:id/ledger', authorize('milling', 'view'), async (req, res) => {
+router.get('/workers/:id/ledger', authorize('payroll', 'view'), async (req, res) => {
   try {
     const workerId = parseInt(req.params.id, 10);
     const worker = await db('mill_workers').where('id', workerId).first();
@@ -953,7 +953,7 @@ router.get('/workers/:id/ledger', authorize('milling', 'view'), async (req, res)
 
 // Record a salary advance: real cash-out (business_expense, category 'salaries',
 // paid now → Money Out / GL) PLUS a tracked advance row that nets off payroll.
-router.post('/workers/:id/advances', authorize('milling', 'create'), noPayrollForOperator, async (req, res) => {
+router.post('/workers/:id/advances', authorize('payroll', 'create'), async (req, res) => {
   try {
     const worker = await db('mill_workers').where('id', req.params.id).first();
     if (!worker) return res.status(404).json({ success: false, message: 'Worker not found.' });
@@ -995,7 +995,7 @@ router.post('/workers/:id/advances', authorize('milling', 'create'), noPayrollFo
 
 // Advance ledger — one advance, its recovery plan, its schedule rows and a
 // debit/credit transaction view (advance given = debit; each recovery = credit).
-router.get('/advances/:id/ledger', authorize('milling', 'view'), async (req, res) => {
+router.get('/advances/:id/ledger', authorize('payroll', 'view'), async (req, res) => {
   try {
     const advance = await db('mill_worker_advances as a')
       .leftJoin('mill_workers as w', 'w.id', 'a.worker_id')
@@ -1023,7 +1023,7 @@ router.get('/advances/:id/ledger', authorize('milling', 'view'), async (req, res
 });
 
 // Delete an advance — unwinds its cash-out and removes the record.
-router.delete('/advances/:id', authorize('milling', 'delete'), noPayrollForOperator, async (req, res) => {
+router.delete('/advances/:id', authorize('payroll', 'delete'), async (req, res) => {
   try {
     const advance = await db('mill_worker_advances').where('id', req.params.id).first();
     if (!advance) return res.status(404).json({ success: false, message: 'Advance not found.' });
@@ -1035,7 +1035,7 @@ router.delete('/advances/:id', authorize('milling', 'delete'), noPayrollForOpera
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
-router.get('/attendance', authorize('milling', 'view'), async (req, res) => {
+router.get('/attendance', authorize('payroll', 'view'), async (req, res) => {
   try {
     const { month, worker_id } = req.query;
     let query = db('mill_attendance as a')
@@ -1054,7 +1054,7 @@ router.get('/attendance', authorize('milling', 'view'), async (req, res) => {
 const VALID_ATTENDANCE = ['present', 'absent', 'half_day', 'leave', 'off'];
 const attHours = (status) => (status === 'half_day' ? 4 : status === 'present' ? 8 : 0);
 
-router.post('/attendance', authorize('milling', 'create'), async (req, res) => {
+router.post('/attendance', authorize('payroll', 'create'), async (req, res) => {
   try {
     const { worker_id, date, status, hours_worked, overtime_hours, notes } = req.body;
     if (!worker_id || !date) return res.status(400).json({ success: false, message: 'worker_id and date required.' });
@@ -1072,7 +1072,7 @@ router.post('/attendance', authorize('milling', 'create'), async (req, res) => {
 
 // Bulk attendance — set many (worker, date) cells at once (Sundays off, holidays,
 // company-wide leave, a range). status 'clear' deletes the cell. One transaction.
-router.post('/attendance/bulk', authorize('milling', 'create'), async (req, res) => {
+router.post('/attendance/bulk', authorize('payroll', 'create'), async (req, res) => {
   try {
     const { records } = req.body;
     if (!Array.isArray(records) || !records.length) return res.status(400).json({ success: false, message: 'records[] required.' });
@@ -1135,7 +1135,7 @@ function pakistanFederalHolidays(year) {
   return [...fixed, ...isl].sort((a, b) => a.date.localeCompare(b.date));
 }
 
-router.get('/attendance/holidays', authorize('milling', 'view'), async (req, res) => {
+router.get('/attendance/holidays', authorize('payroll', 'view'), async (req, res) => {
   try {
     const { month } = req.query;
     if (!/^\d{4}-\d{2}$/.test(month || '')) return res.status(400).json({ success: false, message: 'month (YYYY-MM) required.' });
@@ -1268,7 +1268,7 @@ async function unrecoverAdvancesForWorker(trx, workerId, amount) {
 // (e.g. a manual salary expense and then a payroll run for the same month).
 // committedWorkerStatus moved to ./payroll.service.js (shared with the scheduler).
 
-router.get('/payroll/summary', authorize('milling', 'view'), async (req, res) => {
+router.get('/payroll/summary', authorize('payroll', 'view'), async (req, res) => {
   try {
     const data = await computePayrollSummary(req.query.month);
     const status = await committedWorkerStatus(req.query.month);
@@ -1300,7 +1300,7 @@ async function enrichPayslipLines(lines) {
   }));
 }
 
-router.get('/payroll/runs', authorize('milling', 'view'), async (req, res) => {
+router.get('/payroll/runs', authorize('payroll', 'view'), async (req, res) => {
   try {
     const runs = await db('mill_payroll_runs as r')
       .leftJoin('bank_accounts as ba', 'r.bank_account_id', 'ba.id')
@@ -1315,7 +1315,7 @@ router.get('/payroll/runs', authorize('milling', 'view'), async (req, res) => {
 
 // Payroll report — every run (optionally within a from..to period range) with
 // its payslip lines nested, plus grand totals. One pass over runs + lines.
-router.get('/payroll/report', authorize('milling', 'view'), async (req, res) => {
+router.get('/payroll/report', authorize('payroll', 'view'), async (req, res) => {
   try {
     const { from, to } = req.query;
     let q = db('mill_payroll_runs as r')
@@ -1344,7 +1344,7 @@ router.get('/payroll/report', authorize('milling', 'view'), async (req, res) => 
 });
 
 // A single run with its per-employee payslip lines.
-router.get('/payroll/runs/:id', authorize('milling', 'view'), async (req, res) => {
+router.get('/payroll/runs/:id', authorize('payroll', 'view'), async (req, res) => {
   try {
     const run = await db('mill_payroll_runs as r')
       .leftJoin('bank_accounts as ba', 'r.bank_account_id', 'ba.id')
@@ -1372,7 +1372,7 @@ router.get('/payroll/runs/:id', authorize('milling', 'view'), async (req, res) =
 // advance recovery yet (both happen at /pay). The run must then be Approved and
 // Paid. (Gate: milling.create, not Mill Operator — preparers are Mill Manager/
 // admins; finance/owner approve & pay below.)
-router.post('/payroll/run', authorize('milling', 'create'), noPayrollForOperator,
+router.post('/payroll/run', authorize('payroll', 'create'),
   auditAction('prepare', 'mill_payroll_run', (req, data) => data.data?.run?.id),
   async (req, res) => {
   try {
@@ -1390,7 +1390,7 @@ router.post('/payroll/run', authorize('milling', 'create'), noPayrollForOperator
 const PAYROLL_TASK = 'payroll_prepare';
 function parseTaskConfig(t) { try { return typeof t.config === 'string' ? JSON.parse(t.config) : (t.config || {}); } catch (e) { return {}; } }
 
-router.get('/payroll/schedule', authorize('milling', 'view'), async (req, res) => {
+router.get('/payroll/schedule', authorize('payroll', 'view'), async (req, res) => {
   try {
     const task = await db('scheduled_tasks').where('task_type', PAYROLL_TASK).orderBy('id', 'desc').first();
     if (!task) return res.json({ success: true, data: { schedule: null } });
@@ -1404,7 +1404,7 @@ router.get('/payroll/schedule', authorize('milling', 'view'), async (req, res) =
 });
 
 // Create/update the schedule. Finance/Owner only (they own payroll spend).
-router.put('/payroll/schedule', authorizeRole('Owner', 'Super Admin', 'Finance Manager'),
+router.put('/payroll/schedule', authorize('payroll', 'approve'),
   auditAction('schedule', 'mill_payroll_run', () => null), async (req, res) => {
   try {
     const active = req.body.active !== false;
@@ -1430,7 +1430,7 @@ router.put('/payroll/schedule', authorizeRole('Owner', 'Super Admin', 'Finance M
 
 // Manually trigger the scheduled prepare now (prepares the CURRENT month for all
 // not-yet-committed employees). Preparers (Mill Manager/admins), not operators.
-router.post('/payroll/schedule/run-now', authorize('milling', 'create'), noPayrollForOperator,
+router.post('/payroll/schedule/run-now', authorize('payroll', 'create'),
   auditAction('prepare', 'mill_payroll_run', (req, data) => data.data?.run?.id), async (req, res) => {
   try {
     const month = (req.body.month && /^\d{4}-\d{2}$/.test(req.body.month)) ? req.body.month : new Date().toISOString().slice(0, 7);
@@ -1447,7 +1447,7 @@ router.post('/payroll/schedule/run-now', authorize('milling', 'create'), noPayro
 });
 
 // APPROVE a prepared run (step 2). Finance/Owner only. No money moves yet.
-router.post('/payroll/runs/:id/approve', authorizeRole('Owner', 'Super Admin', 'Finance Manager'),
+router.post('/payroll/runs/:id/approve', authorize('payroll', 'approve'),
   auditAction('approve', 'mill_payroll_run', (req) => req.params.id),
   async (req, res) => {
   try {
@@ -1462,7 +1462,7 @@ router.post('/payroll/runs/:id/approve', authorizeRole('Owner', 'Super Admin', '
 
 // PAY an approved run (step 3) — NOW the cash/GL posting + advance recovery
 // happen. Finance/Owner only. Must be Approved first.
-router.post('/payroll/runs/:id/pay', authorizeRole('Owner', 'Super Admin', 'Finance Manager'),
+router.post('/payroll/runs/:id/pay', authorize('payroll', 'pay'),
   auditAction('pay', 'mill_payroll_run', (req) => req.params.id),
   async (req, res) => {
   try {
@@ -1502,7 +1502,7 @@ router.post('/payroll/runs/:id/pay', authorizeRole('Owner', 'Super Admin', 'Fina
 
 // VOID a Prepared/Approved run (before payment). Nothing posted yet, so just
 // mark it voided — frees its workers for a new run. (Paid runs use DELETE.)
-router.post('/payroll/runs/:id/void', authorizeRole('Owner', 'Super Admin', 'Finance Manager'),
+router.post('/payroll/runs/:id/void', authorize('payroll', 'approve'),
   auditAction('void', 'mill_payroll_run', (req) => req.params.id),
   async (req, res) => {
   try {
@@ -1517,7 +1517,7 @@ router.post('/payroll/runs/:id/void', authorizeRole('Owner', 'Super Admin', 'Fin
 
 // Undo a payroll run — reverse its cash-out (+ GL), restore the advances it
 // recovered to outstanding, and delete the run (lines cascade).
-router.delete('/payroll/runs/:id', authorize('milling', 'delete'), noPayrollForOperator, async (req, res) => {
+router.delete('/payroll/runs/:id', authorize('payroll', 'delete'), async (req, res) => {
   try {
     const run = await db('mill_payroll_runs').where('id', req.params.id).first();
     if (!run) return res.status(404).json({ success: false, message: 'Payroll run not found.' });

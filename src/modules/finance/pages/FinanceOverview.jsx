@@ -690,17 +690,18 @@ function PayrollSummaryStrip({ navigate, fmtPKR }) {
 // Approved one without leaving the Finance dashboard. Hidden for non-approvers /
 // when nothing is pending. Calls the role-gated milling approve/pay endpoints.
 function PayrollApprovalsCard({ fmtPKR }) {
-  const { user } = useAuth();
-  const canApprove = ['Owner', 'Super Admin', 'Finance Manager'].includes(user?.role);
+  const { hasPermission } = useAuth();
+  const canApprove = hasPermission('payroll', 'approve');
+  const canPay = hasPermission('payroll', 'pay');
   const approveMut = useApprovePayrollRun();
   const payMut = usePayPayrollRun();
   const { data, isError, refetch } = useQuery({
     queryKey: ['payroll-pending'],
-    enabled: canApprove,
+    enabled: canApprove || canPay,
     queryFn: async () => { const res = await reportingApi.payrollPending(); return res?.runs ? res : (res?.data || res); },
     retry: false,
   });
-  if (!canApprove || isError) return null;
+  if ((!canApprove && !canPay) || isError) return null;
   const runs = data?.runs || [];
   if (!runs.length) return null;
   const busy = approveMut.isPending || payMut.isPending;
@@ -719,8 +720,8 @@ function PayrollApprovalsCard({ fmtPKR }) {
               <span className="text-[11px] text-gray-400"> · prepared by {r.preparedBy || '—'}</span>
             </div>
             <div className="flex gap-2">
-              {r.status === 'prepared' && <button disabled={busy} onClick={() => approveMut.mutate(r.id)} className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">Approve</button>}
-              {r.status === 'approved' && <button disabled={busy} onClick={() => payMut.mutate(r.id, { onSuccess: () => refetch() })} className="px-3 py-1.5 text-xs font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">Pay {fmtPKR(r.net)}</button>}
+              {r.status === 'prepared' && canApprove && <button disabled={busy} onClick={() => approveMut.mutate(r.id)} className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">Approve</button>}
+              {r.status === 'approved' && canPay && <button disabled={busy} onClick={() => payMut.mutate(r.id, { onSuccess: () => refetch() })} className="px-3 py-1.5 text-xs font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">Pay {fmtPKR(r.net)}</button>}
             </div>
           </div>
         ))}
