@@ -87,8 +87,9 @@ function itemsRows(items, admin) {
   </tr>`).join('');
 }
 
-export function printCustomerInvoice(data, company) {
+export function printCustomerInvoice(data, company, opts = {}) {
   const { sale, items = [], dispatch = {}, totals = {} } = data;
+  const compact = opts.template === 'compact';
   const inner = `
     <div class="row">
       <div>${companyBlock(company)}</div>
@@ -113,7 +114,9 @@ export function printCustomerInvoice(data, company) {
       <tr><td>Received</td><td class="r">${pkr(totals.received)}</td></tr>
       <tr><td>Outstanding</td><td class="r">${pkr(totals.outstanding)}</td></tr>
     </table>
-    <div class="sec"><h4>Dispatch</h4>
+    ${compact
+      ? `<div class="note"><b>Dispatch:</b> ${[items[0]?.warehouse, dispatch.deliveryStatus, dispatch.vehicleNo ? 'Truck ' + esc(dispatch.vehicleNo) : '', dispatch.driverName, dispatch.dispatchDate ? dt(dispatch.dispatchDate) : ''].filter(Boolean).map(esc).join(' &middot; ') || '—'}</div>`
+      : `<div class="sec"><h4>Dispatch</h4>
       <div class="kv">
         <span><b>Warehouse:</b> ${esc(items[0]?.warehouse || '—')}</span>
         <span><b>Delivery status:</b> ${esc(dispatch.deliveryStatus || '—')}</span>
@@ -122,9 +125,11 @@ export function printCustomerInvoice(data, company) {
         <span><b>Driver:</b> ${esc(dispatch.driverName || '—')}</span>
         <span><b>Collected at:</b> ${esc(dispatch.collectionLocation || '—')}</span>
       </div>
-    </div>
+    </div>`}
     ${sale.notes ? `<div class="sec"><h4>Terms / Remarks</h4><div>${esc(sale.notes)}</div></div>` : ''}
-    <div class="sign"><div>Prepared By</div><div>Checked By</div><div>Approved By</div><div>Customer Signature</div></div>
+    ${compact
+      ? `<div class="sign"><div>Authorised Signature</div><div>Customer Signature</div></div>`
+      : `<div class="sign"><div>Prepared By</div><div>Checked By</div><div>Approved By</div><div>Customer Signature</div></div>`}
     <div class="note">Computer-generated sales invoice.</div>
   `;
   return openPrint(`Invoice ${sale.invoiceNo}`, inner);

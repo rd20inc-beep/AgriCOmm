@@ -26,5 +26,6 @@ router.post(
 router.get('/:id/payments', authorize('inventory', 'view'), controller.getPayments);
 router.get('/:id/invoice', authorize('inventory', 'view'), controller.getInvoice);
 router.get('/:id/invoice-admin', authorizeRole(...ADMIN_INVOICE_ROLES), controller.getInvoiceAdmin);
+router.post('/:id/email-invoice', authorize('inventory', 'create'), controller.emailInvoice);
 
 module.exports = router;

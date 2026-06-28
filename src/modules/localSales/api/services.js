@@ -8,4 +8,5 @@ export const localSalesApi = {
   getPayments: (id) => api.get(`/api/local-sales/${id}/payments`),
   getInvoice: (id) => api.get(`/api/local-sales/${id}/invoice`),
   getInvoiceAdmin: (id) => api.get(`/api/local-sales/${id}/invoice-admin`),
+  emailInvoice: (id, data) => api.post(`/api/local-sales/${id}/email-invoice`, data),
 };

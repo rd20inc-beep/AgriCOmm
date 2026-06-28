@@ -54,7 +54,7 @@ async function assembleInvoice(id, includeAdmin = false) {
     .leftJoin('users as u', 'u.id', 'ls.created_by')
     .where(isNumeric ? { 'ls.id': parseInt(id, 10) } : { 'ls.sale_no': id })
     .select('ls.*', 'c.name as customer_name', 'c.phone as customer_phone',
-      'c.address as customer_address', 'c.contact_person as customer_contact',
+      'c.address as customer_address', 'c.contact_person as customer_contact', 'c.email as customer_email',
       'u.full_name as created_by_name')
     .first();
   if (!base) return null;
@@ -162,6 +162,7 @@ async function assembleInvoice(id, includeAdmin = false) {
       customerId: base.customer_id || null,
       customer: base.customer_name || base.buyer_name || 'Walk-in customer',
       customerPhone: base.customer_phone || base.buyer_phone || null,
+      customerEmail: base.customer_email || null,
       customerAddress: base.customer_address || base.buyer_address || null,
       customerContact: base.customer_contact || null,
       date: base.sale_date || base.created_at,
@@ -212,6 +213,46 @@ async function assembleInvoice(id, includeAdmin = false) {
   }
 
   return data;
+}
+
+// Server-side customer-invoice HTML for emailing (inline styles, email-safe).
+// Mirrors the on-screen customer invoice; NO cost/margin.
+function renderInvoiceEmailHtml(data, company = {}) {
+  const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const pkr = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
+  const d = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+  const { sale, items = [], dispatch = {}, totals = {} } = data;
+  const coName = company.legal_name || company.name || 'AGRI COMMODITIES';
+  const coBits = [company.address, company.phone, company.email].filter(Boolean).map(esc).join(' &middot; ');
+  const rows = items.map((it) => `<tr>
+    <td style="padding:6px 8px;border-bottom:1px solid #f0f0f0">${esc(it.riceType)}</td>
+    <td style="padding:6px 8px;border-bottom:1px solid #f0f0f0">${esc(it.gradeProduct)}</td>
+    <td style="padding:6px 8px;border-bottom:1px solid #f0f0f0;text-align:right">${Math.round(it.quantityKg).toLocaleString()} kg</td>
+    <td style="padding:6px 8px;border-bottom:1px solid #f0f0f0;text-align:right">${it.bags != null ? it.bags : '—'}</td>
+    <td style="padding:6px 8px;border-bottom:1px solid #f0f0f0;text-align:right">${it.ratePerKg > 0 ? pkr(it.ratePerKg) : '—'}</td>
+    <td style="padding:6px 8px;border-bottom:1px solid #f0f0f0;text-align:right">${pkr(it.amount)}</td>
+  </tr>`).join('');
+  return `<div style="font-family:Arial,sans-serif;color:#111827;max-width:720px">
+    <div style="border-bottom:2px solid #111827;padding-bottom:8px;display:flex;justify-content:space-between">
+      <div><div style="font-size:18px;font-weight:800">${esc(coName)}</div>${coBits ? `<div style="font-size:11px;color:#6b7280">${coBits}</div>` : ''}${company.ntn ? `<div style="font-size:11px;color:#6b7280">NTN ${esc(company.ntn)}</div>` : ''}</div>
+      <div style="text-align:right"><div style="font-size:15px;font-weight:800">SALES INVOICE</div><div style="font-size:12px;color:#374151">${esc(sale.invoiceNo)}</div><div style="font-size:11px;color:#6b7280">${d(sale.date)}</div></div>
+    </div>
+    <p style="font-size:13px;margin:10px 0 4px">Dear ${esc(sale.customer)},</p>
+    <p style="font-size:12px;color:#374151;margin:0 0 10px">Please find your invoice below. Payment status: <b>${esc(sale.paymentStatus)}</b>${sale.dueDate ? ` &middot; Due ${d(sale.dueDate)}` : ''}.</p>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="background:#f3f4f6">
+        <th style="text-align:left;padding:6px 8px">Rice Type</th><th style="text-align:left;padding:6px 8px">Grade / Product</th>
+        <th style="text-align:right;padding:6px 8px">Qty</th><th style="text-align:right;padding:6px 8px">Bags</th>
+        <th style="text-align:right;padding:6px 8px">Rate</th><th style="text-align:right;padding:6px 8px">Amount</th>
+      </tr></thead><tbody>${rows}</tbody></table>
+    <table style="margin-left:auto;margin-top:8px;font-size:12px">
+      <tr><td style="padding:2px 8px">Total</td><td style="padding:2px 8px;text-align:right;font-weight:700">${pkr(totals.total)}</td></tr>
+      <tr><td style="padding:2px 8px">Received</td><td style="padding:2px 8px;text-align:right">${pkr(totals.received)}</td></tr>
+      <tr><td style="padding:2px 8px;border-top:1px solid #d1d5db">Outstanding</td><td style="padding:2px 8px;text-align:right;border-top:1px solid #d1d5db;font-weight:700">${pkr(totals.outstanding)}</td></tr>
+    </table>
+    ${(dispatch.vehicleNo || dispatch.driverName || dispatch.dispatchDate || items[0]?.warehouse) ? `<div style="margin-top:12px;font-size:11px;color:#6b7280"><b>Dispatch:</b> ${[items[0]?.warehouse, dispatch.deliveryStatus, dispatch.vehicleNo ? 'Truck ' + esc(dispatch.vehicleNo) : '', dispatch.driverName, dispatch.dispatchDate ? d(dispatch.dispatchDate) : ''].filter(Boolean).map(esc).join(' &middot; ')}</div>` : ''}
+    <p style="font-size:11px;color:#9ca3af;margin-top:14px">Computer-generated sales invoice from ${esc(coName)}.</p>
+  </div>`;
 }
 
 module.exports = {
@@ -653,6 +694,32 @@ module.exports = {
       return res.json({ success: true, data });
     } catch (err) {
       return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
+  // Email the customer invoice (Phase 5). Sends the customer-safe HTML (no
+  // cost/margin) to the customer's email via the existing mailer. Read-only on
+  // sales data; only sends an email + writes an email_logs row.
+  async emailInvoice(req, res) {
+    try {
+      const data = await assembleInvoice(req.params.id, false);
+      if (!data) return res.status(404).json({ success: false, message: 'Sale not found.' });
+      let to = (req.body && req.body.to ? String(req.body.to).trim() : '') || data.sale.customerEmail || '';
+      if (!to || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) {
+        return res.status(400).json({ success: false, message: 'A valid recipient email is required (the customer has no email on file).' });
+      }
+      let company = {};
+      try { const cp = await db('company_profile').first(); if (cp) company = cp; } catch (e) { /* default */ }
+      const coName = company.legal_name || company.name || 'AGRI COMMODITIES';
+      const html = renderInvoiceEmailHtml(data, company);
+      const emailService = require('../communications/email.service');
+      const log = await emailService.sendEmail({
+        to, subject: `Invoice ${data.sale.invoiceNo} — ${coName}`, body: html,
+        linkedType: 'local_sale', linkedId: data.sale.id, userId: req.user?.id || null,
+      });
+      return res.json({ success: true, to, status: (log && log.status) || 'Sent' });
+    } catch (err) {
+      return res.status(500).json({ success: false, message: err.message || 'Failed to send invoice email.' });
     }
   },
 

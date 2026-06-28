@@ -8,7 +8,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   ArrowLeft, Printer, ShieldCheck, Wallet, BookUser, Package, Factory,
-  Truck, FileText, AlertTriangle, ChevronRight,
+  Truck, FileText, AlertTriangle, ChevronRight, Mail, MessageCircle,
 } from 'lucide-react';
 import { localSalesApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
@@ -46,6 +46,10 @@ export default function InvoiceView() {
 
   const [payOpen, setPayOpen] = useState(false);
   const [payForm, setPayForm] = useState({ amount: '', payment_method: 'cash', reference: '', payment_date: new Date().toISOString().slice(0, 10), due_date: '', collection_location: 'Mill' });
+  const [template, setTemplate] = useState('standard'); // print template: standard | compact
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [emailTo, setEmailTo] = useState('');
+  const [emailBusy, setEmailBusy] = useState(false);
 
   if (isLoading) return <div className="p-6 text-sm text-gray-400">Loading invoice…</div>;
   if (isError || !data?.sale) return (
@@ -59,7 +63,34 @@ export default function InvoiceView() {
   const primary = items.find(i => i.lotId) || items[0] || {};
 
   const onPrintCustomer = () => {
-    if (!printCustomerInvoice(data, companyProfileData)) addToast?.('Pop-up blocked — allow pop-ups to print.', 'error');
+    if (!printCustomerInvoice(data, companyProfileData, { template })) addToast?.('Pop-up blocked — allow pop-ups to print.', 'error');
+  };
+  const onEmailInvoice = async () => {
+    setEmailBusy(true);
+    try {
+      const res = await localSalesApi.emailInvoice(sale.id, { to: emailTo.trim() || undefined });
+      const status = res?.status || res?.data?.status;
+      const to = res?.to || res?.data?.to || emailTo;
+      if (status === 'Failed') addToast?.(`Email logged but the mail server reported an error. Check SMTP settings.`, 'error');
+      else addToast?.(`Invoice emailed to ${to}.`, 'success');
+      setEmailOpen(false);
+    } catch (e) {
+      addToast?.(e?.message || 'Could not send the invoice email.', 'error');
+    } finally { setEmailBusy(false); }
+  };
+  const onWhatsApp = () => {
+    const phone = String(sale.customerPhone || '').replace(/[^\d]/g, '');
+    if (!phone) { addToast?.('No customer phone on file for WhatsApp.', 'error'); return; }
+    const co = companyProfileData?.legalName || companyProfileData?.name || 'AGRI COMMODITIES';
+    const lines = [
+      `*${co}* — Invoice ${sale.invoiceNo}`,
+      `Date: ${new Date(sale.date).toLocaleDateString('en-GB')}`,
+      `Items: ${(items.map(i => i.gradeProduct).join(', ')) || '—'}`,
+      `Total: Rs ${Math.round(totals.total || 0).toLocaleString()}`,
+      `Received: Rs ${Math.round(totals.received || 0).toLocaleString()}`,
+      `Outstanding: Rs ${Math.round(totals.outstanding || 0).toLocaleString()}`,
+    ];
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(lines.join('\n'))}`, '_blank');
   };
   const onPrintAdmin = async () => {
     setAdminBusy(true);
@@ -107,9 +138,16 @@ export default function InvoiceView() {
           </h1>
           {sale.saleGroupNo && sale.saleGroupNo !== sale.invoiceNo && <p className="text-xs text-gray-400">Group {sale.saleGroupNo}</p>}
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <select value={template} onChange={e => setTemplate(e.target.value)} title="Print template"
+            className="text-xs border border-gray-200 rounded-lg px-2 py-2 bg-white text-gray-700 outline-none">
+            <option value="standard">Standard template</option>
+            <option value="compact">Compact template</option>
+          </select>
           <ActionBtn icon={Printer} label="Print customer invoice" tone="primary" onClick={onPrintCustomer} />
           {canSeeAdminCopy && <ActionBtn icon={ShieldCheck} label={adminBusy ? 'Preparing…' : 'Print admin copy'} onClick={onPrintAdmin} disabled={adminBusy} />}
+          <ActionBtn icon={Mail} label="Email invoice" onClick={() => { setEmailTo(sale.customerEmail || ''); setEmailOpen(true); }} />
+          <ActionBtn icon={MessageCircle} label="WhatsApp" onClick={onWhatsApp} />
           {sale.outstanding > 0.01 && <ActionBtn icon={Wallet} label="Record payment" onClick={() => { setPayForm(f => ({ ...f, amount: String(Math.round(sale.outstanding)) })); setPayOpen(true); }} />}
         </div>
       </div>
@@ -209,6 +247,24 @@ export default function InvoiceView() {
         {primary.finishedGoodsHref && <ActionBtn icon={Package} label="Lot ledger" to={primary.finishedGoodsHref} />}
         {primary.batchHref && <ActionBtn icon={Factory} label="Batch ledger" to={primary.batchHref} />}
       </div>
+
+      {/* Email invoice modal */}
+      <SlideDrawer open={emailOpen} onClose={() => setEmailOpen(false)} title="Email invoice" subtitle={`Send invoice ${sale.invoiceNo} to the customer`} icon={Mail} size="md">
+        {emailOpen && (
+          <div className="space-y-3">
+            <Lbl text="Recipient email">
+              <input type="email" value={emailTo} onChange={e => setEmailTo(e.target.value)} placeholder="customer@email.com"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none" />
+            </Lbl>
+            {!sale.customerEmail && <p className="text-[11px] text-amber-600">No email on file for this customer — enter one to send.</p>}
+            <p className="text-[11px] text-gray-400">Sends the customer invoice (no cost/margin) via email. Requires the mail server to be configured.</p>
+            <button onClick={onEmailInvoice} disabled={emailBusy || !emailTo.trim()}
+              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              <Mail size={14} /> {emailBusy ? 'Sending…' : 'Send invoice'}
+            </button>
+          </div>
+        )}
+      </SlideDrawer>
 
       {/* Record payment modal */}
       <SlideDrawer open={payOpen} onClose={() => setPayOpen(false)} title="Record payment" subtitle={`Against invoice ${sale.invoiceNo}`} icon={Wallet} size="md">
