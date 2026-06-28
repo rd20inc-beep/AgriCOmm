@@ -51,6 +51,22 @@ export default function LotLedger() {
     ],
     rows: events,
   });
+  // Outputs CSV — produced finished/by-product lots with per-grade pricing.
+  const onOutputsCsv = () => exportLedgerCSV({
+    filename: `lot-${lot.lotNo}_outputs.csv`,
+    columns: [
+      { label: 'Batch', accessor: (o) => o.batchNo || '' },
+      { label: 'Product / Grade', accessor: (o) => o.productGrade || '' },
+      { label: 'Type', accessor: (o) => o.type === 'byproduct' ? 'by-product' : 'finished' },
+      { label: 'Rice type', accessor: (o) => o.riceType || '' },
+      { label: 'Qty (kg)', align: 'right', accessor: (o) => Math.round(o.qtyKg) },
+      { label: 'Cost/kg', align: 'right', accessor: (o) => Math.round(o.costPerKg) },
+      { label: 'Sale price/kg', align: 'right', accessor: (o) => Math.round(o.salePricePerKg) },
+      { label: 'Recovery value', align: 'right', accessor: (o) => Math.round(o.recoveryValue) },
+      { label: 'Warehouse', accessor: (o) => o.warehouse || '' },
+    ],
+    rows: outputs,
+  });
 
   const Cell = ({ label, value, sub, tone = 'gray' }) => {
     const t = { emerald: 'text-emerald-700', rose: 'text-rose-600', gray: 'text-gray-900' }[tone] || 'text-gray-900';
@@ -74,7 +90,8 @@ export default function LotLedger() {
         </div>
         <div className="flex flex-wrap gap-2">
           <button onClick={onPrint} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700"><Printer size={14} /> Print / PDF</button>
-          <button onClick={onCsv} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-white text-gray-700 border border-gray-200 hover:bg-gray-50"><Download size={14} /> Export CSV</button>
+          <button onClick={onCsv} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-white text-gray-700 border border-gray-200 hover:bg-gray-50"><Download size={14} /> Activity CSV</button>
+          {outputs.length > 0 && <button onClick={onOutputsCsv} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-white text-gray-700 border border-gray-200 hover:bg-gray-50"><Download size={14} /> Outputs CSV</button>}
           {lot.purchaseInvoiceHref && <Link to={lot.purchaseInvoiceHref} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-white text-gray-700 border border-gray-200 hover:bg-gray-50">Purchase invoice</Link>}
           <Link to={lot.lotDetailHref} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-white text-gray-700 border border-gray-200 hover:bg-gray-50">Lot detail</Link>
         </div>
