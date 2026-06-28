@@ -1178,7 +1178,9 @@ const reportingService = {
     // Processing cost allocated to this lot (approx: batch milling costs × share).
     let processingCostAllocated = 0;
     if (myBatchIds.length) {
-      const mcRows = await db('milling_costs').whereIn('batch_id', myBatchIds).select('batch_id', 'amount');
+      // Exclude the 'raw_rice' category — that's the input-rice cost (already the
+      // purchase value); processing cost = milling fee/packaging/other only.
+      const mcRows = await db('milling_costs').whereIn('batch_id', myBatchIds).whereNot('category', 'raw_rice').select('batch_id', 'amount');
       const mcByBatch = {}; for (const m of mcRows) mcByBatch[m.batch_id] = (mcByBatch[m.batch_id] || 0) + num(m.amount);
       const mb = await db('milling_batches').whereIn('id', myBatchIds).select('id', 'manual_milling_cost_pkr', 'manual_other_expenses_pkr');
       for (const b of mb) mcByBatch[b.id] = (mcByBatch[b.id] || 0) + num(b.manual_milling_cost_pkr) + num(b.manual_other_expenses_pkr);
