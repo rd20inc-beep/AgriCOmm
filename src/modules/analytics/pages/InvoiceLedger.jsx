@@ -4,13 +4,17 @@
 // ref; filter by date, payment status and outstanding-only. Each row opens the
 // Invoice 360 and links to the customer ledger. Read-only; commercial figures
 // only (no COGS/margin). Reuses the shared ledger CSV/print helpers.
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, Fragment } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Search, Download, Printer, FileText, AlertTriangle, BookUser, ChevronRight } from 'lucide-react';
+import { Search, Download, Printer, FileText, AlertTriangle, BookUser, ChevronRight, ChevronDown, Factory } from 'lucide-react';
 import { reportingApi } from '../api/services';
+import { localSalesApi, lotInventoryApi } from '../../../api/services';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printLedger } from '../utils/ledgerExport';
+
+// Roles allowed to see internal by-product pricing (mirrors the invoice gates).
+const ADMIN_PRICING_ROLES = ['Super Admin', 'Owner', 'Finance Manager', 'Mill Manager'];
 
 const pkr = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
 const dt = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
@@ -49,6 +53,34 @@ export default function InvoiceLedger() {
   const from = params.get('from') || '';
   const to = params.get('to') || '';
   const set = (patch) => { const p = new URLSearchParams(params); Object.entries(patch).forEach(([k, v]) => { if (v) p.set(k, v); else p.delete(k); }); setParams(p); };
+
+  // Internal by-product pricing — admin roles only. Lazy-fetched per row on
+  // expand from the existing role-gated invoice endpoints (server enforces it).
+  const canSeePricing = ADMIN_PRICING_ROLES.includes(user?.role);
+  const [expanded, setExpanded] = useState(() => new Set());
+  const [bpData, setBpData] = useState({});
+  const [bpLoading, setBpLoading] = useState({});
+  const toggleBp = async (r) => {
+    const key = `${r.kind}-${r.id}`;
+    setExpanded(prev => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n; });
+    if (bpData[key] != null || bpLoading[key]) return;
+    setBpLoading(prev => ({ ...prev, [key]: true }));
+    try {
+      let groups = [];
+      if (r.kind === 'purchase') {
+        const res = await lotInventoryApi.getPurchaseInvoice(r.id);
+        groups = (res?.data || res)?.producedByproducts || [];
+      } else {
+        const res = await localSalesApi.getInvoiceAdmin(r.id);
+        groups = (res?.data || res)?.batchByproducts || [];
+      }
+      setBpData(prev => ({ ...prev, [key]: groups }));
+    } catch (e) {
+      setBpData(prev => ({ ...prev, [key]: [] }));
+    } finally {
+      setBpLoading(prev => ({ ...prev, [key]: false }));
+    }
+  };
 
   useEffect(() => {
     setLoading(true); setError(null);
@@ -146,15 +178,17 @@ export default function InvoiceLedger() {
               <th className="px-3 py-2 text-right font-medium">Settled</th>
               <th className="px-3 py-2 text-right font-medium">Outstanding</th>
               <th className="px-3 py-2 text-left font-medium">Status</th>
+              {canSeePricing && <th className="px-3 py-2 text-left font-medium">By-products</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {loading ? (
-              <tr><td colSpan={10} className="px-3 py-8 text-center text-gray-400">Loading…</td></tr>
+              <tr><td colSpan={canSeePricing ? 11 : 10} className="px-3 py-8 text-center text-gray-400">Loading…</td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={10} className="px-3 py-8 text-center text-gray-400">No invoices match.</td></tr>
-            ) : rows.map((r) => (
-              <tr key={`${r.kind}-${r.id}`} className="hover:bg-blue-50/40">
+              <tr><td colSpan={canSeePricing ? 11 : 10} className="px-3 py-8 text-center text-gray-400">No invoices match.</td></tr>
+            ) : rows.map((r) => { const bpKey = `${r.kind}-${r.id}`; const isOpen = expanded.has(bpKey); return (
+              <Fragment key={bpKey}>
+              <tr className="hover:bg-blue-50/40">
                 <td className="px-3 py-2"><span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${r.kind === 'purchase' ? 'bg-violet-100 text-violet-700' : 'bg-blue-100 text-blue-700'}`}>{r.kind === 'purchase' ? 'Purchase' : 'Sale'}</span></td>
                 <td className="px-3 py-2">
                   <Link to={r.href} className="font-mono text-blue-600 hover:underline inline-flex items-center gap-1">{r.invoiceNo} <ChevronRight size={12} /></Link>
@@ -171,12 +205,75 @@ export default function InvoiceLedger() {
                 <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{pkr(r.received)}</td>
                 <td className={`px-3 py-2 text-right tabular-nums ${r.outstanding > 0 ? 'text-rose-600' : 'text-gray-400'}`}>{pkr(r.outstanding)}</td>
                 <td className="px-3 py-2"><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_TONE[r.paymentStatus] || 'bg-gray-100 text-gray-600'}`}>{r.paymentStatus}</span></td>
+                {canSeePricing && (
+                  <td className="px-3 py-2">
+                    <button onClick={() => toggleBp(r)} className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-lg border ${isOpen ? 'bg-amber-50 border-amber-200 text-amber-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                      <Factory size={12} /> {isOpen ? 'Hide' : 'Pricing'} {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                    </button>
+                  </td>
+                )}
               </tr>
-            ))}
+              {canSeePricing && isOpen && (
+                <tr className="bg-amber-50/30">
+                  <td colSpan={11} className="px-4 py-3">
+                    <BpPanel groups={bpData[bpKey]} loading={bpLoading[bpKey]} kind={r.kind} />
+                  </td>
+                </tr>
+              )}
+              </Fragment>
+            ); })}
           </tbody>
         </table>
       </div>
       <p className="text-[11px] text-gray-400">Click an invoice to open its 360 view. Sales open the Invoice 360; purchases open the Purchase Invoice. Party links open the customer/supplier ledger.</p>
+    </div>
+  );
+}
+
+// Inline by-product pricing panel for an expanded ledger row (admin only).
+// `groups` = batchByproducts (sale) or producedByproducts (purchase).
+function BpPanel({ groups, loading, kind }) {
+  if (loading) return <p className="text-xs text-gray-400">Loading by-product pricing…</p>;
+  if (!groups || groups.length === 0) return <p className="text-xs text-gray-400">No milling by-product pricing for this {kind === 'purchase' ? 'purchase' : 'invoice'} (not milled, or no per-grade prices recorded).</p>;
+  return (
+    <div className="space-y-3">
+      <p className="text-[10px] uppercase tracking-wider text-amber-700 font-semibold">{kind === 'purchase' ? 'Produced from this lot' : 'Source batch'} — by-product pricing · internal</p>
+      {groups.map((bp) => (
+        <div key={bp.batchId} className="rounded-lg border border-amber-200 overflow-hidden bg-white">
+          <div className="px-3 py-2 flex items-center justify-between flex-wrap gap-2 border-b border-amber-100 bg-amber-50/50">
+            <Link to={bp.batchHref} className="text-xs font-medium text-blue-600 hover:underline">Batch {bp.batchNo}{bp.sharePct != null && bp.sharePct < 99.5 ? ` · ${Math.round(bp.sharePct)}% of this lot` : ''}</Link>
+            {bp.byproductRecovery > 0 && <span className="text-xs text-emerald-700">By-product recovery {pkr(bp.byproductRecovery)}</span>}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="text-gray-500">
+                <tr>
+                  <th className="px-3 py-1.5 text-left font-medium">Product / grade</th>
+                  <th className="px-3 py-1.5 text-left font-medium">Type</th>
+                  <th className="px-3 py-1.5 text-right font-medium">Produced</th>
+                  <th className="px-3 py-1.5 text-right font-medium">Cost/kg</th>
+                  <th className="px-3 py-1.5 text-right font-medium">Sale price/kg</th>
+                  <th className="px-3 py-1.5 text-right font-medium">Recovery value</th>
+                  <th className="px-3 py-1.5 text-left font-medium">Warehouse</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {bp.outputs.map((o) => (
+                  <tr key={o.lotId}>
+                    <td className="px-3 py-1.5"><Link to={o.href} className="text-blue-600 hover:underline">{o.productGrade}</Link></td>
+                    <td className="px-3 py-1.5 text-gray-600">{o.type === 'byproduct' ? 'by-product' : 'finished'}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{Math.round(o.producedKg).toLocaleString()} kg</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{o.costPerKg ? pkr(o.costPerKg) : '—'}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{o.salePricePerKg ? pkr(o.salePricePerKg) : '—'}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{o.recoveryValue ? pkr(o.recoveryValue) : '—'}</td>
+                    <td className="px-3 py-1.5 text-gray-600">{o.warehouse || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
