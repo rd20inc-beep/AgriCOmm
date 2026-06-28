@@ -1146,11 +1146,15 @@ const reportingService = {
    * outstanding-only. Each row links to the Invoice 360 + customer ledger.
    * Read-only. Commercial figures only (no COGS/margin).
    */
-  async getInvoiceLedger({ q, from, to, status, outstanding, entity, limit = 500 } = {}) {
+  async getInvoiceLedger({ q, from, to, status, outstanding, entity, kind, limit = 500 } = {}) {
     const num = (v) => parseFloat(v) || 0;
     const cap = Math.min(parseInt(limit, 10) || 500, 2000);
     const term = String(q || '').trim();
+    const wantOutstanding = (outstanding === '1' || outstanding === true || outstanding === 'true');
+    let saleInvoices = []; let purchaseInvoices = [];
 
+    // ── SALES invoices (local_sales) ──
+    if (kind !== 'purchase') {
     // Resolve batch numbers matching the search term → their lot batch_ref tags.
     let batchRefs = [];
     if (term) {
@@ -1165,7 +1169,7 @@ const reportingService = {
     if (entity) qb = qb.where('ls.entity', entity);
     if (from) qb = qb.where('ls.sale_date', '>=', from);
     if (to) qb = qb.where('ls.sale_date', '<=', to);
-    if (outstanding === '1' || outstanding === true || outstanding === 'true') qb = qb.where('ls.due_amount', '>', 0);
+    if (wantOutstanding) qb = qb.where('ls.due_amount', '>', 0);
     if (term) {
       const like = `%${term}%`;
       qb = qb.where(function () {
@@ -1218,25 +1222,97 @@ const reportingService = {
       for (const ref of allRefs) { const id = parseInt(String(ref).replace(/^batch-/, ''), 10); if (byId[id]) batchNoByRef[ref] = byId[id]; }
     }
 
-    let invoices = Object.values(groups).map(g => ({
-      id: g.minId, invoiceNo: g.key, isGroup: [...g.lots].length + g.items.size > 1 || g.refs.size > 1 || false,
-      date: g.date, customer: g.customer, customerId: g.customerId,
+    saleInvoices = Object.values(groups).map(g => ({
+      id: g.minId, kind: 'sale', invoiceNo: g.key, isGroup: [...g.lots].length + g.items.size > 1 || g.refs.size > 1 || false,
+      date: g.date, party: g.customer, partyType: 'Customer', customer: g.customer, customerId: g.customerId,
       items: [...g.items], lots: [...g.lots],
       batches: [...g.refs].map(ref => batchNoByRef[ref]).filter(Boolean),
       warehouses: [...g.warehouses], vehicle: g.vehicle, dispatched: g.dispatched,
       qtyKg: g.qtyKg, total: g.total, received: g.received, outstanding: g.outstanding,
       paymentStatus: g.outstanding > 0.01 ? (g.received > 0.01 ? 'Partial' : 'Unpaid') : 'Paid',
       href: `/local-sales/${g.minId}/invoice`,
+      partyHref: g.customerId ? `/finance/statements?type=customer&id=${g.customerId}` : null,
       customerHref: g.customerId ? `/finance/statements?type=customer&id=${g.customerId}` : null,
     }));
-    if (status) invoices = invoices.filter(i => i.paymentStatus === status);
-    invoices.sort((a, b) => b.id - a.id);
-    invoices = invoices.slice(0, cap);
+    if (status) saleInvoices = saleInvoices.filter(i => i.paymentStatus === status);
+    } // end sales block
+
+    // ── PURCHASE invoices (purchased rice lots) ──
+    if (kind !== 'sale') {
+      let vehLotIds = [];
+      if (term) {
+        const vs = await db('milling_vehicle_arrivals').where('vehicle_no', 'ilike', `%${term}%`).whereNotNull('lot_id').select('lot_id');
+        vehLotIds = vs.map(v => v.lot_id);
+      }
+      let pq = db('inventory_lots as l')
+        .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
+        .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
+        .where('l.type', 'raw');
+      if (entity) pq = pq.where('l.entity', entity);
+      if (from) pq = pq.where('l.purchase_date', '>=', from);
+      if (to) pq = pq.where('l.purchase_date', '<=', to);
+      if (term) {
+        const like = `%${term}%`;
+        pq = pq.where(function () {
+          this.where('l.lot_no', 'ilike', like)
+            .orWhere('s.name', 'ilike', like)
+            .orWhere('l.variety', 'ilike', like)
+            .orWhere('l.item_name', 'ilike', like);
+          if (vehLotIds.length) this.orWhereIn('l.id', vehLotIds);
+        });
+      }
+      const lots = await pq.select(
+        'l.id', 'l.lot_no', 'l.purchase_date', 'l.variety', 'l.item_name', 'l.grade',
+        'l.net_weight_kg', 'l.received_net_weight_kg', 'l.total_bags', 'l.purchase_amount',
+        'l.landed_cost_total', 'l.paid_amount', 'l.due_amount', 'l.payment_status',
+        'l.supplier_id', 's.name as supplier_name', 'w.name as warehouse_name',
+      ).orderBy('l.id', 'desc').limit(cap);
+
+      // Payable (source of truth for paid/outstanding) keyed by lot_no.
+      const lotNos = lots.map(l => l.lot_no);
+      const payByRef = {};
+      if (lotNos.length) {
+        const pbs = await db('payables').whereIn('linked_ref', lotNos).andWhere('category', 'Raw Material')
+          .select('linked_ref', 'original_amount', 'paid_amount', 'outstanding', 'status');
+        for (const pb of pbs) payByRef[pb.linked_ref] = pb;
+      }
+      purchaseInvoices = lots.map(l => {
+        const pb = payByRef[l.lot_no];
+        const landed = pb ? (num(pb.original_amount) || num(l.landed_cost_total)) : (num(l.landed_cost_total) || num(l.purchase_amount));
+        const paid = pb ? num(pb.paid_amount) : num(l.paid_amount);
+        const out = pb ? num(pb.outstanding) : num(l.due_amount);
+        return {
+          id: l.id, kind: 'purchase', invoiceNo: l.lot_no, isGroup: false,
+          date: l.purchase_date, party: l.supplier_name || '—', partyType: 'Supplier',
+          customer: l.supplier_name || '—', customerId: null,
+          items: [l.variety || l.item_name || '—'], lots: [l.lot_no], batches: [],
+          warehouses: l.warehouse_name ? [l.warehouse_name] : [], vehicle: null, dispatched: false,
+          qtyKg: num(l.received_net_weight_kg) || num(l.net_weight_kg),
+          total: landed, received: paid, outstanding: out,
+          paymentStatus: pb ? pb.status : (out > 0.01 ? (paid > 0.01 ? 'Partial' : 'Unpaid') : 'Paid'),
+          href: `/lot-inventory/${l.id}/purchase-invoice`,
+          partyHref: l.supplier_id ? `/finance/statements?type=supplier&id=${l.supplier_id}` : null,
+          customerHref: l.supplier_id ? `/finance/statements?type=supplier&id=${l.supplier_id}` : null,
+        };
+      });
+      if (wantOutstanding) purchaseInvoices = purchaseInvoices.filter(i => i.outstanding > 0.01);
+      if (status) purchaseInvoices = purchaseInvoices.filter(i => i.paymentStatus === status);
+    }
+
+    // ── Combine, sort newest-first, cap ──
+    let invoices = [...saleInvoices, ...purchaseInvoices].sort((a, b) => {
+      const da = a.date ? new Date(a.date).getTime() : 0;
+      const dbb = b.date ? new Date(b.date).getTime() : 0;
+      if (da !== dbb) return dbb - da;
+      return b.id - a.id;
+    }).slice(0, cap);
 
     return {
       rows: invoices,
       totals: {
         count: invoices.length,
+        sales: invoices.filter(i => i.kind === 'sale').length,
+        purchases: invoices.filter(i => i.kind === 'purchase').length,
         total: invoices.reduce((s, i) => s + i.total, 0),
         received: invoices.reduce((s, i) => s + i.received, 0),
         outstanding: invoices.reduce((s, i) => s + i.outstanding, 0),
