@@ -1098,6 +1098,34 @@ const reportingService = {
       outById[o.id] = { ...o, batchId: bid, produced };
     }
 
+    // Per-grade by-product / finished sale pricing — read each feeding batch's
+    // *_price_per_mt columns (the valuation set at yield) and map per output.
+    const batchPriceById = {};
+    if (myBatchIds.length) {
+      const bp = await db('milling_batches').whereIn('id', myBatchIds)
+        .select('id', 'finished_price_per_mt', 'b1_price_per_mt', 'b2_price_per_mt', 'b3_price_per_mt',
+          'csr_price_per_mt', 'short_grain_price_per_mt', 'broken_price_per_mt', 'powder_price_per_mt',
+          'sweeping_price_per_mt', 'sortex_rejects_price_per_mt');
+      for (const b of bp) batchPriceById[b.id] = b;
+    }
+    const priceForLotOutput = (o, batchId) => {
+      const b = batchPriceById[batchId] || {};
+      const g = String(o.grade || '').toUpperCase();
+      const n = String(o.item_name || '').toLowerCase();
+      let perMt = 0;
+      if (o.type === 'finished') perMt = num(b.finished_price_per_mt);
+      else if (g === 'B1') perMt = num(b.b1_price_per_mt);
+      else if (g === 'B2') perMt = num(b.b2_price_per_mt);
+      else if (g === 'B3') perMt = num(b.b3_price_per_mt);
+      else if (g === 'CSR') perMt = num(b.csr_price_per_mt);
+      else if (g === 'SHORT GRAIN') perMt = num(b.short_grain_price_per_mt);
+      else if (n.includes('powder')) perMt = num(b.powder_price_per_mt);
+      else if (n.includes('sweep')) perMt = num(b.sweeping_price_per_mt);
+      else if (n.includes('sortex')) perMt = num(b.sortex_rejects_price_per_mt);
+      else if (n.includes('broken')) perMt = num(b.broken_price_per_mt);
+      return perMt / 1000;
+    };
+
     // Milling history + outputs (this lot's attributable share).
     const millingHistory = srcRows.map(r => {
       const share = shareOf(r.batch_id, num(r.qty_mt));
@@ -1111,10 +1139,14 @@ const reportingService = {
 
     const outputs = outLots.map(o => {
       const meta = outById[o.id]; const share = shareOf(meta.batchId, num((srcRows.find(s => s.batch_id === meta.batchId) || {}).qty_mt));
+      const qtyKg = meta.produced * share;
+      const salePerKg = priceForLotOutput(o, meta.batchId);
+      const costPerKg = num(o.landed_cost_per_kg);
       return {
         batchNo: (srcRows.find(s => s.batch_id === meta.batchId) || {}).batch_no, batchId: meta.batchId, batchHref: `/milling/${meta.batchId}`,
         productGrade: o.grade || o.item_name || '—', riceType: o.variety || o.item_name || '—',
-        type: o.type, qtyKg: meta.produced * share, fullQtyKg: meta.produced, sharePct: share * 100,
+        type: o.type, qtyKg, fullQtyKg: meta.produced, sharePct: share * 100,
+        costPerKg, salePricePerKg: salePerKg, recoveryValue: qtyKg * salePerKg,
         warehouse: o.warehouse_name || null, lotId: o.id, href: `/lot-inventory/${o.id}`,
       };
     });
@@ -1224,6 +1256,7 @@ const reportingService = {
         paymentReceived, outstanding, realizedProfit,
         realizedProfitPct: totalRevenue > 0 ? (realizedProfit / totalRevenue) * 100 : 0,
         remainingStockValue, expectedProfitRemaining,
+        byproductRecovery: outputs.filter(o => o.type === 'byproduct').reduce((a, o) => a + (o.recoveryValue || 0), 0),
         costBasis: 'Landed cost per kg (residual costing); processing cost allocated by batch share — approximate where blended.',
       },
       millingHistory, outputs, directSales, processedSales,

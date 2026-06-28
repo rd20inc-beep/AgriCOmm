@@ -119,8 +119,8 @@ export function printLotLedger(data, { companyName = 'AGRI COMMODITIES', generat
     <h4>Milling / Processing History</h4>
     ${tbl([{ t: 'Date' }, { t: 'Batch' }, { t: 'Input', r: 1 }, { t: 'Output', r: 1 }, { t: 'Loss', r: 1 }], millingHistory.map(m => [dd(m.date), e(m.batchNo || '—'), kg(m.inputKg), kg(m.outputKg), kg(m.lossKg)]))}
 
-    <h4>Output Produced</h4>
-    ${tbl([{ t: 'Batch' }, { t: 'Product / Grade' }, { t: 'Rice type' }, { t: 'Qty', r: 1 }, { t: 'Warehouse' }], outputs.map(o => [e(o.batchNo || '—'), e(o.productGrade), e(o.riceType), kg(o.qtyKg), e(o.warehouse || '—')]))}
+    <h4>Output Produced &amp; By-product Pricing</h4>
+    ${tbl([{ t: 'Batch' }, { t: 'Product / Grade' }, { t: 'Type' }, { t: 'Rice type' }, { t: 'Qty', r: 1 }, { t: 'Cost/kg', r: 1 }, { t: 'Sale price/kg', r: 1 }, { t: 'Recovery', r: 1 }, { t: 'Warehouse' }], outputs.map(o => [e(o.batchNo || '—'), e(o.productGrade), o.type === 'byproduct' ? 'by-product' : 'finished', e(o.riceType), kg(o.qtyKg), o.costPerKg ? pkr(o.costPerKg) : '—', o.salePricePerKg ? pkr(o.salePricePerKg) : '—', o.recoveryValue ? pkr(o.recoveryValue) : '—', e(o.warehouse || '—')]))}
 
     <h4>Sales From This Lot</h4>
     ${tbl([{ t: 'Date' }, { t: 'Invoice' }, { t: 'Customer' }, { t: 'Type' }, { t: 'Product' }, { t: 'Qty', r: 1 }, { t: 'Amount', r: 1 }], sales.map(s => [dd(s.date), e(s.invoice), e(s.customer), e(s.kind), e(s.product || '—'), kg(s.qtyKg), pkr(s.amount)]))}

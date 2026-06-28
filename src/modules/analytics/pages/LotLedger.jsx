@@ -121,6 +121,7 @@ export default function LotLedger() {
           <Cell label="Realized profit" value={`${pkr(fs.realizedProfit)} (${(parseFloat(fs.realizedProfitPct) || 0).toFixed(1)}%)`} tone={fs.realizedProfit >= 0 ? 'emerald' : 'rose'} />
           <Cell label="Remaining stock value" value={pkr(fs.remainingStockValue)} />
           <Cell label="Expected profit on remaining" value={pkr(fs.expectedProfitRemaining)} />
+          {fs.byproductRecovery > 0 && <Cell label="By-product recovery (valued)" value={pkr(fs.byproductRecovery)} tone="emerald" />}
         </div>
         {fs.costBasis && <p className="px-4 pb-3 text-[11px] text-gray-400">{fs.costBasis}</p>}
       </Section>
@@ -133,10 +134,21 @@ export default function LotLedger() {
       </Section>
 
       {/* Outputs */}
-      <Section icon={Factory} title="Output produced from this lot">
-        <Tbl head={['Batch', 'Product / Grade', 'Rice type', { t: 'Qty', r: 1 }, 'Warehouse']}
-          rows={outputs.map(o => [o.batchHref ? <Link to={o.batchHref} className="text-blue-600 hover:underline">{o.batchNo}</Link> : o.batchNo, o.productGrade, o.riceType, <Link to={o.href} className="text-blue-600 hover:underline">{kg(o.qtyKg)}</Link>, o.warehouse || '—'])}
+      <Section icon={Factory} title="Output produced & by-product pricing">
+        <Tbl head={['Batch', 'Product / Grade', 'Type', 'Rice type', { t: 'Qty', r: 1 }, { t: 'Cost/kg', r: 1 }, { t: 'Sale price/kg', r: 1 }, { t: 'Recovery value', r: 1 }, 'Warehouse']}
+          rows={outputs.map(o => [
+            o.batchHref ? <Link to={o.batchHref} className="text-blue-600 hover:underline">{o.batchNo}</Link> : o.batchNo,
+            o.productGrade,
+            o.type === 'byproduct' ? 'by-product' : 'finished',
+            o.riceType,
+            <Link to={o.href} className="text-blue-600 hover:underline">{kg(o.qtyKg)}</Link>,
+            o.costPerKg ? pkr(o.costPerKg) : '—',
+            o.salePricePerKg ? pkr(o.salePricePerKg) : '—',
+            o.recoveryValue ? pkr(o.recoveryValue) : '—',
+            o.warehouse || '—',
+          ])}
           empty="No finished output yet." />
+        <p className="px-4 py-2 text-[11px] text-gray-400">Sale price/kg is the per-grade valuation set at yield; recovery value (qty × price) is this lot's share. By-product recovery is credited back into the finished cost under residual costing.</p>
       </Section>
 
       {/* Sales */}
