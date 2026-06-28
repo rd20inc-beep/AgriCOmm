@@ -1041,6 +1041,46 @@ router.delete('/advances/:id', authorize('payroll', 'delete'), async (req, res) 
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ── Payroll adjustments (bonuses + deductions) ───────────────────────────────
+// bonus → added to gross; deduction → subtracted from net. One-off (a period
+// YYYY-MM) or recurring (every month). Applied in computePayrollSummary.
+router.get('/workers/:id/adjustments', authorize('payroll', 'view'), async (req, res) => {
+  try {
+    const rows = await db('mill_worker_adjustments').where('worker_id', req.params.id)
+      .orderBy('is_active', 'desc').orderBy('id', 'desc');
+    return res.json({ success: true, data: { adjustments: rows } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.post('/workers/:id/adjustments', authorize('payroll', 'create'), async (req, res) => {
+  try {
+    const worker = await db('mill_workers').where('id', req.params.id).first();
+    if (!worker) return res.status(404).json({ success: false, message: 'Worker not found.' });
+    const type = req.body.type === 'deduction' ? 'deduction' : 'bonus';
+    const amount = parseFloat(req.body.amount);
+    if (!(amount > 0)) return res.status(400).json({ success: false, message: 'A positive amount is required.' });
+    if (!String(req.body.label || '').trim()) return res.status(400).json({ success: false, message: 'A label is required.' });
+    const recurring = !!req.body.recurring;
+    const period = !recurring && /^\d{4}-\d{2}$/.test(req.body.period || '') ? req.body.period : null;
+    if (!recurring && !period) return res.status(400).json({ success: false, message: 'A month (YYYY-MM) is required for a one-off adjustment.' });
+    const [adjustment] = await db('mill_worker_adjustments').insert({
+      worker_id: worker.id, type, label: String(req.body.label).trim(), amount,
+      period: recurring ? null : period, recurring, is_active: true,
+      notes: req.body.notes || null, created_by: req.user?.id || null,
+    }).returning('*');
+    return res.json({ success: true, data: { adjustment } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.delete('/adjustments/:id', authorize('payroll', 'delete'), async (req, res) => {
+  try {
+    const adj = await db('mill_worker_adjustments').where('id', req.params.id).first();
+    if (!adj) return res.status(404).json({ success: false, message: 'Adjustment not found.' });
+    await db('mill_worker_adjustments').where('id', adj.id).del();
+    return res.json({ success: true, data: { deleted: adj.id } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
 router.get('/attendance', authorize('payroll', 'view'), async (req, res) => {
   try {
     const { month, worker_id } = req.query;

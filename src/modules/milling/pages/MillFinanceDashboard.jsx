@@ -13,6 +13,7 @@ import {
   useMillExpenses, useCreateMillExpense, useRecurringExpenses, useMaterializeRecurring, useRunDueRecurring, useCategorizeExpense, useMillWorkers, useCreateMillWorker,
   useUpdateMillWorker, useDeleteMillWorker, useCreateWorkerAdvance, useWorkerAdvances, useWorkerLedger,
   useDeleteWorkerAdvance, useAdvanceLedger,
+  useWorkerAdjustments, useCreateWorkerAdjustment, useDeleteWorkerAdjustment,
   usePayrollSummary, useRecordAttendance, useAttendance, useBulkAttendance, useAttendanceHolidays, useInventory, useExpenseVendors,
   usePayrollRuns, usePostPayrollRun, useDeletePayrollRun, usePayrollRun, usePayrollReport,
   useApprovePayrollRun, usePayPayrollRun, useVoidPayrollRun,
@@ -206,6 +207,7 @@ export default function MillFinanceDashboard() {
   const [runPreselect, setRunPreselect] = useState(null); // worker id to pre-select in the run drawer (per-row Pay)
   const [payslipsRunId, setPayslipsRunId] = useState(null); // open the payslips panel for a run
   const [showScheduleDrawer, setShowScheduleDrawer] = useState(false);
+  const [adjustWorker, setAdjustWorker] = useState(null); // open adjustments drawer for this worker
   const runNowMut = useRunPayrollNow();
 
   function openRunDrawer(preselectId = null) { setRunPreselect(preselectId); setShowRunDrawer(true); }
@@ -1641,6 +1643,7 @@ export default function MillFinanceDashboard() {
                           <button title="Prepare for this employee" onClick={() => openRunDrawer(w.id)} className="p-1.5 rounded-md text-emerald-600 hover:bg-emerald-50"><Wallet className="w-3.5 h-3.5" /></button>
                         )}
                         {canPreparePayroll && <button title="Give advance" onClick={() => openAdvanceDrawer(w)} className="p-1.5 rounded-md text-amber-600 hover:bg-amber-50"><HandCoins className="w-3.5 h-3.5" /></button>}
+                        {canPreparePayroll && <button title="Bonuses & deductions" onClick={() => setAdjustWorker(w)} className="p-1.5 rounded-md text-violet-600 hover:bg-violet-50"><Plus className="w-3.5 h-3.5" /></button>}
                         {canPreparePayroll && <button title="Edit" onClick={() => openWorkerDrawer(w)} className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100"><Pencil className="w-3.5 h-3.5" /></button>}
                         {canPreparePayroll && <button title={w.isActive ? 'Deactivate' : 'Reactivate'} onClick={() => handleToggleActive(w)} className={`p-1.5 rounded-md hover:bg-gray-100 ${w.isActive ? 'text-gray-500' : 'text-emerald-600'}`}><Power className="w-3.5 h-3.5" /></button>}
                         {canDeletePayroll && <button title="Delete" onClick={() => setDeleteWorkerTarget(w)} className="p-1.5 rounded-md text-rose-500 hover:bg-rose-50"><Trash2 className="w-3.5 h-3.5" /></button>}
@@ -2230,6 +2233,9 @@ export default function MillFinanceDashboard() {
           addToast={addToast}
         />
       )}
+
+      {/* ─── BONUSES & DEDUCTIONS DRAWER ───────────────────────────── */}
+      {adjustWorker && <AdjustmentsDrawer worker={adjustWorker} month={payrollMonth} onClose={() => setAdjustWorker(null)} addToast={addToast} />}
 
       {/* ─── PAYSLIPS / RUN PANEL ──────────────────────────────────── */}
       {payslipsRunId && (
@@ -2900,6 +2906,79 @@ function WorkerAdvancesPanel({ worker, onClose, onGiveAdvance, addToast }) {
   );
 }
 
+// Bonuses & deductions for one worker. bonus → +gross, deduction → −net.
+// One-off (a month) or recurring (every month).
+function AdjustmentsDrawer({ worker, month, onClose, addToast }) {
+  const { data: rows = [], isLoading } = useWorkerAdjustments(worker.id);
+  const createMut = useCreateWorkerAdjustment();
+  const delMut = useDeleteWorkerAdjustment();
+  const [form, setForm] = useState({ type: 'bonus', label: '', amount: '', recurring: false, period: month });
+  useEffect(() => { setForm(f => ({ ...f, period: month })); }, [month]);
+  const submit = async () => {
+    if (!form.label.trim()) { addToast('Enter a label', 'error'); return; }
+    if (!(parseFloat(form.amount) > 0)) { addToast('Enter a positive amount', 'error'); return; }
+    try {
+      await createMut.mutateAsync({ id: worker.id, data: { type: form.type, label: form.label.trim(), amount: form.amount, recurring: form.recurring, period: form.recurring ? null : form.period } });
+      addToast(`${form.type === 'bonus' ? 'Bonus' : 'Deduction'} added`, 'success');
+      setForm(f => ({ ...f, label: '', amount: '' }));
+    } catch (e) { addToast(e.message, 'error'); }
+  };
+  const bonuses = rows.filter(r => r.type === 'bonus');
+  const deductions = rows.filter(r => r.type === 'deduction');
+  const Row = (a) => (
+    <div key={a.id} className="flex items-center justify-between px-3 py-2 text-sm">
+      <div>
+        <span className="font-medium text-gray-800">{a.label}</span>
+        <span className="text-[11px] text-gray-400 ml-2">{a.recurring ? 'every month' : a.period}{a.isActive ? '' : ' · inactive'}</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className={`tabular-nums font-semibold ${a.type === 'bonus' ? 'text-emerald-700' : 'text-rose-600'}`}>{a.type === 'bonus' ? '+' : '−'}{PKR(a.amount)}</span>
+        <button onClick={async () => { try { await delMut.mutateAsync(a.id); addToast('Removed', 'success'); } catch (e) { addToast(e.message, 'error'); } }} className="p-1 text-rose-500 hover:bg-rose-50 rounded"><Trash2 className="w-3.5 h-3.5" /></button>
+      </div>
+    </div>
+  );
+  return (
+    <SlideDrawer open onClose={onClose} title="Bonuses & Deductions" subtitle={`${worker.name} · ${worker.role || ''}`} icon={Plus} size="md"
+      footer={<div className="flex justify-end"><button onClick={onClose} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Close</button></div>}>
+      <div className="space-y-4">
+        {/* Add form */}
+        <div className="rounded-lg border border-gray-200 p-3 space-y-3">
+          <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+            {[['bonus', 'Bonus / Allowance'], ['deduction', 'Deduction']].map(([v, l]) => (
+              <button key={v} onClick={() => setForm(f => ({ ...f, type: v }))} className={`px-3 py-1.5 font-medium ${form.type === v ? (v === 'bonus' ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white') : 'bg-white text-gray-600'}`}>{l}</button>
+            ))}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2"><label className="block text-xs text-gray-600 mb-1">Label</label><input value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))} placeholder={form.type === 'bonus' ? 'e.g. Eid bonus, Travel allowance' : 'e.g. Late fine, Loan repayment'} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" /></div>
+            <div><label className="block text-xs text-gray-600 mb-1">Amount (PKR)</label><input type="number" min="0" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm tabular-nums" /></div>
+            <div><label className="block text-xs text-gray-600 mb-1">Applies</label>
+              <select value={form.recurring ? 'recurring' : 'once'} onChange={e => setForm(f => ({ ...f, recurring: e.target.value === 'recurring' }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+                <option value="once">One month</option><option value="recurring">Every month</option>
+              </select>
+            </div>
+            {!form.recurring && <div className="col-span-2"><label className="block text-xs text-gray-600 mb-1">Month</label><input type="month" value={form.period} onChange={e => setForm(f => ({ ...f, period: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" /></div>}
+          </div>
+          <button onClick={submit} disabled={createMut.isPending} className={`w-full px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50 ${form.type === 'bonus' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'}`}>{createMut.isPending ? 'Adding…' : `Add ${form.type === 'bonus' ? 'bonus' : 'deduction'}`}</button>
+        </div>
+
+        {isLoading ? <p className="text-sm text-gray-400">Loading…</p> : (
+          <>
+            <div>
+              <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wide mb-1">Bonuses / allowances (+gross)</p>
+              <div className="rounded-lg border border-gray-200 divide-y divide-gray-100">{bonuses.length ? bonuses.map(Row) : <p className="px-3 py-3 text-xs text-gray-400">None.</p>}</div>
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-rose-700 uppercase tracking-wide mb-1">Deductions (−net)</p>
+              <div className="rounded-lg border border-gray-200 divide-y divide-gray-100">{deductions.length ? deductions.map(Row) : <p className="px-3 py-3 text-xs text-gray-400">None.</p>}</div>
+            </div>
+            <p className="text-[11px] text-gray-400">Bonuses add to gross; deductions subtract from net (after advance recovery). Recurring items apply every month; one-off items only their month. Net never goes below zero.</p>
+          </>
+        )}
+      </div>
+    </SlideDrawer>
+  );
+}
+
 // One advance's recovery plan, schedule and debit/credit ledger.
 function AdvanceLedgerDrawer({ advanceId, onClose }) {
   const { data, isLoading } = useAdvanceLedger(advanceId);
@@ -3016,6 +3095,7 @@ function payslipBody(run, line, company) {
   const method = run.payMethod === 'bank' ? (run.bankName || 'Bank transfer') : 'Cash';
   const ot = parseFloat(line.otPay) || 0; const adv = parseFloat(line.advanceDeducted) || 0;
   const advBal = parseFloat(line.advanceOutstanding) || 0;
+  const bonus = parseFloat(line.bonusTotal) || 0; const otherDed = parseFloat(line.deductionTotal) || 0;
   return `<div class="slip">
     <div class="hd">
       <div>${logo ? `<img src="${logo}" style="height:40px;max-width:170px;object-fit:contain;display:block;margin-bottom:5px"/>` : ''}<div class="co">${name}</div>${co.address ? `<div class="muted" style="max-width:300px">${co.address}</div>` : ''}${co.ntn ? `<div class="muted">NTN ${co.ntn}</div>` : ''}</div>
@@ -3034,11 +3114,15 @@ function payslipBody(run, line, company) {
     <table><tbody>
       <tr><td>Basic pay${line.payType !== 'monthly' ? ` (${line.effectiveDays || 0} day${(line.effectiveDays || 0) === 1 ? '' : 's'})` : ''}</td><td class="r">${rs(line.basicPay)}</td></tr>
       ${ot > 0 ? `<tr><td>Overtime${parseFloat(line.otHours) ? ` (${line.otHours} hrs)` : ''}</td><td class="r">${rs(line.otPay)}</td></tr>` : ''}
-      <tr style="border-top:1px solid #e5e7eb"><td style="font-weight:700;padding-top:7px">Gross pay</td><td class="r" style="font-weight:700;padding-top:7px">${rs(line.grossPay)}</td></tr>
+      ${bonus > 0 ? `<tr><td>Bonuses &amp; allowances</td><td class="r">${rs(bonus)}</td></tr>` : ''}
+      <tr style="border-top:1px solid #e5e7eb"><td style="font-weight:700;padding-top:7px">Gross pay</td><td class="r" style="font-weight:700;padding-top:7px">${rs((parseFloat(line.grossPay) || 0) + bonus)}</td></tr>
     </tbody></table>
 
-    ${adv > 0 ? `<div class="sec">Deductions</div>
-    <table><tbody><tr><td>Advance recovered</td><td class="r">− ${rs(adv)}</td></tr></tbody></table>` : ''}
+    ${(adv > 0 || otherDed > 0) ? `<div class="sec">Deductions</div>
+    <table><tbody>
+      ${adv > 0 ? `<tr><td>Advance recovered</td><td class="r">− ${rs(adv)}</td></tr>` : ''}
+      ${otherDed > 0 ? `<tr><td>Other deductions</td><td class="r">− ${rs(otherDed)}</td></tr>` : ''}
+    </tbody></table>` : ''}
 
     <div class="net"><div><div style="font-size:10px;text-transform:uppercase;color:#047857">Net Paid</div><b>${rs(line.netPay)}</b></div>
       <div style="text-align:right;max-width:55%"><div class="words">Rupees ${amountInWords(line.netPay)} Only</div></div></div>
@@ -3084,24 +3168,26 @@ function PayrollRunDrawer({ month, employees, preselectId, onClose, onPosted, po
     // Default deduction = the SCHEDULED amount for this month (recovery plan),
     // not the full outstanding. Admin can still reduce / skip / enter manually.
     const scheduled = Math.round(w.advanceScheduled != null ? w.advanceScheduled : Math.min(w.advanceOutstanding || 0, w.grossPay || 0));
+    const bonus = Math.round(w.bonusTotal || 0); const deduction = Math.round(w.deductionTotal || 0);
     return {
-      id: w.id, name: w.name, role: w.role, gross: w.grossPay || 0,
+      id: w.id, name: w.name, role: w.role, gross: w.grossPay || 0, bonus, deduction,
       outstanding: Math.round(w.advanceOutstanding || 0),
       scheduled,
       include: preselectId ? w.id === preselectId : true,
-      advance: scheduled, net: Math.max(0, (w.grossPay || 0) - scheduled), reason: '',
+      advance: scheduled, net: Math.max(0, (w.grossPay || 0) + bonus - scheduled - deduction), reason: '',
     };
   }));
 
+  const netOf = (r, advance) => Math.max(0, r.gross + r.bonus - advance - r.deduction);
   const setRow = (id, patch) => setRows(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
   // Changing the advance-to-clear re-derives the net (still editable afterwards).
   const onAdvance = (r, raw) => {
     const advance = Math.max(0, Math.min(Math.round(parseFloat(raw) || 0), r.outstanding, r.gross));
-    setRow(r.id, { advance, net: Math.max(0, r.gross - advance) });
+    setRow(r.id, { advance, net: netOf(r, advance) });
   };
   const onNet = (r, raw) => setRow(r.id, { net: Math.max(0, Math.round(parseFloat(raw) || 0)) });
-  const useScheduled = (r) => setRow(r.id, { advance: r.scheduled, net: Math.max(0, r.gross - r.scheduled), reason: '' });
-  const skipRow = (r) => setRow(r.id, { advance: 0, net: r.gross });
+  const useScheduled = (r) => setRow(r.id, { advance: r.scheduled, net: netOf(r, r.scheduled), reason: '' });
+  const skipRow = (r) => setRow(r.id, { advance: 0, net: netOf(r, 0) });
 
   const included = rows.filter(r => r.include);
   const totalNet = included.reduce((s, r) => s + r.net, 0);
@@ -3190,6 +3276,12 @@ function PayrollRunDrawer({ month, employees, preselectId, onClose, onPosted, po
                     </td>
                     <td className="px-3 py-1.5">
                       <div className="text-gray-800 font-medium">{r.name}</div>
+                      {(r.bonus > 0 || r.deduction > 0) && (
+                        <div className="text-[10px] mt-0.5">
+                          {r.bonus > 0 && <span className="text-emerald-600 mr-2">+ bonus {PKR(r.bonus)}</span>}
+                          {r.deduction > 0 && <span className="text-rose-600">− deduction {PKR(r.deduction)}</span>}
+                        </div>
+                      )}
                       {r.include && r.outstanding > 0 && (
                         <div className="flex gap-2 mt-0.5">
                           <button onClick={() => useScheduled(r)} className="text-[10px] text-blue-600 hover:underline">Use scheduled</button>

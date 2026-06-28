@@ -38,6 +38,19 @@ async function computePayrollSummary(month) {
     if (due > 0) schedDueByAdvance.set(s.advance_id, (schedDueByAdvance.get(s.advance_id) || 0) + due);
   }
 
+  // Per-worker bonuses (+) and deductions (−) for this period: recurring ones
+  // plus any tagged to this exact month. Active only.
+  const adjs = workers.length ? await db('mill_worker_adjustments')
+    .whereIn('worker_id', workers.map((w) => w.id)).where('is_active', true)
+    .where(function () { this.where('recurring', true).orWhere('period', period); }) : [];
+  const adjByWorker = new Map();
+  for (const a of adjs) {
+    const cur = adjByWorker.get(a.worker_id) || { bonus: 0, deduction: 0 };
+    if (a.type === 'bonus') cur.bonus += parseFloat(a.amount) || 0;
+    else if (a.type === 'deduction') cur.deduction += parseFloat(a.amount) || 0;
+    adjByWorker.set(a.worker_id, cur);
+  }
+
   const summary = workers.map(w => {
     const records = attendance.filter(a => a.worker_id === w.id);
     const daysPresent = records.filter(a => a.status === 'present').length;
@@ -77,22 +90,30 @@ async function computePayrollSummary(month) {
       scheduled += applied; remainingGross -= applied;
     }
     const advanceDeduction = Math.min(scheduled, gross);
+    // Bonuses add to pay; deductions subtract from net (after advance recovery).
+    const adj = adjByWorker.get(w.id) || { bonus: 0, deduction: 0 };
+    const bonusTotal = Math.round(adj.bonus);
+    const deductionTotal = Math.round(adj.deduction);
+    const netPay = Math.max(0, Math.round(gross + bonusTotal - advanceDeduction - deductionTotal));
     return {
       ...w, daysPresent, halfDays, effectiveDays, totalOT,
       basicPay: Math.round(basicPay), otPay: Math.round(otPay),
-      grossPay: Math.round(gross),
+      grossPay: Math.round(gross), // earned (basic + OT); bonus shown separately
+      bonusTotal, deductionTotal,
       advanceOutstanding: Math.round(advanceOutstanding),
       advanceScheduled: Math.round(advanceDeduction),
       advanceDeduction: Math.round(advanceDeduction),
-      netPay: Math.round(gross - advanceDeduction),
-      totalPay: Math.round(gross - advanceDeduction), // back-compat alias
+      netPay,
+      totalPay: netPay, // back-compat alias
     };
   });
 
   const grandGross = summary.reduce((s, w) => s + w.grossPay, 0);
   const grandAdvance = summary.reduce((s, w) => s + w.advanceDeduction, 0);
+  const grandBonus = summary.reduce((s, w) => s + w.bonusTotal, 0);
+  const grandDeduction = summary.reduce((s, w) => s + w.deductionTotal, 0);
   const grandTotal = summary.reduce((s, w) => s + w.netPay, 0);
-  return { summary, grandGross, grandAdvance, grandTotal, period: { startDate, endDate } };
+  return { summary, grandGross, grandAdvance, grandBonus, grandDeduction, grandTotal, period: { startDate, endDate } };
 }
 
 // Per-worker payroll commitment for a month. A worker is 'paid' if in a paid/
@@ -142,7 +163,7 @@ async function preparePayrollRun({ month, lines, pay_method, bank_account_id, pa
       const advanceDeducted = Math.max(0, Math.min(requested || 0, w.advanceOutstanding, w.grossPay));
       const netPay = ln.net_pay != null && ln.net_pay !== ''
         ? Math.max(0, Math.round(parseFloat(ln.net_pay)))
-        : Math.max(0, w.grossPay - advanceDeducted);
+        : Math.max(0, w.grossPay + (w.bonusTotal || 0) - advanceDeducted - (w.deductionTotal || 0));
       const changed = Math.round(advanceDeducted) !== Math.round(w.advanceScheduled != null ? w.advanceScheduled : w.advanceDeduction);
       toPay.push({ ...w, advanceDeduction: advanceDeducted, netPay, skipReason: changed ? (ln.skip_reason || ln.reason || null) : null });
     }
@@ -173,6 +194,7 @@ async function preparePayrollRun({ month, lines, pay_method, bank_account_id, pa
         run_id: r.id, worker_id: w.id, worker_name: w.name, role: w.role, pay_type: w.pay_type,
         effective_days: w.effectiveDays || 0, ot_hours: w.totalOT || 0,
         basic_pay: w.basicPay, ot_pay: w.otPay, gross_pay: w.grossPay,
+        bonus_total: w.bonusTotal || 0, deduction_total: w.deductionTotal || 0,
         advance_deducted: w.advanceDeduction, net_pay: w.netPay, skip_reason: w.skipReason || null,
       });
     }

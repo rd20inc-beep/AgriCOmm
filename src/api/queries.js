@@ -1325,6 +1325,19 @@ export function useAdvanceLedger(advanceId) {
   });
 }
 
+// Payroll adjustments (bonuses + deductions) for a worker.
+export function useWorkerAdjustments(workerId) {
+  return useQuery({ queryKey: ['worker-adjustments', workerId], enabled: !!workerId, queryFn: async () => { const res = await millingApi.listWorkerAdjustments(workerId); return transformKeys(unwrap(res, 'adjustments') || []); } });
+}
+export function useCreateWorkerAdjustment() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: ({ id, data }) => millingApi.createWorkerAdjustment(id, data), onSuccess: (_, { id }) => { qc.invalidateQueries({ queryKey: ['worker-adjustments', id] }); qc.invalidateQueries({ queryKey: ['payroll-summary'] }); } });
+}
+export function useDeleteWorkerAdjustment() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id) => millingApi.deleteWorkerAdjustment(id), onSuccess: () => { qc.invalidateQueries({ queryKey: ['worker-adjustments'] }); qc.invalidateQueries({ queryKey: ['payroll-summary'] }); } });
+}
+
 export function useCreateWorkerAdvance() {
   const qc = useQueryClient();
   return useMutation({

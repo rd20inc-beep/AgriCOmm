@@ -1126,7 +1126,9 @@ COL mill_packing_logs.total_cost:numeric:NULL
 COL mill_packing_logs.warehouse_id:integer:NULL
 COL mill_payroll_lines.advance_deducted:numeric:NOT NULL
 COL mill_payroll_lines.basic_pay:numeric:NOT NULL
+COL mill_payroll_lines.bonus_total:numeric:NOT NULL
 COL mill_payroll_lines.created_at:timestamp with time zone:NOT NULL
+COL mill_payroll_lines.deduction_total:numeric:NOT NULL
 COL mill_payroll_lines.effective_days:numeric:NOT NULL
 COL mill_payroll_lines.gross_pay:numeric:NOT NULL
 COL mill_payroll_lines.id:integer:NOT NULL
@@ -1239,6 +1241,18 @@ COL mill_stock_movements.reference_id:integer:NULL
 COL mill_stock_movements.reference_type:character varying:NULL
 COL mill_stock_movements.total_cost:numeric:NULL
 COL mill_stock_movements.warehouse_id:integer:NULL
+COL mill_worker_adjustments.amount:numeric:NOT NULL
+COL mill_worker_adjustments.created_at:timestamp with time zone:NOT NULL
+COL mill_worker_adjustments.created_by:integer:NULL
+COL mill_worker_adjustments.id:integer:NOT NULL
+COL mill_worker_adjustments.is_active:boolean:NOT NULL
+COL mill_worker_adjustments.label:character varying:NOT NULL
+COL mill_worker_adjustments.notes:text:NULL
+COL mill_worker_adjustments.period:character varying:NULL
+COL mill_worker_adjustments.recurring:boolean:NOT NULL
+COL mill_worker_adjustments.type:character varying:NOT NULL
+COL mill_worker_adjustments.updated_at:timestamp with time zone:NOT NULL
+COL mill_worker_adjustments.worker_id:integer:NOT NULL
 COL mill_worker_advance_recovery_schedule.advance_id:integer:NOT NULL
 COL mill_worker_advance_recovery_schedule.created_at:timestamp with time zone:NOT NULL
 COL mill_worker_advance_recovery_schedule.id:integer:NOT NULL
@@ -2527,6 +2541,8 @@ CON mill_stock_movements.mill_stock_movements_performed_by_foreign(f)
 CON mill_stock_movements.mill_stock_movements_pkey(p)
 CON mill_stock_movements.mill_stock_movements_type_chk(c)
 CON mill_stock_movements.mill_stock_movements_warehouse_id_foreign(f)
+CON mill_worker_adjustments.mill_worker_adjustments_pkey(p)
+CON mill_worker_adjustments.mill_worker_adjustments_worker_id_foreign(f)
 CON mill_worker_advance_recovery_schedule.mill_worker_advance_recovery_schedule_advance_id_foreign(f)
 CON mill_worker_advance_recovery_schedule.mill_worker_advance_recovery_schedule_payroll_line_id_foreign(f)
 CON mill_worker_advance_recovery_schedule.mill_worker_advance_recovery_schedule_payroll_run_id_foreign(f)
