@@ -185,6 +185,27 @@ const reportingController = {
     }
   },
 
+  async riceTypeIndex(req, res) {
+    try {
+      const data = await reportingService.getRiceTypeIndex();
+      return res.json({ success: true, ...data });
+    } catch (err) {
+      console.error('Rice type index error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  async riceTypeLedger(req, res) {
+    try {
+      const data = await reportingService.getRiceTypeLedger(req.params.id);
+      if (!data) return res.status(404).json({ success: false, message: 'Rice type not found.' });
+      return res.json({ success: true, ...data });
+    } catch (err) {
+      console.error('Rice type ledger error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
   async listScheduledReports(req, res) {
     try {
       const data = await reportingService.listScheduledReportEmails();

@@ -1282,7 +1282,9 @@ const reportingService = {
         db.raw('COUNT(l.id) as lot_count'),
         db.raw('COALESCE(SUM(COALESCE(l.received_net_weight_kg, l.net_weight_kg)), 0) as purchased_kg'),
         db.raw('COALESCE(SUM(l.net_weight_kg), 0) as remaining_kg'),
-        db.raw('COALESCE(SUM(l.net_weight_kg * COALESCE(l.landed_cost_per_kg, l.rate_per_kg)), 0) as stock_value'))
+        // NULLIF so a 0 landed cost (zero-cost intake) falls back to rate_per_kg,
+        // keeping the picker's stock value consistent with the Supplier 360.
+        db.raw('COALESCE(SUM(l.net_weight_kg * COALESCE(NULLIF(l.landed_cost_per_kg, 0), l.rate_per_kg, 0)), 0) as stock_value'))
       .orderBy('s.name', 'asc');
     const supIds = rows.map(r => r.supplierId);
     const pay = supIds.length
@@ -1399,6 +1401,149 @@ const reportingService = {
         costBasis: 'Per-lot financials reuse the Lot 360 (residual costing); processing cost allocated by batch share — approximate where blended.',
       },
       lots: rows,
+    };
+  },
+
+  /**
+   * Rice Type Index — the picker list for the Rice Type Ledger. One row per
+   * rice variety (product, is_byproduct=false) that has lots, with purchased /
+   * produced / remaining / stock value. By-products (Broken Rice etc.) are
+   * excluded — they live in the Finished Goods Ledger. Keyed by product_id
+   * (the reliable rice-type key; free-text variety is often blank).
+   */
+  async getRiceTypeIndex() {
+    const num = (v) => parseFloat(v) || 0;
+    const rows = await db('inventory_lots as l')
+      .join('products as p', 'l.product_id', 'p.id')
+      .where('p.is_byproduct', false)
+      .groupBy('p.id', 'p.name')
+      .select('p.id as productId', 'p.name as riceType',
+        db.raw('COUNT(l.id) as lot_count'),
+        db.raw("COALESCE(SUM(CASE WHEN l.type = 'raw' THEN COALESCE(l.received_net_weight_kg, l.net_weight_kg) ELSE 0 END), 0) as purchased_kg"),
+        db.raw("COALESCE(SUM(CASE WHEN l.type = 'finished' THEN COALESCE(l.received_net_weight_kg, l.net_weight_kg) ELSE 0 END), 0) as produced_kg"),
+        db.raw('COALESCE(SUM(l.net_weight_kg), 0) as remaining_kg'),
+        // landed_cost_per_kg can be 0 (not NULL) on zero-cost intakes — NULLIF so
+        // it falls back to rate_per_kg, matching the detail page + Lot 360.
+        db.raw('COALESCE(SUM(l.net_weight_kg * COALESCE(NULLIF(l.landed_cost_per_kg, 0), l.rate_per_kg, 0)), 0) as stock_value'))
+      .orderBy('p.name', 'asc');
+    return {
+      rows: rows.map(r => ({
+        productId: r.productId, riceType: r.riceType, href: `/reports/rice-type-ledger/${r.productId}`,
+        lotCount: Number(r.lot_count) || 0, purchasedKg: num(r.purchased_kg),
+        producedKg: num(r.produced_kg), remainingKg: num(r.remaining_kg), stockValue: num(r.stock_value),
+      })),
+    };
+  },
+
+  /**
+   * Rice Type Ledger — one rice variety's full inventory story: purchased,
+   * milled (processed), produced (finished output), sold, exported, reserved
+   * and remaining, with stock value, average cost, average sale rate, revenue
+   * and realized + expected profit, plus supplier / warehouse / lot breakdowns.
+   * Keyed by product_id; spans raw + finished lots of that product. Stock is
+   * valued at landed cost/kg; sales/COGS come from local sales of this type's
+   * lots (export shows as dispatched quantity). Read-only; finance-gated.
+   */
+  async getRiceTypeLedger(productId) {
+    const id = parseInt(productId, 10);
+    if (!id) return null;
+    const num = (v) => parseFloat(v) || 0;
+
+    const product = await db('products').where('id', id).first();
+    if (!product) return null;
+
+    const lots = await db('inventory_lots as l')
+      .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
+      .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
+      .where('l.product_id', id)
+      .select('l.id', 'l.lot_no', 'l.type', 'l.entity', 'l.item_name', 'l.grade', 'l.variety', 'l.batch_ref',
+        'l.received_net_weight_kg', 'l.net_weight_kg', 'l.reserved_qty', 'l.landed_cost_per_kg', 'l.rate_per_kg',
+        'l.supplier_id', 's.name as supplier_name', 'w.name as warehouse_name', 'l.purchase_date', 'l.created_at')
+      .orderBy('l.type', 'asc').orderBy('l.id', 'asc');
+
+    const cpkOf = (l) => num(l.landed_cost_per_kg) || num(l.rate_per_kg);
+    const lotIds = lots.map(l => l.id);
+    const rawIds = lots.filter(l => l.type === 'raw').map(l => l.id);
+
+    // Milled — raw lots of this type that were sent to milling.
+    let milledKg = 0;
+    if (rawIds.length) {
+      const ms = await db('batch_source_lots').whereIn('lot_id', rawIds).sum('qty_mt as q').first();
+      milledKg = num(ms && ms.q) * 1000;
+    }
+
+    // Sales (direct raw + finished) of this type's lots → revenue / COGS.
+    let soldKg = 0, revenue = 0, paid = 0, due = 0, cogs = 0;
+    if (lotIds.length) {
+      const cpkById = Object.fromEntries(lots.map(l => [l.id, cpkOf(l)]));
+      const saleRows = await db('local_sales').whereIn('lot_id', lotIds)
+        .select('lot_id', 'quantity_kg', 'total_amount', 'paid_amount', 'due_amount');
+      for (const sl of saleRows) {
+        const q = num(sl.quantity_kg);
+        soldKg += q; revenue += num(sl.total_amount); paid += num(sl.paid_amount);
+        due += num(sl.due_amount); cogs += q * (cpkById[sl.lot_id] || 0);
+      }
+    }
+
+    // Exported — quantity dispatched to export from this type's lots.
+    let exportedKg = 0;
+    if (lotIds.length) {
+      const ex = await db('lot_transactions').whereIn('lot_id', lotIds)
+        .where('transaction_type', 'export_dispatch_out').sum('quantity_kg as q').first();
+      exportedKg = Math.abs(num(ex && ex.q));
+    }
+
+    const purchasedKg = lots.filter(l => l.type === 'raw').reduce((a, l) => a + (num(l.received_net_weight_kg) || num(l.net_weight_kg)), 0);
+    const producedKg = lots.filter(l => l.type === 'finished').reduce((a, l) => a + (num(l.received_net_weight_kg) || num(l.net_weight_kg)), 0);
+    const remainingKg = lots.reduce((a, l) => a + num(l.net_weight_kg), 0);
+    const reservedKg = lots.reduce((a, l) => a + num(l.reserved_qty) * 1000, 0);
+    const stockValue = lots.reduce((a, l) => a + num(l.net_weight_kg) * cpkOf(l), 0);
+    const realizedProfit = revenue - cogs;
+    const avgSaleRate = soldKg > 0 ? revenue / soldKg : 0;
+    const avgCost = remainingKg > 0 ? stockValue / remainingKg : 0;
+    const expectedProfitRemaining = remainingKg > 0 ? remainingKg * (avgSaleRate || avgCost) - stockValue : 0;
+
+    // Supplier (raw side) + warehouse breakdowns.
+    const bySupplierMap = {}, byWarehouseMap = {};
+    for (const l of lots) {
+      const sv = num(l.net_weight_kg) * cpkOf(l);
+      if (l.type === 'raw') {
+        const k = l.supplier_id || 0;
+        const o = bySupplierMap[k] || (bySupplierMap[k] = { supplierId: l.supplier_id || null, supplier: l.supplier_name || '—', purchasedKg: 0, remainingKg: 0, value: 0 });
+        o.purchasedKg += (num(l.received_net_weight_kg) || num(l.net_weight_kg)); o.remainingKg += num(l.net_weight_kg); o.value += sv;
+      }
+      const wk = l.warehouse_name || '—';
+      const wo = byWarehouseMap[wk] || (byWarehouseMap[wk] = { warehouse: wk, remainingKg: 0, value: 0 });
+      wo.remainingKg += num(l.net_weight_kg); wo.value += sv;
+    }
+
+    const lotRows = lots.map(l => ({
+      lotId: l.id, lotNo: l.lot_no, href: `/reports/lot-ledger/${l.id}`,
+      type: l.type, entity: l.entity, label: l.grade || l.item_name || '—',
+      supplier: l.supplier_name || null, supplierId: l.supplier_id || null,
+      warehouse: l.warehouse_name || null, batchRef: l.batch_ref || null,
+      purchasedKg: l.type === 'raw' ? (num(l.received_net_weight_kg) || num(l.net_weight_kg)) : 0,
+      producedKg: l.type === 'finished' ? (num(l.received_net_weight_kg) || num(l.net_weight_kg)) : 0,
+      remainingKg: num(l.net_weight_kg), reservedKg: num(l.reserved_qty) * 1000,
+      costPerKg: cpkOf(l), value: num(l.net_weight_kg) * cpkOf(l),
+      date: l.purchase_date || l.created_at,
+    }));
+
+    return {
+      riceType: {
+        productId: product.id, name: product.name, code: product.code || null,
+        grade: product.grade || null, category: product.category || null, lotCount: lots.length,
+      },
+      summary: {
+        lotCount: lots.length, purchasedKg, milledKg, producedKg, soldKg, exportedKg, reservedKg, remainingKg,
+        stockValue, avgCost, avgSaleRate, revenue, cogs, realizedProfit,
+        realizedProfitPct: revenue > 0 ? (realizedProfit / revenue) * 100 : 0,
+        paymentReceived: paid, outstandingSales: due, expectedProfitRemaining,
+        costBasis: 'On-hand stock valued at landed cost/kg; sales & COGS from local sales of this rice type’s lots. Export revenue is not included (export shows as dispatched quantity); blended-output figures are approximate.',
+      },
+      bySupplier: Object.values(bySupplierMap).sort((a, b) => b.remainingKg - a.remainingKg),
+      byWarehouse: Object.values(byWarehouseMap).sort((a, b) => b.remainingKg - a.remainingKg),
+      lots: lotRows,
     };
   },
 
