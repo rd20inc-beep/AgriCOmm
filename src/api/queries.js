@@ -1362,6 +1362,17 @@ export function useReverseSettlement() { const qc = useQueryClient(); return use
 export function usePayrollAudit(params = {}) {
   return useQuery({ queryKey: ['payroll-audit', params], queryFn: async () => { const r = await millingApi.payrollAudit(params); return r?.data || { logs: [], actions: [] }; } });
 }
+// Salary revisions (Phase 27)
+export function useSalaryRevisions(workerId) {
+  return useQuery({ queryKey: ['salary-revisions', workerId], enabled: !!workerId, queryFn: async () => { const r = await millingApi.listSalaryRevisions(workerId); return transformKeys(r?.data || []); } });
+}
+export function useReviseSalary() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ workerId, data }) => millingApi.reviseSalary(workerId, data),
+    onSuccess: (_r, v) => { qc.invalidateQueries({ queryKey: ['salary-revisions', v.workerId] }); qc.invalidateQueries({ queryKey: ['mill-workers'] }); qc.invalidateQueries({ queryKey: ['payroll-summary'] }); },
+  });
+}
 
 export function useWorkerAdvances(workerId) {
   return useQuery({

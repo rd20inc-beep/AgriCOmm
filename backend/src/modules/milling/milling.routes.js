@@ -740,6 +740,22 @@ function normalizeWorkerPay(body) {
   return { pay_type, monthly_salary, daily_wage };
 }
 
+// True when a normalized pay change differs from the worker's current pay.
+const payChanged = (w, pay) => String(w.pay_type) !== String(pay.pay_type)
+  || (parseFloat(w.monthly_salary) || 0) !== (parseFloat(pay.monthly_salary) || 0)
+  || (parseFloat(w.daily_wage) || 0) !== (parseFloat(pay.daily_wage) || 0);
+// Record a salary-revision row (old→new) so pay changes are never silent.
+async function recordSalaryRevision(qb, w, pay, { effective_date, reason, ot_rate, userId } = {}) {
+  await qb('mill_salary_revisions').insert({
+    worker_id: w.id, effective_date: effective_date || new Date().toISOString().slice(0, 10), reason: reason || null,
+    prev_pay_type: w.pay_type, new_pay_type: pay.pay_type,
+    prev_monthly_salary: w.monthly_salary, new_monthly_salary: pay.monthly_salary,
+    prev_daily_wage: w.daily_wage, new_daily_wage: pay.daily_wage,
+    prev_ot_rate: w.ot_rate_per_hour, new_ot_rate: ot_rate !== undefined ? ot_rate : w.ot_rate_per_hour,
+    created_by: userId || null,
+  });
+}
+
 // ── Advance recovery plan ───────────────────────────────────────────────────
 const RECOVERY_METHODS = ['full_next_salary', 'fixed_installment', 'salary_percentage', 'manual'];
 
@@ -834,15 +850,50 @@ router.put('/workers/:id', authorize('payroll', 'edit'), auditAction('update', '
       updates.ot_rate_per_hour = v > 0 ? v : null;
     }
     if (req.body.is_active !== undefined) updates.is_active = !!req.body.is_active;
+    let payRevision = null;
     if (req.body.pay_type !== undefined || req.body.daily_wage !== undefined || req.body.monthly_salary !== undefined) {
       const pay = normalizeWorkerPay({ ...worker, ...req.body });
       if (pay.pay_type === 'monthly' && !(pay.monthly_salary > 0)) return res.status(400).json({ success: false, message: 'monthly_salary required for salaried workers.' });
       if (pay.pay_type === 'daily' && !(pay.daily_wage > 0)) return res.status(400).json({ success: false, message: 'daily_wage required for daily-wage workers.' });
       Object.assign(updates, pay);
+      if (payChanged(worker, pay)) payRevision = pay; // log a revision so pay isn't silently overwritten
     }
     updates.updated_at = db.fn.now();
-    const [updated] = await db('mill_workers').where('id', req.params.id).update(updates).returning('*');
+    const [updated] = await db.transaction(async (trx) => {
+      if (payRevision) await recordSalaryRevision(trx, worker, payRevision, { reason: req.body.revision_reason || 'Edited via employee form', userId: req.user?.id });
+      return trx('mill_workers').where('id', req.params.id).update(updates).returning('*');
+    });
     return res.json({ success: true, data: { worker: updated } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Dedicated "Revise salary" — records a revision (old→new) WITH an effective date
+// + reason, then applies the new pay. (The generic PUT also auto-logs, but this
+// is the proper increment flow that captures why + when.)
+router.post('/workers/:id/salary-revision', authorize('payroll', 'edit'), async (req, res) => {
+  try {
+    const worker = await db('mill_workers').where('id', req.params.id).first();
+    if (!worker) return res.status(404).json({ success: false, message: 'Worker not found.' });
+    const pay = normalizeWorkerPay({ ...worker, ...req.body });
+    if (pay.pay_type === 'monthly' && !(pay.monthly_salary > 0)) return res.status(400).json({ success: false, message: 'monthly_salary required for salaried workers.' });
+    if (pay.pay_type === 'daily' && !(pay.daily_wage > 0)) return res.status(400).json({ success: false, message: 'daily_wage required for daily-wage workers.' });
+    if (!payChanged(worker, pay)) return res.status(400).json({ success: false, message: 'No pay change — the new figure matches the current salary.' });
+    const otRate = req.body.ot_rate_per_hour !== undefined ? (req.body.ot_rate_per_hour !== '' ? parseFloat(req.body.ot_rate_per_hour) : null) : worker.ot_rate_per_hour;
+    const updated = await db.transaction(async (trx) => {
+      await recordSalaryRevision(trx, worker, pay, { effective_date: req.body.effective_date, reason: req.body.reason, ot_rate: otRate, userId: req.user?.id });
+      const [w] = await trx('mill_workers').where('id', worker.id).update({ ...pay, ot_rate_per_hour: otRate && otRate > 0 ? otRate : null, updated_at: trx.fn.now() }).returning('*');
+      return w;
+    });
+    return res.json({ success: true, data: { worker: updated } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.get('/workers/:id/salary-revisions', authorize('payroll', 'view'), async (req, res) => {
+  try {
+    const rows = await db('mill_salary_revisions as r').leftJoin('users as u', 'u.id', 'r.created_by')
+      .where('r.worker_id', req.params.id).orderBy('r.effective_date', 'desc').orderBy('r.id', 'desc')
+      .select('r.*', 'u.full_name as created_by_name');
+    return res.json({ success: true, data: rows });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 

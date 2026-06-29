@@ -22,7 +22,7 @@ import {
   useTaxStatement, useWorkerRequests, useWorkerRequestsCount, useResolveWorkerRequest,
   useLeaveTypes, useLeaveRequests, useLeaveRequestsCount, useCreateLeaveType, useUpdateLeaveType, useDeleteLeaveType,
   useApproveLeaveRequest, useRejectLeaveRequest,
-  useFinalSettlement, useFinalizeSettlement, usePayrollAudit,
+  useFinalSettlement, useFinalizeSettlement, usePayrollAudit, useSalaryRevisions, useReviseSalary,
   usePayrollSchedule, useSavePayrollSchedule, useRunPayrollNow,
   usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow, useAcceptFundTransfer,
   useMillLotCosts, useLocalSales, useRecordPayment, usePayablePayments,
@@ -225,6 +225,7 @@ export default function MillFinanceDashboard() {
   const { data: pendingLeaveCount = 0 } = useLeaveRequestsCount();
   const [settleWorker, setSettleWorker] = useState(null);
   const [showAuditDrawer, setShowAuditDrawer] = useState(false);
+  const [reviseWorker, setReviseWorker] = useState(null);
   const [adjustWorker, setAdjustWorker] = useState(null); // open adjustments drawer for this worker
   const runNowMut = useRunPayrollNow();
 
@@ -1694,6 +1695,7 @@ export default function MillFinanceDashboard() {
                         )}
                         {canPreparePayroll && <button title="Give advance" onClick={() => openAdvanceDrawer(w)} className="p-1.5 rounded-md text-amber-600 hover:bg-amber-50"><HandCoins className="w-3.5 h-3.5" /></button>}
                         {canPreparePayroll && <button title="Bonuses & deductions" onClick={() => setAdjustWorker(w)} className="p-1.5 rounded-md text-violet-600 hover:bg-violet-50"><Plus className="w-3.5 h-3.5" /></button>}
+                        {canPreparePayroll && <button title="Revise salary" onClick={() => setReviseWorker(w)} className="p-1.5 rounded-md text-blue-600 hover:bg-blue-50"><TrendingUp className="w-3.5 h-3.5" /></button>}
                         {canPreparePayroll && <button title="Edit" onClick={() => openWorkerDrawer(w)} className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100"><Pencil className="w-3.5 h-3.5" /></button>}
                         {canPayPayroll && w.isActive && <button title="Final settlement" onClick={() => setSettleWorker(w)} className="p-1.5 rounded-md text-rose-600 hover:bg-rose-50"><LogOut className="w-3.5 h-3.5" /></button>}
                         {canPreparePayroll && <button title={w.isActive ? 'Deactivate' : 'Reactivate'} onClick={() => handleToggleActive(w)} className={`p-1.5 rounded-md hover:bg-gray-100 ${w.isActive ? 'text-gray-500' : 'text-emerald-600'}`}><Power className="w-3.5 h-3.5" /></button>}
@@ -2386,6 +2388,11 @@ export default function MillFinanceDashboard() {
       {/* ─── PAYROLL ACTIVITY / AUDIT DRAWER ───────────────────────── */}
       {showAuditDrawer && (
         <PayrollAuditDrawer onClose={() => setShowAuditDrawer(false)} />
+      )}
+
+      {/* ─── SALARY REVISION DRAWER ────────────────────────────────── */}
+      {reviseWorker && (
+        <SalaryRevisionDrawer worker={reviseWorker} company={companyProfileData} onClose={() => setReviseWorker(null)} addToast={addToast} />
       )}
 
       {/* ─── BONUSES & DEDUCTIONS DRAWER ───────────────────────────── */}
@@ -4047,6 +4054,96 @@ function StatutoryDeductionsDrawer({ canPay, bankAccounts = [], company, onClose
         <p className="text-[11px] text-gray-400">Statutory amounts are withheld from each employee's net pay and booked to the chosen liability account (payable to the authority). They appear on payslips and reduce the cash paid out — the salary expense still reflects the full gross.</p>
       </div>
       )}
+    </SlideDrawer>
+  );
+}
+
+// Printable salary increment / revision letter.
+function incrementLetterBody(w, rev, company) {
+  const co = company || {};
+  const name = co.legalName || co.name || 'AGRI COMMODITIES';
+  const monthly = rev.newPayType === 'monthly';
+  const oldAmt = monthly ? rev.prevMonthlySalary : rev.prevDailyWage;
+  const newAmt = monthly ? rev.newMonthlySalary : rev.newDailyWage;
+  const pct = (parseFloat(oldAmt) || 0) > 0 ? Math.round(((newAmt - oldAmt) / oldAmt) * 1000) / 10 : null;
+  const unit = monthly ? 'monthly salary' : 'daily wage';
+  return `<div class="slip">
+    ${docHeaderHtml(company, 'Salary Revision', `Effective ${docDate(rev.effectiveDate)}`)}
+    <div class="meta">
+      <span><div class="k">Employee</div><div class="v">${w.name || '—'}</div></span>
+      <span><div class="k">Designation</div><div class="v" style="text-transform:capitalize">${w.role || '—'}</div></span>
+      <span><div class="k">CNIC</div><div class="v">${w.cnic || '—'}</div></span>
+      <span><div class="k">Effective date</div><div class="v">${docDate(rev.effectiveDate)}</div></span>
+    </div>
+    <p style="margin:14px 0;font-size:12px;line-height:1.7">Dear <b>${w.name}</b>,</p>
+    <p style="font-size:12px;line-height:1.7">We are pleased to inform you that, effective <b>${docDate(rev.effectiveDate)}</b>, your ${unit} has been revised from <b>${rsAmt(oldAmt)}</b> to <b>${rsAmt(newAmt)}</b>${pct != null ? ` (${pct >= 0 ? '+' : ''}${pct}%)` : ''}.${rev.reason ? ` Reason: ${rev.reason}.` : ''}</p>
+    <div class="net"><div><div style="font-size:10px;text-transform:uppercase;color:#047857">Revised ${unit}</div><b>${rsAmt(newAmt)}</b></div>
+      <div style="text-align:right;max-width:55%"><div class="words">Rupees ${amountInWords(newAmt)} Only${monthly ? ' per month' : ' per day'}</div></div></div>
+    <div class="sign"><div><div class="l">Employee</div></div><div><div class="l">Authorized By</div></div></div>
+    <div class="muted" style="text-align:center;margin-top:14px">Computer-generated salary revision letter — ${name}.</div>
+  </div>`;
+}
+function printIncrementLetter(w, rev, company) { return openPayslipWindow(`Salary Revision ${w.name}`, incrementLetterBody(w, rev, company)); }
+
+// Per-employee salary revision — record a pay change (old→new) with effective
+// date + reason; lists the history with a printable increment letter per change.
+function SalaryRevisionDrawer({ worker, company, onClose, addToast }) {
+  const { data: revisions = [], isLoading } = useSalaryRevisions(worker.id);
+  const reviseMut = useReviseSalary();
+  const monthly = worker.payType === 'monthly';
+  const curAmt = monthly ? worker.monthlySalary : worker.dailyWage;
+  const [form, setForm] = useState({ amount: '', effective_date: new Date().toISOString().slice(0, 10), reason: '' });
+  const set = (p) => setForm((f) => ({ ...f, ...p }));
+
+  async function submit() {
+    if (!(parseFloat(form.amount) > 0)) { addToast('Enter the new amount', 'error'); return; }
+    try {
+      const data = { pay_type: worker.payType, effective_date: form.effective_date, reason: form.reason, [monthly ? 'monthly_salary' : 'daily_wage']: parseFloat(form.amount) };
+      await reviseMut.mutateAsync({ workerId: worker.id, data });
+      addToast('Salary revised', 'success'); setForm({ amount: '', effective_date: new Date().toISOString().slice(0, 10), reason: '' });
+    } catch (e) { addToast(e.message, 'error'); }
+  }
+
+  return (
+    <SlideDrawer open onClose={onClose} title="Revise salary" subtitle={`${worker.name} · current ${monthly ? 'monthly' : 'daily'} ${PKR(curAmt)}`} icon={TrendingUp} size="lg">
+      <div className="space-y-4">
+        <div className="rounded-lg border border-gray-200 p-3 space-y-3">
+          <div className="text-xs font-semibold text-gray-600">New {monthly ? 'monthly salary' : 'daily wage'}</div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="block text-[11px] text-gray-500 mb-1">New amount (Rs)</label><input type="number" value={form.amount} onChange={(e) => set({ amount: e.target.value })} placeholder={String(Math.round(parseFloat(curAmt) || 0))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" /></div>
+            <div><label className="block text-[11px] text-gray-500 mb-1">Effective date</label><input type="date" value={form.effective_date} onChange={(e) => set({ effective_date: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" /></div>
+          </div>
+          <div><label className="block text-[11px] text-gray-500 mb-1">Reason</label><input value={form.reason} onChange={(e) => set({ reason: e.target.value })} placeholder="e.g. Annual increment, promotion" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" /></div>
+          {parseFloat(form.amount) > 0 && parseFloat(curAmt) > 0 && (
+            <div className="text-[11px] text-gray-500">{PKR(curAmt)} → <span className="font-semibold text-gray-800">{PKR(form.amount)}</span> ({(parseFloat(form.amount) - curAmt) >= 0 ? '+' : ''}{Math.round(((parseFloat(form.amount) - curAmt) / curAmt) * 1000) / 10}%)</div>
+          )}
+          <div className="flex justify-end">
+            <button onClick={submit} disabled={reviseMut.isPending} className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">Apply revision</button>
+          </div>
+        </div>
+        <div>
+          <div className="text-xs font-semibold text-gray-600 mb-1">Revision history</div>
+          {isLoading ? <p className="text-sm text-gray-400">Loading…</p> : !revisions.length ? (
+            <p className="text-sm text-gray-400 py-4 text-center border border-dashed border-gray-200 rounded-lg">No revisions yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {revisions.map((r) => {
+                const m = r.newPayType === 'monthly';
+                const oldA = m ? r.prevMonthlySalary : r.prevDailyWage; const newA = m ? r.newMonthlySalary : r.newDailyWage;
+                return (
+                  <div key={r.id} className="rounded-lg border border-gray-200 p-3 flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-gray-900">{PKR(oldA)} → {PKR(newA)} <span className="text-[10px] font-normal text-gray-400">{m ? '/mo' : '/day'}</span></div>
+                      <div className="text-xs text-gray-500">eff {fmtDate(r.effectiveDate)}{r.reason ? ` · ${r.reason}` : ''}{r.createdByName ? ` · ${r.createdByName}` : ''}</div>
+                    </div>
+                    <button onClick={() => printIncrementLetter(worker, r, company)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100"><Printer className="w-3.5 h-3.5" /> Letter</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
     </SlideDrawer>
   );
 }
