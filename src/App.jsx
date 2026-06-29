@@ -38,6 +38,7 @@ function lazyWithReload(factory) {
 
 // Lazy-loaded page components (pointing at modular locations)
 const Login = lazyWithReload(() => import('./modules/admin/pages/Login'));
+const EmployeePortal = lazyWithReload(() => import('./modules/portal/EmployeePortal'));
 const Dashboard = lazyWithReload(() => import('./modules/dashboard/pages/Dashboard'));
 const Buyers = lazyWithReload(() => import('./modules/exportOrders/pages/Buyers'));
 const ExportOrders = lazyWithReload(() => import('./modules/exportOrders/pages/ExportOrders'));
@@ -281,6 +282,9 @@ function App() {
           <Suspense fallback={<LoadingSpinner message="Loading page..." />}>
             <Routes>
               <Route path="/login" element={<Login />} />
+              {/* Employee self-service portal — fully public (own CNIC+PIN auth),
+                  mounted OUTSIDE the staff app shell / ProtectedRoute. */}
+              <Route path="/portal" element={<EmployeePortal />} />
               {/* Standalone print page — mounted OUTSIDE the app shell
                   so the browser prints a clean document (no sidebar /
                   header / scroll container fight). */}

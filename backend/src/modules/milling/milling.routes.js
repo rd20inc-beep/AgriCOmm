@@ -716,7 +716,8 @@ async function attachAdvances(workers) {
     .groupBy('worker_id')
     .select('worker_id', db.raw('COALESCE(SUM(amount - recovered_amount), 0) as outstanding'));
   const map = new Map(rows.map((r) => [r.worker_id, parseFloat(r.outstanding) || 0]));
-  return workers.map((w) => ({ ...w, advance_outstanding: map.get(w.id) || 0 }));
+  // Never leak the bcrypt portal PIN hash; expose only the enabled flag.
+  return workers.map(({ portal_pin_hash, ...w }) => ({ ...w, advance_outstanding: map.get(w.id) || 0 }));
 }
 
 router.get('/workers', authorize('payroll', 'view'), async (req, res) => {
@@ -950,6 +951,33 @@ async function unwindAdvanceExpense(trx, expenseId) {
   await trx('journal_entries').where('ref_no', exp.expense_no).del();
   await trx('business_expenses').where('id', expenseId).del();
 }
+
+// Set / reset / disable a worker's self-service portal PIN (Phase 19). A 4+ digit
+// PIN is bcrypt-hashed; `enabled:false` (or no pin) turns the portal off.
+router.post('/workers/:id/portal-pin', authorize('payroll', 'edit'), async (req, res) => {
+  try {
+    const bcrypt = require('bcryptjs');
+    const worker = await db('mill_workers').where('id', req.params.id).first();
+    if (!worker) return res.status(404).json({ success: false, message: 'Worker not found.' });
+    const enabled = req.body?.enabled !== false;
+    const pin = req.body?.pin != null ? String(req.body.pin).trim() : '';
+    const updates = { updated_at: db.fn.now() };
+    if (!enabled) {
+      updates.portal_enabled = false;
+    } else {
+      if (!worker.cnic) return res.status(400).json({ success: false, message: 'Add a CNIC first — the employee logs in with CNIC + PIN.' });
+      if (pin) {
+        if (!/^\d{4,8}$/.test(pin)) return res.status(400).json({ success: false, message: 'PIN must be 4–8 digits.' });
+        updates.portal_pin_hash = await bcrypt.hash(pin, 10);
+      } else if (!worker.portal_pin_hash) {
+        return res.status(400).json({ success: false, message: 'Set a PIN to enable self-service.' });
+      }
+      updates.portal_enabled = true;
+    }
+    const [updated] = await db('mill_workers').where('id', worker.id).update(updates).returning(['id', 'portal_enabled']);
+    return res.json({ success: true, data: { worker: updated } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
 
 // Delete a worker permanently — unwinds every advance's cash-out, then cascades
 // attendance + advances (FK onDelete CASCADE) and removes the worker.

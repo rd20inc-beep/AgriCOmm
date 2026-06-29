@@ -15,6 +15,11 @@ function authenticate(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, config.jwt.secret);
+    // Employee self-service tokens are portal-scoped only — they carry no staff
+    // identity/role and must never authenticate a staff API route.
+    if (decoded && decoded.portal) {
+      return res.status(401).json({ success: false, message: 'Portal session cannot access staff resources.' });
+    }
     req.user = decoded;
     next();
   } catch (err) {

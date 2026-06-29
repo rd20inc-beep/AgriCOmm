@@ -5,6 +5,7 @@ const router = express.Router();
 
 // Public routes
 router.use('/auth', require('./auth'));
+router.use('/portal', require('../modules/portal/portal.routes')); // employee self-service (own CNIC+PIN auth)
 router.use('/streams', require('./streams'));
 
 // Protected routes — all require authentication

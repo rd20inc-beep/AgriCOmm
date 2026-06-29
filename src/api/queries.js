@@ -1299,6 +1299,14 @@ export function useDeleteMillWorker() {
   });
 }
 
+export function useSetWorkerPortalPin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => millingApi.setWorkerPortalPin(id, data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['mill-workers'] }); },
+  });
+}
+
 export function useWorkerAdvances(workerId) {
   return useQuery({
     queryKey: ['worker-advances', workerId],

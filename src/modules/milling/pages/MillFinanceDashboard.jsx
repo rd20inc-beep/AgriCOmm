@@ -11,7 +11,7 @@ import { useAuth } from '../../../context/AuthContext';
 import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import {
   useMillExpenses, useCreateMillExpense, useRecurringExpenses, useMaterializeRecurring, useRunDueRecurring, useCategorizeExpense, useMillWorkers, useCreateMillWorker,
-  useUpdateMillWorker, useDeleteMillWorker, useCreateWorkerAdvance, useWorkerAdvances, useWorkerLedger,
+  useUpdateMillWorker, useDeleteMillWorker, useSetWorkerPortalPin, useCreateWorkerAdvance, useWorkerAdvances, useWorkerLedger,
   useDeleteWorkerAdvance, useAdvanceLedger,
   useWorkerAdjustments, useCreateWorkerAdjustment, useDeleteWorkerAdjustment,
   usePayrollSummary, useRecordAttendance, useAttendance, useBulkAttendance, useAttendanceHolidays, useInventory, useExpenseVendors,
@@ -193,6 +193,8 @@ export default function MillFinanceDashboard() {
   const { data: workers = [] } = useMillWorkers();
   const createWorkerMut = useCreateMillWorker();
   const updateWorkerMut = useUpdateMillWorker();
+  const setPinMut = useSetWorkerPortalPin();
+  const [portalPin, setPortalPin] = useState('');
   const deleteWorkerMut = useDeleteMillWorker();
   const createAdvanceMut = useCreateWorkerAdvance();
   const curMonth = new Date().toISOString().slice(0, 7);
@@ -324,7 +326,7 @@ export default function MillFinanceDashboard() {
   const [showTransfer, setShowTransfer] = useState(false);
   const EMPTY_EXP = { category: 'salaries', vendor_preset: '', vendor_name: '', subcategory: '', employee_id: '', is_recurring: false, recurrence: 'monthly', description: '', amount: '', expense_date: new Date().toISOString().split('T')[0], reference: '', notes: '' };
   const [expForm, setExpForm] = useState(EMPTY_EXP);
-  const EMPTY_WORKER = { id: null, name: '', role: 'laborer', pay_type: 'daily', daily_wage: '', monthly_salary: '', ot_rate_per_hour: '', phone: '', cnic: '', bank_name: '', bank_account_number: '', iban: '', joined_date: new Date().toISOString().split('T')[0], left_date: '', notes: '' };
+  const EMPTY_WORKER = { id: null, name: '', role: 'laborer', pay_type: 'daily', daily_wage: '', monthly_salary: '', ot_rate_per_hour: '', phone: '', cnic: '', bank_name: '', bank_account_number: '', iban: '', joined_date: new Date().toISOString().split('T')[0], left_date: '', notes: '', portal_enabled: false };
   const [workerForm, setWorkerForm] = useState(EMPTY_WORKER);
   const [advanceTarget, setAdvanceTarget] = useState(null); // worker we're giving an advance to
   const [advanceForm, setAdvanceForm] = useState({ amount: '', advance_date: new Date().toISOString().split('T')[0], payment_method: 'cash', notes: '', recovery_method: 'full_next_salary', recovery_start_period: '', installment_amount: '', installment_count: '', deduction_percent: '' });
@@ -551,10 +553,12 @@ export default function MillFinanceDashboard() {
         joined_date: worker.joinedDate ? String(worker.joinedDate).slice(0, 10) : '',
         left_date: worker.leftDate ? String(worker.leftDate).slice(0, 10) : '',
         notes: worker.notes || '',
+        portal_enabled: !!worker.portalEnabled,
       });
     } else {
       setWorkerForm(EMPTY_WORKER);
     }
+    setPortalPin('');
     setShowWorkerDrawer(true);
   }
 
@@ -2093,6 +2097,34 @@ export default function MillFinanceDashboard() {
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
             />
           </div>
+          {workerForm.id && (
+            <div className="rounded-lg border border-gray-200 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Self-service portal</span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${workerForm.portal_enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>{workerForm.portal_enabled ? 'Enabled' : 'Disabled'}</span>
+              </div>
+              <p className="text-[11px] text-gray-400">The employee logs in at <span className="font-mono">/portal</span> with their CNIC + this PIN to view payslips, tax certificate &amp; advance balance.{!workerForm.cnic ? ' Add a CNIC above first.' : ''}</p>
+              <div className="flex gap-2">
+                <input
+                  type="text" inputMode="numeric" maxLength={8} value={portalPin}
+                  onChange={e => setPortalPin(e.target.value.replace(/\D/g, ''))}
+                  placeholder="4–8 digit PIN"
+                  className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
+                />
+                <button
+                  disabled={!workerForm.cnic || portalPin.length < 4 || setPinMut.isPending}
+                  onClick={async () => { try { await setPinMut.mutateAsync({ id: workerForm.id, data: { pin: portalPin, enabled: true } }); setPortalPin(''); setWorkerForm(p => ({ ...p, portal_enabled: true })); addToast('Self-service PIN set', 'success'); } catch (e) { addToast(e.message, 'error'); } }}
+                  className="px-3 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap"
+                >{workerForm.portal_enabled ? 'Reset PIN' : 'Set PIN & enable'}</button>
+              </div>
+              {workerForm.portal_enabled && (
+                <button
+                  onClick={async () => { try { await setPinMut.mutateAsync({ id: workerForm.id, data: { enabled: false } }); setWorkerForm(p => ({ ...p, portal_enabled: false })); addToast('Self-service disabled', 'success'); } catch (e) { addToast(e.message, 'error'); } }}
+                  className="text-[11px] text-rose-600 hover:underline"
+                >Disable self-service</button>
+              )}
+            </div>
+          )}
         </div>
       </SlideDrawer>
 

@@ -1343,6 +1343,8 @@ COL mill_workers.notes:text:NULL
 COL mill_workers.ot_rate_per_hour:numeric:NULL
 COL mill_workers.pay_type:character varying:NOT NULL
 COL mill_workers.phone:character varying:NULL
+COL mill_workers.portal_enabled:boolean:NOT NULL
+COL mill_workers.portal_pin_hash:character varying:NULL
 COL mill_workers.role:character varying:NULL
 COL mill_workers.updated_at:timestamp with time zone:NOT NULL
 COL milling_batches.actual_finished_mt:numeric:NOT NULL
