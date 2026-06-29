@@ -34,6 +34,20 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
   const [customQty, setCustomQty] = useState({});
   const [fetchTrigger, setFetchTrigger] = useState(0);
 
+  // Order lines — for multi-product proformas, an allocation can target a
+  // specific line. Handles either casing (raw snake_case or transformed camel).
+  const orderItems = (order.items || []).map((it) => ({
+    id: it.id,
+    lineNo: it.lineNo ?? it.line_no ?? 1,
+    productName: it.productName ?? it.product_name ?? '',
+    qtyMt: parseFloat(it.qtyMt ?? it.qty_mt) || 0,
+  }));
+  const [lineId, setLineId] = useState('');
+  // Single-line orders auto-link transparently; multi-line wait for a pick.
+  useEffect(() => {
+    if (!lineId && orderItems.length === 1) setLineId(String(orderItems[0].id));
+  }, [orderItems.length]);
+
   const remainingNeeded = Math.max(0, order.qtyMT - totalAllocatedMT);
 
   // Fetch available finished lots only when order needs more stock
@@ -82,6 +96,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
       await exportOrdersApi.allocateStock(order.dbId || order.id, {
         lot_id: lot.id,
         qty_mt: qtyToAllocate,
+        item_id: lineId || undefined,
         notes: `Allocated ${qtyToAllocate.toFixed(2)} MT from ${lot.lot_no}`,
       });
       addToast(`${qtyToAllocate.toFixed(2)} MT allocated from ${lot.lot_no}`, 'success');
@@ -275,6 +290,20 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
               : <span className="text-green-600 font-medium">Fully allocated!</span>
             }
           </p>
+
+          {orderItems.length > 1 && (
+            <div className="mb-4">
+              <label className="block text-xs font-medium text-gray-500 mb-1">Allocate to product line</label>
+              <select value={lineId} onChange={e => setLineId(e.target.value)}
+                className="w-full sm:w-auto border border-gray-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 outline-none">
+                <option value="">Order-wide (no specific line)</option>
+                {orderItems.map(it => (
+                  <option key={it.id} value={it.id}>Line {it.lineNo}: {it.productName || 'Product'} ({it.qtyMt} MT)</option>
+                ))}
+              </select>
+              <p className="text-[11px] text-gray-400 mt-1">Multi-product order — the lots you allocate below are reserved against this line.</p>
+            </div>
+          )}
 
           <div className="space-y-3">
             {[...matchingLots, ...(showAllLots ? otherLots : [])].map(lot => {

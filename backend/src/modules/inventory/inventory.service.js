@@ -1387,7 +1387,7 @@ const inventoryService = {
   // =========================================================================
   // Reserve stock against an export order
   // =========================================================================
-  async reserveStock(trx, { lotId, orderId, qtyMT, userId }) {
+  async reserveStock(trx, { lotId, orderId, qtyMT, itemId = null, userId }) {
     if (!trx) throw new Error('reserveStock requires a transaction');
 
     const parsedQty = parseFloat(qtyMT);
@@ -1402,11 +1402,13 @@ const inventoryService = {
       );
     }
 
-    // Insert reservation
+    // Insert reservation. item_id ties it to a specific export_order_items line
+    // when supplied; null = order-wide (legacy / single-line orders).
     const [reservation] = await trx('inventory_reservations')
       .insert({
         lot_id: lotId,
         order_id: orderId,
+        item_id: itemId || null,
         reserved_qty: parsedQty,
         status: 'Active',
         created_by: userId || null,

@@ -146,6 +146,9 @@ const confirmBalance = Joi.object({
 const allocateExportStock = Joi.object({
   lot_id: Joi.number().integer().positive().required(),
   qty_mt: Joi.number().positive().required(),
+  // Optional export_order_items line this allocation serves (P4b). Without it
+  // here, validate()'s stripUnknown would silently drop item_id from the body.
+  item_id: Joi.number().integer().positive().allow(null),
   notes: Joi.string().allow('', null),
 });
 
