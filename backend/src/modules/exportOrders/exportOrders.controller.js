@@ -56,6 +56,27 @@ function lockRow(query) {
   return typeof query?.forUpdate === 'function' ? query.forUpdate() : query;
 }
 
+// Normalize + dedupe a container's structured lot links (P4c). Accepts either
+// snake or camel casing; keeps the first occurrence of each lot_id.
+function dedupeContainerLots(lots) {
+  const rows = Array.isArray(lots) ? lots : [];
+  const seen = new Set();
+  const out = [];
+  for (const l of rows) {
+    const lotId = parseInt(l.lot_id ?? l.lotId, 10);
+    if (!Number.isFinite(lotId) || seen.has(lotId)) continue;
+    seen.add(lotId);
+    const qty = (l.qty_kg ?? l.qtyKg);
+    const bags = (l.bags ?? l.bagsCount);
+    out.push({
+      lot_id: lotId,
+      qty_kg: qty != null && qty !== '' ? parseFloat(qty) : null,
+      bags: bags != null && bags !== '' ? parseInt(bags, 10) : null,
+    });
+  }
+  return out;
+}
+
 function parseShipmentContainerRows(containers, fallbackContainerNo = null) {
   const rows = Array.isArray(containers) ? containers : [];
   const normalized = rows
@@ -90,6 +111,9 @@ function parseShipmentContainerRows(containers, fallbackContainerNo = null) {
         tare_weight_kg: Number.isFinite(tareWeight) ? tareWeight : null,
         container_type: container.container_type || container.containerType || null,
         notes: container.notes || null,
+        // Structured lot links (P4c) — carried alongside the DB columns and
+        // split off before the shipment_containers insert. Deduped by lot_id.
+        lots: dedupeContainerLots(container.lots),
       };
     })
     .filter(Boolean);
@@ -108,6 +132,7 @@ function parseShipmentContainerRows(containers, fallbackContainerNo = null) {
         tare_weight_kg: null,
         container_type: null,
         notes: null,
+        lots: [],
       });
     }
   }
@@ -420,8 +445,26 @@ const exportOrderController = {
         product_name: it.product_name || it.product_name_lookup || null,
       }));
 
-      order.shipment_containers = shipmentContainers || [];
-      order.shipmentContainers = shipmentContainers || [];
+      // Attach each container's structured lot links (P4c).
+      const containerRows = shipmentContainers || [];
+      const containerIds = containerRows.map((c) => c.id).filter(Boolean);
+      let lotsByContainer = {};
+      if (containerIds.length) {
+        const links = await db('container_lots as cl')
+          .leftJoin('inventory_lots as l', 'cl.lot_id', 'l.id')
+          .whereIn('cl.container_id', containerIds)
+          .select('cl.container_id', 'cl.lot_id', 'cl.qty_kg', 'cl.bags', 'l.lot_no');
+        lotsByContainer = links.reduce((acc, r) => {
+          (acc[r.container_id] = acc[r.container_id] || []).push({
+            lotId: r.lot_id, lotNo: r.lot_no, qtyKg: r.qty_kg != null ? parseFloat(r.qty_kg) : null,
+            bags: r.bags != null ? Number(r.bags) : null, href: `/lot-inventory/${r.lot_id}`,
+          });
+          return acc;
+        }, {});
+      }
+      const withLots = containerRows.map((c) => ({ ...c, lots: lotsByContainer[c.id] || [] }));
+      order.shipment_containers = withLots;
+      order.shipmentContainers = withLots;
       order.allowed_actions = getAllowedActions(order);
       order.allowedActions = order.allowed_actions;
 
@@ -615,7 +658,7 @@ const exportOrderController = {
           statusHistory,
           millingBatch: millingBatch || null,
           packingLines: packingLines || [],
-          shipmentContainers: shipmentContainers || [],
+          shipmentContainers: withLots,
           purchaseLots,
           batchByproducts, // INTERNAL/ADMIN ONLY — empty for non-admin viewers
         },
@@ -1102,15 +1145,55 @@ const exportOrderController = {
 
       await db.transaction(async (trx) => {
         if (hasContainerRows) {
+          // Deleting the containers cascades their container_lots away.
           await trx('shipment_containers').where({ order_id: order.id }).del();
           if (normalizedContainers.length > 0) {
-            await trx('shipment_containers').insert(
-              normalizedContainers.map((container) => ({
-                ...container,
-                order_id: order.id,
-                created_by: req.user.id,
-              }))
-            );
+            // Split the structured lot links off the DB columns, insert the
+            // containers, then map each back to its new id by sequence_no to
+            // write container_lots. lot_number stays in sync (joined lot_nos)
+            // for back-compat / documents.
+            const dbRows = normalizedContainers.map(({ lots, ...row }) => ({
+              ...row,
+              // These columns are NOT NULL with a default; an explicit null
+              // bypasses the default, so coerce when the caller omitted them.
+              gross_weight_kg: row.gross_weight_kg ?? 0,
+              net_weight_kg: row.net_weight_kg ?? 0,
+              container_type: row.container_type ?? '20ft',
+              order_id: order.id,
+              created_by: req.user.id,
+            }));
+            const inserted = await trx('shipment_containers')
+              .insert(dbRows)
+              .returning(['id', 'sequence_no']);
+            const idBySeq = Object.fromEntries(inserted.map((r) => [Number(r.sequence_no), r.id]));
+
+            const lotLinks = [];
+            for (const c of normalizedContainers) {
+              const cid = idBySeq[Number(c.sequence_no)];
+              if (!cid) continue;
+              for (const l of (c.lots || [])) {
+                lotLinks.push({ container_id: cid, lot_id: l.lot_id, qty_kg: l.qty_kg, bags: l.bags, created_by: req.user.id });
+              }
+            }
+            if (lotLinks.length > 0) {
+              // Only link lots that actually exist; FK would reject bad ids and
+              // abort the whole shipment save otherwise.
+              const lotIds = [...new Set(lotLinks.map((l) => l.lot_id))];
+              const realIds = new Set(await trx('inventory_lots').whereIn('id', lotIds).pluck('id'));
+              const valid = lotLinks.filter((l) => realIds.has(l.lot_id));
+              if (valid.length > 0) await trx('container_lots').insert(valid);
+              // Sync lot_number text from the linked lots (per sequence) for docs.
+              const noByCid = {};
+              const lotNoById = Object.fromEntries(
+                (await trx('inventory_lots').whereIn('id', lotIds).select('id', 'lot_no')).map((r) => [r.id, r.lot_no])
+              );
+              for (const l of valid) {
+                noByCid[l.container_id] = noByCid[l.container_id] ? `${noByCid[l.container_id]}, ${lotNoById[l.lot_id]}` : lotNoById[l.lot_id];
+              }
+              for (const [cid, lotNo] of Object.entries(noByCid)) {
+                await trx('shipment_containers').where('id', cid).update({ lot_number: lotNo });
+              }
+            }
           }
         }
 
