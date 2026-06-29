@@ -758,6 +758,12 @@ export default function Reports() {
                 <Users size={14} /> Supplier Ledger
               </Link>
             )}
+            {!operatorScoped && (
+              <Link to="/reports/rice-type-ledger"
+                className="bg-white/15 hover:bg-white/25 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-sm font-medium inline-flex items-center gap-2 transition-colors">
+                <Package size={14} /> Rice Type Ledger
+              </Link>
+            )}
             <Link to="/reports/lots"
               className="bg-white/15 hover:bg-white/25 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-sm font-medium inline-flex items-center gap-2 transition-colors">
               <FileText size={14} /> Lot Reports

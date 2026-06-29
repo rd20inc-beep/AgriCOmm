@@ -51,6 +51,9 @@ router.get('/profitability/monthly-trend', authorize('reports', 'view'), noFinan
 // so finance-free roles (Mill Operator) are excluded like other profit reports.
 router.get('/supplier-ledger', authorize('reports', 'view'), noFinanceForOperator, controller.supplierInventoryIndex);
 router.get('/supplier-ledger/:id', authorize('reports', 'view'), noFinanceForOperator, controller.supplierInventoryLedger);
+// Rice Type Ledger — per-variety stock + revenue + profit, finance-gated like above.
+router.get('/rice-type-ledger', authorize('reports', 'view'), noFinanceForOperator, controller.riceTypeIndex);
+router.get('/rice-type-ledger/:id', authorize('reports', 'view'), noFinanceForOperator, controller.riceTypeLedger);
 router.get('/quality/supplier-ranking', authorize('reports', 'view'), controller.supplierQualityRanking);
 router.get('/quality/recovery-leaderboard', authorize('reports', 'view'), controller.batchRecoveryLeaderboard);
 router.get('/quality/recovery-by-variety', authorize('reports', 'view'), controller.recoveryByVariety);
