@@ -2986,7 +2986,9 @@ const reportingService = {
       .join('mill_payroll_runs as r', 'r.id', 'l.run_id')
       .leftJoin('mill_workers as w', 'w.id', 'l.worker_id')
       .leftJoin('bank_accounts as b', 'b.id', 'r.bank_account_id')
-      .whereIn('r.status', ['paid', 'posted']); // only actually-paid runs
+      // A line counts as paid when it has paid_at (partial or normal pay) OR its
+      // run is fully paid/posted (legacy runs whose lines predate paid_at).
+      .where(function () { this.whereNotNull('l.paid_at').orWhereIn('r.status', ['paid', 'posted']); });
     if (month) q = q.where('r.period', month);
     if (from) q = q.where('r.period', '>=', from);
     if (to) q = q.where('r.period', '<=', to);
@@ -3023,8 +3025,11 @@ const reportingService = {
   async getPayrollOverview({ month } = {}) {
     const num = (v) => parseFloat(v) || 0;
     const period = /^\d{4}-\d{2}$/.test(month || '') ? month : new Date().toISOString().slice(0, 7);
-    const runAgg = await db('mill_payroll_runs').where('period', period).whereIn('status', ['paid', 'posted'])
-      .select(db.raw('COALESCE(SUM(net_total),0) as net'), db.raw('COALESCE(SUM(gross_total),0) as gross'), db.raw('COALESCE(SUM(advance_total),0) as advance'), db.raw('COUNT(*) as runs')).first();
+    // Paid-line level so a partially_paid run contributes its paid portion.
+    const runAgg = await db('mill_payroll_lines as l').join('mill_payroll_runs as r', 'r.id', 'l.run_id')
+      .where('r.period', period)
+      .where(function () { this.whereNotNull('l.paid_at').orWhereIn('r.status', ['paid', 'posted']); })
+      .select(db.raw('COALESCE(SUM(l.net_pay),0) as net'), db.raw('COALESCE(SUM(l.gross_pay),0) as gross'), db.raw('COALESCE(SUM(l.advance_deducted),0) as advance'), db.raw('COUNT(DISTINCT l.run_id) as runs')).first();
     const advOut = await db('mill_worker_advances').where('status', 'outstanding')
       .select(db.raw('COALESCE(SUM(amount - recovered_amount),0) as outstanding')).first();
     const activeWorkers = await db('mill_workers').where('is_active', true).count('* as c').first();
@@ -3036,9 +3041,10 @@ const reportingService = {
       .whereRaw("TO_CHAR(expense_date, 'YYYY-MM') = ?", [period])
       .select(db.raw('COALESCE(SUM(COALESCE(amount_pkr, amount)),0) as total')).first();
     // 6-month net payroll trend.
-    const trendRows = await db('mill_payroll_runs').whereIn('status', ['paid', 'posted'])
-      .select('period', db.raw('COALESCE(SUM(net_total),0) as net'))
-      .groupBy('period').orderBy('period', 'desc').limit(6);
+    const trendRows = await db('mill_payroll_lines as l').join('mill_payroll_runs as r', 'r.id', 'l.run_id')
+      .where(function () { this.whereNotNull('l.paid_at').orWhereIn('r.status', ['paid', 'posted']); })
+      .select('r.period as period', db.raw('COALESCE(SUM(l.net_pay),0) as net'))
+      .groupBy('r.period').orderBy('r.period', 'desc').limit(6);
     const salaryTotal = num(salaryExp.total); const allTotal = num(allExp.total);
     return {
       period,
@@ -3061,17 +3067,29 @@ const reportingService = {
     const runs = await db('mill_payroll_runs as r')
       .leftJoin('users as up', 'up.id', 'r.created_by')
       .leftJoin('users as ua', 'ua.id', 'r.approved_by')
-      .whereIn('r.status', ['prepared', 'approved'])
+      .whereIn('r.status', ['prepared', 'approved', 'partially_paid'])
       .orderBy('r.created_at', 'asc')
       .select('r.id', 'r.period', 'r.pay_date', 'r.pay_method', 'r.status', 'r.gross_total', 'r.advance_total', 'r.net_total', 'r.employee_count', 'r.created_at', 'up.full_name as prepared_by_name', 'ua.full_name as approved_by_name');
-    return {
-      runs: runs.map((r) => ({
+    // Remaining (unpaid) net + headcount per run — for prepared/approved this is
+    // the whole run; for partially_paid it's only what's still owed.
+    const ids = runs.map((r) => r.id);
+    const unpaid = ids.length ? await db('mill_payroll_lines').whereIn('run_id', ids).whereNull('paid_at')
+      .groupBy('run_id').select('run_id', db.raw('COALESCE(SUM(net_pay),0) as net'), db.raw('COUNT(*) as cnt')) : [];
+    const uMap = new Map(unpaid.map((u) => [u.run_id, u]));
+    const mapped = runs.map((r) => {
+      const u = uMap.get(r.id);
+      const net = u ? num(u.net) : num(r.net_total);
+      const cnt = u ? parseInt(u.cnt, 10) : r.employee_count;
+      return {
         id: r.id, period: r.period, payDate: r.pay_date, payMethod: r.pay_method, status: r.status,
-        gross: Math.round(num(r.gross_total)), advance: Math.round(num(r.advance_total)), net: Math.round(num(r.net_total)),
-        employeeCount: r.employee_count, preparedBy: r.prepared_by_name || null, approvedBy: r.approved_by_name || null, preparedAt: r.created_at,
-      })),
-      count: runs.length,
-      netPending: runs.reduce((s, r) => s + num(r.net_total), 0),
+        gross: Math.round(num(r.gross_total)), advance: Math.round(num(r.advance_total)), net: Math.round(net),
+        employeeCount: cnt, preparedBy: r.prepared_by_name || null, approvedBy: r.approved_by_name || null, preparedAt: r.created_at,
+      };
+    });
+    return {
+      runs: mapped,
+      count: mapped.length,
+      netPending: mapped.reduce((s, r) => s + r.net, 0),
     };
   },
 
@@ -3086,17 +3104,16 @@ const reportingService = {
     // List of periods in range (cap 36).
     const periods = []; let p = fromM; for (let i = 0; i < 36 && p <= toM; i += 1) { periods.push(p); p = addMonth(p, 1); }
 
-    const runs = await db('mill_payroll_runs').whereIn('status', ['paid', 'posted'])
-      .where('period', '>=', fromM).where('period', '<=', toM)
-      .select('id', 'period', 'gross_total', 'advance_total', 'net_total', 'employee_count');
-    const runIds = runs.map((r) => r.id);
-    const lines = runIds.length ? await db('mill_payroll_lines as l').join('mill_payroll_runs as r', 'r.id', 'l.run_id')
-      .whereIn('l.run_id', runIds)
-      .select('l.worker_id', 'l.worker_name', 'l.role', 'l.pay_type', 'l.gross_pay', 'l.net_pay', 'l.advance_deducted', 'l.ot_hours', 'r.period') : [];
+    // Paid lines in range (paid_at set, or legacy fully-paid/posted run) — so a
+    // partially_paid run contributes the employees it has actually paid.
+    const lines = await db('mill_payroll_lines as l').join('mill_payroll_runs as r', 'r.id', 'l.run_id')
+      .where('r.period', '>=', fromM).where('r.period', '<=', toM)
+      .where(function () { this.whereNotNull('l.paid_at').orWhereIn('r.status', ['paid', 'posted']); })
+      .select('l.run_id', 'l.worker_id', 'l.worker_name', 'l.role', 'l.pay_type', 'l.gross_pay', 'l.net_pay', 'l.advance_deducted', 'l.ot_hours', 'r.period');
 
-    // Monthly trend (fill zeros for empty months).
-    const byPeriod = {}; for (const r of runs) { const b = byPeriod[r.period] || (byPeriod[r.period] = { gross: 0, net: 0, advance: 0, employees: 0 }); b.gross += num(r.gross_total); b.net += num(r.net_total); b.advance += num(r.advance_total); b.employees += r.employee_count; }
-    const trend = periods.map((per) => ({ period: per, gross: Math.round((byPeriod[per] || {}).gross || 0), net: Math.round((byPeriod[per] || {}).net || 0), advance: Math.round((byPeriod[per] || {}).advance || 0), employees: (byPeriod[per] || {}).employees || 0 }));
+    // Monthly trend (fill zeros for empty months) — from paid lines.
+    const byPeriod = {}; for (const l of lines) { const b = byPeriod[l.period] || (byPeriod[l.period] = { gross: 0, net: 0, advance: 0, workers: new Set() }); b.gross += num(l.gross_pay); b.net += num(l.net_pay); b.advance += num(l.advance_deducted); b.workers.add(l.worker_id); }
+    const trend = periods.map((per) => ({ period: per, gross: Math.round((byPeriod[per] || {}).gross || 0), net: Math.round((byPeriod[per] || {}).net || 0), advance: Math.round((byPeriod[per] || {}).advance || 0), employees: byPeriod[per] ? byPeriod[per].workers.size : 0 }));
 
     // Cost by role (range).
     const roleMap = {};
@@ -3115,9 +3132,10 @@ const reportingService = {
     const advGivenRow = await db('mill_worker_advances').whereRaw("TO_CHAR(advance_date,'YYYY-MM') >= ?", [fromM]).whereRaw("TO_CHAR(advance_date,'YYYY-MM') <= ?", [toM]).select(db.raw('COALESCE(SUM(amount),0) as given')).first();
     const advOutRow = await db('mill_worker_advances').where('status', 'outstanding').select(db.raw('COALESCE(SUM(amount - recovered_amount),0) as outstanding')).first();
 
-    const totalGross = runs.reduce((s, r) => s + num(r.gross_total), 0);
-    const totalNet = runs.reduce((s, r) => s + num(r.net_total), 0);
-    const totalAdvanceRecovered = runs.reduce((s, r) => s + num(r.advance_total), 0);
+    const totalGross = lines.reduce((s, l) => s + num(l.gross_pay), 0);
+    const totalNet = lines.reduce((s, l) => s + num(l.net_pay), 0);
+    const totalAdvanceRecovered = lines.reduce((s, l) => s + num(l.advance_deducted), 0);
+    const runCount = new Set(lines.map((l) => l.run_id)).size;
     const paidEmployees = new Set(lines.map((l) => l.worker_id)).size;
     const given = num(advGivenRow.given);
 
@@ -3125,7 +3143,7 @@ const reportingService = {
       range: { from: fromM, to: toM },
       summary: {
         totalGross: Math.round(totalGross), totalNet: Math.round(totalNet), totalAdvanceRecovered: Math.round(totalAdvanceRecovered),
-        runs: runs.length, paidEmployees, activeWorkers, byPayType,
+        runs: runCount, paidEmployees, activeWorkers, byPayType,
         avgNetPerEmployee: paidEmployees ? Math.round(totalNet / paidEmployees) : 0,
         avgNetPerMonth: periods.length ? Math.round(totalNet / periods.length) : 0,
         advancesGiven: Math.round(given), advancesOutstanding: Math.round(num(advOutRow.outstanding)),

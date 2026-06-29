@@ -1369,7 +1369,9 @@ router.get('/payroll/tax-statement', authorize('payroll', 'view'), async (req, r
     const lines = await db('mill_payroll_lines as pl')
       .join('mill_payroll_runs as r', 'pl.run_id', 'r.id')
       .leftJoin('mill_workers as w', 'pl.worker_id', 'w.id')
-      .whereIn('r.status', ['paid', 'posted'])
+      // Paid lines only — counts an employee's pay once it's actually paid, incl.
+      // the paid portion of a partially_paid run.
+      .where(function () { this.whereNotNull('pl.paid_at').orWhereIn('r.status', ['paid', 'posted']); })
       .whereNotNull('pl.worker_id')
       .where('r.period', '>=', periodFrom).where('r.period', '<=', periodTo)
       .select('pl.*', 'r.period', 'r.pay_date',
