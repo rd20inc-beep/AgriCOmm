@@ -812,6 +812,7 @@ COL inventory_lots.landed_cost_per_kg:numeric:NOT NULL
 COL inventory_lots.landed_cost_total:numeric:NOT NULL
 COL inventory_lots.lot_no:character varying:NOT NULL
 COL inventory_lots.milling_cost_component:numeric:NULL
+COL inventory_lots.milling_reserved_qty:numeric:NOT NULL
 COL inventory_lots.milling_status:character varying:NULL
 COL inventory_lots.moisture_pct:numeric:NULL
 COL inventory_lots.net_weight_kg:numeric:NOT NULL

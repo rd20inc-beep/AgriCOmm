@@ -453,9 +453,15 @@ const millingController = {
               variety: b.lot.variety || null,
               ratio_pct: resolvedRawQty > 0 ? Math.round((b.qty / resolvedRawQty) * 10000) / 100 : null,
             });
-            // Mark the lot In Milling so it isn't double-booked; consumed at yield.
+            // Mark In Milling AND hard-reserve the committed qty (P6a) so it
+            // can't be sold/export-allocated before yield. available_qty =
+            // qty − reserved_qty − milling_reserved_qty. Consumed/released at
+            // yield (consumeForMilling) and at batch delete/cancel.
             await trx('inventory_lots').where({ id: b.lot.id }).update({
-              milling_status: 'In Milling', updated_at: trx.fn.now(),
+              milling_status: 'In Milling',
+              milling_reserved_qty: trx.raw('COALESCE(milling_reserved_qty, 0) + ?', [b.qty]),
+              available_qty: trx.raw('GREATEST(COALESCE(qty, 0) - COALESCE(reserved_qty, 0) - (COALESCE(milling_reserved_qty, 0) + ?), 0)', [b.qty]),
+              updated_at: trx.fn.now(),
             });
           }
           // Feed the weighted raw cost into the batch cost pool (category
@@ -1744,8 +1750,14 @@ const millingController = {
         for (const s of sourceLots) {
           const srcLot = await trx('inventory_lots').where({ id: s.lot_id }).first();
           if (srcLot && srcLot.milling_status === 'In Milling') {
+            // Release the milling hold placed at batch start (P6a) so the qty
+            // returns to available_qty for sale / another batch.
+            const heldQty = parseFloat(s.qty_mt) || 0;
             await trx('inventory_lots').where({ id: s.lot_id }).update({
-              milling_status: null, status: 'Available', updated_at: trx.fn.now(),
+              milling_status: null, status: 'Available',
+              milling_reserved_qty: trx.raw('GREATEST(COALESCE(milling_reserved_qty, 0) - ?, 0)', [heldQty]),
+              available_qty: trx.raw('COALESCE(qty, 0) - COALESCE(reserved_qty, 0) - GREATEST(COALESCE(milling_reserved_qty, 0) - ?, 0)', [heldQty]),
+              updated_at: trx.fn.now(),
             });
           }
         }
