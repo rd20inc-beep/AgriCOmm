@@ -19,7 +19,7 @@ import {
   useApprovePayrollRun, usePayPayrollRun, useVoidPayrollRun, useAccruePayrollRun, useSettlePayrollRun,
   useStatutoryDeductions, useCreateStatutoryDeduction, useUpdateStatutoryDeduction, useDeleteStatutoryDeduction,
   useStatutoryLiabilities, useStatutoryRemittances, useCreateStatutoryRemittance, useDeleteStatutoryRemittance,
-  useTaxStatement,
+  useTaxStatement, useWorkerRequests, useWorkerRequestsCount, useResolveWorkerRequest,
   usePayrollSchedule, useSavePayrollSchedule, useRunPayrollNow,
   usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow, useAcceptFundTransfer,
   useMillLotCosts, useLocalSales, useRecordPayment, usePayablePayments,
@@ -216,6 +216,8 @@ export default function MillFinanceDashboard() {
   const [showScheduleDrawer, setShowScheduleDrawer] = useState(false);
   const [showStatutoryDrawer, setShowStatutoryDrawer] = useState(false);
   const [showTaxDrawer, setShowTaxDrawer] = useState(false);
+  const [showRequestsDrawer, setShowRequestsDrawer] = useState(false);
+  const { data: pendingRequestCount = 0 } = useWorkerRequestsCount();
   const [adjustWorker, setAdjustWorker] = useState(null); // open adjustments drawer for this worker
   const runNowMut = useRunPayrollNow();
 
@@ -1556,6 +1558,12 @@ export default function MillFinanceDashboard() {
                   <FileText className="w-3.5 h-3.5" /> Tax statements
                 </button>
               )}
+              {payrollView === 'payroll' && canViewPayroll && (
+                <button onClick={() => setShowRequestsDrawer(true)} className="relative inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 bg-white hover:bg-gray-50">
+                  <Inbox className="w-3.5 h-3.5" /> Requests
+                  {pendingRequestCount > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center">{pendingRequestCount}</span>}
+                </button>
+              )}
               {canPreparePayroll && (
                 <button onClick={() => openWorkerDrawer(null)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-700">
                   <UserPlus className="w-3.5 h-3.5" /> Add Employee
@@ -2327,6 +2335,11 @@ export default function MillFinanceDashboard() {
       {/* ─── YEAR-END TAX STATEMENTS DRAWER ────────────────────────── */}
       {showTaxDrawer && (
         <TaxStatementDrawer company={companyProfileData} onClose={() => setShowTaxDrawer(false)} addToast={addToast} />
+      )}
+
+      {/* ─── EMPLOYEE REQUESTS DRAWER ──────────────────────────────── */}
+      {showRequestsDrawer && (
+        <WorkerRequestsDrawer canResolve={canPreparePayroll} onClose={() => setShowRequestsDrawer(false)} addToast={addToast} />
       )}
 
       {/* ─── BONUSES & DEDUCTIONS DRAWER ───────────────────────────── */}
@@ -3844,6 +3857,64 @@ function StatutoryDeductionsDrawer({ canPay, bankAccounts = [], company, onClose
         </div>
         <p className="text-[11px] text-gray-400">Statutory amounts are withheld from each employee's net pay and booked to the chosen liability account (payable to the authority). They appear on payslips and reduce the cash paid out — the salary expense still reflects the full gross.</p>
       </div>
+      )}
+    </SlideDrawer>
+  );
+}
+
+// Employee self-service requests inbox (admin side) — workers raise leave /
+// advance / correction / query requests from the portal; payroll responds.
+function WorkerRequestsDrawer({ canResolve, onClose, addToast }) {
+  const [tab, setTab] = useState('pending');
+  const { data: requests = [], isLoading } = useWorkerRequests(tab === 'all' ? null : 'pending');
+  const resolveMut = useResolveWorkerRequest();
+  const [replyId, setReplyId] = useState(null);
+  const [reply, setReply] = useState('');
+
+  async function act(r, status) {
+    try { await resolveMut.mutateAsync({ id: r.id, data: { status, response: reply || null } }); setReplyId(null); setReply(''); addToast(`Request ${status}`, 'success'); }
+    catch (e) { addToast(e.message, 'error'); }
+  }
+  const TONE = { pending: 'bg-amber-100 text-amber-700', approved: 'bg-emerald-100 text-emerald-700', rejected: 'bg-rose-100 text-rose-700', resolved: 'bg-blue-100 text-blue-700' };
+
+  return (
+    <SlideDrawer open onClose={onClose} title="Employee requests" subtitle="Leave / advance / correction / query requests from the self-service portal" icon={Inbox} size="lg">
+      <div className="flex gap-1 mb-4 border-b border-gray-200">
+        {['pending', 'all'].map((t) => (
+          <button key={t} onClick={() => setTab(t)} className={`px-3 py-2 text-xs font-medium border-b-2 -mb-px capitalize ${tab === t ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>{t}</button>
+        ))}
+      </div>
+      {isLoading ? <p className="text-sm text-gray-400">Loading…</p> : !requests.length ? (
+        <p className="text-sm text-gray-400 py-6 text-center border border-dashed border-gray-200 rounded-lg">No {tab === 'pending' ? 'pending ' : ''}requests.</p>
+      ) : (
+        <div className="space-y-2">
+          {requests.map((r) => (
+            <div key={r.id} className="rounded-lg border border-gray-200 p-3">
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-semibold text-gray-900">{r.workerName} <span className="text-[10px] font-normal text-gray-400 capitalize">· {r.type}{r.subject ? ` · ${r.subject}` : ''}</span></div>
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold capitalize ${TONE[r.status] || 'bg-gray-100 text-gray-600'}`}>{r.status}</span>
+              </div>
+              {r.message && <div className="text-xs text-gray-600 mt-1">{r.message}</div>}
+              {r.fromDate && <div className="text-[11px] text-gray-400 mt-0.5">{String(r.fromDate).slice(0, 10)}{r.toDate ? ` → ${String(r.toDate).slice(0, 10)}` : ''}</div>}
+              {r.response && <div className="text-xs text-blue-700 bg-blue-50 rounded px-2 py-1 mt-1.5">Reply: {r.response}{r.handledByName ? ` — ${r.handledByName}` : ''}</div>}
+              {canResolve && r.status === 'pending' && (
+                replyId === r.id ? (
+                  <div className="mt-2 space-y-1.5">
+                    <textarea rows={2} value={reply} onChange={(e) => setReply(e.target.value)} placeholder="Reply (optional)" className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs" />
+                    <div className="flex gap-1.5">
+                      <button onClick={() => act(r, 'approved')} disabled={resolveMut.isPending} className="px-2.5 py-1.5 text-xs text-white bg-emerald-600 rounded-lg hover:bg-emerald-700">Approve</button>
+                      <button onClick={() => act(r, 'rejected')} disabled={resolveMut.isPending} className="px-2.5 py-1.5 text-xs text-rose-600 bg-rose-50 rounded-lg hover:bg-rose-100">Reject</button>
+                      <button onClick={() => act(r, 'resolved')} disabled={resolveMut.isPending} className="px-2.5 py-1.5 text-xs text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">Mark resolved</button>
+                      <button onClick={() => { setReplyId(null); setReply(''); }} className="px-2.5 py-1.5 text-xs text-gray-500 bg-gray-100 rounded-lg">Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={() => { setReplyId(r.id); setReply(''); }} className="mt-2 text-xs font-medium text-blue-700 hover:underline">Respond →</button>
+                )
+              )}
+            </div>
+          ))}
+        </div>
       )}
     </SlideDrawer>
   );

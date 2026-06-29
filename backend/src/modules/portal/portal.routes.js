@@ -152,4 +152,49 @@ router.get('/tax-statement', portalAuth, async (req, res) => {
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
+// POST /api/portal/change-pin — worker changes their own PIN.
+router.post('/change-pin', portalAuth, async (req, res) => {
+  try {
+    const current = String(req.body && req.body.current_pin || '');
+    const next = String(req.body && req.body.new_pin || '').trim();
+    if (!/^\d{4,8}$/.test(next)) return res.status(400).json({ success: false, message: 'New PIN must be 4–8 digits.' });
+    const w = await db('mill_workers').where('id', req.workerId).first();
+    if (!w || !w.portal_pin_hash) return res.status(404).json({ success: false, message: 'Worker not found.' });
+    const ok = await bcrypt.compare(current, w.portal_pin_hash);
+    if (!ok) return res.status(401).json({ success: false, message: 'Current PIN is incorrect.' });
+    await db('mill_workers').where('id', w.id).update({ portal_pin_hash: await bcrypt.hash(next, 10), updated_at: db.fn.now() });
+    return res.json({ success: true, data: { changed: true } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// GET /api/portal/requests — the worker's own requests.
+router.get('/requests', portalAuth, async (req, res) => {
+  try {
+    const rows = await db('mill_worker_requests').where('worker_id', req.workerId).orderBy('created_at', 'desc');
+    return res.json({
+      success: true,
+      data: rows.map((r) => ({
+        id: r.id, type: r.type, subject: r.subject, message: r.message,
+        fromDate: r.from_date, toDate: r.to_date, status: r.status,
+        response: r.response, createdAt: r.created_at, handledAt: r.handled_at,
+      })),
+    });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// POST /api/portal/requests — worker raises a request.
+router.post('/requests', portalAuth, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const type = ['leave', 'advance', 'correction', 'query'].includes(b.type) ? b.type : 'query';
+    const message = String(b.message || '').trim();
+    if (!message) return res.status(400).json({ success: false, message: 'Please describe your request.' });
+    const [row] = await db('mill_worker_requests').insert({
+      worker_id: req.workerId, type, subject: (b.subject || '').slice(0, 160) || null,
+      message, from_date: b.from_date || null, to_date: b.to_date || null, status: 'pending',
+    }).returning('*');
+    return res.status(201).json({ success: true, data: { id: row.id } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
 module.exports = router;

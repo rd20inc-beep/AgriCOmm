@@ -104,6 +104,13 @@ export default function EmployeePortal() {
   const [payslips, setPayslips] = useState([]);
   const [tax, setTax] = useState(null);
   const [taxYear, setTaxYear] = useState('');
+  const [advances, setAdvances] = useState(null);
+  const [requests, setRequests] = useState([]);
+  const [reqForm, setReqForm] = useState({ type: 'leave', subject: '', message: '', from_date: '', to_date: '' });
+  const [reqOpen, setReqOpen] = useState(false);
+  const [pinForm, setPinForm] = useState({ current_pin: '', new_pin: '' });
+  const [pinOpen, setPinOpen] = useState(false);
+  const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
   const [form, setForm] = useState({ cnic: '', pin: '' });
@@ -113,8 +120,11 @@ export default function EmployeePortal() {
   const loadAll = useCallback(async (tk) => {
     setLoading(true); setErr('');
     try {
-      const [meRes, psRes] = await Promise.all([portalApi('/me', { token: tk }), portalApi('/payslips', { token: tk })]);
-      setMe(meRes.data); setPayslips(psRes.data || []);
+      const [meRes, psRes, advRes, reqRes] = await Promise.all([
+        portalApi('/me', { token: tk }), portalApi('/payslips', { token: tk }),
+        portalApi('/advances', { token: tk }), portalApi('/requests', { token: tk }),
+      ]);
+      setMe(meRes.data); setPayslips(psRes.data || []); setAdvances(advRes.data); setRequests(reqRes.data || []);
       const tyRes = await portalApi('/tax-statement', { token: tk });
       setTax(tyRes.data); setTaxYear(tyRes.data.taxYear);
     } catch (e) {
@@ -136,6 +146,23 @@ export default function EmployeePortal() {
     setTaxYear(y);
     try { const r = await portalApi(`/tax-statement?tax_year=${y}`, { token }); setTax(r.data); } catch (e) { setErr(e.message); }
   }
+  async function submitRequest(e) {
+    e.preventDefault(); setErr(''); setMsg('');
+    if (!reqForm.message.trim()) { setErr('Please describe your request.'); return; }
+    try {
+      await portalApi('/requests', { method: 'POST', token, body: reqForm });
+      setReqForm({ type: 'leave', subject: '', message: '', from_date: '', to_date: '' }); setReqOpen(false); setMsg('Request submitted.');
+      const r = await portalApi('/requests', { token }); setRequests(r.data || []);
+    } catch (e2) { setErr(e2.message); }
+  }
+  async function changePin(e) {
+    e.preventDefault(); setErr(''); setMsg('');
+    try {
+      await portalApi('/change-pin', { method: 'POST', token, body: pinForm });
+      setPinForm({ current_pin: '', new_pin: '' }); setPinOpen(false); setMsg('PIN changed.');
+    } catch (e2) { setErr(e2.message); }
+  }
+  const REQ_TONE = { pending: 'bg-amber-100 text-amber-700', approved: 'bg-emerald-100 text-emerald-700', rejected: 'bg-rose-100 text-rose-700', resolved: 'bg-blue-100 text-blue-700' };
 
   // ── Login screen ──
   if (!token || !me) {
@@ -173,7 +200,10 @@ export default function EmployeePortal() {
           <div className="text-sm font-semibold">{co?.legalName || co?.name || 'Agri Commodities'}</div>
           <div className="text-[11px] text-slate-300">Employee Self-Service</div>
         </div>
-        <button onClick={logout} className="text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20">Sign out</button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => { setPinOpen((v) => !v); setMsg(''); setErr(''); }} className="text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20">Change PIN</button>
+          <button onClick={logout} className="text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20">Sign out</button>
+        </div>
       </header>
 
       <main className="max-w-2xl mx-auto p-4 space-y-4">
@@ -185,6 +215,82 @@ export default function EmployeePortal() {
             <div className="rounded-lg bg-amber-50 p-2.5"><div className="text-[10px] uppercase text-amber-500">Advance outstanding</div><div className="text-sm font-semibold text-amber-700 tabular-nums">{PKR(me.advanceOutstanding)}</div></div>
             <div className="rounded-lg bg-slate-50 p-2.5"><div className="text-[10px] uppercase text-gray-400">Bank</div><div className="text-sm font-semibold text-gray-700">{w.bankName || '—'}</div></div>
           </div>
+        </div>
+
+        {msg && <div className="text-xs text-emerald-700 bg-emerald-50 rounded-lg px-3 py-2">{msg}</div>}
+
+        {/* Change PIN */}
+        {pinOpen && (
+          <div className="bg-white rounded-xl shadow-sm p-4">
+            <div className="text-sm font-semibold text-gray-900 mb-2">Change your PIN</div>
+            <form onSubmit={changePin} className="space-y-2">
+              <input type="password" inputMode="numeric" maxLength={8} value={pinForm.current_pin} onChange={(e) => setPinForm((f) => ({ ...f, current_pin: e.target.value.replace(/\D/g, '') }))} placeholder="Current PIN" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+              <input type="password" inputMode="numeric" maxLength={8} value={pinForm.new_pin} onChange={(e) => setPinForm((f) => ({ ...f, new_pin: e.target.value.replace(/\D/g, '') }))} placeholder="New PIN (4–8 digits)" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+              <button type="submit" className="px-4 py-2 text-sm text-white bg-[#1e3a5f] rounded-lg hover:bg-[#162a45]">Update PIN</button>
+            </form>
+          </div>
+        )}
+
+        {/* Advances */}
+        {advances && advances.advances.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm p-4">
+            <div className="text-sm font-semibold text-gray-900 mb-2">My advances</div>
+            <div className="space-y-2">
+              {advances.advances.map((a) => (
+                <div key={a.id} className="rounded-lg border border-gray-200 p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-semibold text-gray-900">{PKR(a.amount)} <span className="text-[10px] font-normal text-gray-400 capitalize">{String(a.recoveryMethod || '').replace(/_/g, ' ')}</span></div>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${a.status === 'outstanding' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>{a.status}</span>
+                  </div>
+                  <div className="text-xs text-gray-500 mt-0.5">Recovered {PKR(a.recovered)} · <span className="text-amber-700 font-medium">remaining {PKR(a.remaining)}</span></div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Requests */}
+        <div className="bg-white rounded-xl shadow-sm p-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-sm font-semibold text-gray-900">My requests</div>
+            <button onClick={() => { setReqOpen((v) => !v); setMsg(''); setErr(''); }} className="text-xs font-medium text-blue-700 bg-blue-50 px-3 py-1.5 rounded-lg hover:bg-blue-100">{reqOpen ? 'Cancel' : 'New request'}</button>
+          </div>
+          {reqOpen && (
+            <form onSubmit={submitRequest} className="space-y-2 mb-3 border-b border-gray-100 pb-3">
+              <div className="grid grid-cols-2 gap-2">
+                <select value={reqForm.type} onChange={(e) => setReqForm((f) => ({ ...f, type: e.target.value }))} className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+                  <option value="leave">Leave</option>
+                  <option value="advance">Advance</option>
+                  <option value="correction">Payslip correction</option>
+                  <option value="query">General query</option>
+                </select>
+                <input value={reqForm.subject} onChange={(e) => setReqForm((f) => ({ ...f, subject: e.target.value }))} placeholder="Subject" className="border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              {reqForm.type === 'leave' && (
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className="block text-[10px] text-gray-400 mb-0.5">From</label><input type="date" value={reqForm.from_date} onChange={(e) => setReqForm((f) => ({ ...f, from_date: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" /></div>
+                  <div><label className="block text-[10px] text-gray-400 mb-0.5">To</label><input type="date" value={reqForm.to_date} onChange={(e) => setReqForm((f) => ({ ...f, to_date: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" /></div>
+                </div>
+              )}
+              <textarea rows={2} value={reqForm.message} onChange={(e) => setReqForm((f) => ({ ...f, message: e.target.value }))} placeholder="Describe your request…" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+              <button type="submit" className="px-4 py-2 text-sm text-white bg-[#1e3a5f] rounded-lg hover:bg-[#162a45]">Submit request</button>
+            </form>
+          )}
+          {!requests.length ? <p className="text-sm text-gray-400 py-2 text-center">No requests yet.</p> : (
+            <div className="space-y-2">
+              {requests.map((r) => (
+                <div key={r.id} className="rounded-lg border border-gray-200 p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-medium text-gray-900 capitalize">{r.type}{r.subject ? ` · ${r.subject}` : ''}</div>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold capitalize ${REQ_TONE[r.status] || 'bg-gray-100 text-gray-600'}`}>{r.status}</span>
+                  </div>
+                  {r.message && <div className="text-xs text-gray-500 mt-0.5">{r.message}</div>}
+                  {r.fromDate && <div className="text-[11px] text-gray-400 mt-0.5">{String(r.fromDate).slice(0, 10)}{r.toDate ? ` → ${String(r.toDate).slice(0, 10)}` : ''}</div>}
+                  {r.response && <div className="text-xs text-blue-700 bg-blue-50 rounded px-2 py-1 mt-1.5">Reply: {r.response}</div>}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Payslips */}

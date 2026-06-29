@@ -979,6 +979,38 @@ router.post('/workers/:id/portal-pin', authorize('payroll', 'edit'), async (req,
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ── Employee self-service requests (admin side — Phase 20) ──
+router.get('/worker-requests', authorize('payroll', 'view'), async (req, res) => {
+  try {
+    let q = db('mill_worker_requests as r').leftJoin('mill_workers as w', 'w.id', 'r.worker_id')
+      .leftJoin('users as u', 'u.id', 'r.handled_by')
+      .select('r.*', 'w.name as worker_name', 'w.role as worker_role', 'u.full_name as handled_by_name')
+      .orderBy('r.created_at', 'desc');
+    if (req.query.status) q = q.where('r.status', req.query.status);
+    const rows = await q;
+    return res.json({ success: true, data: rows });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.get('/worker-requests/count', authorize('payroll', 'view'), async (req, res) => {
+  try {
+    const row = await db('mill_worker_requests').where('status', 'pending').count('id as c').first();
+    return res.json({ success: true, data: { pending: parseInt(row?.c, 10) || 0 } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.post('/worker-requests/:id/resolve', authorize('payroll', 'edit'), async (req, res) => {
+  try {
+    const r = await db('mill_worker_requests').where('id', req.params.id).first();
+    if (!r) return res.status(404).json({ success: false, message: 'Request not found.' });
+    const status = ['approved', 'rejected', 'resolved'].includes(req.body?.status) ? req.body.status : 'resolved';
+    const [updated] = await db('mill_worker_requests').where('id', r.id).update({
+      status, response: req.body?.response || null, handled_by: req.user?.id || null, handled_at: db.fn.now(), updated_at: db.fn.now(),
+    }).returning('*');
+    return res.json({ success: true, data: updated });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
 // Delete a worker permanently — unwinds every advance's cash-out, then cascades
 // attendance + advances (FK onDelete CASCADE) and removes the worker.
 router.delete('/workers/:id', authorize('payroll', 'delete'), async (req, res) => {

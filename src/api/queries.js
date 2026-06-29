@@ -1306,6 +1306,26 @@ export function useSetWorkerPortalPin() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['mill-workers'] }); },
   });
 }
+export function useWorkerRequests(status) {
+  return useQuery({
+    queryKey: ['worker-requests', status || 'all'],
+    queryFn: async () => { const res = await millingApi.listWorkerRequests(status ? { status } : {}); return transformKeys(res?.data || []); },
+  });
+}
+export function useWorkerRequestsCount() {
+  return useQuery({
+    queryKey: ['worker-requests-count'],
+    queryFn: async () => { const res = await millingApi.workerRequestsCount(); return res?.data?.pending || 0; },
+    refetchInterval: 60000,
+  });
+}
+export function useResolveWorkerRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => millingApi.resolveWorkerRequest(id, data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['worker-requests'] }); qc.invalidateQueries({ queryKey: ['worker-requests-count'] }); },
+  });
+}
 
 export function useWorkerAdvances(workerId) {
   return useQuery({

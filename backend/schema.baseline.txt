@@ -1326,6 +1326,19 @@ COL mill_worker_advances.recovery_start_period:character varying:NULL
 COL mill_worker_advances.status:character varying:NOT NULL
 COL mill_worker_advances.updated_at:timestamp with time zone:NOT NULL
 COL mill_worker_advances.worker_id:integer:NOT NULL
+COL mill_worker_requests.created_at:timestamp with time zone:NOT NULL
+COL mill_worker_requests.from_date:date:NULL
+COL mill_worker_requests.handled_at:timestamp with time zone:NULL
+COL mill_worker_requests.handled_by:integer:NULL
+COL mill_worker_requests.id:integer:NOT NULL
+COL mill_worker_requests.message:text:NULL
+COL mill_worker_requests.response:text:NULL
+COL mill_worker_requests.status:character varying:NOT NULL
+COL mill_worker_requests.subject:character varying:NULL
+COL mill_worker_requests.to_date:date:NULL
+COL mill_worker_requests.type:character varying:NOT NULL
+COL mill_worker_requests.updated_at:timestamp with time zone:NOT NULL
+COL mill_worker_requests.worker_id:integer:NOT NULL
 COL mill_workers.bank_account_number:character varying:NULL
 COL mill_workers.bank_name:character varying:NULL
 COL mill_workers.cnic:character varying:NULL
@@ -2602,6 +2615,8 @@ CON mill_worker_advance_recovery_schedule.mill_worker_advance_recovery_schedule_
 CON mill_worker_advances.mill_worker_advances_expense_id_foreign(f)
 CON mill_worker_advances.mill_worker_advances_pkey(p)
 CON mill_worker_advances.mill_worker_advances_worker_id_foreign(f)
+CON mill_worker_requests.mill_worker_requests_pkey(p)
+CON mill_worker_requests.mill_worker_requests_worker_id_foreign(f)
 CON mill_workers.mill_workers_mill_id_foreign(f)
 CON mill_workers.mill_workers_pkey(p)
 CON milling_batches.chk_mb_b1_nonneg(c)
