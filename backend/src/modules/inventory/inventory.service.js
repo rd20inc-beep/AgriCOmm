@@ -1235,8 +1235,25 @@ const inventoryService = {
       userId,
     });
 
+    // Auto-reserve the freshly-transferred stock against the order it was moved
+    // for, so the export lot can't be double-allocated and is dispatched at
+    // Shipped (the dispatch loop runs off inventory_reservations). No order ⇒
+    // the lot stays available in the export pool (speculative transfer), as
+    // before. reserveStock reads available_qty (just set by the TRANSFER_IN),
+    // enforces the over-reserve cap, writes the reservation row + ledger entry,
+    // and sets reserved_against — all inside this same transaction.
+    let reservation = null;
+    if (orderId) {
+      reservation = await inventoryService.reserveStock(trx, {
+        lotId: exportLot.id,
+        orderId,
+        qtyMT: parsedQty,
+        userId,
+      });
+    }
+
     const updatedExportLot = await trx('inventory_lots').where('id', exportLot.id).first();
-    return { outMovement, inMovement, exportLot: updatedExportLot };
+    return { outMovement, inMovement, exportLot: updatedExportLot, reservation };
   },
 
   // =========================================================================

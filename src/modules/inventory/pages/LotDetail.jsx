@@ -2348,6 +2348,7 @@ function TransferToExportDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
               <option key={o.id} value={o.id}>{o.order_no || o.orderNo} — {o.customer_name || o.customerName || ''}</option>
             ))}
           </select>
+          <p className="text-xs text-gray-400 mt-1">{orderId ? 'The transferred stock is reserved for this order and dispatched when it ships.' : 'No order — the stock stays available in the export pool to allocate later.'}</p>
         </div>
       </form>
     </SlideDrawer>
