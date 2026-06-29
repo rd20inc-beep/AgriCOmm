@@ -267,7 +267,7 @@ async function preparePayrollRun({ month, lines, pay_method, bank_account_id, pa
     }).returning('*');
     for (const w of toPay) {
       await trx('mill_payroll_lines').insert({
-        run_id: r.id, worker_id: w.id, worker_name: w.name, role: w.role, pay_type: w.pay_type,
+        run_id: r.id, worker_id: w.id, worker_name: w.name, role: w.role, department: w.department || null, pay_type: w.pay_type,
         effective_days: w.effectiveDays || 0, ot_hours: w.totalOT || 0,
         basic_pay: w.basicPay, ot_pay: w.otPay, gross_pay: w.grossPay,
         employed_days: w.employedDays != null ? w.employedDays : null,

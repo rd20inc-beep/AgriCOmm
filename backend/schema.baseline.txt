@@ -1130,6 +1130,7 @@ COL mill_payroll_lines.bonus_total:numeric:NOT NULL
 COL mill_payroll_lines.created_at:timestamp with time zone:NOT NULL
 COL mill_payroll_lines.days_in_month:integer:NULL
 COL mill_payroll_lines.deduction_total:numeric:NOT NULL
+COL mill_payroll_lines.department:character varying:NULL
 COL mill_payroll_lines.effective_days:numeric:NOT NULL
 COL mill_payroll_lines.employed_days:integer:NULL
 COL mill_payroll_lines.expense_id:integer:NULL
@@ -1344,6 +1345,7 @@ COL mill_workers.bank_name:character varying:NULL
 COL mill_workers.cnic:character varying:NULL
 COL mill_workers.created_at:timestamp with time zone:NOT NULL
 COL mill_workers.daily_wage:numeric:NOT NULL
+COL mill_workers.department:character varying:NULL
 COL mill_workers.iban:character varying:NULL
 COL mill_workers.id:integer:NOT NULL
 COL mill_workers.is_active:boolean:NOT NULL

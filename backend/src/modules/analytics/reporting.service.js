@@ -2980,7 +2980,7 @@ const reportingService = {
   // ── Payroll Ledger — one row per employee per payroll run, with filters. ──
   // Read-only over mill_payroll_lines/runs/workers. Reuses existing payroll data;
   // creates none. (Finance/Reports surface; gated reports.view, no Mill Operator.)
-  async getPayrollLedger({ from, to, month, employee, role, payMethod, status } = {}) {
+  async getPayrollLedger({ from, to, month, employee, role, department, payMethod, status } = {}) {
     const num = (v) => parseFloat(v) || 0;
     let q = db('mill_payroll_lines as l')
       .join('mill_payroll_runs as r', 'r.id', 'l.run_id')
@@ -2994,15 +2994,16 @@ const reportingService = {
     if (to) q = q.where('r.period', '<=', to);
     if (employee) q = q.where('l.worker_id', parseInt(employee, 10));
     if (role) q = q.where('l.role', role);
+    if (department) q = q.where('l.department', department);
     if (payMethod) q = q.where('r.pay_method', payMethod);
     const rows = await q
       .select('l.id', 'r.id as run_id', 'r.period', 'r.pay_date', 'r.pay_method', 'b.name as account_name',
-        'l.worker_id', 'l.worker_name', 'l.role', 'l.pay_type', 'l.effective_days', 'l.ot_hours',
+        'l.worker_id', 'l.worker_name', 'l.role', 'l.department', 'l.pay_type', 'l.effective_days', 'l.ot_hours',
         'l.gross_pay', 'l.advance_deducted', 'l.net_pay')
       .orderBy('r.pay_date', 'desc').orderBy('l.id', 'desc');
     const out = rows.map((r) => ({
       id: r.id, runId: r.run_id, period: r.period, date: r.pay_date,
-      employee: r.worker_name, workerId: r.worker_id || null, role: r.role || '—', payType: r.pay_type || '—',
+      employee: r.worker_name, workerId: r.worker_id || null, role: r.role || '—', department: r.department || '—', payType: r.pay_type || '—',
       effectiveDays: num(r.effective_days), otHours: num(r.ot_hours),
       gross: Math.round(num(r.gross_pay)), advanceDeducted: Math.round(num(r.advance_deducted)), net: Math.round(num(r.net_pay)),
       payMethod: r.pay_method || 'cash', account: r.account_name || (r.pay_method === 'bank' ? '—' : 'Mill Cash'),
@@ -3017,7 +3018,8 @@ const reportingService = {
     };
     // Distinct roles for the filter dropdown.
     const roles = [...new Set(out.map((r) => r.role).filter((x) => x && x !== '—'))];
-    return { rows: out, totals, roles };
+    const departments = [...new Set(out.map((r) => r.department).filter((x) => x && x !== '—'))];
+    return { rows: out, totals, roles, departments };
   },
 
   // ── Payroll overview KPIs for the Head-Office Finance dashboard. ──
@@ -3109,7 +3111,7 @@ const reportingService = {
     const lines = await db('mill_payroll_lines as l').join('mill_payroll_runs as r', 'r.id', 'l.run_id')
       .where('r.period', '>=', fromM).where('r.period', '<=', toM)
       .where(function () { this.whereNotNull('l.paid_at').orWhereIn('r.status', ['paid', 'posted']); })
-      .select('l.run_id', 'l.worker_id', 'l.worker_name', 'l.role', 'l.pay_type', 'l.gross_pay', 'l.net_pay', 'l.advance_deducted', 'l.ot_hours', 'r.period');
+      .select('l.run_id', 'l.worker_id', 'l.worker_name', 'l.role', 'l.department', 'l.pay_type', 'l.gross_pay', 'l.net_pay', 'l.advance_deducted', 'l.ot_hours', 'r.period');
 
     // Monthly trend (fill zeros for empty months) — from paid lines.
     const byPeriod = {}; for (const l of lines) { const b = byPeriod[l.period] || (byPeriod[l.period] = { gross: 0, net: 0, advance: 0, workers: new Set() }); b.gross += num(l.gross_pay); b.net += num(l.net_pay); b.advance += num(l.advance_deducted); b.workers.add(l.worker_id); }
@@ -3119,6 +3121,11 @@ const reportingService = {
     const roleMap = {};
     for (const l of lines) { const k = l.role || '—'; const b = roleMap[k] || (roleMap[k] = { role: k, gross: 0, net: 0, advance: 0, ot: 0, workers: new Set() }); b.gross += num(l.gross_pay); b.net += num(l.net_pay); b.advance += num(l.advance_deducted); b.ot += num(l.ot_hours); b.workers.add(l.worker_id); }
     const byRole = Object.values(roleMap).map((b) => ({ role: b.role, employees: b.workers.size, gross: Math.round(b.gross), net: Math.round(b.net), advance: Math.round(b.advance), otHours: Math.round(b.ot) })).sort((a, b) => b.net - a.net);
+
+    // Cost by department / cost-center (range).
+    const deptMap = {};
+    for (const l of lines) { const k = l.department || 'Unassigned'; const b = deptMap[k] || (deptMap[k] = { department: k, gross: 0, net: 0, advance: 0, workers: new Set() }); b.gross += num(l.gross_pay); b.net += num(l.net_pay); b.advance += num(l.advance_deducted); b.workers.add(l.worker_id); }
+    const byDepartment = Object.values(deptMap).map((b) => ({ department: b.department, employees: b.workers.size, gross: Math.round(b.gross), net: Math.round(b.net), advance: Math.round(b.advance) })).sort((a, b) => b.net - a.net);
 
     // Top earners (range).
     const earnMap = {};
@@ -3149,7 +3156,7 @@ const reportingService = {
         advancesGiven: Math.round(given), advancesOutstanding: Math.round(num(advOutRow.outstanding)),
         advanceRecoveryRate: given > 0 ? Math.round((totalAdvanceRecovered / given) * 1000) / 10 : 0,
       },
-      trend, byRole, topEarners,
+      trend, byRole, byDepartment, topEarners,
     };
   },
 };

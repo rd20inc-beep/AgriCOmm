@@ -17,6 +17,7 @@ const COLS = [
   { label: 'Month', key: 'period' },
   { label: 'Employee', key: 'employee' },
   { label: 'Role', key: 'role' },
+  { label: 'Department', key: 'department' },
   { label: 'Pay type', key: 'payType' },
   { label: 'Gross', align: 'right', accessor: (r) => Math.round(r.gross) },
   { label: 'Advance deducted', align: 'right', accessor: (r) => Math.round(r.advanceDeducted) },
@@ -29,7 +30,7 @@ const COLS = [
 export default function PayrollLedger() {
   const { companyProfileData } = useApp();
   const { user } = useAuth();
-  const [filters, setFilters] = useState({ from: '', to: '', month: '', role: '', payMethod: '' });
+  const [filters, setFilters] = useState({ from: '', to: '', month: '', role: '', department: '', payMethod: '' });
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -46,6 +47,7 @@ export default function PayrollLedger() {
   const rows = data?.rows || [];
   const totals = data?.totals || {};
   const roles = data?.roles || [];
+  const departments = data?.departments || [];
   const set = (patch) => setFilters(f => ({ ...f, ...patch }));
   const stamp = new Date().toISOString().slice(0, 10);
   const exportMeta = useMemo(() => [`${rows.length} salary lines`, filters.month ? `Month: ${filters.month}` : null, filters.role ? `Role: ${filters.role}` : null].filter(Boolean), [rows.length, filters]);
@@ -80,13 +82,18 @@ export default function PayrollLedger() {
             <option value="">All roles</option>{roles.map(r => <option key={r} value={r}>{r}</option>)}
           </select>
         </div>
+        <div><label className="block text-[11px] text-gray-500 mb-1">Department</label>
+          <select value={filters.department} onChange={e => set({ department: e.target.value })} className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
+            <option value="">All departments</option>{departments.map(d => <option key={d} value={d}>{d}</option>)}
+          </select>
+        </div>
         <div><label className="block text-[11px] text-gray-500 mb-1">Mode</label>
           <select value={filters.payMethod} onChange={e => set({ payMethod: e.target.value })} className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
             <option value="">All</option><option value="cash">Cash</option><option value="bank">Bank</option>
           </select>
         </div>
-        {(filters.month || filters.from || filters.to || filters.role || filters.payMethod) && (
-          <button onClick={() => setFilters({ from: '', to: '', month: '', role: '', payMethod: '' })} className="text-xs text-blue-600 hover:underline ml-auto">Clear</button>
+        {(filters.month || filters.from || filters.to || filters.role || filters.department || filters.payMethod) && (
+          <button onClick={() => setFilters({ from: '', to: '', month: '', role: '', department: '', payMethod: '' })} className="text-xs text-blue-600 hover:underline ml-auto">Clear</button>
         )}
       </div>
 
@@ -107,6 +114,7 @@ export default function PayrollLedger() {
               <th className="px-3 py-2 text-left font-medium">Month</th>
               <th className="px-3 py-2 text-left font-medium">Employee</th>
               <th className="px-3 py-2 text-left font-medium">Role</th>
+              <th className="px-3 py-2 text-left font-medium">Department</th>
               <th className="px-3 py-2 text-right font-medium">Gross</th>
               <th className="px-3 py-2 text-right font-medium">Advance ded.</th>
               <th className="px-3 py-2 text-right font-medium">Net pay</th>
@@ -116,15 +124,16 @@ export default function PayrollLedger() {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {loading ? (
-              <tr><td colSpan={9} className="px-3 py-8 text-center text-gray-400">Loading…</td></tr>
+              <tr><td colSpan={10} className="px-3 py-8 text-center text-gray-400">Loading…</td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={9} className="px-3 py-8 text-center text-gray-400">No payroll lines match.</td></tr>
+              <tr><td colSpan={10} className="px-3 py-8 text-center text-gray-400">No payroll lines match.</td></tr>
             ) : rows.map((r) => (
               <tr key={r.id} className="hover:bg-blue-50/40">
                 <td className="px-3 py-2 whitespace-nowrap text-gray-600">{dt(r.date)}</td>
                 <td className="px-3 py-2 text-gray-600">{r.period}</td>
                 <td className="px-3 py-2">{r.employeeHref ? <Link to={r.employeeHref} className="text-blue-600 hover:underline">{r.employee}</Link> : r.employee}</td>
                 <td className="px-3 py-2 text-gray-600">{r.role}</td>
+                <td className="px-3 py-2 text-gray-600">{r.department}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{pkr(r.gross)}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-amber-700">{r.advanceDeducted ? pkr(r.advanceDeducted) : '—'}</td>
                 <td className="px-3 py-2 text-right tabular-nums font-medium">{pkr(r.net)}</td>

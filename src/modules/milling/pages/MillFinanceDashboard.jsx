@@ -328,7 +328,7 @@ export default function MillFinanceDashboard() {
   const [showTransfer, setShowTransfer] = useState(false);
   const EMPTY_EXP = { category: 'salaries', vendor_preset: '', vendor_name: '', subcategory: '', employee_id: '', is_recurring: false, recurrence: 'monthly', description: '', amount: '', expense_date: new Date().toISOString().split('T')[0], reference: '', notes: '' };
   const [expForm, setExpForm] = useState(EMPTY_EXP);
-  const EMPTY_WORKER = { id: null, name: '', role: 'laborer', pay_type: 'daily', daily_wage: '', monthly_salary: '', ot_rate_per_hour: '', phone: '', cnic: '', bank_name: '', bank_account_number: '', iban: '', joined_date: new Date().toISOString().split('T')[0], left_date: '', notes: '', portal_enabled: false };
+  const EMPTY_WORKER = { id: null, name: '', role: 'laborer', department: '', pay_type: 'daily', daily_wage: '', monthly_salary: '', ot_rate_per_hour: '', phone: '', cnic: '', bank_name: '', bank_account_number: '', iban: '', joined_date: new Date().toISOString().split('T')[0], left_date: '', notes: '', portal_enabled: false };
   const [workerForm, setWorkerForm] = useState(EMPTY_WORKER);
   const [advanceTarget, setAdvanceTarget] = useState(null); // worker we're giving an advance to
   const [advanceForm, setAdvanceForm] = useState({ amount: '', advance_date: new Date().toISOString().split('T')[0], payment_method: 'cash', notes: '', recovery_method: 'full_next_salary', recovery_start_period: '', installment_amount: '', installment_count: '', deduction_percent: '' });
@@ -545,7 +545,7 @@ export default function MillFinanceDashboard() {
   function openWorkerDrawer(worker) {
     if (worker) {
       setWorkerForm({
-        id: worker.id, name: worker.name || '', role: worker.role || 'laborer',
+        id: worker.id, name: worker.name || '', role: worker.role || 'laborer', department: worker.department || '',
         pay_type: worker.payType || 'daily',
         daily_wage: worker.dailyWage != null ? String(worker.dailyWage) : '',
         monthly_salary: worker.monthlySalary != null ? String(worker.monthlySalary) : '',
@@ -569,7 +569,7 @@ export default function MillFinanceDashboard() {
     if (workerForm.pay_type === 'monthly' && !(parseFloat(workerForm.monthly_salary) > 0)) { addToast('Monthly salary is required', 'error'); return; }
     if (workerForm.pay_type === 'daily' && !(parseFloat(workerForm.daily_wage) > 0)) { addToast('Daily wage is required', 'error'); return; }
     const payload = {
-      name: workerForm.name.trim(), role: workerForm.role, pay_type: workerForm.pay_type,
+      name: workerForm.name.trim(), role: workerForm.role, department: workerForm.department || null, pay_type: workerForm.pay_type,
       daily_wage: workerForm.daily_wage || null, monthly_salary: workerForm.monthly_salary || null,
       ot_rate_per_hour: workerForm.ot_rate_per_hour || null,
       phone: workerForm.phone || null, cnic: workerForm.cnic || null,
@@ -1982,6 +1982,18 @@ export default function MillFinanceDashboard() {
                 {WORKER_ROLES.map(r => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
               </select>
             </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Department / cost-center <span className="text-gray-400 font-normal">(for cost breakdown)</span></label>
+            <input
+              list="mill-departments" value={workerForm.department}
+              onChange={e => setWorkerForm(p => ({ ...p, department: e.target.value }))}
+              placeholder="e.g. Milling, Packing, Admin"
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
+            />
+            <datalist id="mill-departments">
+              {[...new Set((workers || []).map(x => x.department).filter(Boolean))].map(d => <option key={d} value={d} />)}
+            </datalist>
           </div>
 
           {/* Pay type toggle — daily wage vs monthly salary */}

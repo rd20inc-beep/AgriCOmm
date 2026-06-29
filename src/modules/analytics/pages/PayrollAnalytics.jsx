@@ -39,6 +39,7 @@ export default function PayrollAnalytics() {
   const s = data?.summary || {};
   const trend = data?.trend || [];
   const byRole = data?.byRole || [];
+  const byDepartment = data?.byDepartment || [];
   const topEarners = data?.topEarners || [];
   const dr = data?.range || {};
 
@@ -110,6 +111,31 @@ export default function PayrollAnalytics() {
               {byRole.length > 0 && (
                 <div className="mt-2 text-[11px] text-gray-500 grid grid-cols-2 gap-x-4 gap-y-1">
                   {byRole.map((r, i) => <div key={i} className="flex justify-between"><span className="capitalize"><span className="inline-block w-2 h-2 rounded-sm mr-1.5" style={{ background: ROLE_COLORS[i % ROLE_COLORS.length] }} />{r.role} ({r.employees})</span><span className="tabular-nums">{pkr(r.net)}</span></div>)}
+                </div>
+              )}
+            </div>
+
+            {/* Cost by department / cost-center */}
+            <div className="bg-white rounded-xl border border-gray-200 p-4">
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">Net cost by department</h3>
+              {byDepartment.length === 0 ? <p className="text-sm text-gray-400 py-8 text-center">No paid payroll in this period.</p> : (
+                <div style={{ width: '100%', height: Math.max(160, byDepartment.length * 42) }}>
+                  <ResponsiveContainer>
+                    <BarChart layout="vertical" data={byDepartment} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
+                      <XAxis type="number" tickFormatter={pkrShort} tick={{ fontSize: 11 }} />
+                      <YAxis type="category" dataKey="department" tick={{ fontSize: 11 }} width={90} />
+                      <Tooltip formatter={(v) => pkr(v)} />
+                      <Bar dataKey="net" name="Net" radius={[0, 3, 3, 0]}>
+                        {byDepartment.map((r, i) => <Cell key={i} fill={ROLE_COLORS[i % ROLE_COLORS.length]} />)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+              {byDepartment.length > 0 && (
+                <div className="mt-2 text-[11px] text-gray-500 grid grid-cols-2 gap-x-4 gap-y-1">
+                  {byDepartment.map((r, i) => <div key={i} className="flex justify-between"><span><span className="inline-block w-2 h-2 rounded-sm mr-1.5" style={{ background: ROLE_COLORS[i % ROLE_COLORS.length] }} />{r.department} ({r.employees})</span><span className="tabular-nums">{pkr(r.net)}</span></div>)}
                 </div>
               )}
             </div>

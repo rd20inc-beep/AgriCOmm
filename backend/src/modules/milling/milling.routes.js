@@ -799,7 +799,7 @@ function plannedScheduleRows(advance) {
 
 router.post('/workers', authorize('payroll', 'create'), async (req, res) => {
   try {
-    const { name, role, phone, cnic, joined_date, left_date, mill_id, notes, bank_name, bank_account_number, iban } = req.body;
+    const { name, role, phone, cnic, joined_date, left_date, mill_id, notes, bank_name, bank_account_number, iban, department } = req.body;
     const { pay_type, monthly_salary, daily_wage } = normalizeWorkerPay(req.body);
     if (!name) return res.status(400).json({ success: false, message: 'name is required.' });
     if (pay_type === 'monthly' && !(monthly_salary > 0)) return res.status(400).json({ success: false, message: 'monthly_salary required for salaried workers.' });
@@ -810,6 +810,7 @@ router.post('/workers', authorize('payroll', 'create'), async (req, res) => {
       ot_rate_per_hour: ot_rate_per_hour > 0 ? ot_rate_per_hour : null,
       phone: phone || null, cnic: cnic || null,
       bank_name: bank_name || null, bank_account_number: bank_account_number || null, iban: iban || null,
+      department: department || null,
       joined_date: joined_date || new Date().toISOString().split('T')[0],
       left_date: left_date || null,
       mill_id: mill_id || null, notes: notes || null,
@@ -825,7 +826,7 @@ router.put('/workers/:id', authorize('payroll', 'edit'), async (req, res) => {
     const worker = await db('mill_workers').where('id', req.params.id).first();
     if (!worker) return res.status(404).json({ success: false, message: 'Worker not found.' });
     const updates = {};
-    for (const f of ['name', 'role', 'phone', 'cnic', 'joined_date', 'left_date', 'notes', 'bank_name', 'bank_account_number', 'iban']) {
+    for (const f of ['name', 'role', 'phone', 'cnic', 'joined_date', 'left_date', 'notes', 'bank_name', 'bank_account_number', 'iban', 'department']) {
       if (req.body[f] !== undefined) updates[f] = req.body[f] || null;
     }
     if (req.body.ot_rate_per_hour !== undefined) {
