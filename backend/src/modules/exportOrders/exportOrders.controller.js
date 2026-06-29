@@ -1932,7 +1932,7 @@ const exportOrderController = {
       const rawId = req.params.id;
       const isNumeric = /^\d+$/.test(rawId);
       const whereClause = isNumeric ? { id: parseInt(rawId) } : { order_no: rawId };
-      const { lot_id, qty_mt, notes } = req.body;
+      const { lot_id, qty_mt, notes, item_id } = req.body;
 
       if (!lot_id) {
         return res.status(400).json({ success: false, message: 'lot_id is required.' });
@@ -1941,6 +1941,7 @@ const exportOrderController = {
       if (!qtyMT || qtyMT <= 0) {
         return res.status(400).json({ success: false, message: 'A positive qty_mt is required.' });
       }
+      const itemId = item_id ? parseInt(item_id, 10) : null;
 
       const allocationContext = await db.transaction(async (trx) => {
         const order = await lockRow(trx('export_orders').where(whereClause)).first();
@@ -1964,10 +1965,21 @@ const exportOrderController = {
           throw err;
         }
 
+        // If an order line was named, it must belong to this order.
+        if (itemId) {
+          const item = await trx('export_order_items').where({ id: itemId, order_id: order.id }).first();
+          if (!item) {
+            const err = new Error('Order line not found for this export order.');
+            err.statusCode = 400;
+            throw err;
+          }
+        }
+
         await inventoryService.reserveStock(trx, {
           lotId: lot.id,
           orderId: order.id,
           qtyMT,
+          itemId,
           userId: req.user?.id,
         });
 

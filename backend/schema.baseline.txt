@@ -866,6 +866,7 @@ COL inventory_movements.transfer_id:integer:NULL
 COL inventory_reservations.created_at:timestamp with time zone:NOT NULL
 COL inventory_reservations.created_by:integer:NULL
 COL inventory_reservations.id:integer:NOT NULL
+COL inventory_reservations.item_id:integer:NULL
 COL inventory_reservations.lot_id:integer:NULL
 COL inventory_reservations.order_id:integer:NULL
 COL inventory_reservations.reserved_qty:numeric:NOT NULL
@@ -2507,6 +2508,7 @@ CON inventory_movements.inventory_movements_transfer_id_foreign(f)
 CON inventory_reservations.chk_inventory_reservations_reserved_qty_nn(c)
 CON inventory_reservations.chk_inventory_reservations_status_valid(c)
 CON inventory_reservations.inventory_reservations_created_by_foreign(f)
+CON inventory_reservations.inventory_reservations_item_id_foreign(f)
 CON inventory_reservations.inventory_reservations_lot_id_foreign(f)
 CON inventory_reservations.inventory_reservations_order_id_foreign(f)
 CON inventory_reservations.inventory_reservations_pkey(p)
