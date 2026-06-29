@@ -1358,6 +1358,10 @@ function invalidateSettlement(qc) {
 }
 export function useFinalizeSettlement() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ workerId, data }) => millingApi.finalizeSettlement(workerId, data), onSuccess: () => invalidateSettlement(qc) }); }
 export function useReverseSettlement() { const qc = useQueryClient(); return useMutation({ mutationFn: (id) => millingApi.reverseFinalSettlement(id), onSuccess: () => invalidateSettlement(qc) }); }
+// Payroll audit (Phase 26) — keep raw (entity_type/user_name/details), no transformKeys.
+export function usePayrollAudit(params = {}) {
+  return useQuery({ queryKey: ['payroll-audit', params], queryFn: async () => { const r = await millingApi.payrollAudit(params); return r?.data || { logs: [], actions: [] }; } });
+}
 
 export function useWorkerAdvances(workerId) {
   return useQuery({

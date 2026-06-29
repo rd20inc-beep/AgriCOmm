@@ -797,7 +797,7 @@ function plannedScheduleRows(advance) {
   return rows;
 }
 
-router.post('/workers', authorize('payroll', 'create'), async (req, res) => {
+router.post('/workers', authorize('payroll', 'create'), auditAction('create', 'mill_worker', (req, d) => d.data?.worker?.id), async (req, res) => {
   try {
     const { name, role, phone, cnic, joined_date, left_date, mill_id, notes, bank_name, bank_account_number, iban, department } = req.body;
     const { pay_type, monthly_salary, daily_wage } = normalizeWorkerPay(req.body);
@@ -821,7 +821,7 @@ router.post('/workers', authorize('payroll', 'create'), async (req, res) => {
 
 // Edit a worker — pay type/rate, contact, or activate/deactivate. Deactivating
 // (is_active=false) keeps all history but drops them from the active payroll run.
-router.put('/workers/:id', authorize('payroll', 'edit'), async (req, res) => {
+router.put('/workers/:id', authorize('payroll', 'edit'), auditAction('update', 'mill_worker', (req) => req.params.id), async (req, res) => {
   try {
     const worker = await db('mill_workers').where('id', req.params.id).first();
     if (!worker) return res.status(404).json({ success: false, message: 'Worker not found.' });
@@ -1122,7 +1122,7 @@ router.post('/payroll/leave-requests', authorize('payroll', 'create'), async (re
     return res.status(201).json({ success: true, data: row });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
-router.post('/payroll/leave-requests/:id/approve', authorize('payroll', 'approve'), async (req, res) => {
+router.post('/payroll/leave-requests/:id/approve', authorize('payroll', 'approve'), auditAction('approve', 'mill_leave_request', (req) => req.params.id), async (req, res) => {
   try {
     const r = await db('mill_leave_requests').where('id', req.params.id).first();
     if (!r) return res.status(404).json({ success: false, message: 'Leave request not found.' });
@@ -1131,7 +1131,7 @@ router.post('/payroll/leave-requests/:id/approve', authorize('payroll', 'approve
     return res.json({ success: true, data: row });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
-router.post('/payroll/leave-requests/:id/reject', authorize('payroll', 'approve'), async (req, res) => {
+router.post('/payroll/leave-requests/:id/reject', authorize('payroll', 'approve'), auditAction('reject', 'mill_leave_request', (req) => req.params.id), async (req, res) => {
   try {
     const r = await db('mill_leave_requests').where('id', req.params.id).first();
     if (!r) return res.status(404).json({ success: false, message: 'Leave request not found.' });
@@ -1198,6 +1198,28 @@ router.get('/payroll/final-settlements', authorize('payroll', 'view'), async (re
     const rows = await db('mill_final_settlements as s').leftJoin('mill_workers as w', 'w.id', 's.worker_id')
       .select('s.*', 'w.name as worker_name', 'w.role as worker_role').orderBy('s.created_at', 'desc');
     return res.json({ success: true, data: rows });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── Payroll activity / audit (Phase 26) — a payroll-scoped slice of the audit
+// trail, gated payroll.view (the global /api/audit-logs is admin-only). ──
+const PAYROLL_AUDIT_ENTITIES = ['mill_payroll_run', 'statutory_remittance', 'mill_final_settlement', 'mill_leave_request', 'mill_leave_type', 'mill_worker', 'mill_worker_advance', 'mill_worker_request', 'mill_statutory_deduction'];
+router.get('/payroll/audit', authorize('payroll', 'view'), async (req, res) => {
+  try {
+    const { action, user_id, entity_type, date_from, date_to } = req.query;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(200, parseInt(req.query.limit, 10) || 50);
+    let q = db('audit_logs as a').leftJoin('users as u', 'a.user_id', 'u.id').whereIn('a.entity_type', PAYROLL_AUDIT_ENTITIES);
+    if (action) q = q.where('a.action', action);
+    if (user_id) q = q.where('a.user_id', user_id);
+    if (entity_type) q = q.where('a.entity_type', entity_type);
+    if (date_from) q = q.where('a.created_at', '>=', new Date(date_from));
+    if (date_to) q = q.where('a.created_at', '<=', new Date(`${String(date_to).slice(0, 10)}T23:59:59`));
+    const countRow = await q.clone().clearSelect().count('a.id as c').first();
+    const logs = await q.select('a.id', 'a.action', 'a.entity_type', 'a.entity_id', 'a.details', 'a.created_at', 'a.user_id', 'u.full_name as user_name')
+      .orderBy('a.created_at', 'desc').limit(limit).offset((page - 1) * limit);
+    const actions = await db('audit_logs').whereIn('entity_type', PAYROLL_AUDIT_ENTITIES).distinct('action').orderBy('action').pluck('action');
+    return res.json({ success: true, data: { logs, actions, total: parseInt(countRow?.c, 10) || 0, page, limit } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -1275,7 +1297,7 @@ router.delete('/payroll/final-settlements/:id', authorize('payroll', 'pay'),
 
 // Delete a worker permanently — unwinds every advance's cash-out, then cascades
 // attendance + advances (FK onDelete CASCADE) and removes the worker.
-router.delete('/workers/:id', authorize('payroll', 'delete'), async (req, res) => {
+router.delete('/workers/:id', authorize('payroll', 'delete'), auditAction('delete', 'mill_worker', (req) => req.params.id), async (req, res) => {
   try {
     const worker = await db('mill_workers').where('id', req.params.id).first();
     if (!worker) return res.status(404).json({ success: false, message: 'Worker not found.' });
@@ -1367,7 +1389,7 @@ router.get('/workers/:id/ledger', authorize('payroll', 'view'), async (req, res)
 
 // Record a salary advance: real cash-out (business_expense, category 'salaries',
 // paid now → Money Out / GL) PLUS a tracked advance row that nets off payroll.
-router.post('/workers/:id/advances', authorize('payroll', 'create'), async (req, res) => {
+router.post('/workers/:id/advances', authorize('payroll', 'create'), auditAction('advance_given', 'mill_worker_advance', (req) => req.params.id), async (req, res) => {
   try {
     const worker = await db('mill_workers').where('id', req.params.id).first();
     if (!worker) return res.status(404).json({ success: false, message: 'Worker not found.' });
@@ -1437,7 +1459,7 @@ router.get('/advances/:id/ledger', authorize('payroll', 'view'), async (req, res
 });
 
 // Delete an advance — unwinds its cash-out and removes the record.
-router.delete('/advances/:id', authorize('payroll', 'delete'), async (req, res) => {
+router.delete('/advances/:id', authorize('payroll', 'delete'), auditAction('advance_delete', 'mill_worker_advance', (req) => req.params.id), async (req, res) => {
   try {
     const advance = await db('mill_worker_advances').where('id', req.params.id).first();
     if (!advance) return res.status(404).json({ success: false, message: 'Advance not found.' });

@@ -44,6 +44,7 @@ export const millingApi = {
   finalizeSettlement: (workerId, data) => api.post(`/api/milling/payroll/final-settlement/${workerId}`, data),
   listFinalSettlements: () => api.get('/api/milling/payroll/final-settlements'),
   reverseFinalSettlement: (id) => api.delete(`/api/milling/payroll/final-settlements/${id}`),
+  payrollAudit: (params) => api.get('/api/milling/payroll/audit', params),
   listWorkerAdvances: (id) => api.get(`/api/milling/workers/${id}/advances`),
   workerLedger: (id) => api.get(`/api/milling/workers/${id}/ledger`),
   createWorkerAdvance: (id, data) => api.post(`/api/milling/workers/${id}/advances`, data),

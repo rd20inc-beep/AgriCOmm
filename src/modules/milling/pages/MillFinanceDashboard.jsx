@@ -4,7 +4,7 @@ import {
   DollarSign, Users, Zap, Shield, TrendingUp, TrendingDown, AlertTriangle,
   Plus, UserPlus, Package, Factory, Wallet, ArrowUpRight, ArrowDownRight, Printer,
   Building2, Banknote, Receipt, Layers, Truck, ExternalLink,
-  Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X, FileText, RefreshCw, Sparkles, ArrowLeftRight, Inbox, Check, ShoppingCart, Clock, Landmark, LogOut,
+  Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X, FileText, RefreshCw, Sparkles, ArrowLeftRight, Inbox, Check, ShoppingCart, Clock, Landmark, LogOut, History,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
@@ -22,7 +22,7 @@ import {
   useTaxStatement, useWorkerRequests, useWorkerRequestsCount, useResolveWorkerRequest,
   useLeaveTypes, useLeaveRequests, useLeaveRequestsCount, useCreateLeaveType, useUpdateLeaveType, useDeleteLeaveType,
   useApproveLeaveRequest, useRejectLeaveRequest,
-  useFinalSettlement, useFinalizeSettlement,
+  useFinalSettlement, useFinalizeSettlement, usePayrollAudit,
   usePayrollSchedule, useSavePayrollSchedule, useRunPayrollNow,
   usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow, useAcceptFundTransfer,
   useMillLotCosts, useLocalSales, useRecordPayment, usePayablePayments,
@@ -224,6 +224,7 @@ export default function MillFinanceDashboard() {
   const [showLeaveDrawer, setShowLeaveDrawer] = useState(false);
   const { data: pendingLeaveCount = 0 } = useLeaveRequestsCount();
   const [settleWorker, setSettleWorker] = useState(null);
+  const [showAuditDrawer, setShowAuditDrawer] = useState(false);
   const [adjustWorker, setAdjustWorker] = useState(null); // open adjustments drawer for this worker
   const runNowMut = useRunPayrollNow();
 
@@ -1565,6 +1566,11 @@ export default function MillFinanceDashboard() {
                 </button>
               )}
               {payrollView === 'payroll' && canViewPayroll && (
+                <button onClick={() => setShowAuditDrawer(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 bg-white hover:bg-gray-50">
+                  <History className="w-3.5 h-3.5" /> Activity
+                </button>
+              )}
+              {payrollView === 'payroll' && canViewPayroll && (
                 <button onClick={() => setShowRequestsDrawer(true)} className="relative inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 bg-white hover:bg-gray-50">
                   <Inbox className="w-3.5 h-3.5" /> Requests
                   {pendingRequestCount > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center">{pendingRequestCount}</span>}
@@ -2375,6 +2381,11 @@ export default function MillFinanceDashboard() {
       {/* ─── FINAL SETTLEMENT DRAWER ───────────────────────────────── */}
       {settleWorker && (
         <FinalSettlementDrawer worker={settleWorker} bankAccounts={bankAccountsList} company={companyProfileData} onClose={() => setSettleWorker(null)} addToast={addToast} />
+      )}
+
+      {/* ─── PAYROLL ACTIVITY / AUDIT DRAWER ───────────────────────── */}
+      {showAuditDrawer && (
+        <PayrollAuditDrawer onClose={() => setShowAuditDrawer(false)} />
       )}
 
       {/* ─── BONUSES & DEDUCTIONS DRAWER ───────────────────────────── */}
@@ -4036,6 +4047,66 @@ function StatutoryDeductionsDrawer({ canPay, bankAccounts = [], company, onClose
         <p className="text-[11px] text-gray-400">Statutory amounts are withheld from each employee's net pay and booked to the chosen liability account (payable to the authority). They appear on payslips and reduce the cash paid out — the salary expense still reflects the full gross.</p>
       </div>
       )}
+    </SlideDrawer>
+  );
+}
+
+// Payroll activity / audit log — a payroll-scoped slice of the audit trail.
+const AUDIT_ENTITY_LABEL = { mill_payroll_run: 'Payroll run', statutory_remittance: 'Statutory remittance', mill_final_settlement: 'Final settlement', mill_leave_request: 'Leave request', mill_leave_type: 'Leave type', mill_worker: 'Employee', mill_worker_advance: 'Advance', mill_worker_request: 'Request', mill_statutory_deduction: 'Statutory rule' };
+const AUDIT_ACTION_TONE = { pay: 'bg-emerald-100 text-emerald-700', settle: 'bg-emerald-100 text-emerald-700', approve: 'bg-blue-100 text-blue-700', accrue: 'bg-violet-100 text-violet-700', prepare: 'bg-amber-100 text-amber-700', remit: 'bg-indigo-100 text-indigo-700', void: 'bg-rose-100 text-rose-700', reject: 'bg-rose-100 text-rose-700', delete: 'bg-rose-100 text-rose-700', advance_delete: 'bg-rose-100 text-rose-700', create: 'bg-slate-100 text-slate-700', update: 'bg-slate-100 text-slate-700', advance_given: 'bg-amber-100 text-amber-700' };
+function auditSummary(l) {
+  let d = l.details; if (typeof d === 'string') { try { d = JSON.parse(d); } catch { d = {}; } }
+  const r = d?.result || {}; const b = d?.body || {};
+  const run = r.run || r;
+  if (l.entity_type === 'mill_payroll_run' && run?.period) return `${run.period} · ${PKR(run.net_total ?? run.netTotal)}`;
+  if (l.entity_type === 'mill_final_settlement') return `net ${PKR(r.net_amount ?? b.final_salary)}`;
+  if (l.entity_type === 'statutory_remittance') return `${r.remittance_no || ''} · ${PKR(r.amount ?? b.amount)}`;
+  if (l.entity_type === 'mill_worker') return r.worker?.name || b.name || '';
+  if (l.entity_type === 'mill_worker_advance') return PKR(b.amount);
+  if (l.entity_type === 'mill_leave_request') return `${r.from_date ? String(r.from_date).slice(0, 10) : ''}${r.days ? ` · ${r.days}d` : ''}`;
+  return '';
+}
+function PayrollAuditDrawer({ onClose }) {
+  const [filters, setFilters] = useState({ action: '', date_from: '', date_to: '' });
+  const [limit, setLimit] = useState(50);
+  const params = { ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v)), limit };
+  const { data, isLoading } = usePayrollAudit(params);
+  const logs = data?.logs || []; const actions = data?.actions || []; const total = data?.total || 0;
+  const fmtTs = (t) => (t ? new Date(t).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '');
+  const set = (p) => setFilters((f) => ({ ...f, ...p }));
+
+  return (
+    <SlideDrawer open onClose={onClose} title="Payroll activity" subtitle="Every prepare / approve / pay / accrue / settle / void / leave / advance action" icon={History} size="lg">
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <div><label className="block text-[11px] text-gray-500 mb-1">Action</label>
+            <select value={filters.action} onChange={(e) => set({ action: e.target.value })} className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white">
+              <option value="">All actions</option>{actions.map((a) => <option key={a} value={a}>{String(a).replace(/_/g, ' ')}</option>)}
+            </select>
+          </div>
+          <div><label className="block text-[11px] text-gray-500 mb-1">From</label><input type="date" value={filters.date_from} onChange={(e) => set({ date_from: e.target.value })} className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+          <div><label className="block text-[11px] text-gray-500 mb-1">To</label><input type="date" value={filters.date_to} onChange={(e) => set({ date_to: e.target.value })} className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm" /></div>
+          {(filters.action || filters.date_from || filters.date_to) && <button onClick={() => setFilters({ action: '', date_from: '', date_to: '' })} className="text-xs text-blue-600 hover:underline pb-2">Clear</button>}
+          <span className="text-[11px] text-gray-400 pb-2 ml-auto">{total} action(s)</span>
+        </div>
+        {isLoading ? <p className="text-sm text-gray-400">Loading…</p> : !logs.length ? (
+          <p className="text-sm text-gray-400 py-6 text-center border border-dashed border-gray-200 rounded-lg">No payroll activity for these filters.</p>
+        ) : (
+          <div className="space-y-1.5">
+            {logs.map((l) => (
+              <div key={l.id} className="flex items-center gap-2 rounded-lg border border-gray-100 px-3 py-2 text-xs">
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold capitalize ${AUDIT_ACTION_TONE[l.action] || 'bg-gray-100 text-gray-600'}`}>{String(l.action).replace(/_/g, ' ')}</span>
+                <span className="text-gray-700 font-medium">{AUDIT_ENTITY_LABEL[l.entity_type] || l.entity_type}{l.entity_id ? ` #${l.entity_id}` : ''}</span>
+                <span className="text-gray-500 truncate">{auditSummary(l)}</span>
+                <span className="ml-auto text-gray-400 whitespace-nowrap">{l.user_name || '—'} · {fmtTs(l.created_at)}</span>
+              </div>
+            ))}
+            {logs.length >= limit && total > limit && (
+              <button onClick={() => setLimit((n) => n + 50)} className="w-full mt-1 px-3 py-2 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">Load more ({total - limit} older)</button>
+            )}
+          </div>
+        )}
+      </div>
     </SlideDrawer>
   );
 }
