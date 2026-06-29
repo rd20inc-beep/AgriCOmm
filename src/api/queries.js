@@ -1485,7 +1485,8 @@ export function useApprovePayrollRun() {
 }
 export function usePayPayrollRun() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: (id) => millingApi.payPayrollRun(id), onSuccess: () => { invalidatePayroll(qc); qc.invalidateQueries({ queryKey: ['payroll-pending'] }); } });
+  // Accepts an id, or { id, lineIds } to pay only selected employees (partial).
+  return useMutation({ mutationFn: (arg) => (typeof arg === 'object' ? millingApi.payPayrollRun(arg.id, arg.lineIds) : millingApi.payPayrollRun(arg)), onSuccess: () => { invalidatePayroll(qc); qc.invalidateQueries({ queryKey: ['payroll-pending'] }); } });
 }
 export function useVoidPayrollRun() {
   const qc = useQueryClient();

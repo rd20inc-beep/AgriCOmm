@@ -853,8 +853,9 @@ router.put('/workers/:id', authorize('payroll', 'edit'), async (req, res) => {
 // than paid to the employee — so this is recognised at pay/accrue and stays as
 // a standing liability until separately remitted. Ref `STAT-RUN-<id>` so the
 // run DELETE can reverse it cleanly. No-op when nothing was withheld.
-async function postRunStatutoryJournal(trx, run, userId) {
-  const lines = await trx('mill_payroll_lines').where('run_id', run.id);
+async function postRunStatutoryJournal(trx, run, userId, lines, refNo) {
+  if (!lines) lines = await trx('mill_payroll_lines').where('run_id', run.id);
+  refNo = refNo || `STAT-RUN-${run.id}`;
   const byAccount = {};
   for (const l of lines) {
     let arr = l.statutory_json;
@@ -880,7 +881,7 @@ async function postRunStatutoryJournal(trx, run, userId) {
   // createJournal does string date math — normalise a Date to YYYY-MM-DD.
   const payDate = run.pay_date instanceof Date ? run.pay_date.toISOString().slice(0, 10) : (run.pay_date || new Date().toISOString().slice(0, 10));
   const journal = await accountingService.createJournal(trx, {
-    date: payDate, entity: 'mill', refType: 'Payroll Statutory', refNo: `STAT-RUN-${run.id}`,
+    date: payDate, entity: 'mill', refType: 'Payroll Statutory', refNo,
     description: `Statutory deductions withheld — payroll ${run.period}`,
     currency: 'PKR', fxRate: 1, isAuto: true, userId: userId || null,
     lines: [
@@ -889,6 +890,43 @@ async function postRunStatutoryJournal(trx, run, userId) {
     ],
   });
   if (journal?.id) await accountingService.postJournal(trx, journal.id);
+}
+
+// Pay a specific set of (unpaid) payroll lines: create ONE salaries expense for
+// their net (cash/bank + GL), recover their advances, post their statutory
+// journal, mark those lines paid, and roll the run to 'paid' (all lines paid)
+// or 'partially_paid' (some still unpaid). Shared by full and partial pay.
+async function payLineBatch(run, lineRows, userId) {
+  const net = lineRows.reduce((s, l) => s + (parseFloat(l.net_pay) || 0), 0);
+  let expense = null;
+  if (net > 0) {
+    expense = await expensesService.create({
+      expense_type: 'mill', category: 'salaries', amount: net, currency: 'PKR',
+      expense_date: run.pay_date,
+      description: `Salaries — payroll run ${run.period}`,
+      notes: `Payroll ${run.period}: ${lineRows.length} employee(s) · net ${net}`,
+      pay_now: true, bank_account_id: run.bank_account_id, payment_method: run.pay_method || 'cash',
+    }, userId);
+  }
+  return db.transaction(async (trx) => {
+    for (const l of lineRows) {
+      const ded = parseFloat(l.advance_deducted) || 0;
+      if (ded > 0 && l.worker_id) await recoverAdvancesForWorker(trx, l.worker_id, ded, { period: run.period, runId: run.id, lineId: l.id });
+      if (l.skip_reason && l.worker_id) await markPeriodSkipped(trx, l.worker_id, run.period, l.skip_reason);
+      await trx('mill_payroll_lines').where('id', l.id).update({ paid_at: trx.fn.now(), paid_by: userId || null, expense_id: expense?.id || null, updated_at: trx.fn.now() });
+    }
+    // Statutory journal scoped to THIS batch (ref tied to the expense so reversal
+    // is precise even when a run pays in several batches). Best-effort.
+    try { await postRunStatutoryJournal(trx, run, userId, lineRows, expense ? `STAT-EXP-${expense.id}` : `STAT-RUN-${run.id}`); } catch (e) { console.warn('Statutory journal (pay batch) failed:', e.message); }
+    const remaining = await trx('mill_payroll_lines').where('run_id', run.id).whereNull('paid_at').count('id as c').first();
+    const allPaid = (parseInt(remaining?.c, 10) || 0) === 0;
+    const patch = allPaid
+      ? { status: 'paid', paid_by: userId || null, paid_at: trx.fn.now(), updated_at: trx.fn.now() }
+      : { status: 'partially_paid', updated_at: trx.fn.now() };
+    if (!run.expense_id && expense?.id) patch.expense_id = expense.id; // keep first expense on the run row
+    const [r] = await trx('mill_payroll_runs').where('id', run.id).update(patch).returning('*');
+    return r;
+  });
 }
 
 async function unwindAdvanceExpense(trx, expenseId) {
@@ -1806,39 +1844,23 @@ router.post('/payroll/runs/:id/pay', authorize('payroll', 'pay'),
   try {
     const run = await db('mill_payroll_runs').where('id', req.params.id).first();
     if (!run) return res.status(404).json({ success: false, message: 'Payroll run not found.' });
-    if (run.status !== 'approved') return res.status(409).json({ success: false, message: `Only an Approved run can be paid (this run is ${run.status}).` });
-    const lines = await db('mill_payroll_lines').where('run_id', run.id);
-    const netTotal = parseFloat(run.net_total) || 0;
+    if (!['approved', 'partially_paid'].includes(run.status)) return res.status(409).json({ success: false, message: `Only an Approved or Partially-Paid run can be paid (this run is ${run.status}).` });
 
-    // 1) Pay out the net total as a paid salaries expense (cash/bank + GL).
-    let expense = null;
-    if (netTotal > 0) {
-      expense = await expensesService.create({
-        expense_type: 'mill', category: 'salaries', amount: netTotal, currency: 'PKR',
-        expense_date: run.pay_date,
-        description: `Salaries — payroll run ${run.period}`,
-        notes: run.notes || `Payroll ${run.period}: ${run.employee_count} employee(s) · net ${netTotal}`,
-        pay_now: true, bank_account_id: run.bank_account_id,
-        payment_method: run.pay_method || 'cash',
-      }, req.user?.id);
+    // Target the UNPAID lines — all of them, or just the selected `line_ids`
+    // (partial payment). Paying with no selection settles whatever remains.
+    const allLines = await db('mill_payroll_lines').where('run_id', run.id);
+    const unpaid = allLines.filter((l) => !l.paid_at);
+    let target = unpaid;
+    const ids = Array.isArray(req.body?.line_ids) ? req.body.line_ids.map(Number).filter(Boolean) : null;
+    if (ids && ids.length) {
+      const set = new Set(ids);
+      target = unpaid.filter((l) => set.has(l.id));
+      if (!target.length) return res.status(400).json({ success: false, message: 'None of the selected employees are unpaid.' });
     }
+    if (!target.length) return res.status(409).json({ success: false, message: 'Every employee in this run is already paid.' });
 
-    // 2) Recover the advances each line cleared, book statutory withholding, and
-    //    mark the run Paid.
-    const updated = await db.transaction(async (trx) => {
-      for (const l of lines) {
-        const ded = parseFloat(l.advance_deducted) || 0;
-        if (ded > 0 && l.worker_id) await recoverAdvancesForWorker(trx, l.worker_id, ded, { period: run.period, runId: run.id, lineId: l.id });
-        if (l.skip_reason && l.worker_id) await markPeriodSkipped(trx, l.worker_id, run.period, l.skip_reason);
-      }
-      // Best-effort (matches the supplementary-GL pattern elsewhere): a statutory
-      // journal hiccup must never block the payroll payment or leak the expense.
-      try { await postRunStatutoryJournal(trx, run, req.user?.id); } catch (e) { console.warn('Statutory journal (pay) failed:', e.message); }
-      const [r] = await trx('mill_payroll_runs').where('id', run.id)
-        .update({ status: 'paid', expense_id: expense?.id || null, paid_by: req.user?.id || null, paid_at: trx.fn.now(), updated_at: trx.fn.now() }).returning('*');
-      return r;
-    });
-    return res.json({ success: true, data: { run: updated } });
+    const updated = await payLineBatch(run, target, req.user?.id);
+    return res.json({ success: true, data: { run: updated, paidCount: target.length } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -1932,9 +1954,9 @@ router.delete('/payroll/runs/:id', authorize('payroll', 'delete'), async (req, r
     const run = await db('mill_payroll_runs').where('id', req.params.id).first();
     if (!run) return res.status(404).json({ success: false, message: 'Payroll run not found.' });
     // A Prepared/Approved/Voided run never posted money or recovered advances —
-    // just delete it (lines cascade). Paid/posted (cash + GL) AND accrued
-    // (expense + liability + advances, no cash yet) runs need full reversal.
-    if (!['paid', 'posted', 'accrued'].includes(run.status)) {
+    // just delete it (lines cascade). Paid/posted/accrued AND partially_paid
+    // (one or more cash batches) runs need full reversal.
+    if (!['paid', 'posted', 'accrued', 'partially_paid'].includes(run.status)) {
       await db('mill_payroll_runs').where('id', run.id).del();
       return res.json({ success: true, data: { deleted: run.id } });
     }
@@ -1970,8 +1992,19 @@ router.delete('/payroll/runs/:id', authorize('payroll', 'delete'), async (req, r
           }
         }
       }
-      await unwindAdvanceExpense(trx, run.expense_id); // reverse cash-out + GL
-      // Reverse the statutory-withholding journal (DR 6135 / CR liabilities).
+      // Reverse EVERY salaries expense the run created (one per pay batch +
+      // run.expense_id for accrued/legacy single-batch runs) and each batch's
+      // statutory journal (ref STAT-EXP-<expenseId>).
+      const expIds = new Set();
+      if (run.expense_id) expIds.add(run.expense_id);
+      const lineExp = await trx('mill_payroll_lines').where('run_id', run.id).whereNotNull('expense_id').distinct('expense_id');
+      for (const r of lineExp) expIds.add(r.expense_id);
+      for (const expId of expIds) {
+        await unwindAdvanceExpense(trx, expId); // reverse cash-out + GL + payable
+        await trx('journal_lines').whereIn('journal_id', trx('journal_entries').where('ref_no', `STAT-EXP-${expId}`).select('id')).del();
+        await trx('journal_entries').where('ref_no', `STAT-EXP-${expId}`).del();
+      }
+      // Legacy / accrued statutory journal (DR 6135 / CR liabilities).
       await trx('journal_lines').whereIn('journal_id', trx('journal_entries').where('ref_no', `STAT-RUN-${run.id}`).select('id')).del();
       await trx('journal_entries').where('ref_no', `STAT-RUN-${run.id}`).del();
       await trx('mill_payroll_runs').where('id', run.id).del(); // lines cascade

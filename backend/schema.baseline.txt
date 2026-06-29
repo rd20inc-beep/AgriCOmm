@@ -1132,11 +1132,14 @@ COL mill_payroll_lines.days_in_month:integer:NULL
 COL mill_payroll_lines.deduction_total:numeric:NOT NULL
 COL mill_payroll_lines.effective_days:numeric:NOT NULL
 COL mill_payroll_lines.employed_days:integer:NULL
+COL mill_payroll_lines.expense_id:integer:NULL
 COL mill_payroll_lines.gross_pay:numeric:NOT NULL
 COL mill_payroll_lines.id:integer:NOT NULL
 COL mill_payroll_lines.net_pay:numeric:NOT NULL
 COL mill_payroll_lines.ot_hours:numeric:NOT NULL
 COL mill_payroll_lines.ot_pay:numeric:NOT NULL
+COL mill_payroll_lines.paid_at:timestamp with time zone:NULL
+COL mill_payroll_lines.paid_by:integer:NULL
 COL mill_payroll_lines.pay_type:character varying:NULL
 COL mill_payroll_lines.role:character varying:NULL
 COL mill_payroll_lines.run_id:integer:NOT NULL

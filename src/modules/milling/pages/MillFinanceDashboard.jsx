@@ -300,7 +300,7 @@ export default function MillFinanceDashboard() {
   const monthRuns = payrollRuns.filter(r => r.period === payrollMonth && r.status !== 'voided');
   const isPaidStatus = (s) => s === 'paid' || s === 'posted';
   const paidThisMonth = monthRuns.filter(r => isPaidStatus(r.status)).reduce((s, r) => s + (parseFloat(r.netTotal) || 0), 0);
-  const pendingRuns = monthRuns.filter(r => r.status === 'prepared' || r.status === 'approved' || r.status === 'accrued');
+  const pendingRuns = monthRuns.filter(r => r.status === 'prepared' || r.status === 'approved' || r.status === 'accrued' || r.status === 'partially_paid');
   const paidCount = payrollData?.paidCount || 0;
   const unpaidNet = payrollData?.unpaidNet ?? payrollTotal;
   // "Unpaid" for preparing a NEW run = employees not already in any run this month.
@@ -1579,9 +1579,9 @@ export default function MillFinanceDashboard() {
               <div className="flex flex-wrap gap-2">
                 {pendingRuns.map(r => (
                   <div key={r.id} className="inline-flex items-center gap-2 bg-white border border-amber-200 rounded-lg px-2.5 py-1 text-xs">
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${r.status === 'accrued' ? 'bg-violet-100 text-violet-700' : r.status === 'approved' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>{r.status}</span>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${RUN_STATUS_TONE[r.status] || 'bg-amber-100 text-amber-700'}`}>{String(r.status).replace('_', ' ')}</span>
                     <span className="text-gray-600">{r.employeeCount} emp · <span className="font-semibold tabular-nums">{PKR(r.netTotal)}</span> · {fmtDate(r.payDate)}</span>
-                    <button onClick={() => setPayslipsRunId(r.id)} className="text-blue-700 font-medium hover:underline">{r.status === 'accrued' ? 'settle' : 'review'}</button>
+                    <button onClick={() => setPayslipsRunId(r.id)} className="text-blue-700 font-medium hover:underline">{r.status === 'accrued' ? 'settle' : r.status === 'partially_paid' ? 'continue' : 'review'}</button>
                   </div>
                 ))}
               </div>
@@ -2312,7 +2312,7 @@ export default function MillFinanceDashboard() {
           onClose={() => setPayslipsRunId(null)}
           onUndo={(run) => { setPayslipsRunId(null); handleDeleteRun(run); }}
           onApprove={async (run) => { try { await approveRunMut.mutateAsync(run.id); addToast('Payroll run approved', 'success'); } catch (e) { addToast(e.message, 'error'); } }}
-          onPay={async (run) => { try { await payRunMut.mutateAsync(run.id); addToast(`Payroll paid — ${PKR(run.netTotal)}`, 'success'); } catch (e) { addToast(e.message, 'error'); } }}
+          onPay={async (run, lineIds) => { try { const res = await payRunMut.mutateAsync(lineIds && lineIds.length ? { id: run.id, lineIds } : run.id); const st = res?.data?.run?.status; addToast(st === 'partially_paid' ? 'Selected employees paid — run partially paid' : `Payroll paid — ${PKR(run.netTotal)}`, 'success'); } catch (e) { addToast(e.message, 'error'); } }}
           onVoid={async (run) => { try { await voidRunMut.mutateAsync({ id: run.id, reason: null }); addToast('Payroll run voided', 'success'); setPayslipsRunId(null); } catch (e) { addToast(e.message, 'error'); } }}
           onAccrue={async (run) => { try { await accrueRunMut.mutateAsync(run.id); addToast(`Payroll accrued — ${PKR(run.netTotal)} booked to Salaries Payable`, 'success'); } catch (e) { addToast(e.message, 'error'); } }}
           onSettle={async (run) => { try { await settleRunMut.mutateAsync(run.id); addToast(`Accrued payroll settled — ${PKR(run.netTotal)} paid`, 'success'); } catch (e) { addToast(e.message, 'error'); } }}
@@ -4032,7 +4032,7 @@ function PayrollScheduleDrawer({ canManage, canPrepare, onClose, onRunNow, runNo
 
 // Run panel: review a run's payslip lines, see its approval status, and (for
 // Finance/Owner) Approve → Pay → or Void. Paid runs can be Undone (reversed).
-const RUN_STATUS_TONE = { prepared: 'bg-amber-100 text-amber-700', approved: 'bg-blue-100 text-blue-700', accrued: 'bg-violet-100 text-violet-700', paid: 'bg-emerald-100 text-emerald-700', posted: 'bg-emerald-100 text-emerald-700', voided: 'bg-gray-100 text-gray-500' };
+const RUN_STATUS_TONE = { prepared: 'bg-amber-100 text-amber-700', approved: 'bg-blue-100 text-blue-700', accrued: 'bg-violet-100 text-violet-700', partially_paid: 'bg-orange-100 text-orange-700', paid: 'bg-emerald-100 text-emerald-700', posted: 'bg-emerald-100 text-emerald-700', voided: 'bg-gray-100 text-gray-500' };
 function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDelete, addToast, onClose, onUndo, onApprove, onPay, onVoid, onAccrue, onSettle, deleteRunMut, approveRunMut, payRunMut, voidRunMut, accrueRunMut, settleRunMut }) {
   const { data, isLoading } = usePayrollRun(runId);
   const run = data?.run;
@@ -4040,7 +4040,18 @@ function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDelete, a
   const st = run?.status;
   const isPaid = st === 'paid' || st === 'posted';
   const isAccrued = st === 'accrued';
+  const isPartial = st === 'partially_paid';
   const busy = approveRunMut?.isPending || payRunMut?.isPending || voidRunMut?.isPending || deleteRunMut?.isPending || accrueRunMut?.isPending || settleRunMut?.isPending;
+  // Partial pay: pick which unpaid employees to pay now.
+  const canSelectPay = canPay && (st === 'approved' || st === 'partially_paid');
+  const unpaidLines = lines.filter((l) => !l.paidAt);
+  const paidCount = lines.length - unpaidLines.length;
+  const [selected, setSelected] = useState(() => new Set());
+  useEffect(() => { setSelected(new Set()); }, [runId, st]);
+  const toggleSel = (id) => setSelected((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const selectedUnpaid = unpaidLines.filter((l) => selected.has(l.id));
+  const selectedTotal = selectedUnpaid.reduce((s, l) => s + (parseFloat(l.netPay) || 0), 0);
+  const unpaidTotal = unpaidLines.reduce((s, l) => s + (parseFloat(l.netPay) || 0), 0);
   return (
     <SlideDrawer
       open
@@ -4054,11 +4065,12 @@ function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDelete, a
           <div className="flex gap-2">
             {/* Workflow actions (Finance/Owner only) */}
             {canApprove && st === 'prepared' && <button onClick={() => onApprove(run)} disabled={busy} className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">Approve</button>}
-            {canPay && st === 'approved' && <button onClick={() => onPay(run)} disabled={busy} className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">Pay now {PKR(run.netTotal)}</button>}
+            {canSelectPay && selected.size > 0 && <button onClick={() => onPay(run, [...selected])} disabled={busy} className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">Pay selected {PKR(selectedTotal)}</button>}
+            {canSelectPay && selected.size === 0 && unpaidLines.length > 0 && <button onClick={() => onPay(run)} disabled={busy} className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">{isPartial ? 'Pay remaining' : 'Pay all'} {PKR(unpaidTotal)}</button>}
             {canApprove && st === 'approved' && <button onClick={() => onAccrue(run)} disabled={busy} className="px-4 py-2 text-sm text-violet-700 bg-violet-50 rounded-lg hover:bg-violet-100 disabled:opacity-50">Accrue (pay later)</button>}
             {canPay && isAccrued && <button onClick={() => onSettle(run)} disabled={busy} className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">Settle {PKR(run.netTotal)}</button>}
             {canApprove && (st === 'prepared' || st === 'approved') && <button onClick={() => onVoid(run)} disabled={busy} className="px-4 py-2 text-sm text-rose-600 bg-rose-50 rounded-lg hover:bg-rose-100 disabled:opacity-50">Void</button>}
-            {canDelete && (isPaid || isAccrued) && <button onClick={() => onUndo(run)} disabled={busy} className="px-4 py-2 text-sm text-rose-600 bg-rose-50 rounded-lg hover:bg-rose-100 disabled:opacity-50">{isAccrued ? 'Reverse accrual' : 'Undo run'}</button>}
+            {canDelete && (isPaid || isAccrued || isPartial) && <button onClick={() => onUndo(run)} disabled={busy} className="px-4 py-2 text-sm text-rose-600 bg-rose-50 rounded-lg hover:bg-rose-100 disabled:opacity-50">{isAccrued ? 'Reverse accrual' : 'Undo run'}</button>}
           </div>
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Close</button>
         </div>
@@ -4077,7 +4089,8 @@ function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDelete, a
             </div>
           </div>
           {isAccrued && <div className="rounded-lg bg-violet-50 border border-violet-200 p-2.5 text-xs text-violet-800">Accrued — salary expense &amp; <span className="font-semibold">Salaries Payable</span> liability are booked and advances recovered, but no cash has moved. Settle to pay it out.{!canPay ? ' Finance/Owner must settle this.' : ''}</div>}
-          {!isPaid && !isAccrued && <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5 text-xs text-amber-800">{st === 'prepared' ? 'Pending approval — no cash/GL has posted yet.' : 'Approved — pending payment. Pay now (cash + GL) or Accrue (book the liability, pay later).'}{!canApprove ? ' Finance/Owner must complete this.' : ''}</div>}
+          {isPartial && <div className="rounded-lg bg-orange-50 border border-orange-200 p-2.5 text-xs text-orange-800"><span className="font-semibold">Partially paid</span> — {paidCount} of {lines.length} employee(s) paid, {unpaidLines.length} still owed ({PKR(unpaidTotal)}). Tick employees and Pay remaining when ready.{!canPay ? ' Finance/Owner must complete this.' : ''}</div>}
+          {!isPaid && !isAccrued && !isPartial && <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5 text-xs text-amber-800">{st === 'prepared' ? 'Pending approval — no cash/GL has posted yet.' : 'Approved — pending payment. Pay all/selected (cash + GL) or Accrue (book the liability, pay later).'}{!canApprove ? ' Finance/Owner must complete this.' : ''}</div>}
           <div className="grid grid-cols-3 gap-2">
             <div className="rounded-lg bg-gray-50 p-2.5"><div className="text-[10px] text-gray-400 uppercase">Gross</div><div className="text-sm font-semibold tabular-nums">{PKR(run.grossTotal)}</div></div>
             <div className="rounded-lg bg-amber-50 p-2.5"><div className="text-[10px] text-amber-500 uppercase">Advances</div><div className="text-sm font-semibold tabular-nums text-amber-700">−{PKR(run.advanceTotal)}</div></div>
@@ -4101,15 +4114,25 @@ function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDelete, a
               </button>
             </div>
           )}
-          {lines.map(l => (
-            <div key={l.id} className="rounded-lg border border-gray-200 p-3 flex items-center justify-between">
-              <div>
-                <div className="text-sm font-semibold text-gray-900">{l.workerName}</div>
-                <div className="text-xs text-gray-400">
-                  Gross {PKR(l.grossPay)}{parseFloat(l.advanceDeducted) > 0 ? ` · advance −${PKR(l.advanceDeducted)}` : ''} · <span className="text-emerald-700 font-medium">net {PKR(l.netPay)}</span>
+          {lines.map(l => {
+            const linePaid = !!l.paidAt;
+            return (
+            <div key={l.id} className={`rounded-lg border p-3 flex items-center justify-between ${canSelectPay && !linePaid && selected.has(l.id) ? 'border-emerald-300 bg-emerald-50/40' : 'border-gray-200'}`}>
+              <div className="flex items-center gap-2.5">
+                {canSelectPay && !linePaid && (
+                  <input type="checkbox" checked={selected.has(l.id)} onChange={() => toggleSel(l.id)} className="rounded border-gray-300" />
+                )}
+                <div>
+                  <div className="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
+                    {l.workerName}
+                    {linePaid && <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-100 text-emerald-700 uppercase">paid</span>}
+                  </div>
+                  <div className="text-xs text-gray-400">
+                    Gross {PKR(l.grossPay)}{parseFloat(l.advanceDeducted) > 0 ? ` · advance −${PKR(l.advanceDeducted)}` : ''} · <span className="text-emerald-700 font-medium">net {PKR(l.netPay)}</span>
+                  </div>
                 </div>
               </div>
-              {isPaid && (
+              {linePaid && (
                 <div className="flex items-center gap-1.5">
                   <button onClick={() => printPayslip(run, l, companyProfile)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
                     <Printer className="w-3.5 h-3.5" /> Payslip
@@ -4120,7 +4143,8 @@ function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDelete, a
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </SlideDrawer>
