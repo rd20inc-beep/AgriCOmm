@@ -4,6 +4,14 @@
 const db = require('../../config/database');
 const { resolveCashAccountId } = require('../../shared/cashAccounts');
 
+// Normalise a date column (node-pg may hand back a Date or a string) to a plain
+// YYYY-MM-DD string so date comparisons stay lexicographic = chronological.
+function ymd(d) {
+  if (!d) return null;
+  if (typeof d === 'string') return d.slice(0, 10);
+  try { return new Date(d).toISOString().slice(0, 10); } catch { return null; }
+}
+
 // ── Statutory deductions (Phase 12) ──────────────────────────────────────────
 // Progressive slab tax on an ANNUALISED base: brackets are [{threshold, rate,
 // base}] (annual lower bound, marginal %, fixed annual tax at the bracket).
@@ -102,8 +110,17 @@ async function computePayrollSummary(month) {
     const dailyWage = parseFloat(w.daily_wage) || 0;
     // Salaried staff earn their flat monthly figure; daily-wage staff earn per
     // effective day worked. Overtime (if logged) pays 1.5× the daily hourly rate.
+    // PRORATION: a monthly-salaried employee who joined or left partway through
+    // the month is paid only for the days they were employed within it.
+    const daysInMonth = parseInt(endDate.slice(8, 10), 10) || 30;
+    const empStart = (w.joined_date && ymd(w.joined_date) > startDate) ? ymd(w.joined_date) : startDate;
+    const leftYmd = w.left_date ? ymd(w.left_date) : null;
+    const empEnd = (leftYmd && leftYmd < endDate) ? leftYmd : endDate;
+    const employedDays = Math.max(0, Math.round((Date.parse(empEnd) - Date.parse(empStart)) / 86400000) + 1);
+    const proratable = w.pay_type === 'monthly' && employedDays < daysInMonth;
+    const proRatio = proratable ? Math.min(1, employedDays / daysInMonth) : 1;
     const basicPay = w.pay_type === 'monthly'
-      ? (parseFloat(w.monthly_salary) || 0)
+      ? Math.round((parseFloat(w.monthly_salary) || 0) * proRatio)
       : effectiveDays * dailyWage;
     // Overtime: per-worker ot_rate_per_hour if set, else 1.5× the daily hourly rate.
     const otRate = parseFloat(w.ot_rate_per_hour) > 0 ? parseFloat(w.ot_rate_per_hour) : (dailyWage / 8 * 1.5);
@@ -154,6 +171,7 @@ async function computePayrollSummary(month) {
       ...w, daysPresent, halfDays, effectiveDays, totalOT,
       basicPay: Math.round(basicPay), otPay: Math.round(otPay),
       grossPay: Math.round(gross), // earned (basic + OT); bonus shown separately
+      prorated: proratable, employedDays, daysInMonth,
       bonusTotal, deductionTotal,
       statutoryTotal, statutoryLines,
       advanceOutstanding: Math.round(advanceOutstanding),
@@ -252,6 +270,8 @@ async function preparePayrollRun({ month, lines, pay_method, bank_account_id, pa
         run_id: r.id, worker_id: w.id, worker_name: w.name, role: w.role, pay_type: w.pay_type,
         effective_days: w.effectiveDays || 0, ot_hours: w.totalOT || 0,
         basic_pay: w.basicPay, ot_pay: w.otPay, gross_pay: w.grossPay,
+        employed_days: w.employedDays != null ? w.employedDays : null,
+        days_in_month: w.daysInMonth != null ? w.daysInMonth : null,
         bonus_total: w.bonusTotal || 0, deduction_total: w.deductionTotal || 0,
         statutory_total: w.statutoryTotal || 0,
         statutory_json: JSON.stringify(w.statutoryLines || []),

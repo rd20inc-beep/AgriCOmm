@@ -324,7 +324,7 @@ export default function MillFinanceDashboard() {
   const [showTransfer, setShowTransfer] = useState(false);
   const EMPTY_EXP = { category: 'salaries', vendor_preset: '', vendor_name: '', subcategory: '', employee_id: '', is_recurring: false, recurrence: 'monthly', description: '', amount: '', expense_date: new Date().toISOString().split('T')[0], reference: '', notes: '' };
   const [expForm, setExpForm] = useState(EMPTY_EXP);
-  const EMPTY_WORKER = { id: null, name: '', role: 'laborer', pay_type: 'daily', daily_wage: '', monthly_salary: '', ot_rate_per_hour: '', phone: '', cnic: '', joined_date: new Date().toISOString().split('T')[0], notes: '' };
+  const EMPTY_WORKER = { id: null, name: '', role: 'laborer', pay_type: 'daily', daily_wage: '', monthly_salary: '', ot_rate_per_hour: '', phone: '', cnic: '', bank_name: '', bank_account_number: '', iban: '', joined_date: new Date().toISOString().split('T')[0], left_date: '', notes: '' };
   const [workerForm, setWorkerForm] = useState(EMPTY_WORKER);
   const [advanceTarget, setAdvanceTarget] = useState(null); // worker we're giving an advance to
   const [advanceForm, setAdvanceForm] = useState({ amount: '', advance_date: new Date().toISOString().split('T')[0], payment_method: 'cash', notes: '', recovery_method: 'full_next_salary', recovery_start_period: '', installment_amount: '', installment_count: '', deduction_percent: '' });
@@ -547,7 +547,9 @@ export default function MillFinanceDashboard() {
         monthly_salary: worker.monthlySalary != null ? String(worker.monthlySalary) : '',
         ot_rate_per_hour: worker.otRatePerHour != null ? String(worker.otRatePerHour) : '',
         phone: worker.phone || '', cnic: worker.cnic || '',
+        bank_name: worker.bankName || '', bank_account_number: worker.bankAccountNumber || '', iban: worker.iban || '',
         joined_date: worker.joinedDate ? String(worker.joinedDate).slice(0, 10) : '',
+        left_date: worker.leftDate ? String(worker.leftDate).slice(0, 10) : '',
         notes: worker.notes || '',
       });
     } else {
@@ -565,7 +567,8 @@ export default function MillFinanceDashboard() {
       daily_wage: workerForm.daily_wage || null, monthly_salary: workerForm.monthly_salary || null,
       ot_rate_per_hour: workerForm.ot_rate_per_hour || null,
       phone: workerForm.phone || null, cnic: workerForm.cnic || null,
-      joined_date: workerForm.joined_date || null, notes: workerForm.notes || null,
+      bank_name: workerForm.bank_name || null, bank_account_number: workerForm.bank_account_number || null, iban: workerForm.iban || null,
+      joined_date: workerForm.joined_date || null, left_date: workerForm.left_date || null, notes: workerForm.notes || null,
     };
     try {
       if (workerForm.id) {
@@ -2050,6 +2053,38 @@ export default function MillFinanceDashboard() {
             </div>
           </div>
           <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Last working day <span className="text-gray-400 font-normal">(optional — prorates the final month's salary)</span></label>
+            <input
+              type="date"
+              value={workerForm.left_date}
+              onChange={e => setWorkerForm(p => ({ ...p, left_date: e.target.value }))}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
+            />
+          </div>
+          <div className="rounded-lg border border-gray-200 p-3 space-y-3">
+            <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Bank details (for salary transfer)</div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Bank name</label>
+                <input type="text" placeholder="e.g. HBL, Meezan" value={workerForm.bank_name}
+                  onChange={e => setWorkerForm(p => ({ ...p, bank_name: e.target.value }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Account number</label>
+                <input type="text" value={workerForm.bank_account_number}
+                  onChange={e => setWorkerForm(p => ({ ...p, bank_account_number: e.target.value }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">IBAN</label>
+              <input type="text" placeholder="PK00XXXX0000000000000000" value={workerForm.iban}
+                onChange={e => setWorkerForm(p => ({ ...p, iban: e.target.value.toUpperCase() }))}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900" />
+            </div>
+          </div>
+          <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Notes</label>
             <textarea
               rows={2}
@@ -2273,6 +2308,7 @@ export default function MillFinanceDashboard() {
           canApprove={canApprovePayroll}
           canPay={canPayPayroll}
           canDelete={canDeletePayroll}
+          addToast={addToast}
           onClose={() => setPayslipsRunId(null)}
           onUndo={(run) => { setPayslipsRunId(null); handleDeleteRun(run); }}
           onApprove={async (run) => { try { await approveRunMut.mutateAsync(run.id); addToast('Payroll run approved', 'success'); } catch (e) { addToast(e.message, 'error'); } }}
@@ -3148,7 +3184,7 @@ function payslipBody(run, line, company) {
 
     <div class="sec">Earnings</div>
     <table><tbody>
-      <tr><td>Basic pay${line.payType !== 'monthly' ? ` (${line.effectiveDays || 0} day${(line.effectiveDays || 0) === 1 ? '' : 's'})` : ''}</td><td class="r">${rs(line.basicPay)}</td></tr>
+      <tr><td>Basic pay${line.payType !== 'monthly' ? ` (${line.effectiveDays || 0} day${(line.effectiveDays || 0) === 1 ? '' : 's'})` : (line.employedDays != null && line.daysInMonth != null && line.employedDays < line.daysInMonth ? ` (prorated ${line.employedDays}/${line.daysInMonth} days)` : '')}</td><td class="r">${rs(line.basicPay)}</td></tr>
       ${ot > 0 ? `<tr><td>Overtime${parseFloat(line.otHours) ? ` (${line.otHours} hrs)` : ''}</td><td class="r">${rs(line.otPay)}</td></tr>` : ''}
       ${bonus > 0 ? `<tr><td>Bonuses &amp; allowances</td><td class="r">${rs(bonus)}</td></tr>` : ''}
       <tr style="border-top:1px solid #e5e7eb"><td style="font-weight:700;padding-top:7px">Gross pay</td><td class="r" style="font-weight:700;padding-top:7px">${rs((parseFloat(line.grossPay) || 0) + bonus)}</td></tr>
@@ -3335,6 +3371,38 @@ function printAllTaxCertificates(employees, meta, company) {
   return openPayslipWindow(`Tax Certificates ${meta.taxYear}`, employees.map((e) => taxCertificateBody(e, meta, company)).join(''));
 }
 
+// Bank bulk-transfer (disbursement) file — one beneficiary row per payslip line,
+// for upload to the bank's payroll portal. Generic CSV with the common columns.
+function downloadBankTransferFile(run, lines, addToast) {
+  if (!lines || !lines.length) { if (addToast) addToast('No employees in this run', 'error'); return; }
+  const rows = lines.map((l, i) => ({
+    sno: i + 1,
+    name: l.workerName || '',
+    cnic: l.cnic || '',
+    bank: l.bankName || '',
+    account: l.bankAccountNumber || '',
+    iban: l.iban || '',
+    amount: Math.round(parseFloat(l.netPay) || 0),
+    narration: `Salary ${periodLabel(run.period)}`,
+  }));
+  const cols = [
+    { key: 'sno', label: 'S.No' },
+    { key: 'name', label: 'Beneficiary Name' },
+    { key: 'cnic', label: 'CNIC' },
+    { key: 'bank', label: 'Bank Name' },
+    { key: 'account', label: 'Account Number' },
+    { key: 'iban', label: 'IBAN' },
+    { key: 'amount', label: 'Amount (PKR)' },
+    { key: 'narration', label: 'Narration' },
+  ];
+  downloadCSV(rows, cols, `bank-transfer-${run.period}-run${run.id || ''}.csv`);
+  if (addToast) {
+    const missing = rows.filter((r) => !r.account && !r.iban).length;
+    if (missing) addToast(`Exported ${rows.length} rows — ${missing} missing bank details`, 'info');
+    else addToast(`Bank transfer file: ${rows.length} beneficiaries`, 'success');
+  }
+}
+
 // Drawer to post a payroll run: review the per-employee breakdown, then pay it
 // out from Mill Cash. Server recomputes the figures on submit.
 function PayrollRunDrawer({ month, employees, preselectId, bankAccounts = [], onClose, onPosted, postRunMut, addToast }) {
@@ -3351,6 +3419,7 @@ function PayrollRunDrawer({ month, employees, preselectId, bankAccounts = [], on
     const statutory = Math.round(w.statutoryTotal || 0);
     return {
       id: w.id, name: w.name, role: w.role, gross: w.grossPay || 0, bonus, deduction, statutory,
+      prorated: !!w.prorated, employedDays: w.employedDays, daysInMonth: w.daysInMonth,
       outstanding: Math.round(w.advanceOutstanding || 0),
       scheduled,
       include: preselectId ? w.id === preselectId : true,
@@ -3467,8 +3536,9 @@ function PayrollRunDrawer({ month, employees, preselectId, bankAccounts = [], on
                     </td>
                     <td className="px-3 py-1.5">
                       <div className="text-gray-800 font-medium">{r.name}</div>
-                      {(r.bonus > 0 || r.deduction > 0 || r.statutory > 0) && (
+                      {(r.bonus > 0 || r.deduction > 0 || r.statutory > 0 || r.prorated) && (
                         <div className="text-[10px] mt-0.5">
+                          {r.prorated && <span className="text-amber-600 mr-2">prorated {r.employedDays}/{r.daysInMonth} days</span>}
                           {r.bonus > 0 && <span className="text-emerald-600 mr-2">+ bonus {PKR(r.bonus)}</span>}
                           {r.deduction > 0 && <span className="text-rose-600 mr-2">− deduction {PKR(r.deduction)}</span>}
                           {r.statutory > 0 && <span className="text-violet-600">− tax/statutory {PKR(r.statutory)}</span>}
@@ -3540,14 +3610,19 @@ function StatutoryDeductionsDrawer({ canPay, bankAccounts = [], onClose, addToas
   const createMut = useCreateStatutoryDeduction();
   const updateMut = useUpdateStatutoryDeduction();
   const deleteMut = useDeleteStatutoryDeduction();
-  const blank = { name: '', calc_method: 'percent', rate: '', fixed_amount: '', base: 'gross', min_gross: '', applies_to: 'all', liability_account_code: '2050' };
+  const blank = { name: '', calc_method: 'percent', rate: '', fixed_amount: '', base: 'gross', min_gross: '', applies_to: 'all', liability_account_code: '2050', slabs: [] };
   const [form, setForm] = useState(blank);
   const [editId, setEditId] = useState(null);
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
+  // Slab editor helpers (progressive annual brackets: threshold/rate/base).
+  const slabs = Array.isArray(form.slabs) ? form.slabs : [];
+  const setSlab = (i, patch) => set({ slabs: slabs.map((s, j) => (j === i ? { ...s, ...patch } : s)) });
+  const addSlab = () => set({ slabs: [...slabs, { threshold: '', rate: '', base: '' }] });
+  const rmSlab = (i) => set({ slabs: slabs.filter((_, j) => j !== i) });
 
   const startEdit = (r) => {
     setEditId(r.id);
-    setForm({ name: r.name, calc_method: r.calcMethod, rate: r.rate || '', fixed_amount: r.fixedAmount || '', base: r.base, min_gross: r.minGross || '', applies_to: r.appliesTo, liability_account_code: r.liabilityAccountCode || '2050' });
+    setForm({ name: r.name, calc_method: r.calcMethod, rate: r.rate || '', fixed_amount: r.fixedAmount || '', base: r.base, min_gross: r.minGross || '', applies_to: r.appliesTo, liability_account_code: r.liabilityAccountCode || '2050', slabs: Array.isArray(r.slabs) ? r.slabs : [] });
   };
   const reset = () => { setEditId(null); setForm(blank); };
 
@@ -3555,7 +3630,15 @@ function StatutoryDeductionsDrawer({ canPay, bankAccounts = [], onClose, addToas
     if (!String(form.name).trim()) { addToast('Name is required', 'error'); return; }
     if (form.calc_method === 'percent' && !(parseFloat(form.rate) > 0)) { addToast('Enter a rate %', 'error'); return; }
     if (form.calc_method === 'fixed' && !(parseFloat(form.fixed_amount) > 0)) { addToast('Enter a fixed amount', 'error'); return; }
-    const payload = { ...form, rate: parseFloat(form.rate) || 0, fixed_amount: parseFloat(form.fixed_amount) || 0, min_gross: parseFloat(form.min_gross) || 0 };
+    if (form.calc_method === 'slab' && !slabs.some((s) => parseFloat(s.threshold) >= 0 && (parseFloat(s.rate) > 0 || parseFloat(s.base) > 0))) { addToast('Add at least one tax slab', 'error'); return; }
+    const payload = {
+      ...form, rate: parseFloat(form.rate) || 0, fixed_amount: parseFloat(form.fixed_amount) || 0, min_gross: parseFloat(form.min_gross) || 0,
+      slabs: form.calc_method === 'slab'
+        ? slabs.filter((s) => s.threshold !== '' || s.rate !== '' || s.base !== '')
+          .map((s) => ({ threshold: parseFloat(s.threshold) || 0, rate: parseFloat(s.rate) || 0, base: parseFloat(s.base) || 0 }))
+          .sort((a, b) => a.threshold - b.threshold)
+        : undefined,
+    };
     try {
       if (editId) { await updateMut.mutateAsync({ id: editId, data: payload }); addToast('Rule updated', 'success'); }
       else { await createMut.mutateAsync(payload); addToast('Rule added', 'success'); }
@@ -3568,7 +3651,7 @@ function StatutoryDeductionsDrawer({ canPay, bankAccounts = [], onClose, addToas
   async function remove(r) {
     try { await deleteMut.mutateAsync(r.id); addToast('Rule removed', 'success'); } catch (e) { addToast(e.message, 'error'); }
   }
-  const describe = (r) => r.calcMethod === 'percent' ? `${parseFloat(r.rate)}% of ${r.base}` : r.calcMethod === 'fixed' ? `${PKR(r.fixedAmount)} fixed` : 'Slab-based';
+  const describe = (r) => r.calcMethod === 'percent' ? `${parseFloat(r.rate)}% of ${r.base}` : r.calcMethod === 'fixed' ? `${PKR(r.fixedAmount)} fixed` : `Income tax slabs (${Array.isArray(r.slabs) ? r.slabs.length : 0} bracket${(Array.isArray(r.slabs) ? r.slabs.length : 0) === 1 ? '' : 's'}) on ${r.base}`;
 
   return (
     <SlideDrawer open onClose={onClose} title="Statutory deductions" subtitle="Tax / EOBI rules + remit withheld liabilities to the authority" icon={Landmark} size="lg">
@@ -3592,6 +3675,7 @@ function StatutoryDeductionsDrawer({ canPay, bankAccounts = [], onClose, addToas
               <select value={form.calc_method} onChange={(e) => set({ calc_method: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
                 <option value="percent">Percent of pay</option>
                 <option value="fixed">Fixed amount</option>
+                <option value="slab">Income tax slabs (annual)</option>
               </select>
             </div>
             {form.calc_method === 'percent' ? (
@@ -3608,10 +3692,18 @@ function StatutoryDeductionsDrawer({ canPay, bankAccounts = [], onClose, addToas
                   </select>
                 </div>
               </>
-            ) : (
+            ) : form.calc_method === 'fixed' ? (
               <div>
                 <label className="block text-[11px] text-gray-500 mb-1">Fixed amount (Rs)</label>
                 <input type="number" value={form.fixed_amount} onChange={(e) => set({ fixed_amount: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+              </div>
+            ) : (
+              <div>
+                <label className="block text-[11px] text-gray-500 mb-1">Applied to (annualised)</label>
+                <select value={form.base} onChange={(e) => set({ base: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+                  <option value="gross">Gross pay</option>
+                  <option value="basic">Basic pay</option>
+                </select>
               </div>
             )}
             <div>
@@ -3634,6 +3726,26 @@ function StatutoryDeductionsDrawer({ canPay, bankAccounts = [], onClose, addToas
               </select>
             </div>
           </div>
+          {form.calc_method === 'slab' && (
+            <div className="rounded-lg bg-gray-50 border border-gray-200 p-2.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold text-gray-600">Annual income-tax slabs (FBR)</span>
+                <button onClick={addSlab} className="text-[11px] text-blue-700 font-medium hover:underline">+ Add bracket</button>
+              </div>
+              <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-1.5 text-[9px] uppercase text-gray-400 px-1">
+                <span>Annual income over (Rs)</span><span>Rate % above</span><span>Fixed tax at this point (Rs)</span><span></span>
+              </div>
+              {!slabs.length ? <p className="text-[11px] text-gray-400 px-1">No brackets yet — add the FBR salary slabs (lowest first).</p> : slabs.map((s, i) => (
+                <div key={i} className="grid grid-cols-[1fr_1fr_1fr_auto] gap-1.5 items-center">
+                  <input type="number" value={s.threshold} onChange={(e) => setSlab(i, { threshold: e.target.value })} placeholder="0" className="border border-gray-200 rounded-md px-2 py-1.5 text-xs" />
+                  <input type="number" step="0.01" value={s.rate} onChange={(e) => setSlab(i, { rate: e.target.value })} placeholder="0" className="border border-gray-200 rounded-md px-2 py-1.5 text-xs" />
+                  <input type="number" value={s.base} onChange={(e) => setSlab(i, { base: e.target.value })} placeholder="0" className="border border-gray-200 rounded-md px-2 py-1.5 text-xs" />
+                  <button onClick={() => rmSlab(i)} className="p-1 rounded text-rose-500 hover:bg-rose-50"><Trash2 className="w-3.5 h-3.5" /></button>
+                </div>
+              ))}
+              <p className="text-[10px] text-gray-400">Tax = <em>fixed tax at the bracket</em> + <em>rate%</em> × (annual income − <em>bracket threshold</em>), then ÷12 for the month. Income is the chosen base × 12. Enter brackets lowest-threshold first.</p>
+            </div>
+          )}
           <div className="flex gap-2 justify-end">
             {editId && <button onClick={reset} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>}
             <button onClick={save} disabled={createMut.isPending || updateMut.isPending} className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">{editId ? 'Save rule' : 'Add rule'}</button>
@@ -3921,7 +4033,7 @@ function PayrollScheduleDrawer({ canManage, canPrepare, onClose, onRunNow, runNo
 // Run panel: review a run's payslip lines, see its approval status, and (for
 // Finance/Owner) Approve → Pay → or Void. Paid runs can be Undone (reversed).
 const RUN_STATUS_TONE = { prepared: 'bg-amber-100 text-amber-700', approved: 'bg-blue-100 text-blue-700', accrued: 'bg-violet-100 text-violet-700', paid: 'bg-emerald-100 text-emerald-700', posted: 'bg-emerald-100 text-emerald-700', voided: 'bg-gray-100 text-gray-500' };
-function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDelete, onClose, onUndo, onApprove, onPay, onVoid, onAccrue, onSettle, deleteRunMut, approveRunMut, payRunMut, voidRunMut, accrueRunMut, settleRunMut }) {
+function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDelete, addToast, onClose, onUndo, onApprove, onPay, onVoid, onAccrue, onSettle, deleteRunMut, approveRunMut, payRunMut, voidRunMut, accrueRunMut, settleRunMut }) {
   const { data, isLoading } = usePayrollRun(runId);
   const run = data?.run;
   const lines = data?.lines || [];
@@ -3971,6 +4083,11 @@ function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDelete, o
             <div className="rounded-lg bg-amber-50 p-2.5"><div className="text-[10px] text-amber-500 uppercase">Advances</div><div className="text-sm font-semibold tabular-nums text-amber-700">−{PKR(run.advanceTotal)}</div></div>
             <div className="rounded-lg bg-emerald-50 p-2.5"><div className="text-[10px] text-emerald-500 uppercase">{isPaid ? 'Net paid' : 'Net to pay'}</div><div className="text-sm font-semibold tabular-nums text-emerald-700">{PKR(run.netTotal)}</div></div>
           </div>
+          {lines.length > 0 && (run.payMethod === 'bank' || !isPaid) && (
+            <button onClick={() => downloadBankTransferFile(run, lines, addToast)} className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100">
+              <Banknote className="w-3.5 h-3.5" /> Bank transfer file (CSV) · {lines.length}
+            </button>
+          )}
           {isPaid && lines.length > 0 && (
             <div className="grid grid-cols-3 gap-2">
               <button onClick={() => printPaymentVoucher(run, lines, companyProfile)} className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100">

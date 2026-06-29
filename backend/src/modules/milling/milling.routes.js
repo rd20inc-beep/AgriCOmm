@@ -798,7 +798,7 @@ function plannedScheduleRows(advance) {
 
 router.post('/workers', authorize('payroll', 'create'), async (req, res) => {
   try {
-    const { name, role, phone, cnic, joined_date, mill_id, notes } = req.body;
+    const { name, role, phone, cnic, joined_date, left_date, mill_id, notes, bank_name, bank_account_number, iban } = req.body;
     const { pay_type, monthly_salary, daily_wage } = normalizeWorkerPay(req.body);
     if (!name) return res.status(400).json({ success: false, message: 'name is required.' });
     if (pay_type === 'monthly' && !(monthly_salary > 0)) return res.status(400).json({ success: false, message: 'monthly_salary required for salaried workers.' });
@@ -808,7 +808,9 @@ router.post('/workers', authorize('payroll', 'create'), async (req, res) => {
       name, role: role || 'laborer', pay_type, monthly_salary, daily_wage,
       ot_rate_per_hour: ot_rate_per_hour > 0 ? ot_rate_per_hour : null,
       phone: phone || null, cnic: cnic || null,
+      bank_name: bank_name || null, bank_account_number: bank_account_number || null, iban: iban || null,
       joined_date: joined_date || new Date().toISOString().split('T')[0],
+      left_date: left_date || null,
       mill_id: mill_id || null, notes: notes || null,
     }).returning('*');
     return res.json({ success: true, data: { worker } });
@@ -822,7 +824,7 @@ router.put('/workers/:id', authorize('payroll', 'edit'), async (req, res) => {
     const worker = await db('mill_workers').where('id', req.params.id).first();
     if (!worker) return res.status(404).json({ success: false, message: 'Worker not found.' });
     const updates = {};
-    for (const f of ['name', 'role', 'phone', 'cnic', 'joined_date', 'notes']) {
+    for (const f of ['name', 'role', 'phone', 'cnic', 'joined_date', 'left_date', 'notes', 'bank_name', 'bank_account_number', 'iban']) {
       if (req.body[f] !== undefined) updates[f] = req.body[f] || null;
     }
     if (req.body.ot_rate_per_hour !== undefined) {
@@ -1617,7 +1619,7 @@ router.get('/payroll/summary', authorize('payroll', 'view'), async (req, res) =>
 async function enrichPayslipLines(lines) {
   const ids = [...new Set(lines.map((l) => l.worker_id).filter(Boolean))];
   if (!ids.length) return lines.map((l) => ({ ...l, cnic: null, phone: null, advance_outstanding: 0 }));
-  const workers = await db('mill_workers').whereIn('id', ids).select('id', 'cnic', 'phone', 'joined_date');
+  const workers = await db('mill_workers').whereIn('id', ids).select('id', 'cnic', 'phone', 'joined_date', 'bank_name', 'bank_account_number', 'iban');
   const wMap = new Map(workers.map((w) => [w.id, w]));
   const advRows = await db('mill_worker_advances').whereIn('worker_id', ids).where('status', 'outstanding')
     .groupBy('worker_id').select('worker_id', db.raw('COALESCE(SUM(amount - recovered_amount),0) as outstanding'));
@@ -1627,6 +1629,9 @@ async function enrichPayslipLines(lines) {
     cnic: (wMap.get(l.worker_id) || {}).cnic || null,
     phone: (wMap.get(l.worker_id) || {}).phone || null,
     joined_date: (wMap.get(l.worker_id) || {}).joined_date || null,
+    bank_name: (wMap.get(l.worker_id) || {}).bank_name || null,
+    bank_account_number: (wMap.get(l.worker_id) || {}).bank_account_number || null,
+    iban: (wMap.get(l.worker_id) || {}).iban || null,
     advance_outstanding: advMap.get(l.worker_id) || 0,
   }));
 }
