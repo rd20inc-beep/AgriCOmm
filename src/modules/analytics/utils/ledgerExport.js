@@ -363,6 +363,44 @@ export function printFinishedGoodsLedger(data, { companyName = 'AGRI COMMODITIES
   return true;
 }
 
+// Full Inventory Movement Ledger print — chronological movement feed + totals,
+// A4. data = the /reporting/inventory-ledger payload ({ rows, totals }).
+export function printInventoryMovementLedger(data, { companyName = 'AGRI COMMODITIES', generatedBy, filterText } = {}) {
+  const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const pkr = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
+  const n0 = (v) => Math.round(parseFloat(v) || 0).toLocaleString();
+  const dd = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+  const { rows = [], totals = {} } = data || {};
+  const now = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const body = rows.map(r => {
+    const where = [r.fromWh, r.toWh].filter(Boolean).join(' &rarr; ') || r.reference || '—';
+    const qty = `${r.direction === 'out' ? '−' : '+'}${n0(r.qtyKg)}`;
+    return `<tr><td>${dd(r.date)}</td><td>${e(r.label)}</td><td>${e(r.lotNo || r.batchNo || '—')}</td><td>${e(where)}</td>
+      <td style="text-align:right;color:${r.direction === 'out' ? '#b91c1c' : '#047857'}">${qty}</td><td style="text-align:right">${r.costPkr > 0 ? pkr(r.costPkr) : '—'}</td></tr>`;
+  }).join('');
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Inventory Movement Ledger</title><style>
+    *{box-sizing:border-box} body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#111827;margin:0;font-size:11px}
+    .page{padding:12mm} .hdr{border-bottom:2px solid #111827;padding-bottom:8px;display:flex;justify-content:space-between}
+    .co{font-size:18px;font-weight:800} .title{font-size:15px;font-weight:800;text-align:right} .muted{color:#6b7280;font-size:10px}
+    table{width:100%;border-collapse:collapse;margin-top:10px} th{background:#f3f4f6;font-size:9px;text-transform:uppercase;color:#374151;padding:6px 8px;border-bottom:1px solid #d1d5db;text-align:left}
+    th:nth-child(5),th:nth-child(6){text-align:right} td{padding:5px 8px;border-bottom:1px solid #f0f0f0} tbody tr:nth-child(even) td{background:#fafafa}
+    tr.tot td{background:#f3f4f6;font-weight:700}
+    @media print{.page{padding:10mm}@page{size:A4 landscape;margin:0}}
+  </style></head><body><div class="page">
+    <div class="hdr"><div><div class="co">${e(companyName)}</div><div class="muted">Inventory Movement Ledger</div></div>
+      <div><div class="title">STOCK MOVEMENTS</div><div class="muted">${e(filterText || 'All movements')}</div><div class="muted">${generatedBy ? 'By ' + e(generatedBy) + ' · ' : ''}${e(now)}</div></div></div>
+    <table><thead><tr><th>Date</th><th>Movement</th><th>Lot / Batch</th><th>Where</th><th>Qty (kg)</th><th>Cost</th></tr></thead>
+    <tbody>${body || '<tr><td colspan="6" style="color:#9ca3af">No movements.</td></tr>'}
+    <tr class="tot"><td colspan="4">TOTAL · ${e(totals.count || rows.length)} movements</td><td style="text-align:right">+${n0(totals.inKg)} / −${n0(totals.outKg)}</td><td></td></tr>
+    </tbody></table>
+    <div class="muted" style="margin-top:8px">Source: inventory_movements. + inbound, − outbound.</div>
+  </div><script>window.addEventListener('load',function(){setTimeout(function(){window.focus();window.print();},350)});<\/script></body></html>`;
+  const w = window.open('', '_blank', 'width=1100,height=900');
+  if (!w) return false;
+  w.document.open(); w.document.write(html); w.document.close(); w.focus();
+  return true;
+}
+
 // Full multi-section Batch 360 print (inputs → processing → outputs → sales →
 // financials), A4. data = the /reporting/batch-ledger/:id payload.
 export function printBatchLedger(data, { companyName = 'AGRI COMMODITIES', generatedBy } = {}) {
