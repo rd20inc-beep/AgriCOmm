@@ -11,7 +11,7 @@ import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printLotLedger } from '../utils/ledgerExport';
 
-const pkr = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
+const pkr = (v) => (v == null ? '—' : `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`);
 const kg = (v) => `${Math.round(parseFloat(v) || 0).toLocaleString()} kg`;
 const dt = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 
