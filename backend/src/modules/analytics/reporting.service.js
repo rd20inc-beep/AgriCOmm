@@ -983,6 +983,56 @@ const reportingService = {
   // ═══════════════════════════════════════════════════════════════════
 
   /**
+   * Export-use for a set of lot ids — which export orders the lot(s) fed, via
+   * inventory_reservations (still-reserved qty) + export-dispatch lot_transactions
+   * (shipped qty). Also returns transferredToExportKg = qty this lot moved to the
+   * export entity (transfer-to-export), which is the previously-weak path: a lot
+   * milled then transferred to export shows up here even before it's tied to an
+   * order. Schema-accurate (reservations: lot_id/order_id/status; lot_transactions:
+   * reference_module='export_order'/reference_id, entity_to). Read-only.
+   */
+  async _exportUseForLots(lotIds) {
+    const num = (v) => parseFloat(v) || 0;
+    const ids = (lotIds || []).filter(Boolean);
+    if (!ids.length) return { orders: [], transferredToExportKg: 0 };
+
+    const [resv, txns, tr] = await Promise.all([
+      db('inventory_reservations as r')
+        .leftJoin('export_orders as eo', 'r.order_id', 'eo.id')
+        .leftJoin('customers as c', 'eo.customer_id', 'c.id')
+        .whereIn('r.lot_id', ids).whereNot('r.status', 'Cancelled')
+        .select('r.order_id', 'r.reserved_qty', 'r.status as resv_status',
+          'eo.order_no', 'eo.status as order_status', 'eo.country', db.raw("COALESCE(c.name,'—') as customer")),
+      db('lot_transactions as lt')
+        .leftJoin('export_orders as eo', 'lt.reference_id', 'eo.id')
+        .leftJoin('customers as c', 'eo.customer_id', 'c.id')
+        .whereIn('lt.lot_id', ids).where('lt.reference_module', 'export_order')
+        .where('lt.transaction_type', 'export_dispatch_out')
+        .select('lt.reference_id as order_id', 'lt.quantity_kg',
+          'eo.order_no', 'eo.status as order_status', 'eo.country', db.raw("COALESCE(c.name,'—') as customer")),
+      db('lot_transactions').whereIn('lot_id', ids).where('entity_to', 'export')
+        .whereIn('transaction_type', ['transfer_to_export', 'warehouse_transfer_out']).sum('quantity_kg as q').first(),
+    ]);
+
+    const byOrder = {};
+    const ensure = (oid, info) => {
+      if (!oid) return null;
+      return byOrder[oid] || (byOrder[oid] = {
+        orderId: oid, orderNo: info.order_no || `#${oid}`, href: `/export/${oid}`,
+        customer: info.customer || '—', country: info.country || null, status: info.order_status || null,
+        reservedKg: 0, dispatchedKg: 0,
+      });
+    };
+    for (const r of resv) { const o = ensure(r.order_id, r); if (o && r.resv_status === 'Active') o.reservedKg += num(r.reserved_qty) * 1000; }
+    for (const t of txns) { const o = ensure(t.order_id, t); if (o) o.dispatchedKg += Math.abs(num(t.quantity_kg)); }
+
+    return {
+      orders: Object.values(byOrder).sort((a, b) => (b.dispatchedKg + b.reservedKg) - (a.dispatchedKg + a.reservedKg)),
+      transferredToExportKg: Math.abs(num(tr && tr.q)),
+    };
+  },
+
+  /**
    * Lot Ledger — the full chronological activity for one lot, built from the
    * authoritative `lot_transactions` table (every movement type writes a row
    * here with a running balance_kg). Each event is enriched with a human
@@ -1260,6 +1310,7 @@ const reportingService = {
         costBasis: 'Landed cost per kg (residual costing); processing cost allocated by batch share — approximate where blended.',
       },
       millingHistory, outputs, directSales, processedSales,
+      exportUse: await this._exportUseForLots([id, ...outIds]),
       events,
       totals: { events: events.length, inKg: totIn, outKg: totOut, balanceKg: remainingKg },
     };
@@ -1875,6 +1926,7 @@ const reportingService = {
       manualCosts: { milling: num(batch.manual_milling_cost_pkr), other: num(batch.manual_other_expenses_pkr) },
       outputs: outputRows,
       sales,
+      exportUse: await this._exportUseForLots(outIds),
       yieldSummary: { inputMt, finishedMt, byproductMt, totalOutputMt, lossMt, yieldPct: inputMt > 0 ? (finishedMt / inputMt) * 100 : num(batch.yield_pct) },
       financialSummary: {
         rawCost, processingCost, totalInputCost: inputCostPkr,

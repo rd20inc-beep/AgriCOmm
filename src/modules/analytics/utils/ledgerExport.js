@@ -73,7 +73,8 @@ export function printLotLedger(data, { companyName = 'AGRI COMMODITIES', generat
   const pkr = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
   const kg = (v) => `${Math.round(parseFloat(v) || 0).toLocaleString()} kg`;
   const dd = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
-  const { lot = {}, quantitySummary: qs = {}, financialSummary: fs = {}, millingHistory = [], outputs = [], directSales = [], processedSales = [], events = [] } = data;
+  const { lot = {}, quantitySummary: qs = {}, financialSummary: fs = {}, millingHistory = [], outputs = [], directSales = [], processedSales = [], events = [], exportUse = {} } = data;
+  const exportOrders = exportUse.orders || [];
   const now = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   const sales = [...directSales, ...processedSales];
   const kv = (rows) => `<table class="kv">${rows.filter(Boolean).map(([k, v]) => `<tr><td class="k">${e(k)}</td><td class="v">${v}</td></tr>`).join('')}</table>`;
@@ -124,6 +125,10 @@ export function printLotLedger(data, { companyName = 'AGRI COMMODITIES', generat
 
     <h4>Sales From This Lot</h4>
     ${tbl([{ t: 'Date' }, { t: 'Invoice' }, { t: 'Customer' }, { t: 'Type' }, { t: 'Product' }, { t: 'Qty', r: 1 }, { t: 'Amount', r: 1 }], sales.map(s => [dd(s.date), e(s.invoice), e(s.customer), e(s.kind), e(s.product || '—'), kg(s.qtyKg), pkr(s.amount)]))}
+
+    ${(exportOrders.length || exportUse.transferredToExportKg) ? `<h4>Export Use</h4>
+    ${tbl([{ t: 'Export order' }, { t: 'Customer' }, { t: 'Country' }, { t: 'Reserved', r: 1 }, { t: 'Dispatched', r: 1 }, { t: 'Status' }], exportOrders.map(o => [e(o.orderNo), e(o.customer), e(o.country || '—'), o.reservedKg ? kg(o.reservedKg) : '—', o.dispatchedKg ? kg(o.dispatchedKg) : '—', e(o.status || '—')]))}
+    ${exportUse.transferredToExportKg ? `<div class="muted" style="margin-top:4px">${kg(exportUse.transferredToExportKg)} transferred to the Export entity.</div>` : ''}` : ''}
 
     <h4>Lot Activity Ledger</h4>
     ${tbl([{ t: 'Date' }, { t: 'Activity' }, { t: 'Ref' }, { t: 'In', r: 1 }, { t: 'Out', r: 1 }, { t: 'Balance', r: 1 }], events.map(ev => [dd(ev.date), e(ev.label), e(ev.reference || ev.txnNo || '—'), ev.inKg ? kg(ev.inKg) : '', ev.outKg ? kg(ev.outKg) : '', kg(ev.balanceKg)]))}
@@ -409,7 +414,8 @@ export function printBatchLedger(data, { companyName = 'AGRI COMMODITIES', gener
   const kg = (v) => `${Math.round(parseFloat(v) || 0).toLocaleString()} kg`;
   const mt = (v) => `${(parseFloat(v) || 0).toFixed(2)} MT`;
   const dd = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
-  const { batch: b = {}, inputs = [], outputs = [], sales = [], costs = [], manualCosts: mc = {}, yieldSummary: ys = {}, financialSummary: fs = {} } = data;
+  const { batch: b = {}, inputs = [], outputs = [], sales = [], costs = [], manualCosts: mc = {}, yieldSummary: ys = {}, financialSummary: fs = {}, exportUse = {} } = data;
+  const exportOrders = exportUse.orders || [];
   const now = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   const kv = (rows) => `<table class="kv">${rows.filter(Boolean).map(([k, v]) => `<tr><td class="k">${e(k)}</td><td class="v">${v}</td></tr>`).join('')}</table>`;
   const tbl = (head, rows) => `<table><thead><tr>${head.map(h => `<th style="text-align:${h.r ? 'right' : 'left'}">${e(h.t || h)}</th>`).join('')}</tr></thead><tbody>${rows.length ? rows.map(r => `<tr>${r.map((c, i) => `<td style="text-align:${head[i] && head[i].r ? 'right' : 'left'}">${c}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="${head.length}" style="color:#9ca3af">None</td></tr>`}</tbody></table>`;
@@ -463,6 +469,10 @@ export function printBatchLedger(data, { companyName = 'AGRI COMMODITIES', gener
 
     <h4>Sales from this batch</h4>
     ${tbl([{ t: 'Date' }, { t: 'Invoice' }, { t: 'Customer' }, { t: 'Product' }, { t: 'Qty', r: 1 }, { t: 'Amount', r: 1 }], sales.map(s => [dd(s.date), e(s.invoice), e(s.customer), e(s.product || '—'), kg(s.qtyKg), pkr(s.amount)]))}
+
+    ${(exportOrders.length || exportUse.transferredToExportKg) ? `<h4>Export Use</h4>
+    ${tbl([{ t: 'Export order' }, { t: 'Customer' }, { t: 'Country' }, { t: 'Reserved', r: 1 }, { t: 'Dispatched', r: 1 }, { t: 'Status' }], exportOrders.map(o => [e(o.orderNo), e(o.customer), e(o.country || '—'), o.reservedKg ? kg(o.reservedKg) : '—', o.dispatchedKg ? kg(o.dispatchedKg) : '—', e(o.status || '—')]))}
+    ${exportUse.transferredToExportKg ? `<div class="muted" style="margin-top:4px">${kg(exportUse.transferredToExportKg)} of output transferred to the Export entity.</div>` : ''}` : ''}
   </div><script>window.addEventListener('load',function(){setTimeout(function(){window.focus();window.print();},350)});<\/script></body></html>`;
   const w = window.open('', '_blank', 'width=980,height=1200');
   if (!w) return false;
