@@ -217,6 +217,9 @@ export default function ExportOrderDetail() {
     tareWeightKg: container.tareWeightKg ?? container.tare_weight_kg ?? '',
     containerType: container.containerType || container.container_type || '20ft',
     notes: container.notes || '',
+    lots: Array.isArray(container.lots)
+      ? container.lots.map((l) => ({ lotId: l.lotId ?? l.lot_id, lotNo: l.lotNo ?? l.lot_no }))
+      : [],
   });
 
   const openAdvanceModal = () => {
@@ -436,6 +439,9 @@ export default function ExportOrderDetail() {
             : parseFloat(container.tareWeightKg),
           container_type: container.containerType || null,
           notes: container.notes || null,
+          lots: (Array.isArray(container.lots) ? container.lots : [])
+            .map((l) => ({ lot_id: l.lotId ?? l.lot_id, qty_kg: l.qtyKg ?? null, bags: l.bags ?? null }))
+            .filter((l) => l.lot_id),
         }))
         .filter((container) => container.container_no);
 
@@ -567,6 +573,14 @@ export default function ExportOrderDetail() {
   const canRequestBalance = backendActions.canRequestBalance ?? (order.status === 'Awaiting Balance' && order.balanceReceived < order.balanceExpected);
   const canCreateMilling = backendActions.canCreateMilling ?? (order.advanceReceived >= order.advanceExpected && !order.millingOrderId && !['Draft', 'Closed', 'Cancelled'].includes(order.status));
   const canUpdateShipment = backendActions.canUpdateShipment ?? ['Ready to Ship', 'Shipped'].includes(order.status);
+  // Lots reserved/allocated to this order — offered as the container lot picker
+  // in the shipment editor (P4c). Deduped by lot id.
+  const reservedLots = (() => {
+    const seen = new Set();
+    return (order.purchaseLots || [])
+      .map((l) => ({ lotId: l.id || l.lot_id, lotNo: l.lot_no || l.lotNo }))
+      .filter((l) => l.lotId && l.lotNo && !seen.has(l.lotId) && seen.add(l.lotId));
+  })();
   const canPutOnHold = backendActions.canPutOnHold ?? !['Closed', 'Cancelled'].includes(order.status);
   const canCloseOrder = backendActions.canCloseOrder ?? (order.status === 'Arrived' || (order.balanceReceived >= order.balanceExpected && order.status === 'Shipped'));
 
@@ -837,6 +851,7 @@ export default function ExportOrderDetail() {
       <ShipmentModal
         isOpen={showShipmentModal}
         onClose={() => setShowShipmentModal(false)}
+        reservedLots={reservedLots}
         shipVessel={shipVessel}
         setShipVessel={setShipVessel}
         shipBooking={shipBooking}

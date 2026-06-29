@@ -273,6 +273,14 @@ COL commodity_rate_master.rate_value:numeric:NOT NULL
 COL commodity_rate_master.source_reference:character varying:NULL
 COL commodity_rate_master.unit:character varying:NULL
 COL commodity_rate_master.updated_at:timestamp with time zone:NOT NULL
+COL container_lots.bags:integer:NULL
+COL container_lots.container_id:integer:NOT NULL
+COL container_lots.created_at:timestamp with time zone:NOT NULL
+COL container_lots.created_by:integer:NULL
+COL container_lots.id:integer:NOT NULL
+COL container_lots.lot_id:integer:NOT NULL
+COL container_lots.qty_kg:numeric:NULL
+COL container_lots.updated_at:timestamp with time zone:NOT NULL
 COL cost_allocation_lines.allocation_id:integer:NULL
 COL cost_allocation_lines.amount:numeric:NULL
 COL cost_allocation_lines.created_at:timestamp with time zone:NULL
@@ -2278,6 +2286,10 @@ CON comments.comments_pkey(p)
 CON comments.comments_user_id_foreign(f)
 CON commodity_rate_master.commodity_rate_master_pkey(p)
 CON commodity_rate_master.commodity_rate_master_product_id_foreign(f)
+CON container_lots.container_lots_container_id_foreign(f)
+CON container_lots.container_lots_lot_id_foreign(f)
+CON container_lots.container_lots_pkey(p)
+CON container_lots.uq_container_lots(u)
 CON cost_allocation_lines.chk_cost_allocation_lines_amount_nn(c)
 CON cost_allocation_lines.cost_allocation_lines_allocation_id_foreign(f)
 CON cost_allocation_lines.cost_allocation_lines_pkey(p)

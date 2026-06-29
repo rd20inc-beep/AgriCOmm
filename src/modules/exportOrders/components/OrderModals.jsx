@@ -372,12 +372,26 @@ export function ShipmentModal({
   shipNotifyEmail, setShipNotifyEmail,
   shipRemarks, setShipRemarks,
   shipmentContainers, setShipmentContainers,
+  reservedLots = [],
   onConfirm,
 }) {
   const rows = Array.isArray(shipmentContainers) ? shipmentContainers : [];
 
   const updateRow = (index, field, value) => {
     setShipmentContainers((prev) => prev.map((row, rowIndex) => (rowIndex === index ? { ...row, [field]: value } : row)));
+  };
+
+  // Toggle a reserved lot into / out of a container's structured lot links (P4c).
+  const toggleContainerLot = (index, rl) => {
+    setShipmentContainers((prev) => prev.map((row, rowIndex) => {
+      if (rowIndex !== index) return row;
+      const lots = Array.isArray(row.lots) ? row.lots : [];
+      const has = lots.some((l) => String(l.lotId ?? l.lot_id) === String(rl.lotId));
+      const nextLots = has
+        ? lots.filter((l) => String(l.lotId ?? l.lot_id) !== String(rl.lotId))
+        : [...lots, { lotId: rl.lotId, lotNo: rl.lotNo }];
+      return { ...row, lots: nextLots };
+    }));
   };
 
   const addRow = () => {
@@ -532,6 +546,23 @@ export function ShipmentModal({
                   />
                 </div>
               </div>
+              {reservedLots.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Lots loaded in this container</label>
+                  <div className="flex flex-wrap gap-2">
+                    {reservedLots.map((rl) => {
+                      const sel = (container.lots || []).some((l) => String(l.lotId ?? l.lot_id) === String(rl.lotId));
+                      return (
+                        <button type="button" key={rl.lotId} onClick={() => toggleContainerLot(index, rl)}
+                          className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${sel ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
+                          {rl.lotNo}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-1">Tap the reserved lots in this container — links them by FK (and fills the Lot/Batch Number above on save).</p>
+                </div>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Gross Weight (kg)</label>

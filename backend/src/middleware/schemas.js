@@ -90,10 +90,23 @@ const updateExportShipment = Joi.object({
   booking_no: Joi.string().allow('', null),
   container_no: Joi.string().allow('', null),
   containers: Joi.array().items(Joi.object({
+    sequence_no: Joi.number().integer().allow(null),
     container_no: Joi.string().trim().min(1).required(),
     seal_no: Joi.string().allow('', null),
+    // These were silently stripped before (not declared) so they never
+    // persisted — declare them so the container rows save fully (P4c).
+    lot_number: Joi.string().allow('', null),
+    bags_count: Joi.number().integer().allow(null),
+    tare_weight_kg: Joi.number().min(0).allow(null),
+    container_type: Joi.string().allow('', null),
     gross_weight_kg: Joi.number().min(0).allow(null),
     net_weight_kg: Joi.number().min(0).allow(null),
+    // Structured lot links → container_lots (P4c).
+    lots: Joi.array().items(Joi.object({
+      lot_id: Joi.number().integer().positive().required(),
+      qty_kg: Joi.number().min(0).allow(null),
+      bags: Joi.number().integer().allow(null),
+    })).allow(null),
     notes: Joi.string().allow('', null),
   })).allow(null),
   bl_number: Joi.string().allow('', null),
