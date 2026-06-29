@@ -782,6 +782,12 @@ export default function Reports() {
                 <Factory size={14} /> Finished Goods
               </Link>
             )}
+            {!operatorScoped && (
+              <Link to="/reports/inventory-movement-ledger"
+                className="bg-white/15 hover:bg-white/25 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-sm font-medium inline-flex items-center gap-2 transition-colors">
+                <Truck size={14} /> Stock Movements
+              </Link>
+            )}
             <Link to="/reports/lots"
               className="bg-white/15 hover:bg-white/25 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-sm font-medium inline-flex items-center gap-2 transition-colors">
               <FileText size={14} /> Lot Reports
