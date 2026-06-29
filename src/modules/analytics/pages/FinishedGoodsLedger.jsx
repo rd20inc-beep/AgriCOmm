@@ -12,7 +12,7 @@ import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printFinishedGoodsLedger } from '../utils/ledgerExport';
 
-const pkr = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
+const pkr = (v) => (v == null ? '—' : `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`);
 const kg = (v) => `${Math.round(parseFloat(v) || 0).toLocaleString()} kg`;
 
 export default function FinishedGoodsLedger() {

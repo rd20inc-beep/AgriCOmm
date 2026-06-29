@@ -1,5 +1,49 @@
 const reportingService = require('../../services/reportingService');
 
+// ── Report money redaction (P6b) ──────────────────────────────────────────
+// A role with reports.view but not reports.view_cost / view_profit sees stock
+// quantities but not the money. Recursively null cost/value keys (view_cost)
+// and profit/margin/revenue keys (view_profit) in the response. The reports
+// routes already run authorize('reports','view'), which loads
+// req.user.permissions, so the Set is populated by the time we get here.
+const COST_KEYS = new Set([
+  'costPerKg', 'costPerUnit', 'costPkr', 'stockValue', 'value', 'valuePkr',
+  'landedCostPerKg', 'purchaseValue', 'totalCostOfSold', 'cogs', 'cogsOfSold',
+  'totalInputCost', 'rawCost', 'processingCost', 'onHandValue', 'remainingStockValue',
+  'avgCost', 'totalCost', 'unitCostPkr', 'costTotalPkr', 'outputValue',
+  'byproductRecovery', 'processingCostAllocated', 'recoveryValue', 'ratePerKg', 'purchaseCost',
+]);
+const PROFIT_KEYS = new Set([
+  'realizedProfit', 'realizedProfitPct', 'expectedProfitRemaining', 'revenue',
+  'totalRevenue', 'directRevenue', 'processedRevenue', 'avgSaleRate', 'salePricePerKg',
+  'paymentReceived', 'outstanding', 'outstandingSales', 'profit', 'margin', 'marginPct',
+]);
+
+function userReportPerms(req) {
+  const perms = (req.user && req.user.permissions) || null;
+  // No loaded set (shouldn't happen on gated routes) → don't redact.
+  if (!perms) return { cost: true, profit: true };
+  return { cost: perms.has('reports.view_cost'), profit: perms.has('reports.view_profit') };
+}
+
+function redactMoney(node, cost, profit) {
+  if (Array.isArray(node)) { for (const x of node) redactMoney(x, cost, profit); return; }
+  if (node && typeof node === 'object') {
+    for (const k of Object.keys(node)) {
+      if ((!cost && COST_KEYS.has(k)) || (!profit && PROFIT_KEYS.has(k))) { node[k] = null; continue; }
+      redactMoney(node[k], cost, profit);
+    }
+  }
+}
+
+// Mutates + returns the data object, redacting per the caller's permissions.
+function redactReport(req, data) {
+  const { cost, profit } = userReportPerms(req);
+  if (cost && profit) return data;
+  redactMoney(data, cost, profit);
+  return data;
+}
+
 const reportingController = {
   // ═══════════════════════════════════════════════════════════════════
   // EXECUTIVE DASHBOARDS
@@ -63,7 +107,7 @@ const reportingController = {
 
   async lotLedger(req, res) {
     try {
-      const data = await reportingService.getLotLedger(req.params.id);
+      const data = redactReport(req, await reportingService.getLotLedger(req.params.id));
       if (!data) return res.status(404).json({ success: false, message: 'Lot not found.' });
       return res.json({ success: true, ...data });
     } catch (err) {
@@ -74,7 +118,7 @@ const reportingController = {
 
   async batchLedger(req, res) {
     try {
-      const data = await reportingService.getBatchLedger(req.params.id);
+      const data = redactReport(req, await reportingService.getBatchLedger(req.params.id));
       if (!data) return res.status(404).json({ success: false, message: 'Batch not found.' });
       return res.json({ success: true, ...data });
     } catch (err) {
@@ -146,7 +190,7 @@ const reportingController = {
 
   async inventoryLedger(req, res) {
     try {
-      const data = await reportingService.getInventoryLedger(req.query || {});
+      const data = redactReport(req, await reportingService.getInventoryLedger(req.query || {}));
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Inventory ledger error:', err);
@@ -156,7 +200,7 @@ const reportingController = {
 
   async finishedGoodsLedger(req, res) {
     try {
-      const data = await reportingService.getFinishedGoodsLedger(req.query || {});
+      const data = redactReport(req, await reportingService.getFinishedGoodsLedger(req.query || {}));
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Finished goods ledger error:', err);
@@ -166,7 +210,7 @@ const reportingController = {
 
   async supplierInventoryIndex(req, res) {
     try {
-      const data = await reportingService.getSupplierInventoryIndex();
+      const data = redactReport(req, await reportingService.getSupplierInventoryIndex());
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Supplier inventory index error:', err);
@@ -176,7 +220,7 @@ const reportingController = {
 
   async supplierInventoryLedger(req, res) {
     try {
-      const data = await reportingService.getSupplierInventoryLedger(req.params.id);
+      const data = redactReport(req, await reportingService.getSupplierInventoryLedger(req.params.id));
       if (!data) return res.status(404).json({ success: false, message: 'Supplier not found.' });
       return res.json({ success: true, ...data });
     } catch (err) {
@@ -187,7 +231,7 @@ const reportingController = {
 
   async riceTypeIndex(req, res) {
     try {
-      const data = await reportingService.getRiceTypeIndex();
+      const data = redactReport(req, await reportingService.getRiceTypeIndex());
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Rice type index error:', err);
@@ -197,7 +241,7 @@ const reportingController = {
 
   async riceTypeLedger(req, res) {
     try {
-      const data = await reportingService.getRiceTypeLedger(req.params.id);
+      const data = redactReport(req, await reportingService.getRiceTypeLedger(req.params.id));
       if (!data) return res.status(404).json({ success: false, message: 'Rice type not found.' });
       return res.json({ success: true, ...data });
     } catch (err) {
@@ -208,7 +252,7 @@ const reportingController = {
 
   async warehouseIndex(req, res) {
     try {
-      const data = await reportingService.getWarehouseIndex();
+      const data = redactReport(req, await reportingService.getWarehouseIndex());
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Warehouse index error:', err);
@@ -218,7 +262,7 @@ const reportingController = {
 
   async warehouseLedger(req, res) {
     try {
-      const data = await reportingService.getWarehouseLedger(req.params.id);
+      const data = redactReport(req, await reportingService.getWarehouseLedger(req.params.id));
       if (!data) return res.status(404).json({ success: false, message: 'Warehouse not found.' });
       return res.json({ success: true, ...data });
     } catch (err) {
@@ -229,7 +273,7 @@ const reportingController = {
 
   async processingLossLedger(req, res) {
     try {
-      const data = await reportingService.getProcessingLossLedger(req.query || {});
+      const data = redactReport(req, await reportingService.getProcessingLossLedger(req.query || {}));
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Processing loss ledger error:', err);
@@ -310,9 +354,9 @@ const reportingController = {
   async batchMargin(req, res) {
     try {
       const { from_date, to_date, limit } = req.query;
-      const data = await reportingService.getBatchMargin({
+      const data = redactReport(req, await reportingService.getBatchMargin({
         from_date, to_date, limit: parseInt(limit, 10) || 200,
-      });
+      }));
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Batch margin error:', err);
