@@ -325,6 +325,44 @@ export function printProcessingLossLedger(data, { companyName = 'AGRI COMMODITIE
   return true;
 }
 
+// Full Finished Goods Ledger print — grouped register (group → lots) + totals,
+// A4. data = the /reporting/finished-goods-ledger payload ({ rows, grand }).
+export function printFinishedGoodsLedger(data, { companyName = 'AGRI COMMODITIES', generatedBy, filterText } = {}) {
+  const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const pkr = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
+  const kg = (v) => `${Math.round(parseFloat(v) || 0).toLocaleString()} kg`;
+  const { rows = [], grand = {} } = data || {};
+  const now = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const body = rows.map(r => {
+    const head = `<tr class="grp"><td>${e(r.key)} <span class="muted">· ${r.type === 'byproduct' ? 'by-product' : 'finished'} · ${r.lots.length} lot${r.lots.length === 1 ? '' : 's'}</span></td>
+      <td style="text-align:right">${kg(r.producedKg)}</td><td style="text-align:right">${kg(r.soldKg)}</td><td style="text-align:right">${kg(r.onHandKg)}</td><td style="text-align:right">${kg(r.reservedKg)}</td><td style="text-align:right">${pkr(r.valuePkr)}</td></tr>`;
+    const kids = (r.lots || []).map(l => `<tr class="kid"><td>&nbsp;&nbsp;${e(l.lotNo)}${l.isBlend ? ' · blend' : ''}${l.variety ? ' · ' + e(l.variety) : ''}</td>
+      <td style="text-align:right">${kg(l.producedKg)}</td><td style="text-align:right">${kg(l.soldKg)}</td><td style="text-align:right">${kg(l.onHandKg)}</td><td style="text-align:right">${kg(l.reservedKg)}</td><td style="text-align:right">${pkr(l.valuePkr)}</td></tr>`).join('');
+    return head + kids;
+  }).join('');
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Finished Goods Ledger</title><style>
+    *{box-sizing:border-box} body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#111827;margin:0;font-size:11px}
+    .page{padding:12mm} .hdr{border-bottom:2px solid #111827;padding-bottom:8px;display:flex;justify-content:space-between}
+    .co{font-size:18px;font-weight:800} .title{font-size:15px;font-weight:800;text-align:right} .muted{color:#6b7280;font-size:10px;font-weight:400}
+    table{width:100%;border-collapse:collapse;margin-top:10px} th{background:#f3f4f6;font-size:9px;text-transform:uppercase;color:#374151;padding:6px 8px;border-bottom:1px solid #d1d5db;text-align:right}
+    th:first-child{text-align:left} td{padding:5px 8px;border-bottom:1px solid #f0f0f0} tr.grp td{font-weight:600} tr.kid td{color:#6b7280;background:#fafafa}
+    tr.tot td{background:#f3f4f6;font-weight:700}
+    @media print{.page{padding:10mm}@page{size:A4 landscape;margin:0}}
+  </style></head><body><div class="page">
+    <div class="hdr"><div><div class="co">${e(companyName)}</div><div class="muted">Finished Goods Ledger</div></div>
+      <div><div class="title">FINISHED GOODS</div><div class="muted">${e(filterText || 'All outputs')}</div><div class="muted">${generatedBy ? 'By ' + e(generatedBy) + ' · ' : ''}${e(now)}</div></div></div>
+    <table><thead><tr><th>Output</th><th>Produced</th><th>Sold</th><th>On hand</th><th>Reserved</th><th>Value</th></tr></thead>
+    <tbody>${body || '<tr><td colspan="6" style="color:#9ca3af">No outputs.</td></tr>'}
+    <tr class="tot"><td>TOTAL</td><td style="text-align:right">${kg(grand.producedKg)}</td><td style="text-align:right">${kg(grand.soldKg)}</td><td style="text-align:right">${kg(grand.onHandKg)}</td><td style="text-align:right">${kg(grand.reservedKg)}</td><td style="text-align:right">${pkr(grand.valuePkr)}</td></tr>
+    </tbody></table>
+    <div class="muted" style="margin-top:8px">Value = on-hand kg × cost/kg. By-products grouped by grade; finished by product.</div>
+  </div><script>window.addEventListener('load',function(){setTimeout(function(){window.focus();window.print();},350)});<\/script></body></html>`;
+  const w = window.open('', '_blank', 'width=1100,height=900');
+  if (!w) return false;
+  w.document.open(); w.document.write(html); w.document.close(); w.focus();
+  return true;
+}
+
 // Full multi-section Batch 360 print (inputs → processing → outputs → sales →
 // financials), A4. data = the /reporting/batch-ledger/:id payload.
 export function printBatchLedger(data, { companyName = 'AGRI COMMODITIES', generatedBy } = {}) {
