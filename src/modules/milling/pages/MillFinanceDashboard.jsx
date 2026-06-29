@@ -4,7 +4,7 @@ import {
   DollarSign, Users, Zap, Shield, TrendingUp, TrendingDown, AlertTriangle,
   Plus, UserPlus, Package, Factory, Wallet, ArrowUpRight, ArrowDownRight, Printer,
   Building2, Banknote, Receipt, Layers, Truck, ExternalLink,
-  Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X, FileText, RefreshCw, Sparkles, ArrowLeftRight, Inbox, Check, ShoppingCart, Clock,
+  Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X, FileText, RefreshCw, Sparkles, ArrowLeftRight, Inbox, Check, ShoppingCart, Clock, Landmark,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
@@ -17,6 +17,7 @@ import {
   usePayrollSummary, useRecordAttendance, useAttendance, useBulkAttendance, useAttendanceHolidays, useInventory, useExpenseVendors,
   usePayrollRuns, usePostPayrollRun, useDeletePayrollRun, usePayrollRun, usePayrollReport,
   useApprovePayrollRun, usePayPayrollRun, useVoidPayrollRun, useAccruePayrollRun, useSettlePayrollRun,
+  useStatutoryDeductions, useCreateStatutoryDeduction, useUpdateStatutoryDeduction, useDeleteStatutoryDeduction,
   usePayrollSchedule, useSavePayrollSchedule, useRunPayrollNow,
   usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow, useAcceptFundTransfer,
   useMillLotCosts, useLocalSales, useRecordPayment, usePayablePayments,
@@ -209,6 +210,7 @@ export default function MillFinanceDashboard() {
   const [runPreselect, setRunPreselect] = useState(null); // worker id to pre-select in the run drawer (per-row Pay)
   const [payslipsRunId, setPayslipsRunId] = useState(null); // open the payslips panel for a run
   const [showScheduleDrawer, setShowScheduleDrawer] = useState(false);
+  const [showStatutoryDrawer, setShowStatutoryDrawer] = useState(false);
   const [adjustWorker, setAdjustWorker] = useState(null); // open adjustments drawer for this worker
   const runNowMut = useRunPayrollNow();
 
@@ -1534,6 +1536,11 @@ export default function MillFinanceDashboard() {
                   <Clock className="w-3.5 h-3.5" /> Schedule
                 </button>
               )}
+              {payrollView === 'payroll' && canApprovePayroll && (
+                <button onClick={() => setShowStatutoryDrawer(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 bg-white hover:bg-gray-50">
+                  <Landmark className="w-3.5 h-3.5" /> Statutory
+                </button>
+              )}
               {canPreparePayroll && (
                 <button onClick={() => openWorkerDrawer(null)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-700">
                   <UserPlus className="w-3.5 h-3.5" /> Add Employee
@@ -2235,6 +2242,11 @@ export default function MillFinanceDashboard() {
           runNowBusy={runNowMut.isPending}
           addToast={addToast}
         />
+      )}
+
+      {/* ─── STATUTORY DEDUCTIONS DRAWER ───────────────────────────── */}
+      {showStatutoryDrawer && (
+        <StatutoryDeductionsDrawer onClose={() => setShowStatutoryDrawer(false)} addToast={addToast} />
       )}
 
       {/* ─── BONUSES & DEDUCTIONS DRAWER ───────────────────────────── */}
@@ -3103,6 +3115,10 @@ function payslipBody(run, line, company) {
   const ot = parseFloat(line.otPay) || 0; const adv = parseFloat(line.advanceDeducted) || 0;
   const advBal = parseFloat(line.advanceOutstanding) || 0;
   const bonus = parseFloat(line.bonusTotal) || 0; const otherDed = parseFloat(line.deductionTotal) || 0;
+  const statTotal = parseFloat(line.statutoryTotal) || 0;
+  let statLines = line.statutoryJson;
+  if (typeof statLines === 'string') { try { statLines = JSON.parse(statLines); } catch { statLines = []; } }
+  if (!Array.isArray(statLines)) statLines = [];
   return `<div class="slip">
     <div class="hd">
       <div>${logo ? `<img src="${logo}" style="height:40px;max-width:170px;object-fit:contain;display:block;margin-bottom:5px"/>` : ''}<div class="co">${name}</div>${co.address ? `<div class="muted" style="max-width:300px">${co.address}</div>` : ''}${co.ntn ? `<div class="muted">NTN ${co.ntn}</div>` : ''}</div>
@@ -3125,9 +3141,10 @@ function payslipBody(run, line, company) {
       <tr style="border-top:1px solid #e5e7eb"><td style="font-weight:700;padding-top:7px">Gross pay</td><td class="r" style="font-weight:700;padding-top:7px">${rs((parseFloat(line.grossPay) || 0) + bonus)}</td></tr>
     </tbody></table>
 
-    ${(adv > 0 || otherDed > 0) ? `<div class="sec">Deductions</div>
+    ${(adv > 0 || otherDed > 0 || statTotal > 0) ? `<div class="sec">Deductions</div>
     <table><tbody>
       ${adv > 0 ? `<tr><td>Advance recovered</td><td class="r">− ${rs(adv)}</td></tr>` : ''}
+      ${statLines.map((s) => `<tr><td>${s.name || 'Statutory'}</td><td class="r">− ${rs(s.amount)}</td></tr>`).join('')}
       ${otherDed > 0 ? `<tr><td>Other deductions</td><td class="r">− ${rs(otherDed)}</td></tr>` : ''}
     </tbody></table>` : ''}
 
@@ -3191,6 +3208,7 @@ function paymentVoucherBody(run, lines, company) {
   const method = run.payMethod === 'bank' ? (run.bankName || 'Bank transfer') : 'Cash';
   const account = run.payMethod === 'bank' ? (run.bankName || 'Bank') : 'Mill Cash';
   const net = parseFloat(run.netTotal) || 0;
+  const statTotal = (lines || []).reduce((s, l) => s + (parseFloat(l.statutoryTotal) || 0), 0);
   const vno = voucherNo(run);
   const rows = (lines || []).map((l, i) => `<tr><td>${i + 1}</td><td>${l.workerName || '—'}</td><td style="text-transform:capitalize">${l.role || '—'}</td><td class="r">${rsAmt(l.netPay)}</td></tr>`).join('');
   return `<div class="slip">
@@ -3213,6 +3231,7 @@ function paymentVoucherBody(run, lines, company) {
     <table><tbody>
       <tr><td>Dr 6135 Salaries &amp; Wages</td><td class="r">${rsAmt(net)}</td></tr>
       <tr><td>Cr 1000 Cash &amp; Bank (${account})</td><td class="r">${rsAmt(net)}</td></tr>
+      ${statTotal > 0 ? `<tr><td style="color:#6b7280">Statutory withheld (held as payable to authority)</td><td class="r" style="color:#6b7280">${rsAmt(statTotal)}</td></tr>` : ''}
     </tbody></table>
     <div class="meta" style="margin-top:10px">
       <span><div class="k">Prepared by</div><div class="v">${run.preparedByName || '—'}</div></span>
@@ -3274,16 +3293,17 @@ function PayrollRunDrawer({ month, employees, preselectId, bankAccounts = [], on
     // not the full outstanding. Admin can still reduce / skip / enter manually.
     const scheduled = Math.round(w.advanceScheduled != null ? w.advanceScheduled : Math.min(w.advanceOutstanding || 0, w.grossPay || 0));
     const bonus = Math.round(w.bonusTotal || 0); const deduction = Math.round(w.deductionTotal || 0);
+    const statutory = Math.round(w.statutoryTotal || 0);
     return {
-      id: w.id, name: w.name, role: w.role, gross: w.grossPay || 0, bonus, deduction,
+      id: w.id, name: w.name, role: w.role, gross: w.grossPay || 0, bonus, deduction, statutory,
       outstanding: Math.round(w.advanceOutstanding || 0),
       scheduled,
       include: preselectId ? w.id === preselectId : true,
-      advance: scheduled, net: Math.max(0, (w.grossPay || 0) + bonus - scheduled - deduction), reason: '',
+      advance: scheduled, net: Math.max(0, (w.grossPay || 0) + bonus - scheduled - deduction - statutory), reason: '',
     };
   }));
 
-  const netOf = (r, advance) => Math.max(0, r.gross + r.bonus - advance - r.deduction);
+  const netOf = (r, advance) => Math.max(0, r.gross + r.bonus - advance - r.deduction - (r.statutory || 0));
   const setRow = (id, patch) => setRows(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
   // Changing the advance-to-clear re-derives the net (still editable afterwards).
   const onAdvance = (r, raw) => {
@@ -3392,10 +3412,11 @@ function PayrollRunDrawer({ month, employees, preselectId, bankAccounts = [], on
                     </td>
                     <td className="px-3 py-1.5">
                       <div className="text-gray-800 font-medium">{r.name}</div>
-                      {(r.bonus > 0 || r.deduction > 0) && (
+                      {(r.bonus > 0 || r.deduction > 0 || r.statutory > 0) && (
                         <div className="text-[10px] mt-0.5">
                           {r.bonus > 0 && <span className="text-emerald-600 mr-2">+ bonus {PKR(r.bonus)}</span>}
-                          {r.deduction > 0 && <span className="text-rose-600">− deduction {PKR(r.deduction)}</span>}
+                          {r.deduction > 0 && <span className="text-rose-600 mr-2">− deduction {PKR(r.deduction)}</span>}
+                          {r.statutory > 0 && <span className="text-violet-600">− tax/statutory {PKR(r.statutory)}</span>}
                         </div>
                       )}
                       {r.include && r.outstanding > 0 && (
@@ -3456,6 +3477,134 @@ function PayrollRunDrawer({ month, employees, preselectId, bankAccounts = [], on
 
 // Schedule monthly payroll auto-prepare. The scheduler PREPARES a run on the
 // chosen day each month into the approval queue — it never auto-approves/pays.
+// Manage org-level statutory deduction RULES (income tax, EOBI, …) that apply
+// automatically to every eligible employee at payroll time.
+function StatutoryDeductionsDrawer({ onClose, addToast }) {
+  const { data: rules = [], isLoading } = useStatutoryDeductions();
+  const createMut = useCreateStatutoryDeduction();
+  const updateMut = useUpdateStatutoryDeduction();
+  const deleteMut = useDeleteStatutoryDeduction();
+  const blank = { name: '', calc_method: 'percent', rate: '', fixed_amount: '', base: 'gross', min_gross: '', applies_to: 'all', liability_account_code: '2050' };
+  const [form, setForm] = useState(blank);
+  const [editId, setEditId] = useState(null);
+  const set = (patch) => setForm((f) => ({ ...f, ...patch }));
+
+  const startEdit = (r) => {
+    setEditId(r.id);
+    setForm({ name: r.name, calc_method: r.calcMethod, rate: r.rate || '', fixed_amount: r.fixedAmount || '', base: r.base, min_gross: r.minGross || '', applies_to: r.appliesTo, liability_account_code: r.liabilityAccountCode || '2050' });
+  };
+  const reset = () => { setEditId(null); setForm(blank); };
+
+  async function save() {
+    if (!String(form.name).trim()) { addToast('Name is required', 'error'); return; }
+    if (form.calc_method === 'percent' && !(parseFloat(form.rate) > 0)) { addToast('Enter a rate %', 'error'); return; }
+    if (form.calc_method === 'fixed' && !(parseFloat(form.fixed_amount) > 0)) { addToast('Enter a fixed amount', 'error'); return; }
+    const payload = { ...form, rate: parseFloat(form.rate) || 0, fixed_amount: parseFloat(form.fixed_amount) || 0, min_gross: parseFloat(form.min_gross) || 0 };
+    try {
+      if (editId) { await updateMut.mutateAsync({ id: editId, data: payload }); addToast('Rule updated', 'success'); }
+      else { await createMut.mutateAsync(payload); addToast('Rule added', 'success'); }
+      reset();
+    } catch (e) { addToast(e.message, 'error'); }
+  }
+  async function toggleActive(r) {
+    try { await updateMut.mutateAsync({ id: r.id, data: { is_active: !r.isActive, calc_method: r.calcMethod, rate: r.rate, fixed_amount: r.fixedAmount } }); } catch (e) { addToast(e.message, 'error'); }
+  }
+  async function remove(r) {
+    try { await deleteMut.mutateAsync(r.id); addToast('Rule removed', 'success'); } catch (e) { addToast(e.message, 'error'); }
+  }
+  const describe = (r) => r.calcMethod === 'percent' ? `${parseFloat(r.rate)}% of ${r.base}` : r.calcMethod === 'fixed' ? `${PKR(r.fixedAmount)} fixed` : 'Slab-based';
+
+  return (
+    <SlideDrawer open onClose={onClose} title="Statutory deductions" subtitle="Tax / EOBI rules applied automatically to every eligible employee" icon={Landmark} size="lg">
+      <div className="space-y-4">
+        <div className="rounded-lg border border-gray-200 p-3 space-y-3">
+          <div className="text-xs font-semibold text-gray-600">{editId ? 'Edit rule' : 'Add a deduction rule'}</div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2">
+              <label className="block text-[11px] text-gray-500 mb-1">Name</label>
+              <input value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder="e.g. Income Tax, EOBI" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900" />
+            </div>
+            <div>
+              <label className="block text-[11px] text-gray-500 mb-1">Method</label>
+              <select value={form.calc_method} onChange={(e) => set({ calc_method: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+                <option value="percent">Percent of pay</option>
+                <option value="fixed">Fixed amount</option>
+              </select>
+            </div>
+            {form.calc_method === 'percent' ? (
+              <>
+                <div>
+                  <label className="block text-[11px] text-gray-500 mb-1">Rate %</label>
+                  <input type="number" step="0.01" value={form.rate} onChange={(e) => set({ rate: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-gray-500 mb-1">Applied to</label>
+                  <select value={form.base} onChange={(e) => set({ base: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+                    <option value="gross">Gross pay</option>
+                    <option value="basic">Basic pay</option>
+                  </select>
+                </div>
+              </>
+            ) : (
+              <div>
+                <label className="block text-[11px] text-gray-500 mb-1">Fixed amount (Rs)</label>
+                <input type="number" value={form.fixed_amount} onChange={(e) => set({ fixed_amount: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+              </div>
+            )}
+            <div>
+              <label className="block text-[11px] text-gray-500 mb-1">Only when gross ≥</label>
+              <input type="number" value={form.min_gross} onChange={(e) => set({ min_gross: e.target.value })} placeholder="0 = always" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="block text-[11px] text-gray-500 mb-1">Employees</label>
+              <select value={form.applies_to} onChange={(e) => set({ applies_to: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+                <option value="all">All staff</option>
+                <option value="monthly">Salaried only</option>
+                <option value="daily">Daily-wage only</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] text-gray-500 mb-1">Liability account</label>
+              <select value={form.liability_account_code} onChange={(e) => set({ liability_account_code: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+                <option value="2050">2050 Tax Payable</option>
+                <option value="2055">2055 EOBI Payable</option>
+              </select>
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end">
+            {editId && <button onClick={reset} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>}
+            <button onClick={save} disabled={createMut.isPending || updateMut.isPending} className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">{editId ? 'Save rule' : 'Add rule'}</button>
+          </div>
+        </div>
+
+        <div>
+          <div className="text-xs font-semibold text-gray-600 mb-1">Active &amp; inactive rules</div>
+          {isLoading ? <p className="text-sm text-gray-400">Loading…</p> : !rules.length ? (
+            <p className="text-sm text-gray-400 py-4 text-center border border-dashed border-gray-200 rounded-lg">No statutory deductions configured yet. Withholding is off until you add a rule.</p>
+          ) : (
+            <div className="space-y-2">
+              {rules.map((r) => (
+                <div key={r.id} className={`rounded-lg border p-3 flex items-center justify-between ${r.isActive ? 'border-gray-200' : 'border-gray-100 bg-gray-50 opacity-70'}`}>
+                  <div>
+                    <div className="text-sm font-semibold text-gray-900">{r.name} <span className="text-[10px] font-normal text-gray-400">{r.code}</span></div>
+                    <div className="text-xs text-gray-500">{describe(r)}{parseFloat(r.minGross) > 0 ? ` · only if gross ≥ ${PKR(r.minGross)}` : ''} · {r.appliesTo === 'all' ? 'all staff' : r.appliesTo === 'monthly' ? 'salaried' : 'daily-wage'} · → {r.liabilityAccountCode}</div>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={() => toggleActive(r)} className={`px-2 py-1 text-[11px] rounded-md ${r.isActive ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100' : 'text-gray-500 bg-gray-100 hover:bg-gray-200'}`}>{r.isActive ? 'Active' : 'Inactive'}</button>
+                    <button onClick={() => startEdit(r)} className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100"><Pencil className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => remove(r)} className="p-1.5 rounded-md text-rose-500 hover:bg-rose-50"><Trash2 className="w-3.5 h-3.5" /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <p className="text-[11px] text-gray-400">Statutory amounts are withheld from each employee's net pay and booked to the chosen liability account (payable to the authority). They appear on payslips and reduce the cash paid out — the salary expense still reflects the full gross.</p>
+      </div>
+    </SlideDrawer>
+  );
+}
+
 function PayrollScheduleDrawer({ canManage, canPrepare, onClose, onRunNow, runNowBusy, addToast }) {
   const { data: schedule, isLoading } = usePayrollSchedule();
   const saveMut = useSavePayrollSchedule();

@@ -1139,6 +1139,8 @@ COL mill_payroll_lines.pay_type:character varying:NULL
 COL mill_payroll_lines.role:character varying:NULL
 COL mill_payroll_lines.run_id:integer:NOT NULL
 COL mill_payroll_lines.skip_reason:text:NULL
+COL mill_payroll_lines.statutory_json:jsonb:NULL
+COL mill_payroll_lines.statutory_total:numeric:NOT NULL
 COL mill_payroll_lines.updated_at:timestamp with time zone:NOT NULL
 COL mill_payroll_lines.worker_id:integer:NULL
 COL mill_payroll_lines.worker_name:character varying:NOT NULL
@@ -1211,6 +1213,23 @@ COL mill_purchases.supplier_id:integer:NULL
 COL mill_purchases.total_amount:numeric:NOT NULL
 COL mill_purchases.updated_at:timestamp with time zone:NULL
 COL mill_purchases.vendor_name:character varying:NULL
+COL mill_statutory_deductions.applies_to:character varying:NOT NULL
+COL mill_statutory_deductions.base:character varying:NOT NULL
+COL mill_statutory_deductions.calc_method:character varying:NOT NULL
+COL mill_statutory_deductions.code:character varying:NOT NULL
+COL mill_statutory_deductions.created_at:timestamp with time zone:NOT NULL
+COL mill_statutory_deductions.created_by:integer:NULL
+COL mill_statutory_deductions.fixed_amount:numeric:NULL
+COL mill_statutory_deductions.id:integer:NOT NULL
+COL mill_statutory_deductions.is_active:boolean:NOT NULL
+COL mill_statutory_deductions.liability_account_code:character varying:NOT NULL
+COL mill_statutory_deductions.min_gross:numeric:NULL
+COL mill_statutory_deductions.name:character varying:NOT NULL
+COL mill_statutory_deductions.notes:text:NULL
+COL mill_statutory_deductions.rate:numeric:NULL
+COL mill_statutory_deductions.slabs:jsonb:NULL
+COL mill_statutory_deductions.sort_order:integer:NULL
+COL mill_statutory_deductions.updated_at:timestamp with time zone:NOT NULL
 COL mill_stock.created_at:timestamp with time zone:NULL
 COL mill_stock.id:integer:NOT NULL
 COL mill_stock.item_id:integer:NOT NULL
@@ -2524,6 +2543,7 @@ CON mill_purchases.mill_purchases_payment_status_chk(c)
 CON mill_purchases.mill_purchases_pkey(p)
 CON mill_purchases.mill_purchases_purchase_no_unique(u)
 CON mill_purchases.mill_purchases_supplier_id_foreign(f)
+CON mill_statutory_deductions.mill_statutory_deductions_pkey(p)
 CON mill_stock.chk_mill_stock_quantity_reserved_nn(c)
 CON mill_stock.mill_stock_available_non_neg(c)
 CON mill_stock.mill_stock_item_id_foreign(f)

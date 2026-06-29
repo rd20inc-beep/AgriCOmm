@@ -4,6 +4,43 @@
 const db = require('../../config/database');
 const { resolveCashAccountId } = require('../../shared/cashAccounts');
 
+// ── Statutory deductions (Phase 12) ──────────────────────────────────────────
+// Progressive slab tax on an ANNUALISED base: brackets are [{threshold, rate,
+// base}] (annual lower bound, marginal %, fixed annual tax at the bracket).
+// Returns the MONTHLY withholding (annual tax / 12).
+function slabMonthly(slabs, monthlyBase) {
+  let arr = slabs;
+  if (typeof arr === 'string') { try { arr = JSON.parse(arr); } catch { arr = []; } }
+  if (!Array.isArray(arr) || !arr.length) return 0;
+  const annual = (parseFloat(monthlyBase) || 0) * 12;
+  let chosen = null;
+  for (const s of arr) { if (annual >= (parseFloat(s.threshold) || 0)) chosen = s; }
+  if (!chosen) return 0;
+  const annualTax = (parseFloat(chosen.base) || 0)
+    + (annual - (parseFloat(chosen.threshold) || 0)) * (parseFloat(chosen.rate) || 0) / 100;
+  return Math.max(0, annualTax / 12);
+}
+
+// Compute the statutory deductions a single worker incurs this month from the
+// active rule set. Returns { total, lines:[{id,code,name,amount,account}] }.
+function statutoryForWorker(rules, { gross, basicPay, payType }) {
+  const lines = [];
+  for (const r of (rules || [])) {
+    if (r.applies_to === 'monthly' && payType !== 'monthly') continue;
+    if (r.applies_to === 'daily' && payType !== 'daily') continue;
+    const baseVal = r.base === 'basic' ? basicPay : gross;
+    if ((parseFloat(r.min_gross) || 0) > 0 && baseVal < parseFloat(r.min_gross)) continue;
+    let amt = 0;
+    if (r.calc_method === 'fixed') amt = parseFloat(r.fixed_amount) || 0;
+    else if (r.calc_method === 'slab') amt = slabMonthly(r.slabs, baseVal);
+    else amt = baseVal * (parseFloat(r.rate) || 0) / 100; // percent (default)
+    amt = Math.max(0, Math.round(amt));
+    if (amt > 0) lines.push({ id: r.id, code: r.code, name: r.name, amount: amt, account: r.liability_account_code || '2050' });
+  }
+  const total = lines.reduce((s, l) => s + l.amount, 0);
+  return { total, lines };
+}
+
 // Compute the month's payroll for every ACTIVE employee — the single source of
 // truth shared by GET /payroll/summary and the prepare flow (so a run can never
 // post a figure that disagrees with what the screen showed).
@@ -51,6 +88,11 @@ async function computePayrollSummary(month) {
     adjByWorker.set(a.worker_id, cur);
   }
 
+  // Active statutory deduction rules (income tax / EOBI / etc.) — org-level,
+  // applied to every eligible worker by formula.
+  const statRules = await db('mill_statutory_deductions')
+    .where('is_active', true).orderBy('sort_order').orderBy('id');
+
   const summary = workers.map(w => {
     const records = attendance.filter(a => a.worker_id === w.id);
     const daysPresent = records.filter(a => a.status === 'present').length;
@@ -94,12 +136,26 @@ async function computePayrollSummary(month) {
     const adj = adjByWorker.get(w.id) || { bonus: 0, deduction: 0 };
     const bonusTotal = Math.round(adj.bonus);
     const deductionTotal = Math.round(adj.deduction);
-    const netPay = Math.max(0, Math.round(gross + bonusTotal - advanceDeduction - deductionTotal));
+
+    // Statutory deductions (tax/EOBI) — withheld AFTER advances + adjustments.
+    // Clamp the total (scaling the breakdown) so net pay can't go negative.
+    const stat = statutoryForWorker(statRules, { gross, basicPay, payType: w.pay_type });
+    const beforeStat = Math.round(gross + bonusTotal - advanceDeduction - deductionTotal);
+    let statutoryTotal = stat.total;
+    let statutoryLines = stat.lines;
+    if (statutoryTotal > Math.max(0, beforeStat)) {
+      const cap = Math.max(0, beforeStat);
+      const scale = statutoryTotal > 0 ? cap / statutoryTotal : 0;
+      statutoryLines = statutoryLines.map((l) => ({ ...l, amount: Math.round(l.amount * scale) }));
+      statutoryTotal = statutoryLines.reduce((s, l) => s + l.amount, 0);
+    }
+    const netPay = Math.max(0, beforeStat - statutoryTotal);
     return {
       ...w, daysPresent, halfDays, effectiveDays, totalOT,
       basicPay: Math.round(basicPay), otPay: Math.round(otPay),
       grossPay: Math.round(gross), // earned (basic + OT); bonus shown separately
       bonusTotal, deductionTotal,
+      statutoryTotal, statutoryLines,
       advanceOutstanding: Math.round(advanceOutstanding),
       advanceScheduled: Math.round(advanceDeduction),
       advanceDeduction: Math.round(advanceDeduction),
@@ -112,8 +168,9 @@ async function computePayrollSummary(month) {
   const grandAdvance = summary.reduce((s, w) => s + w.advanceDeduction, 0);
   const grandBonus = summary.reduce((s, w) => s + w.bonusTotal, 0);
   const grandDeduction = summary.reduce((s, w) => s + w.deductionTotal, 0);
+  const grandStatutory = summary.reduce((s, w) => s + w.statutoryTotal, 0);
   const grandTotal = summary.reduce((s, w) => s + w.netPay, 0);
-  return { summary, grandGross, grandAdvance, grandBonus, grandDeduction, grandTotal, period: { startDate, endDate } };
+  return { summary, grandGross, grandAdvance, grandBonus, grandDeduction, grandStatutory, grandTotal, period: { startDate, endDate } };
 }
 
 // Per-worker payroll commitment for a month. A worker is 'paid' if in a paid/
@@ -163,7 +220,7 @@ async function preparePayrollRun({ month, lines, pay_method, bank_account_id, pa
       const advanceDeducted = Math.max(0, Math.min(requested || 0, w.advanceOutstanding, w.grossPay));
       const netPay = ln.net_pay != null && ln.net_pay !== ''
         ? Math.max(0, Math.round(parseFloat(ln.net_pay)))
-        : Math.max(0, w.grossPay + (w.bonusTotal || 0) - advanceDeducted - (w.deductionTotal || 0));
+        : Math.max(0, w.grossPay + (w.bonusTotal || 0) - advanceDeducted - (w.deductionTotal || 0) - (w.statutoryTotal || 0));
       const changed = Math.round(advanceDeducted) !== Math.round(w.advanceScheduled != null ? w.advanceScheduled : w.advanceDeduction);
       toPay.push({ ...w, advanceDeduction: advanceDeducted, netPay, skipReason: changed ? (ln.skip_reason || ln.reason || null) : null });
     }
@@ -176,6 +233,7 @@ async function preparePayrollRun({ month, lines, pay_method, bank_account_id, pa
   const grossTotal = toPay.reduce((s, w) => s + w.grossPay, 0);
   const advanceTotal = toPay.reduce((s, w) => s + w.advanceDeduction, 0);
   const netTotal = toPay.reduce((s, w) => s + w.netPay, 0);
+  const statutoryTotal = toPay.reduce((s, w) => s + (w.statutoryTotal || 0), 0);
 
   const method = pay_method === 'bank' ? 'bank' : 'cash';
   const payDate = pay_date || new Date().toISOString().split('T')[0];
@@ -195,6 +253,8 @@ async function preparePayrollRun({ month, lines, pay_method, bank_account_id, pa
         effective_days: w.effectiveDays || 0, ot_hours: w.totalOT || 0,
         basic_pay: w.basicPay, ot_pay: w.otPay, gross_pay: w.grossPay,
         bonus_total: w.bonusTotal || 0, deduction_total: w.deductionTotal || 0,
+        statutory_total: w.statutoryTotal || 0,
+        statutory_json: JSON.stringify(w.statutoryLines || []),
         advance_deducted: w.advanceDeduction, net_pay: w.netPay, skip_reason: w.skipReason || null,
       });
     }

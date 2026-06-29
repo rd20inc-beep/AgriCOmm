@@ -1499,6 +1499,28 @@ export function useSettlePayrollRun() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (id) => millingApi.settlePayrollRun(id), onSuccess: () => { invalidatePayroll(qc); qc.invalidateQueries({ queryKey: ['payroll-pending'] }); } });
 }
+export function useStatutoryDeductions() {
+  return useQuery({
+    queryKey: ['statutory-deductions'],
+    queryFn: async () => { const res = await millingApi.listStatutoryDeductions(); return transformKeys(res?.data || []); },
+  });
+}
+function invalidateStatutory(qc) {
+  qc.invalidateQueries({ queryKey: ['statutory-deductions'] });
+  invalidatePayroll(qc); // rules change every worker's computed net
+}
+export function useCreateStatutoryDeduction() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (data) => millingApi.createStatutoryDeduction(data), onSuccess: () => invalidateStatutory(qc) });
+}
+export function useUpdateStatutoryDeduction() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: ({ id, data }) => millingApi.updateStatutoryDeduction(id, data), onSuccess: () => invalidateStatutory(qc) });
+}
+export function useDeleteStatutoryDeduction() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id) => millingApi.deleteStatutoryDeduction(id), onSuccess: () => invalidateStatutory(qc) });
+}
 
 export function useMills() {
   return useQuery({

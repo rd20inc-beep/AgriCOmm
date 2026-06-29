@@ -494,6 +494,7 @@ router.put('/batches/:id/prices', authorize('milling', 'edit'),
 // Out tab, and Accounting ledger. The legacy `mill_expenses` table is
 // no longer written to. (mill_expenses was empty at the time of the cut-over.)
 const expensesService = require('../expenses/expenses.service');
+const accountingService = require('../accounting/accounting.service');
 const automationService = require('../admin/automation.service');
 const { resolveCashAccountId } = require('../../shared/cashAccounts');
 // Shared payroll logic (also used by the scheduler) — compute + prepare.
@@ -844,6 +845,50 @@ router.put('/workers/:id', authorize('payroll', 'edit'), async (req, res) => {
 // Fully unwind a salary-advance cash-out (the business_expense it created, its
 // payable, payment, bank movement and GL journals) — danger-zone hard-delete
 // style, so deleting an advance or its worker leaves no orphan money behind.
+// Post the statutory-withholding journal for a run (DR 6135 Salaries & Wages /
+// CR each liability account, e.g. 2050 Tax Payable, 2055 EOBI Payable). The
+// withheld amounts are still a salary cost but are owed to the authority rather
+// than paid to the employee — so this is recognised at pay/accrue and stays as
+// a standing liability until separately remitted. Ref `STAT-RUN-<id>` so the
+// run DELETE can reverse it cleanly. No-op when nothing was withheld.
+async function postRunStatutoryJournal(trx, run, userId) {
+  const lines = await trx('mill_payroll_lines').where('run_id', run.id);
+  const byAccount = {};
+  for (const l of lines) {
+    let arr = l.statutory_json;
+    if (typeof arr === 'string') { try { arr = JSON.parse(arr); } catch { arr = []; } }
+    if (!Array.isArray(arr)) continue;
+    for (const s of arr) {
+      const acc = s.account || '2050';
+      byAccount[acc] = (byAccount[acc] || 0) + (parseFloat(s.amount) || 0);
+    }
+  }
+  const total = Object.values(byAccount).reduce((s, v) => s + v, 0);
+  if (total <= 0) return;
+  const dr = await trx('chart_of_accounts').where('code', '6135').first();
+  if (!dr) return;
+  const creditLines = [];
+  for (const [code, amt] of Object.entries(byAccount)) {
+    if (amt <= 0) continue;
+    const acc = await trx('chart_of_accounts').where('code', code).first();
+    if (!acc) continue;
+    creditLines.push({ account_id: acc.id, account: acc.name, debit: 0, credit: amt, narration: `CR ${acc.code} ${acc.name} — statutory withheld ${run.period}` });
+  }
+  if (!creditLines.length) return;
+  // createJournal does string date math — normalise a Date to YYYY-MM-DD.
+  const payDate = run.pay_date instanceof Date ? run.pay_date.toISOString().slice(0, 10) : (run.pay_date || new Date().toISOString().slice(0, 10));
+  const journal = await accountingService.createJournal(trx, {
+    date: payDate, entity: 'mill', refType: 'Payroll Statutory', refNo: `STAT-RUN-${run.id}`,
+    description: `Statutory deductions withheld — payroll ${run.period}`,
+    currency: 'PKR', fxRate: 1, isAuto: true, userId: userId || null,
+    lines: [
+      { account_id: dr.id, account: dr.name, debit: total, credit: 0, narration: `DR ${dr.code} ${dr.name} — statutory withheld ${run.period}` },
+      ...creditLines,
+    ],
+  });
+  if (journal?.id) await accountingService.postJournal(trx, journal.id);
+}
+
 async function unwindAdvanceExpense(trx, expenseId) {
   if (!expenseId) return;
   const exp = await trx('business_expenses').where('id', expenseId).first();
@@ -1079,6 +1124,75 @@ router.delete('/adjustments/:id', authorize('payroll', 'delete'), async (req, re
     if (!adj) return res.status(404).json({ success: false, message: 'Adjustment not found.' });
     await db('mill_worker_adjustments').where('id', adj.id).del();
     return res.json({ success: true, data: { deleted: adj.id } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── Statutory deduction RULES (org-level: income tax, EOBI, …) ──────────────
+// Applied automatically to every eligible worker by computePayrollSummary.
+// Managing rules is an approver/finance act (payroll.approve), not a per-run one.
+router.get('/payroll/statutory-deductions', authorize('payroll', 'view'), async (req, res) => {
+  try {
+    const rows = await db('mill_statutory_deductions').orderBy('sort_order').orderBy('id');
+    return res.json({ success: true, data: rows });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.post('/payroll/statutory-deductions', authorize('payroll', 'approve'), async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.name || !String(b.name).trim()) return res.status(400).json({ success: false, message: 'Name is required.' });
+    const code = String(b.code || b.name).trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').slice(0, 30);
+    const method = ['percent', 'fixed', 'slab'].includes(b.calc_method) ? b.calc_method : 'percent';
+    const [row] = await db('mill_statutory_deductions').insert({
+      name: String(b.name).trim(),
+      code,
+      calc_method: method,
+      rate: method === 'percent' ? (parseFloat(b.rate) || 0) : 0,
+      fixed_amount: method === 'fixed' ? (parseFloat(b.fixed_amount) || 0) : 0,
+      base: b.base === 'basic' ? 'basic' : 'gross',
+      slabs: method === 'slab' && Array.isArray(b.slabs) ? JSON.stringify(b.slabs) : null,
+      min_gross: parseFloat(b.min_gross) || 0,
+      applies_to: ['all', 'monthly', 'daily'].includes(b.applies_to) ? b.applies_to : 'all',
+      liability_account_code: String(b.liability_account_code || '2050').slice(0, 20),
+      is_active: b.is_active === undefined ? true : !!b.is_active,
+      sort_order: parseInt(b.sort_order, 10) || 0,
+      notes: b.notes || null,
+      created_by: req.user?.id || null,
+    }).returning('*');
+    return res.status(201).json({ success: true, data: row });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.put('/payroll/statutory-deductions/:id', authorize('payroll', 'approve'), async (req, res) => {
+  try {
+    const existing = await db('mill_statutory_deductions').where('id', req.params.id).first();
+    if (!existing) return res.status(404).json({ success: false, message: 'Rule not found.' });
+    const b = req.body || {};
+    const method = ['percent', 'fixed', 'slab'].includes(b.calc_method) ? b.calc_method : existing.calc_method;
+    const patch = { updated_at: db.fn.now() };
+    if (b.name !== undefined) patch.name = String(b.name).trim();
+    patch.calc_method = method;
+    patch.rate = method === 'percent' ? (parseFloat(b.rate) || 0) : 0;
+    patch.fixed_amount = method === 'fixed' ? (parseFloat(b.fixed_amount) || 0) : 0;
+    if (b.base !== undefined) patch.base = b.base === 'basic' ? 'basic' : 'gross';
+    patch.slabs = method === 'slab' && Array.isArray(b.slabs) ? JSON.stringify(b.slabs) : (method === 'slab' ? existing.slabs : null);
+    if (b.min_gross !== undefined) patch.min_gross = parseFloat(b.min_gross) || 0;
+    if (b.applies_to !== undefined) patch.applies_to = ['all', 'monthly', 'daily'].includes(b.applies_to) ? b.applies_to : 'all';
+    if (b.liability_account_code !== undefined) patch.liability_account_code = String(b.liability_account_code || '2050').slice(0, 20);
+    if (b.is_active !== undefined) patch.is_active = !!b.is_active;
+    if (b.sort_order !== undefined) patch.sort_order = parseInt(b.sort_order, 10) || 0;
+    if (b.notes !== undefined) patch.notes = b.notes || null;
+    const [row] = await db('mill_statutory_deductions').where('id', existing.id).update(patch).returning('*');
+    return res.json({ success: true, data: row });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.delete('/payroll/statutory-deductions/:id', authorize('payroll', 'approve'), async (req, res) => {
+  try {
+    const row = await db('mill_statutory_deductions').where('id', req.params.id).first();
+    if (!row) return res.status(404).json({ success: false, message: 'Rule not found.' });
+    await db('mill_statutory_deductions').where('id', row.id).del();
+    return res.json({ success: true, data: { deleted: row.id } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -1536,13 +1650,17 @@ router.post('/payroll/runs/:id/pay', authorize('payroll', 'pay'),
       }, req.user?.id);
     }
 
-    // 2) Recover the advances each line cleared + mark the run Paid.
+    // 2) Recover the advances each line cleared, book statutory withholding, and
+    //    mark the run Paid.
     const updated = await db.transaction(async (trx) => {
       for (const l of lines) {
         const ded = parseFloat(l.advance_deducted) || 0;
         if (ded > 0 && l.worker_id) await recoverAdvancesForWorker(trx, l.worker_id, ded, { period: run.period, runId: run.id, lineId: l.id });
         if (l.skip_reason && l.worker_id) await markPeriodSkipped(trx, l.worker_id, run.period, l.skip_reason);
       }
+      // Best-effort (matches the supplementary-GL pattern elsewhere): a statutory
+      // journal hiccup must never block the payroll payment or leak the expense.
+      try { await postRunStatutoryJournal(trx, run, req.user?.id); } catch (e) { console.warn('Statutory journal (pay) failed:', e.message); }
       const [r] = await trx('mill_payroll_runs').where('id', run.id)
         .update({ status: 'paid', expense_id: expense?.id || null, paid_by: req.user?.id || null, paid_at: trx.fn.now(), updated_at: trx.fn.now() }).returning('*');
       return r;
@@ -1585,6 +1703,7 @@ router.post('/payroll/runs/:id/accrue', authorize('payroll', 'approve'),
         if (ded > 0 && l.worker_id) await recoverAdvancesForWorker(trx, l.worker_id, ded, { period: run.period, runId: run.id, lineId: l.id });
         if (l.skip_reason && l.worker_id) await markPeriodSkipped(trx, l.worker_id, run.period, l.skip_reason);
       }
+      try { await postRunStatutoryJournal(trx, run, req.user?.id); } catch (e) { console.warn('Statutory journal (accrue) failed:', e.message); }
       const [r] = await trx('mill_payroll_runs').where('id', run.id)
         .update({ status: 'accrued', expense_id: expense?.id || null, accrued_by: req.user?.id || null, accrued_at: trx.fn.now(), updated_at: trx.fn.now() }).returning('*');
       return r;
@@ -1679,6 +1798,9 @@ router.delete('/payroll/runs/:id', authorize('payroll', 'delete'), async (req, r
         }
       }
       await unwindAdvanceExpense(trx, run.expense_id); // reverse cash-out + GL
+      // Reverse the statutory-withholding journal (DR 6135 / CR liabilities).
+      await trx('journal_lines').whereIn('journal_id', trx('journal_entries').where('ref_no', `STAT-RUN-${run.id}`).select('id')).del();
+      await trx('journal_entries').where('ref_no', `STAT-RUN-${run.id}`).del();
       await trx('mill_payroll_runs').where('id', run.id).del(); // lines cascade
     });
     return res.json({ success: true, data: { deleted: run.id } });
