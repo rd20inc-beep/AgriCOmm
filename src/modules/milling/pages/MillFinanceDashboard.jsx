@@ -19,6 +19,7 @@ import {
   useApprovePayrollRun, usePayPayrollRun, useVoidPayrollRun, useAccruePayrollRun, useSettlePayrollRun,
   useStatutoryDeductions, useCreateStatutoryDeduction, useUpdateStatutoryDeduction, useDeleteStatutoryDeduction,
   useStatutoryLiabilities, useStatutoryRemittances, useCreateStatutoryRemittance, useDeleteStatutoryRemittance,
+  useTaxStatement,
   usePayrollSchedule, useSavePayrollSchedule, useRunPayrollNow,
   usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow, useAcceptFundTransfer,
   useMillLotCosts, useLocalSales, useRecordPayment, usePayablePayments,
@@ -212,6 +213,7 @@ export default function MillFinanceDashboard() {
   const [payslipsRunId, setPayslipsRunId] = useState(null); // open the payslips panel for a run
   const [showScheduleDrawer, setShowScheduleDrawer] = useState(false);
   const [showStatutoryDrawer, setShowStatutoryDrawer] = useState(false);
+  const [showTaxDrawer, setShowTaxDrawer] = useState(false);
   const [adjustWorker, setAdjustWorker] = useState(null); // open adjustments drawer for this worker
   const runNowMut = useRunPayrollNow();
 
@@ -1542,6 +1544,11 @@ export default function MillFinanceDashboard() {
                   <Landmark className="w-3.5 h-3.5" /> Statutory
                 </button>
               )}
+              {payrollView === 'payroll' && canViewPayroll && (
+                <button onClick={() => setShowTaxDrawer(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 bg-white hover:bg-gray-50">
+                  <FileText className="w-3.5 h-3.5" /> Tax statements
+                </button>
+              )}
               {canPreparePayroll && (
                 <button onClick={() => openWorkerDrawer(null)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-700">
                   <UserPlus className="w-3.5 h-3.5" /> Add Employee
@@ -2248,6 +2255,11 @@ export default function MillFinanceDashboard() {
       {/* ─── STATUTORY DEDUCTIONS DRAWER ───────────────────────────── */}
       {showStatutoryDrawer && (
         <StatutoryDeductionsDrawer canPay={canPayPayroll} bankAccounts={bankAccountsList} onClose={() => setShowStatutoryDrawer(false)} addToast={addToast} />
+      )}
+
+      {/* ─── YEAR-END TAX STATEMENTS DRAWER ────────────────────────── */}
+      {showTaxDrawer && (
+        <TaxStatementDrawer company={companyProfileData} onClose={() => setShowTaxDrawer(false)} addToast={addToast} />
       )}
 
       {/* ─── BONUSES & DEDUCTIONS DRAWER ───────────────────────────── */}
@@ -3281,6 +3293,48 @@ function printAllReceipts(run, lines, company) {
   return openPayslipWindow(`Salary Receipts ${run.period}`, lines.map((l) => salaryReceiptBody(run, l, company)).join(''));
 }
 
+// SALARY & TAX-DEDUCTION CERTIFICATE — per-employee annual statement for a
+// Pakistani tax year (1 Jul – 30 Jun). Built from the tax-statement aggregation.
+function taxYearLabel(meta) {
+  const y = parseInt(String(meta.taxYear || '').slice(0, 4), 10);
+  return Number.isFinite(y) ? `1 July ${y} – 30 June ${y + 1}` : (meta.taxYear || '');
+}
+function taxCertificateBody(emp, meta, company) {
+  const co = company || {};
+  const name = co.legalName || co.name || 'AGRI COMMODITIES';
+  const monthName = (p) => periodLabel(p);
+  const rows = (emp.months || []).map((m) => `<tr><td>${monthName(m.period)}</td><td class="r">${rsAmt(m.gross)}</td><td class="r">${rsAmt(m.statutory)}</td><td class="r">${rsAmt(m.net)}</td></tr>`).join('');
+  const t = emp.totals || {};
+  const breakdown = Object.entries(t.byStatutory || {}).filter(([, v]) => (parseFloat(v) || 0) > 0)
+    .map(([k, v]) => `<tr><td>${k}</td><td class="r">${rsAmt(v)}</td></tr>`).join('');
+  return `<div class="slip">
+    ${docHeaderHtml(company, 'Salary &amp; Tax Certificate', `Tax year ${meta.taxYear || ''}`, taxYearLabel(meta))}
+    <div class="meta">
+      <span><div class="k">Employee</div><div class="v">${emp.name || '—'}</div></span>
+      <span><div class="k">Designation</div><div class="v" style="text-transform:capitalize">${emp.role || '—'}</div></span>
+      <span><div class="k">CNIC</div><div class="v">${emp.cnic || '—'}</div></span>
+      <span><div class="k">Tax year</div><div class="v">${taxYearLabel(meta)}</div></span>
+    </div>
+    <p style="margin:12px 0 4px;font-size:11.5px;color:#374151">This is to certify that the following salary was paid to the above employee and the amounts shown were deducted during the tax year, withheld under section 149 of the Income Tax Ordinance, 2001.</p>
+    <table><thead><tr><th>Month</th><th class="r">Gross paid</th><th class="r">Statutory deducted</th><th class="r">Net paid</th></tr></thead><tbody>${rows}
+      <tr style="border-top:1px solid #e5e7eb"><td style="font-weight:700;padding-top:7px">Total (${t.monthsPaid || 0} month${(t.monthsPaid || 0) === 1 ? '' : 's'})</td><td class="r" style="font-weight:700;padding-top:7px">${rsAmt(t.gross)}</td><td class="r" style="font-weight:700;padding-top:7px">${rsAmt(t.statutory)}</td><td class="r" style="font-weight:700;padding-top:7px">${rsAmt(t.net)}</td></tr>
+    </tbody></table>
+    ${breakdown ? `<div class="sec">Statutory deductions withheld</div><table><tbody>${breakdown}
+      <tr style="border-top:1px solid #e5e7eb"><td style="font-weight:700;padding-top:7px">Total deducted</td><td class="r" style="font-weight:700;padding-top:7px">${rsAmt(t.statutory)}</td></tr></tbody></table>` : ''}
+    <div class="net"><div><div style="font-size:10px;text-transform:uppercase;color:#047857">Total Gross Paid</div><b>${rsAmt(t.gross)}</b></div>
+      <div style="text-align:right;max-width:55%"><div class="words">Rupees ${amountInWords(t.gross)} Only · tax/statutory deducted ${rsAmt(t.statutory)}</div></div></div>
+    <div class="sign"><div><div class="l">Employee</div></div><div><div class="l">Prepared By</div></div><div><div class="l">Authorized Signatory</div></div></div>
+    <div class="muted" style="text-align:center;margin-top:14px">Computer-generated salary &amp; tax certificate — ${name}. Tax deducted u/s 149, Income Tax Ordinance 2001.</div>
+  </div>`;
+}
+function printTaxCertificate(emp, meta, company) {
+  return openPayslipWindow(`Tax Certificate ${emp.name} ${meta.taxYear}`, taxCertificateBody(emp, meta, company));
+}
+function printAllTaxCertificates(employees, meta, company) {
+  if (!employees || !employees.length) return false;
+  return openPayslipWindow(`Tax Certificates ${meta.taxYear}`, employees.map((e) => taxCertificateBody(e, meta, company)).join(''));
+}
+
 // Drawer to post a payroll run: review the per-employee breakdown, then pay it
 // out from Mill Cash. Server recomputes the figures on submit.
 function PayrollRunDrawer({ month, employees, preselectId, bankAccounts = [], onClose, onPosted, postRunMut, addToast }) {
@@ -3611,6 +3665,65 @@ function StatutoryDeductionsDrawer({ canPay, bankAccounts = [], onClose, addToas
         <p className="text-[11px] text-gray-400">Statutory amounts are withheld from each employee's net pay and booked to the chosen liability account (payable to the authority). They appear on payslips and reduce the cash paid out — the salary expense still reflects the full gross.</p>
       </div>
       )}
+    </SlideDrawer>
+  );
+}
+
+// Year-end tax statements — per-employee annual salary + tax-withheld summary
+// for a Pakistani tax year, with printable salary/tax certificates (u/s 149).
+function TaxStatementDrawer({ company, onClose, addToast }) {
+  // Build a few recent tax-year options (current FY first).
+  const now = new Date();
+  const curStart = (now.getUTCMonth() + 1) >= 7 ? now.getUTCFullYear() : now.getUTCFullYear() - 1;
+  const years = [0, 1, 2].map((d) => { const y = curStart - d; return `${y}-${String((y + 1) % 100).padStart(2, '0')}`; });
+  const [taxYear, setTaxYear] = useState(years[0]);
+  const { data, isLoading } = useTaxStatement({ tax_year: taxYear });
+  const meta = { taxYear: data?.taxYear || taxYear, periodFrom: data?.periodFrom, periodTo: data?.periodTo };
+  const employees = data?.employees || [];
+  const grand = data?.grand || { gross: 0, statutory: 0, net: 0 };
+
+  return (
+    <SlideDrawer open onClose={onClose} title="Year-end tax statements" subtitle="Annual salary & tax-deduction certificates (u/s 149)" icon={FileText} size="lg"
+      footer={employees.length > 0 && (
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-gray-500">{employees.length} employee(s) · gross {PKR(grand.gross)} · tax/statutory {PKR(grand.statutory)}</span>
+          <button onClick={() => printAllTaxCertificates(employees, meta, company)} className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
+            <Printer className="w-3.5 h-3.5" /> Print all certificates ({employees.length})
+          </button>
+        </div>
+      )}
+    >
+      <div className="space-y-4">
+        <div className="flex items-center gap-2">
+          <label className="text-xs font-medium text-gray-600">Tax year</label>
+          <select value={taxYear} onChange={(e) => setTaxYear(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white">
+            {years.map((y) => <option key={y} value={y}>{y} (Jul {y.slice(0, 4)} – Jun {parseInt(y.slice(0, 4), 10) + 1})</option>)}
+          </select>
+        </div>
+        {isLoading ? <p className="text-sm text-gray-400">Loading…</p> : !employees.length ? (
+          <p className="text-sm text-gray-400 py-6 text-center border border-dashed border-gray-200 rounded-lg">No paid salaries in this tax year.</p>
+        ) : (
+          <div className="space-y-2">
+            {employees.map((e) => (
+              <div key={e.workerId} className="rounded-lg border border-gray-200 p-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-semibold text-gray-900">{e.name}{e.cnic ? <span className="text-[10px] font-normal text-gray-400"> · {e.cnic}</span> : ''}</div>
+                    <div className="text-xs text-gray-500">{e.totals.monthsPaid} month(s) · gross {PKR(e.totals.gross)} · <span className="text-violet-700">tax/statutory {PKR(e.totals.statutory)}</span> · net {PKR(e.totals.net)}</div>
+                    {Object.keys(e.totals.byStatutory || {}).length > 0 && (
+                      <div className="text-[10px] text-gray-400 mt-0.5">{Object.entries(e.totals.byStatutory).map(([k, v]) => `${k} ${PKR(v)}`).join(' · ')}</div>
+                    )}
+                  </div>
+                  <button onClick={() => printTaxCertificate(e, meta, company)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
+                    <Printer className="w-3.5 h-3.5" /> Certificate
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <p className="text-[11px] text-gray-400">Built from paid payroll runs in the tax year (1 July – 30 June). Each certificate states the salary paid and tax/statutory withheld under section 149 of the Income Tax Ordinance, 2001.</p>
+      </div>
     </SlideDrawer>
   );
 }

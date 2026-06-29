@@ -1545,6 +1545,15 @@ export function useDeleteStatutoryRemittance() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (id) => millingApi.deleteStatutoryRemittance(id), onSuccess: () => invalidateRemittances(qc) });
 }
+// NOTE: the backend already returns camelCase AND the statutory breakdowns are
+// keyed by dynamic rule names ("Income Tax", "EOBI") — do NOT transformKeys, it
+// would corrupt those keys. Return res.data verbatim.
+export function useTaxStatement(params = {}) {
+  return useQuery({
+    queryKey: ['tax-statement', params],
+    queryFn: async () => { const res = await millingApi.taxStatement(params); return res?.data || { employees: [] }; },
+  });
+}
 
 export function useMills() {
   return useQuery({

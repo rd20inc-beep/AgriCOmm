@@ -54,6 +54,7 @@ export const millingApi = {
   listStatutoryRemittances: () => api.get('/api/milling/payroll/statutory-remittances'),
   createStatutoryRemittance: (data) => api.post('/api/milling/payroll/statutory-remittances', data),
   deleteStatutoryRemittance: (id) => api.delete(`/api/milling/payroll/statutory-remittances/${id}`),
+  taxStatement: (params) => api.get('/api/milling/payroll/tax-statement', params),
   voidPayrollRun: (id, reason) => api.post(`/api/milling/payroll/runs/${id}/void`, { reason }),
   deletePayrollRun: (id) => api.delete(`/api/milling/payroll/runs/${id}`),
   getPayrollSchedule: () => api.get('/api/milling/payroll/schedule'),

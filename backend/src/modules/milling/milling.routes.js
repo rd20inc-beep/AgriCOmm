@@ -1312,6 +1312,58 @@ router.delete('/payroll/statutory-remittances/:id', authorize('payroll', 'pay'),
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ── Year-end tax statement (Pakistani tax year: Jul Y – Jun Y+1) ────────────
+// Per-employee annual salary + tax-withheld summary built from the PAID payroll
+// line snapshots, for the salary / tax-deduction certificate (u/s 149).
+router.get('/payroll/tax-statement', authorize('payroll', 'view'), async (req, res) => {
+  try {
+    // Resolve the tax year — "2025-26" / "2025" / (default) the current FY.
+    let startYear;
+    const m = String(req.query.tax_year || '').match(/(\d{4})/);
+    if (m) startYear = parseInt(m[1], 10);
+    else { const now = new Date(); startYear = (now.getUTCMonth() + 1) >= 7 ? now.getUTCFullYear() : now.getUTCFullYear() - 1; }
+    const periodFrom = `${startYear}-07`;
+    const periodTo = `${startYear + 1}-06`;
+    const taxYear = `${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`;
+
+    const lines = await db('mill_payroll_lines as pl')
+      .join('mill_payroll_runs as r', 'pl.run_id', 'r.id')
+      .leftJoin('mill_workers as w', 'pl.worker_id', 'w.id')
+      .whereIn('r.status', ['paid', 'posted'])
+      .whereNotNull('pl.worker_id')
+      .where('r.period', '>=', periodFrom).where('r.period', '<=', periodTo)
+      .select('pl.*', 'r.period', 'r.pay_date',
+        'w.cnic', 'w.phone', 'w.joined_date', 'w.pay_type as w_pay_type', 'w.name as w_name', 'w.role as w_role');
+
+    const byWorker = new Map();
+    for (const l of lines) {
+      let e = byWorker.get(l.worker_id);
+      if (!e) {
+        e = { workerId: l.worker_id, name: l.w_name || l.worker_name, cnic: l.cnic || null, phone: l.phone || null, role: l.w_role || l.role || null, payType: l.w_pay_type || l.pay_type || null, joinedDate: l.joined_date || null, months: [], totals: { gross: 0, statutory: 0, advance: 0, net: 0, byStatutory: {} } };
+        byWorker.set(l.worker_id, e);
+      }
+      const gross = (parseFloat(l.gross_pay) || 0) + (parseFloat(l.bonus_total) || 0);
+      const stat = parseFloat(l.statutory_total) || 0;
+      const adv = parseFloat(l.advance_deducted) || 0;
+      const net = parseFloat(l.net_pay) || 0;
+      let sj = l.statutory_json; if (typeof sj === 'string') { try { sj = JSON.parse(sj); } catch { sj = []; } } if (!Array.isArray(sj)) sj = [];
+      const mBreak = {};
+      for (const s of sj) { const nm = s.name || 'Statutory'; mBreak[nm] = (mBreak[nm] || 0) + (parseFloat(s.amount) || 0); e.totals.byStatutory[nm] = (e.totals.byStatutory[nm] || 0) + (parseFloat(s.amount) || 0); }
+      e.months.push({ period: l.period, payDate: l.pay_date, gross: Math.round(gross), statutory: Math.round(stat), statutoryBreakdown: mBreak, advance: Math.round(adv), net: Math.round(net) });
+      e.totals.gross += gross; e.totals.statutory += stat; e.totals.advance += adv; e.totals.net += net;
+    }
+    const employees = [...byWorker.values()].map((e) => {
+      e.months.sort((a, b) => (a.period < b.period ? -1 : 1));
+      ['gross', 'statutory', 'advance', 'net'].forEach((k) => { e.totals[k] = Math.round(e.totals[k]); });
+      Object.keys(e.totals.byStatutory).forEach((k) => { e.totals.byStatutory[k] = Math.round(e.totals.byStatutory[k]); });
+      e.totals.monthsPaid = e.months.length;
+      return e;
+    }).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    const grand = employees.reduce((g, e) => ({ gross: g.gross + e.totals.gross, statutory: g.statutory + e.totals.statutory, advance: g.advance + e.totals.advance, net: g.net + e.totals.net }), { gross: 0, statutory: 0, advance: 0, net: 0 });
+    return res.json({ success: true, data: { taxYear, periodFrom, periodTo, employees, grand } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
 router.get('/attendance', authorize('payroll', 'view'), async (req, res) => {
   try {
     const { month, worker_id } = req.query;
