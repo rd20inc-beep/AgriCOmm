@@ -14,7 +14,7 @@ import {
   useUpdateMillWorker, useDeleteMillWorker, useSetWorkerPortalPin, useCreateWorkerAdvance, useWorkerAdvances, useWorkerLedger,
   useDeleteWorkerAdvance, useAdvanceLedger,
   useWorkerAdjustments, useCreateWorkerAdjustment, useDeleteWorkerAdjustment,
-  usePayrollSummary, useRecordAttendance, useAttendance, useBulkAttendance, useAttendanceHolidays, useInventory, useExpenseVendors,
+  usePayrollSummary, useRecordAttendance, useAttendance, useBulkAttendance, useImportAttendance, useAttendanceHolidays, useInventory, useExpenseVendors,
   usePayrollRuns, usePostPayrollRun, useDeletePayrollRun, usePayrollRun, usePayrollReport,
   useApprovePayrollRun, usePayPayrollRun, useVoidPayrollRun, useAccruePayrollRun, useSettlePayrollRun,
   useStatutoryDeductions, useCreateStatutoryDeduction, useUpdateStatutoryDeduction, useDeleteStatutoryDeduction,
@@ -2628,6 +2628,7 @@ function EmployeeAttendanceGrid({ month, employees, recordAttMut, addToast }) {
   const [selEmps, setSelEmps] = useState(() => new Set());   // selected employee rows (empty = all)
   const [showHolidays, setShowHolidays] = useState(false);
   const [holExcluded, setHolExcluded] = useState(() => new Set()); // holiday dates the user unticked
+  const [showImport, setShowImport] = useState(false);
 
   const active = employees.filter(e => e.isActive);
   const activeIds = active.map(e => e.id);
@@ -2741,6 +2742,9 @@ function EmployeeAttendanceGrid({ month, employees, recordAttMut, addToast }) {
         <div className="flex items-center gap-2">
           <button onClick={markSundaysOff} disabled={bulkMut.isPending} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50">
             <CalendarDays className="w-3.5 h-3.5" /> Mark Sundays Off
+          </button>
+          <button onClick={() => setShowImport(true)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100">
+            <FileText className="w-3.5 h-3.5" /> Import CSV
           </button>
           <div className="relative">
             <button onClick={() => setShowHolidays(s => !s)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100">
@@ -2868,7 +2872,146 @@ function EmployeeAttendanceGrid({ month, employees, recordAttMut, addToast }) {
           otFor={(d) => parseFloat(fetchedMap[`${otWorker.id}|${d}`]?.overtimeHours) || 0}
           recordAttMut={recordAttMut} addToast={addToast} onClose={() => setOtWorker(null)} />
       )}
+      {showImport && (
+        <AttendanceImportDrawer employees={active} month={month} addToast={addToast} onClose={() => setShowImport(false)} />
+      )}
     </div>
+  );
+}
+
+// Bulk CSV attendance import (Phase 21). Parses a CSV client-side, matches each
+// row to a worker (CNIC, else name), validates date+status, previews matched vs
+// errored rows, then upserts via /attendance/import (status + hours + OVERTIME).
+const ATT_STATUS_MAP = { p: 'present', present: 'present', a: 'absent', absent: 'absent', h: 'half_day', half: 'half_day', half_day: 'half_day', 'half day': 'half_day', hd: 'half_day', l: 'leave', leave: 'leave', o: 'off', off: 'off', holiday: 'off' };
+function parseCsv(text) {
+  const rows = [];
+  for (const raw of String(text).split(/\r?\n/)) {
+    if (!raw.trim()) continue;
+    const cells = []; let cur = ''; let q = false;
+    for (let i = 0; i < raw.length; i += 1) {
+      const c = raw[i];
+      if (q) { if (c === '"' && raw[i + 1] === '"') { cur += '"'; i += 1; } else if (c === '"') q = false; else cur += c; }
+      else if (c === '"') q = true; else if (c === ',') { cells.push(cur); cur = ''; } else cur += c;
+    }
+    cells.push(cur);
+    rows.push(cells.map((s) => s.trim()));
+  }
+  return rows;
+}
+function normalizeDate(s) {
+  const t = String(s || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+  let m = t.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/); // DD/MM/YYYY
+  if (m) return `${m[3]}-${String(m[2]).padStart(2, '0')}-${String(m[1]).padStart(2, '0')}`;
+  return null;
+}
+function AttendanceImportDrawer({ employees, month, addToast, onClose }) {
+  const importMut = useImportAttendance();
+  const [parsed, setParsed] = useState(null); // { valid:[], errors:[] }
+  const [fileName, setFileName] = useState('');
+
+  const byCnic = new Map(employees.filter((e) => e.cnic).map((e) => [String(e.cnic).replace(/\s/g, ''), e]));
+  const byName = new Map(employees.map((e) => [String(e.name).trim().toLowerCase(), e]));
+
+  function handleFile(file) {
+    if (!file) return;
+    setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const rows = parseCsv(reader.result);
+      if (!rows.length) { setParsed({ valid: [], errors: [] }); return; }
+      // header detection
+      const header = rows[0].map((h) => h.toLowerCase());
+      const col = (...names) => header.findIndex((h) => names.some((n) => h.includes(n)));
+      const ci = { cnic: col('cnic'), name: col('name', 'employee', 'worker'), date: col('date'), status: col('status', 'attendance'), ot: col('overtime', 'ot') };
+      const hasHeader = ci.date >= 0 || ci.status >= 0 || ci.cnic >= 0;
+      const body = hasHeader ? rows.slice(1) : rows;
+      if (!hasHeader) { ci.cnic = 0; ci.name = 1; ci.date = 2; ci.status = 3; ci.ot = 4; }
+      const valid = []; const errors = [];
+      body.forEach((r, idx) => {
+        const rowNo = (hasHeader ? idx + 2 : idx + 1);
+        const cnicV = ci.cnic >= 0 ? String(r[ci.cnic] || '').replace(/\s/g, '') : '';
+        const nameV = ci.name >= 0 ? String(r[ci.name] || '').trim().toLowerCase() : '';
+        const w = (cnicV && byCnic.get(cnicV)) || (nameV && byName.get(nameV)) || null;
+        const date = normalizeDate(r[ci.date]);
+        const status = ATT_STATUS_MAP[String(r[ci.status] || '').trim().toLowerCase()];
+        const ot = Math.max(0, parseFloat(r[ci.ot]) || 0);
+        if (!w) { errors.push({ row: rowNo, reason: `No match for "${r[ci.cnic] || r[ci.name] || '?'}"` }); return; }
+        if (!date) { errors.push({ row: rowNo, reason: `Bad date "${r[ci.date] || ''}"` }); return; }
+        if (!status) { errors.push({ row: rowNo, reason: `Bad status "${r[ci.status] || ''}"` }); return; }
+        valid.push({ row: rowNo, worker_id: w.id, workerName: w.name, date, status, overtime_hours: ot });
+      });
+      setParsed({ valid, errors });
+    };
+    reader.readAsText(file);
+  }
+
+  async function doImport() {
+    if (!parsed?.valid.length) return;
+    try {
+      const res = await importMut.mutateAsync({ records: parsed.valid.map(({ row, worker_id, date, status, overtime_hours }) => ({ row, worker_id, date, status, overtime_hours })) });
+      const d = res?.data || res;
+      addToast(`Imported ${d.imported} row(s)${d.skipped ? `, ${d.skipped} skipped` : ''}`, d.skipped ? 'info' : 'success');
+      onClose();
+    } catch (e) { addToast(e.message, 'error'); }
+  }
+
+  function downloadTemplate() {
+    const sample = employees.slice(0, 2);
+    const rows = [['CNIC', 'Name', 'Date', 'Status', 'Overtime']];
+    sample.forEach((e) => rows.push([e.cnic || '', e.name, `${month}-01`, 'present', '0']));
+    if (!sample.length) rows.push(['35201-0000000-0', 'Worker Name', `${month}-01`, 'present', '2']);
+    const csv = rows.map((r) => r.map((c) => (String(c).includes(',') ? `"${c}"` : c)).join(',')).join('\n');
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = `attendance-template-${month}.csv`; a.click(); URL.revokeObjectURL(a.href);
+  }
+
+  return (
+    <SlideDrawer open onClose={onClose} title="Import attendance (CSV)" subtitle="Status + overtime for many employees at once" icon={FileText} size="lg">
+      <div className="space-y-4">
+        <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 text-xs text-blue-800">
+          CSV columns: <b>CNIC</b> (or Name), <b>Date</b> (YYYY-MM-DD or DD/MM/YYYY), <b>Status</b> (present / absent / half_day / leave / off — P/A/H/L/O also work), <b>Overtime</b> (hours). Existing days are updated; overtime is set per row.
+          <button onClick={downloadTemplate} className="ml-1 underline font-medium">Download template</button>
+        </div>
+        <label className="block">
+          <span className="text-xs font-medium text-gray-600">CSV file</span>
+          <input type="file" accept=".csv,text/csv" onChange={(e) => handleFile(e.target.files[0])} className="mt-1 block w-full text-sm text-gray-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-gray-900 file:text-white hover:file:bg-gray-700" />
+          {fileName && <span className="text-[11px] text-gray-400">{fileName}</span>}
+        </label>
+
+        {parsed && (
+          <>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-lg bg-emerald-50 p-2.5"><div className="text-[10px] uppercase text-emerald-500">Ready to import</div><div className="text-lg font-bold text-emerald-700">{parsed.valid.length}</div></div>
+              <div className="rounded-lg bg-rose-50 p-2.5"><div className="text-[10px] uppercase text-rose-500">Errors (skipped)</div><div className="text-lg font-bold text-rose-700">{parsed.errors.length}</div></div>
+            </div>
+            {parsed.valid.length > 0 && (
+              <div className="rounded-lg border border-gray-200 overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead><tr className="bg-gray-50 text-gray-500"><th className="text-left px-3 py-1.5">Employee</th><th className="text-left px-3 py-1.5">Date</th><th className="text-left px-3 py-1.5">Status</th><th className="text-right px-3 py-1.5">OT</th></tr></thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {parsed.valid.slice(0, 60).map((v, i) => (
+                      <tr key={i}><td className="px-3 py-1 text-gray-800">{v.workerName}</td><td className="px-3 py-1 text-gray-500">{v.date}</td><td className="px-3 py-1 capitalize">{v.status.replace('_', ' ')}</td><td className="px-3 py-1 text-right tabular-nums">{v.overtime_hours || ''}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+                {parsed.valid.length > 60 && <div className="px-3 py-1.5 text-[11px] text-gray-400">+ {parsed.valid.length - 60} more…</div>}
+              </div>
+            )}
+            {parsed.errors.length > 0 && (
+              <div className="rounded-lg border border-rose-200 bg-rose-50/50 p-2.5 text-xs text-rose-700 space-y-0.5 max-h-40 overflow-auto">
+                {parsed.errors.slice(0, 30).map((e, i) => <div key={i}>Row {e.row}: {e.reason}</div>)}
+                {parsed.errors.length > 30 && <div className="text-rose-400">+ {parsed.errors.length - 30} more…</div>}
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <button onClick={onClose} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+              <button onClick={doImport} disabled={!parsed.valid.length || importMut.isPending} className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">Import {parsed.valid.length} row(s)</button>
+            </div>
+          </>
+        )}
+      </div>
+    </SlideDrawer>
   );
 }
 

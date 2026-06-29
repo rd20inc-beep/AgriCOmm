@@ -1431,6 +1431,17 @@ export function useBulkAttendance() {
   });
 }
 
+export function useImportAttendance() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => millingApi.importAttendance(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['payroll-summary'] });
+      qc.invalidateQueries({ queryKey: ['attendance'] });
+    },
+  });
+}
+
 export function useAttendanceHolidays(month) {
   return useQuery({
     queryKey: ['attendance-holidays', month],

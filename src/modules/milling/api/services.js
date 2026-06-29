@@ -40,6 +40,7 @@ export const millingApi = {
   listAttendance: (params) => api.get('/api/milling/attendance', params),
   recordAttendance: (data) => api.post('/api/milling/attendance', data),
   bulkAttendance: (data) => api.post('/api/milling/attendance/bulk', data),
+  importAttendance: (data) => api.post('/api/milling/attendance/import', data),
   attendanceHolidays: (params) => api.get('/api/milling/attendance/holidays', params),
   payrollSummary: (params) => api.get('/api/milling/payroll/summary', params),
   postPayrollRun: (data) => api.post('/api/milling/payroll/run', data),

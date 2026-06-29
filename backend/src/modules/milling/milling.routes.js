@@ -1529,6 +1529,36 @@ router.post('/attendance/bulk', authorize('payroll', 'create'), async (req, res)
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
+// Bulk CSV attendance import (Phase 21). Unlike /attendance/bulk (which forces a
+// single status across a day and zeroes OT), this upserts status + hours + OVER-
+// TIME per row — for importing a whole month from a biometric/timesheet export.
+// The FE resolves CNIC/name → worker_id and validates; the server re-validates.
+router.post('/attendance/import', authorize('payroll', 'create'), async (req, res) => {
+  try {
+    const { records } = req.body;
+    if (!Array.isArray(records) || !records.length) return res.status(400).json({ success: false, message: 'records[] required.' });
+    if (records.length > 5000) return res.status(400).json({ success: false, message: 'Too many rows (max 5000 per import).' });
+    const validIds = new Set((await db('mill_workers').select('id')).map((r) => r.id));
+    let imported = 0; const errors = [];
+    await db.transaction(async (trx) => {
+      for (let i = 0; i < records.length; i += 1) {
+        const r = records[i] || {};
+        const wid = parseInt(r.worker_id, 10);
+        const date = String(r.date || '').slice(0, 10);
+        const status = String(r.status || '').toLowerCase();
+        const ot = Math.max(0, parseFloat(r.overtime_hours) || 0);
+        if (!validIds.has(wid)) { errors.push({ row: r.row || i + 1, reason: 'Unknown worker' }); continue; }
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { errors.push({ row: r.row || i + 1, reason: 'Invalid date' }); continue; }
+        if (!VALID_ATTENDANCE.includes(status)) { errors.push({ row: r.row || i + 1, reason: `Invalid status "${r.status}"` }); continue; }
+        await trx('mill_attendance').insert({ worker_id: wid, date, status, hours_worked: attHours(status), overtime_hours: ot })
+          .onConflict(['worker_id', 'date']).merge(['status', 'hours_worked', 'overtime_hours', 'updated_at']);
+        imported += 1;
+      }
+    });
+    return res.json({ success: true, data: { imported, skipped: errors.length, errors: errors.slice(0, 50) } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
 // Pakistan federal (gazetted) public holidays for a year. Fixed-date holidays are
 // exact; the Islamic ones depend on moon-sighting so they're flagged approximate
 // and the supervisor confirms before applying. (No live AI/API is wired in the
