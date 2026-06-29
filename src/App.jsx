@@ -72,6 +72,7 @@ const PayrollLedger = lazyWithReload(() => import('./modules/analytics/pages/Pay
 const PayrollAnalytics = lazyWithReload(() => import('./modules/analytics/pages/PayrollAnalytics'));
 const LotLedger = lazyWithReload(() => import('./modules/analytics/pages/LotLedger'));
 const BatchLedger = lazyWithReload(() => import('./modules/analytics/pages/BatchLedger'));
+const SupplierLedger = lazyWithReload(() => import('./modules/analytics/pages/SupplierLedger'));
 const StandalonePrintReport = lazyWithReload(() => import('./modules/analytics/pages/StandalonePrintReport'));
 const Approvals = lazyWithReload(() => import('./modules/admin/pages/Approvals'));
 const AuditLog = lazyWithReload(() => import('./modules/admin/pages/AuditLog'));
@@ -158,6 +159,8 @@ function ExportRoutes() {
         <Route path="/reports/payroll-analytics" element={<PayrollAnalytics />} />
         <Route path="/reports/lot-ledger/:id" element={<LotLedger />} />
         <Route path="/reports/batch-ledger/:id" element={<BatchLedger />} />
+        <Route path="/reports/supplier-ledger" element={<SupplierLedger />} />
+        <Route path="/reports/supplier-ledger/:id" element={<SupplierLedger />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </ExportLayout>
@@ -201,6 +204,8 @@ function MillRoutes() {
         <Route path="/reports/payroll-analytics" element={<PayrollAnalytics />} />
         <Route path="/reports/lot-ledger/:id" element={<LotLedger />} />
         <Route path="/reports/batch-ledger/:id" element={<BatchLedger />} />
+        <Route path="/reports/supplier-ledger" element={<SupplierLedger />} />
+        <Route path="/reports/supplier-ledger/:id" element={<SupplierLedger />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </MillLayout>
@@ -251,6 +256,8 @@ function StandardRoutes() {
         <Route path="/reports/payroll-analytics" element={<ProtectedRoute module="reports" action="view"><PayrollAnalytics /></ProtectedRoute>} />
         <Route path="/reports/lot-ledger/:id" element={<ProtectedRoute module="reports" action="view"><LotLedger /></ProtectedRoute>} />
         <Route path="/reports/batch-ledger/:id" element={<ProtectedRoute module="reports" action="view"><BatchLedger /></ProtectedRoute>} />
+        <Route path="/reports/supplier-ledger" element={<ProtectedRoute module="reports" action="view"><SupplierLedger /></ProtectedRoute>} />
+        <Route path="/reports/supplier-ledger/:id" element={<ProtectedRoute module="reports" action="view"><SupplierLedger /></ProtectedRoute>} />
         <Route path="/exceptions" element={<ProtectedRoute module="admin" action="view"><ExceptionDashboard /></ProtectedRoute>} />
         <Route path="/ai" element={<AiAssistant />} />
         <Route path="/intelligence" element={<ProtectedRoute anyOf={[{ module: 'finance', action: 'view' }, { module: 'admin', action: 'view' }]}><Intelligence /></ProtectedRoute>} />

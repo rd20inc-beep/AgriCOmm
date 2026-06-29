@@ -134,6 +134,55 @@ export function printLotLedger(data, { companyName = 'AGRI COMMODITIES', generat
   return true;
 }
 
+// Full Supplier Inventory Ledger / Supplier 360 print — summary + per-lot
+// purchased/milled/sold/remaining/value/profit, A4. data = the
+// /reporting/supplier-ledger/:id payload.
+export function printSupplierLedger(data, { companyName = 'AGRI COMMODITIES', generatedBy } = {}) {
+  const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const pkr = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
+  const kg = (v) => `${Math.round(parseFloat(v) || 0).toLocaleString()} kg`;
+  const dd = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+  const { supplier: sup = {}, summary: sm = {}, lots = [] } = data;
+  const now = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const kv = (rows) => `<table class="kv">${rows.filter(Boolean).map(([k, v]) => `<tr><td class="k">${e(k)}</td><td class="v">${v}</td></tr>`).join('')}</table>`;
+  const tbl = (head, rows) => `<table><thead><tr>${head.map(h => `<th style="text-align:${h.r ? 'right' : 'left'}">${e(h.t || h)}</th>`).join('')}</tr></thead><tbody>${rows.length ? rows.map(r => `<tr>${r.map((c, i) => `<td style="text-align:${head[i] && head[i].r ? 'right' : 'left'}">${c}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="${head.length}" style="color:#9ca3af">None</td></tr>`}</tbody></table>`;
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Supplier ${e(sup.name)}</title><style>
+    *{box-sizing:border-box} body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#111827;margin:0;font-size:11px}
+    .page{padding:12mm} .hdr{border-bottom:2px solid #111827;padding-bottom:8px;display:flex;justify-content:space-between}
+    .co{font-size:18px;font-weight:800} .title{font-size:15px;font-weight:800;text-align:right} .muted{color:#6b7280;font-size:10px}
+    h4{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#374151;margin:16px 0 5px;border-bottom:1px solid #e5e7eb;padding-bottom:3px}
+    table{width:100%;border-collapse:collapse;margin-top:3px} th{background:#f3f4f6;font-size:9px;text-transform:uppercase;color:#374151;padding:5px 7px;border-bottom:1px solid #d1d5db}
+    td{padding:4px 7px;border-bottom:1px solid #f0f0f0} tbody tr:nth-child(even) td{background:#fafafa}
+    table.kv{width:auto} table.kv td{border:0;padding:2px 10px 2px 0} table.kv .k{color:#6b7280} table.kv .v{font-weight:600}
+    .grid2{display:flex;gap:32px} .grid2>div{flex:1}
+    @media print{.page{padding:10mm}@page{size:A4 landscape;margin:0}}
+  </style></head><body><div class="page">
+    <div class="hdr"><div><div class="co">${e(companyName)}</div><div class="muted">Supplier Inventory Ledger / Supplier 360</div></div>
+      <div><div class="title">${e(sup.name)}</div><div class="muted">${e(sup.country || '')}</div><div class="muted">${generatedBy ? 'By ' + e(generatedBy) + ' · ' : ''}${e(now)}</div></div></div>
+    <div class="grid2"><div>${kv([
+      ['Contact', e(sup.contactPerson || '—')], ['Phone', e(sup.phone || '—')], ['Lots purchased', e(sm.lotCount)],
+      ['Total purchased', kg(sm.purchasedKg)], ['Total milled', kg(sm.milledKg)], ['Total sold', kg(sm.soldKg)],
+      ['Remaining stock', kg(sm.remainingKg)], ['Processing loss', kg(sm.lossKg)],
+    ])}</div><div>${kv([
+      ['Stock value', pkr(sm.stockValue)], ['Revenue generated', pkr(sm.revenue)],
+      ['Realized profit', `${pkr(sm.realizedProfit)} (${(parseFloat(sm.realizedProfitPct) || 0).toFixed(1)}%)`],
+      ['Expected profit on remaining', pkr(sm.expectedProfitRemaining)],
+      ['Payable outstanding', pkr(sm.payableOutstanding)], ['Payments made', pkr(sm.payablePaid)],
+      ['Avg yield', sm.avgYieldPct != null ? `${(parseFloat(sm.avgYieldPct) || 0).toFixed(1)}%` : '—'],
+      ['Avg moisture', sm.avgMoisture != null ? `${(parseFloat(sm.avgMoisture) || 0).toFixed(1)}%` : '—'],
+    ])}</div></div>
+
+    <h4>Lots from this supplier</h4>
+    ${tbl([{ t: 'Lot' }, { t: 'Rice type' }, { t: 'Purchased', r: 1 }, { t: 'Milled', r: 1 }, { t: 'Sold', r: 1 }, { t: 'Remaining', r: 1 }, { t: 'Cost/kg', r: 1 }, { t: 'Stock value', r: 1 }, { t: 'Revenue', r: 1 }, { t: 'Realized profit', r: 1 }],
+      lots.map(l => [e(l.lotNo), e(l.riceType || '—'), kg(l.purchasedKg), kg(l.milledKg), kg(l.soldKg), kg(l.remainingKg), l.costPerKg ? pkr(l.costPerKg) : '—', pkr(l.stockValue), pkr(l.revenue), pkr(l.realizedProfit)]))}
+    <div class="muted" style="margin-top:6px">${e(sm.costBasis || '')}</div>
+  </div><script>window.addEventListener('load',function(){setTimeout(function(){window.focus();window.print();},350)});<\/script></body></html>`;
+  const w = window.open('', '_blank', 'width=1100,height=900');
+  if (!w) return false;
+  w.document.open(); w.document.write(html); w.document.close(); w.focus();
+  return true;
+}
+
 // Full multi-section Batch 360 print (inputs → processing → outputs → sales →
 // financials), A4. data = the /reporting/batch-ledger/:id payload.
 export function printBatchLedger(data, { companyName = 'AGRI COMMODITIES', generatedBy } = {}) {
