@@ -499,7 +499,7 @@ const automationService = require('../admin/automation.service');
 const { resolveCashAccountId } = require('../../shared/cashAccounts');
 // Shared payroll logic (also used by the scheduler) — compute + prepare.
 const payrollService = require('./payroll.service');
-const { computePayrollSummary, committedWorkerStatus, preparePayrollRun, nextPrepareDate } = payrollService;
+const { computePayrollSummary, committedWorkerStatus, preparePayrollRun, nextPrepareDate, computeLeaveBalances } = payrollService;
 
 router.get('/expenses', authorize('milling', 'view'), async (req, res) => {
   try {
@@ -1018,18 +1018,25 @@ const inclusiveDays = (from, to) => {
   if (Number.isNaN(a) || Number.isNaN(b) || b < a) return 0;
   return Math.round((b - a) / 86400000) + 1;
 };
-// Derived balances: quota − approved days taken in `year`, per active leave type.
-async function leaveBalances(workerId, year) {
-  const types = await db('mill_leave_types').where('is_active', true).orderBy('sort_order').orderBy('id');
-  const taken = await db('mill_leave_requests').where('worker_id', workerId).where('status', 'approved')
-    .whereRaw("TO_CHAR(from_date, 'YYYY') = ?", [String(year)])
-    .groupBy('leave_type_id').select('leave_type_id', db.raw('COALESCE(SUM(days),0) as d'));
-  const takenMap = new Map(taken.map((t) => [t.leave_type_id, parseFloat(t.d) || 0]));
-  return types.map((t) => {
-    const used = takenMap.get(t.id) || 0;
-    const quota = t.annual_quota != null ? parseFloat(t.annual_quota) : null;
-    return { id: t.id, name: t.name, code: t.code, paid: t.paid, quota, taken: used, remaining: quota != null ? Math.max(0, quota - used) : null };
-  });
+// Reflect approved leave on the attendance grid: upsert status='leave' for each
+// date in the range (so it shows + prevents a present/leave double-pay), or
+// remove those 'leave' rows when an approval is undone. Capped to a sane range.
+async function markLeaveAttendance(workerId, fromDate, toDate, { remove = false } = {}) {
+  // node-pg returns date columns as Date objects — String(Date) is not YYYY-MM-DD.
+  const toYmd = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10));
+  const from = toYmd(fromDate); const to = toYmd(toDate);
+  const a = Date.parse(from); const b = Date.parse(to);
+  if (Number.isNaN(a) || Number.isNaN(b) || b < a || (b - a) / 86400000 > 120) return;
+  const dates = [];
+  for (let d = a; d <= b; d += 86400000) dates.push(new Date(d).toISOString().slice(0, 10));
+  if (remove) {
+    await db('mill_attendance').where('worker_id', workerId).whereIn('date', dates).where('status', 'leave').del();
+    return;
+  }
+  for (const date of dates) {
+    await db('mill_attendance').insert({ worker_id: workerId, date, status: 'leave', hours_worked: 0, overtime_hours: 0 })
+      .onConflict(['worker_id', 'date']).merge(['status', 'hours_worked', 'updated_at']);
+  }
 }
 
 router.get('/payroll/leave-types', authorize('payroll', 'view'), async (req, res) => {
@@ -1043,6 +1050,8 @@ router.post('/payroll/leave-types', authorize('payroll', 'approve'), async (req,
     const [row] = await db('mill_leave_types').insert({
       name: String(b.name).trim(), code: String(b.code || b.name).trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').slice(0, 30),
       paid: b.paid !== false, annual_quota: (b.annual_quota === '' || b.annual_quota == null) ? null : parseFloat(b.annual_quota),
+      accrues: !!b.accrues, carry_forward: !!b.carry_forward,
+      max_carry: (b.max_carry === '' || b.max_carry == null) ? null : parseFloat(b.max_carry),
       is_active: b.is_active !== false, sort_order: parseInt(b.sort_order, 10) || 0,
     }).returning('*');
     return res.status(201).json({ success: true, data: row });
@@ -1056,6 +1065,9 @@ router.put('/payroll/leave-types/:id', authorize('payroll', 'approve'), async (r
     if (b.name !== undefined) patch.name = String(b.name).trim();
     if (b.paid !== undefined) patch.paid = !!b.paid;
     if (b.annual_quota !== undefined) patch.annual_quota = (b.annual_quota === '' || b.annual_quota == null) ? null : parseFloat(b.annual_quota);
+    if (b.accrues !== undefined) patch.accrues = !!b.accrues;
+    if (b.carry_forward !== undefined) patch.carry_forward = !!b.carry_forward;
+    if (b.max_carry !== undefined) patch.max_carry = (b.max_carry === '' || b.max_carry == null) ? null : parseFloat(b.max_carry);
     if (b.is_active !== undefined) patch.is_active = !!b.is_active;
     if (b.sort_order !== undefined) patch.sort_order = parseInt(b.sort_order, 10) || 0;
     const [row] = await db('mill_leave_types').where('id', existing.id).update(patch).returning('*');
@@ -1091,7 +1103,7 @@ router.get('/payroll/leave-balances', authorize('payroll', 'view'), async (req, 
   try {
     if (!req.query.worker_id) return res.status(400).json({ success: false, message: 'worker_id required.' });
     const year = /^\d{4}$/.test(req.query.year || '') ? req.query.year : new Date().getUTCFullYear();
-    return res.json({ success: true, data: await leaveBalances(parseInt(req.query.worker_id, 10), year) });
+    return res.json({ success: true, data: await computeLeaveBalances(parseInt(req.query.worker_id, 10), year) });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 router.post('/payroll/leave-requests', authorize('payroll', 'create'), async (req, res) => {
@@ -1106,6 +1118,7 @@ router.post('/payroll/leave-requests', authorize('payroll', 'create'), async (re
       days, paid: type ? !!type.paid : true, reason: b.reason || null,
       status: b.status === 'approved' ? 'approved' : 'pending', approved_by: b.status === 'approved' ? (req.user?.id || null) : null, approved_at: b.status === 'approved' ? db.fn.now() : null,
     }).returning('*');
+    if (row.status === 'approved') await markLeaveAttendance(row.worker_id, row.from_date, row.to_date);
     return res.status(201).json({ success: true, data: row });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
@@ -1114,6 +1127,7 @@ router.post('/payroll/leave-requests/:id/approve', authorize('payroll', 'approve
     const r = await db('mill_leave_requests').where('id', req.params.id).first();
     if (!r) return res.status(404).json({ success: false, message: 'Leave request not found.' });
     const [row] = await db('mill_leave_requests').where('id', r.id).update({ status: 'approved', approved_by: req.user?.id || null, approved_at: db.fn.now(), updated_at: db.fn.now() }).returning('*');
+    await markLeaveAttendance(row.worker_id, row.from_date, row.to_date);
     return res.json({ success: true, data: row });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
@@ -1122,6 +1136,7 @@ router.post('/payroll/leave-requests/:id/reject', authorize('payroll', 'approve'
     const r = await db('mill_leave_requests').where('id', req.params.id).first();
     if (!r) return res.status(404).json({ success: false, message: 'Leave request not found.' });
     const [row] = await db('mill_leave_requests').where('id', r.id).update({ status: 'rejected', approved_by: req.user?.id || null, approved_at: db.fn.now(), updated_at: db.fn.now() }).returning('*');
+    if (r.status === 'approved') await markLeaveAttendance(r.worker_id, r.from_date, r.to_date, { remove: true });
     return res.json({ success: true, data: row });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
@@ -1129,6 +1144,7 @@ router.delete('/payroll/leave-requests/:id', authorize('payroll', 'delete'), asy
   try {
     const r = await db('mill_leave_requests').where('id', req.params.id).first();
     if (!r) return res.status(404).json({ success: false, message: 'Leave request not found.' });
+    if (r.status === 'approved') await markLeaveAttendance(r.worker_id, r.from_date, r.to_date, { remove: true });
     await db('mill_leave_requests').where('id', r.id).del();
     return res.json({ success: true, data: { deleted: r.id } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }

@@ -319,4 +319,38 @@ function nextPrepareDate(dayOfMonth) {
   return new Date(Date.UTC(y, m, day, 6, 0, 0)); // 06:00 UTC ≈ 11:00 PKT
 }
 
-module.exports = { computePayrollSummary, committedWorkerStatus, preparePayrollRun, nextPrepareDate };
+// Derived leave balances for a worker in a year (shared by the admin routes +
+// the portal). Two modes per type: whole-quota (accrues=false → full quota
+// available immediately) or ACCRUAL (accrues=true → quota × months-elapsed/12,
+// + carried-forward prior-year unused capped at max_carry). Unlimited types
+// (quota null) just report `taken`.
+async function computeLeaveBalances(workerId, year) {
+  const y = parseInt(year, 10) || new Date().getUTCFullYear();
+  const types = await db('mill_leave_types').where('is_active', true).orderBy('sort_order').orderBy('id');
+  const sumTaken = (yr) => db('mill_leave_requests').where('worker_id', workerId).where('status', 'approved')
+    .whereRaw("TO_CHAR(from_date, 'YYYY') = ?", [String(yr)]).groupBy('leave_type_id')
+    .select('leave_type_id', db.raw('COALESCE(SUM(days),0) as d'));
+  const [takenThis, takenPrior] = await Promise.all([sumTaken(y), sumTaken(y - 1)]);
+  const tMap = new Map(takenThis.map((t) => [t.leave_type_id, parseFloat(t.d) || 0]));
+  const pMap = new Map(takenPrior.map((t) => [t.leave_type_id, parseFloat(t.d) || 0]));
+  const now = new Date();
+  const monthsElapsed = y < now.getUTCFullYear() ? 12 : (y > now.getUTCFullYear() ? 0 : now.getUTCMonth() + 1);
+  return types.map((t) => {
+    const quota = t.annual_quota != null ? parseFloat(t.annual_quota) : null;
+    const taken = tMap.get(t.id) || 0;
+    if (quota == null) return { id: t.id, name: t.name, code: t.code, paid: t.paid, accrues: !!t.accrues, quota: null, accrued: null, carriedIn: 0, taken, remaining: null };
+    let accrued; let carriedIn = 0;
+    if (t.accrues) {
+      accrued = Math.round((quota * monthsElapsed / 12) * 100) / 100;
+      if (t.carry_forward) {
+        const priorUnused = Math.max(0, quota - (pMap.get(t.id) || 0));
+        carriedIn = t.max_carry != null ? Math.min(parseFloat(t.max_carry), priorUnused) : priorUnused;
+      }
+    } else {
+      accrued = quota; // whole quota available up-front
+    }
+    return { id: t.id, name: t.name, code: t.code, paid: t.paid, accrues: !!t.accrues, quota, accrued, carriedIn: Math.round(carriedIn * 100) / 100, taken, remaining: Math.max(0, Math.round((accrued + carriedIn - taken) * 100) / 100) };
+  });
+}
+
+module.exports = { computePayrollSummary, committedWorkerStatus, preparePayrollRun, nextPrepareDate, computeLeaveBalances };

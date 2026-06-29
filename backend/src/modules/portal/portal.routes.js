@@ -210,15 +210,7 @@ router.get('/leave-types', portalAuth, async (req, res) => {
 router.get('/leave', portalAuth, async (req, res) => {
   try {
     const year = /^\d{4}$/.test(req.query.year || '') ? req.query.year : new Date().getUTCFullYear();
-    const types = await db('mill_leave_types').where('is_active', true).orderBy('sort_order').orderBy('id');
-    const takenRows = await db('mill_leave_requests').where('worker_id', req.workerId).where('status', 'approved')
-      .whereRaw("TO_CHAR(from_date, 'YYYY') = ?", [String(year)])
-      .groupBy('leave_type_id').select('leave_type_id', db.raw('COALESCE(SUM(days),0) as d'));
-    const takenMap = new Map(takenRows.map((t) => [t.leave_type_id, parseFloat(t.d) || 0]));
-    const balances = types.map((t) => {
-      const used = takenMap.get(t.id) || 0; const quota = t.annual_quota != null ? parseFloat(t.annual_quota) : null;
-      return { id: t.id, name: t.name, paid: t.paid, quota, taken: used, remaining: quota != null ? Math.max(0, quota - used) : null };
-    });
+    const balances = await require('../milling/payroll.service').computeLeaveBalances(req.workerId, year);
     const requests = await db('mill_leave_requests as lr').leftJoin('mill_leave_types as t', 't.id', 'lr.leave_type_id')
       .where('lr.worker_id', req.workerId).orderBy('lr.created_at', 'desc')
       .select('lr.id', 'lr.from_date', 'lr.to_date', 'lr.days', 'lr.paid', 'lr.reason', 'lr.status', 't.name as type_name');

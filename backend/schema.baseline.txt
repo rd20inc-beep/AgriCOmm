@@ -1116,11 +1116,14 @@ COL mill_leave_requests.status:character varying:NOT NULL
 COL mill_leave_requests.to_date:date:NOT NULL
 COL mill_leave_requests.updated_at:timestamp with time zone:NOT NULL
 COL mill_leave_requests.worker_id:integer:NOT NULL
+COL mill_leave_types.accrues:boolean:NOT NULL
 COL mill_leave_types.annual_quota:numeric:NULL
+COL mill_leave_types.carry_forward:boolean:NOT NULL
 COL mill_leave_types.code:character varying:NOT NULL
 COL mill_leave_types.created_at:timestamp with time zone:NOT NULL
 COL mill_leave_types.id:integer:NOT NULL
 COL mill_leave_types.is_active:boolean:NOT NULL
+COL mill_leave_types.max_carry:numeric:NULL
 COL mill_leave_types.name:character varying:NOT NULL
 COL mill_leave_types.paid:boolean:NOT NULL
 COL mill_leave_types.sort_order:integer:NULL

@@ -4041,13 +4041,13 @@ function LeaveDrawer({ canManage, workers = [], onClose, addToast }) {
   const { data: types = [] } = useLeaveTypes();
   const approveMut = useApproveLeaveRequest(); const rejectMut = useRejectLeaveRequest();
   const createType = useCreateLeaveType(); const updateType = useUpdateLeaveType(); const deleteType = useDeleteLeaveType();
-  const [typeForm, setTypeForm] = useState({ name: '', paid: true, annual_quota: '' });
+  const [typeForm, setTypeForm] = useState({ name: '', paid: true, annual_quota: '', accrues: false });
   const list = tab === 'requests' ? requests : allReq;
   const TONE = { pending: 'bg-amber-100 text-amber-700', approved: 'bg-emerald-100 text-emerald-700', rejected: 'bg-rose-100 text-rose-700', cancelled: 'bg-gray-100 text-gray-500' };
   const act = async (mut, id, label) => { try { await mut.mutateAsync(id); addToast(`Leave ${label}`, 'success'); } catch (e) { addToast(e.message, 'error'); } };
   const addType = async () => {
     if (!typeForm.name.trim()) { addToast('Name required', 'error'); return; }
-    try { await createType.mutateAsync({ ...typeForm, annual_quota: typeForm.annual_quota === '' ? null : parseFloat(typeForm.annual_quota) }); setTypeForm({ name: '', paid: true, annual_quota: '' }); addToast('Leave type added', 'success'); } catch (e) { addToast(e.message, 'error'); }
+    try { await createType.mutateAsync({ ...typeForm, annual_quota: typeForm.annual_quota === '' ? null : parseFloat(typeForm.annual_quota) }); setTypeForm({ name: '', paid: true, annual_quota: '', accrues: false }); addToast('Leave type added', 'success'); } catch (e) { addToast(e.message, 'error'); }
   };
 
   return (
@@ -4060,10 +4060,11 @@ function LeaveDrawer({ canManage, workers = [], onClose, addToast }) {
       {tab === 'types' ? (
         <div className="space-y-3">
           {canManage && (
-            <div className="rounded-lg border border-gray-200 p-3 grid grid-cols-[1fr_auto_auto_auto] gap-2 items-end">
-              <div><label className="block text-[11px] text-gray-500 mb-1">New leave type</label><input value={typeForm.name} onChange={(e) => setTypeForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. Bereavement" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" /></div>
+            <div className="rounded-lg border border-gray-200 p-3 flex flex-wrap items-end gap-2">
+              <div className="flex-1 min-w-[140px]"><label className="block text-[11px] text-gray-500 mb-1">New leave type</label><input value={typeForm.name} onChange={(e) => setTypeForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. Bereavement" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" /></div>
               <div><label className="block text-[11px] text-gray-500 mb-1">Paid?</label><select value={typeForm.paid ? 'y' : 'n'} onChange={(e) => setTypeForm((f) => ({ ...f, paid: e.target.value === 'y' }))} className="border border-gray-200 rounded-lg px-2 py-2 text-sm bg-white"><option value="y">Paid</option><option value="n">Unpaid</option></select></div>
               <div><label className="block text-[11px] text-gray-500 mb-1">Days/yr</label><input type="number" value={typeForm.annual_quota} onChange={(e) => setTypeForm((f) => ({ ...f, annual_quota: e.target.value }))} placeholder="∞" className="w-20 border border-gray-200 rounded-lg px-2 py-2 text-sm" /></div>
+              <label className="flex items-center gap-1.5 text-xs text-gray-600 pb-2.5"><input type="checkbox" checked={typeForm.accrues} onChange={(e) => setTypeForm((f) => ({ ...f, accrues: e.target.checked }))} className="rounded border-gray-300" /> Accrues monthly</label>
               <button onClick={addType} className="px-3 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700">Add</button>
             </div>
           )}
@@ -4071,8 +4072,9 @@ function LeaveDrawer({ canManage, workers = [], onClose, addToast }) {
             {types.map((t) => (
               <div key={t.id} className={`rounded-lg border p-3 flex items-center justify-between ${t.isActive ? 'border-gray-200' : 'border-gray-100 bg-gray-50 opacity-70'}`}>
                 <div><div className="text-sm font-semibold text-gray-900">{t.name} <span className="text-[10px] font-normal text-gray-400">{t.code}</span></div>
-                  <div className="text-xs text-gray-500">{t.paid ? 'Paid' : 'Unpaid'} · {t.annualQuota != null ? `${parseFloat(t.annualQuota)} days/yr` : 'unlimited'}</div></div>
+                  <div className="text-xs text-gray-500">{t.paid ? 'Paid' : 'Unpaid'} · {t.annualQuota != null ? `${parseFloat(t.annualQuota)} days/yr` : 'unlimited'} · {t.accrues ? 'accrues monthly' : 'full quota up-front'}</div></div>
                 {canManage && <div className="flex items-center gap-1.5">
+                  {t.annualQuota != null && <button onClick={async () => { try { await updateType.mutateAsync({ id: t.id, data: { accrues: !t.accrues } }); addToast(t.accrues ? 'Now full-quota' : 'Now accrues monthly', 'success'); } catch (e) { addToast(e.message, 'error'); } }} className={`px-2 py-1 text-[11px] rounded-md ${t.accrues ? 'text-violet-700 bg-violet-50' : 'text-gray-500 bg-gray-100'}`}>{t.accrues ? 'Accrual' : 'Up-front'}</button>}
                   <button onClick={async () => { try { await updateType.mutateAsync({ id: t.id, data: { is_active: !t.isActive } }); } catch (e) { addToast(e.message, 'error'); } }} className={`px-2 py-1 text-[11px] rounded-md ${t.isActive ? 'text-emerald-700 bg-emerald-50' : 'text-gray-500 bg-gray-100'}`}>{t.isActive ? 'Active' : 'Inactive'}</button>
                   <button onClick={async () => { try { await deleteType.mutateAsync(t.id); addToast('Removed', 'success'); } catch (e) { addToast(e.message, 'error'); } }} className="p-1.5 rounded-md text-rose-500 hover:bg-rose-50"><Trash2 className="w-3.5 h-3.5" /></button>
                 </div>}
