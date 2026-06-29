@@ -829,6 +829,11 @@ export default function LotDetail() {
         const totalSaleCost = lotSales.reduce((s, sale) => s + (parseFloat(sale.landed_cost_total) || 0), 0);
         const totalSaleProfit = lotSales.reduce((s, sale) => s + (parseFloat(sale.gross_profit) || 0), 0);
         const totalSaleKg = lotSales.reduce((s, sale) => s + (parseFloat(sale.quantity_kg) || 0), 0);
+        // Forward-looking: value the unsold remainder at cost, and project the
+        // profit still to come if it sells at the realised average rate so far.
+        const remainingStockValue = netKg * landedKg;
+        const avgSaleRate = totalSaleKg > 0 ? totalSaleRevenue / totalSaleKg : 0;
+        const expectedProfitRemaining = avgSaleRate > 0 ? (netKg * avgSaleRate) - remainingStockValue : null;
         return (
         <div className="space-y-6">
           {/* Profit Summary */}
@@ -852,6 +857,24 @@ export default function LotDetail() {
             <div className={`rounded-xl border p-4 ${totalSaleProfit >= 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100'}`}>
               <p className={`text-xs font-medium uppercase ${totalSaleProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>Gross Profit</p>
               <p className={`text-xl font-bold mt-1 ${totalSaleProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{fmtPKR(totalSaleProfit)}</p>
+            </div>
+          </div>
+
+          {/* Forward-looking: remaining stock value + expected profit on it */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="bg-white rounded-xl border border-gray-100 p-4">
+              <p className="text-xs font-medium text-gray-500 uppercase">Remaining Stock</p>
+              <p className="text-xl font-bold text-gray-900 mt-1">{dv(netKg).toLocaleString()} <span className="text-sm font-normal text-gray-400">{ul()}</span></p>
+            </div>
+            <div className="bg-white rounded-xl border border-gray-100 p-4">
+              <p className="text-xs font-medium text-gray-500 uppercase">Remaining Stock Value</p>
+              <p className="text-xl font-bold text-gray-900 mt-1">{fmtPKR(remainingStockValue)}</p>
+              <p className="text-[11px] text-gray-400">at cost {fmtPKR(landedKg)}/KG</p>
+            </div>
+            <div className="bg-violet-50 rounded-xl border border-violet-100 p-4">
+              <p className="text-xs font-medium text-violet-600 uppercase">Expected Profit on Remaining</p>
+              <p className="text-xl font-bold text-violet-700 mt-1">{expectedProfitRemaining == null ? '—' : fmtPKR(expectedProfitRemaining)}</p>
+              <p className="text-[11px] text-gray-400">{avgSaleRate > 0 ? `if sold at avg ${fmtPKR(avgSaleRate)}/KG` : 'no sales yet to project a rate'}</p>
             </div>
           </div>
 
