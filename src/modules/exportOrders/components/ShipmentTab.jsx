@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { Check, Circle, Ship, Anchor } from 'lucide-react';
 
 export default function ShipmentTab({ order, onUpdateShipment, canUpdateShipment }) {
@@ -106,6 +107,19 @@ export default function ShipmentTab({ order, onUpdateShipment, canUpdateShipment
                     </p>
                   </div>
                 </div>
+                {Array.isArray(container.lots) && container.lots.length > 0 && (
+                  <div>
+                    <p className="text-gray-500 text-xs uppercase mb-1">Lots loaded</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {container.lots.map((l) => (
+                        <Link key={l.lotId} to={l.href || `/lot-inventory/${l.lotId}`}
+                          className="text-xs font-mono px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 hover:bg-blue-100">
+                          {l.lotNo || `#${l.lotId}`}{l.qtyKg ? ` · ${Math.round(l.qtyKg).toLocaleString()}kg` : ''}
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {container.notes ? (
                   <p className="text-xs text-gray-500">{container.notes}</p>
                 ) : null}

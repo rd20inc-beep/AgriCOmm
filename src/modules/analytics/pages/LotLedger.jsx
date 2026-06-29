@@ -179,8 +179,8 @@ export default function LotLedger() {
       {/* Export use */}
       {(exportOrders.length > 0 || exportUse.transferredToExportKg > 0) && (
         <Section icon={Ship} title="Export use">
-          <Tbl head={['Export order', 'Customer', 'Country', { t: 'Reserved', r: 1 }, { t: 'Dispatched', r: 1 }, 'Status']}
-            rows={exportOrders.map(o => [<Link to={o.href} className="font-mono text-blue-600 hover:underline">{o.orderNo}</Link>, o.customer, o.country || '—', o.reservedKg ? kg(o.reservedKg) : '—', o.dispatchedKg ? kg(o.dispatchedKg) : '—', o.status || '—'])}
+          <Tbl head={['Export order', 'Customer', 'Country', { t: 'Reserved', r: 1 }, { t: 'Dispatched', r: 1 }, 'Containers', 'Status']}
+            rows={exportOrders.map(o => [<Link to={o.href} className="font-mono text-blue-600 hover:underline">{o.orderNo}</Link>, o.customer, o.country || '—', o.reservedKg ? kg(o.reservedKg) : '—', o.dispatchedKg ? kg(o.dispatchedKg) : '—', (o.containers && o.containers.length) ? o.containers.join(', ') : '—', o.status || '—'])}
             empty="This lot is not on any export order." />
           {exportUse.transferredToExportKg > 0 && <p className="px-4 py-2 text-[11px] text-gray-500">{kg(exportUse.transferredToExportKg)} transferred to the Export entity (onward order allocation shows on the export-side lots).</p>}
         </Section>
