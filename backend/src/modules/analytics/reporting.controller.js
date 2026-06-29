@@ -164,6 +164,27 @@ const reportingController = {
     }
   },
 
+  async supplierInventoryIndex(req, res) {
+    try {
+      const data = await reportingService.getSupplierInventoryIndex();
+      return res.json({ success: true, ...data });
+    } catch (err) {
+      console.error('Supplier inventory index error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  async supplierInventoryLedger(req, res) {
+    try {
+      const data = await reportingService.getSupplierInventoryLedger(req.params.id);
+      if (!data) return res.status(404).json({ success: false, message: 'Supplier not found.' });
+      return res.json({ success: true, ...data });
+    } catch (err) {
+      console.error('Supplier inventory ledger error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
   async listScheduledReports(req, res) {
     try {
       const data = await reportingService.listScheduledReportEmails();

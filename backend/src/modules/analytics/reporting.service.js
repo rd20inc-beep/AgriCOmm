@@ -1266,6 +1266,143 @@ const reportingService = {
   },
 
   /**
+   * Supplier Inventory Index — the picker list for the Supplier Inventory
+   * Ledger. One row per supplier that has at least one purchased rice lot, with
+   * light roll-up totals (purchased / remaining / stock value / payable
+   * outstanding). Deliberately SQL-only (no per-lot 360) so it stays fast; the
+   * full profit picture is computed on the detail page. Finance-gated upstream.
+   */
+  async getSupplierInventoryIndex() {
+    const num = (v) => parseFloat(v) || 0;
+    const rows = await db('inventory_lots as l')
+      .join('suppliers as s', 'l.supplier_id', 's.id')
+      .where('l.type', 'raw')
+      .groupBy('s.id', 's.name')
+      .select('s.id as supplierId', 's.name as supplier',
+        db.raw('COUNT(l.id) as lot_count'),
+        db.raw('COALESCE(SUM(COALESCE(l.received_net_weight_kg, l.net_weight_kg)), 0) as purchased_kg'),
+        db.raw('COALESCE(SUM(l.net_weight_kg), 0) as remaining_kg'),
+        db.raw('COALESCE(SUM(l.net_weight_kg * COALESCE(l.landed_cost_per_kg, l.rate_per_kg)), 0) as stock_value'))
+      .orderBy('s.name', 'asc');
+    const supIds = rows.map(r => r.supplierId);
+    const pay = supIds.length
+      ? await db('payables').whereIn('supplier_id', supIds).groupBy('supplier_id')
+        .select('supplier_id', db.raw('COALESCE(SUM(outstanding), 0) as outstanding'))
+      : [];
+    const payBy = Object.fromEntries(pay.map(p => [p.supplier_id, num(p.outstanding)]));
+    return {
+      rows: rows.map(r => ({
+        supplierId: r.supplierId, supplier: r.supplier, href: `/reports/supplier-ledger/${r.supplierId}`,
+        lotCount: Number(r.lot_count) || 0, purchasedKg: num(r.purchased_kg),
+        remainingKg: num(r.remaining_kg), stockValue: num(r.stock_value),
+        payableOutstanding: payBy[r.supplierId] || 0,
+      })),
+    };
+  },
+
+  /**
+   * Supplier Inventory Ledger / Supplier 360 — everything bought from one
+   * supplier and what became of it: per-lot purchased / milled / sold /
+   * remaining, current stock value, revenue, realized & expected profit,
+   * outstanding payable + payments, and yield/quality performance. Each lot's
+   * financials reuse getLotLedger so the numbers reconcile exactly with Lot 360.
+   * Read-only. Finance-gated upstream (denyRoles Mill Operator).
+   */
+  async getSupplierInventoryLedger(supplierId) {
+    const id = parseInt(supplierId, 10);
+    if (!id) return null;
+    const num = (v) => parseFloat(v) || 0;
+
+    const supplier = await db('suppliers').where('id', id).first();
+    if (!supplier) return null;
+
+    const lots = await db('inventory_lots as l')
+      .leftJoin('products as p', 'l.product_id', 'p.id')
+      .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
+      .where('l.supplier_id', id)
+      .where('l.type', 'raw')
+      .select('l.id', 'l.lot_no', 'l.variety', 'l.grade', 'l.item_name', 'l.purchase_date', 'l.created_at',
+        'l.received_net_weight_kg', 'l.net_weight_kg', 'l.landed_cost_per_kg', 'l.rate_per_kg',
+        'l.moisture_pct', 'p.name as product_name', 'w.name as warehouse_name')
+      .orderBy('l.purchase_date', 'asc').orderBy('l.id', 'asc');
+
+    const agg = {
+      lotCount: lots.length, purchasedKg: 0, milledKg: 0, soldKg: 0, remainingKg: 0,
+      reservedKg: 0, lossKg: 0, stockValue: 0, purchaseValue: 0, revenue: 0, cogs: 0,
+      realizedProfit: 0, expectedProfitRemaining: 0, paymentReceived: 0, outstandingSales: 0,
+    };
+    const rows = [];
+    for (const lot of lots) {
+      // Reuse the lot 360 so supplier roll-ups reconcile with Lot Ledger exactly.
+      const led = await this.getLotLedger(lot.id);
+      const qs = (led && led.quantitySummary) || {};
+      const fs = (led && led.financialSummary) || {};
+      const purchasedKg = num(qs.purchasedKg);
+      const milledKg = num(qs.sentForMillingKg);
+      const soldKg = num(qs.soldWithoutProcessingKg) + num(qs.soldAfterProcessingKg);
+      const remainingKg = num(qs.remainingKg);
+      rows.push({
+        lotId: lot.id, lotNo: lot.lot_no, href: `/reports/lot-ledger/${lot.id}`,
+        lotDetailHref: `/lot-inventory/${lot.id}`,
+        riceType: lot.variety || lot.product_name || lot.item_name || '—', grade: lot.grade || null,
+        purchaseDate: lot.purchase_date || lot.created_at, warehouse: lot.warehouse_name || null,
+        moisturePct: lot.moisture_pct != null ? num(lot.moisture_pct) : null,
+        costPerKg: num(lot.landed_cost_per_kg) || num(lot.rate_per_kg),
+        purchasedKg, milledKg, soldKg, remainingKg,
+        reservedKg: num(qs.reservedKg), lossKg: num(qs.processingLossKg),
+        purchaseValue: num(fs.purchaseValue), stockValue: num(fs.remainingStockValue),
+        revenue: num(fs.totalRevenue), realizedProfit: num(fs.realizedProfit),
+        expectedProfitRemaining: num(fs.expectedProfitRemaining),
+      });
+      agg.purchasedKg += purchasedKg; agg.milledKg += milledKg; agg.soldKg += soldKg;
+      agg.remainingKg += remainingKg; agg.reservedKg += num(qs.reservedKg); agg.lossKg += num(qs.processingLossKg);
+      agg.stockValue += num(fs.remainingStockValue); agg.purchaseValue += num(fs.purchaseValue);
+      agg.revenue += num(fs.totalRevenue); agg.cogs += num(fs.totalCostOfSold);
+      agg.realizedProfit += num(fs.realizedProfit); agg.expectedProfitRemaining += num(fs.expectedProfitRemaining);
+      agg.paymentReceived += num(fs.paymentReceived); agg.outstandingSales += num(fs.outstanding);
+    }
+
+    // Outstanding payable + payments to this supplier (all payable sources).
+    const payRow = await db('payables').where('supplier_id', id)
+      .select(db.raw('COALESCE(SUM(original_amount), 0) as billed'),
+        db.raw('COALESCE(SUM(paid_amount), 0) as paid'),
+        db.raw('COALESCE(SUM(outstanding), 0) as outstanding')).first();
+
+    // Yield / quality performance across batches that consumed this supplier's lots.
+    const lotIds = lots.map(l => l.id);
+    let avgYieldPct = null, batchesUsing = 0;
+    if (lotIds.length) {
+      const bsl = await db('batch_source_lots').whereIn('lot_id', lotIds).distinct('batch_id');
+      const bIds = bsl.map(b => b.batch_id).filter(Boolean);
+      batchesUsing = bIds.length;
+      if (bIds.length) {
+        const yr = await db('milling_batches').whereIn('id', bIds).whereNotNull('yield_pct')
+          .andWhere('yield_pct', '>', 0).avg('yield_pct as ay').first();
+        avgYieldPct = yr && yr.ay != null ? num(yr.ay) : null;
+      }
+    }
+    const moistVals = lots.map(l => l.moisture_pct).filter(v => v != null).map(num);
+    const avgMoisture = moistVals.length ? moistVals.reduce((a, b) => a + b, 0) / moistVals.length : null;
+
+    return {
+      supplier: {
+        id: supplier.id, name: supplier.name, contactPerson: supplier.contact_person || null,
+        phone: supplier.phone || null, country: supplier.country || null, type: supplier.type || null,
+        statementHref: `/finance/statements?type=supplier&id=${supplier.id}`,
+      },
+      summary: {
+        ...agg,
+        realizedProfitPct: agg.revenue > 0 ? (agg.realizedProfit / agg.revenue) * 100 : 0,
+        payableBilled: num(payRow && payRow.billed), payablePaid: num(payRow && payRow.paid),
+        payableOutstanding: num(payRow && payRow.outstanding),
+        avgYieldPct, avgMoisture, batchesUsing,
+        costBasis: 'Per-lot financials reuse the Lot 360 (residual costing); processing cost allocated by batch share — approximate where blended.',
+      },
+      lots: rows,
+    };
+  },
+
+  /**
    * Batch Processing Ledger — one batch's inputs (source lots), outputs
    * (finished + by-product lots), recorded costs and yield, assembled from
    * milling_batches / batch_source_lots / milling_costs / inventory_lots.

@@ -752,6 +752,12 @@ export default function Reports() {
                 <Receipt size={14} /> Invoice Ledger
               </Link>
             )}
+            {!operatorScoped && (
+              <Link to="/reports/supplier-ledger"
+                className="bg-white/15 hover:bg-white/25 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-sm font-medium inline-flex items-center gap-2 transition-colors">
+                <Users size={14} /> Supplier Ledger
+              </Link>
+            )}
             <Link to="/reports/lots"
               className="bg-white/15 hover:bg-white/25 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-sm font-medium inline-flex items-center gap-2 transition-colors">
               <FileText size={14} /> Lot Reports
