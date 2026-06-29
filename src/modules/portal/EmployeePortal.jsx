@@ -110,6 +110,10 @@ export default function EmployeePortal() {
   const [reqOpen, setReqOpen] = useState(false);
   const [pinForm, setPinForm] = useState({ current_pin: '', new_pin: '' });
   const [pinOpen, setPinOpen] = useState(false);
+  const [leave, setLeave] = useState(null);
+  const [leaveTypes, setLeaveTypes] = useState([]);
+  const [leaveForm, setLeaveForm] = useState({ leave_type_id: '', from_date: '', to_date: '', reason: '' });
+  const [leaveOpen, setLeaveOpen] = useState(false);
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
@@ -120,11 +124,13 @@ export default function EmployeePortal() {
   const loadAll = useCallback(async (tk) => {
     setLoading(true); setErr('');
     try {
-      const [meRes, psRes, advRes, reqRes] = await Promise.all([
+      const [meRes, psRes, advRes, reqRes, lvRes, ltRes] = await Promise.all([
         portalApi('/me', { token: tk }), portalApi('/payslips', { token: tk }),
         portalApi('/advances', { token: tk }), portalApi('/requests', { token: tk }),
+        portalApi('/leave', { token: tk }), portalApi('/leave-types', { token: tk }),
       ]);
       setMe(meRes.data); setPayslips(psRes.data || []); setAdvances(advRes.data); setRequests(reqRes.data || []);
+      setLeave(lvRes.data); setLeaveTypes(ltRes.data || []);
       const tyRes = await portalApi('/tax-statement', { token: tk });
       setTax(tyRes.data); setTaxYear(tyRes.data.taxYear);
     } catch (e) {
@@ -162,7 +168,16 @@ export default function EmployeePortal() {
       setPinForm({ current_pin: '', new_pin: '' }); setPinOpen(false); setMsg('PIN changed.');
     } catch (e2) { setErr(e2.message); }
   }
-  const REQ_TONE = { pending: 'bg-amber-100 text-amber-700', approved: 'bg-emerald-100 text-emerald-700', rejected: 'bg-rose-100 text-rose-700', resolved: 'bg-blue-100 text-blue-700' };
+  async function submitLeave(e) {
+    e.preventDefault(); setErr(''); setMsg('');
+    if (!leaveForm.from_date || !leaveForm.to_date) { setErr('Pick leave dates.'); return; }
+    try {
+      await portalApi('/leave', { method: 'POST', token, body: leaveForm });
+      setLeaveForm({ leave_type_id: '', from_date: '', to_date: '', reason: '' }); setLeaveOpen(false); setMsg('Leave applied.');
+      const r = await portalApi('/leave', { token }); setLeave(r.data);
+    } catch (e2) { setErr(e2.message); }
+  }
+  const REQ_TONE = { pending: 'bg-amber-100 text-amber-700', approved: 'bg-emerald-100 text-emerald-700', rejected: 'bg-rose-100 text-rose-700', resolved: 'bg-blue-100 text-blue-700', cancelled: 'bg-gray-100 text-gray-500' };
 
   // ── Login screen ──
   if (!token || !me) {
@@ -246,6 +261,48 @@ export default function EmployeePortal() {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Leave */}
+        {leave && (
+          <div className="bg-white rounded-xl shadow-sm p-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-sm font-semibold text-gray-900">My leave <span className="text-[11px] font-normal text-gray-400">{leave.year}</span></div>
+              <button onClick={() => { setLeaveOpen((v) => !v); setMsg(''); setErr(''); }} className="text-xs font-medium text-blue-700 bg-blue-50 px-3 py-1.5 rounded-lg hover:bg-blue-100">{leaveOpen ? 'Cancel' : 'Apply for leave'}</button>
+            </div>
+            {/* Balances */}
+            {leave.balances.length > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-2">
+                {leave.balances.map((b) => (
+                  <div key={b.id} className="rounded-lg bg-slate-50 p-2"><div className="text-[10px] uppercase text-gray-400">{b.name}{b.paid ? '' : ' (unpaid)'}</div><div className="text-sm font-semibold text-gray-700">{b.quota != null ? `${b.remaining}/${b.quota}` : `${b.taken} taken`}</div></div>
+                ))}
+              </div>
+            )}
+            {leaveOpen && (
+              <form onSubmit={submitLeave} className="space-y-2 mb-3 border-b border-gray-100 pb-3">
+                <select value={leaveForm.leave_type_id} onChange={(e) => setLeaveForm((f) => ({ ...f, leave_type_id: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+                  <option value="">Select leave type…</option>
+                  {leaveTypes.map((t) => <option key={t.id} value={t.id}>{t.name}{t.paid ? '' : ' (unpaid)'}</option>)}
+                </select>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className="block text-[10px] text-gray-400 mb-0.5">From</label><input type="date" value={leaveForm.from_date} onChange={(e) => setLeaveForm((f) => ({ ...f, from_date: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" /></div>
+                  <div><label className="block text-[10px] text-gray-400 mb-0.5">To</label><input type="date" value={leaveForm.to_date} onChange={(e) => setLeaveForm((f) => ({ ...f, to_date: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" /></div>
+                </div>
+                <textarea rows={2} value={leaveForm.reason} onChange={(e) => setLeaveForm((f) => ({ ...f, reason: e.target.value }))} placeholder="Reason (optional)" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+                <button type="submit" className="px-4 py-2 text-sm text-white bg-[#1e3a5f] rounded-lg hover:bg-[#162a45]">Apply</button>
+              </form>
+            )}
+            {leave.requests.length > 0 && (
+              <div className="space-y-1.5">
+                {leave.requests.slice(0, 8).map((r) => (
+                  <div key={r.id} className="flex items-center justify-between text-xs border-b border-gray-50 pb-1">
+                    <span className="text-gray-600">{r.type || 'Leave'} · {String(r.fromDate).slice(0, 10)}→{String(r.toDate).slice(0, 10)} · {r.days}d</span>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold capitalize ${REQ_TONE[r.status] || 'bg-gray-100 text-gray-600'}`}>{r.status}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

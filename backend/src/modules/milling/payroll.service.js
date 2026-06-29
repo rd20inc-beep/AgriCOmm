@@ -101,6 +101,23 @@ async function computePayrollSummary(month) {
   const statRules = await db('mill_statutory_deductions')
     .where('is_active', true).orderBy('sort_order').orderBy('id');
 
+  // Approved leave overlapping the month → paid/unpaid days per worker (clamped
+  // to the month). UNPAID leave docks a monthly salary; PAID leave pays a
+  // daily-wage worker for those days.
+  const leaveRows = workers.length ? await db('mill_leave_requests')
+    .whereIn('worker_id', workers.map((w) => w.id)).where('status', 'approved')
+    .where('from_date', '<=', endDate).where('to_date', '>=', startDate) : [];
+  const leaveByWorker = new Map();
+  for (const lr of leaveRows) {
+    const f = ymd(lr.from_date) > startDate ? ymd(lr.from_date) : startDate;
+    const t = ymd(lr.to_date) < endDate ? ymd(lr.to_date) : endDate;
+    const days = Math.max(0, Math.round((Date.parse(t) - Date.parse(f)) / 86400000) + 1);
+    if (days <= 0) continue;
+    const cur = leaveByWorker.get(lr.worker_id) || { paid: 0, unpaid: 0 };
+    if (lr.paid) cur.paid += days; else cur.unpaid += days;
+    leaveByWorker.set(lr.worker_id, cur);
+  }
+
   const summary = workers.map(w => {
     const records = attendance.filter(a => a.worker_id === w.id);
     const daysPresent = records.filter(a => a.status === 'present').length;
@@ -119,9 +136,17 @@ async function computePayrollSummary(month) {
     const employedDays = Math.max(0, Math.round((Date.parse(empEnd) - Date.parse(empStart)) / 86400000) + 1);
     const proratable = w.pay_type === 'monthly' && employedDays < daysInMonth;
     const proRatio = proratable ? Math.min(1, employedDays / daysInMonth) : 1;
-    const basicPay = w.pay_type === 'monthly'
+    let basicPay = w.pay_type === 'monthly'
       ? Math.round((parseFloat(w.monthly_salary) || 0) * proRatio)
       : effectiveDays * dailyWage;
+    // Leave adjustment: monthly → dock unpaid-leave days (dailyRate × days);
+    // daily → add paid-leave days (dailyWage × days). Paid leave doesn't dock a
+    // monthly salary; unpaid leave doesn't pay a daily worker.
+    const lv = leaveByWorker.get(w.id) || { paid: 0, unpaid: 0 };
+    let leaveAdjust = 0;
+    if (w.pay_type === 'monthly') leaveAdjust = -Math.round(((parseFloat(w.monthly_salary) || 0) / daysInMonth) * lv.unpaid);
+    else leaveAdjust = Math.round(dailyWage * lv.paid);
+    basicPay = Math.max(0, basicPay + leaveAdjust);
     // Overtime: per-worker ot_rate_per_hour if set, else 1.5× the daily hourly rate.
     const otRate = parseFloat(w.ot_rate_per_hour) > 0 ? parseFloat(w.ot_rate_per_hour) : (dailyWage / 8 * 1.5);
     const otPay = totalOT * otRate;
@@ -172,6 +197,7 @@ async function computePayrollSummary(month) {
       basicPay: Math.round(basicPay), otPay: Math.round(otPay),
       grossPay: Math.round(gross), // earned (basic + OT); bonus shown separately
       prorated: proratable, employedDays, daysInMonth,
+      leaveDaysPaid: lv.paid, leaveDaysUnpaid: lv.unpaid, leaveAdjust,
       bonusTotal, deductionTotal,
       statutoryTotal, statutoryLines,
       advanceOutstanding: Math.round(advanceOutstanding),

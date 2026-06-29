@@ -1012,6 +1012,128 @@ router.post('/worker-requests/:id/resolve', authorize('payroll', 'edit'), async 
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ── Leave management (Phase 23) ──────────────────────────────────────────────
+const inclusiveDays = (from, to) => {
+  const a = Date.parse(String(from).slice(0, 10)); const b = Date.parse(String(to).slice(0, 10));
+  if (Number.isNaN(a) || Number.isNaN(b) || b < a) return 0;
+  return Math.round((b - a) / 86400000) + 1;
+};
+// Derived balances: quota − approved days taken in `year`, per active leave type.
+async function leaveBalances(workerId, year) {
+  const types = await db('mill_leave_types').where('is_active', true).orderBy('sort_order').orderBy('id');
+  const taken = await db('mill_leave_requests').where('worker_id', workerId).where('status', 'approved')
+    .whereRaw("TO_CHAR(from_date, 'YYYY') = ?", [String(year)])
+    .groupBy('leave_type_id').select('leave_type_id', db.raw('COALESCE(SUM(days),0) as d'));
+  const takenMap = new Map(taken.map((t) => [t.leave_type_id, parseFloat(t.d) || 0]));
+  return types.map((t) => {
+    const used = takenMap.get(t.id) || 0;
+    const quota = t.annual_quota != null ? parseFloat(t.annual_quota) : null;
+    return { id: t.id, name: t.name, code: t.code, paid: t.paid, quota, taken: used, remaining: quota != null ? Math.max(0, quota - used) : null };
+  });
+}
+
+router.get('/payroll/leave-types', authorize('payroll', 'view'), async (req, res) => {
+  try { return res.json({ success: true, data: await db('mill_leave_types').orderBy('sort_order').orderBy('id') }); }
+  catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+router.post('/payroll/leave-types', authorize('payroll', 'approve'), async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.name) return res.status(400).json({ success: false, message: 'Name is required.' });
+    const [row] = await db('mill_leave_types').insert({
+      name: String(b.name).trim(), code: String(b.code || b.name).trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').slice(0, 30),
+      paid: b.paid !== false, annual_quota: (b.annual_quota === '' || b.annual_quota == null) ? null : parseFloat(b.annual_quota),
+      is_active: b.is_active !== false, sort_order: parseInt(b.sort_order, 10) || 0,
+    }).returning('*');
+    return res.status(201).json({ success: true, data: row });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+router.put('/payroll/leave-types/:id', authorize('payroll', 'approve'), async (req, res) => {
+  try {
+    const existing = await db('mill_leave_types').where('id', req.params.id).first();
+    if (!existing) return res.status(404).json({ success: false, message: 'Leave type not found.' });
+    const b = req.body || {}; const patch = { updated_at: db.fn.now() };
+    if (b.name !== undefined) patch.name = String(b.name).trim();
+    if (b.paid !== undefined) patch.paid = !!b.paid;
+    if (b.annual_quota !== undefined) patch.annual_quota = (b.annual_quota === '' || b.annual_quota == null) ? null : parseFloat(b.annual_quota);
+    if (b.is_active !== undefined) patch.is_active = !!b.is_active;
+    if (b.sort_order !== undefined) patch.sort_order = parseInt(b.sort_order, 10) || 0;
+    const [row] = await db('mill_leave_types').where('id', existing.id).update(patch).returning('*');
+    return res.json({ success: true, data: row });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+router.delete('/payroll/leave-types/:id', authorize('payroll', 'approve'), async (req, res) => {
+  try {
+    const used = await db('mill_leave_requests').where('leave_type_id', req.params.id).first();
+    if (used) { await db('mill_leave_types').where('id', req.params.id).update({ is_active: false, updated_at: db.fn.now() }); return res.json({ success: true, data: { deactivated: true } }); }
+    await db('mill_leave_types').where('id', req.params.id).del();
+    return res.json({ success: true, data: { deleted: req.params.id } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.get('/payroll/leave-requests', authorize('payroll', 'view'), async (req, res) => {
+  try {
+    let q = db('mill_leave_requests as lr').leftJoin('mill_workers as w', 'w.id', 'lr.worker_id')
+      .leftJoin('mill_leave_types as t', 't.id', 'lr.leave_type_id').leftJoin('users as u', 'u.id', 'lr.approved_by')
+      .select('lr.*', 'w.name as worker_name', 'w.role as worker_role', 't.name as type_name', 'u.full_name as approved_by_name')
+      .orderBy('lr.created_at', 'desc');
+    if (req.query.status) q = q.where('lr.status', req.query.status);
+    if (req.query.worker_id) q = q.where('lr.worker_id', parseInt(req.query.worker_id, 10));
+    if (req.query.year) q = q.whereRaw("TO_CHAR(lr.from_date, 'YYYY') = ?", [String(req.query.year)]);
+    return res.json({ success: true, data: await q });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+router.get('/payroll/leave-requests/count', authorize('payroll', 'view'), async (req, res) => {
+  try { const r = await db('mill_leave_requests').where('status', 'pending').count('id as c').first(); return res.json({ success: true, data: { pending: parseInt(r?.c, 10) || 0 } }); }
+  catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+router.get('/payroll/leave-balances', authorize('payroll', 'view'), async (req, res) => {
+  try {
+    if (!req.query.worker_id) return res.status(400).json({ success: false, message: 'worker_id required.' });
+    const year = /^\d{4}$/.test(req.query.year || '') ? req.query.year : new Date().getUTCFullYear();
+    return res.json({ success: true, data: await leaveBalances(parseInt(req.query.worker_id, 10), year) });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+router.post('/payroll/leave-requests', authorize('payroll', 'create'), async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.worker_id || !b.from_date || !b.to_date) return res.status(400).json({ success: false, message: 'worker, from and to dates are required.' });
+    const type = b.leave_type_id ? await db('mill_leave_types').where('id', b.leave_type_id).first() : null;
+    const days = inclusiveDays(b.from_date, b.to_date);
+    if (days <= 0) return res.status(400).json({ success: false, message: 'Invalid date range.' });
+    const [row] = await db('mill_leave_requests').insert({
+      worker_id: b.worker_id, leave_type_id: b.leave_type_id || null, from_date: b.from_date, to_date: b.to_date,
+      days, paid: type ? !!type.paid : true, reason: b.reason || null,
+      status: b.status === 'approved' ? 'approved' : 'pending', approved_by: b.status === 'approved' ? (req.user?.id || null) : null, approved_at: b.status === 'approved' ? db.fn.now() : null,
+    }).returning('*');
+    return res.status(201).json({ success: true, data: row });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+router.post('/payroll/leave-requests/:id/approve', authorize('payroll', 'approve'), async (req, res) => {
+  try {
+    const r = await db('mill_leave_requests').where('id', req.params.id).first();
+    if (!r) return res.status(404).json({ success: false, message: 'Leave request not found.' });
+    const [row] = await db('mill_leave_requests').where('id', r.id).update({ status: 'approved', approved_by: req.user?.id || null, approved_at: db.fn.now(), updated_at: db.fn.now() }).returning('*');
+    return res.json({ success: true, data: row });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+router.post('/payroll/leave-requests/:id/reject', authorize('payroll', 'approve'), async (req, res) => {
+  try {
+    const r = await db('mill_leave_requests').where('id', req.params.id).first();
+    if (!r) return res.status(404).json({ success: false, message: 'Leave request not found.' });
+    const [row] = await db('mill_leave_requests').where('id', r.id).update({ status: 'rejected', approved_by: req.user?.id || null, approved_at: db.fn.now(), updated_at: db.fn.now() }).returning('*');
+    return res.json({ success: true, data: row });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+router.delete('/payroll/leave-requests/:id', authorize('payroll', 'delete'), async (req, res) => {
+  try {
+    const r = await db('mill_leave_requests').where('id', req.params.id).first();
+    if (!r) return res.status(404).json({ success: false, message: 'Leave request not found.' });
+    await db('mill_leave_requests').where('id', r.id).del();
+    return res.json({ success: true, data: { deleted: r.id } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
 // Delete a worker permanently — unwinds every advance's cash-out, then cascades
 // attendance + advances (FK onDelete CASCADE) and removes the worker.
 router.delete('/workers/:id', authorize('payroll', 'delete'), async (req, res) => {

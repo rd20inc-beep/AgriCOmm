@@ -1326,6 +1326,26 @@ export function useResolveWorkerRequest() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['worker-requests'] }); qc.invalidateQueries({ queryKey: ['worker-requests-count'] }); },
   });
 }
+// ── Leave management (Phase 23) ──
+export function useLeaveTypes() {
+  return useQuery({ queryKey: ['leave-types'], queryFn: async () => { const r = await millingApi.listLeaveTypes(); return transformKeys(r?.data || []); } });
+}
+export function useLeaveRequests(status) {
+  return useQuery({ queryKey: ['leave-requests', status || 'all'], queryFn: async () => { const r = await millingApi.listLeaveRequests(status ? { status } : {}); return transformKeys(r?.data || []); } });
+}
+export function useLeaveRequestsCount() {
+  return useQuery({ queryKey: ['leave-requests-count'], queryFn: async () => { const r = await millingApi.leaveRequestsCount(); return r?.data?.pending || 0; }, refetchInterval: 60000 });
+}
+function invalidateLeave(qc) {
+  ['leave-types', 'leave-requests', 'leave-requests-count', 'payroll-summary'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+}
+export function useCreateLeaveType() { const qc = useQueryClient(); return useMutation({ mutationFn: (d) => millingApi.createLeaveType(d), onSuccess: () => invalidateLeave(qc) }); }
+export function useUpdateLeaveType() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, data }) => millingApi.updateLeaveType(id, data), onSuccess: () => invalidateLeave(qc) }); }
+export function useDeleteLeaveType() { const qc = useQueryClient(); return useMutation({ mutationFn: (id) => millingApi.deleteLeaveType(id), onSuccess: () => invalidateLeave(qc) }); }
+export function useCreateLeaveRequest() { const qc = useQueryClient(); return useMutation({ mutationFn: (d) => millingApi.createLeaveRequest(d), onSuccess: () => invalidateLeave(qc) }); }
+export function useApproveLeaveRequest() { const qc = useQueryClient(); return useMutation({ mutationFn: (id) => millingApi.approveLeaveRequest(id), onSuccess: () => invalidateLeave(qc) }); }
+export function useRejectLeaveRequest() { const qc = useQueryClient(); return useMutation({ mutationFn: (id) => millingApi.rejectLeaveRequest(id), onSuccess: () => invalidateLeave(qc) }); }
+export function useDeleteLeaveRequest() { const qc = useQueryClient(); return useMutation({ mutationFn: (id) => millingApi.deleteLeaveRequest(id), onSuccess: () => invalidateLeave(qc) }); }
 
 export function useWorkerAdvances(workerId) {
   return useQuery({

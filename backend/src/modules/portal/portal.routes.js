@@ -197,4 +197,50 @@ router.post('/requests', portalAuth, async (req, res) => {
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
+// GET /api/portal/leave-types — active types the worker can apply for.
+router.get('/leave-types', portalAuth, async (req, res) => {
+  try {
+    const types = await db('mill_leave_types').where('is_active', true).orderBy('sort_order').orderBy('id')
+      .select('id', 'name', 'code', 'paid', 'annual_quota');
+    return res.json({ success: true, data: types.map((t) => ({ id: t.id, name: t.name, code: t.code, paid: t.paid, quota: t.annual_quota != null ? parseFloat(t.annual_quota) : null })) });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// GET /api/portal/leave — the worker's leave requests + derived balances (this year).
+router.get('/leave', portalAuth, async (req, res) => {
+  try {
+    const year = /^\d{4}$/.test(req.query.year || '') ? req.query.year : new Date().getUTCFullYear();
+    const types = await db('mill_leave_types').where('is_active', true).orderBy('sort_order').orderBy('id');
+    const takenRows = await db('mill_leave_requests').where('worker_id', req.workerId).where('status', 'approved')
+      .whereRaw("TO_CHAR(from_date, 'YYYY') = ?", [String(year)])
+      .groupBy('leave_type_id').select('leave_type_id', db.raw('COALESCE(SUM(days),0) as d'));
+    const takenMap = new Map(takenRows.map((t) => [t.leave_type_id, parseFloat(t.d) || 0]));
+    const balances = types.map((t) => {
+      const used = takenMap.get(t.id) || 0; const quota = t.annual_quota != null ? parseFloat(t.annual_quota) : null;
+      return { id: t.id, name: t.name, paid: t.paid, quota, taken: used, remaining: quota != null ? Math.max(0, quota - used) : null };
+    });
+    const requests = await db('mill_leave_requests as lr').leftJoin('mill_leave_types as t', 't.id', 'lr.leave_type_id')
+      .where('lr.worker_id', req.workerId).orderBy('lr.created_at', 'desc')
+      .select('lr.id', 'lr.from_date', 'lr.to_date', 'lr.days', 'lr.paid', 'lr.reason', 'lr.status', 't.name as type_name');
+    return res.json({ success: true, data: { year: Number(year), balances, requests: requests.map((r) => ({ id: r.id, type: r.type_name, fromDate: r.from_date, toDate: r.to_date, days: parseFloat(r.days), paid: r.paid, reason: r.reason, status: r.status })) } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// POST /api/portal/leave — worker applies for leave.
+router.post('/leave', portalAuth, async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.from_date || !b.to_date) return res.status(400).json({ success: false, message: 'From and to dates are required.' });
+    const a = Date.parse(String(b.from_date).slice(0, 10)); const z = Date.parse(String(b.to_date).slice(0, 10));
+    if (Number.isNaN(a) || Number.isNaN(z) || z < a) return res.status(400).json({ success: false, message: 'Invalid date range.' });
+    const days = Math.round((z - a) / 86400000) + 1;
+    const type = b.leave_type_id ? await db('mill_leave_types').where('id', b.leave_type_id).first() : null;
+    const [row] = await db('mill_leave_requests').insert({
+      worker_id: req.workerId, leave_type_id: b.leave_type_id || null, from_date: b.from_date, to_date: b.to_date,
+      days, paid: type ? !!type.paid : true, reason: b.reason || null, status: 'pending',
+    }).returning('id');
+    return res.status(201).json({ success: true, data: { id: row.id || row } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
 module.exports = router;

@@ -20,6 +20,8 @@ import {
   useStatutoryDeductions, useCreateStatutoryDeduction, useUpdateStatutoryDeduction, useDeleteStatutoryDeduction,
   useStatutoryLiabilities, useStatutoryRemittances, useCreateStatutoryRemittance, useDeleteStatutoryRemittance,
   useTaxStatement, useWorkerRequests, useWorkerRequestsCount, useResolveWorkerRequest,
+  useLeaveTypes, useLeaveRequests, useLeaveRequestsCount, useCreateLeaveType, useUpdateLeaveType, useDeleteLeaveType,
+  useApproveLeaveRequest, useRejectLeaveRequest,
   usePayrollSchedule, useSavePayrollSchedule, useRunPayrollNow,
   usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow, useAcceptFundTransfer,
   useMillLotCosts, useLocalSales, useRecordPayment, usePayablePayments,
@@ -218,6 +220,8 @@ export default function MillFinanceDashboard() {
   const [showTaxDrawer, setShowTaxDrawer] = useState(false);
   const [showRequestsDrawer, setShowRequestsDrawer] = useState(false);
   const { data: pendingRequestCount = 0 } = useWorkerRequestsCount();
+  const [showLeaveDrawer, setShowLeaveDrawer] = useState(false);
+  const { data: pendingLeaveCount = 0 } = useLeaveRequestsCount();
   const [adjustWorker, setAdjustWorker] = useState(null); // open adjustments drawer for this worker
   const runNowMut = useRunPayrollNow();
 
@@ -1564,6 +1568,12 @@ export default function MillFinanceDashboard() {
                   {pendingRequestCount > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center">{pendingRequestCount}</span>}
                 </button>
               )}
+              {payrollView === 'payroll' && canViewPayroll && (
+                <button onClick={() => setShowLeaveDrawer(true)} className="relative inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 bg-white hover:bg-gray-50">
+                  <CalendarDays className="w-3.5 h-3.5" /> Leave
+                  {pendingLeaveCount > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center">{pendingLeaveCount}</span>}
+                </button>
+              )}
               {canPreparePayroll && (
                 <button onClick={() => openWorkerDrawer(null)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-700">
                   <UserPlus className="w-3.5 h-3.5" /> Add Employee
@@ -2352,6 +2362,11 @@ export default function MillFinanceDashboard() {
       {/* ─── EMPLOYEE REQUESTS DRAWER ──────────────────────────────── */}
       {showRequestsDrawer && (
         <WorkerRequestsDrawer canResolve={canPreparePayroll} onClose={() => setShowRequestsDrawer(false)} addToast={addToast} />
+      )}
+
+      {/* ─── LEAVE MANAGEMENT DRAWER ───────────────────────────────── */}
+      {showLeaveDrawer && (
+        <LeaveDrawer canManage={canApprovePayroll} workers={workers} onClose={() => setShowLeaveDrawer(false)} addToast={addToast} />
       )}
 
       {/* ─── BONUSES & DEDUCTIONS DRAWER ───────────────────────────── */}
@@ -4012,6 +4027,79 @@ function StatutoryDeductionsDrawer({ canPay, bankAccounts = [], company, onClose
         </div>
         <p className="text-[11px] text-gray-400">Statutory amounts are withheld from each employee's net pay and booked to the chosen liability account (payable to the authority). They appear on payslips and reduce the cash paid out — the salary expense still reflects the full gross.</p>
       </div>
+      )}
+    </SlideDrawer>
+  );
+}
+
+// Leave management (admin) — approve/reject leave requests + manage leave types.
+// Approved leave feeds payroll (unpaid docks monthly, paid pays daily-wage).
+function LeaveDrawer({ canManage, workers = [], onClose, addToast }) {
+  const [tab, setTab] = useState('requests');
+  const { data: requests = [], isLoading } = useLeaveRequests(tab === 'requests' ? 'pending' : null);
+  const { data: allReq = [] } = useLeaveRequests(null);
+  const { data: types = [] } = useLeaveTypes();
+  const approveMut = useApproveLeaveRequest(); const rejectMut = useRejectLeaveRequest();
+  const createType = useCreateLeaveType(); const updateType = useUpdateLeaveType(); const deleteType = useDeleteLeaveType();
+  const [typeForm, setTypeForm] = useState({ name: '', paid: true, annual_quota: '' });
+  const list = tab === 'requests' ? requests : allReq;
+  const TONE = { pending: 'bg-amber-100 text-amber-700', approved: 'bg-emerald-100 text-emerald-700', rejected: 'bg-rose-100 text-rose-700', cancelled: 'bg-gray-100 text-gray-500' };
+  const act = async (mut, id, label) => { try { await mut.mutateAsync(id); addToast(`Leave ${label}`, 'success'); } catch (e) { addToast(e.message, 'error'); } };
+  const addType = async () => {
+    if (!typeForm.name.trim()) { addToast('Name required', 'error'); return; }
+    try { await createType.mutateAsync({ ...typeForm, annual_quota: typeForm.annual_quota === '' ? null : parseFloat(typeForm.annual_quota) }); setTypeForm({ name: '', paid: true, annual_quota: '' }); addToast('Leave type added', 'success'); } catch (e) { addToast(e.message, 'error'); }
+  };
+
+  return (
+    <SlideDrawer open onClose={onClose} title="Leave management" subtitle="Approve leave + manage leave types (feeds payroll: unpaid docks, paid pays daily staff)" icon={CalendarDays} size="lg">
+      <div className="flex gap-1 mb-4 border-b border-gray-200">
+        {[['requests', 'Pending requests'], ['all', 'All requests'], ['types', 'Leave types']].map(([k, lbl]) => (
+          <button key={k} onClick={() => setTab(k)} className={`px-3 py-2 text-xs font-medium border-b-2 -mb-px ${tab === k ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>{lbl}</button>
+        ))}
+      </div>
+      {tab === 'types' ? (
+        <div className="space-y-3">
+          {canManage && (
+            <div className="rounded-lg border border-gray-200 p-3 grid grid-cols-[1fr_auto_auto_auto] gap-2 items-end">
+              <div><label className="block text-[11px] text-gray-500 mb-1">New leave type</label><input value={typeForm.name} onChange={(e) => setTypeForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. Bereavement" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" /></div>
+              <div><label className="block text-[11px] text-gray-500 mb-1">Paid?</label><select value={typeForm.paid ? 'y' : 'n'} onChange={(e) => setTypeForm((f) => ({ ...f, paid: e.target.value === 'y' }))} className="border border-gray-200 rounded-lg px-2 py-2 text-sm bg-white"><option value="y">Paid</option><option value="n">Unpaid</option></select></div>
+              <div><label className="block text-[11px] text-gray-500 mb-1">Days/yr</label><input type="number" value={typeForm.annual_quota} onChange={(e) => setTypeForm((f) => ({ ...f, annual_quota: e.target.value }))} placeholder="∞" className="w-20 border border-gray-200 rounded-lg px-2 py-2 text-sm" /></div>
+              <button onClick={addType} className="px-3 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700">Add</button>
+            </div>
+          )}
+          <div className="space-y-2">
+            {types.map((t) => (
+              <div key={t.id} className={`rounded-lg border p-3 flex items-center justify-between ${t.isActive ? 'border-gray-200' : 'border-gray-100 bg-gray-50 opacity-70'}`}>
+                <div><div className="text-sm font-semibold text-gray-900">{t.name} <span className="text-[10px] font-normal text-gray-400">{t.code}</span></div>
+                  <div className="text-xs text-gray-500">{t.paid ? 'Paid' : 'Unpaid'} · {t.annualQuota != null ? `${parseFloat(t.annualQuota)} days/yr` : 'unlimited'}</div></div>
+                {canManage && <div className="flex items-center gap-1.5">
+                  <button onClick={async () => { try { await updateType.mutateAsync({ id: t.id, data: { is_active: !t.isActive } }); } catch (e) { addToast(e.message, 'error'); } }} className={`px-2 py-1 text-[11px] rounded-md ${t.isActive ? 'text-emerald-700 bg-emerald-50' : 'text-gray-500 bg-gray-100'}`}>{t.isActive ? 'Active' : 'Inactive'}</button>
+                  <button onClick={async () => { try { await deleteType.mutateAsync(t.id); addToast('Removed', 'success'); } catch (e) { addToast(e.message, 'error'); } }} className="p-1.5 rounded-md text-rose-500 hover:bg-rose-50"><Trash2 className="w-3.5 h-3.5" /></button>
+                </div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : isLoading ? <p className="text-sm text-gray-400">Loading…</p> : !list.length ? (
+        <p className="text-sm text-gray-400 py-6 text-center border border-dashed border-gray-200 rounded-lg">No {tab === 'requests' ? 'pending ' : ''}leave requests.</p>
+      ) : (
+        <div className="space-y-2">
+          {list.map((r) => (
+            <div key={r.id} className="rounded-lg border border-gray-200 p-3">
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-semibold text-gray-900">{r.workerName} <span className="text-[10px] font-normal text-gray-400">· {r.typeName || 'Leave'} · {parseFloat(r.days)}d {r.paid ? '(paid)' : '(unpaid)'}</span></div>
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold capitalize ${TONE[r.status] || 'bg-gray-100 text-gray-600'}`}>{r.status}</span>
+              </div>
+              <div className="text-xs text-gray-500 mt-0.5">{String(r.fromDate).slice(0, 10)} → {String(r.toDate).slice(0, 10)}{r.reason ? ` · ${r.reason}` : ''}</div>
+              {canManage && r.status === 'pending' && (
+                <div className="flex gap-1.5 mt-2">
+                  <button onClick={() => act(approveMut, r.id, 'approved')} disabled={approveMut.isPending} className="px-2.5 py-1.5 text-xs text-white bg-emerald-600 rounded-lg hover:bg-emerald-700">Approve</button>
+                  <button onClick={() => act(rejectMut, r.id, 'rejected')} disabled={rejectMut.isPending} className="px-2.5 py-1.5 text-xs text-rose-600 bg-rose-50 rounded-lg hover:bg-rose-100">Reject</button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       )}
     </SlideDrawer>
   );
