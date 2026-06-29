@@ -227,6 +227,16 @@ const reportingController = {
     }
   },
 
+  async processingLossLedger(req, res) {
+    try {
+      const data = await reportingService.getProcessingLossLedger(req.query || {});
+      return res.json({ success: true, ...data });
+    } catch (err) {
+      console.error('Processing loss ledger error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
   async listScheduledReports(req, res) {
     try {
       const data = await reportingService.listScheduledReportEmails();

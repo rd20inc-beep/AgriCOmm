@@ -1647,6 +1647,90 @@ const reportingService = {
   },
 
   /**
+   * Processing-Loss Ledger — milling loss across batches in a date range. Loss
+   * per batch = raw input − total recorded output (finished + by-product lots),
+   * with breakdowns by rice type, supplier, operator, machine and month, and a
+   * per-batch table that drills to Batch 360. Population = batches that have
+   * recorded output (yield done). Blends (re-milled finished rice) are flagged
+   * and EXCLUDED from the headline totals/breakdowns so re-mill loss doesn't mix
+   * with fresh raw→finished loss. Read-only; finance-free metric but kept under
+   * the finance-gated routes for role consistency.
+   */
+  async getProcessingLossLedger({ from, to } = {}) {
+    const num = (v) => parseFloat(v) || 0;
+    const ym = (d) => { try { return new Date(d).toISOString().slice(0, 7); } catch { return '—'; } };
+
+    let q = db('milling_batches as mb')
+      .leftJoin('products as p', 'mb.product_id', 'p.id')
+      .leftJoin('suppliers as s', 'mb.supplier_id', 's.id')
+      .select('mb.id', 'mb.batch_no', 'mb.processing_type', 'mb.raw_qty_mt', 'mb.yield_pct',
+        'mb.operator_name', 'mb.machine_line', 'mb.created_at', 'mb.completed_at',
+        'p.name as product_name', 's.name as supplier_name');
+    if (from) q = q.where('mb.created_at', '>=', from);
+    if (to) q = q.where('mb.created_at', '<=', `${to} 23:59:59`);
+    const batches = await q.orderBy('mb.created_at', 'asc');
+
+    const empty = {
+      summary: { batchCount: 0, blendCount: 0, inputMt: 0, outputMt: 0, lossMt: 0, avgLossPct: 0,
+        costBasis: 'Processing loss = raw input − total recorded output (finished + by-products). Blends (re-milled finished rice) are flagged and excluded from totals.' },
+      byRiceType: [], bySupplier: [], byOperator: [], byMachine: [], byMonth: [], batches: [],
+    };
+    if (!batches.length) return empty;
+
+    const outRefs = batches.map(b => `batch-${b.id}`);
+    const outRows = await db('inventory_lots')
+      .whereIn('batch_ref', outRefs).whereIn('type', ['finished', 'byproduct'])
+      .groupBy('batch_ref')
+      .select('batch_ref', db.raw('COALESCE(SUM(COALESCE(received_net_weight_kg, net_weight_kg)), 0) as out_kg'));
+    const outByBatch = {};
+    for (const r of outRows) { const bid = parseInt(String(r.batch_ref).replace(/^batch-/, ''), 10); outByBatch[bid] = num(r.out_kg); }
+
+    const rows = [];
+    for (const b of batches) {
+      const outputKg = outByBatch[b.id] || 0;
+      if (outputKg <= 0) continue; // yield not recorded yet — not a milled batch
+      const inputKg = num(b.raw_qty_mt) * 1000;
+      const lossKg = Math.max(0, inputKg - outputKg);
+      rows.push({
+        batchId: b.id, batchNo: b.batch_no, href: `/reports/batch-ledger/${b.id}`,
+        isBlend: b.processing_type === 'blended',
+        date: b.completed_at || b.created_at, riceType: b.product_name || '—',
+        supplier: b.supplier_name || '—', operator: b.operator_name || '—', machine: b.machine_line || '—',
+        inputKg, outputKg, lossKg, lossPct: inputKg > 0 ? (lossKg / inputKg) * 100 : 0,
+      });
+    }
+
+    const core = rows.filter(r => !r.isBlend);
+    const tot = core.reduce((a, r) => ({ input: a.input + r.inputKg, output: a.output + r.outputKg, loss: a.loss + r.lossKg }), { input: 0, output: 0, loss: 0 });
+    const groupBy = (keyFn) => {
+      const m = {};
+      for (const r of core) {
+        const k = keyFn(r) || '—';
+        const o = m[k] || (m[k] = { key: k, batches: 0, inputKg: 0, outputKg: 0, lossKg: 0 });
+        o.batches += 1; o.inputKg += r.inputKg; o.outputKg += r.outputKg; o.lossKg += r.lossKg;
+      }
+      return Object.values(m).map(o => ({ ...o, lossPct: o.inputKg > 0 ? (o.lossKg / o.inputKg) * 100 : 0 }))
+        .sort((a, b) => b.lossKg - a.lossKg);
+    };
+    const byMonth = groupBy(r => ym(r.date)).sort((a, b) => a.key < b.key ? -1 : 1);
+
+    return {
+      summary: {
+        batchCount: core.length, blendCount: rows.length - core.length,
+        inputMt: tot.input / 1000, outputMt: tot.output / 1000, lossMt: tot.loss / 1000,
+        avgLossPct: tot.input > 0 ? (tot.loss / tot.input) * 100 : 0,
+        costBasis: 'Processing loss = raw input − total recorded output (finished + by-products). Blends (re-milled finished rice) are flagged and excluded from totals/breakdowns.',
+      },
+      byRiceType: groupBy(r => r.riceType),
+      bySupplier: groupBy(r => r.supplier),
+      byOperator: groupBy(r => r.operator),
+      byMachine: groupBy(r => r.machine),
+      byMonth,
+      batches: rows,
+    };
+  },
+
+  /**
    * Batch Processing Ledger — one batch's inputs (source lots), outputs
    * (finished + by-product lots), recorded costs and yield, assembled from
    * milling_batches / batch_source_lots / milling_costs / inventory_lots.

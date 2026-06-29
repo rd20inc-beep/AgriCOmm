@@ -57,6 +57,8 @@ router.get('/rice-type-ledger/:id', authorize('reports', 'view'), noFinanceForOp
 // Warehouse Ledger — per-warehouse stock roll-forward + value, finance-gated (shows value).
 router.get('/warehouse-ledger', authorize('reports', 'view'), noFinanceForOperator, controller.warehouseIndex);
 router.get('/warehouse-ledger/:id', authorize('reports', 'view'), noFinanceForOperator, controller.warehouseLedger);
+// Processing-Loss Ledger — milling loss by batch / rice type / supplier / operator / machine / month.
+router.get('/processing-loss-ledger', authorize('reports', 'view'), noFinanceForOperator, controller.processingLossLedger);
 router.get('/quality/supplier-ranking', authorize('reports', 'view'), controller.supplierQualityRanking);
 router.get('/quality/recovery-leaderboard', authorize('reports', 'view'), controller.batchRecoveryLeaderboard);
 router.get('/quality/recovery-by-variety', authorize('reports', 'view'), controller.recoveryByVariety);
