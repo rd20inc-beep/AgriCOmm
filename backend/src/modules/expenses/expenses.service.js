@@ -101,6 +101,14 @@ const expensesService = {
         resolvedAccountId = await resolveCashAccountId(trx, { entity: expense_type || 'general' });
       }
 
+      // Route salaries to the dedicated 6135 Salaries & Wages account (Phase 9)
+      // instead of the generic 6000 the expense_recorded rule debits.
+      let salaryDebitAccountId = null;
+      if (category === 'salaries') {
+        const salAcc = await trx('chart_of_accounts').where('code', '6135').first();
+        if (salAcc) salaryDebitAccountId = salAcc.id;
+      }
+
       const [expense] = await trx('business_expenses').insert({
         expense_no: expenseNo,
         expense_type: expense_type || 'general',
@@ -206,10 +214,14 @@ const expensesService = {
         const payDate = (expense_date instanceof Date ? expense_date.toISOString().slice(0, 10) : expense_date) || new Date().toISOString().split('T')[0];
         const payCount = await trx('payments').count('id as c').first();
         const paymentNo = `EXP-PAY-${(parseInt(payCount?.c) || 0) + 1}`;
+        // payments.payment_method is constrained to the canonical set
+        // (cash/bank_transfer/cheque/...); the UI shorthand 'bank' maps to
+        // 'bank_transfer' so a bank-paid expense doesn't violate the CHECK.
+        const payMethod = (payment_method === 'bank' || !payment_method) ? 'bank_transfer' : payment_method;
         await trx('payments').insert({
           payment_no: paymentNo,
           type: 'payment', amount: amountPkr, currency: 'PKR', fx_rate: 1, base_amount_pkr: amountPkr,
-          payment_method: payment_method || 'bank', bank_account_id: resolvedAccountId,
+          payment_method: payMethod, bank_account_id: resolvedAccountId,
           bank_reference: payment_reference || null,
           linked_payable_id: payableRow?.id || null,
           payment_date: payDate, notes: `Payment for ${expenseNo}`, created_by: userId || null,
@@ -219,6 +231,34 @@ const expensesService = {
             current_balance: trx.raw('current_balance - ?', [amountPkr]),
             updated_at: trx.fn.now(),
           });
+          // Record the cash/bank outflow on the account's transaction ledger so
+          // the Bank/Cash statement shows the payout (mirrors the receipt side
+          // in localSales.postReceiptToAccount). Best-effort.
+          try {
+            const acct = await trx('bank_accounts').where('id', resolvedAccountId).first();
+            const btCount = await trx('bank_transactions').count('id as c').first();
+            const btNo = `BT-${String((parseInt(btCount?.c) || 0) + 1).padStart(4, '0')}`;
+            const paymentRow = await trx('payments').where('payment_no', paymentNo).first();
+            await trx('bank_transactions').insert({
+              transaction_no: btNo,
+              bank_account_id: resolvedAccountId,
+              type: 'debit',
+              amount: amountPkr,
+              currency: 'PKR',
+              status: 'posted',
+              transaction_date: payDate,
+              reference: paymentNo,
+              notes: `Payment for ${expenseNo}`,
+              source: category === 'salaries' ? 'salaries' : 'expense',
+              linked_payment_id: paymentRow?.id || null,
+              running_balance: acct ? acct.current_balance : null,
+              category: category || 'expense',
+              counterparty: vendorLabel,
+              created_by: userId || null,
+            });
+          } catch (e) {
+            console.warn('Expense bank_transaction write failed:', e.message);
+          }
         }
         await postExpenseSettlement(trx, {
           expense: { amount_pkr: amountPkr, supplier_id, expense_type, expense_no: expenseNo },
@@ -242,6 +282,7 @@ const expensesService = {
           userId,
           partyType: supplier_id ? 'supplier' : null,
           partyId: supplier_id || null,
+          debitAccountId: salaryDebitAccountId,
         });
       } catch (e) {
         console.warn('Expense journal post failed:', e.message);

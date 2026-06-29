@@ -2208,6 +2208,7 @@ export default function MillFinanceDashboard() {
           month={payrollMonth}
           employees={unpaidEmployees}
           preselectId={runPreselect}
+          bankAccounts={bankAccountsList}
           onClose={() => { setShowRunDrawer(false); setRunPreselect(null); }}
           onPosted={(run) => { setShowRunDrawer(false); setRunPreselect(null); addToast(`Payroll run prepared — ${PKR(run.netTotal)} pending approval`, 'success'); setPayslipsRunId(run.id); }}
           postRunMut={postRunMut}
@@ -3160,8 +3161,10 @@ function printAllPayslips(run, lines, company) {
 
 // Drawer to post a payroll run: review the per-employee breakdown, then pay it
 // out from Mill Cash. Server recomputes the figures on submit.
-function PayrollRunDrawer({ month, employees, preselectId, onClose, onPosted, postRunMut, addToast }) {
+function PayrollRunDrawer({ month, employees, preselectId, bankAccounts = [], onClose, onPosted, postRunMut, addToast }) {
   const [form, setForm] = useState({ pay_method: 'cash', bank_account_id: '', pay_date: new Date().toISOString().split('T')[0] });
+  // Banks the mill can pay salaries from (cash is the dedicated Mill Cash float).
+  const payBanks = (bankAccounts || []).filter(a => a.type !== 'cash');
   // One editable row per unpaid employee: include, advance-to-clear, and the
   // amount actually being paid (defaults to gross − advance, both overridable).
   const [rows, setRows] = useState(() => employees.map(w => {
@@ -3198,12 +3201,12 @@ function PayrollRunDrawer({ month, employees, preselectId, onClose, onPosted, po
   async function post() {
     if (!included.length) { addToast('Select at least one employee to pay', 'error'); return; }
     if (needsReason.length) { addToast(`Add a reason for the changed deduction: ${needsReason.map(r => r.name).join(', ')}`, 'error'); return; }
+    if (form.pay_method === 'bank' && !form.bank_account_id) { addToast('Select a bank account to pay from', 'error'); return; }
     try {
-      // Mill payroll is always paid from Mill Cash.
       const res = await postRunMut.mutateAsync({
         month,
-        pay_method: 'cash',
-        bank_account_id: null,
+        pay_method: form.pay_method,
+        bank_account_id: form.pay_method === 'bank' ? Number(form.bank_account_id) : null,
         pay_date: form.pay_date,
         lines: included.map(r => ({ worker_id: r.id, net_pay: r.net, advance_deducted: r.advance, skip_reason: Math.round(r.advance) !== Math.round(r.scheduled) ? (r.reason || null) : null })),
       });
@@ -3236,9 +3239,20 @@ function PayrollRunDrawer({ month, employees, preselectId, onClose, onPosted, po
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Pay via</label>
-            <div className="px-3 py-2 rounded-lg border border-emerald-200 bg-emerald-50 text-sm text-emerald-800 inline-flex items-center gap-1.5 w-full">
-              <Wallet size={14} /> Mill Cash
-            </div>
+            <select
+              value={form.pay_method === 'bank' ? `bank:${form.bank_account_id}` : 'cash'}
+              onChange={e => {
+                const v = e.target.value;
+                if (v === 'cash') setForm(f => ({ ...f, pay_method: 'cash', bank_account_id: '' }));
+                else setForm(f => ({ ...f, pay_method: 'bank', bank_account_id: v.replace('bank:', '') }));
+              }}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900 bg-white"
+            >
+              <option value="cash">Mill Cash</option>
+              {payBanks.map(a => (
+                <option key={a.id} value={`bank:${a.id}`}>{a.name}{a.bank_name ? ` · ${a.bank_name}` : ''}</option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Pay date</label>

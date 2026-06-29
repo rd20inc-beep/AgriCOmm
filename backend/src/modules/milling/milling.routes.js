@@ -854,6 +854,7 @@ async function unwindAdvanceExpense(trx, expenseId) {
     const pays = await trx('payments').whereIn('linked_payable_id', payableIds).select('id', 'payment_no', 'bank_account_id', 'amount');
     for (const p of pays) {
       if (p.bank_account_id) await trx('bank_accounts').where('id', p.bank_account_id).increment('current_balance', parseFloat(p.amount) || 0);
+      await trx('bank_transactions').where('linked_payment_id', p.id).del();
       await trx('journal_lines').whereIn('journal_id', trx('journal_entries').where('ref_no', p.payment_no).select('id')).del();
       await trx('journal_entries').where('ref_no', p.payment_no).del();
     }

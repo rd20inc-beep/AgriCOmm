@@ -302,6 +302,9 @@ const accountingService = {
     partyType = null, partyId = null,
     // Original-currency metadata, passed through to createJournal.
     origCurrency = null, origFxRate = null,
+    // Optional debit-account override (e.g. route salaries to a dedicated
+    // Salaries & Wages account instead of the rule's generic 6000).
+    debitAccountId = null,
   }) {
     // Wrap in a transaction if one was not provided, to ensure
     // posting rule lookup + journal creation + posting are atomic.
@@ -322,15 +325,18 @@ const accountingService = {
       const parsedAmount = parseFloat(amount);
       if (!parsedAmount || parsedAmount <= 0) return null;
 
+      // Allow the caller to override the rule's debit account (e.g. salaries).
+      const debitId = debitAccountId || rule.debit_account_id;
+
       // Fetch account names for narration
       const [debitAcc, creditAcc] = await Promise.all([
-        knex('chart_of_accounts').where({ id: rule.debit_account_id }).first(),
+        knex('chart_of_accounts').where({ id: debitId }).first(),
         knex('chart_of_accounts').where({ id: rule.credit_account_id }).first(),
       ]);
 
       const lines = [
         {
-          account_id: rule.debit_account_id,
+          account_id: debitId,
           account: debitAcc ? debitAcc.name : '',
           debit: parsedAmount,
           credit: 0,
