@@ -1196,6 +1196,122 @@ router.delete('/payroll/statutory-deductions/:id', authorize('payroll', 'approve
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ── Statutory liability REMITTANCE (pay withheld tax/EOBI to the authority) ──
+// Outstanding = the GL balance of each statutory liability account (Σcredit −
+// Σdebit on Posted journals): Phase 12 credits these at payroll; remittance
+// debits them back when the money is paid to FBR/EOBI.
+async function statutoryAccountOutstanding(code) {
+  const acc = await db('chart_of_accounts').where('code', code).first();
+  if (!acc) return null;
+  const t = await db('journal_lines as jl').join('journal_entries as je', 'jl.journal_id', 'je.id')
+    .where('jl.account_id', acc.id).where('je.status', 'Posted')
+    .select(db.raw('COALESCE(SUM(jl.credit),0)::numeric as cr'), db.raw('COALESCE(SUM(jl.debit),0)::numeric as dr')).first();
+  const outstanding = (parseFloat(t.cr) || 0) - (parseFloat(t.dr) || 0);
+  return { code, name: acc.name, accountId: acc.id, outstanding: Math.round(outstanding * 100) / 100 };
+}
+
+router.get('/payroll/statutory-liabilities', authorize('payroll', 'view'), async (req, res) => {
+  try {
+    const rules = await db('mill_statutory_deductions').select('liability_account_code');
+    const codes = Array.from(new Set([...rules.map((r) => r.liability_account_code || '2050'), '2050', '2055']));
+    const out = [];
+    for (const c of codes) { const r = await statutoryAccountOutstanding(c); if (r) out.push(r); }
+    return res.json({ success: true, data: out });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.get('/payroll/statutory-remittances', authorize('payroll', 'view'), async (req, res) => {
+  try {
+    const rows = await db('mill_statutory_remittances as r')
+      .leftJoin('bank_accounts as ba', 'r.bank_account_id', 'ba.id')
+      .leftJoin('chart_of_accounts as coa', 'r.account_id', 'coa.id')
+      .leftJoin('users as u', 'u.id', 'r.created_by')
+      .select('r.*', 'ba.name as bank_name', 'coa.name as account_name', 'u.full_name as created_by_name')
+      .orderBy('r.remit_date', 'desc').orderBy('r.id', 'desc');
+    return res.json({ success: true, data: rows });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.post('/payroll/statutory-remittances', authorize('payroll', 'pay'),
+  auditAction('remit', 'statutory_remittance', (req, data) => data.data?.id),
+  async (req, res) => {
+  try {
+    const b = req.body || {};
+    const code = String(b.liability_account_code || '2050');
+    const amount = parseFloat(b.amount) || 0;
+    if (!(amount > 0)) return res.status(400).json({ success: false, message: 'Amount must be greater than zero.' });
+    const acc = await db('chart_of_accounts').where('code', code).first();
+    if (!acc) return res.status(400).json({ success: false, message: `Unknown liability account ${code}.` });
+    const cash = await db('chart_of_accounts').where('code', '1000').first();
+    if (!cash) return res.status(400).json({ success: false, message: 'Cash & Bank control account (1000) missing.' });
+    const method = b.pay_method === 'bank' ? 'bank' : 'cash';
+    const remitDate = b.remit_date || new Date().toISOString().slice(0, 10);
+
+    const row = await db.transaction(async (trx) => {
+      const acctId = method === 'bank' ? (b.bank_account_id || null) : await resolveCashAccountId(trx, { entity: 'mill' });
+      const last = await trx('mill_statutory_remittances').orderBy('id', 'desc').first();
+      const seq = (last ? (parseInt(String(last.remittance_no).replace(/^STR-/, ''), 10) || 0) : 0) + 1;
+      const remitNo = `STR-${String(seq).padStart(4, '0')}`;
+      const [r] = await trx('mill_statutory_remittances').insert({
+        remittance_no: remitNo, liability_account_code: code, account_id: acc.id, amount,
+        pay_method: method, bank_account_id: acctId, remit_date: remitDate,
+        reference: b.reference || null, authority: b.authority || null,
+        period_from: b.period_from || null, period_to: b.period_to || null,
+        notes: b.notes || null, created_by: req.user?.id || null,
+      }).returning('*');
+
+      // GL: DR liability / CR Cash & Bank.
+      const journal = await accountingService.createJournal(trx, {
+        date: remitDate, entity: 'mill', refType: 'Statutory Remittance', refNo: remitNo,
+        description: `Remit ${acc.name}${b.authority ? ` to ${b.authority}` : ''}${b.reference ? ` (${b.reference})` : ''}`,
+        currency: 'PKR', fxRate: 1, isAuto: true, userId: req.user?.id || null,
+        lines: [
+          { account_id: acc.id, account: acc.name, debit: amount, credit: 0, narration: `DR ${acc.code} ${acc.name} — remittance ${remitNo}` },
+          { account_id: cash.id, account: cash.name, debit: 0, credit: amount, narration: `CR ${cash.code} ${cash.name} — remittance ${remitNo}` },
+        ],
+      });
+      if (journal?.id) await accountingService.postJournal(trx, journal.id);
+
+      // Move the cash/bank account + record the outflow on its ledger.
+      if (acctId) {
+        await trx('bank_accounts').where('id', acctId).update({ current_balance: trx.raw('current_balance - ?', [amount]), updated_at: trx.fn.now() });
+        const acctRow = await trx('bank_accounts').where('id', acctId).first();
+        const btCount = await trx('bank_transactions').count('id as c').first();
+        const btNo = `BT-${String((parseInt(btCount?.c) || 0) + 1).padStart(4, '0')}`;
+        await trx('bank_transactions').insert({
+          transaction_no: btNo, bank_account_id: acctId, type: 'debit', amount, currency: 'PKR',
+          status: 'posted', transaction_date: remitDate, reference: remitNo,
+          notes: `Statutory remittance ${remitNo}${b.authority ? ` — ${b.authority}` : ''}`,
+          source: 'statutory_remittance', running_balance: acctRow ? acctRow.current_balance : null,
+          category: 'statutory', counterparty: b.authority || null, created_by: req.user?.id || null,
+        });
+      }
+      await trx('mill_statutory_remittances').where('id', r.id).update({ journal_id: journal?.id || null });
+      return { ...r, journal_id: journal?.id || null };
+    });
+    return res.status(201).json({ success: true, data: row });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Reverse a remittance — undo the GL, restore the bank balance, drop the bank
+// transaction, and delete the record.
+router.delete('/payroll/statutory-remittances/:id', authorize('payroll', 'pay'),
+  auditAction('void', 'statutory_remittance', (req) => req.params.id),
+  async (req, res) => {
+  try {
+    const row = await db('mill_statutory_remittances').where('id', req.params.id).first();
+    if (!row) return res.status(404).json({ success: false, message: 'Remittance not found.' });
+    await db.transaction(async (trx) => {
+      if (row.bank_account_id) await trx('bank_accounts').where('id', row.bank_account_id).increment('current_balance', parseFloat(row.amount) || 0);
+      await trx('bank_transactions').where({ reference: row.remittance_no, source: 'statutory_remittance' }).del();
+      await trx('journal_lines').whereIn('journal_id', trx('journal_entries').where('ref_no', row.remittance_no).select('id')).del();
+      await trx('journal_entries').where('ref_no', row.remittance_no).del();
+      await trx('mill_statutory_remittances').where('id', row.id).del();
+    });
+    return res.json({ success: true, data: { deleted: row.id } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
 router.get('/attendance', authorize('payroll', 'view'), async (req, res) => {
   try {
     const { month, worker_id } = req.query;

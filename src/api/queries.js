@@ -1521,6 +1521,30 @@ export function useDeleteStatutoryDeduction() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (id) => millingApi.deleteStatutoryDeduction(id), onSuccess: () => invalidateStatutory(qc) });
 }
+export function useStatutoryLiabilities() {
+  return useQuery({
+    queryKey: ['statutory-liabilities'],
+    queryFn: async () => { const res = await millingApi.listStatutoryLiabilities(); return transformKeys(res?.data || []); },
+  });
+}
+export function useStatutoryRemittances() {
+  return useQuery({
+    queryKey: ['statutory-remittances'],
+    queryFn: async () => { const res = await millingApi.listStatutoryRemittances(); return transformKeys(res?.data || []); },
+  });
+}
+function invalidateRemittances(qc) {
+  qc.invalidateQueries({ queryKey: ['statutory-remittances'] });
+  qc.invalidateQueries({ queryKey: ['statutory-liabilities'] });
+}
+export function useCreateStatutoryRemittance() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (data) => millingApi.createStatutoryRemittance(data), onSuccess: () => invalidateRemittances(qc) });
+}
+export function useDeleteStatutoryRemittance() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id) => millingApi.deleteStatutoryRemittance(id), onSuccess: () => invalidateRemittances(qc) });
+}
 
 export function useMills() {
   return useQuery({

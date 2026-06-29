@@ -18,6 +18,7 @@ import {
   usePayrollRuns, usePostPayrollRun, useDeletePayrollRun, usePayrollRun, usePayrollReport,
   useApprovePayrollRun, usePayPayrollRun, useVoidPayrollRun, useAccruePayrollRun, useSettlePayrollRun,
   useStatutoryDeductions, useCreateStatutoryDeduction, useUpdateStatutoryDeduction, useDeleteStatutoryDeduction,
+  useStatutoryLiabilities, useStatutoryRemittances, useCreateStatutoryRemittance, useDeleteStatutoryRemittance,
   usePayrollSchedule, useSavePayrollSchedule, useRunPayrollNow,
   usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow, useAcceptFundTransfer,
   useMillLotCosts, useLocalSales, useRecordPayment, usePayablePayments,
@@ -2246,7 +2247,7 @@ export default function MillFinanceDashboard() {
 
       {/* ─── STATUTORY DEDUCTIONS DRAWER ───────────────────────────── */}
       {showStatutoryDrawer && (
-        <StatutoryDeductionsDrawer onClose={() => setShowStatutoryDrawer(false)} addToast={addToast} />
+        <StatutoryDeductionsDrawer canPay={canPayPayroll} bankAccounts={bankAccountsList} onClose={() => setShowStatutoryDrawer(false)} addToast={addToast} />
       )}
 
       {/* ─── BONUSES & DEDUCTIONS DRAWER ───────────────────────────── */}
@@ -3479,7 +3480,8 @@ function PayrollRunDrawer({ month, employees, preselectId, bankAccounts = [], on
 // chosen day each month into the approval queue — it never auto-approves/pays.
 // Manage org-level statutory deduction RULES (income tax, EOBI, …) that apply
 // automatically to every eligible employee at payroll time.
-function StatutoryDeductionsDrawer({ onClose, addToast }) {
+function StatutoryDeductionsDrawer({ canPay, bankAccounts = [], onClose, addToast }) {
+  const [tab, setTab] = useState('rules');
   const { data: rules = [], isLoading } = useStatutoryDeductions();
   const createMut = useCreateStatutoryDeduction();
   const updateMut = useUpdateStatutoryDeduction();
@@ -3515,7 +3517,14 @@ function StatutoryDeductionsDrawer({ onClose, addToast }) {
   const describe = (r) => r.calcMethod === 'percent' ? `${parseFloat(r.rate)}% of ${r.base}` : r.calcMethod === 'fixed' ? `${PKR(r.fixedAmount)} fixed` : 'Slab-based';
 
   return (
-    <SlideDrawer open onClose={onClose} title="Statutory deductions" subtitle="Tax / EOBI rules applied automatically to every eligible employee" icon={Landmark} size="lg">
+    <SlideDrawer open onClose={onClose} title="Statutory deductions" subtitle="Tax / EOBI rules + remit withheld liabilities to the authority" icon={Landmark} size="lg">
+      <div className="flex gap-1 mb-4 border-b border-gray-200">
+        <button onClick={() => setTab('rules')} className={`px-3 py-2 text-xs font-medium border-b-2 -mb-px ${tab === 'rules' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>Deduction rules</button>
+        <button onClick={() => setTab('remit')} className={`px-3 py-2 text-xs font-medium border-b-2 -mb-px ${tab === 'remit' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>Remit liabilities</button>
+      </div>
+      {tab === 'remit' ? (
+        <StatutoryRemittancePanel canPay={canPay} bankAccounts={bankAccounts} addToast={addToast} />
+      ) : (
       <div className="space-y-4">
         <div className="rounded-lg border border-gray-200 p-3 space-y-3">
           <div className="text-xs font-semibold text-gray-600">{editId ? 'Edit rule' : 'Add a deduction rule'}</div>
@@ -3601,7 +3610,131 @@ function StatutoryDeductionsDrawer({ onClose, addToast }) {
         </div>
         <p className="text-[11px] text-gray-400">Statutory amounts are withheld from each employee's net pay and booked to the chosen liability account (payable to the authority). They appear on payslips and reduce the cash paid out — the salary expense still reflects the full gross.</p>
       </div>
+      )}
     </SlideDrawer>
+  );
+}
+
+// Remit accrued statutory liabilities (2050 Tax Payable / 2055 EOBI Payable) to
+// the authority — shows each account's outstanding GL balance, records a payment
+// (DR liability / CR Cash & Bank), and lists remittance history.
+function StatutoryRemittancePanel({ canPay, bankAccounts = [], addToast }) {
+  const { data: liabilities = [], isLoading: loadingLiab } = useStatutoryLiabilities();
+  const { data: history = [], isLoading: loadingHist } = useStatutoryRemittances();
+  const createMut = useCreateStatutoryRemittance();
+  const deleteMut = useDeleteStatutoryRemittance();
+  const payBanks = (bankAccounts || []).filter((a) => a.type !== 'cash');
+  const owed = liabilities.filter((l) => parseFloat(l.outstanding) > 0);
+  const blank = { liability_account_code: '', amount: '', pay_method: 'cash', bank_account_id: '', remit_date: new Date().toISOString().slice(0, 10), reference: '', authority: '', period_from: '', period_to: '', notes: '' };
+  const [form, setForm] = useState(blank);
+  const set = (patch) => setForm((f) => ({ ...f, ...patch }));
+
+  const pickAccount = (code) => {
+    const l = liabilities.find((x) => x.code === code);
+    const authority = code === '2055' ? 'EOBI' : code === '2050' ? 'FBR' : '';
+    set({ liability_account_code: code, amount: l ? Math.round(parseFloat(l.outstanding) || 0) : '', authority });
+  };
+
+  async function remit() {
+    if (!form.liability_account_code) { addToast('Pick a liability to remit', 'error'); return; }
+    if (!(parseFloat(form.amount) > 0)) { addToast('Enter an amount', 'error'); return; }
+    if (form.pay_method === 'bank' && !form.bank_account_id) { addToast('Select a bank account', 'error'); return; }
+    try {
+      await createMut.mutateAsync({ ...form, amount: parseFloat(form.amount), bank_account_id: form.pay_method === 'bank' ? Number(form.bank_account_id) : null });
+      addToast(`Remitted ${PKR(form.amount)}`, 'success');
+      setForm(blank);
+    } catch (e) { addToast(e.message, 'error'); }
+  }
+  async function reverse(r) {
+    try { await deleteMut.mutateAsync(r.id); addToast('Remittance reversed', 'success'); } catch (e) { addToast(e.message, 'error'); }
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Outstanding balances */}
+      <div>
+        <div className="text-xs font-semibold text-gray-600 mb-1">Outstanding statutory liabilities</div>
+        {loadingLiab ? <p className="text-sm text-gray-400">Loading…</p> : !liabilities.length ? (
+          <p className="text-sm text-gray-400">No statutory liability accounts.</p>
+        ) : (
+          <div className="grid grid-cols-2 gap-2">
+            {liabilities.map((l) => (
+              <div key={l.code} className={`rounded-lg border p-3 ${parseFloat(l.outstanding) > 0 ? 'border-violet-200 bg-violet-50' : 'border-gray-200'}`}>
+                <div className="text-[10px] uppercase text-gray-400">{l.code} {l.name}</div>
+                <div className={`text-sm font-semibold tabular-nums ${parseFloat(l.outstanding) > 0 ? 'text-violet-700' : 'text-gray-500'}`}>{PKR(l.outstanding)}</div>
+                {parseFloat(l.outstanding) > 0 && canPay && (
+                  <button onClick={() => pickAccount(l.code)} className="mt-1 text-[11px] text-violet-700 font-medium hover:underline">Remit →</button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Record remittance */}
+      {canPay ? (
+        <div className="rounded-lg border border-gray-200 p-3 space-y-3">
+          <div className="text-xs font-semibold text-gray-600">Record a remittance</div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[11px] text-gray-500 mb-1">Liability</label>
+              <select value={form.liability_account_code} onChange={(e) => pickAccount(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+                <option value="">Select…</option>
+                {(owed.length ? owed : liabilities).map((l) => <option key={l.code} value={l.code}>{l.code} {l.name} ({PKR(l.outstanding)})</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] text-gray-500 mb-1">Amount (Rs)</label>
+              <input type="number" value={form.amount} onChange={(e) => set({ amount: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="block text-[11px] text-gray-500 mb-1">Pay via</label>
+              <select value={form.pay_method === 'bank' ? `bank:${form.bank_account_id}` : 'cash'} onChange={(e) => { const v = e.target.value; if (v === 'cash') set({ pay_method: 'cash', bank_account_id: '' }); else set({ pay_method: 'bank', bank_account_id: v.replace('bank:', '') }); }} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+                <option value="cash">Mill Cash</option>
+                {payBanks.map((a) => <option key={a.id} value={`bank:${a.id}`}>{a.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] text-gray-500 mb-1">Date</label>
+              <input type="date" value={form.remit_date} onChange={(e) => set({ remit_date: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="block text-[11px] text-gray-500 mb-1">Authority</label>
+              <input value={form.authority} onChange={(e) => set({ authority: e.target.value })} placeholder="FBR / EOBI" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="block text-[11px] text-gray-500 mb-1">Challan / CPR ref</label>
+              <input value={form.reference} onChange={(e) => set({ reference: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <button onClick={remit} disabled={createMut.isPending} className="px-4 py-2 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">Record remittance</button>
+          </div>
+        </div>
+      ) : (
+        <p className="text-[11px] text-gray-400">You don't have permission to record remittances (needs payroll Pay).</p>
+      )}
+
+      {/* History */}
+      <div>
+        <div className="text-xs font-semibold text-gray-600 mb-1">Remittance history</div>
+        {loadingHist ? <p className="text-sm text-gray-400">Loading…</p> : !history.length ? (
+          <p className="text-sm text-gray-400 py-3 text-center border border-dashed border-gray-200 rounded-lg">No remittances recorded yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {history.map((r) => (
+              <div key={r.id} className="rounded-lg border border-gray-200 p-3 flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-semibold text-gray-900">{r.remittanceNo} · {PKR(r.amount)} <span className="text-[10px] font-normal text-gray-400">{r.accountName}</span></div>
+                  <div className="text-xs text-gray-500">{fmtDate(r.remitDate)} · {r.payMethod === 'bank' ? (r.bankName || 'bank') : 'cash'}{r.authority ? ` · ${r.authority}` : ''}{r.reference ? ` · ${r.reference}` : ''}</div>
+                </div>
+                {canPay && <button onClick={() => reverse(r)} disabled={deleteMut.isPending} className="p-1.5 rounded-md text-rose-500 hover:bg-rose-50" title="Reverse remittance"><Trash2 className="w-3.5 h-3.5" /></button>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 

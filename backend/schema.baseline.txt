@@ -1230,6 +1230,23 @@ COL mill_statutory_deductions.rate:numeric:NULL
 COL mill_statutory_deductions.slabs:jsonb:NULL
 COL mill_statutory_deductions.sort_order:integer:NULL
 COL mill_statutory_deductions.updated_at:timestamp with time zone:NOT NULL
+COL mill_statutory_remittances.account_id:integer:NULL
+COL mill_statutory_remittances.amount:numeric:NOT NULL
+COL mill_statutory_remittances.authority:character varying:NULL
+COL mill_statutory_remittances.bank_account_id:integer:NULL
+COL mill_statutory_remittances.created_at:timestamp with time zone:NOT NULL
+COL mill_statutory_remittances.created_by:integer:NULL
+COL mill_statutory_remittances.id:integer:NOT NULL
+COL mill_statutory_remittances.journal_id:integer:NULL
+COL mill_statutory_remittances.liability_account_code:character varying:NOT NULL
+COL mill_statutory_remittances.notes:text:NULL
+COL mill_statutory_remittances.pay_method:character varying:NOT NULL
+COL mill_statutory_remittances.period_from:character varying:NULL
+COL mill_statutory_remittances.period_to:character varying:NULL
+COL mill_statutory_remittances.reference:character varying:NULL
+COL mill_statutory_remittances.remit_date:date:NOT NULL
+COL mill_statutory_remittances.remittance_no:character varying:NOT NULL
+COL mill_statutory_remittances.updated_at:timestamp with time zone:NOT NULL
 COL mill_stock.created_at:timestamp with time zone:NULL
 COL mill_stock.id:integer:NOT NULL
 COL mill_stock.item_id:integer:NOT NULL
@@ -2544,6 +2561,7 @@ CON mill_purchases.mill_purchases_pkey(p)
 CON mill_purchases.mill_purchases_purchase_no_unique(u)
 CON mill_purchases.mill_purchases_supplier_id_foreign(f)
 CON mill_statutory_deductions.mill_statutory_deductions_pkey(p)
+CON mill_statutory_remittances.mill_statutory_remittances_pkey(p)
 CON mill_stock.chk_mill_stock_quantity_reserved_nn(c)
 CON mill_stock.mill_stock_available_non_neg(c)
 CON mill_stock.mill_stock_item_id_foreign(f)
