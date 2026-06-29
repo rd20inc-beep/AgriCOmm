@@ -996,7 +996,7 @@ const reportingService = {
     const ids = (lotIds || []).filter(Boolean);
     if (!ids.length) return { orders: [], transferredToExportKg: 0 };
 
-    const [resv, txns, tr] = await Promise.all([
+    const [resv, txns, tr, cont] = await Promise.all([
       db('inventory_reservations as r')
         .leftJoin('export_orders as eo', 'r.order_id', 'eo.id')
         .leftJoin('customers as c', 'eo.customer_id', 'c.id')
@@ -1012,6 +1012,14 @@ const reportingService = {
           'eo.order_no', 'eo.status as order_status', 'eo.country', db.raw("COALESCE(c.name,'—') as customer")),
       db('lot_transactions').whereIn('lot_id', ids).where('entity_to', 'export')
         .whereIn('transaction_type', ['transfer_to_export', 'warehouse_transfer_out']).sum('quantity_kg as q').first(),
+      // Containers these lots were physically loaded into (P4d, via container_lots).
+      db('container_lots as cl')
+        .join('shipment_containers as sc', 'cl.container_id', 'sc.id')
+        .leftJoin('export_orders as eo', 'sc.order_id', 'eo.id')
+        .leftJoin('customers as c', 'eo.customer_id', 'c.id')
+        .whereIn('cl.lot_id', ids)
+        .select('sc.order_id', 'sc.container_no', 'sc.seal_no',
+          'eo.order_no', 'eo.status as order_status', 'eo.country', db.raw("COALESCE(c.name,'—') as customer")),
     ]);
 
     const byOrder = {};
@@ -1020,11 +1028,12 @@ const reportingService = {
       return byOrder[oid] || (byOrder[oid] = {
         orderId: oid, orderNo: info.order_no || `#${oid}`, href: `/export/${oid}`,
         customer: info.customer || '—', country: info.country || null, status: info.order_status || null,
-        reservedKg: 0, dispatchedKg: 0,
+        reservedKg: 0, dispatchedKg: 0, containers: [],
       });
     };
     for (const r of resv) { const o = ensure(r.order_id, r); if (o && r.resv_status === 'Active') o.reservedKg += num(r.reserved_qty) * 1000; }
     for (const t of txns) { const o = ensure(t.order_id, t); if (o) o.dispatchedKg += Math.abs(num(t.quantity_kg)); }
+    for (const c of cont) { const o = ensure(c.order_id, c); if (o && c.container_no && !o.containers.includes(c.container_no)) o.containers.push(c.container_no); }
 
     return {
       orders: Object.values(byOrder).sort((a, b) => (b.dispatchedKg + b.reservedKg) - (a.dispatchedKg + a.reservedKg)),
@@ -2442,11 +2451,19 @@ const reportingService = {
       db('customers').where('name', 'ilike', like).select('id', 'name').orderBy('name').limit(cap),
     ]);
 
+    // Shipment containers by container_no → jump to the export order (P4d).
+    const containers = isMill ? [] : await db('shipment_containers as sc')
+      .leftJoin('export_orders as eo', 'sc.order_id', 'eo.id')
+      .where('sc.container_no', 'ilike', like)
+      .select('sc.id', 'sc.container_no', 'sc.order_id', 'eo.order_no')
+      .orderBy('sc.id', 'desc').limit(cap);
+
     const groups = [];
     if (lots.length) groups.push({ key: 'lots', label: 'Lots', items: lots.map(l => ({ id: l.id, title: l.lot_no, subtitle: `${l.item_name || '—'}${l.supplier && l.supplier !== '—' ? ' · ' + l.supplier : ''}`, href: `/lot-inventory/${l.id}` })) });
     if (batches.length) groups.push({ key: 'batches', label: 'Milling batches', items: batches.map(b => ({ id: b.id, title: b.batch_no, subtitle: `${b.product_name || 'Batch'}${b.status ? ' · ' + b.status : ''}`, href: `/milling/${b.id}` })) });
     if (sales.length) groups.push({ key: 'sales', label: 'Local sales', items: sales.map(s => ({ id: s.id, title: s.sale_no || `Sale #${s.id}`, subtitle: `${s.item_name || '—'}${s.buyer_name ? ' · ' + s.buyer_name : ''}`, href: `/local-sales/${s.id}` })) });
     if (orders.length) groups.push({ key: 'orders', label: 'Export orders', items: orders.map(o => ({ id: o.id, title: o.order_no || `Order #${o.id}`, subtitle: `${o.product_name || '—'}${o.customer && o.customer !== '—' ? ' · ' + o.customer : ''}`, href: `/export/${o.id}` })) });
+    if (containers.length) groups.push({ key: 'containers', label: 'Containers', items: containers.map(c => ({ id: c.id, title: c.container_no, subtitle: `Export order ${c.order_no || `#${c.order_id}`}`, href: `/export/${c.order_id}` })) });
     if (suppliers.length) groups.push({ key: 'suppliers', label: 'Suppliers', items: suppliers.map(s => ({ id: s.id, title: s.name, subtitle: 'Supplier statement', href: `${isMill ? '/milling/statements' : '/finance/statements'}?type=supplier&id=${s.id}` })) });
     if (customers.length) groups.push({ key: 'customers', label: 'Customers', items: customers.map(c => ({ id: c.id, title: c.name, subtitle: 'Customer statement', href: `${isMill ? '/milling/statements' : '/finance/statements'}?type=customer&id=${c.id}` })) });
 

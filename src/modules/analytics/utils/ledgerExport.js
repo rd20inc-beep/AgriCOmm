@@ -127,7 +127,7 @@ export function printLotLedger(data, { companyName = 'AGRI COMMODITIES', generat
     ${tbl([{ t: 'Date' }, { t: 'Invoice' }, { t: 'Customer' }, { t: 'Type' }, { t: 'Product' }, { t: 'Qty', r: 1 }, { t: 'Amount', r: 1 }], sales.map(s => [dd(s.date), e(s.invoice), e(s.customer), e(s.kind), e(s.product || '—'), kg(s.qtyKg), pkr(s.amount)]))}
 
     ${(exportOrders.length || exportUse.transferredToExportKg) ? `<h4>Export Use</h4>
-    ${tbl([{ t: 'Export order' }, { t: 'Customer' }, { t: 'Country' }, { t: 'Reserved', r: 1 }, { t: 'Dispatched', r: 1 }, { t: 'Status' }], exportOrders.map(o => [e(o.orderNo), e(o.customer), e(o.country || '—'), o.reservedKg ? kg(o.reservedKg) : '—', o.dispatchedKg ? kg(o.dispatchedKg) : '—', e(o.status || '—')]))}
+    ${tbl([{ t: 'Export order' }, { t: 'Customer' }, { t: 'Country' }, { t: 'Reserved', r: 1 }, { t: 'Dispatched', r: 1 }, { t: 'Containers' }, { t: 'Status' }], exportOrders.map(o => [e(o.orderNo), e(o.customer), e(o.country || '—'), o.reservedKg ? kg(o.reservedKg) : '—', o.dispatchedKg ? kg(o.dispatchedKg) : '—', e((o.containers || []).join(', ') || '—'), e(o.status || '—')]))}
     ${exportUse.transferredToExportKg ? `<div class="muted" style="margin-top:4px">${kg(exportUse.transferredToExportKg)} transferred to the Export entity.</div>` : ''}` : ''}
 
     <h4>Lot Activity Ledger</h4>
@@ -471,7 +471,7 @@ export function printBatchLedger(data, { companyName = 'AGRI COMMODITIES', gener
     ${tbl([{ t: 'Date' }, { t: 'Invoice' }, { t: 'Customer' }, { t: 'Product' }, { t: 'Qty', r: 1 }, { t: 'Amount', r: 1 }], sales.map(s => [dd(s.date), e(s.invoice), e(s.customer), e(s.product || '—'), kg(s.qtyKg), pkr(s.amount)]))}
 
     ${(exportOrders.length || exportUse.transferredToExportKg) ? `<h4>Export Use</h4>
-    ${tbl([{ t: 'Export order' }, { t: 'Customer' }, { t: 'Country' }, { t: 'Reserved', r: 1 }, { t: 'Dispatched', r: 1 }, { t: 'Status' }], exportOrders.map(o => [e(o.orderNo), e(o.customer), e(o.country || '—'), o.reservedKg ? kg(o.reservedKg) : '—', o.dispatchedKg ? kg(o.dispatchedKg) : '—', e(o.status || '—')]))}
+    ${tbl([{ t: 'Export order' }, { t: 'Customer' }, { t: 'Country' }, { t: 'Reserved', r: 1 }, { t: 'Dispatched', r: 1 }, { t: 'Containers' }, { t: 'Status' }], exportOrders.map(o => [e(o.orderNo), e(o.customer), e(o.country || '—'), o.reservedKg ? kg(o.reservedKg) : '—', o.dispatchedKg ? kg(o.dispatchedKg) : '—', e((o.containers || []).join(', ') || '—'), e(o.status || '—')]))}
     ${exportUse.transferredToExportKg ? `<div class="muted" style="margin-top:4px">${kg(exportUse.transferredToExportKg)} of output transferred to the Export entity.</div>` : ''}` : ''}
   </div><script>window.addEventListener('load',function(){setTimeout(function(){window.focus();window.print();},350)});<\/script></body></html>`;
   const w = window.open('', '_blank', 'width=980,height=1200');
