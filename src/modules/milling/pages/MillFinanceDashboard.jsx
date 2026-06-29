@@ -2289,7 +2289,7 @@ export default function MillFinanceDashboard() {
 
       {/* ─── STATUTORY DEDUCTIONS DRAWER ───────────────────────────── */}
       {showStatutoryDrawer && (
-        <StatutoryDeductionsDrawer canPay={canPayPayroll} bankAccounts={bankAccountsList} onClose={() => setShowStatutoryDrawer(false)} addToast={addToast} />
+        <StatutoryDeductionsDrawer canPay={canPayPayroll} bankAccounts={bankAccountsList} company={companyProfileData} onClose={() => setShowStatutoryDrawer(false)} addToast={addToast} />
       )}
 
       {/* ─── YEAR-END TAX STATEMENTS DRAWER ────────────────────────── */}
@@ -3371,6 +3371,42 @@ function printAllTaxCertificates(employees, meta, company) {
   return openPayslipWindow(`Tax Certificates ${meta.taxYear}`, employees.map((e) => taxCertificateBody(e, meta, company)).join(''));
 }
 
+// STATUTORY REMITTANCE CHALLAN / PAYMENT VOUCHER — proof of a tax/EOBI payment
+// to the authority (the one payroll money-out that lacked a document).
+function statutoryRemittanceBody(r, company) {
+  const co = company || {};
+  const name = co.legalName || co.name || 'AGRI COMMODITIES';
+  const amt = parseFloat(r.amount) || 0;
+  const method = r.payMethod === 'bank' ? (r.bankName || 'Bank transfer') : 'Cash';
+  const acctName = r.accountName || r.liabilityAccountCode || 'Statutory liability';
+  const period = r.periodFrom ? (r.periodTo && r.periodTo !== r.periodFrom ? `${periodLabel(r.periodFrom)} – ${periodLabel(r.periodTo)}` : periodLabel(r.periodFrom)) : '—';
+  return `<div class="slip">
+    ${docHeaderHtml(company, 'Statutory Remittance', r.remittanceNo || '', r.authority ? `To: ${r.authority}` : '')}
+    <div class="meta">
+      <span><div class="k">Remittance No</div><div class="v">${r.remittanceNo || '—'}</div></span>
+      <span><div class="k">Date</div><div class="v">${docDate(r.remitDate)}</div></span>
+      <span><div class="k">Authority</div><div class="v">${r.authority || '—'}</div></span>
+      <span><div class="k">Challan / CPR ref</div><div class="v">${r.reference || '—'}</div></span>
+      <span><div class="k">Liability settled</div><div class="v">${r.liabilityAccountCode || ''} ${acctName}</div></span>
+      <span><div class="k">Paid via</div><div class="v">${method}</div></span>
+      <span><div class="k">For period</div><div class="v">${period}</div></span>
+    </div>
+    <div class="net"><div><div style="font-size:10px;text-transform:uppercase;color:#047857">Amount Remitted</div><b>${rsAmt(amt)}</b></div>
+      <div style="text-align:right;max-width:55%"><div class="words">Rupees ${amountInWords(amt)} Only</div></div></div>
+    <div class="sec">Accounting</div>
+    <table><tbody>
+      <tr><td>Dr ${r.liabilityAccountCode || ''} ${acctName}</td><td class="r">${rsAmt(amt)}</td></tr>
+      <tr><td>Cr 1000 Cash &amp; Bank (${method})</td><td class="r">${rsAmt(amt)}</td></tr>
+    </tbody></table>
+    ${r.notes ? `<div class="sec">Notes</div><div style="font-size:11.5px;color:#374151">${r.notes}</div>` : ''}
+    <div class="sign"><div><div class="l">Prepared By</div></div><div><div class="l">Approved By</div></div><div><div class="l">Received (Authority)</div></div></div>
+    <div class="muted" style="text-align:center;margin-top:14px">Computer-generated statutory remittance voucher — ${name}.</div>
+  </div>`;
+}
+function printStatutoryRemittance(r, company) {
+  return openPayslipWindow(`Remittance ${r.remittanceNo || ''}`, statutoryRemittanceBody(r, company));
+}
+
 // Bank bulk-transfer (disbursement) file — one beneficiary row per payslip line,
 // for upload to the bank's payroll portal. Generic CSV with the common columns.
 function downloadBankTransferFile(run, lines, addToast) {
@@ -3604,7 +3640,7 @@ function PayrollRunDrawer({ month, employees, preselectId, bankAccounts = [], on
 // chosen day each month into the approval queue — it never auto-approves/pays.
 // Manage org-level statutory deduction RULES (income tax, EOBI, …) that apply
 // automatically to every eligible employee at payroll time.
-function StatutoryDeductionsDrawer({ canPay, bankAccounts = [], onClose, addToast }) {
+function StatutoryDeductionsDrawer({ canPay, bankAccounts = [], company, onClose, addToast }) {
   const [tab, setTab] = useState('rules');
   const { data: rules = [], isLoading } = useStatutoryDeductions();
   const createMut = useCreateStatutoryDeduction();
@@ -3660,7 +3696,7 @@ function StatutoryDeductionsDrawer({ canPay, bankAccounts = [], onClose, addToas
         <button onClick={() => setTab('remit')} className={`px-3 py-2 text-xs font-medium border-b-2 -mb-px ${tab === 'remit' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>Remit liabilities</button>
       </div>
       {tab === 'remit' ? (
-        <StatutoryRemittancePanel canPay={canPay} bankAccounts={bankAccounts} addToast={addToast} />
+        <StatutoryRemittancePanel canPay={canPay} bankAccounts={bankAccounts} company={company} addToast={addToast} />
       ) : (
       <div className="space-y-4">
         <div className="rounded-lg border border-gray-200 p-3 space-y-3">
@@ -3843,7 +3879,7 @@ function TaxStatementDrawer({ company, onClose, addToast }) {
 // Remit accrued statutory liabilities (2050 Tax Payable / 2055 EOBI Payable) to
 // the authority — shows each account's outstanding GL balance, records a payment
 // (DR liability / CR Cash & Bank), and lists remittance history.
-function StatutoryRemittancePanel({ canPay, bankAccounts = [], addToast }) {
+function StatutoryRemittancePanel({ canPay, bankAccounts = [], company, addToast }) {
   const { data: liabilities = [], isLoading: loadingLiab } = useStatutoryLiabilities();
   const { data: history = [], isLoading: loadingHist } = useStatutoryRemittances();
   const createMut = useCreateStatutoryRemittance();
@@ -3953,7 +3989,10 @@ function StatutoryRemittancePanel({ canPay, bankAccounts = [], addToast }) {
                   <div className="text-sm font-semibold text-gray-900">{r.remittanceNo} · {PKR(r.amount)} <span className="text-[10px] font-normal text-gray-400">{r.accountName}</span></div>
                   <div className="text-xs text-gray-500">{fmtDate(r.remitDate)} · {r.payMethod === 'bank' ? (r.bankName || 'bank') : 'cash'}{r.authority ? ` · ${r.authority}` : ''}{r.reference ? ` · ${r.reference}` : ''}</div>
                 </div>
-                {canPay && <button onClick={() => reverse(r)} disabled={deleteMut.isPending} className="p-1.5 rounded-md text-rose-500 hover:bg-rose-50" title="Reverse remittance"><Trash2 className="w-3.5 h-3.5" /></button>}
+                <div className="flex items-center gap-1.5">
+                  <button onClick={() => printStatutoryRemittance(r, company)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100" title="Print remittance voucher"><Receipt className="w-3.5 h-3.5" /> Voucher</button>
+                  {canPay && <button onClick={() => reverse(r)} disabled={deleteMut.isPending} className="p-1.5 rounded-md text-rose-500 hover:bg-rose-50" title="Reverse remittance"><Trash2 className="w-3.5 h-3.5" /></button>}
+                </div>
               </div>
             ))}
           </div>
