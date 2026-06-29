@@ -770,6 +770,12 @@ export default function Reports() {
                 <Layers size={14} /> Warehouse Ledger
               </Link>
             )}
+            {!operatorScoped && (
+              <Link to="/reports/processing-loss-ledger"
+                className="bg-white/15 hover:bg-white/25 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-sm font-medium inline-flex items-center gap-2 transition-colors">
+                <Scale size={14} /> Processing Loss
+              </Link>
+            )}
             <Link to="/reports/lots"
               className="bg-white/15 hover:bg-white/25 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-sm font-medium inline-flex items-center gap-2 transition-colors">
               <FileText size={14} /> Lot Reports

@@ -34,6 +34,7 @@ export const reportingApi = {
   riceTypeLedger: (id) => api.get(`/api/reporting/rice-type-ledger/${id}`),
   warehouseIndex: () => api.get('/api/reporting/warehouse-ledger'),
   warehouseLedger: (id) => api.get(`/api/reporting/warehouse-ledger/${id}`),
+  processingLossLedger: (params) => api.get('/api/reporting/processing-loss-ledger', params),
   saleDetail: (id) => api.get(`/api/reporting/sale-detail/${id}`),
   invoiceLedger: (params) => api.get('/api/reporting/invoice-ledger', params),
   payrollLedger: (params) => api.get('/api/reporting/payroll-ledger', params),

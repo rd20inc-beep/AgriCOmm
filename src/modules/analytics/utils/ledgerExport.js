@@ -278,6 +278,53 @@ export function printWarehouseLedger(data, { companyName = 'AGRI COMMODITIES', g
   return true;
 }
 
+// Full Processing-Loss Ledger print — summary + breakdowns + per-batch table,
+// A4. data = the /reporting/processing-loss-ledger payload.
+export function printProcessingLossLedger(data, { companyName = 'AGRI COMMODITIES', generatedBy, period } = {}) {
+  const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const mt = (v) => `${(parseFloat(v) || 0).toFixed(2)} MT`;
+  const pc = (v) => `${(parseFloat(v) || 0).toFixed(2)}%`;
+  const kgMt = (v) => `${((parseFloat(v) || 0) / 1000).toFixed(2)} MT`;
+  const dd = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+  const { summary: sm = {}, byRiceType = [], bySupplier = [], byOperator = [], byMachine = [], byMonth = [], batches = [] } = data;
+  const now = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const kv = (rows) => `<table class="kv">${rows.filter(Boolean).map(([k, v]) => `<tr><td class="k">${e(k)}</td><td class="v">${v}</td></tr>`).join('')}</table>`;
+  const tbl = (head, rows) => `<table><thead><tr>${head.map(h => `<th style="text-align:${h.r ? 'right' : 'left'}">${e(h.t || h)}</th>`).join('')}</tr></thead><tbody>${rows.length ? rows.map(r => `<tr>${r.map((c, i) => `<td style="text-align:${head[i] && head[i].r ? 'right' : 'left'}">${c}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="${head.length}" style="color:#9ca3af">None</td></tr>`}</tbody></table>`;
+  const grp = (rows) => tbl([{ t: 'Group' }, { t: 'Batches', r: 1 }, { t: 'Input', r: 1 }, { t: 'Output', r: 1 }, { t: 'Loss', r: 1 }, { t: 'Loss %', r: 1 }],
+    rows.map(r => [e(r.key), r.batches, kgMt(r.inputKg), kgMt(r.outputKg), kgMt(r.lossKg), pc(r.lossPct)]));
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Processing-Loss Ledger</title><style>
+    *{box-sizing:border-box} body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#111827;margin:0;font-size:11px}
+    .page{padding:12mm} .hdr{border-bottom:2px solid #111827;padding-bottom:8px;display:flex;justify-content:space-between}
+    .co{font-size:18px;font-weight:800} .title{font-size:15px;font-weight:800;text-align:right} .muted{color:#6b7280;font-size:10px}
+    h4{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#374151;margin:16px 0 5px;border-bottom:1px solid #e5e7eb;padding-bottom:3px}
+    table{width:100%;border-collapse:collapse;margin-top:3px} th{background:#f3f4f6;font-size:9px;text-transform:uppercase;color:#374151;padding:5px 7px;border-bottom:1px solid #d1d5db}
+    td{padding:4px 7px;border-bottom:1px solid #f0f0f0} tbody tr:nth-child(even) td{background:#fafafa}
+    table.kv{width:auto} table.kv td{border:0;padding:2px 10px 2px 0} table.kv .k{color:#6b7280} table.kv .v{font-weight:600}
+    .grid2{display:flex;gap:32px} .grid2>div{flex:1}
+    @media print{.page{padding:10mm}@page{size:A4 landscape;margin:0}}
+  </style></head><body><div class="page">
+    <div class="hdr"><div><div class="co">${e(companyName)}</div><div class="muted">Processing-Loss Ledger</div></div>
+      <div><div class="title">MILLING LOSS</div><div class="muted">${e(period || 'All time')}</div><div class="muted">${generatedBy ? 'By ' + e(generatedBy) + ' · ' : ''}${e(now)}</div></div></div>
+    ${kv([
+      ['Batches', e(sm.batchCount)], ['Total input', mt(sm.inputMt)], ['Total output', mt(sm.outputMt)],
+      ['Total loss', mt(sm.lossMt)], ['Average loss %', pc(sm.avgLossPct)], sm.blendCount ? ['Blends (excluded)', e(sm.blendCount)] : null,
+    ])}
+
+    <div class="grid2"><div><h4>By rice type</h4>${grp(byRiceType)}</div><div><h4>By supplier</h4>${grp(bySupplier)}</div></div>
+    <div class="grid2"><div><h4>By operator</h4>${grp(byOperator)}</div><div><h4>By machine</h4>${grp(byMachine)}</div></div>
+    <h4>By month</h4>${grp(byMonth)}
+
+    <h4>Batches</h4>
+    ${tbl([{ t: 'Date' }, { t: 'Batch' }, { t: 'Rice type' }, { t: 'Supplier' }, { t: 'Operator' }, { t: 'Input', r: 1 }, { t: 'Output', r: 1 }, { t: 'Loss', r: 1 }, { t: 'Loss %', r: 1 }],
+      batches.map(b => [dd(b.date), e(b.batchNo) + (b.isBlend ? ' (blend)' : ''), e(b.riceType), e(b.supplier), e(b.operator), kgMt(b.inputKg), kgMt(b.outputKg), kgMt(b.lossKg), pc(b.lossPct)]))}
+    <div class="muted" style="margin-top:6px">${e(sm.costBasis || '')}</div>
+  </div><script>window.addEventListener('load',function(){setTimeout(function(){window.focus();window.print();},350)});<\/script></body></html>`;
+  const w = window.open('', '_blank', 'width=1100,height=900');
+  if (!w) return false;
+  w.document.open(); w.document.write(html); w.document.close(); w.focus();
+  return true;
+}
+
 // Full multi-section Batch 360 print (inputs → processing → outputs → sales →
 // financials), A4. data = the /reporting/batch-ledger/:id payload.
 export function printBatchLedger(data, { companyName = 'AGRI COMMODITIES', generatedBy } = {}) {
