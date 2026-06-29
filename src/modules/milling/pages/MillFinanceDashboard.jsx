@@ -3165,6 +3165,102 @@ function printAllPayslips(run, lines, company) {
   return openPayslipWindow(`Payslips ${run.period}`, lines.map((l) => payslipBody(run, l, company)).join(''));
 }
 
+// Shared A4 document header (logo + company + a doc title with up to two
+// right-aligned sub-lines). Used by the payment voucher + salary receipt.
+function docHeaderHtml(company, docTitle, sub1, sub2) {
+  const co = company || {};
+  const name = co.legalName || co.name || 'AGRI COMMODITIES';
+  const logo = co.logo ? (String(co.logo).startsWith('http') ? co.logo : `${typeof location !== 'undefined' ? location.origin : ''}${co.logo}`) : null;
+  return `<div class="hd">
+    <div>${logo ? `<img src="${logo}" style="height:40px;max-width:170px;object-fit:contain;display:block;margin-bottom:5px"/>` : ''}<div class="co">${name}</div>${co.address ? `<div class="muted" style="max-width:300px">${co.address}</div>` : ''}${co.ntn ? `<div class="muted">NTN ${co.ntn}</div>` : ''}</div>
+    <div><div class="doc">${docTitle}</div>${sub1 ? `<div class="muted" style="text-align:right">${sub1}</div>` : ''}${sub2 ? `<div class="muted" style="text-align:right">${sub2}</div>` : ''}</div>
+  </div>`;
+}
+
+const rsAmt = (v) => 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString();
+const docDate = (x) => x ? new Date(x).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+// Derived (un-stored) document numbers — the run id + period make them stable
+// and unique without a vouchers table (mirrors the "sale row = invoice" model).
+const voucherNo = (run) => `PV/${run.period}/${String(run.id || 0).padStart(4, '0')}`;
+const receiptNo = (run, line) => `SR/${run.period}/${String(run.id || 0).padStart(4, '0')}/${line.id || ''}`;
+
+// PAYMENT VOUCHER — the formal cash/bank disbursement record for a PAID run.
+function paymentVoucherBody(run, lines, company) {
+  const co = company || {};
+  const name = co.legalName || co.name || 'AGRI COMMODITIES';
+  const method = run.payMethod === 'bank' ? (run.bankName || 'Bank transfer') : 'Cash';
+  const account = run.payMethod === 'bank' ? (run.bankName || 'Bank') : 'Mill Cash';
+  const net = parseFloat(run.netTotal) || 0;
+  const vno = voucherNo(run);
+  const rows = (lines || []).map((l, i) => `<tr><td>${i + 1}</td><td>${l.workerName || '—'}</td><td style="text-transform:capitalize">${l.role || '—'}</td><td class="r">${rsAmt(l.netPay)}</td></tr>`).join('');
+  return `<div class="slip">
+    ${docHeaderHtml(company, 'Payment Voucher', vno, periodLabel(run.period))}
+    <div class="meta">
+      <span><div class="k">Voucher No</div><div class="v">${vno}</div></span>
+      <span><div class="k">Pay date</div><div class="v">${docDate(run.payDate)}</div></span>
+      <span><div class="k">Paid from</div><div class="v">${account}</div></span>
+      <span><div class="k">Payment method</div><div class="v">${method}</div></span>
+      <span><div class="k">Paid to</div><div class="v">Mill staff payroll · ${(lines && lines.length) || run.employeeCount || 0} employee(s)</div></span>
+      <span><div class="k">For period</div><div class="v">${periodLabel(run.period)}</div></span>
+    </div>
+    <div class="sec">Payment breakdown</div>
+    <table><thead><tr><th style="width:24px">#</th><th>Employee</th><th>Designation</th><th class="r">Net paid</th></tr></thead><tbody>${rows}
+      <tr style="border-top:1px solid #e5e7eb"><td colspan="3" style="font-weight:700;padding-top:7px">Total disbursed</td><td class="r" style="font-weight:700;padding-top:7px">${rsAmt(net)}</td></tr>
+    </tbody></table>
+    <div class="net"><div><div style="font-size:10px;text-transform:uppercase;color:#047857">Total Paid</div><b>${rsAmt(net)}</b></div>
+      <div style="text-align:right;max-width:55%"><div class="words">Rupees ${amountInWords(net)} Only</div></div></div>
+    <div class="sec">Accounting</div>
+    <table><tbody>
+      <tr><td>Dr 6135 Salaries &amp; Wages</td><td class="r">${rsAmt(net)}</td></tr>
+      <tr><td>Cr 1000 Cash &amp; Bank (${account})</td><td class="r">${rsAmt(net)}</td></tr>
+    </tbody></table>
+    <div class="meta" style="margin-top:10px">
+      <span><div class="k">Prepared by</div><div class="v">${run.preparedByName || '—'}</div></span>
+      <span><div class="k">Approved by</div><div class="v">${run.approvedByName || '—'}</div></span>
+      ${run.accruedByName ? `<span><div class="k">Accrued by</div><div class="v">${run.accruedByName}</div></span>` : ''}
+      <span><div class="k">Paid by</div><div class="v">${run.paidByName || '—'}</div></span>
+    </div>
+    <div class="sign"><div><div class="l">Prepared By</div></div><div><div class="l">Checked By</div></div><div><div class="l">Approved By</div></div><div><div class="l">Received By</div></div></div>
+    <div class="muted" style="text-align:center;margin-top:14px">Computer-generated payment voucher — ${name}.</div>
+  </div>`;
+}
+
+// SALARY RECEIPT — per-employee acknowledgment of net pay received.
+function salaryReceiptBody(run, line, company) {
+  const co = company || {};
+  const name = co.legalName || co.name || 'AGRI COMMODITIES';
+  const method = run.payMethod === 'bank' ? (run.bankName || 'Bank transfer') : 'Cash';
+  const net = parseFloat(line.netPay) || 0;
+  const rno = receiptNo(run, line);
+  return `<div class="slip">
+    ${docHeaderHtml(company, 'Salary Receipt', rno, periodLabel(run.period))}
+    <div class="meta">
+      <span><div class="k">Receipt No</div><div class="v">${rno}</div></span>
+      <span><div class="k">Date</div><div class="v">${docDate(run.payDate)}</div></span>
+      <span><div class="k">Employee</div><div class="v">${line.workerName || '—'}</div></span>
+      <span><div class="k">CNIC</div><div class="v">${line.cnic || '—'}</div></span>
+      <span><div class="k">Designation</div><div class="v" style="text-transform:capitalize">${line.role || '—'}</div></span>
+      <span><div class="k">Payment method</div><div class="v">${method}</div></span>
+    </div>
+    <div class="net"><div><div style="font-size:10px;text-transform:uppercase;color:#047857">Net Received</div><b>${rsAmt(net)}</b></div>
+      <div style="text-align:right;max-width:55%"><div class="words">Rupees ${amountInWords(net)} Only</div></div></div>
+    <p style="margin-top:16px;font-size:12px;line-height:1.7">Received with thanks from <b>${name}</b> the sum of <b>${rsAmt(net)}</b> (Rupees ${amountInWords(net)} Only), being the net salary due to me for the month of <b>${periodLabel(run.period)}</b>, paid via ${method}, in full and final settlement. I acknowledge that I have no further claim for the said period.</p>
+    <div class="sign"><div><div class="l">Employee Signature / Thumb</div></div><div><div class="l">Date</div></div><div><div class="l">Paid By</div></div></div>
+    <div class="muted" style="text-align:center;margin-top:14px">Salary acknowledgment receipt — ${name}.</div>
+  </div>`;
+}
+
+function printPaymentVoucher(run, lines, company) {
+  return openPayslipWindow(`Payment Voucher ${run.period}`, paymentVoucherBody(run, lines, company));
+}
+function printSalaryReceipt(run, line, company) {
+  return openPayslipWindow(`Salary Receipt ${line.workerName} ${run.period}`, salaryReceiptBody(run, line, company));
+}
+function printAllReceipts(run, lines, company) {
+  if (!lines || !lines.length) return false;
+  return openPayslipWindow(`Salary Receipts ${run.period}`, lines.map((l) => salaryReceiptBody(run, l, company)).join(''));
+}
+
 // Drawer to post a payroll run: review the per-employee breakdown, then pay it
 // out from Mill Cash. Server recomputes the figures on submit.
 function PayrollRunDrawer({ month, employees, preselectId, bankAccounts = [], onClose, onPosted, postRunMut, addToast }) {
@@ -3481,9 +3577,17 @@ function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDelete, o
             <div className="rounded-lg bg-emerald-50 p-2.5"><div className="text-[10px] text-emerald-500 uppercase">{isPaid ? 'Net paid' : 'Net to pay'}</div><div className="text-sm font-semibold tabular-nums text-emerald-700">{PKR(run.netTotal)}</div></div>
           </div>
           {isPaid && lines.length > 0 && (
-            <button onClick={() => printAllPayslips(run, lines, companyProfile)} className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
-              <Printer className="w-3.5 h-3.5" /> Print all payslips ({lines.length})
-            </button>
+            <div className="grid grid-cols-3 gap-2">
+              <button onClick={() => printPaymentVoucher(run, lines, companyProfile)} className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100">
+                <Receipt className="w-3.5 h-3.5" /> Payment voucher
+              </button>
+              <button onClick={() => printAllPayslips(run, lines, companyProfile)} className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
+                <Printer className="w-3.5 h-3.5" /> Payslips ({lines.length})
+              </button>
+              <button onClick={() => printAllReceipts(run, lines, companyProfile)} className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-emerald-700 bg-emerald-50 rounded-lg hover:bg-emerald-100">
+                <Printer className="w-3.5 h-3.5" /> Receipts ({lines.length})
+              </button>
+            </div>
           )}
           {lines.map(l => (
             <div key={l.id} className="rounded-lg border border-gray-200 p-3 flex items-center justify-between">
@@ -3494,9 +3598,14 @@ function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDelete, o
                 </div>
               </div>
               {isPaid && (
-                <button onClick={() => printPayslip(run, l, companyProfile)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
-                  <Printer className="w-3.5 h-3.5" /> Payslip
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <button onClick={() => printPayslip(run, l, companyProfile)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
+                    <Printer className="w-3.5 h-3.5" /> Payslip
+                  </button>
+                  <button onClick={() => printSalaryReceipt(run, l, companyProfile)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 rounded-lg hover:bg-emerald-100">
+                    <Receipt className="w-3.5 h-3.5" /> Receipt
+                  </button>
+                </div>
               )}
             </div>
           ))}
