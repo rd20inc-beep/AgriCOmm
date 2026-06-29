@@ -369,6 +369,7 @@ const inventoryService = {
     // 4. Update lot qty
     const currentQty = parseFloat(lot.qty) || 0;
     const currentReserved = parseFloat(lot.reserved_qty) || 0;
+    const currentMillingReserved = parseFloat(lot.milling_reserved_qty) || 0; // P6a
     let newQty;
 
     if (INBOUND_TYPES.has(movementType)) {
@@ -386,8 +387,8 @@ const inventoryService = {
       throw new Error(`Movement would result in negative stock on lot ${lot.lot_no}: current ${currentQty}, change ${-parsedQty}`);
     }
 
-    // 5. available_qty = qty - reserved_qty
-    const newAvailable = newQty - currentReserved;
+    // 5. available_qty = qty - reserved_qty (export) - milling_reserved_qty (P6a)
+    const newAvailable = newQty - currentReserved - currentMillingReserved;
     const currentNetWeightKg = parseFloat(lot.net_weight_kg) || currentQty * 1000;
     const newNetWeightKg = currentNetWeightKg + (direction * movementQtyKg);
     const newGrossWeightKg = newNetWeightKg;
@@ -711,8 +712,22 @@ const inventoryService = {
       for (const s of sources) {
         const lot = await trx('inventory_lots').where({ id: s.lot_id }).first();
         if (!lot) continue;
-        const avail = parseFloat(lot.available_qty) || 0;
-        const consume = Math.min(parseFloat(s.qty_mt) || 0, avail);
+        const want = parseFloat(s.qty_mt) || 0;
+        // P6a: release THIS batch's milling hold first so the committed qty is
+        // consumable. Availability subtracts milling_reserved_qty, so without
+        // releasing, a fully-reserved lot would read available 0 and consume
+        // nothing. Consume against physical-minus-export (qty − reserved_qty).
+        const heldNow = parseFloat(lot.milling_reserved_qty) || 0;
+        const heldAfter = Math.max(0, heldNow - want);
+        if (heldNow !== heldAfter) {
+          await trx('inventory_lots').where({ id: lot.id }).update({
+            milling_reserved_qty: heldAfter,
+            available_qty: (parseFloat(lot.qty) || 0) - (parseFloat(lot.reserved_qty) || 0) - heldAfter,
+            updated_at: trx.fn.now(),
+          });
+        }
+        const avail = (parseFloat(lot.qty) || 0) - (parseFloat(lot.reserved_qty) || 0) - heldAfter;
+        const consume = Math.min(want, avail);
         if (consume <= 0) continue;
         const m = await inventoryService.postMovement(trx, {
           movementType: MOVEMENT_TYPES.PRODUCTION_ISSUE,
@@ -1415,12 +1430,13 @@ const inventoryService = {
       })
       .returning('*');
 
-    // HARD ENFORCEMENT: no over-reservation
+    // HARD ENFORCEMENT: no over-reservation (account for milling holds too, P6a)
+    const millingReserved = parseFloat(lot.milling_reserved_qty) || 0;
     const newReserved = parseFloat(lot.reserved_qty) + parsedQty;
-    if (newReserved > parseFloat(lot.qty)) {
-      throw new Error(`Cannot reserve ${parsedQty} MT — would exceed total qty ${lot.qty} on lot ${lot.lot_no}`);
+    if (newReserved + millingReserved > parseFloat(lot.qty) + 1e-6) {
+      throw new Error(`Cannot reserve ${parsedQty} MT — would exceed available on lot ${lot.lot_no} (qty ${lot.qty}, already reserved ${lot.reserved_qty} + ${millingReserved} in milling)`);
     }
-    const newAvailable = parseFloat(lot.qty) - newReserved;
+    const newAvailable = parseFloat(lot.qty) - newReserved - millingReserved;
 
     await trx('inventory_lots').where('id', lotId).update({
       reserved_qty: newReserved,
@@ -1472,7 +1488,8 @@ const inventoryService = {
 
     const releasedQty = parseFloat(reservation.reserved_qty);
     const newReserved = Math.max(0, parseFloat(lot.reserved_qty) - releasedQty);
-    const newAvailable = parseFloat(lot.qty) - newReserved;
+    const millingReserved = parseFloat(lot.milling_reserved_qty) || 0; // P6a
+    const newAvailable = parseFloat(lot.qty) - newReserved - millingReserved;
 
     await trx('inventory_lots').where('id', lot.id).update({
       reserved_qty: newReserved,
