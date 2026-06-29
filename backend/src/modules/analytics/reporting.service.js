@@ -2209,7 +2209,7 @@ const reportingService = {
     const lots = await q.select(
       'l.id', 'l.lot_no', 'l.type', 'l.item_name', 'l.grade', 'l.variety', 'l.processing_type',
       'l.net_weight_kg', 'l.received_net_weight_kg', 'l.available_qty', 'l.reserved_qty', 'l.sold_weight_kg',
-      'l.landed_cost_per_kg', 'p.name as product_name',
+      'l.landed_cost_per_kg', 'l.rate_per_kg', 'p.name as product_name',
     );
 
     // Group key: by grade for by-products, by product/item for finished.
@@ -2222,9 +2222,12 @@ const reportingService = {
       const onHand = num(l.net_weight_kg);
       const reserved = num(l.reserved_qty) * 1000;
       const sold = num(l.sold_weight_kg) || Math.max(0, produced - onHand);
+      // landed_cost_per_kg can be 0 on zero-cost intakes — fall back to rate_per_kg
+      // so value matches the Warehouse / Rice Type ledgers + Lot 360.
+      const cpk = num(l.landed_cost_per_kg) || num(l.rate_per_kg);
       g.producedKg += produced; g.onHandKg += onHand; g.reservedKg += reserved; g.soldKg += sold;
-      g.valuePkr += onHand * num(l.landed_cost_per_kg);
-      g.lots.push({ lotId: l.id, lotNo: l.lot_no, item: l.grade || l.item_name, variety: l.variety, isBlend: l.processing_type === 'blended', producedKg: produced, onHandKg: onHand, reservedKg: reserved, soldKg: sold, costPerKg: num(l.landed_cost_per_kg), valuePkr: onHand * num(l.landed_cost_per_kg), href: `/lot-inventory/${l.id}` });
+      g.valuePkr += onHand * cpk;
+      g.lots.push({ lotId: l.id, lotNo: l.lot_no, item: l.grade || l.item_name, variety: l.variety, isBlend: l.processing_type === 'blended', producedKg: produced, onHandKg: onHand, reservedKg: reserved, soldKg: sold, costPerKg: cpk, valuePkr: onHand * cpk, href: `/lot-inventory/${l.id}` });
     }
     const rows = Object.values(groups).sort((a, b) => b.onHandKg - a.onHandKg);
     const grand = rows.reduce((s, g) => ({ producedKg: s.producedKg + g.producedKg, onHandKg: s.onHandKg + g.onHandKg, reservedKg: s.reservedKg + g.reservedKg, soldKg: s.soldKg + g.soldKg, valuePkr: s.valuePkr + g.valuePkr }), { producedKg: 0, onHandKg: 0, reservedKg: 0, soldKg: 0, valuePkr: 0 });
