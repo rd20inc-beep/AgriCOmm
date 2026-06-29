@@ -54,6 +54,9 @@ router.get('/supplier-ledger/:id', authorize('reports', 'view'), noFinanceForOpe
 // Rice Type Ledger — per-variety stock + revenue + profit, finance-gated like above.
 router.get('/rice-type-ledger', authorize('reports', 'view'), noFinanceForOperator, controller.riceTypeIndex);
 router.get('/rice-type-ledger/:id', authorize('reports', 'view'), noFinanceForOperator, controller.riceTypeLedger);
+// Warehouse Ledger — per-warehouse stock roll-forward + value, finance-gated (shows value).
+router.get('/warehouse-ledger', authorize('reports', 'view'), noFinanceForOperator, controller.warehouseIndex);
+router.get('/warehouse-ledger/:id', authorize('reports', 'view'), noFinanceForOperator, controller.warehouseLedger);
 router.get('/quality/supplier-ranking', authorize('reports', 'view'), controller.supplierQualityRanking);
 router.get('/quality/recovery-leaderboard', authorize('reports', 'view'), controller.batchRecoveryLeaderboard);
 router.get('/quality/recovery-by-variety', authorize('reports', 'view'), controller.recoveryByVariety);

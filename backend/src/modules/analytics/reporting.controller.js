@@ -206,6 +206,27 @@ const reportingController = {
     }
   },
 
+  async warehouseIndex(req, res) {
+    try {
+      const data = await reportingService.getWarehouseIndex();
+      return res.json({ success: true, ...data });
+    } catch (err) {
+      console.error('Warehouse index error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  async warehouseLedger(req, res) {
+    try {
+      const data = await reportingService.getWarehouseLedger(req.params.id);
+      if (!data) return res.status(404).json({ success: false, message: 'Warehouse not found.' });
+      return res.json({ success: true, ...data });
+    } catch (err) {
+      console.error('Warehouse ledger error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
   async listScheduledReports(req, res) {
     try {
       const data = await reportingService.listScheduledReportEmails();

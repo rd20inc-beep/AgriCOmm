@@ -1548,6 +1548,105 @@ const reportingService = {
   },
 
   /**
+   * Warehouse Index — the picker list for the Warehouse Ledger. One row per
+   * active warehouse with on-hand lot count, on-hand / reserved / available KG
+   * and stock value. Empty warehouses are shown too (0s). NULLIF on the cost
+   * so a 0 landed cost falls back to rate_per_kg (matches the detail / Lot 360).
+   */
+  async getWarehouseIndex() {
+    const num = (v) => parseFloat(v) || 0;
+    const whs = await db('warehouses').where('is_active', true)
+      .orderBy('entity', 'asc').orderBy('name', 'asc')
+      .select('id', 'name', 'entity', 'type');
+    const agg = await db('inventory_lots as l')
+      .whereNotNull('l.warehouse_id').where('l.net_weight_kg', '>', 0)
+      .groupBy('l.warehouse_id')
+      .select('l.warehouse_id',
+        db.raw('COUNT(l.id) as lot_count'),
+        db.raw('COALESCE(SUM(l.net_weight_kg), 0) as onhand_kg'),
+        db.raw('COALESCE(SUM(l.reserved_qty * 1000), 0) as reserved_kg'),
+        db.raw('COALESCE(SUM(l.net_weight_kg * COALESCE(NULLIF(l.landed_cost_per_kg, 0), l.rate_per_kg, 0)), 0) as stock_value'));
+    const byId = Object.fromEntries(agg.map(a => [a.warehouse_id, a]));
+    return {
+      rows: whs.map(w => {
+        const a = byId[w.id] || {};
+        const onhand = num(a.onhand_kg), reserved = num(a.reserved_kg);
+        return {
+          warehouseId: w.id, warehouse: w.name, entity: w.entity, type: w.type,
+          href: `/reports/warehouse-ledger/${w.id}`, lotCount: Number(a.lot_count) || 0,
+          onHandKg: onhand, reservedKg: reserved, availableKg: Math.max(0, onhand - reserved),
+          stockValue: num(a.stock_value),
+        };
+      }),
+    };
+  },
+
+  /**
+   * Warehouse Ledger — one warehouse's stock: a per-lot roll-forward (In =
+   * total intake to the lot, Out = milled/sold/transferred since, Reserved,
+   * Available, Closing = current on-hand, Value), grouped by rice type and by
+   * lot type. Keyed on each lot's current warehouse_id (lot_transactions barely
+   * uses the warehouse transfer columns, so the lot's location is authoritative).
+   * Stock valued at landed cost/kg. Read-only; finance-gated.
+   */
+  async getWarehouseLedger(warehouseId) {
+    const id = parseInt(warehouseId, 10);
+    if (!id) return null;
+    const num = (v) => parseFloat(v) || 0;
+
+    const w = await db('warehouses').where('id', id).first();
+    if (!w) return null;
+
+    const lots = await db('inventory_lots as l')
+      .leftJoin('products as p', 'l.product_id', 'p.id')
+      .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
+      .where('l.warehouse_id', id).where('l.net_weight_kg', '>', 0)
+      .select('l.id', 'l.lot_no', 'l.type', 'l.entity', 'l.item_name', 'l.grade', 'l.variety', 'l.batch_ref',
+        'l.received_net_weight_kg', 'l.net_weight_kg', 'l.reserved_qty', 'l.landed_cost_per_kg', 'l.rate_per_kg',
+        'p.name as product_name', 'l.supplier_id', 's.name as supplier_name', 'l.purchase_date', 'l.created_at')
+      .orderBy('l.type', 'asc').orderBy('l.id', 'asc');
+
+    const cpkOf = (l) => num(l.landed_cost_per_kg) || num(l.rate_per_kg);
+    let onHand = 0, reserved = 0, value = 0, totalIn = 0, totalOut = 0;
+    const byType = {}, byRice = {};
+    const lotRows = lots.map((l) => {
+      const net = num(l.net_weight_kg);
+      const recv = num(l.received_net_weight_kg) || net;
+      const res = num(l.reserved_qty) * 1000;
+      const cpk = cpkOf(l);
+      const val = net * cpk;
+      const outKg = Math.max(0, recv - net);
+      onHand += net; reserved += res; value += val; totalIn += recv; totalOut += outKg;
+      const t = l.type || 'other';
+      const bt = byType[t] || (byType[t] = { type: t, onHandKg: 0, value: 0 });
+      bt.onHandKg += net; bt.value += val;
+      const rk = l.product_name || l.variety || l.item_name || '—';
+      const br = byRice[rk] || (byRice[rk] = { riceType: rk, lots: 0, onHandKg: 0, reservedKg: 0, value: 0 });
+      br.lots += 1; br.onHandKg += net; br.reservedKg += res; br.value += val;
+      return {
+        lotId: l.id, lotNo: l.lot_no, href: `/reports/lot-ledger/${l.id}`, type: l.type, entity: l.entity,
+        riceType: l.product_name || l.variety || l.item_name || '—', label: l.grade || l.item_name || '—',
+        batchRef: l.batch_ref || null, supplier: l.supplier_name || null, supplierId: l.supplier_id || null,
+        inKg: recv, outKg, reservedKg: res, availableKg: Math.max(0, net - res), closingKg: net,
+        costPerKg: cpk, value: val, date: l.purchase_date || l.created_at,
+      };
+    });
+
+    return {
+      warehouse: { id: w.id, name: w.name, entity: w.entity, type: w.type, lotCount: lots.length },
+      summary: {
+        lotCount: lots.length, onHandKg: onHand, reservedKg: reserved,
+        availableKg: Math.max(0, onHand - reserved), stockValue: value,
+        totalInKg: totalIn, totalOutKg: totalOut,
+        byType: Object.values(byType).sort((a, b) => b.onHandKg - a.onHandKg),
+        costBasis: 'On-hand lots valued at landed cost/kg. In = total intake to the lot; Out = milled / sold / transferred since intake; Closing = current on-hand.',
+      },
+      byRiceType: Object.values(byRice).sort((a, b) => b.onHandKg - a.onHandKg),
+      lots: lotRows,
+    };
+  },
+
+  /**
    * Batch Processing Ledger — one batch's inputs (source lots), outputs
    * (finished + by-product lots), recorded costs and yield, assembled from
    * milling_batches / batch_source_lots / milling_costs / inventory_lots.
