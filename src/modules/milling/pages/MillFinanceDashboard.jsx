@@ -16,7 +16,7 @@ import {
   useWorkerAdjustments, useCreateWorkerAdjustment, useDeleteWorkerAdjustment,
   usePayrollSummary, useRecordAttendance, useAttendance, useBulkAttendance, useAttendanceHolidays, useInventory, useExpenseVendors,
   usePayrollRuns, usePostPayrollRun, useDeletePayrollRun, usePayrollRun, usePayrollReport,
-  useApprovePayrollRun, usePayPayrollRun, useVoidPayrollRun,
+  useApprovePayrollRun, usePayPayrollRun, useVoidPayrollRun, useAccruePayrollRun, useSettlePayrollRun,
   usePayrollSchedule, useSavePayrollSchedule, useRunPayrollNow,
   usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow, useAcceptFundTransfer,
   useMillLotCosts, useLocalSales, useRecordPayment, usePayablePayments,
@@ -203,6 +203,8 @@ export default function MillFinanceDashboard() {
   const approveRunMut = useApprovePayrollRun();
   const payRunMut = usePayPayrollRun();
   const voidRunMut = useVoidPayrollRun();
+  const accrueRunMut = useAccruePayrollRun();
+  const settleRunMut = useSettlePayrollRun();
   const [showRunDrawer, setShowRunDrawer] = useState(false);
   const [runPreselect, setRunPreselect] = useState(null); // worker id to pre-select in the run drawer (per-row Pay)
   const [payslipsRunId, setPayslipsRunId] = useState(null); // open the payslips panel for a run
@@ -293,7 +295,7 @@ export default function MillFinanceDashboard() {
   const monthRuns = payrollRuns.filter(r => r.period === payrollMonth && r.status !== 'voided');
   const isPaidStatus = (s) => s === 'paid' || s === 'posted';
   const paidThisMonth = monthRuns.filter(r => isPaidStatus(r.status)).reduce((s, r) => s + (parseFloat(r.netTotal) || 0), 0);
-  const pendingRuns = monthRuns.filter(r => r.status === 'prepared' || r.status === 'approved');
+  const pendingRuns = monthRuns.filter(r => r.status === 'prepared' || r.status === 'approved' || r.status === 'accrued');
   const paidCount = payrollData?.paidCount || 0;
   const unpaidNet = payrollData?.unpaidNet ?? payrollTotal;
   // "Unpaid" for preparing a NEW run = employees not already in any run this month.
@@ -1559,9 +1561,9 @@ export default function MillFinanceDashboard() {
               <div className="flex flex-wrap gap-2">
                 {pendingRuns.map(r => (
                   <div key={r.id} className="inline-flex items-center gap-2 bg-white border border-amber-200 rounded-lg px-2.5 py-1 text-xs">
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${r.status === 'approved' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>{r.status}</span>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${r.status === 'accrued' ? 'bg-violet-100 text-violet-700' : r.status === 'approved' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>{r.status}</span>
                     <span className="text-gray-600">{r.employeeCount} emp · <span className="font-semibold tabular-nums">{PKR(r.netTotal)}</span> · {fmtDate(r.payDate)}</span>
-                    <button onClick={() => setPayslipsRunId(r.id)} className="text-blue-700 font-medium hover:underline">review</button>
+                    <button onClick={() => setPayslipsRunId(r.id)} className="text-blue-700 font-medium hover:underline">{r.status === 'accrued' ? 'settle' : 'review'}</button>
                   </div>
                 ))}
               </div>
@@ -2251,10 +2253,14 @@ export default function MillFinanceDashboard() {
           onApprove={async (run) => { try { await approveRunMut.mutateAsync(run.id); addToast('Payroll run approved', 'success'); } catch (e) { addToast(e.message, 'error'); } }}
           onPay={async (run) => { try { await payRunMut.mutateAsync(run.id); addToast(`Payroll paid — ${PKR(run.netTotal)}`, 'success'); } catch (e) { addToast(e.message, 'error'); } }}
           onVoid={async (run) => { try { await voidRunMut.mutateAsync({ id: run.id, reason: null }); addToast('Payroll run voided', 'success'); setPayslipsRunId(null); } catch (e) { addToast(e.message, 'error'); } }}
+          onAccrue={async (run) => { try { await accrueRunMut.mutateAsync(run.id); addToast(`Payroll accrued — ${PKR(run.netTotal)} booked to Salaries Payable`, 'success'); } catch (e) { addToast(e.message, 'error'); } }}
+          onSettle={async (run) => { try { await settleRunMut.mutateAsync(run.id); addToast(`Accrued payroll settled — ${PKR(run.netTotal)} paid`, 'success'); } catch (e) { addToast(e.message, 'error'); } }}
           deleteRunMut={deleteRunMut}
           approveRunMut={approveRunMut}
           payRunMut={payRunMut}
           voidRunMut={voidRunMut}
+          accrueRunMut={accrueRunMut}
+          settleRunMut={settleRunMut}
         />
       )}
 
@@ -3423,14 +3429,15 @@ function PayrollScheduleDrawer({ canManage, canPrepare, onClose, onRunNow, runNo
 
 // Run panel: review a run's payslip lines, see its approval status, and (for
 // Finance/Owner) Approve → Pay → or Void. Paid runs can be Undone (reversed).
-const RUN_STATUS_TONE = { prepared: 'bg-amber-100 text-amber-700', approved: 'bg-blue-100 text-blue-700', paid: 'bg-emerald-100 text-emerald-700', posted: 'bg-emerald-100 text-emerald-700', voided: 'bg-gray-100 text-gray-500' };
-function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDelete, onClose, onUndo, onApprove, onPay, onVoid, deleteRunMut, approveRunMut, payRunMut, voidRunMut }) {
+const RUN_STATUS_TONE = { prepared: 'bg-amber-100 text-amber-700', approved: 'bg-blue-100 text-blue-700', accrued: 'bg-violet-100 text-violet-700', paid: 'bg-emerald-100 text-emerald-700', posted: 'bg-emerald-100 text-emerald-700', voided: 'bg-gray-100 text-gray-500' };
+function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDelete, onClose, onUndo, onApprove, onPay, onVoid, onAccrue, onSettle, deleteRunMut, approveRunMut, payRunMut, voidRunMut, accrueRunMut, settleRunMut }) {
   const { data, isLoading } = usePayrollRun(runId);
   const run = data?.run;
   const lines = data?.lines || [];
   const st = run?.status;
   const isPaid = st === 'paid' || st === 'posted';
-  const busy = approveRunMut?.isPending || payRunMut?.isPending || voidRunMut?.isPending || deleteRunMut?.isPending;
+  const isAccrued = st === 'accrued';
+  const busy = approveRunMut?.isPending || payRunMut?.isPending || voidRunMut?.isPending || deleteRunMut?.isPending || accrueRunMut?.isPending || settleRunMut?.isPending;
   return (
     <SlideDrawer
       open
@@ -3444,9 +3451,11 @@ function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDelete, o
           <div className="flex gap-2">
             {/* Workflow actions (Finance/Owner only) */}
             {canApprove && st === 'prepared' && <button onClick={() => onApprove(run)} disabled={busy} className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">Approve</button>}
-            {canPay && st === 'approved' && <button onClick={() => onPay(run)} disabled={busy} className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">Pay {PKR(run.netTotal)}</button>}
+            {canPay && st === 'approved' && <button onClick={() => onPay(run)} disabled={busy} className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">Pay now {PKR(run.netTotal)}</button>}
+            {canApprove && st === 'approved' && <button onClick={() => onAccrue(run)} disabled={busy} className="px-4 py-2 text-sm text-violet-700 bg-violet-50 rounded-lg hover:bg-violet-100 disabled:opacity-50">Accrue (pay later)</button>}
+            {canPay && isAccrued && <button onClick={() => onSettle(run)} disabled={busy} className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">Settle {PKR(run.netTotal)}</button>}
             {canApprove && (st === 'prepared' || st === 'approved') && <button onClick={() => onVoid(run)} disabled={busy} className="px-4 py-2 text-sm text-rose-600 bg-rose-50 rounded-lg hover:bg-rose-100 disabled:opacity-50">Void</button>}
-            {canDelete && isPaid && <button onClick={() => onUndo(run)} disabled={busy} className="px-4 py-2 text-sm text-rose-600 bg-rose-50 rounded-lg hover:bg-rose-100 disabled:opacity-50">Undo run</button>}
+            {canDelete && (isPaid || isAccrued) && <button onClick={() => onUndo(run)} disabled={busy} className="px-4 py-2 text-sm text-rose-600 bg-rose-50 rounded-lg hover:bg-rose-100 disabled:opacity-50">{isAccrued ? 'Reverse accrual' : 'Undo run'}</button>}
           </div>
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Close</button>
         </div>
@@ -3460,10 +3469,12 @@ function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDelete, o
             <div className="text-[11px] text-gray-400">
               {run.preparedByName ? `Prepared by ${run.preparedByName}` : ''}
               {run.approvedByName ? ` · Approved by ${run.approvedByName}` : ''}
+              {run.accruedByName ? ` · Accrued by ${run.accruedByName}` : ''}
               {run.paidByName ? ` · Paid by ${run.paidByName}` : ''}
             </div>
           </div>
-          {!isPaid && <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5 text-xs text-amber-800">{st === 'prepared' ? 'Pending approval — no cash/GL has posted yet.' : 'Approved — pending payment. Cash/GL posts and advances are recovered when you Pay.'}{!canApprove ? ' Finance/Owner must complete this.' : ''}</div>}
+          {isAccrued && <div className="rounded-lg bg-violet-50 border border-violet-200 p-2.5 text-xs text-violet-800">Accrued — salary expense &amp; <span className="font-semibold">Salaries Payable</span> liability are booked and advances recovered, but no cash has moved. Settle to pay it out.{!canPay ? ' Finance/Owner must settle this.' : ''}</div>}
+          {!isPaid && !isAccrued && <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5 text-xs text-amber-800">{st === 'prepared' ? 'Pending approval — no cash/GL has posted yet.' : 'Approved — pending payment. Pay now (cash + GL) or Accrue (book the liability, pay later).'}{!canApprove ? ' Finance/Owner must complete this.' : ''}</div>}
           <div className="grid grid-cols-3 gap-2">
             <div className="rounded-lg bg-gray-50 p-2.5"><div className="text-[10px] text-gray-400 uppercase">Gross</div><div className="text-sm font-semibold tabular-nums">{PKR(run.grossTotal)}</div></div>
             <div className="rounded-lg bg-amber-50 p-2.5"><div className="text-[10px] text-amber-500 uppercase">Advances</div><div className="text-sm font-semibold tabular-nums text-amber-700">−{PKR(run.advanceTotal)}</div></div>

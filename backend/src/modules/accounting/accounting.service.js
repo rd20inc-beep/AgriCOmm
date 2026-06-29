@@ -305,6 +305,9 @@ const accountingService = {
     // Optional debit-account override (e.g. route salaries to a dedicated
     // Salaries & Wages account instead of the rule's generic 6000).
     debitAccountId = null,
+    // Optional credit-account override (e.g. credit Salaries Payable instead of
+    // the rule's generic Supplier Payable for an accrued payroll expense).
+    creditAccountId = null,
   }) {
     // Wrap in a transaction if one was not provided, to ensure
     // posting rule lookup + journal creation + posting are atomic.
@@ -325,13 +328,15 @@ const accountingService = {
       const parsedAmount = parseFloat(amount);
       if (!parsedAmount || parsedAmount <= 0) return null;
 
-      // Allow the caller to override the rule's debit account (e.g. salaries).
+      // Allow the caller to override the rule's debit/credit accounts (e.g.
+      // salaries → DR 6135 Salaries & Wages / CR 2040 Salaries Payable).
       const debitId = debitAccountId || rule.debit_account_id;
+      const creditId = creditAccountId || rule.credit_account_id;
 
       // Fetch account names for narration
       const [debitAcc, creditAcc] = await Promise.all([
         knex('chart_of_accounts').where({ id: debitId }).first(),
-        knex('chart_of_accounts').where({ id: rule.credit_account_id }).first(),
+        knex('chart_of_accounts').where({ id: creditId }).first(),
       ]);
 
       const lines = [
@@ -343,7 +348,7 @@ const accountingService = {
           narration: `DR ${debitAcc ? debitAcc.code + ' ' + debitAcc.name : ''} — ${description || rule.description}`,
         },
         {
-          account_id: rule.credit_account_id,
+          account_id: creditId,
           account: creditAcc ? creditAcc.name : '',
           debit: 0,
           credit: parsedAmount,

@@ -1356,7 +1356,8 @@ router.get('/payroll/runs', authorize('payroll', 'view'), async (req, res) => {
       .leftJoin('users as up', 'up.id', 'r.created_by')
       .leftJoin('users as ua', 'ua.id', 'r.approved_by')
       .leftJoin('users as upd', 'upd.id', 'r.paid_by')
-      .select('r.*', 'ba.name as bank_name', 'up.full_name as prepared_by_name', 'ua.full_name as approved_by_name', 'upd.full_name as paid_by_name')
+      .leftJoin('users as uac', 'uac.id', 'r.accrued_by')
+      .select('r.*', 'ba.name as bank_name', 'up.full_name as prepared_by_name', 'ua.full_name as approved_by_name', 'upd.full_name as paid_by_name', 'uac.full_name as accrued_by_name')
       .orderBy('r.period', 'desc').orderBy('r.id', 'desc');
     return res.json({ success: true, data: { runs } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
@@ -1400,7 +1401,8 @@ router.get('/payroll/runs/:id', authorize('payroll', 'view'), async (req, res) =
       .leftJoin('users as up', 'up.id', 'r.created_by')
       .leftJoin('users as ua', 'ua.id', 'r.approved_by')
       .leftJoin('users as upd', 'upd.id', 'r.paid_by')
-      .select('r.*', 'ba.name as bank_name', 'up.full_name as prepared_by_name', 'ua.full_name as approved_by_name', 'upd.full_name as paid_by_name')
+      .leftJoin('users as uac', 'uac.id', 'r.accrued_by')
+      .select('r.*', 'ba.name as bank_name', 'up.full_name as prepared_by_name', 'ua.full_name as approved_by_name', 'upd.full_name as paid_by_name', 'uac.full_name as accrued_by_name')
       .where('r.id', req.params.id).first();
     if (!run) return res.status(404).json({ success: false, message: 'Payroll run not found.' });
     const lines = await enrichPayslipLines(await db('mill_payroll_lines').where('run_id', run.id).orderBy('worker_name'));
@@ -1549,6 +1551,73 @@ router.post('/payroll/runs/:id/pay', authorize('payroll', 'pay'),
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ACCRUE an approved run (alternative to immediate Pay) — books the salary
+// EXPENSE + LIABILITY now (DR 6135 Salaries & Wages / CR 2040 Salaries Payable)
+// and recovers advances, but moves NO cash. The run sits as 'accrued' until it
+// is Settled. Gate: payroll.approve (committing the liability is an approver act).
+router.post('/payroll/runs/:id/accrue', authorize('payroll', 'approve'),
+  auditAction('accrue', 'mill_payroll_run', (req) => req.params.id),
+  async (req, res) => {
+  try {
+    const run = await db('mill_payroll_runs').where('id', req.params.id).first();
+    if (!run) return res.status(404).json({ success: false, message: 'Payroll run not found.' });
+    if (run.status !== 'approved') return res.status(409).json({ success: false, message: `Only an Approved run can be accrued (this run is ${run.status}).` });
+    const lines = await db('mill_payroll_lines').where('run_id', run.id);
+    const netTotal = parseFloat(run.net_total) || 0;
+
+    // 1) Book the salaries expense as a PENDING payable (pay_now:false → no cash).
+    let expense = null;
+    if (netTotal > 0) {
+      expense = await expensesService.create({
+        expense_type: 'mill', category: 'salaries', amount: netTotal, currency: 'PKR',
+        expense_date: run.pay_date,
+        description: `Salaries (accrued) — payroll run ${run.period}`,
+        notes: run.notes || `Payroll ${run.period}: ${run.employee_count} employee(s) · net ${netTotal} (accrued)`,
+        pay_now: false,
+      }, req.user?.id);
+    }
+
+    // 2) Recover advances + mark the run accrued (advance recovery is non-cash,
+    //    so it belongs with recognising the net liability).
+    const updated = await db.transaction(async (trx) => {
+      for (const l of lines) {
+        const ded = parseFloat(l.advance_deducted) || 0;
+        if (ded > 0 && l.worker_id) await recoverAdvancesForWorker(trx, l.worker_id, ded, { period: run.period, runId: run.id, lineId: l.id });
+        if (l.skip_reason && l.worker_id) await markPeriodSkipped(trx, l.worker_id, run.period, l.skip_reason);
+      }
+      const [r] = await trx('mill_payroll_runs').where('id', run.id)
+        .update({ status: 'accrued', expense_id: expense?.id || null, accrued_by: req.user?.id || null, accrued_at: trx.fn.now(), updated_at: trx.fn.now() }).returning('*');
+      return r;
+    });
+    return res.json({ success: true, data: { run: updated } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// SETTLE an accrued run — NOW the cash moves: pay the pending salaries payable
+// (DR 2040 Salaries Payable / CR Cash & Bank) via the run's stored pay method/
+// account. Advances were already recovered at accrual. Gate: payroll.pay.
+router.post('/payroll/runs/:id/settle', authorize('payroll', 'pay'),
+  auditAction('settle', 'mill_payroll_run', (req) => req.params.id),
+  async (req, res) => {
+  try {
+    const run = await db('mill_payroll_runs').where('id', req.params.id).first();
+    if (!run) return res.status(404).json({ success: false, message: 'Payroll run not found.' });
+    if (run.status !== 'accrued') return res.status(409).json({ success: false, message: `Only an Accrued run can be settled (this run is ${run.status}).` });
+
+    // Settle the accrued payable (no-op if a zero-net run had no expense).
+    if (run.expense_id) {
+      await expensesService.markPaid(run.expense_id, {
+        bank_account_id: run.bank_account_id || null,
+        payment_method: run.pay_method || 'cash',
+        paid_date: run.pay_date,
+      }, req.user?.id);
+    }
+    const [updated] = await db('mill_payroll_runs').where('id', run.id)
+      .update({ status: 'paid', paid_by: req.user?.id || null, paid_at: db.fn.now(), updated_at: db.fn.now() }).returning('*');
+    return res.json({ success: true, data: { run: updated } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
 // VOID a Prepared/Approved run (before payment). Nothing posted yet, so just
 // mark it voided — frees its workers for a new run. (Paid runs use DELETE.)
 router.post('/payroll/runs/:id/void', authorize('payroll', 'approve'),
@@ -1571,8 +1640,9 @@ router.delete('/payroll/runs/:id', authorize('payroll', 'delete'), async (req, r
     const run = await db('mill_payroll_runs').where('id', req.params.id).first();
     if (!run) return res.status(404).json({ success: false, message: 'Payroll run not found.' });
     // A Prepared/Approved/Voided run never posted money or recovered advances —
-    // just delete it (lines cascade). Only paid/posted runs need reversal.
-    if (!['paid', 'posted'].includes(run.status)) {
+    // just delete it (lines cascade). Paid/posted (cash + GL) AND accrued
+    // (expense + liability + advances, no cash yet) runs need full reversal.
+    if (!['paid', 'posted', 'accrued'].includes(run.status)) {
       await db('mill_payroll_runs').where('id', run.id).del();
       return res.json({ success: true, data: { deleted: run.id } });
     }

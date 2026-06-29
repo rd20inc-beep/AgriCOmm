@@ -1142,6 +1142,8 @@ COL mill_payroll_lines.skip_reason:text:NULL
 COL mill_payroll_lines.updated_at:timestamp with time zone:NOT NULL
 COL mill_payroll_lines.worker_id:integer:NULL
 COL mill_payroll_lines.worker_name:character varying:NOT NULL
+COL mill_payroll_runs.accrued_at:timestamp with time zone:NULL
+COL mill_payroll_runs.accrued_by:integer:NULL
 COL mill_payroll_runs.advance_total:numeric:NOT NULL
 COL mill_payroll_runs.approved_at:timestamp with time zone:NULL
 COL mill_payroll_runs.approved_by:integer:NULL

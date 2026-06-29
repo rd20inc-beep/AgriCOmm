@@ -11,11 +11,17 @@ const { resolveCashAccountId } = require('../../shared/cashAccounts');
 // never blocks the payment. Returns nothing.
 async function postExpenseSettlement(trx, { expense, paymentNo, payDate, userId }) {
   try {
-    const [ap, cash] = await Promise.all([
-      trx('chart_of_accounts').where({ code: '2010' }).first(),
+    // Settle against the SAME payable the accrual credited: salaries credit
+    // 2040 Salaries Payable, everything else credits 2010 Supplier Payable. The
+    // settlement must debit that account back or the payable never clears.
+    const payableCode = expense.category === 'salaries' ? '2040' : '2010';
+    let [ap, cash] = await Promise.all([
+      trx('chart_of_accounts').where({ code: payableCode }).first(),
       trx('chart_of_accounts').where({ code: '1000' }).first(),
     ]);
-    if (!ap || !cash) { console.warn(`Expense settlement journal skipped (missing 2010/1000) for ${paymentNo}`); return; }
+    // Fall back to Supplier Payable if the dedicated account is missing (older DB).
+    if (!ap && payableCode !== '2010') ap = await trx('chart_of_accounts').where({ code: '2010' }).first();
+    if (!ap || !cash) { console.warn(`Expense settlement journal skipped (missing ${payableCode}/1000) for ${paymentNo}`); return; }
     const amt = parseFloat(expense.amount_pkr) || 0;
     if (amt <= 0) return;
     const entity = expense.expense_type === 'mill' ? 'mill' : expense.expense_type === 'export' ? 'export' : 'general';
@@ -101,12 +107,19 @@ const expensesService = {
         resolvedAccountId = await resolveCashAccountId(trx, { entity: expense_type || 'general' });
       }
 
-      // Route salaries to the dedicated 6135 Salaries & Wages account (Phase 9)
-      // instead of the generic 6000 the expense_recorded rule debits.
+      // Route salaries to dedicated GL accounts (Phase 9/10): DR 6135 Salaries &
+      // Wages (instead of generic 6000) and CR 2040 Salaries Payable (instead of
+      // generic 2010 Supplier Payable). Either falls back to the rule default if
+      // the account is missing on an older DB.
       let salaryDebitAccountId = null;
+      let salaryCreditAccountId = null;
       if (category === 'salaries') {
-        const salAcc = await trx('chart_of_accounts').where('code', '6135').first();
-        if (salAcc) salaryDebitAccountId = salAcc.id;
+        const [salDr, salCr] = await Promise.all([
+          trx('chart_of_accounts').where('code', '6135').first(),
+          trx('chart_of_accounts').where('code', '2040').first(),
+        ]);
+        if (salDr) salaryDebitAccountId = salDr.id;
+        if (salCr) salaryCreditAccountId = salCr.id;
       }
 
       const [expense] = await trx('business_expenses').insert({
@@ -261,7 +274,7 @@ const expensesService = {
           }
         }
         await postExpenseSettlement(trx, {
-          expense: { amount_pkr: amountPkr, supplier_id, expense_type, expense_no: expenseNo },
+          expense: { amount_pkr: amountPkr, supplier_id, expense_type, expense_no: expenseNo, category },
           paymentNo, payDate, userId,
         });
       }
@@ -283,6 +296,7 @@ const expensesService = {
           partyType: supplier_id ? 'supplier' : null,
           partyId: supplier_id || null,
           debitAccountId: salaryDebitAccountId,
+          creditAccountId: salaryCreditAccountId,
         });
       } catch (e) {
         console.warn('Expense journal post failed:', e.message);
@@ -394,6 +408,9 @@ const expensesService = {
       // Cash with no explicit account → the paying entity's cash float (Mill Cash
       // for mill expenses, Office Petty Cash for Head Office / general).
       const acctId = bank_account_id || (payment_method === 'cash' ? await resolveCashAccountId(trx, { entity: expense.expense_type || 'general' }) : null);
+      // payments.payment_method is constrained to the canonical set; map the UI
+      // shorthand 'bank' → 'bank_transfer' so a bank settlement doesn't 500.
+      const payMethod = (payment_method === 'bank' || !payment_method) ? 'bank_transfer' : payment_method;
       const [updated] = await trx('business_expenses').where('id', id).update({
         payment_status: fullyPaid ? 'Paid' : 'Partial',
         bank_account_id: acctId,
@@ -416,21 +433,46 @@ const expensesService = {
       // Canonical payment row for this installment.
       const payCount = await trx('payments').count('id as c').first();
       const paymentNo = `EXP-PAY-${(parseInt(payCount?.c) || 0) + 1}`;
-      await trx('payments').insert({
+      const [payRow] = await trx('payments').insert({
         payment_no: paymentNo,
         type: 'payment', amount: payAmt, currency: 'PKR', fx_rate: 1, base_amount_pkr: payAmt,
-        payment_method: payment_method || 'bank', bank_account_id: acctId,
+        payment_method: payMethod, bank_account_id: acctId,
         bank_reference: payment_reference || null, due_date: due_date || null,
         linked_payable_id: payable ? payable.id : null,
         payment_date: payDate, notes: notes || `Payment for ${expense.expense_no}`, created_by: userId || null,
-      });
+      }).returning('id');
 
-      // Debit the resolved cash/bank account for this installment.
+      // Debit the resolved cash/bank account for this installment + record the
+      // outflow on the account's transaction ledger (mirrors create()'s pay-now).
       if (acctId) {
         await trx('bank_accounts').where('id', acctId).update({
           current_balance: trx.raw('current_balance - ?', [payAmt]),
           updated_at: trx.fn.now(),
         });
+        try {
+          const acct = await trx('bank_accounts').where('id', acctId).first();
+          const btCount = await trx('bank_transactions').count('id as c').first();
+          const btNo = `BT-${String((parseInt(btCount?.c) || 0) + 1).padStart(4, '0')}`;
+          await trx('bank_transactions').insert({
+            transaction_no: btNo,
+            bank_account_id: acctId,
+            type: 'debit',
+            amount: payAmt,
+            currency: 'PKR',
+            status: 'posted',
+            transaction_date: payDate,
+            reference: paymentNo,
+            notes: notes || `Payment for ${expense.expense_no}`,
+            source: expense.category === 'salaries' ? 'salaries' : 'expense',
+            linked_payment_id: payRow?.id || null,
+            running_balance: acct ? acct.current_balance : null,
+            category: expense.category || 'expense',
+            counterparty: expense.vendor_name || null,
+            created_by: userId || null,
+          });
+        } catch (e) {
+          console.warn('Expense settlement bank_transaction write failed:', e.message);
+        }
       }
 
       // GL settlement for this installment: DR Supplier Payable / CR Cash & Bank.

@@ -1491,6 +1491,14 @@ export function useVoidPayrollRun() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: ({ id, reason }) => millingApi.voidPayrollRun(id, reason), onSuccess: () => { invalidatePayroll(qc); qc.invalidateQueries({ queryKey: ['payroll-pending'] }); } });
 }
+export function useAccruePayrollRun() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id) => millingApi.accruePayrollRun(id), onSuccess: () => { invalidatePayroll(qc); qc.invalidateQueries({ queryKey: ['payroll-pending'] }); } });
+}
+export function useSettlePayrollRun() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id) => millingApi.settlePayrollRun(id), onSuccess: () => { invalidatePayroll(qc); qc.invalidateQueries({ queryKey: ['payroll-pending'] }); } });
+}
 
 export function useMills() {
   return useQuery({
