@@ -1085,6 +1085,25 @@ COL mill_expenses.payment_method:character varying:NULL
 COL mill_expenses.period:character varying:NULL
 COL mill_expenses.reference:character varying:NULL
 COL mill_expenses.updated_at:timestamp with time zone:NOT NULL
+COL mill_final_settlements.advances_deducted:numeric:NOT NULL
+COL mill_final_settlements.bank_account_id:integer:NULL
+COL mill_final_settlements.breakdown:jsonb:NULL
+COL mill_final_settlements.created_at:timestamp with time zone:NOT NULL
+COL mill_final_settlements.created_by:integer:NULL
+COL mill_final_settlements.expense_id:integer:NULL
+COL mill_final_settlements.final_salary:numeric:NOT NULL
+COL mill_final_settlements.gratuity:numeric:NOT NULL
+COL mill_final_settlements.id:integer:NOT NULL
+COL mill_final_settlements.leave_encashment:numeric:NOT NULL
+COL mill_final_settlements.left_date:date:NULL
+COL mill_final_settlements.net_amount:numeric:NOT NULL
+COL mill_final_settlements.notes:text:NULL
+COL mill_final_settlements.other_deductions:numeric:NOT NULL
+COL mill_final_settlements.pay_method:character varying:NOT NULL
+COL mill_final_settlements.service_years:numeric:NULL
+COL mill_final_settlements.settlement_date:date:NOT NULL
+COL mill_final_settlements.updated_at:timestamp with time zone:NOT NULL
+COL mill_final_settlements.worker_id:integer:NOT NULL
 COL mill_items.avg_cost_per_unit:numeric:NULL
 COL mill_items.bag_type_id:integer:NULL
 COL mill_items.capacity_kg:numeric:NULL
@@ -2561,6 +2580,8 @@ CON mill_expenses.chk_me_amount_nonneg(c)
 CON mill_expenses.mill_expenses_created_by_foreign(f)
 CON mill_expenses.mill_expenses_mill_id_foreign(f)
 CON mill_expenses.mill_expenses_pkey(p)
+CON mill_final_settlements.mill_final_settlements_pkey(p)
+CON mill_final_settlements.mill_final_settlements_worker_id_foreign(f)
 CON mill_items.chk_mill_items_avg_cost_per_unit_nn(c)
 CON mill_items.chk_mill_items_last_purchase_cost_nn(c)
 CON mill_items.chk_mill_items_reorder_level_nn(c)

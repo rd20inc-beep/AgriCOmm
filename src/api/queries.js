@@ -1346,6 +1346,18 @@ export function useCreateLeaveRequest() { const qc = useQueryClient(); return us
 export function useApproveLeaveRequest() { const qc = useQueryClient(); return useMutation({ mutationFn: (id) => millingApi.approveLeaveRequest(id), onSuccess: () => invalidateLeave(qc) }); }
 export function useRejectLeaveRequest() { const qc = useQueryClient(); return useMutation({ mutationFn: (id) => millingApi.rejectLeaveRequest(id), onSuccess: () => invalidateLeave(qc) }); }
 export function useDeleteLeaveRequest() { const qc = useQueryClient(); return useMutation({ mutationFn: (id) => millingApi.deleteLeaveRequest(id), onSuccess: () => invalidateLeave(qc) }); }
+// ── Final settlement (Phase 25) ──
+export function useFinalSettlement(workerId) {
+  return useQuery({ queryKey: ['final-settlement', workerId], enabled: !!workerId, queryFn: async () => { const r = await millingApi.computeFinalSettlement(workerId); return r?.data || null; } });
+}
+export function useFinalSettlements() {
+  return useQuery({ queryKey: ['final-settlements'], queryFn: async () => { const r = await millingApi.listFinalSettlements(); return transformKeys(r?.data || []); } });
+}
+function invalidateSettlement(qc) {
+  ['final-settlements', 'mill-workers', 'payroll-summary', 'worker-advances'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+}
+export function useFinalizeSettlement() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ workerId, data }) => millingApi.finalizeSettlement(workerId, data), onSuccess: () => invalidateSettlement(qc) }); }
+export function useReverseSettlement() { const qc = useQueryClient(); return useMutation({ mutationFn: (id) => millingApi.reverseFinalSettlement(id), onSuccess: () => invalidateSettlement(qc) }); }
 
 export function useWorkerAdvances(workerId) {
   return useQuery({

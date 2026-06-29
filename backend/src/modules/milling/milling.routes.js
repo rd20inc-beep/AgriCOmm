@@ -1150,6 +1150,129 @@ router.delete('/payroll/leave-requests/:id', authorize('payroll', 'delete'), asy
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ── Final settlement (Phase 25) ─────────────────────────────────────────────
+const sYmd = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : (v ? String(v).slice(0, 10) : null));
+// Compute the suggested settlement components for a worker (all admin-editable).
+async function computeFinalSettlement(workerId) {
+  const w = await db('mill_workers').where('id', workerId).first();
+  if (!w) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const joined = sYmd(w.joined_date); const left = sYmd(w.left_date) || today;
+  const serviceYears = joined ? Math.max(0, Math.round(((Date.parse(left) - Date.parse(joined)) / (365.25 * 86400000)) * 100) / 100) : 0;
+  const monthly = parseFloat(w.monthly_salary) || 0; const dailyWage = parseFloat(w.daily_wage) || 0;
+  const dailyRate = w.pay_type === 'monthly' ? monthly / 30 : dailyWage;
+  // Final prorated salary for the month containing left_date (monthly only).
+  let finalSalary = 0;
+  if (w.pay_type === 'monthly') {
+    const ld = new Date(`${left}T00:00:00Z`); const y = ld.getUTCFullYear(); const m = ld.getUTCMonth();
+    const daysInMonth = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    const monthStart = `${y}-${String(m + 1).padStart(2, '0')}-01`;
+    const empStart = joined && joined > monthStart ? joined : monthStart;
+    const empDays = Math.max(0, Math.round((Date.parse(left) - Date.parse(empStart)) / 86400000) + 1);
+    finalSalary = Math.round(monthly * Math.min(1, empDays / daysInMonth));
+  }
+  const balances = await computeLeaveBalances(workerId, new Date(`${left}T00:00:00Z`).getUTCFullYear());
+  const leaveLines = balances.filter((b) => b.paid && b.remaining > 0).map((b) => ({ name: b.name, days: b.remaining, amount: Math.round(b.remaining * dailyRate) }));
+  const leaveEncashment = leaveLines.reduce((s, l) => s + l.amount, 0);
+  const completedYears = Math.floor(serviceYears);
+  const gratuity = Math.round(dailyRate * 30 * completedYears);
+  const advRow = await db('mill_worker_advances').where('worker_id', workerId).where('status', 'outstanding').select(db.raw('COALESCE(SUM(amount - recovered_amount),0) as o')).first();
+  const advancesOutstanding = Math.round(parseFloat(advRow.o) || 0);
+  const suggestedNet = Math.max(0, finalSalary + leaveEncashment + gratuity - advancesOutstanding);
+  return {
+    worker: { id: w.id, name: w.name, role: w.role, cnic: w.cnic, payType: w.pay_type, joinedDate: joined, leftDate: sYmd(w.left_date), monthlySalary: monthly, dailyWage },
+    today, left, serviceYears, completedYears, finalSalary, leaveEncashment, leaveLines, gratuity, advancesOutstanding, suggestedNet,
+  };
+}
+
+router.get('/payroll/final-settlement/:workerId', authorize('payroll', 'view'), async (req, res) => {
+  try {
+    const data = await computeFinalSettlement(parseInt(req.params.workerId, 10));
+    if (!data) return res.status(404).json({ success: false, message: 'Worker not found.' });
+    return res.json({ success: true, data });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.get('/payroll/final-settlements', authorize('payroll', 'view'), async (req, res) => {
+  try {
+    const rows = await db('mill_final_settlements as s').leftJoin('mill_workers as w', 'w.id', 's.worker_id')
+      .select('s.*', 'w.name as worker_name', 'w.role as worker_role').orderBy('s.created_at', 'desc');
+    return res.json({ success: true, data: rows });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.post('/payroll/final-settlement/:workerId', authorize('payroll', 'pay'),
+  auditAction('settle', 'mill_final_settlement', (req) => req.params.workerId),
+  async (req, res) => {
+  try {
+    const w = await db('mill_workers').where('id', req.params.workerId).first();
+    if (!w) return res.status(404).json({ success: false, message: 'Worker not found.' });
+    const b = req.body || {};
+    const today = new Date().toISOString().slice(0, 10);
+    const finalSalary = Math.max(0, parseFloat(b.final_salary) || 0);
+    const leaveEncash = Math.max(0, parseFloat(b.leave_encashment) || 0);
+    const gratuity = Math.max(0, parseFloat(b.gratuity) || 0);
+    const advances = Math.max(0, parseFloat(b.advances_deducted) || 0);
+    const otherDed = Math.max(0, parseFloat(b.other_deductions) || 0);
+    const net = Math.max(0, finalSalary + leaveEncash + gratuity - advances - otherDed);
+    const method = b.pay_method === 'bank' ? 'bank' : 'cash';
+    const settleDate = b.settlement_date || today;
+    const leftDate = b.left_date || sYmd(w.left_date) || today;
+
+    // 1) Pay the net out as a salaries expense (reuses 6135/cash GL).
+    let expense = null;
+    if (net > 0) {
+      expense = await expensesService.create({
+        expense_type: 'mill', category: 'salaries', amount: net, currency: 'PKR', expense_date: settleDate,
+        description: `Final settlement — ${w.name}`, notes: b.notes || `Final settlement for ${w.name}`,
+        pay_now: true, bank_account_id: method === 'bank' ? (b.bank_account_id || null) : null, payment_method: method,
+      }, req.user?.id);
+    }
+
+    const settlement = await db.transaction(async (trx) => {
+      // 2) Clear outstanding advances deducted here (snapshot prior state for reversal).
+      const cleared = [];
+      if (advances > 0) {
+        const outs = await trx('mill_worker_advances').where('worker_id', w.id).where('status', 'outstanding');
+        for (const a of outs) { cleared.push({ id: a.id, prior_recovered: parseFloat(a.recovered_amount) || 0, prior_status: a.status }); }
+        await trx('mill_worker_advances').where('worker_id', w.id).where('status', 'outstanding')
+          .update({ recovered_amount: trx.raw('amount'), status: 'recovered', updated_at: trx.fn.now() });
+      }
+      const breakdown = { leaveLines: b.breakdown?.leaveLines || null, advancesCleared: cleared };
+      const [row] = await trx('mill_final_settlements').insert({
+        worker_id: w.id, settlement_date: settleDate, left_date: leftDate, service_years: b.service_years || null,
+        final_salary: finalSalary, leave_encashment: leaveEncash, gratuity, advances_deducted: advances, other_deductions: otherDed,
+        net_amount: net, pay_method: method, bank_account_id: method === 'bank' ? (b.bank_account_id || null) : null,
+        notes: b.notes || null, expense_id: expense?.id || null, breakdown: JSON.stringify(breakdown), created_by: req.user?.id || null,
+      }).returning('*');
+      // 3) Stamp left_date + deactivate the worker.
+      await trx('mill_workers').where('id', w.id).update({ is_active: false, left_date: leftDate, updated_at: trx.fn.now() });
+      return row;
+    });
+    return res.status(201).json({ success: true, data: settlement });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Reverse a settlement — unwind the payout, restore cleared advances, reactivate.
+router.delete('/payroll/final-settlements/:id', authorize('payroll', 'pay'),
+  auditAction('void', 'mill_final_settlement', (req) => req.params.id),
+  async (req, res) => {
+  try {
+    const s = await db('mill_final_settlements').where('id', req.params.id).first();
+    if (!s) return res.status(404).json({ success: false, message: 'Settlement not found.' });
+    await db.transaction(async (trx) => {
+      let bd = s.breakdown; if (typeof bd === 'string') { try { bd = JSON.parse(bd); } catch { bd = {}; } }
+      for (const a of (bd?.advancesCleared || [])) {
+        await trx('mill_worker_advances').where('id', a.id).update({ recovered_amount: a.prior_recovered, status: a.prior_status || 'outstanding', updated_at: trx.fn.now() });
+      }
+      if (s.expense_id) await unwindAdvanceExpense(trx, s.expense_id); // reverse cash-out + GL + payable
+      await trx('mill_workers').where('id', s.worker_id).update({ is_active: true, updated_at: trx.fn.now() });
+      await trx('mill_final_settlements').where('id', s.id).del();
+    });
+    return res.json({ success: true, data: { deleted: s.id } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
 // Delete a worker permanently — unwinds every advance's cash-out, then cascades
 // attendance + advances (FK onDelete CASCADE) and removes the worker.
 router.delete('/workers/:id', authorize('payroll', 'delete'), async (req, res) => {

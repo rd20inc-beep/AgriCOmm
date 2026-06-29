@@ -4,7 +4,7 @@ import {
   DollarSign, Users, Zap, Shield, TrendingUp, TrendingDown, AlertTriangle,
   Plus, UserPlus, Package, Factory, Wallet, ArrowUpRight, ArrowDownRight, Printer,
   Building2, Banknote, Receipt, Layers, Truck, ExternalLink,
-  Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X, FileText, RefreshCw, Sparkles, ArrowLeftRight, Inbox, Check, ShoppingCart, Clock, Landmark,
+  Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X, FileText, RefreshCw, Sparkles, ArrowLeftRight, Inbox, Check, ShoppingCart, Clock, Landmark, LogOut,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
@@ -22,6 +22,7 @@ import {
   useTaxStatement, useWorkerRequests, useWorkerRequestsCount, useResolveWorkerRequest,
   useLeaveTypes, useLeaveRequests, useLeaveRequestsCount, useCreateLeaveType, useUpdateLeaveType, useDeleteLeaveType,
   useApproveLeaveRequest, useRejectLeaveRequest,
+  useFinalSettlement, useFinalizeSettlement,
   usePayrollSchedule, useSavePayrollSchedule, useRunPayrollNow,
   usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow, useAcceptFundTransfer,
   useMillLotCosts, useLocalSales, useRecordPayment, usePayablePayments,
@@ -222,6 +223,7 @@ export default function MillFinanceDashboard() {
   const { data: pendingRequestCount = 0 } = useWorkerRequestsCount();
   const [showLeaveDrawer, setShowLeaveDrawer] = useState(false);
   const { data: pendingLeaveCount = 0 } = useLeaveRequestsCount();
+  const [settleWorker, setSettleWorker] = useState(null);
   const [adjustWorker, setAdjustWorker] = useState(null); // open adjustments drawer for this worker
   const runNowMut = useRunPayrollNow();
 
@@ -1687,6 +1689,7 @@ export default function MillFinanceDashboard() {
                         {canPreparePayroll && <button title="Give advance" onClick={() => openAdvanceDrawer(w)} className="p-1.5 rounded-md text-amber-600 hover:bg-amber-50"><HandCoins className="w-3.5 h-3.5" /></button>}
                         {canPreparePayroll && <button title="Bonuses & deductions" onClick={() => setAdjustWorker(w)} className="p-1.5 rounded-md text-violet-600 hover:bg-violet-50"><Plus className="w-3.5 h-3.5" /></button>}
                         {canPreparePayroll && <button title="Edit" onClick={() => openWorkerDrawer(w)} className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100"><Pencil className="w-3.5 h-3.5" /></button>}
+                        {canPayPayroll && w.isActive && <button title="Final settlement" onClick={() => setSettleWorker(w)} className="p-1.5 rounded-md text-rose-600 hover:bg-rose-50"><LogOut className="w-3.5 h-3.5" /></button>}
                         {canPreparePayroll && <button title={w.isActive ? 'Deactivate' : 'Reactivate'} onClick={() => handleToggleActive(w)} className={`p-1.5 rounded-md hover:bg-gray-100 ${w.isActive ? 'text-gray-500' : 'text-emerald-600'}`}><Power className="w-3.5 h-3.5" /></button>}
                         {canDeletePayroll && <button title="Delete" onClick={() => setDeleteWorkerTarget(w)} className="p-1.5 rounded-md text-rose-500 hover:bg-rose-50"><Trash2 className="w-3.5 h-3.5" /></button>}
                         {!canPreparePayroll && !canDeletePayroll && <span className="text-[11px] text-gray-300">—</span>}
@@ -2367,6 +2370,11 @@ export default function MillFinanceDashboard() {
       {/* ─── LEAVE MANAGEMENT DRAWER ───────────────────────────────── */}
       {showLeaveDrawer && (
         <LeaveDrawer canManage={canApprovePayroll} workers={workers} onClose={() => setShowLeaveDrawer(false)} addToast={addToast} />
+      )}
+
+      {/* ─── FINAL SETTLEMENT DRAWER ───────────────────────────────── */}
+      {settleWorker && (
+        <FinalSettlementDrawer worker={settleWorker} bankAccounts={bankAccountsList} company={companyProfileData} onClose={() => setSettleWorker(null)} addToast={addToast} />
       )}
 
       {/* ─── BONUSES & DEDUCTIONS DRAWER ───────────────────────────── */}
@@ -4029,6 +4037,131 @@ function StatutoryDeductionsDrawer({ canPay, bankAccounts = [], company, onClose
       </div>
       )}
     </SlideDrawer>
+  );
+}
+
+// Printable end-of-service settlement voucher.
+function settlementVoucherBody(w, s, company) {
+  const co = company || {};
+  const name = co.legalName || co.name || 'AGRI COMMODITIES';
+  const rows = [
+    ['Final salary (prorated)', s.final_salary],
+    ['Leave encashment', s.leave_encashment],
+    ['Gratuity', s.gratuity],
+  ].filter(([, v]) => (parseFloat(v) || 0) !== 0).map(([k, v]) => `<tr><td>${k}</td><td class="r">${rsAmt(v)}</td></tr>`).join('');
+  const ded = [
+    ['Advances recovered', s.advances_deducted],
+    ['Other deductions', s.other_deductions],
+  ].filter(([, v]) => (parseFloat(v) || 0) !== 0).map(([k, v]) => `<tr><td>${k}</td><td class="r">− ${rsAmt(v)}</td></tr>`).join('');
+  return `<div class="slip">
+    ${docHeaderHtml(company, 'Final Settlement', `S-${s.id || ''}`, `Settled ${docDate(s.settlement_date)}`)}
+    <div class="meta">
+      <span><div class="k">Employee</div><div class="v">${w.name || '—'}</div></span>
+      <span><div class="k">Designation</div><div class="v" style="text-transform:capitalize">${w.role || '—'}</div></span>
+      <span><div class="k">CNIC</div><div class="v">${w.cnic || '—'}</div></span>
+      <span><div class="k">Last working day</div><div class="v">${docDate(s.left_date)}</div></span>
+      <span><div class="k">Service</div><div class="v">${s.service_years != null ? `${s.service_years} yrs` : '—'}</div></span>
+      <span><div class="k">Paid via</div><div class="v">${s.pay_method === 'bank' ? 'Bank transfer' : 'Cash'}</div></span>
+    </div>
+    <div class="sec">Earnings</div><table><tbody>${rows}</tbody></table>
+    ${ded ? `<div class="sec">Deductions</div><table><tbody>${ded}</tbody></table>` : ''}
+    <div class="net"><div><div style="font-size:10px;text-transform:uppercase;color:#047857">Net Settlement</div><b>${rsAmt(s.net_amount)}</b></div>
+      <div style="text-align:right;max-width:55%"><div class="words">Rupees ${amountInWords(s.net_amount)} Only</div></div></div>
+    <p style="margin-top:14px;font-size:11.5px;line-height:1.6">Received the above sum in full and final settlement of all my dues with <b>${name}</b> up to my last working day. I have no further claim.</p>
+    <div class="sign"><div><div class="l">Employee Signature</div></div><div><div class="l">Prepared By</div></div><div><div class="l">Authorized By</div></div></div>
+    <div class="muted" style="text-align:center;margin-top:14px">Computer-generated final settlement — ${name}.</div>
+  </div>`;
+}
+function printSettlement(w, s, company) { return openPayslipWindow(`Final Settlement ${w.name}`, settlementVoucherBody(w, s, company)); }
+
+// End-of-service final settlement — computes prorated salary + leave encashment
+// + gratuity − advances (all editable), pays the net out (6135/cash GL), clears
+// advances, and deactivates the worker.
+function FinalSettlementDrawer({ worker, bankAccounts = [], company, onClose, addToast }) {
+  const { data: calc, isLoading } = useFinalSettlement(worker.id);
+  const finalizeMut = useFinalizeSettlement();
+  const payBanks = (bankAccounts || []).filter((a) => a.type !== 'cash');
+  const [form, setForm] = useState(null);
+  useEffect(() => {
+    if (calc) setForm({
+      final_salary: calc.finalSalary, leave_encashment: calc.leaveEncashment, gratuity: calc.gratuity,
+      advances_deducted: calc.advancesOutstanding, other_deductions: 0,
+      pay_method: 'cash', bank_account_id: '', left_date: calc.left, settlement_date: calc.today, service_years: calc.serviceYears, notes: '',
+    });
+  }, [calc]);
+  const set = (p) => setForm((f) => ({ ...f, ...p }));
+  const n = (v) => parseFloat(v) || 0;
+  const net = form ? Math.max(0, n(form.final_salary) + n(form.leave_encashment) + n(form.gratuity) - n(form.advances_deducted) - n(form.other_deductions)) : 0;
+
+  async function finalize() {
+    if (form.pay_method === 'bank' && !form.bank_account_id) { addToast('Select a bank account', 'error'); return; }
+    if (!window.confirm(`Pay ${PKR(net)} and deactivate ${worker.name}? This closes their employment.`)) return;
+    try {
+      const res = await finalizeMut.mutateAsync({ workerId: worker.id, data: { ...form, bank_account_id: form.pay_method === 'bank' ? Number(form.bank_account_id) : null, breakdown: { leaveLines: calc.leaveLines } } });
+      const s = res?.data || res;
+      addToast(`Final settlement paid — ${PKR(s.net_amount)}`, 'success');
+      printSettlement(worker, { ...s, role: worker.role, cnic: worker.cnic }, company);
+      onClose();
+    } catch (e) { addToast(e.message, 'error'); }
+  }
+
+  return (
+    <SlideDrawer open onClose={onClose} title="Final settlement" subtitle={`End-of-service payout for ${worker.name}`} icon={LogOut} size="lg"
+      footer={form && (
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm text-gray-500">Net settlement <span className="font-semibold text-gray-900">{PKR(net)}</span></span>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+            <button onClick={finalize} disabled={finalizeMut.isPending} className="px-4 py-2 text-sm text-white bg-rose-600 rounded-lg hover:bg-rose-700 disabled:opacity-50">Pay &amp; close employment</button>
+          </div>
+        </div>
+      )}
+    >
+      {isLoading || !form ? <p className="text-sm text-gray-400">Computing…</p> : (
+        <div className="space-y-4">
+          <div className="rounded-lg bg-slate-50 p-3 text-xs text-gray-600">
+            <div className="font-semibold text-gray-800">{worker.name} · <span className="capitalize">{worker.role}</span></div>
+            <div>Joined {fmtDate(calc.worker.joinedDate)} · last day {fmtDate(form.left_date)} · <span className="font-medium">{calc.serviceYears} yrs service ({calc.completedYears} completed)</span></div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Final salary (prorated)" value={form.final_salary} onChange={(v) => set({ final_salary: v })} />
+            <Field label="Leave encashment" value={form.leave_encashment} onChange={(v) => set({ leave_encashment: v })} hint={calc.leaveLines.length ? calc.leaveLines.map((l) => `${l.name} ${l.days}d`).join(', ') : 'no unused paid leave'} />
+            <Field label="Gratuity" value={form.gratuity} onChange={(v) => set({ gratuity: v })} hint={`${calc.completedYears} completed yr(s)`} />
+            <Field label="Advances recovered (−)" value={form.advances_deducted} onChange={(v) => set({ advances_deducted: v })} />
+            <Field label="Other deductions (−)" value={form.other_deductions} onChange={(v) => set({ other_deductions: v })} />
+            <div>
+              <label className="block text-[11px] text-gray-500 mb-1">Last working day</label>
+              <input type="date" value={form.left_date} onChange={(e) => set({ left_date: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="block text-[11px] text-gray-500 mb-1">Pay via</label>
+              <select value={form.pay_method === 'bank' ? `bank:${form.bank_account_id}` : 'cash'} onChange={(e) => { const v = e.target.value; if (v === 'cash') set({ pay_method: 'cash', bank_account_id: '' }); else set({ pay_method: 'bank', bank_account_id: v.replace('bank:', '') }); }} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+                <option value="cash">Mill Cash</option>
+                {payBanks.map((a) => <option key={a.id} value={`bank:${a.id}`}>{a.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] text-gray-500 mb-1">Settlement date</label>
+              <input type="date" value={form.settlement_date} onChange={(e) => set({ settlement_date: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-[11px] text-gray-500 mb-1">Notes</label>
+            <textarea rows={2} value={form.notes} onChange={(e) => set({ notes: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+          </div>
+          <p className="text-[11px] text-gray-400">Pays the net via a salaries expense (DR 6135 / CR Cash &amp; Bank), recovers the outstanding advances, sets the last working day and deactivates the employee. A settlement voucher prints on confirm.</p>
+        </div>
+      )}
+    </SlideDrawer>
+  );
+}
+function Field({ label, value, onChange, hint }) {
+  return (
+    <div>
+      <label className="block text-[11px] text-gray-500 mb-1">{label}</label>
+      <input type="number" value={value} onChange={(e) => onChange(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm tabular-nums" />
+      {hint && <div className="text-[10px] text-gray-400 mt-0.5">{hint}</div>}
+    </div>
   );
 }
 
