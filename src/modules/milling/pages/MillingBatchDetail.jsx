@@ -374,25 +374,29 @@ export default function MillingBatchDetail() {
   }
 
   function openYieldModal() {
+    // The yield form captures KG (Phase 5c); the transform exposes the batch in
+    // MT, so ×1000 to prefill the KG inputs. State keys keep their *MT names but
+    // now hold KG values.
+    const k = (mt) => (mt ? Math.round(parseFloat(mt) * 1000 * 100) / 100 : '');
     setYieldForm({
-      actualFinishedMT: batch.actualFinishedMT || '',
-      brokenMT: batch.brokenMT || '',
-      b1MT: batch.b1MT || batch.b1_mt || '',
-      b2MT: batch.b2MT || batch.b2_mt || '',
-      b3MT: batch.b3MT || batch.b3_mt || '',
-      csrMT: batch.csrMT || batch.csr_mt || '',
-      shortGrainMT: batch.shortGrainMT || batch.short_grain_mt || '',
-      sortexMT: batch.sortexRejectsMT || batch.sortex_rejects_mt || '',
-      powderMT: batch.powderMT || batch.powder_mt || '',
-      sweepingMT: batch.sweepingMT || batch.sweeping_mt || '',
-      chobaMT: batch.chobaMT || batch.choba_mt || '',
-      ovMT: batch.ovMT || batch.ov_mt || '',
-      stoneMT: batch.stoneMT || batch.stone_mt || '',
-      wastageMT: batch.wastageMT || '',
+      actualFinishedMT: k(batch.actualFinishedMT),
+      brokenMT: k(batch.brokenMT),
+      b1MT: k(batch.b1MT),
+      b2MT: k(batch.b2MT),
+      b3MT: k(batch.b3MT),
+      csrMT: k(batch.csrMT),
+      shortGrainMT: k(batch.shortGrainMT),
+      sortexMT: k(batch.sortexRejectsMT),
+      powderMT: k(batch.powderMT),
+      sweepingMT: k(batch.sweepingMT),
+      chobaMT: k(batch.chobaMT),
+      ovMT: k(batch.ovMT),
+      stoneMT: k(batch.stoneMT),
+      wastageMT: k(batch.wastageMT),
       // Carry forward legacy bran/husk so re-submitting an old batch
       // doesn't zero them out.
-      branMT: batch.branMT || '',
-      huskMT: batch.huskMT || '',
+      branMT: k(batch.branMT),
+      huskMT: k(batch.huskMT),
     });
     setShowYieldModal(true);
   }
@@ -437,28 +441,30 @@ export default function MillingBatchDetail() {
     const stone = parseFloat(yieldForm.stoneMT) || 0;
     const wastage = parseFloat(yieldForm.wastageMT) || 0;
     const totalOutput = finished + broken + bran + husk + sortex + powder + sweeping + choba + ov + stone + wastage;
-    const yieldPct = batch.rawQtyMT > 0 ? parseFloat(((finished / batch.rawQtyMT) * 100).toFixed(1)) : 0;
+    // form values are KG; batch.rawQtyMT is MT → ×1000 for the yield %.
+    const rawKg = (parseFloat(batch.rawQtyMT) || 0) * 1000;
+    const yieldPct = rawKg > 0 ? parseFloat(((finished / rawKg) * 100).toFixed(1)) : 0;
 
     try {
       const yieldRes = await recordYieldMut.mutateAsync({
         id: batchId,
         data: {
-          actual_finished_mt: finished,
-          broken_mt: broken,
-          b1_mt: b1,
-          b2_mt: b2,
-          b3_mt: b3,
-          csr_mt: csr,
-          short_grain_mt: shortGrain,
-          bran_mt: bran,
-          husk_mt: husk,
-          sortex_rejects_mt: sortex,
-          powder_mt: powder,
-          sweeping_mt: sweeping,
-          choba_mt: choba,
-          ov_mt: ov,
-          stone_mt: stone,
-          wastage_mt: wastage,
+          actual_finished_kg: finished,
+          broken_kg: broken,
+          b1_kg: b1,
+          b2_kg: b2,
+          b3_kg: b3,
+          csr_kg: csr,
+          short_grain_kg: shortGrain,
+          bran_kg: bran,
+          husk_kg: husk,
+          sortex_rejects_kg: sortex,
+          powder_kg: powder,
+          sweeping_kg: sweeping,
+          choba_kg: choba,
+          ov_kg: ov,
+          stone_kg: stone,
+          wastage_kg: wastage,
         },
       });
       addToast(`Yield output recorded for ${batch.id} — Yield: ${yieldPct}%`);
@@ -476,15 +482,15 @@ export default function MillingBatchDetail() {
           const res = await millingApi.getLastPrices();
           const lp = res?.data?.lastPrices || {};
           setPriceForm({
-            broken: String(lp.broken || commodityPrices.broken),
-            sortex: String(lp.sortex || commodityPrices.sortex),
-            bran: String(lp.bran || commodityPrices.bran),
-            husk: String(lp.husk || commodityPrices.husk),
-            b1: String(lp.b1 || lp.broken || commodityPrices.broken),
-            b2: String(lp.b2 || lp.broken || commodityPrices.broken),
-            b3: String(lp.b3 || lp.broken || commodityPrices.broken),
-            csr: String(lp.csr || lp.broken || commodityPrices.broken),
-            shortGrain: String(lp.short_grain || lp.broken || commodityPrices.broken),
+            broken: String(lp.broken || commodityPrices.broken / 1000),
+            sortex: String(lp.sortex || commodityPrices.sortex / 1000),
+            bran: String(lp.bran || commodityPrices.bran / 1000),
+            husk: String(lp.husk || commodityPrices.husk / 1000),
+            b1: String(lp.b1 || lp.broken || commodityPrices.broken / 1000),
+            b2: String(lp.b2 || lp.broken || commodityPrices.broken / 1000),
+            b3: String(lp.b3 || lp.broken || commodityPrices.broken / 1000),
+            csr: String(lp.csr || lp.broken || commodityPrices.broken / 1000),
+            shortGrain: String(lp.short_grain || lp.broken || commodityPrices.broken / 1000),
             ...defaultCostInputs(),
           });
         } catch { /* use defaults */ }
@@ -1875,7 +1881,7 @@ export default function MillingBatchDetail() {
 
           {/* Finished rice */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Finished Rice (MT) *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Finished Rice (KG) *</label>
             <input type="number" step="0.01" min="0" required value={yieldForm.actualFinishedMT}
               onChange={(e) => setYieldForm(prev => ({ ...prev, actualFinishedMT: e.target.value }))}
               placeholder="e.g. 49.2"
@@ -1886,7 +1892,7 @@ export default function MillingBatchDetail() {
               generic "Broken Rice" tag). Total is computed and shown live. */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-sm font-medium text-gray-700">Grades (MT)</label>
+              <label className="block text-sm font-medium text-gray-700">Grades (KG)</label>
               {(() => {
                 const total = ['b1MT','b2MT','b3MT','csrMT','shortGrainMT']
                   .reduce((s, k) => s + (parseFloat(yieldForm[k]) || 0), 0);
@@ -1897,35 +1903,35 @@ export default function MillingBatchDetail() {
             </div>
             <div className="grid grid-cols-5 gap-2">
               <div>
-                <label className="block text-[11px] font-medium text-gray-600 mb-1">B1 (MT)</label>
+                <label className="block text-[11px] font-medium text-gray-600 mb-1">B1 (KG)</label>
                 <input type="number" step="0.01" min="0" value={yieldForm.b1MT}
                   onChange={(e) => setYieldForm(prev => ({ ...prev, b1MT: e.target.value }))}
                   placeholder="0"
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
               </div>
               <div>
-                <label className="block text-[11px] font-medium text-gray-600 mb-1">B2 (MT)</label>
+                <label className="block text-[11px] font-medium text-gray-600 mb-1">B2 (KG)</label>
                 <input type="number" step="0.01" min="0" value={yieldForm.b2MT}
                   onChange={(e) => setYieldForm(prev => ({ ...prev, b2MT: e.target.value }))}
                   placeholder="0"
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
               </div>
               <div>
-                <label className="block text-[11px] font-medium text-gray-600 mb-1">B3 (MT)</label>
+                <label className="block text-[11px] font-medium text-gray-600 mb-1">B3 (KG)</label>
                 <input type="number" step="0.01" min="0" value={yieldForm.b3MT}
                   onChange={(e) => setYieldForm(prev => ({ ...prev, b3MT: e.target.value }))}
                   placeholder="0"
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
               </div>
               <div>
-                <label className="block text-[11px] font-medium text-gray-600 mb-1">CSR (MT)</label>
+                <label className="block text-[11px] font-medium text-gray-600 mb-1">CSR (KG)</label>
                 <input type="number" step="0.01" min="0" value={yieldForm.csrMT}
                   onChange={(e) => setYieldForm(prev => ({ ...prev, csrMT: e.target.value }))}
                   placeholder="0"
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
               </div>
               <div>
-                <label className="block text-[11px] font-medium text-gray-600 mb-1">Short Grain (MT)</label>
+                <label className="block text-[11px] font-medium text-gray-600 mb-1">Short Grain (KG)</label>
                 <input type="number" step="0.01" min="0" value={yieldForm.shortGrainMT}
                   onChange={(e) => setYieldForm(prev => ({ ...prev, shortGrainMT: e.target.value }))}
                   placeholder="0"
@@ -1937,7 +1943,7 @@ export default function MillingBatchDetail() {
           {/* By-products */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Sortex Rejects (MT)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Sortex Rejects (KG)</label>
               <input type="number" step="0.01" min="0" value={yieldForm.sortexMT}
                 onChange={(e) => setYieldForm(prev => ({ ...prev, sortexMT: e.target.value }))}
                 placeholder="e.g. 2.1"
@@ -1945,7 +1951,7 @@ export default function MillingBatchDetail() {
               <p className="text-[11px] text-gray-400 mt-0.5">Color-sorter rejected kernels (yellow/damaged)</p>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Powder (MT)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Powder (KG)</label>
               <input type="number" step="0.01" min="0" value={yieldForm.powderMT}
                 onChange={(e) => setYieldForm(prev => ({ ...prev, powderMT: e.target.value }))}
                 placeholder="e.g. 0.5"
@@ -1953,7 +1959,7 @@ export default function MillingBatchDetail() {
               <p className="text-[11px] text-gray-400 mt-0.5">Rice powder — sellable, goes to inventory</p>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">S.W (MT)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">S.W (KG)</label>
               <input type="number" step="0.01" min="0" value={yieldForm.sweepingMT}
                 onChange={(e) => setYieldForm(prev => ({ ...prev, sweepingMT: e.target.value }))}
                 placeholder="e.g. 0.3"
@@ -1961,7 +1967,7 @@ export default function MillingBatchDetail() {
               <p className="text-[11px] text-gray-400 mt-0.5">Sweeping — sellable, goes to inventory</p>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Choba (MT)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Choba (KG)</label>
               <input type="number" step="0.01" min="0" value={yieldForm.chobaMT}
                 onChange={(e) => setYieldForm(prev => ({ ...prev, chobaMT: e.target.value }))}
                 placeholder="e.g. 0.4"
@@ -1969,7 +1975,7 @@ export default function MillingBatchDetail() {
               <p className="text-[11px] text-gray-400 mt-0.5">Choba — sellable, goes to inventory</p>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">O.V (MT)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">O.V (KG)</label>
               <input type="number" step="0.01" min="0" value={yieldForm.ovMT}
                 onChange={(e) => setYieldForm(prev => ({ ...prev, ovMT: e.target.value }))}
                 placeholder="e.g. 0.2"
@@ -1977,7 +1983,7 @@ export default function MillingBatchDetail() {
               <p className="text-[11px] text-gray-400 mt-0.5">Record-only — not priced or stocked</p>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Stone (MT)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Stone (KG)</label>
               <input type="number" step="0.01" min="0" value={yieldForm.stoneMT}
                 onChange={(e) => setYieldForm(prev => ({ ...prev, stoneMT: e.target.value }))}
                 placeholder="e.g. 0.1"
@@ -1985,7 +1991,7 @@ export default function MillingBatchDetail() {
               <p className="text-[11px] text-gray-400 mt-0.5">Record-only — not priced or stocked</p>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Wastage (MT)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Wastage (KG)</label>
               <input type="number" step="0.01" min="0" value={yieldForm.wastageMT}
                 onChange={(e) => setYieldForm(prev => ({ ...prev, wastageMT: e.target.value }))}
                 placeholder="e.g. 1.3"
@@ -2022,7 +2028,7 @@ export default function MillingBatchDetail() {
             // saved before this change.
             const b = gradeTotal > 0 ? gradeTotal : (parseFloat(yieldForm.brokenMT) || 0);
             const total = f + b + br + h + sx + pw + sw + ch + ovv + st + w;
-            const rawQty = batch.rawQtyMT || 0;
+            const rawQty = (parseFloat(batch.rawQtyMT) || 0) * 1000; // KG (form is KG)
             const yieldPct = rawQty > 0 ? ((f / rawQty) * 100).toFixed(1) : '0.0';
             const accounted = rawQty > 0 ? ((total / rawQty) * 100).toFixed(1) : '0.0';
 
@@ -2395,7 +2401,8 @@ export default function MillingBatchDetail() {
           const otherExpenses = num(priceForm.otherExpenses);
           const packingCost = num(batch?.costs?.packaging); // auto from packing logs, always added
           const netPurchase = rawPurchase + millingCost + otherExpenses + packingCost;
-          const byproductValue = byFields.reduce((s, f) => s + f.qty * num(priceForm[f.key]), 0);
+          // prices are per-KG (Phase 5c); f.qty is MT → ×1000 to KG for the value.
+          const byproductValue = byFields.reduce((s, f) => s + (f.qty * 1000) * num(priceForm[f.key]), 0);
           const readyRiceCost = Math.max(0, netPurchase - byproductValue);
           const clamped = netPurchase - byproductValue < 0;
           const finishedPerMT = finishedMT > 0 ? readyRiceCost / finishedMT : 0;
@@ -2438,7 +2445,7 @@ export default function MillingBatchDetail() {
 
               {/* By-product sale prices */}
               <div>
-                <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-2">By-product sale price (PKR/MT)</p>
+                <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-2">By-product sale price (PKR/KG)</p>
                 <div className="grid grid-cols-2 gap-3">
                   {byFields.map(f => (
                     <div key={f.key}>
@@ -2468,18 +2475,18 @@ export default function MillingBatchDetail() {
                 <button onClick={async () => {
                   try {
                     await millingApi.confirmPrices(batchId, {
-                      broken_price_per_mt: num(priceForm.broken),
-                      bran_price_per_mt: num(priceForm.bran),
-                      husk_price_per_mt: num(priceForm.husk),
-                      sortex_rejects_price_per_mt: num(priceForm.sortex),
-                      b1_price_per_mt: num(priceForm.b1),
-                      b2_price_per_mt: num(priceForm.b2),
-                      b3_price_per_mt: num(priceForm.b3),
-                      csr_price_per_mt: num(priceForm.csr),
-                      short_grain_price_per_mt: num(priceForm.shortGrain),
-                      powder_price_per_mt: num(priceForm.powder),
-                      sweeping_price_per_mt: num(priceForm.sweeping),
-                      choba_price_per_mt: num(priceForm.choba),
+                      broken_price_per_kg: num(priceForm.broken),
+                      bran_price_per_kg: num(priceForm.bran),
+                      husk_price_per_kg: num(priceForm.husk),
+                      sortex_rejects_price_per_kg: num(priceForm.sortex),
+                      b1_price_per_kg: num(priceForm.b1),
+                      b2_price_per_kg: num(priceForm.b2),
+                      b3_price_per_kg: num(priceForm.b3),
+                      csr_price_per_kg: num(priceForm.csr),
+                      short_grain_price_per_kg: num(priceForm.shortGrain),
+                      powder_price_per_kg: num(priceForm.powder),
+                      sweeping_price_per_kg: num(priceForm.sweeping),
+                      choba_price_per_kg: num(priceForm.choba),
                       manual_milling_cost_pkr: millingCost,
                       manual_other_expenses_pkr: otherExpenses,
                     });
@@ -2506,15 +2513,15 @@ export default function MillingBatchDetail() {
               const lp = res?.data?.lastPrices || {};
               setPriceForm(p => ({
                 ...p,
-                broken: String(lp.broken || commodityPrices.broken),
-                sortex: String(lp.sortex || commodityPrices.sortex),
-                bran: String(lp.bran || commodityPrices.bran),
-                husk: String(lp.husk || commodityPrices.husk),
-                b1: String(lp.b1 || lp.broken || commodityPrices.broken),
-                b2: String(lp.b2 || lp.broken || commodityPrices.broken),
-                b3: String(lp.b3 || lp.broken || commodityPrices.broken),
-                csr: String(lp.csr || lp.broken || commodityPrices.broken),
-                shortGrain: String(lp.short_grain || lp.broken || commodityPrices.broken),
+                broken: String(lp.broken || commodityPrices.broken / 1000),
+                sortex: String(lp.sortex || commodityPrices.sortex / 1000),
+                bran: String(lp.bran || commodityPrices.bran / 1000),
+                husk: String(lp.husk || commodityPrices.husk / 1000),
+                b1: String(lp.b1 || lp.broken || commodityPrices.broken / 1000),
+                b2: String(lp.b2 || lp.broken || commodityPrices.broken / 1000),
+                b3: String(lp.b3 || lp.broken || commodityPrices.broken / 1000),
+                csr: String(lp.csr || lp.broken || commodityPrices.broken / 1000),
+                shortGrain: String(lp.short_grain || lp.broken || commodityPrices.broken / 1000),
                 ...defaultCostInputs(),
               }));
             } catch {}

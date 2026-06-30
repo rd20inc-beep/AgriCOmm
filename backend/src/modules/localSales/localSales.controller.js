@@ -88,10 +88,10 @@ async function assembleInvoice(id, includeAdmin = false) {
       .leftJoin('inventory_lots as src', 'bsl.lot_id', 'src.id')
       .leftJoin('suppliers as s', 'src.supplier_id', 's.id')
       .whereIn('bsl.batch_id', batchIds)
-      .select('bsl.batch_id', 'bsl.qty_mt', 'src.id as lot_id', 'src.lot_no',
+      .select('bsl.batch_id', 'bsl.qty_kg', 'src.id as lot_id', 'src.lot_no',
         db.raw("COALESCE(s.name, '—') as supplier"));
     for (const s of srcs) (srcByBatch[s.batch_id] = srcByBatch[s.batch_id] || []).push({
-      lotId: s.lot_id, lotNo: s.lot_no, supplier: s.supplier, qtyMt: num(s.qty_mt),
+      lotId: s.lot_id, lotNo: s.lot_no, supplier: s.supplier, qtyMt: num(s.qty_kg),
       href: s.lot_id ? `/lot-inventory/${s.lot_id}` : null,
     });
   }
@@ -123,7 +123,7 @@ async function assembleInvoice(id, includeAdmin = false) {
       item.cogs = cogs;
       item.grossMargin = num(r.total_amount) - cogs;
       item.marginPct = num(r.total_amount) > 0 ? ((num(r.total_amount) - cogs) / num(r.total_amount)) * 100 : 0;
-      item.remainingStockKg = num(r.lot_net_weight_kg) || num(r.lot_available_qty) * 1000;
+      item.remainingStockKg = num(r.lot_net_weight_kg) || num(r.lot_available_qty);
     }
     return item;
   });
@@ -144,9 +144,9 @@ async function assembleInvoice(id, includeAdmin = false) {
         if (arrLotIds.size) this.whereIn('lot_id', [...arrLotIds]);
         if (arrBatchIds.size) this.orWhereIn('batch_id', [...arrBatchIds]);
       })
-      .select('id', 'lot_id', 'batch_id', 'vehicle_no', 'driver_name', 'driver_phone', 'weight_mt', 'total_bags', 'arrival_date');
+      .select('id', 'lot_id', 'batch_id', 'vehicle_no', 'driver_name', 'driver_phone', 'weight_kg', 'total_bags', 'arrival_date');
   }
-  const fmtVeh = (a) => ({ vehicleNo: a.vehicle_no, driverName: a.driver_name || null, driverPhone: a.driver_phone || null, weightMt: num(a.weight_mt), totalBags: a.total_bags || null, arrivalDate: a.arrival_date || null });
+  const fmtVeh = (a) => ({ vehicleNo: a.vehicle_no, driverName: a.driver_name || null, driverPhone: a.driver_phone || null, weightKg: num(a.weight_kg), totalBags: a.total_bags || null, arrivalDate: a.arrival_date || null });
   for (const it of items) {
     const srcIds = new Set((it.sourceLots || []).map(s => s.lotId).filter(Boolean));
     if (it.lotId) srcIds.add(it.lotId);
@@ -239,7 +239,7 @@ async function assembleInvoice(id, includeAdmin = false) {
     };
     data.linked = {
       receivables: receivables.map(r => ({ recvNo: r.recv_no, type: r.type, expected: num(r.expected_amount), received: num(r.received_amount), outstanding: num(r.outstanding), status: r.status, dueDate: r.due_date })),
-      inventoryMovements: movements.map(m => ({ id: m.id, type: m.movement_type, qtyKg: num(m.qty) * 1000, costPkr: num(m.total_cost), lotId: m.lot_id, date: m.created_at })),
+      inventoryMovements: movements.map(m => ({ id: m.id, type: m.movement_type, qtyKg: num(m.qty), costPkr: num(m.total_cost), lotId: m.lot_id, date: m.created_at })),
       lotTransactions: lotTxns.map(t => ({ txnNo: t.transaction_no, type: t.transaction_type, qtyKg: num(t.quantity_kg), balanceKg: num(t.balance_kg), date: t.transaction_date })),
     };
 
@@ -248,9 +248,9 @@ async function assembleInvoice(id, includeAdmin = false) {
     // per-grade output valuation set at yield (same basis as Batch 360).
     if (batchIds.length) {
       const priceBatches = await db('milling_batches').whereIn('id', batchIds)
-        .select('id', 'batch_no', 'finished_price_per_mt', 'b1_price_per_mt', 'b2_price_per_mt', 'b3_price_per_mt',
-          'csr_price_per_mt', 'short_grain_price_per_mt', 'broken_price_per_mt', 'powder_price_per_mt',
-          'sweeping_price_per_mt', 'choba_price_per_mt', 'sortex_rejects_price_per_mt');
+        .select('id', 'batch_no', 'finished_price_per_kg', 'b1_price_per_kg', 'b2_price_per_kg', 'b3_price_per_kg',
+          'csr_price_per_kg', 'short_grain_price_per_kg', 'broken_price_per_kg', 'powder_price_per_kg',
+          'sweeping_price_per_kg', 'choba_price_per_kg', 'sortex_rejects_price_per_kg');
       const priceById = {}; for (const b of priceBatches) priceById[b.id] = b;
       const outRefs = batchIds.map(bid => `batch-${bid}`);
       const outLots = await db('inventory_lots as l').leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
@@ -261,18 +261,18 @@ async function assembleInvoice(id, includeAdmin = false) {
         const g = String(o.grade || '').toUpperCase();
         const n = String(o.item_name || '').toLowerCase();
         let perMt = 0;
-        if (o.type === 'finished') perMt = num(b.finished_price_per_mt);
-        else if (g === 'B1') perMt = num(b.b1_price_per_mt);
-        else if (g === 'B2') perMt = num(b.b2_price_per_mt);
-        else if (g === 'B3') perMt = num(b.b3_price_per_mt);
-        else if (g === 'CSR') perMt = num(b.csr_price_per_mt);
-        else if (g === 'SHORT GRAIN') perMt = num(b.short_grain_price_per_mt);
-        else if (n.includes('powder')) perMt = num(b.powder_price_per_mt);
-        else if (n.includes('sweep')) perMt = num(b.sweeping_price_per_mt);
-            else if (n.includes('choba')) perMt = num(b.choba_price_per_mt);
-        else if (n.includes('sortex')) perMt = num(b.sortex_rejects_price_per_mt);
-        else if (n.includes('broken')) perMt = num(b.broken_price_per_mt);
-        return perMt / 1000;
+        if (o.type === 'finished') perMt = num(b.finished_price_per_kg);
+        else if (g === 'B1') perMt = num(b.b1_price_per_kg);
+        else if (g === 'B2') perMt = num(b.b2_price_per_kg);
+        else if (g === 'B3') perMt = num(b.b3_price_per_kg);
+        else if (g === 'CSR') perMt = num(b.csr_price_per_kg);
+        else if (g === 'SHORT GRAIN') perMt = num(b.short_grain_price_per_kg);
+        else if (n.includes('powder')) perMt = num(b.powder_price_per_kg);
+        else if (n.includes('sweep')) perMt = num(b.sweeping_price_per_kg);
+            else if (n.includes('choba')) perMt = num(b.choba_price_per_kg);
+        else if (n.includes('sortex')) perMt = num(b.sortex_rejects_price_per_kg);
+        else if (n.includes('broken')) perMt = num(b.broken_price_per_kg);
+        return perMt;
       };
       const byBatch = {};
       for (const o of outLots) {
@@ -524,7 +524,7 @@ module.exports = {
           } else if (l.lot_id) {
             const lot = await trx('inventory_lots').where({ id: l.lot_id }).first();
             if (!lot) throw new Error('Inventory lot not found');
-            const availKg = (parseFloat(lot.available_qty) || 0) * 1000;
+            const availKg = parseFloat(lot.available_qty) || 0;
             if (l.qtyKg > availKg + 0.01) {
               const e = new Error(`Insufficient stock: ${l.item_name} needs ${Math.round(l.qtyKg)} kg but only ${availKg.toFixed(0)} kg available in ${lot.lot_no}`);
               e.status = 400; throw e;
@@ -532,7 +532,7 @@ module.exports = {
             // Atomic outbound movement — draws the lot down + writes the ledger;
             // no try/catch so a failed deduction rolls the whole sale back.
             await inventoryService.postMovement(trx, {
-              movementType: 'local_sale', lotId: lot.id, qty: l.qtyKg / 1000,
+              movementType: 'local_sale', lotId: lot.id, qty: l.qtyKg,
               fromWarehouseId: lot.warehouse_id, sourceEntity: lot.entity, linkedRef: saleNo,
               notes: `Local sale ${saleNo} to ${buyer_name || 'customer'}`,
               costPerUnit: parseFloat(lot.cost_per_unit) || 0, currency: 'PKR', userId: req.user?.id,
@@ -540,7 +540,7 @@ module.exports = {
             await trx('inventory_lots').where({ id: l.lot_id }).update({
               sold_weight_kg: (parseFloat(lot.sold_weight_kg) || 0) + l.qtyKg,
             });
-            costPerKg = parseFloat(lot.landed_cost_per_kg) || (parseFloat(lot.cost_per_unit) || 0) / 1000 || (parseFloat(lot.rate_per_kg) || 0);
+            costPerKg = parseFloat(lot.landed_cost_per_kg) || (parseFloat(lot.cost_per_unit) || 0) || (parseFloat(lot.rate_per_kg) || 0);
             landedCostTotal = uc.round2(l.qtyKg * costPerKg);
             lotNo = lot.lot_no;
           }

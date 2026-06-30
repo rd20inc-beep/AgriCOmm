@@ -28,7 +28,7 @@ router.put('/batches/:id', authorize('milling', 'edit'),
         : (await db('milling_batches').where('batch_no', req.params.id).select('id').first())?.id;
       if (!id) return res.status(404).json({ success: false, message: 'Batch not found' });
 
-      const allowed = ['supplier_id', 'raw_qty_mt', 'planned_finished_mt', 'milling_fee_per_kg',
+      const allowed = ['supplier_id', 'raw_qty_kg', 'planned_finished_kg', 'milling_fee_per_kg',
         'mill_id', 'machine_line', 'shift', 'notes', 'variance_status', 'status'];
       const updates = {};
       for (const key of allowed) {
@@ -128,7 +128,7 @@ router.get('/rice-purchases', authorize('milling', 'view'), async (req, res) => 
         'va.vehicle_no',
         'va.driver_name',
         'va.driver_phone',
-        'va.weight_mt',
+        'va.weight_kg',
         'va.bag_size_kg',
         'va.total_bags',
         'va.arrival_date',
@@ -165,7 +165,7 @@ router.get('/rice-purchases', authorize('milling', 'view'), async (req, res) => 
     // on the vehicle row's own quality_json wins.
     const rows = rawRows.map((r) => {
       const qj = r.quality_json || {};
-      const { aq_moisture, aq_broken, aq_price_per_kg, aq_price_per_mt, ...rest } = r;
+      const { aq_moisture, aq_broken, aq_price_per_mt, aq_price_per_kg, ...rest } = r;
       return {
         ...rest,
         quality_json: {
@@ -179,9 +179,9 @@ router.get('/rice-purchases', authorize('milling', 'view'), async (req, res) => 
     });
 
     // Summary totals
-    const totalWeight = rows.reduce((s, r) => s + (parseFloat(r.weight_mt) || 0), 0);
+    const totalWeight = rows.reduce((s, r) => s + (parseFloat(r.weight_kg) || 0), 0);
     const totalValue = rows.reduce((s, r) => {
-      const w = parseFloat(r.weight_mt) || 0;
+      const w = parseFloat(r.weight_kg) || 0;
       const p = r.quality_json && r.quality_json.price_per_mt
         ? parseFloat(r.quality_json.price_per_mt) : 0;
       return s + (w * p);
@@ -380,37 +380,37 @@ router.get('/last-prices', authorize('milling', 'view'), async (req, res) => {
   try {
     // Get the most recent batch with confirmed prices
     const last = await db('milling_batches')
-      .whereNotNull('finished_price_per_mt')
+      .whereNotNull('finished_price_per_kg')
       .where('prices_confirmed', true)
       .orderBy('completed_at', 'desc')
       .select(
-        'finished_price_per_mt', 'broken_price_per_mt',
-        'bran_price_per_mt', 'husk_price_per_mt',
-        'sortex_rejects_price_per_mt',
-        'b1_price_per_mt', 'b2_price_per_mt', 'b3_price_per_mt',
-        'csr_price_per_mt', 'short_grain_price_per_mt',
+        'finished_price_per_kg', 'broken_price_per_kg',
+        'bran_price_per_kg', 'husk_price_per_kg',
+        'sortex_rejects_price_per_kg',
+        'b1_price_per_kg', 'b2_price_per_kg', 'b3_price_per_kg',
+        'csr_price_per_kg', 'short_grain_price_per_kg',
         'batch_no', 'completed_at'
       )
       .first();
 
-    const brokenDefault = parseFloat(last?.broken_price_per_mt) || 38000;
+    const brokenDefault = parseFloat(last?.broken_price_per_kg) || 38;
     return res.json({
       success: true,
       data: {
         lastPrices: last ? {
-          finished:    parseFloat(last.finished_price_per_mt) || 72800,
+          finished:    parseFloat(last.finished_price_per_kg) || 72.8,
           broken:      brokenDefault,
-          bran:        parseFloat(last.bran_price_per_mt) || 28000,
-          husk:        parseFloat(last.husk_price_per_mt) || 8400,
-          sortex:      parseFloat(last.sortex_rejects_price_per_mt) || 35000,
+          bran:        parseFloat(last.bran_price_per_kg) || 28,
+          husk:        parseFloat(last.husk_price_per_kg) || 8.4,
+          sortex:      parseFloat(last.sortex_rejects_price_per_kg) || 35,
           // Per-grade broken prices — fall back to the aggregate broken
           // price so old batches give the operator a sensible starting
           // value until they set grade-specific rates.
-          b1:          parseFloat(last.b1_price_per_mt) || brokenDefault,
-          b2:          parseFloat(last.b2_price_per_mt) || brokenDefault,
-          b3:          parseFloat(last.b3_price_per_mt) || brokenDefault,
-          csr:         parseFloat(last.csr_price_per_mt) || brokenDefault,
-          short_grain: parseFloat(last.short_grain_price_per_mt) || brokenDefault,
+          b1:          parseFloat(last.b1_price_per_kg) || brokenDefault,
+          b2:          parseFloat(last.b2_price_per_kg) || brokenDefault,
+          b3:          parseFloat(last.b3_price_per_kg) || brokenDefault,
+          csr:         parseFloat(last.csr_price_per_kg) || brokenDefault,
+          short_grain: parseFloat(last.short_grain_price_per_kg) || brokenDefault,
           fromBatch:   last.batch_no,
           date:        last.completed_at,
         } : {
@@ -431,13 +431,13 @@ router.put('/batches/:id/prices', authorize('milling', 'edit'),
     try {
       const id = await controller.resolveBatchId ? await controller.resolveBatchId(req.params.id) : parseInt(req.params.id);
       const {
-        broken_price_per_mt,
-        bran_price_per_mt, husk_price_per_mt,
-        sortex_rejects_price_per_mt,
-        b1_price_per_mt, b2_price_per_mt, b3_price_per_mt,
-        csr_price_per_mt, short_grain_price_per_mt,
-        powder_price_per_mt, sweeping_price_per_mt,
-        choba_price_per_mt,
+        broken_price_per_kg,
+        bran_price_per_kg, husk_price_per_kg,
+        sortex_rejects_price_per_kg,
+        b1_price_per_kg, b2_price_per_kg, b3_price_per_kg,
+        csr_price_per_kg, short_grain_price_per_kg,
+        powder_price_per_kg, sweeping_price_per_kg,
+        choba_price_per_kg,
         // Residual costing inputs — operator-entered Milling Cost and Other
         // Expenses (PKR totals). Finished price is DERIVED, not accepted here.
         manual_milling_cost_pkr, manual_other_expenses_pkr,
@@ -447,18 +447,18 @@ router.put('/batches/:id/prices', authorize('milling', 'edit'),
       const numOrNull = (v) => (v === '' || v == null || Number.isNaN(parseFloat(v))) ? null : parseFloat(v);
 
       const priceUpdate = {
-        broken_price_per_mt: parseFloat(broken_price_per_mt) || null,
-        bran_price_per_mt: parseFloat(bran_price_per_mt) || null,
-        husk_price_per_mt: parseFloat(husk_price_per_mt) || null,
-        sortex_rejects_price_per_mt: parseFloat(sortex_rejects_price_per_mt) || null,
-        b1_price_per_mt: parseFloat(b1_price_per_mt) || null,
-        b2_price_per_mt: parseFloat(b2_price_per_mt) || null,
-        b3_price_per_mt: parseFloat(b3_price_per_mt) || null,
-        csr_price_per_mt: parseFloat(csr_price_per_mt) || null,
-        short_grain_price_per_mt: parseFloat(short_grain_price_per_mt) || null,
-        powder_price_per_mt: parseFloat(powder_price_per_mt) || null,
-        sweeping_price_per_mt: parseFloat(sweeping_price_per_mt) || null,
-        choba_price_per_mt: parseFloat(choba_price_per_mt) || null,
+        broken_price_per_kg: parseFloat(broken_price_per_kg) || null,
+        bran_price_per_kg: parseFloat(bran_price_per_kg) || null,
+        husk_price_per_kg: parseFloat(husk_price_per_kg) || null,
+        sortex_rejects_price_per_kg: parseFloat(sortex_rejects_price_per_kg) || null,
+        b1_price_per_kg: parseFloat(b1_price_per_kg) || null,
+        b2_price_per_kg: parseFloat(b2_price_per_kg) || null,
+        b3_price_per_kg: parseFloat(b3_price_per_kg) || null,
+        csr_price_per_kg: parseFloat(csr_price_per_kg) || null,
+        short_grain_price_per_kg: parseFloat(short_grain_price_per_kg) || null,
+        powder_price_per_kg: parseFloat(powder_price_per_kg) || null,
+        sweeping_price_per_kg: parseFloat(sweeping_price_per_kg) || null,
+        choba_price_per_kg: parseFloat(choba_price_per_kg) || null,
         manual_milling_cost_pkr: numOrNull(manual_milling_cost_pkr),
         manual_other_expenses_pkr: numOrNull(manual_other_expenses_pkr),
         prices_confirmed: true,
@@ -467,14 +467,14 @@ router.put('/batches/:id/prices', authorize('milling', 'edit'),
       // Persist prices + manual costs, then run the residual cost engine across
       // the batch's output lots (finished = Net Purchase − by-product value),
       // recomputing COGS for any non-locked order/sale. Stamp the derived
-      // finished cost back onto finished_price_per_mt for display.
+      // finished cost back onto finished_price_per_kg for display.
       const inventoryService = require('../inventory/inventory.service');
       const result = await db.transaction(async (trx) => {
         const [updated] = await trx('milling_batches').where({ id })
           .update({ ...priceUpdate, updated_at: trx.fn.now() }).returning('*');
         const realloc = await inventoryService.recomputeBatchOutputsAfterPriceChange(trx, id, { userId: req.user?.id });
         if (realloc && realloc.finishedCostPerKg != null) {
-          await trx('milling_batches').where({ id }).update({ finished_price_per_mt: realloc.finishedCostPerKg * 1000 });
+          await trx('milling_batches').where({ id }).update({ finished_price_per_kg: realloc.finishedCostPerKg * 1000 });
         }
         return { updated, realloc };
       });

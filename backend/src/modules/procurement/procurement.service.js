@@ -303,7 +303,7 @@ const procurementService = {
         vehicle_no: data.vehicle_no,
         driver_name: data.driver_name || null,
         driver_phone: data.driver_phone || null,
-        weight_mt: netWeight,
+        weight_kg: netWeight * 1000, // GRN net weight is MT (doc) → KG (engine)
         arrival_date: data.receipt_date || new Date().toISOString().slice(0, 10),
         notes: `Auto-created from GRN ${grnNo}`,
       });
@@ -313,8 +313,8 @@ const procurementService = {
     if (acceptedQty > 0 && batchId) {
       await inventoryService.receiveRice(trx, {
         batchId,
-        weightMT: acceptedQty,
-        costPerMT: pricePerMt,
+        weightKg: acceptedQty * 1000, // GRN accepted qty is MT (doc) → KG (engine)
+        costPerKg: (parseFloat(pricePerMt) || 0) / 1000, // per-MT → per-KG
         currency: data.currency || 'PKR',
         supplierId,
         vehicleNo: data.vehicle_no || null,
@@ -389,11 +389,11 @@ const procurementService = {
           await inventoryService.postMovement(trx, {
             movementType: inventoryService.MOVEMENT_TYPES.ADJUSTMENT_MINUS,
             lotId: lot.id,
-            qty: parseFloat(grn.accepted_qty_mt),
+            qty: (parseFloat(grn.accepted_qty_mt) || 0) * 1000, // MT (doc) → KG (engine)
             fromWarehouseId: lot.warehouse_id,
             sourceEntity: 'mill',
             notes: `Quality rejection reversal for GRN ${grn.grn_no}`,
-            costPerUnit: parseFloat(grn.price_per_mt) || 0,
+            costPerUnit: (parseFloat(grn.price_per_mt) || 0) / 1000, // per-MT → per-KG
             currency: grn.currency || 'PKR',
             userId: inspectedBy,
           });
@@ -421,11 +421,11 @@ const procurementService = {
             await inventoryService.postMovement(trx, {
               movementType: inventoryService.MOVEMENT_TYPES.ADJUSTMENT_MINUS,
               lotId: lot.id,
-              qty: deductionMt,
+              qty: deductionMt * 1000, // MT (doc) → KG (engine)
               fromWarehouseId: lot.warehouse_id,
               sourceEntity: 'mill',
               notes: `Quality deduction for GRN ${grn.grn_no}`,
-              costPerUnit: parseFloat(grn.price_per_mt) || 0,
+              costPerUnit: (parseFloat(grn.price_per_mt) || 0) / 1000, // per-MT → per-KG
               currency: grn.currency || 'PKR',
               userId: inspectedBy,
             });
@@ -436,8 +436,8 @@ const procurementService = {
       if (grn.batch_id && parseFloat(grn.accepted_qty_mt) > 0) {
         await inventoryService.receiveRice(trx, {
           batchId: grn.batch_id,
-          weightMT: parseFloat(grn.accepted_qty_mt),
-          costPerMT: parseFloat(grn.price_per_mt) || 0,
+          weightKg: (parseFloat(grn.accepted_qty_mt) || 0) * 1000, // MT (doc) → KG (engine)
+          costPerKg: (parseFloat(grn.price_per_mt) || 0) / 1000, // per-MT → per-KG
           currency: grn.currency || 'PKR',
           supplierId: grn.supplier_id,
           vehicleNo: grn.vehicle_no || null,
@@ -601,11 +601,11 @@ const procurementService = {
           await inventoryService.postMovement(trx, {
             movementType: inventoryService.MOVEMENT_TYPES.RETURN,
             lotId: lot.id,
-            qty: qtyMt,
+            qty: qtyMt * 1000, // purchase return qty is MT (doc) → KG (engine)
             fromWarehouseId: lot.warehouse_id,
             sourceEntity: 'mill',
             notes: `Purchase return ${returnNo} for GRN ${grn.grn_no}`,
-            costPerUnit: parseFloat(grn.price_per_mt) || 0,
+            costPerUnit: (parseFloat(grn.price_per_mt) || 0) / 1000, // per-MT → per-KG
             currency: grn.currency || 'PKR',
             userId: data.created_by || null,
           });

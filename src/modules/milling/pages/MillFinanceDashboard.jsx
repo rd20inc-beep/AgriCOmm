@@ -798,9 +798,9 @@ export default function MillFinanceDashboard() {
 
           {/* Inventory breakdown */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <Stat tone="amber"  label="Raw Rice"      value={PKR(inventoryValue.raw)} sub={`${inventory.filter(i => i.type === 'raw').reduce((s, i) => s + pf(i.qty), 0).toFixed(1)} MT`} />
-            <Stat tone="green"  label="Finished Rice" value={PKR(inventoryValue.fin)} sub={`${inventory.filter(i => i.type === 'finished').reduce((s, i) => s + pf(i.availableQty), 0).toFixed(1)} MT`} />
-            <Stat tone="purple" label="Byproducts"    value={PKR(inventoryValue.bp)}  sub={`${inventory.filter(i => i.type === 'byproduct').reduce((s, i) => s + pf(i.availableQty), 0).toFixed(1)} MT`} />
+            <Stat tone="amber"  label="Raw Rice"      value={PKR(inventoryValue.raw)} sub={`${(inventory.filter(i => i.type === 'raw').reduce((s, i) => s + pf(i.qty), 0) / 1000).toFixed(1)} MT`} />
+            <Stat tone="green"  label="Finished Rice" value={PKR(inventoryValue.fin)} sub={`${(inventory.filter(i => i.type === 'finished').reduce((s, i) => s + pf(i.availableQty), 0) / 1000).toFixed(1)} MT`} />
+            <Stat tone="purple" label="Byproducts"    value={PKR(inventoryValue.bp)}  sub={`${(inventory.filter(i => i.type === 'byproduct').reduce((s, i) => s + pf(i.availableQty), 0) / 1000).toFixed(1)} MT`} />
             <Stat tone="blue"   label="Working Cap."  value={PKR(inventoryValue.total)} sub="Locked in stock" />
           </div>
 

@@ -118,7 +118,7 @@ function riceTypeName(lot) {
  */
 function renderLotRow(lot, displayUnit, navigate, indented) {
   const netKg = parseFloat(lot.netWeightKg) || parseFloat(lot.qty) * 1000 || 0;
-  const availKg = (parseFloat(lot.availableQty) || 0) * 1000;
+  const availKg = (parseFloat(lot.availableQty) || 0);
   const bw = parseFloat(lot.bagWeightKg) || 50;
   const variety = riceTypeName(lot);
   const grade = lot.grade;
@@ -265,7 +265,7 @@ export default function LotInventory() {
     const all = lots;
     const totalKg = all.reduce((s, l) => s + (parseFloat(l.netWeightKg) || 0), 0);
     const availKg = all.filter(l => l.status === 'Available').reduce((s, l) => s + (parseFloat(l.netWeightKg) || 0), 0);
-    const reservedKg = all.reduce((s, l) => s + (parseFloat(l.reservedQty) || 0) * 1000, 0);
+    const reservedKg = all.reduce((s, l) => s + (parseFloat(l.reservedQty) || 0), 0);
     const soldKg = all.reduce((s, l) => s + (parseFloat(l.soldWeightKg) || 0), 0);
     const totalValue = all.reduce((s, l) => s + (parseFloat(l.landedCostTotal) || 0), 0);
     return { totalLots: all.length, totalKg, availKg, reservedKg, soldKg, totalValue };
@@ -309,7 +309,7 @@ export default function LotInventory() {
     }
     const groups = Array.from(map.values()).map((g) => {
       const totalKg = g.lots.reduce((s, l) => s + (parseFloat(l.netWeightKg) || 0), 0);
-      const availKg = g.lots.reduce((s, l) => s + ((parseFloat(l.availableQty) || 0) * 1000), 0);
+      const availKg = g.lots.reduce((s, l) => s + ((parseFloat(l.availableQty) || 0)), 0);
       const totalValue = g.lots.reduce((s, l) => s + (parseFloat(l.landedCostTotal) || 0), 0);
       const weightedLanded = totalKg > 0
         ? g.lots.reduce((s, l) => s + ((parseFloat(l.landedCostPerKg) || 0) * (parseFloat(l.netWeightKg) || 0)), 0) / totalKg

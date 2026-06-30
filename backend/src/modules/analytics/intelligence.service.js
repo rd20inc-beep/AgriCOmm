@@ -73,7 +73,7 @@ const intelligenceService = {
         'a.moisture as arrival_moisture',
         's.broken as sample_broken',
         'a.broken as arrival_broken',
-        'mb.raw_qty_mt'
+        'mb.raw_qty_kg'
       );
 
     return rows.map((r) => {
@@ -91,7 +91,7 @@ const intelligenceService = {
         description: `Moisture variance: ${moistureVar.toFixed(2)}%, Broken variance: ${brokenVar.toFixed(2)}% between sample and arrival analysis.`,
         metric_value: maxVar,
         threshold_value: 1.00,
-        amount_at_risk: parseFloat(r.raw_qty_mt) * 500, // estimated loss at $500/MT
+        amount_at_risk: (parseFloat(r.raw_qty_kg) / 1000) * 500, // estimated loss at $500/MT
         currency: 'USD',
         auto_generated: true,
       };
@@ -345,10 +345,12 @@ const intelligenceService = {
         db.raw('COALESCE(SUM(ir.reserved_qty), 0) as reserved_qty')
       )
       .groupBy('eo.id', 'eo.order_no', 'eo.qty_mt', 'eo.contract_value', 'eo.currency', 'eo.status')
-      .havingRaw('COALESCE(SUM(ir.reserved_qty), 0) < eo.qty_mt');
+      // reserved_qty is KG (Phase 5c); export order qty_mt is MT (doc) → ÷1000 to compare.
+      .havingRaw('COALESCE(SUM(ir.reserved_qty), 0) / 1000 < eo.qty_mt');
 
     return rows.map((r) => {
-      const shortfall = parseFloat(r.qty_mt) - parseFloat(r.reserved_qty);
+      const reservedMt = parseFloat(r.reserved_qty) / 1000;
+      const shortfall = parseFloat(r.qty_mt) - reservedMt;
       return {
         exception_type: 'stock_shortage',
         severity: shortfall >= parseFloat(r.qty_mt) ? 'warning' : 'info',
@@ -357,7 +359,7 @@ const intelligenceService = {
         linked_id: r.id,
         linked_ref: r.order_no,
         title: `Stock shortage for ${r.order_no}: ${shortfall.toFixed(2)} MT unreserved`,
-        description: `Order requires ${parseFloat(r.qty_mt).toFixed(2)} MT, only ${parseFloat(r.reserved_qty).toFixed(2)} MT reserved. Status: ${r.status}.`,
+        description: `Order requires ${parseFloat(r.qty_mt).toFixed(2)} MT, only ${reservedMt.toFixed(2)} MT reserved. Status: ${r.status}.`,
         metric_value: shortfall,
         threshold_value: 0,
         amount_at_risk: (shortfall / parseFloat(r.qty_mt)) * parseFloat(r.contract_value),
@@ -431,13 +433,13 @@ const intelligenceService = {
         'mb.yield_pct',
         'rb.expected_yield_pct',
         'rb.variety',
-        'mb.raw_qty_mt',
-        'mb.actual_finished_mt'
+        'mb.raw_qty_kg',
+        'mb.actual_finished_kg'
       );
 
     return rows.map((r) => {
       const gap = parseFloat(r.expected_yield_pct) - parseFloat(r.yield_pct);
-      const lostMT = (gap / 100) * parseFloat(r.raw_qty_mt);
+      const lostMT = (gap / 100) * (parseFloat(r.raw_qty_kg) / 1000);
       return {
         exception_type: 'yield_below_benchmark',
         severity: gap > 5 ? 'critical' : 'warning',
@@ -1128,7 +1130,7 @@ const intelligenceService = {
     const expectedYield = benchmark ? parseFloat(benchmark.expected_yield_pct) : 75;
     const actualYield = parseFloat(batch.yield_pct);
     const yieldGap = expectedYield - actualYield;
-    const rawQty = parseFloat(batch.raw_qty_mt);
+    const rawQty = parseFloat(batch.raw_qty_kg) / 1000;
     const lostMT = (yieldGap / 100) * rawQty;
 
     // Factor 1: Quality parameters from arrival analysis
@@ -1690,7 +1692,7 @@ const intelligenceService = {
           .leftJoin('export_orders as eo', 'eo.id', 'mb.linked_export_order_id')
           .whereIn('mb.status', ['Queued', 'In Progress', 'Processing'])
           .select(
-            'mb.id', 'mb.batch_no', 'mb.status', 'mb.raw_qty_mt', 'mb.planned_finished_mt',
+            'mb.id', 'mb.batch_no', 'mb.status', 'mb.raw_qty_kg', 'mb.planned_finished_kg',
             'mb.supplier_name', 'eo.order_no as linked_order'
           )
           .orderBy('mb.created_at', 'desc');

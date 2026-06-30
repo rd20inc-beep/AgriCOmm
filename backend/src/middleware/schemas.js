@@ -408,22 +408,22 @@ const createBatch = Joi.object({
   supplier_id: Joi.number().integer().positive().allow(null),
   // Required for a single-source batch; for a blend it's omitted and the
   // backend derives it from source_lots. The .or() below requires one of them.
-  raw_qty_mt: Joi.number().positive().messages({
+  raw_qty_kg: Joi.number().positive().messages({
     'number.positive': 'Raw quantity must be greater than zero',
   }),
   // Blend input: partial quantities from multiple existing mill lots
-  // (raw and/or leftover finished rice). [{ lot_id, qty_mt }].
+  // (raw and/or leftover finished rice). [{ lot_id, qty_kg }].
   source_lots: Joi.array().items(
     Joi.object({
       lot_id: Joi.number().integer().positive().required(),
-      qty_mt: Joi.number().positive().required(),
+      qty_kg: Joi.number().positive().required(),
     })
   ),
   product_id: Joi.number().integer().positive().allow(null),
   // Single-Variety vs Blended. Omit to let the backend infer it from the number
   // of distinct source-lot varieties.
   processing_type: Joi.string().valid('single_variety', 'blended').allow(null),
-  planned_finished_mt: Joi.number().positive().allow(null),
+  planned_finished_kg: Joi.number().positive().allow(null),
   milling_fee_per_kg: Joi.number().min(0).allow(null),
   transport_mode: Joi.string().allow('', null),
   purchase_price_per_kg: Joi.number().min(0).allow(null),
@@ -432,14 +432,14 @@ const createBatch = Joi.object({
   machine_line: Joi.string().allow('', null),
   shift: Joi.string().valid('Day', 'Night', 'Full').default('Day'),
   notes: Joi.string().allow('', null),
-}).or('raw_qty_mt', 'source_lots');
+}).or('raw_qty_kg', 'source_lots');
 
 const recordYield = Joi.object({
-  actual_finished_mt: Joi.number().min(0).required(),
-  broken_mt: Joi.number().min(0).default(0),
-  bran_mt: Joi.number().min(0).default(0),
-  husk_mt: Joi.number().min(0).default(0),
-  wastage_mt: Joi.number().min(0).default(0),
+  actual_finished_kg: Joi.number().min(0).required(),
+  broken_kg: Joi.number().min(0).default(0),
+  bran_kg: Joi.number().min(0).default(0),
+  husk_kg: Joi.number().min(0).default(0),
+  wastage_kg: Joi.number().min(0).default(0),
 });
 
 module.exports = {

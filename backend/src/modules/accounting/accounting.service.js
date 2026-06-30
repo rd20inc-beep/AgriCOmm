@@ -1344,7 +1344,7 @@ const accountingService = {
     // detail (raw qty, cost, product) lives on milling_batches instead.
     const batchRows = lotRefs.length
       ? await db('milling_batches').whereIn('batch_no', lotRefs)
-        .select('batch_no', 'product_id', 'raw_qty_mt', 'raw_cost_total', 'purchase_price_per_kg')
+        .select('batch_no', 'product_id', 'raw_qty_kg', 'raw_cost_total', 'purchase_price_per_kg')
       : [];
     const lotProdIds = [...new Set([
       ...lotRows.map((l) => l.product_id),
@@ -1388,8 +1388,8 @@ const accountingService = {
     const batchNarration = (batchNo, includeName = true) => {
       const b = batchNo && batchByNo[batchNo];
       if (!b) return '';
-      const mt = num0(b.raw_qty_mt);
-      const kg = mt * 1000;
+      const kg = num0(b.raw_qty_kg);
+      const mt = kg / 1000;
       const total = num0(b.raw_cost_total);
       const rate = num0(b.purchase_price_per_kg) || (kg > 0 ? total / kg : 0);
       const name = lotProdName[b.product_id] || 'Raw rice';

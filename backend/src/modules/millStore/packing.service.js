@@ -23,7 +23,7 @@ const packingService = {
         'mb.name as master_bag_name', 'po.name as poly_name', 'u.full_name as packed_by_name')
       .orderBy('pl.created_at', 'desc');
 
-    const finishedKg = (Number(batch.actual_finished_mt) || 0) * 1000;
+    const finishedKg = (Number(batch.actual_finished_kg) || 0);
     const packedKg = logs.reduce((s, l) => s + (Number(l.packed_weight_kg) || 0), 0);
     const totalBags = logs.reduce((s, l) => s + (Number(l.bags_count) || 0), 0);
 
@@ -79,7 +79,7 @@ const packingService = {
       const grossKg = Number((packedKg + tareKg).toFixed(3));
 
       // Don't pack more net rice than the batch produced (small tolerance).
-      const finishedKg = (Number(batch.actual_finished_mt) || 0) * 1000;
+      const finishedKg = (Number(batch.actual_finished_kg) || 0);
       if (!allowOverPack && finishedKg > 0) {
         const alreadyPacked = Number((await trx('mill_packing_logs')
           .where('batch_id', batchId).sum({ s: 'packed_weight_kg' }).first())?.s || 0);
@@ -225,7 +225,7 @@ const packingService = {
         });
         // Re-cost the batch's outputs so the finished cost/kg includes the bags
         // (no-op if the batch hasn't yielded yet).
-        if ((Number(batch.actual_finished_mt) || 0) > 0) {
+        if ((Number(batch.actual_finished_kg) || 0) > 0) {
           try { await inventoryService.recomputeBatchOutputsAfterPriceChange(trx, batchId, { userId }); }
           catch (e) { console.error('Packing cost reallocation failed:', e.message); }
         }

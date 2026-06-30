@@ -769,14 +769,13 @@ const controlService = {
       .where('created_at', '<=', periodEnd);
 
     const batchesProcessed = batches.length;
-    const totalInputMT = batches.reduce((s, b) => s + parseFloat(b.raw_qty_mt || 0), 0);
-    const totalOutputMT = batches.reduce((s, b) => s + parseFloat(b.actual_finished_mt || 0), 0);
+    // qty columns are KG (Phase 5c); mill_performance stores MT → ÷1000.
+    const totalInputMT = batches.reduce((s, b) => s + parseFloat(b.raw_qty_kg || 0) / 1000, 0);
+    const totalOutputMT = batches.reduce((s, b) => s + parseFloat(b.actual_finished_kg || 0) / 1000, 0);
 
     const avgYieldPct = totalInputMT > 0 ? (totalOutputMT / totalInputMT) * 100 : 0;
-    const totalBrokenMT = batches.reduce((s, b) => s + parseFloat(b.broken_mt || 0), 0);
-    const totalBranMT = batches.reduce((s, b) => s + parseFloat(b.bran_mt || 0), 0);
+    const totalBrokenMT = batches.reduce((s, b) => s + parseFloat(b.broken_kg || 0) / 1000, 0);
     const avgBrokenPct = totalInputMT > 0 ? (totalBrokenMT / totalInputMT) * 100 : 0;
-    const avgBranPct = totalInputMT > 0 ? (totalBranMT / totalInputMT) * 100 : 0;
 
     // Total downtime from machine_downtime
     const downtimeRows = await db('machine_downtime')
@@ -832,7 +831,7 @@ const controlService = {
         total_output_mt: Math.round(totalOutputMT * 100) / 100,
         avg_yield_pct: Math.round(avgYieldPct * 100) / 100,
         avg_broken_pct: Math.round(avgBrokenPct * 100) / 100,
-        avg_bran_pct: Math.round(avgBranPct * 100) / 100,
+        avg_bran_pct: 0,
         avg_cost_per_mt: Math.round(avgCostPerMT * 100) / 100,
         total_downtime_hours: Math.round(totalDowntimeHours * 100) / 100,
         utilization_pct: Math.round(utilizationPct * 100) / 100,
@@ -854,16 +853,13 @@ const controlService = {
         'mb.batch_no',
         'mb.supplier_id',
         's.name as supplier_name',
-        'mb.raw_qty_mt',
-        'mb.actual_finished_mt',
-        'mb.broken_mt',
-        'mb.bran_mt',
-        'mb.husk_mt',
-        'mb.wastage_mt',
+        'mb.raw_qty_kg',
+        'mb.actual_finished_kg',
+        'mb.broken_kg',
+        'mb.wastage_kg',
         'mb.yield_pct as actual_yield_pct',
         'rb.expected_yield_pct as benchmark_yield_pct',
         'rb.expected_broken_pct as benchmark_broken_pct',
-        'rb.expected_bran_pct as benchmark_bran_pct',
         'rb.variety',
         'mb.created_at'
       );
@@ -877,14 +873,13 @@ const controlService = {
 
     // Enrich with variance
     const data = rows.map(r => {
-      const rawQty = parseFloat(r.raw_qty_mt || 0);
-      const actualBrokenPct = rawQty > 0 ? (parseFloat(r.broken_mt || 0) / rawQty) * 100 : 0;
-      const actualBranPct = rawQty > 0 ? (parseFloat(r.bran_mt || 0) / rawQty) * 100 : 0;
+      // pct = qty/raw is unit-invariant (both KG now).
+      const rawQty = parseFloat(r.raw_qty_kg || 0);
+      const actualBrokenPct = rawQty > 0 ? (parseFloat(r.broken_kg || 0) / rawQty) * 100 : 0;
 
       return {
         ...r,
         actual_broken_pct: Math.round(actualBrokenPct * 100) / 100,
-        actual_bran_pct: Math.round(actualBranPct * 100) / 100,
         yield_variance: r.benchmark_yield_pct
           ? Math.round((parseFloat(r.actual_yield_pct || 0) - parseFloat(r.benchmark_yield_pct)) * 100) / 100
           : null,
@@ -897,8 +892,8 @@ const controlService = {
     // Summary
     const summary = {
       total_batches: data.length,
-      total_input_mt: data.reduce((s, r) => s + parseFloat(r.raw_qty_mt || 0), 0),
-      total_output_mt: data.reduce((s, r) => s + parseFloat(r.actual_finished_mt || 0), 0),
+      total_input_mt: data.reduce((s, r) => s + parseFloat(r.raw_qty_kg || 0) / 1000, 0),
+      total_output_mt: data.reduce((s, r) => s + parseFloat(r.actual_finished_kg || 0) / 1000, 0),
       avg_yield_pct: data.length > 0
         ? Math.round(data.reduce((s, r) => s + parseFloat(r.actual_yield_pct || 0), 0) / data.length * 100) / 100
         : 0,

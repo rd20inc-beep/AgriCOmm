@@ -1438,7 +1438,7 @@ const financeController = {
             batch_id,
             export_order_id,
             product_name: product_name || null,
-            qty_mt: parseFloat(qty_mt),
+            qty_kg: parseFloat(qty_mt) * 1000, // FE sends MT; internal_transfers stores KG (Phase 5c)
             transfer_price_pkr: transfer_price_pkr ? parseFloat(transfer_price_pkr) : null,
             total_value_pkr: total_value_pkr ? parseFloat(total_value_pkr) : null,
             usd_equivalent: usd_equivalent ? parseFloat(usd_equivalent) : null,
@@ -1455,7 +1455,7 @@ const financeController = {
         // requested MT to keep stock fragmented as little as possible.
         const millingLot = await trx('inventory_lots')
           .where({ entity: 'mill', type: 'finished' })
-          .where('available_qty', '>=', t.qty_mt)
+          .where('available_qty', '>=', t.qty_kg)
           .orderBy('available_qty', 'asc')
           .first();
 
@@ -1463,7 +1463,7 @@ const financeController = {
           await inventoryService.transferToExport(trx, {
             transferId: t.id,
             lotId: millingLot.id,
-            qtyMT: t.qty_mt,
+            qtyKg: t.qty_kg,
             productName: t.product_name,
             orderId: t.export_order_id,
             transferPricePerMT: parseFloat(t.transfer_price_pkr) || 0,

@@ -403,8 +403,8 @@ export default function ExportOrderDetail() {
         supplier_id: supplierId,
         linked_export_order_id: orderId || null,
         product_id: order.productId ? parseInt(order.productId) : null,
-        raw_qty_mt: rawQty,
-        planned_finished_mt: order.qtyMT,
+        raw_qty_kg: rawQty * 1000, // createBatch expects KG (Phase 5c); rawQty/order.qtyMT are MT
+        planned_finished_kg: (parseFloat(order.qtyMT) || 0) * 1000,
       });
       const batchNo = res?.data?.batch?.batch_no || res?.data?.batch?.id || 'New';
       addToast(`Milling batch ${batchNo} created successfully`);

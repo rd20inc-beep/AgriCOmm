@@ -293,8 +293,8 @@ export default function LotCostSheet({ lot, companyProfile, linkedBatch, transac
           <div className="grid grid-cols-5 gap-4">
             {[
               ['Total', netKg, 'text-gray-900'],
-              ['Available', (parseFloat(lot.availableQty) || 0) * 1000, 'text-emerald-700'],
-              ['Reserved', (parseFloat(lot.reservedQty) || 0) * 1000, 'text-amber-700'],
+              ['Available', (parseFloat(lot.availableQty) || 0), 'text-emerald-700'],
+              ['Reserved', (parseFloat(lot.reservedQty) || 0), 'text-amber-700'],
               ['Sold', parseFloat(lot.soldWeightKg) || 0, 'text-blue-700'],
               ['Damaged', parseFloat(lot.damagedWeightKg) || 0, 'text-red-700'],
             ].map(([label, kg, color]) => (

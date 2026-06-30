@@ -781,7 +781,7 @@ const reportingController = {
         .leftJoin('products as p', 'b.product_id', 'p.id')
         .select(
           'b.id', 'b.batch_no', 'b.status', 'b.processing_type', 'b.supplier_id',
-          'b.raw_qty_mt', 'b.planned_finished_mt', 'b.actual_finished_mt', 'b.yield_pct',
+          'b.raw_qty_kg', 'b.planned_finished_kg', 'b.actual_finished_kg', 'b.yield_pct',
           'b.total_cost_per_kg_finished', 'b.created_at', 'b.completed_at',
           'm.name as mill_name',
           's.name as supplier_name',
@@ -817,15 +817,15 @@ const reportingController = {
           if (b.status === 'Completed' || b.status === 'Approved') acc.completed += 1;
           if (isBlend(b)) {
             acc.blendedCount += 1;
-            acc.blendedRawMt += num(b.raw_qty_mt);
-            acc.blendedFinishedMt += num(b.actual_finished_mt);
+            acc.blendedRawMt += num(b.raw_qty_kg)/1000;
+            acc.blendedFinishedMt += num(b.actual_finished_kg)/1000;
           } else if (!isReceived(b)) {
             acc.pendingCount += 1;
-            acc.pendingRawMt += num(b.raw_qty_mt);
+            acc.pendingRawMt += num(b.raw_qty_kg)/1000;
           } else {
-            acc.rawMt += num(b.raw_qty_mt);
-            acc.finishedMt += num(b.actual_finished_mt);
-            acc.plannedMt += num(b.planned_finished_mt);
+            acc.rawMt += num(b.raw_qty_kg)/1000;
+            acc.finishedMt += num(b.actual_finished_kg)/1000;
+            acc.plannedMt += num(b.planned_finished_kg)/1000;
           }
           return acc;
         },
@@ -842,8 +842,8 @@ const reportingController = {
           const k = b[key] || '—';
           const r = map.get(k) || { name: k, batchCount: 0, rawMt: 0, finishedMt: 0 };
           r.batchCount += 1;
-          r.rawMt += num(b.raw_qty_mt);
-          r.finishedMt += num(b.actual_finished_mt);
+          r.rawMt += num(b.raw_qty_kg)/1000;
+          r.finishedMt += num(b.actual_finished_kg)/1000;
           map.set(k, r);
         }
         return Array.from(map.values()).map(r => ({
@@ -863,10 +863,10 @@ const reportingController = {
             id: b.id, batchNo: b.batch_no, status: b.status,
             processingType: b.processing_type,
             isBlend: isBlend(b),
-            rawMt: num(b.raw_qty_mt),
-            plannedMt: num(b.planned_finished_mt),
-            finishedMt: num(b.actual_finished_mt),
-            yieldPct: num(b.yield_pct) || (num(b.raw_qty_mt) > 0 ? num(b.actual_finished_mt) / num(b.raw_qty_mt) * 100 : 0),
+            rawMt: num(b.raw_qty_kg)/1000,
+            plannedMt: num(b.planned_finished_kg)/1000,
+            finishedMt: num(b.actual_finished_kg)/1000,
+            yieldPct: num(b.yield_pct) || (num(b.raw_qty_kg) > 0 ? num(b.actual_finished_kg) / num(b.raw_qty_kg) * 100 : 0),
             perKgFinished: num(b.total_cost_per_kg_finished),
             bags: bagsByBatch[`batch-${b.id}`] || 0,
             millName: b.mill_name,
@@ -921,8 +921,9 @@ const reportingController = {
         .whereIn('status', ['Completed', 'Approved'])
         .whereBetween('completed_at', [fromDate, toDate])
         .count({ cnt: 'id' })
-        .sum({ rawMt: 'raw_qty_mt' })
-        .sum({ finishedMt: 'actual_finished_mt' })
+        // qty columns are KG (Phase 5c) → ÷1000 for the MT totals.
+        .select(db.raw('COALESCE(SUM(raw_qty_kg),0)/1000 as "rawMt"'))
+        .select(db.raw('COALESCE(SUM(actual_finished_kg),0)/1000 as "finishedMt"'))
         .first();
 
       // ─── Costs ──────────────────────────────────────────────────
@@ -1290,15 +1291,15 @@ const reportingController = {
           // like a product spans many suppliers, so no single id applies).
           db.raw(group_by === 'supplier' ? 'l.supplier_id as group_id' : 'NULL::integer as group_id'),
           db.raw('COUNT(l.id)::int as lot_count'),
-          db.raw('COALESCE(SUM(CASE WHEN l.net_weight_kg > 0 THEN l.net_weight_kg ELSE CAST(l.qty AS DECIMAL) * 1000 END), 0)::numeric as total_kg'),
-          db.raw('COALESCE(SUM(CAST(l.available_qty AS DECIMAL) * 1000), 0)::numeric as available_kg'),
-          db.raw('COALESCE(SUM(CAST(l.reserved_qty AS DECIMAL) * 1000), 0)::numeric as reserved_kg'),
+          db.raw('COALESCE(SUM(CASE WHEN l.net_weight_kg > 0 THEN l.net_weight_kg ELSE CAST(l.qty AS DECIMAL) END), 0)::numeric as total_kg'),
+          db.raw('COALESCE(SUM(CAST(l.available_qty AS DECIMAL)), 0)::numeric as available_kg'),
+          db.raw('COALESCE(SUM(CAST(l.reserved_qty AS DECIMAL)), 0)::numeric as reserved_kg'),
           db.raw('COALESCE(SUM(l.total_bags), 0)::int as total_bags'),
           // Value of what's on hand = on-hand kg × cost/kg (NOT the stale
           // landed_cost_total, which carries the original intake value).
           db.raw(`COALESCE(SUM(
-            (CASE WHEN l.net_weight_kg > 0 THEN l.net_weight_kg ELSE CAST(l.qty AS DECIMAL) * 1000 END)
-            * COALESCE(NULLIF(l.landed_cost_per_kg, 0), NULLIF(l.rate_per_kg, 0), CAST(l.cost_per_unit AS DECIMAL) / 1000.0, 0)
+            (CASE WHEN l.net_weight_kg > 0 THEN l.net_weight_kg ELSE CAST(l.qty AS DECIMAL) END)
+            * COALESCE(NULLIF(l.landed_cost_per_kg, 0), NULLIF(l.rate_per_kg, 0), CAST(l.cost_per_unit AS DECIMAL), 0)
           ), 0)::numeric as total_value_pkr`),
         )
         // Subtype groups by the raw CASE expression itself — passing the long
@@ -1321,10 +1322,10 @@ const reportingController = {
         'l.id as lot_id', 'l.lot_no',
         db.raw("COALESCE(p.name, l.item_name, '—') as item"),
         'l.variety', 'l.grade',
-        db.raw('(CASE WHEN l.net_weight_kg > 0 THEN l.net_weight_kg ELSE CAST(l.qty AS DECIMAL) * 1000 END)::numeric as on_hand_kg'),
-        db.raw('(CAST(l.available_qty AS DECIMAL) * 1000)::numeric as available_kg'),
+        db.raw('(CASE WHEN l.net_weight_kg > 0 THEN l.net_weight_kg ELSE CAST(l.qty AS DECIMAL) END)::numeric as on_hand_kg'),
+        db.raw('(CAST(l.available_qty AS DECIMAL))::numeric as available_kg'),
         db.raw('COALESCE(l.total_bags, 0)::int as bags'),
-        db.raw('COALESCE(NULLIF(l.landed_cost_per_kg, 0), NULLIF(l.rate_per_kg, 0), CAST(l.cost_per_unit AS DECIMAL) / 1000.0, 0)::numeric as cost_per_kg'),
+        db.raw('COALESCE(NULLIF(l.landed_cost_per_kg, 0), NULLIF(l.rate_per_kg, 0), CAST(l.cost_per_unit AS DECIMAL), 0)::numeric as cost_per_kg'),
         'l.supplier_id', db.raw("COALESCE(s.name, '—') as supplier"),
         db.raw("COALESCE(w.name, '—') as warehouse"),
       ).orderByRaw('on_hand_kg DESC');
@@ -1396,7 +1397,7 @@ const reportingController = {
         'l.id', 'l.lot_no', 'l.created_at', 'l.item_name', 'l.variety', 'l.grade',
         'l.rate_per_kg', 'l.total_bags', 'l.supplier_id', 'l.payment_status', 'l.net_weight_kg',
         's.name as supplier_name', 'p.name as product_name',
-        db.raw('COALESCE(NULLIF(l.received_net_weight_kg,0), NULLIF(l.net_weight_kg,0), l.qty*1000) as kg'),
+        db.raw('COALESCE(NULLIF(l.received_net_weight_kg,0), NULLIF(l.net_weight_kg,0), l.qty) as kg'),
       ).orderBy('l.created_at', 'desc');
 
       // Per-lot disposition: direct sales (+ buyers) and milling consumption.
@@ -1415,7 +1416,7 @@ const reportingController = {
         const milled = await db('batch_source_lots as bsl')
           .leftJoin('milling_batches as mb', 'mb.id', 'bsl.batch_id')
           .whereIn('bsl.lot_id', lotIds)
-          .select('bsl.lot_id', 'bsl.qty_mt', 'mb.id as batch_id', 'mb.batch_no');
+          .select('bsl.lot_id', 'bsl.qty_kg', 'mb.id as batch_id', 'mb.batch_no');
         for (const m of milled) (milledByLot[m.lot_id] = milledByLot[m.lot_id] || []).push(m);
 
         // Trace THROUGH milling: each batch's finished/by-product output lots and
@@ -1424,9 +1425,9 @@ const reportingController = {
         if (batchIds.length) {
           // Total raw input per batch (all source lots) → split a blend's output
           // proportionally among the raw lots that fed it.
-          const allSrc = await db('batch_source_lots').whereIn('batch_id', batchIds).select('batch_id', 'qty_mt');
+          const allSrc = await db('batch_source_lots').whereIn('batch_id', batchIds).select('batch_id', 'qty_kg');
           const batchTotalQty = {};
-          for (const x of allSrc) batchTotalQty[x.batch_id] = (batchTotalQty[x.batch_id] || 0) + (parseFloat(x.qty_mt) || 0);
+          for (const x of allSrc) batchTotalQty[x.batch_id] = (batchTotalQty[x.batch_id] || 0) + (parseFloat(x.qty_kg) || 0);
 
           const refs = batchIds.map((id) => `batch-${id}`);
           const outLots = await db('inventory_lots')
@@ -1466,8 +1467,8 @@ const reportingController = {
             for (const m of batches) {
               const sales = salesByBatch[m.batch_id];
               if (!sales) continue;
-              const tot = batchTotalQty[m.batch_id] || (parseFloat(m.qty_mt) || 0);
-              const share = tot > 0 ? (parseFloat(m.qty_mt) || 0) / tot : 1;
+              const tot = batchTotalQty[m.batch_id] || (parseFloat(m.qty_kg) || 0);
+              const share = tot > 0 ? (parseFloat(m.qty_kg) || 0) / tot : 1;
               for (const sale of sales) acc.push({ ...sale, kg: sale.kg * share, valuePkr: sale.valuePkr * share, sharePct: share * 100 });
             }
             if (acc.length) downstreamByLot[rawLotId] = acc;
@@ -1480,7 +1481,7 @@ const reportingController = {
         const lotSales = salesByLot[r.id] || [];
         const lotMilled = milledByLot[r.id] || [];
         const soldKg = lotSales.reduce((s, x) => s + (parseFloat(x.quantity_kg) || 0), 0);
-        const milledKg = lotMilled.reduce((s, x) => s + (parseFloat(x.qty_mt) || 0) * 1000, 0);
+        const milledKg = lotMilled.reduce((s, x) => s + (parseFloat(x.qty_kg) || 0), 0);
         const remainingKg = Math.max(0, parseFloat(r.net_weight_kg) || 0);
         return {
           lotId: r.id, lotNo: r.lot_no, date: r.created_at, supplier: r.supplier_name || '—', supplierId: r.supplier_id,
@@ -1492,7 +1493,7 @@ const reportingController = {
             kg: parseFloat(x.quantity_kg) || 0, ratePerKg: parseFloat(x.rate_per_kg) || 0,
             valuePkr: parseFloat(x.total_amount) || 0, paymentStatus: x.payment_status,
           })),
-          milledInto: lotMilled.map((x) => ({ batchId: x.batch_id, batchNo: x.batch_no, kg: (parseFloat(x.qty_mt) || 0) * 1000 })),
+          milledInto: lotMilled.map((x) => ({ batchId: x.batch_id, batchNo: x.batch_no, kg: (parseFloat(x.qty_kg) || 0) })),
           // Through-milling trace: who bought the finished / by-product output.
           downstreamSales: downstreamByLot[r.id] || [],
         };
@@ -1524,7 +1525,7 @@ const reportingController = {
         'l.supplier_id', 'l.payment_status', 'l.paid_amount', 'l.due_amount', 'l.net_weight_kg',
         'l.moisture_pct', 'l.broken_pct', 'l.quality_json', 'l.milling_status',
         's.name as supplier_name', 'p.name as product_name', 'w.name as warehouse_name',
-        db.raw('COALESCE(NULLIF(l.received_net_weight_kg,0), NULLIF(l.net_weight_kg,0), l.qty*1000) as kg'),
+        db.raw('COALESCE(NULLIF(l.received_net_weight_kg,0), NULLIF(l.net_weight_kg,0), l.qty) as kg'),
       ).orderBy('l.created_at', 'desc');
       const lotIds = lots.map((l) => l.id);
 
@@ -1532,7 +1533,7 @@ const reportingController = {
       if (lotIds.length) {
         // Delivering trucks (with per-truck quality)
         const vehs = await db('milling_vehicle_arrivals').whereIn('lot_id', lotIds)
-          .select('lot_id', 'vehicle_no', 'driver_name', 'driver_phone', 'weight_mt', 'total_bags', 'bag_size_kg', 'arrival_date', 'quality_json')
+          .select('lot_id', 'vehicle_no', 'driver_name', 'driver_phone', 'weight_kg', 'total_bags', 'bag_size_kg', 'arrival_date', 'quality_json')
           .orderBy('id', 'asc');
         for (const v of vehs) (vehByLot[v.lot_id] = vehByLot[v.lot_id] || []).push(v);
 
@@ -1546,7 +1547,7 @@ const reportingController = {
 
         // Milled into batches
         const milled = await db('batch_source_lots as bsl').leftJoin('milling_batches as mb', 'mb.id', 'bsl.batch_id')
-          .whereIn('bsl.lot_id', lotIds).select('bsl.lot_id', 'bsl.qty_mt', 'mb.id as batch_id', 'mb.batch_no');
+          .whereIn('bsl.lot_id', lotIds).select('bsl.lot_id', 'bsl.qty_kg', 'mb.id as batch_id', 'mb.batch_no');
         for (const m of milled) (milledByLot[m.lot_id] = milledByLot[m.lot_id] || []).push(m);
 
         // Through-milling: who bought the batch output
@@ -1554,9 +1555,9 @@ const reportingController = {
         if (batchIds.length) {
           // Total raw contribution per batch (ALL its source lots) so a blend's
           // output is split proportionally among the lots that fed it.
-          const allSrc = await db('batch_source_lots').whereIn('batch_id', batchIds).select('batch_id', 'qty_mt');
+          const allSrc = await db('batch_source_lots').whereIn('batch_id', batchIds).select('batch_id', 'qty_kg');
           const batchTotalQty = {};
-          for (const x of allSrc) batchTotalQty[x.batch_id] = (batchTotalQty[x.batch_id] || 0) + num(x.qty_mt);
+          for (const x of allSrc) batchTotalQty[x.batch_id] = (batchTotalQty[x.batch_id] || 0) + num(x.qty_kg);
 
           const refs = batchIds.map((id) => `batch-${id}`);
           const outLots = await db('inventory_lots').whereIn('batch_ref', refs).whereIn('type', ['finished', 'byproduct'])
@@ -1580,8 +1581,8 @@ const reportingController = {
             for (const m of batches) {
               const sales = salesByBatch[m.batch_id];
               if (!sales) continue;
-              const tot = batchTotalQty[m.batch_id] || num(m.qty_mt);
-              const share = tot > 0 ? num(m.qty_mt) / tot : 1; // this lot's slice of the batch
+              const tot = batchTotalQty[m.batch_id] || num(m.qty_kg);
+              const share = tot > 0 ? num(m.qty_kg) / tot : 1; // this lot's slice of the batch
               for (const sale of sales) {
                 acc.push({ ...sale, kg: sale.kg * share, valuePkr: sale.valuePkr * share, cost: sale.cost * share, sharePct: share * 100 });
               }
@@ -1596,7 +1597,7 @@ const reportingController = {
         const lotSales = salesByLot[l.id] || [];
         const lotMilled = milledByLot[l.id] || [];
         const soldKg = lotSales.reduce((a, x) => a + num(x.quantity_kg), 0);
-        const milledKg = lotMilled.reduce((a, x) => a + num(x.qty_mt) * 1000, 0);
+        const milledKg = lotMilled.reduce((a, x) => a + num(x.qty_kg), 0);
         const remainingKg = Math.max(0, num(l.net_weight_kg));
         const status = milledKg > 0 ? 'Milled' : soldKg > 0 ? (remainingKg > 0 ? 'Part-sold' : 'Sold') : remainingKg > 0 ? 'In stock' : 'Empty';
         // Realized trading margin = revenue from what's been sold (this lot sold
@@ -1624,9 +1625,9 @@ const reportingController = {
           moisturePct: l.moisture_pct, brokenPct: l.broken_pct, qualityJson: l.quality_json || null,
           remainingKg, soldKg, milledKg, status,
           realizedRevenue, realizedCost, realizedMargin, realizedMarginPct, hasSales: realizedRevenue > 0,
-          vehicles: (vehByLot[l.id] || []).map((v) => ({ vehicleNo: v.vehicle_no, driverName: v.driver_name, driverPhone: v.driver_phone, weightMt: num(v.weight_mt), totalBags: v.total_bags, bagSizeKg: num(v.bag_size_kg), arrivalDate: v.arrival_date, quality: v.quality_json || null })),
+          vehicles: (vehByLot[l.id] || []).map((v) => ({ vehicleNo: v.vehicle_no, driverName: v.driver_name, driverPhone: v.driver_phone, weightKg: num(v.weight_kg), totalBags: v.total_bags, bagSizeKg: num(v.bag_size_kg), arrivalDate: v.arrival_date, quality: v.quality_json || null })),
           buyers: lotSales.map((x) => ({ saleId: x.sale_id, saleNo: x.sale_no, date: x.sale_date, customer: x.customer, customerId: x.customer_id || null, kg: num(x.quantity_kg), ratePerKg: num(x.rate_per_kg), valuePkr: num(x.total_amount), paymentStatus: x.payment_status })),
-          milledInto: lotMilled.map((x) => ({ batchId: x.batch_id, batchNo: x.batch_no, kg: num(x.qty_mt) * 1000 })),
+          milledInto: lotMilled.map((x) => ({ batchId: x.batch_id, batchNo: x.batch_no, kg: num(x.qty_kg) })),
           downstreamSales: downstreamByLot[l.id] || [],
         };
       });
@@ -1670,17 +1671,17 @@ const reportingController = {
           .leftJoin('suppliers as s', 'src.supplier_id', 's.id')
           .leftJoin('milling_batches as mb', 'bsl.batch_id', 'mb.id')
           .whereIn('bsl.batch_id', batchIds)
-          .select('bsl.batch_id', 'bsl.qty_mt', 'mb.batch_no', 'src.id as raw_lot_id', 'src.lot_no as raw_lot_no',
+          .select('bsl.batch_id', 'bsl.qty_kg', 'mb.batch_no', 'src.id as raw_lot_id', 'src.lot_no as raw_lot_no',
             'src.supplier_id as raw_supplier_id', 's.name as raw_supplier');
         // Total raw input per batch → each source lot's % contribution (blend share).
         const batchTotalQty = {};
-        for (const r of srcs) batchTotalQty[r.batch_id] = (batchTotalQty[r.batch_id] || 0) + num(r.qty_mt);
+        for (const r of srcs) batchTotalQty[r.batch_id] = (batchTotalQty[r.batch_id] || 0) + num(r.qty_kg);
         for (const r of srcs) {
           batchNoById[r.batch_id] = r.batch_no;
-          const tot = batchTotalQty[r.batch_id] || num(r.qty_mt);
+          const tot = batchTotalQty[r.batch_id] || num(r.qty_kg);
           (rawByBatch[r.batch_id] = rawByBatch[r.batch_id] || []).push({
             lotId: r.raw_lot_id, lotNo: r.raw_lot_no, supplier: r.raw_supplier, supplierId: r.raw_supplier_id || null,
-            kg: num(r.qty_mt) * 1000, sharePct: tot > 0 ? (num(r.qty_mt) / tot) * 100 : 100,
+            kg: num(r.qty_kg), sharePct: tot > 0 ? (num(r.qty_kg) / tot) * 100 : 100,
           });
         }
       }
@@ -1736,12 +1737,12 @@ const reportingController = {
         for (const r of localRows) { if (r.batch_ref) { const id = parseInt(String(r.batch_ref).replace(/^batch-/, ''), 10); if (byId[id]) lsBatchByRef[r.batch_ref] = byId[id]; } }
       }
       let eo = db('export_orders as o').leftJoin('customers as c', 'o.customer_id', 'c.id')
-        .select('o.id', 'o.order_no', 'o.created_at', 'o.product_name', 'o.qty_mt', 'o.price_per_mt', 'o.total_bags', 'o.status', 'o.customer_id', db.raw("COALESCE(c.name, '—') as customer"));
+        .select('o.id', 'o.order_no', 'o.created_at', 'o.product_name', 'o.qty_kg', 'o.price_per_mt', 'o.total_bags', 'o.status', 'o.customer_id', db.raw("COALESCE(c.name, '—') as customer"));
       if (from) eo = eo.where('o.created_at', '>=', from);
       if (to) eo = eo.where('o.created_at', '<=', to);
       const exportRows = await eo.orderBy('o.created_at', 'desc');
       const local = localRows.map((r) => ({ id: r.id, ref: r.sale_no, date: r.sale_date, customer: r.customer, customerId: r.customer_id || null, item: r.item_name, itemType: r.item_type, mt: (parseFloat(r.quantity_kg) || 0) / 1000, bags: r.quantity_bags || 0, ratePerKg: parseFloat(r.rate_per_kg) || 0, valuePkr: parseFloat(r.total_amount) || 0, lotNo: r.lot_no, lotId: r.lot_id, batchNo: r.batch_ref ? (lsBatchByRef[r.batch_ref] || null) : null, warehouse: r.warehouse_name || null, paymentStatus: r.payment_status }));
-      const exp = exportRows.map((r) => ({ id: r.id, ref: r.order_no, date: r.created_at, customer: r.customer, customerId: r.customer_id || null, item: r.product_name, mt: parseFloat(r.qty_mt) || 0, bags: r.total_bags || 0, ratePerMt: parseFloat(r.price_per_mt) || 0, valueUsd: (parseFloat(r.qty_mt) || 0) * (parseFloat(r.price_per_mt) || 0), status: r.status }));
+      const exp = exportRows.map((r) => ({ id: r.id, ref: r.order_no, date: r.created_at, customer: r.customer, customerId: r.customer_id || null, item: r.product_name, mt: parseFloat(r.qty_kg) || 0, bags: r.total_bags || 0, ratePerMt: parseFloat(r.price_per_mt) || 0, valueUsd: (parseFloat(r.qty_kg) || 0) * (parseFloat(r.price_per_mt) || 0), status: r.status }));
       return res.json({ success: true, data: { local, export: exp, totals: { localCount: local.length, localMt: local.reduce((s, d) => s + d.mt, 0), localPkr: local.reduce((s, d) => s + d.valuePkr, 0), exportCount: exp.length, exportMt: exp.reduce((s, d) => s + d.mt, 0), exportUsd: exp.reduce((s, d) => s + d.valueUsd, 0) }, period: { from, to } } });
     } catch (err) { console.error('Sales ledger error:', err); return res.status(500).json({ success: false, message: 'Internal server error.' }); }
   },
@@ -1762,10 +1763,10 @@ const reportingController = {
         'l.id', 'l.lot_no', 'l.type', 'l.item_name', 'l.variety', 'l.grade', 'l.processing_type',
         'l.blend_batch_no', 'l.batch_ref', 'l.supplier_id', 'l.status', 'l.total_bags',
         's.name as supplier_name', 'p.name as product_name', 'w.name as warehouse_name',
-        db.raw('COALESCE(NULLIF(l.net_weight_kg,0), l.qty*1000) as on_hand_kg'),
-        db.raw('l.available_qty*1000 as available_kg'),
-        db.raw('l.reserved_qty*1000 as reserved_kg'),
-        db.raw('COALESCE(NULLIF(l.landed_cost_per_kg,0), NULLIF(l.rate_per_kg,0), l.cost_per_unit/1000.0, 0) as cost_per_kg'),
+        db.raw('COALESCE(NULLIF(l.net_weight_kg,0), l.qty) as on_hand_kg'),
+        db.raw('l.available_qty as available_kg'),
+        db.raw('l.reserved_qty as reserved_kg'),
+        db.raw('COALESCE(NULLIF(l.landed_cost_per_kg,0), NULLIF(l.rate_per_kg,0), l.cost_per_unit, 0) as cost_per_kg'),
       ).orderBy([{ column: 'l.type' }, { column: 'l.lot_no' }]);
       // Trace milled output (batch_ref = 'batch-<id>') back to the raw-rice supplier.
       const ids = [...new Set(lots.map((l) => l.batch_ref).filter(Boolean).map((r) => parseInt(String(r).replace(/^batch-/, ''), 10)).filter(Boolean))];
@@ -1820,16 +1821,16 @@ const reportingController = {
       const lots = await q.select(
         'l.id', 'l.lot_no', 'l.item_name', 'l.grade', 'l.variety', 'l.batch_ref', 'l.blend_batch_no',
         'l.status', 'l.supplier_id', 'l.total_bags', 'l.available_qty', 's.name as supplier_name',
-        db.raw('COALESCE(NULLIF(l.net_weight_kg,0), l.qty*1000) as kg'),
-        db.raw('COALESCE(NULLIF(l.landed_cost_per_kg,0), NULLIF(l.rate_per_kg,0), l.cost_per_unit/1000.0, 0) as cost_per_kg'),
+        db.raw('COALESCE(NULLIF(l.net_weight_kg,0), l.qty) as kg'),
+        db.raw('COALESCE(NULLIF(l.landed_cost_per_kg,0), NULLIF(l.rate_per_kg,0), l.cost_per_unit, 0) as cost_per_kg'),
       ).orderBy('l.lot_no');
       // Trace each sweeping lot back to its batch (batch_ref='batch-<id>') + raw supplier + raw input MT.
       const ids = [...new Set(lots.map((l) => l.batch_ref).filter(Boolean).map((r) => parseInt(String(r).replace(/^batch-/, ''), 10)).filter(Boolean))];
       const bi = {};
       if (ids.length) {
         const bs = await db('milling_batches as mb').leftJoin('suppliers as s', 'mb.supplier_id', 's.id').leftJoin('products as p', 'mb.product_id', 'p.id')
-          .whereIn('mb.id', ids).select('mb.id', 'mb.batch_no', 'mb.raw_qty_mt', 'mb.created_at', 's.name as raw_supplier', 's.id as raw_supplier_id', 'p.name as product');
-        for (const b of bs) bi[`batch-${b.id}`] = { batchId: b.id, batchNo: b.batch_no, rawSupplier: b.raw_supplier, rawSupplierId: b.raw_supplier_id, product: b.product, rawMt: parseFloat(b.raw_qty_mt) || 0, date: b.created_at };
+          .whereIn('mb.id', ids).select('mb.id', 'mb.batch_no', 'mb.raw_qty_kg', 'mb.created_at', 's.name as raw_supplier', 's.id as raw_supplier_id', 'p.name as product');
+        for (const b of bs) bi[`batch-${b.id}`] = { batchId: b.id, batchNo: b.batch_no, rawSupplier: b.raw_supplier, rawSupplierId: b.raw_supplier_id, product: b.product, rawMt: (parseFloat(b.raw_qty_kg) || 0) / 1000, date: b.created_at };
       }
       const rows = lots.map((l) => {
         const kg = parseFloat(l.kg) || 0; const cpk = parseFloat(l.cost_per_kg) || 0; const b = bi[l.batch_ref] || {};
@@ -1887,12 +1888,12 @@ const reportingController = {
 
       // Memo: rice still in inventory (its cost is deferred, not yet expensed).
       const invRow = await db('inventory_lots').whereIn('type', ['raw', 'finished']).where('status', 'Available')
-        .select(db.raw('COALESCE(SUM((CASE WHEN net_weight_kg>0 THEN net_weight_kg ELSE qty*1000 END) * COALESCE(NULLIF(landed_cost_per_kg,0),NULLIF(rate_per_kg,0),cost_per_unit/1000.0,0)),0) as val')).first();
+        .select(db.raw('COALESCE(SUM((CASE WHEN net_weight_kg>0 THEN net_weight_kg ELSE qty END) * COALESCE(NULLIF(landed_cost_per_kg,0),NULLIF(rate_per_kg,0),cost_per_unit,0)),0) as val')).first();
 
       // Inventory roll-forward: raw purchases LANDED in the period (cost basis,
       // full intake qty — this is what was added to inventory when bought).
       const purchaseRow = await db('inventory_lots').where('type', 'raw').whereBetween('created_at', [fromDate, toDate])
-        .select(db.raw('COALESCE(SUM((CASE WHEN received_net_weight_kg>0 THEN received_net_weight_kg WHEN net_weight_kg>0 THEN net_weight_kg ELSE qty*1000 END) * COALESCE(NULLIF(landed_cost_per_kg,0),NULLIF(rate_per_kg,0),cost_per_unit/1000.0,0)),0) as val')).first();
+        .select(db.raw('COALESCE(SUM((CASE WHEN received_net_weight_kg>0 THEN received_net_weight_kg WHEN net_weight_kg>0 THEN net_weight_kg ELSE qty END) * COALESCE(NULLIF(landed_cost_per_kg,0),NULLIF(rate_per_kg,0),cost_per_unit,0)),0) as val')).first();
 
       const revenue = { exportPkr: num(exportRow.rev), exportCount: parseInt(exportRow.cnt, 10) || 0, localPkr: num(localRow.rev), localCount: parseInt(localRow.cnt, 10) || 0 };
       revenue.totalPkr = revenue.exportPkr + revenue.localPkr;

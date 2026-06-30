@@ -43,7 +43,7 @@ const smartService = {
         'mc.category',
         'mc.amount',
         'mc.currency',
-        'mb.raw_qty_mt',
+        'mb.raw_qty_kg',
         'mc.created_at'
       );
 
@@ -91,7 +91,7 @@ const smartService = {
     // Aggregate milling costs per MT
     const millingBucket = { weightedSum: 0, totalWeight: 0, count: 0 };
     for (const row of millingCosts) {
-      const perMT = row.raw_qty_mt > 0 ? parseFloat(row.amount) / parseFloat(row.raw_qty_mt) : 0;
+      const perMT = row.raw_qty_kg > 0 ? parseFloat(row.amount) / (parseFloat(row.raw_qty_kg) / 1000) : 0; // KG col → per-MT
       const weight = calcWeight(row.created_at);
       millingBucket.weightedSum += perMT * weight;
       millingBucket.totalWeight += weight;
@@ -1132,9 +1132,9 @@ const smartService = {
         'mb.id',
         'mb.batch_no',
         'mb.status',
-        'mb.raw_qty_mt',
-        'mb.planned_finished_mt',
-        'mb.actual_finished_mt',
+        'mb.raw_qty_kg',
+        'mb.planned_finished_kg',
+        'mb.actual_finished_kg',
         'mb.yield_pct',
         's.id as supplier_id',
         's.name as supplier_name',
@@ -1358,7 +1358,7 @@ const smartService = {
     const recentBatches = await db('milling_batches')
       .where('completed_at', '>=', thirtyDaysAgo)
       .where('yield_pct', '>', 0)
-      .select('id', 'batch_no', 'supplier_id', 'supplier_name', 'raw_qty_mt', 'actual_finished_mt', 'yield_pct');
+      .select('id', 'batch_no', 'supplier_id', 'supplier_name', 'raw_qty_kg', 'actual_finished_kg', 'yield_pct');
 
     if (recentBatches.length === 0) return alerts;
 

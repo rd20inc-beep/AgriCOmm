@@ -142,7 +142,7 @@ export default function DangerZoneTab() {
           <select className={INPUT} value={lotId} onChange={e => previewLot(e.target.value)}>
             <option value="">Select a lot…</option>
             {lots.map(l => (
-              <option key={l.id} value={l.id}>{l.lotNo} — {l.itemName} ({Number(l.qty || 0).toFixed(2)} MT, {l.status})</option>
+              <option key={l.id} value={l.id}>{l.lotNo} — {l.itemName} ({(Number(l.qty || 0) / 1000).toFixed(2)} MT, {l.status})</option>
             ))}
           </select>
         </div>

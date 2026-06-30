@@ -602,9 +602,9 @@ const exportOrderController = {
         const batchIds = [...numericIds];
         if (batchIds.length) {
           const priceBatches = await db('milling_batches').whereIn('id', batchIds)
-            .select('id', 'batch_no', 'finished_price_per_mt', 'b1_price_per_mt', 'b2_price_per_mt', 'b3_price_per_mt',
-              'csr_price_per_mt', 'short_grain_price_per_mt', 'broken_price_per_mt', 'powder_price_per_mt',
-              'sweeping_price_per_mt', 'choba_price_per_mt', 'sortex_rejects_price_per_mt');
+            .select('id', 'batch_no', 'finished_price_per_kg', 'b1_price_per_kg', 'b2_price_per_kg', 'b3_price_per_kg',
+              'csr_price_per_kg', 'short_grain_price_per_kg', 'broken_price_per_kg', 'powder_price_per_kg',
+              'sweeping_price_per_kg', 'choba_price_per_kg', 'sortex_rejects_price_per_kg');
           const priceById = {}; const refToId = {};
           for (const b of priceBatches) { priceById[b.id] = b; refToId[`batch-${b.id}`] = b.id; if (b.batch_no) refToId[b.batch_no] = b.id; }
           const outLots = await db('inventory_lots as l').leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
@@ -615,18 +615,18 @@ const exportOrderController = {
             const g = String(o.grade || '').toUpperCase();
             const n = String(o.item_name || '').toLowerCase();
             let perMt = 0;
-            if (o.type === 'finished') perMt = num(b.finished_price_per_mt);
-            else if (g === 'B1') perMt = num(b.b1_price_per_mt);
-            else if (g === 'B2') perMt = num(b.b2_price_per_mt);
-            else if (g === 'B3') perMt = num(b.b3_price_per_mt);
-            else if (g === 'CSR') perMt = num(b.csr_price_per_mt);
-            else if (g === 'SHORT GRAIN') perMt = num(b.short_grain_price_per_mt);
-            else if (n.includes('powder')) perMt = num(b.powder_price_per_mt);
-            else if (n.includes('sweep')) perMt = num(b.sweeping_price_per_mt);
-            else if (n.includes('choba')) perMt = num(b.choba_price_per_mt);
-            else if (n.includes('sortex')) perMt = num(b.sortex_rejects_price_per_mt);
-            else if (n.includes('broken')) perMt = num(b.broken_price_per_mt);
-            return perMt / 1000;
+            if (o.type === 'finished') perMt = num(b.finished_price_per_kg);
+            else if (g === 'B1') perMt = num(b.b1_price_per_kg);
+            else if (g === 'B2') perMt = num(b.b2_price_per_kg);
+            else if (g === 'B3') perMt = num(b.b3_price_per_kg);
+            else if (g === 'CSR') perMt = num(b.csr_price_per_kg);
+            else if (g === 'SHORT GRAIN') perMt = num(b.short_grain_price_per_kg);
+            else if (n.includes('powder')) perMt = num(b.powder_price_per_kg);
+            else if (n.includes('sweep')) perMt = num(b.sweeping_price_per_kg);
+            else if (n.includes('choba')) perMt = num(b.choba_price_per_kg);
+            else if (n.includes('sortex')) perMt = num(b.sortex_rejects_price_per_kg);
+            else if (n.includes('broken')) perMt = num(b.broken_price_per_kg);
+            return perMt;
           };
           const byBatch = {};
           for (const o of outLots) {
@@ -1780,12 +1780,12 @@ const exportOrderController = {
         try {
           const availableLot = await trx('inventory_lots')
             .where({ entity: 'export', type: 'finished', status: 'Available' })
-            .where('available_qty', '>=', order.qty_mt)
+            .where('available_qty', '>=', order.qty_mt * 1000) // order qty MT (doc) → KG
             .first();
           if (availableLot) {
             await inventoryService.reserveStock(trx, {
               lotId: availableLot.id, orderId: order.id,
-              qtyMT: order.qty_mt, userId: req.user?.id,
+              qtyKg: order.qty_mt * 1000, userId: req.user?.id,
             });
           }
         } catch (e) { console.warn('Stock reservation failed:', e.message); }
@@ -2042,9 +2042,10 @@ const exportOrderController = {
           throw err;
         }
 
-        const available = parseFloat(lot.available_qty) || 0;
-        if (qtyMT > available) {
-          const err = new Error(`Requested ${qtyMT} MT but only ${available} MT available in ${lot.lot_no}.`);
+        const available = parseFloat(lot.available_qty) || 0; // KG (Phase 5c)
+        const qtyKg = qtyMT * 1000; // FE sends MT; engine reserves in KG
+        if (qtyKg > available) {
+          const err = new Error(`Requested ${qtyMT} MT but only ${available / 1000} MT available in ${lot.lot_no}.`);
           err.statusCode = 400;
           throw err;
         }
@@ -2062,7 +2063,7 @@ const exportOrderController = {
         await inventoryService.reserveStock(trx, {
           lotId: lot.id,
           orderId: order.id,
-          qtyMT,
+          qtyKg,
           itemId,
           userId: req.user?.id,
         });

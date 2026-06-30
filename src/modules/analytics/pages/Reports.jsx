@@ -2431,7 +2431,7 @@ function InventoryTab({ millScoped, hideValue }) {
   // Headline totals — prefer the printable-stock grand (carries available/reserved),
   // fall back to summing the per-lot aging data so the tab is never blank.
   const grand = byType.data?.grand || {};
-  const totalKg = grand.totalKg != null ? parseFloat(grand.totalKg) : lotsArr.reduce((s, l) => s + (parseFloat(l.qty) || 0) * 1000, 0);
+  const totalKg = grand.totalKg != null ? parseFloat(grand.totalKg) : lotsArr.reduce((s, l) => s + (parseFloat(l.qty) || 0), 0);
   const availKg = grand.availableKg;
   const reservedKg = grand.reservedKg;
   const totalValue = grand.valuePkr != null ? parseFloat(grand.valuePkr) : lotsArr.reduce((s, l) => s + (parseFloat(l.totalValue) || 0), 0);
@@ -2441,7 +2441,7 @@ function InventoryTab({ millScoped, hideValue }) {
   // Aging buckets from days-in-stock. Value/% columns dropped in qty-only mode.
   const bucketRows = AGE_BUCKETS.map(([label, test]) => {
     const ls = lotsArr.filter((l) => test(parseInt(l.daysInStock, 10) || 0));
-    const kg = ls.reduce((s, l) => s + (parseFloat(l.qty) || 0) * 1000, 0);
+    const kg = ls.reduce((s, l) => s + (parseFloat(l.qty) || 0), 0);
     const val = ls.reduce((s, l) => s + (parseFloat(l.totalValue) || 0), 0);
     return hideValue
       ? [label, ls.length, fmtMT(kg)]
