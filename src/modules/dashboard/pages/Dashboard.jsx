@@ -134,22 +134,17 @@ export default function Dashboard() {
     const completed = safeBatches.filter(b => b.status === 'Completed' && Number(b.rawQtyMT) > 0);
     if (completed.length === 0) return [
       { name: 'Finished', value: 65, fill: '#3b82f6' },
-      { name: 'Broken', value: 15, fill: '#f59e0b' },
-      { name: 'Bran', value: 10, fill: '#10b981' },
-      { name: 'Husk', value: 8, fill: '#8b5cf6' },
+      { name: 'Broken', value: 33, fill: '#f59e0b' },
       { name: 'Wastage', value: 2, fill: '#ef4444' },
     ];
     const t = completed.reduce((a, b) => ({
       f: a.f + (Number(b.actualFinishedMT) || 0), br: a.br + (Number(b.brokenMT) || 0),
-      bn: a.bn + (Number(b.branMT) || 0), h: a.h + (Number(b.huskMT) || 0),
       w: a.w + (Number(b.wastageMT) || 0), r: a.r + (Number(b.rawQtyMT) || 0),
-    }), { f: 0, br: 0, bn: 0, h: 0, w: 0, r: 0 });
+    }), { f: 0, br: 0, w: 0, r: 0 });
     const pct = v => Math.round((v / t.r) * 100) || 0;
     return [
       { name: 'Finished', value: pct(t.f), fill: '#3b82f6' },
       { name: 'Broken', value: pct(t.br), fill: '#f59e0b' },
-      { name: 'Bran', value: pct(t.bn), fill: '#10b981' },
-      { name: 'Husk', value: pct(t.h), fill: '#8b5cf6' },
       { name: 'Wastage', value: pct(t.w), fill: '#ef4444' },
     ];
   }, [safeBatches]);

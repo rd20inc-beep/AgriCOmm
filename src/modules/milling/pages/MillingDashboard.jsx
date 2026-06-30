@@ -345,7 +345,7 @@ export default function MillingDashboard() {
   const localSalesValue = useMemo(() => {
     return millingBatches
       .filter(b => b.status === 'Completed')
-      .reduce((sum, b) => sum + (b.brokenMT * MILL_PRICES_PKR.brokenPerMT) + (b.branMT * MILL_PRICES_PKR.branPerMT) + (b.huskMT * MILL_PRICES_PKR.huskPerMT), 0);
+      .reduce((sum, b) => sum + (b.brokenMT * MILL_PRICES_PKR.brokenPerMT), 0);
   }, [millingBatches]);
 
   // Calculate mill net profit from completed batches (PKR)
@@ -353,7 +353,7 @@ export default function MillingDashboard() {
     return millingBatches
       .filter(b => b.status === 'Completed')
       .reduce((sum, b) => {
-        const revenue = (b.actualFinishedMT * MILL_PRICES_PKR.finishedRicePerMT) + (b.brokenMT * MILL_PRICES_PKR.brokenPerMT) + (b.branMT * MILL_PRICES_PKR.branPerMT) + (b.huskMT * MILL_PRICES_PKR.huskPerMT);
+        const revenue = (b.actualFinishedMT * MILL_PRICES_PKR.finishedRicePerMT) + (b.brokenMT * MILL_PRICES_PKR.brokenPerMT);
         const costs = Object.values(b.costs || {}).reduce((s, c) => s + c, 0);
         return sum + (revenue - costs);
       }, 0);
@@ -366,8 +366,6 @@ export default function MillingDashboard() {
       .map(b => ({
         batch: b.id,
         Broken: Math.round(b.brokenMT * MILL_PRICES_PKR.brokenPerMT),
-        Bran: Math.round(b.branMT * MILL_PRICES_PKR.branPerMT),
-        Husk: Math.round(b.huskMT * MILL_PRICES_PKR.huskPerMT),
       }));
   }, [millingBatches]);
 
@@ -528,7 +526,7 @@ export default function MillingDashboard() {
           }, 0);
           const finishedRevenue = completed.reduce((s, b) => s + (b.actualFinishedMT * MILL_PRICES_PKR.finishedRicePerMT), 0);
           const byproductRevenue = completed.reduce((s, b) =>
-            s + (b.brokenMT * MILL_PRICES_PKR.brokenPerMT) + (b.branMT * MILL_PRICES_PKR.branPerMT) + (b.huskMT * MILL_PRICES_PKR.huskPerMT), 0);
+            s + (b.brokenMT * MILL_PRICES_PKR.brokenPerMT), 0);
           const totalRevenue = finishedRevenue + byproductRevenue;
           const totalCost = totalRawCost + totalOtherBatchCosts + totalOverhead;
           const netProfit = totalRevenue - totalCost;
@@ -592,7 +590,7 @@ export default function MillingDashboard() {
                       </tr></thead>
                       <tbody className="divide-y divide-gray-100">
                         {completed.map(b => {
-                          const bRevenue = (b.actualFinishedMT * MILL_PRICES_PKR.finishedRicePerMT) + (b.brokenMT * MILL_PRICES_PKR.brokenPerMT) + (b.branMT * MILL_PRICES_PKR.branPerMT) + (b.huskMT * MILL_PRICES_PKR.huskPerMT);
+                          const bRevenue = (b.actualFinishedMT * MILL_PRICES_PKR.finishedRicePerMT) + (b.brokenMT * MILL_PRICES_PKR.brokenPerMT);
                           const bCost = Object.values(b.costs || {}).reduce((s, c) => s + (parseFloat(c) || 0), 0);
                           const bProfit = bRevenue - bCost;
                           return (
@@ -820,8 +818,6 @@ export default function MillingDashboard() {
                   <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 uppercase">Raw</th>
                   <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 uppercase">Finished</th>
                   <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 uppercase">Broken</th>
-                  <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 uppercase">Bran</th>
-                  <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 uppercase">Husk</th>
                   <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 uppercase">Yield%</th>
                   <th className="text-left py-2 px-2 text-xs font-medium text-gray-500 uppercase">Status</th>
                 </tr>
@@ -840,8 +836,6 @@ export default function MillingDashboard() {
                     <td className="py-2.5 px-2 text-right text-gray-600">{batch.rawQtyMT}</td>
                     <td className="py-2.5 px-2 text-right text-gray-600">{batch.actualFinishedMT}</td>
                     <td className="py-2.5 px-2 text-right text-gray-600">{batch.brokenMT}</td>
-                    <td className="py-2.5 px-2 text-right text-gray-600">{batch.branMT}</td>
-                    <td className="py-2.5 px-2 text-right text-gray-600">{batch.huskMT}</td>
                     <td className={`py-2.5 px-2 text-right font-medium ${
                       batch.yieldPct >= 75 ? 'text-green-600' : batch.yieldPct > 0 ? 'text-amber-600' : 'text-gray-400'
                     }`}>
@@ -993,8 +987,6 @@ export default function MillingDashboard() {
                   wrapperStyle={{ fontSize: '12px', paddingBottom: '8px' }}
                 />
                 <Bar dataKey="Broken" name="Broken" fill="#f59e0b" />
-                <Bar dataKey="Bran" name="Bran" fill="#10b981" />
-                <Bar dataKey="Husk" name="Husk" fill="#8b5cf6" />
               </BarChart>
             </ResponsiveContainer>
           </div>

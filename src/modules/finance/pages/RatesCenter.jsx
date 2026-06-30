@@ -214,7 +214,7 @@ export default function RatesCenter() {
                   className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" required>
                   <option value="">Select...</option>
                   <option value="raw_rice_purchase">Raw Rice Purchase</option><option value="finished_rice">Finished Rice</option>
-                  <option value="broken_rice">Broken Rice</option><option value="bran">Bran</option><option value="husk">Husk</option>
+                  <option value="broken_rice">Broken Rice</option>
                   <option value="milling_cost">Milling Cost</option><option value="packaging_rate">Packaging</option><option value="freight_rate">Freight</option>
                 </select>
               </div>
