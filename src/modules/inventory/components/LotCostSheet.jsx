@@ -262,7 +262,7 @@ export default function LotCostSheet({ lot, companyProfile, linkedBatch, transac
                 <tr className="border-b border-gray-200">
                   <th className="text-left py-1.5 font-semibold text-gray-500">Vehicle No</th>
                   <th className="text-left py-1.5 font-semibold text-gray-500">Driver</th>
-                  <th className="text-right py-1.5 font-semibold text-gray-500">Weight (MT)</th>
+                  <th className="text-right py-1.5 font-semibold text-gray-500">Weight (kg)</th>
                   <th className="text-left py-1.5 font-semibold text-gray-500">Date</th>
                 </tr>
               </thead>
@@ -271,7 +271,7 @@ export default function LotCostSheet({ lot, companyProfile, linkedBatch, transac
                   <tr key={v.id || i} className={i % 2 === 0 ? '' : 'bg-gray-50'}>
                     <td className="py-1.5 font-mono font-bold text-gray-900">{v.vehicleNo}</td>
                     <td className="py-1.5 text-gray-600">{v.driverName || '—'}</td>
-                    <td className="py-1.5 text-right text-gray-900">{v.weightMT || '—'}</td>
+                    <td className="py-1.5 text-right text-gray-900">{v.weight_kg ? Math.round(parseFloat(v.weight_kg)).toLocaleString() : '—'}</td>
                     <td className="py-1.5 text-gray-600">{fmtDate(v.arrivalDate)}</td>
                   </tr>
                 ))}
@@ -279,7 +279,7 @@ export default function LotCostSheet({ lot, companyProfile, linkedBatch, transac
               <tfoot>
                 <tr className="border-t border-gray-200">
                   <td className="py-1.5 font-bold text-gray-900" colSpan={2}>Total</td>
-                  <td className="py-1.5 text-right font-bold text-gray-900">{vehicles.reduce((s, v) => s + (v.weightMT || 0), 0).toFixed(1)} MT</td>
+                  <td className="py-1.5 text-right font-bold text-gray-900">{Math.round(vehicles.reduce((s, v) => s + (parseFloat(v.weight_kg) || 0), 0)).toLocaleString()} kg</td>
                   <td></td>
                 </tr>
               </tfoot>

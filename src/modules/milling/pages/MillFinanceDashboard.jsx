@@ -798,9 +798,9 @@ export default function MillFinanceDashboard() {
 
           {/* Inventory breakdown */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <Stat tone="amber"  label="Raw Rice"      value={PKR(inventoryValue.raw)} sub={`${(inventory.filter(i => i.type === 'raw').reduce((s, i) => s + pf(i.qty), 0) / 1000).toFixed(1)} MT`} />
-            <Stat tone="green"  label="Finished Rice" value={PKR(inventoryValue.fin)} sub={`${(inventory.filter(i => i.type === 'finished').reduce((s, i) => s + pf(i.availableQty), 0) / 1000).toFixed(1)} MT`} />
-            <Stat tone="purple" label="Byproducts"    value={PKR(inventoryValue.bp)}  sub={`${(inventory.filter(i => i.type === 'byproduct').reduce((s, i) => s + pf(i.availableQty), 0) / 1000).toFixed(1)} MT`} />
+            <Stat tone="amber"  label="Raw Rice"      value={PKR(inventoryValue.raw)} sub={`${Math.round(inventory.filter(i => i.type === 'raw').reduce((s, i) => s + pf(i.qty), 0)).toLocaleString()} kg`} />
+            <Stat tone="green"  label="Finished Rice" value={PKR(inventoryValue.fin)} sub={`${Math.round(inventory.filter(i => i.type === 'finished').reduce((s, i) => s + pf(i.availableQty), 0)).toLocaleString()} kg`} />
+            <Stat tone="purple" label="Byproducts"    value={PKR(inventoryValue.bp)}  sub={`${Math.round(inventory.filter(i => i.type === 'byproduct').reduce((s, i) => s + pf(i.availableQty), 0)).toLocaleString()} kg`} />
             <Stat tone="blue"   label="Working Cap."  value={PKR(inventoryValue.total)} sub="Locked in stock" />
           </div>
 
@@ -1432,15 +1432,15 @@ export default function MillFinanceDashboard() {
             <Stat tone="green" icon={TrendingUp}    label="Avg Recovery"  value={`${efficiency.avgYield}%`}    sub="Finished / Raw" />
             <Stat tone="red"   icon={AlertTriangle} label="Avg Wastage"   value={`${efficiency.avgWastage}%`}  sub="Waste / Raw" />
             <Stat tone="blue"  icon={DollarSign}    label="Cost per KG"   value={`Rs ${efficiency.costPerKg}`} sub="All-in finished" />
-            <Stat tone="slate" icon={Factory}       label="Batches"       value={completed.length}             sub={`${efficiency.totalRaw?.toFixed(0) || 0} MT processed`} />
+            <Stat tone="slate" icon={Factory}       label="Batches"       value={completed.length}             sub={`${Math.round((efficiency.totalRaw || 0) * 1000).toLocaleString()} kg processed`} />
           </div>
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-600 uppercase tracking-wide">
                   <th className="text-left px-4 py-3 font-medium">Batch</th>
-                  <th className="text-right px-4 py-3 font-medium">Raw MT</th>
-                  <th className="text-right px-4 py-3 font-medium">Finished MT</th>
+                  <th className="text-right px-4 py-3 font-medium">Raw kg</th>
+                  <th className="text-right px-4 py-3 font-medium">Finished kg</th>
                   <th className="text-right px-4 py-3 font-medium">Yield %</th>
                   <th className="text-right px-4 py-3 font-medium">Wastage %</th>
                   <th className="text-right px-4 py-3 font-medium">Cost/KG</th>
@@ -1454,8 +1454,8 @@ export default function MillFinanceDashboard() {
                   return (
                     <tr key={b.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3 font-medium"><Link to={`/milling/${b.id}`} className="text-blue-600">{b.id}</Link></td>
-                      <td className="px-4 py-3 text-right tabular-nums">{b.rawQtyMT}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">{b.actualFinishedMT}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">{Math.round(b.rawQtyKg).toLocaleString()}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">{Math.round(b.actualFinishedKg).toLocaleString()}</td>
                       <td className="px-4 py-3 text-right font-medium tabular-nums">{b.yieldPct}%</td>
                       <td className="px-4 py-3 text-right text-red-600 tabular-nums">{wastePct}%</td>
                       <td className="px-4 py-3 text-right tabular-nums">Rs {costKg.toFixed(2)}</td>
@@ -1483,10 +1483,10 @@ export default function MillFinanceDashboard() {
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-600 uppercase tracking-wide">
                   <th className="text-left px-4 py-3 font-medium">Batch</th>
-                  <th className="text-right px-4 py-3 font-medium">Raw MT</th>
+                  <th className="text-right px-4 py-3 font-medium">Raw kg</th>
                   <th className="text-right px-4 py-3 font-medium">Expected</th>
                   <th className="text-right px-4 py-3 font-medium">Actual</th>
-                  <th className="text-right px-4 py-3 font-medium">Var MT</th>
+                  <th className="text-right px-4 py-3 font-medium">Var kg</th>
                   <th className="text-right px-4 py-3 font-medium">Var %</th>
                   <th className="text-center px-4 py-3 font-medium">Status</th>
                 </tr>
@@ -1495,10 +1495,10 @@ export default function MillFinanceDashboard() {
                 {lossData.map(b => (
                   <tr key={b.id} className={`hover:bg-gray-50 ${b.flagged ? 'bg-red-50/50' : ''}`}>
                     <td className="px-4 py-3 font-medium"><Link to={`/milling/${b.id}`} className="text-blue-600">{b.id}</Link></td>
-                    <td className="px-4 py-3 text-right tabular-nums">{b.rawQtyMT}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{b.expected.toFixed(2)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{b.actualFinishedMT}</td>
-                    <td className={`px-4 py-3 text-right font-medium tabular-nums ${b.variance < 0 ? 'text-red-600' : 'text-emerald-600'}`}>{b.variance > 0 ? '+' : ''}{b.variance.toFixed(2)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{Math.round(b.rawQtyKg).toLocaleString()}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{Math.round(b.expected * 1000).toLocaleString()}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{Math.round(b.actualFinishedKg).toLocaleString()}</td>
+                    <td className={`px-4 py-3 text-right font-medium tabular-nums ${b.variance < 0 ? 'text-red-600' : 'text-emerald-600'}`}>{b.variance > 0 ? '+' : ''}{Math.round(b.variance * 1000).toLocaleString()}</td>
                     <td className={`px-4 py-3 text-right font-medium tabular-nums ${parseFloat(b.variancePct) < -3 ? 'text-red-600' : 'text-gray-600'}`}>{b.variancePct}%</td>
                     <td className="px-4 py-3 text-center">
                       {b.flagged

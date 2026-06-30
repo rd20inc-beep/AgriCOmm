@@ -15,8 +15,8 @@ import { useMillSummary } from '../hooks/useMillSummary';
 import { useInventory } from '../../../api/queries';
 import { useMillStoreSummary, useMillStoreAlerts } from '../../millStore/api/queries';
 
-function formatMT(n) {
-  return `${(Number(n) || 0).toFixed(1)} MT`;
+function formatKg(n) {
+  return `${Math.round(Number(n) || 0).toLocaleString()} kg`;
 }
 
 function daysBetween(a, b) {
@@ -116,7 +116,7 @@ function BatchColumn({ title, batches, accent, onBatchClick }) {
           >
             <p className="text-xs font-semibold text-gray-900 truncate">{b.id}</p>
             <p className="text-[11px] text-gray-500 truncate">
-              {b.supplierName || 'Unknown'} · {Number(b.rawQtyMT || 0).toFixed(1)} MT
+              {b.supplierName || 'Unknown'} · {Math.round(Number(b.rawQtyKg || 0)).toLocaleString()} kg
             </p>
             {b.yieldPct > 0 && (
               <p className="text-[11px] text-gray-600 mt-0.5">Yield: {Number(b.yieldPct).toFixed(1)}%</p>
@@ -359,7 +359,7 @@ export default function MillHomeDashboard() {
         <KPI
           icon={Wheat}
           label="Raw Rice Stock"
-          value={formatMT(data.rawStockMT)}
+          value={formatKg(data.rawStockMT)}
           sub={data.daysOfCover != null ? `${data.daysOfCover} days of cover` : 'no recent consumption'}
           accent={data.daysOfCover != null && data.daysOfCover < 3 ? 'red' : 'amber'}
         />

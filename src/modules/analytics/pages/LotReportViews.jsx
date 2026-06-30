@@ -78,9 +78,9 @@ function LotCard({ bundle }) {
           head={['Quantity', 'MT', 'Katta', 'Maund']}
           align={['left', 'right', 'right', 'right']}
           rows={[
-            ['Total', fmtMt(lot.qty), fmtKg(lot.total_katta), fmtKg(lot.total_maund)],
-            ['Available', fmtMt(lot.available_qty), fmtKg(lot.available_katta), fmtKg(lot.available_maund)],
-            ['Reserved', fmtMt(lot.reserved_qty), fmtKg(lot.reserved_katta), '—'],
+            ['Total', fmtMt(num(lot.qty) != null ? num(lot.qty) / 1000 : 0), fmtKg(lot.total_katta), fmtKg(lot.total_maund)],
+            ['Available', fmtMt(num(lot.available_qty) != null ? num(lot.available_qty) / 1000 : 0), fmtKg(lot.available_katta), fmtKg(lot.available_maund)],
+            ['Reserved', fmtMt(num(lot.reserved_qty) != null ? num(lot.reserved_qty) / 1000 : 0), fmtKg(lot.reserved_katta), '—'],
             ['Sold', fmtMt(num(lot.sold_weight_kg) != null ? num(lot.sold_weight_kg) / 1000 : 0), fmtKg(lot.sold_katta), fmtKg(lot.sold_maund)],
             ['Damaged', fmtMt(num(lot.damaged_weight_kg) != null ? num(lot.damaged_weight_kg) / 1000 : 0), fmtKg(lot.damaged_katta), fmtKg(lot.damaged_maund)],
           ]}
@@ -123,13 +123,13 @@ function LotCard({ bundle }) {
       </div>
 
       {blendRecipe && Array.isArray(blendRecipe.inputs) && blendRecipe.inputs.length > 0 && (
-        <Section title={`Blend recipe — batch ${blendRecipe.batch_no} (${fmtMt(blendRecipe.raw_qty_mt)} MT raw)`}>
+        <Section title={`Blend recipe — batch ${blendRecipe.batch_no} (${Math.round(num(blendRecipe.raw_qty_kg) || 0).toLocaleString()} kg raw)`}>
           <Table
-            head={['Variety', 'Source Lot', 'Supplier', 'Qty MT', 'Ratio', 'Moisture', 'Broken', 'Grade']}
+            head={['Variety', 'Source Lot', 'Supplier', 'Qty kg', 'Ratio', 'Moisture', 'Broken', 'Grade']}
             align={['left', 'left', 'left', 'right', 'right', 'right', 'right', 'left']}
             rows={blendRecipe.inputs.map((i) => [
               i.variety || '—', i.source_lot_no || '—', i.supplier_name || '—',
-              fmtMt(i.qty_mt), i.ratio_pct != null ? `${i.ratio_pct}%` : '—',
+              Math.round(num(i.qty_kg) || 0).toLocaleString(), i.ratio_pct != null ? `${i.ratio_pct}%` : '—',
               pct(i.moisture), pct(i.broken), i.grade || '—',
             ])}
             empty=""
@@ -140,13 +140,13 @@ function LotCard({ bundle }) {
       {batchYield && (
         <Section title="Output composition (from yield)">
           <Table
-            head={['Output', 'MT']}
+            head={['Output', 'kg']}
             align={['left', 'right']}
             rows={[
-              ['Finished', fmtMt(batchYield.actual_finished_mt)], ['B1', fmtMt(batchYield.b1_mt)],
-              ['B2', fmtMt(batchYield.b2_mt)], ['B3', fmtMt(batchYield.b3_mt)], ['CSR', fmtMt(batchYield.csr_mt)],
-              ['Short grain', fmtMt(batchYield.short_grain_mt)], ['Broken (total)', fmtMt(batchYield.broken_mt)],
-              ['Powder', fmtMt(batchYield.powder_mt)], ['Sweepings', fmtMt(batchYield.sweeping_mt)], ['Sortex rejects', fmtMt(batchYield.sortex_rejects_mt)],
+              ['Finished', fmtKg(batchYield.actual_finished_kg)], ['B1', fmtKg(batchYield.b1_kg)],
+              ['B2', fmtKg(batchYield.b2_kg)], ['B3', fmtKg(batchYield.b3_kg)], ['CSR', fmtKg(batchYield.csr_kg)],
+              ['Short grain', fmtKg(batchYield.short_grain_kg)], ['Broken (total)', fmtKg(batchYield.broken_kg)],
+              ['Powder', fmtKg(batchYield.powder_kg)], ['Sweepings', fmtKg(batchYield.sweeping_kg)], ['Sortex rejects', fmtKg(batchYield.sortex_rejects_kg)],
             ].filter((r) => parseFloat(String(r[1]).replace(/,/g, '')) > 0)}
             empty="No yield recorded."
           />
@@ -156,9 +156,9 @@ function LotCard({ bundle }) {
       {reservations.length > 0 && (
         <Section title="Reservations">
           <Table
-            head={['Order', 'Reserved MT', 'Status']}
+            head={['Order', 'Reserved kg', 'Status']}
             align={['left', 'right', 'left']}
-            rows={reservations.map((r) => [r.order_no || `#${r.order_id}`, fmtMt(r.reserved_qty), r.status || '—'])}
+            rows={reservations.map((r) => [r.order_no || `#${r.order_id}`, fmtKg(r.reserved_qty), r.status || '—'])}
             empty=""
           />
         </Section>
@@ -196,7 +196,7 @@ function CombinedReport({ lots }) {
     .filter((b) => b.blendRecipe && Array.isArray(b.blendRecipe.inputs) && b.blendRecipe.inputs.length)
     .flatMap((b) => b.blendRecipe.inputs.map((i) => [
       lotName(b.lot), i.variety || '—', i.source_lot_no || '—', i.supplier_name || '—',
-      fmtMt(i.qty_mt), i.ratio_pct != null ? `${i.ratio_pct}%` : '—', pct(i.moisture), i.grade || '—',
+      Math.round(num(i.qty_kg) || 0).toLocaleString(), i.ratio_pct != null ? `${i.ratio_pct}%` : '—', pct(i.moisture), i.grade || '—',
     ]));
 
   const yieldRows = lots
@@ -204,13 +204,13 @@ function CombinedReport({ lots }) {
     .map((b) => {
       const y = b.batchYield;
       return [
-        lotName(b.lot), fmtMt(y.actual_finished_mt), fmtMt(y.b1_mt), fmtMt(y.b2_mt),
-        fmtMt(y.b3_mt), fmtMt(y.csr_mt), fmtMt(y.short_grain_mt), fmtMt(y.broken_mt),
+        lotName(b.lot), fmtKg(y.actual_finished_kg), fmtKg(y.b1_kg), fmtKg(y.b2_kg),
+        fmtKg(y.b3_kg), fmtKg(y.csr_kg), fmtKg(y.short_grain_kg), fmtKg(y.broken_kg),
       ];
     });
 
   const reservationRows = lots.flatMap((b) =>
-    (b.reservations || []).map((r) => [lotName(b.lot), r.order_no || `#${r.order_id}`, fmtMt(r.reserved_qty), r.status || '—']));
+    (b.reservations || []).map((r) => [lotName(b.lot), r.order_no || `#${r.order_id}`, fmtKg(r.reserved_qty), r.status || '—']));
 
   const ledgerRows = lots.flatMap((b) =>
     (b.transactions || []).map((t) => [
@@ -223,12 +223,12 @@ function CombinedReport({ lots }) {
     <div className="space-y-5">
       <Section title="Quantities">
         <Table
-          head={['Lot', 'Total MT', 'Available MT', 'Reserved MT', 'Sold MT', 'Damaged MT']}
+          head={['Lot', 'Total kg', 'Available kg', 'Reserved kg', 'Sold kg', 'Damaged kg']}
           align={['left', 'right', 'right', 'right', 'right', 'right']}
           rows={lots.map(({ lot }) => [
-            lotName(lot), fmtMt(lot.qty), fmtMt(lot.available_qty), fmtMt(lot.reserved_qty),
-            fmtMt(num(lot.sold_weight_kg) != null ? num(lot.sold_weight_kg) / 1000 : 0),
-            fmtMt(num(lot.damaged_weight_kg) != null ? num(lot.damaged_weight_kg) / 1000 : 0),
+            lotName(lot), fmtKg(lot.qty), fmtKg(lot.available_qty), fmtKg(lot.reserved_qty),
+            fmtKg(num(lot.sold_weight_kg) || 0),
+            fmtKg(num(lot.damaged_weight_kg) || 0),
           ])}
           empty=""
         />
@@ -258,7 +258,7 @@ function CombinedReport({ lots }) {
       {blendRows.length > 0 && (
         <Section title="Blend inputs">
           <Table
-            head={['Output Lot', 'Variety', 'Source Lot', 'Supplier', 'Qty MT', 'Ratio', 'Moisture', 'Grade']}
+            head={['Output Lot', 'Variety', 'Source Lot', 'Supplier', 'Qty kg', 'Ratio', 'Moisture', 'Grade']}
             align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'left']}
             rows={blendRows}
             empty=""
@@ -267,7 +267,7 @@ function CombinedReport({ lots }) {
       )}
 
       {yieldRows.length > 0 && (
-        <Section title="Yield output composition (MT)">
+        <Section title="Yield output composition (kg)">
           <Table
             head={['Lot', 'Finished', 'B1', 'B2', 'B3', 'CSR', 'Short', 'Broken']}
             align={['left', 'right', 'right', 'right', 'right', 'right', 'right', 'right']}
@@ -280,7 +280,7 @@ function CombinedReport({ lots }) {
       {reservationRows.length > 0 && (
         <Section title="Reservations">
           <Table
-            head={['Lot', 'Order', 'Reserved MT', 'Status']}
+            head={['Lot', 'Order', 'Reserved kg', 'Status']}
             align={['left', 'left', 'right', 'left']}
             rows={reservationRows}
             empty=""
@@ -324,8 +324,8 @@ export function LotReportView({ lots = [], companyName, detail = 'full', generat
             <SummaryRow items={[
               { label: 'Lot', value: lotName(lots[0].lot) },
               { label: 'Type', value: typeLabel(lots[0].lot.type) },
-              { label: 'Total', value: `${fmtMt(totalMt)} MT` },
-              { label: 'Available', value: `${fmtMt(availMt)} MT` },
+              { label: 'Total', value: `${fmtKg(totalMt)} kg` },
+              { label: 'Available', value: `${fmtKg(availMt)} kg` },
               { label: 'Value', value: fmtPkr(totalValue) },
             ]} />
           )
@@ -334,21 +334,21 @@ export function LotReportView({ lots = [], companyName, detail = 'full', generat
         <>
           <SummaryRow items={[
             { label: 'Lots', value: lots.length },
-            { label: 'Total', value: `${fmtMt(totalMt)} MT` },
-            { label: 'Available', value: `${fmtMt(availMt)} MT` },
-            { label: 'Reserved', value: `${fmtMt(reservedMt)} MT` },
+            { label: 'Total', value: `${fmtKg(totalMt)} kg` },
+            { label: 'Available', value: `${fmtKg(availMt)} kg` },
+            { label: 'Reserved', value: `${fmtKg(reservedMt)} kg` },
             { label: 'Value', value: fmtPkr(totalValue) },
           ]} />
 
           <Section title="Lots">
             <Table
-              head={['Lot No', 'Type', 'Variety', 'Supplier', 'Total MT', 'Avail MT', 'Rate/kg', 'Value']}
+              head={['Lot No', 'Type', 'Variety', 'Supplier', 'Total kg', 'Avail kg', 'Rate/kg', 'Value']}
               align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'right']}
               rows={lots.map(({ lot }) => [
                 lotName(lot), typeLabel(lot.type), lot.variety || lot.item_name || lot.product_name || '—',
-                lot.supplier_name || '—', fmtMt(lot.qty), fmtMt(lot.available_qty), fmtPkr(lot.rate_per_kg), fmtPkr(lotValuePkr(lot)),
+                lot.supplier_name || '—', fmtKg(lot.qty), fmtKg(lot.available_qty), fmtPkr(lot.rate_per_kg), fmtPkr(lotValuePkr(lot)),
               ])}
-              totalRow={['TOTAL', '', '', '', fmtMt(totalMt), fmtMt(availMt), '', fmtPkr(totalValue)]}
+              totalRow={['TOTAL', '', '', '', fmtKg(totalMt), fmtKg(availMt), '', fmtPkr(totalValue)]}
               empty="No lots selected."
             />
           </Section>

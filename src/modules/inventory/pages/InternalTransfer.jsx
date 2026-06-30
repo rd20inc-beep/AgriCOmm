@@ -80,7 +80,7 @@ export default function InternalTransfer() {
       });
 
       const t = res?.data?.transfer;
-      addToast(`Transfer ${t?.transfer_no || ''} created: ${qty} MT dispatched`, 'success');
+      addToast(`Transfer ${t?.transfer_no || ''} created: ${Math.round(qty * 1000).toLocaleString()} kg dispatched`, 'success');
       setForm({ batchNo: '', exportOrder: '', qtyMT: '', transferPrice: '', dispatchDate: '' });
     } catch (err) {
       addToast(err.message || 'Failed to create transfer', 'error');
@@ -122,7 +122,7 @@ export default function InternalTransfer() {
                   <option value="">Select completed batch...</option>
                   {completedBatches.map(b => (
                     <option key={b.id} value={b.id}>
-                      {b.id} - {b.actualFinishedMT} MT ({b.supplierName})
+                      {b.id} - {Math.round(b.actualFinishedKg).toLocaleString()} kg ({b.supplierName})
                     </option>
                   ))}
                 </select>
@@ -138,7 +138,7 @@ export default function InternalTransfer() {
                   <option value="">Select active export order...</option>
                   {activeExportOrders.map(o => (
                     <option key={o.id} value={o.id}>
-                      {o.id} - {o.customerName} ({o.qtyMT} MT)
+                      {o.id} - {o.customerName} ({Math.round((o.qtyMT || 0) * 1000).toLocaleString()} kg)
                     </option>
                   ))}
                 </select>
@@ -244,7 +244,7 @@ export default function InternalTransfer() {
                   {totalAmount > 0 ? `+${formatPKR(totalAmount)}` : 'Rs 0'}
                 </div>
                 <p className="text-xs text-blue-500 mt-1">
-                  Revenue: {qty > 0 ? `${qty} MT` : '0 MT'} x {price > 0 ? formatPKR(price) : 'Rs 0'}/MT
+                  Revenue: {qty > 0 ? `${Math.round(qty * 1000).toLocaleString()} kg` : '0 kg'} x {price > 0 ? formatPKR(price / 1000) : 'Rs 0'}/kg
                 </p>
               </div>
 
@@ -258,7 +258,7 @@ export default function InternalTransfer() {
                   {totalAmount > 0 ? `-${formatUSD(Math.round(totalAmount / PKR_RATE))}` : '$0'}
                 </div>
                 <p className="text-xs text-amber-500 mt-1">
-                  Cost of goods: {qty > 0 ? `${qty} MT` : '0 MT'} x {price > 0 ? formatUSD(Math.round(price / PKR_RATE)) : '$0'}/MT
+                  Cost of goods: {qty > 0 ? `${Math.round(qty * 1000).toLocaleString()} kg` : '0 kg'} x {price > 0 ? formatUSD(price / PKR_RATE / 1000) : '$0'}/kg
                   <span className="block mt-0.5 text-amber-400">@ 1 USD = {PKR_RATE} PKR</span>
                 </p>
               </div>
@@ -307,8 +307,8 @@ export default function InternalTransfer() {
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">Batch No</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">Export Order</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">Product</th>
-                <th className="text-right px-4 py-3 font-semibold text-gray-600">Qty MT</th>
-                <th className="text-right px-4 py-3 font-semibold text-gray-600">Price/MT</th>
+                <th className="text-right px-4 py-3 font-semibold text-gray-600">Qty kg</th>
+                <th className="text-right px-4 py-3 font-semibold text-gray-600">Price/kg</th>
                 <th className="text-right px-4 py-3 font-semibold text-gray-600">Total Amount</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">Dispatch Date</th>
                 <th className="text-center px-4 py-3 font-semibold text-gray-600">Status</th>
@@ -326,8 +326,8 @@ export default function InternalTransfer() {
                     <td className="px-4 py-3 text-gray-900">{t.batchNo || `B-${t.batchId}`}</td>
                     <td className="px-4 py-3 text-gray-900">{t.exportOrderNo || `#${t.exportOrderId}`}</td>
                     <td className="px-4 py-3 text-gray-600">{t.productName}</td>
-                    <td className="px-4 py-3 text-right text-gray-900 font-medium">{(parseFloat(t.qtyMt) || 0).toFixed(1)}</td>
-                    <td className="px-4 py-3 text-right text-gray-900">{formatPKR(t.transferPricePkr)}</td>
+                    <td className="px-4 py-3 text-right text-gray-900 font-medium">{Math.round((parseFloat(t.qtyMt) || 0) * 1000).toLocaleString()}</td>
+                    <td className="px-4 py-3 text-right text-gray-900">{formatPKR((parseFloat(t.transferPricePkr) || 0) / 1000)}</td>
                     <td className="px-4 py-3 text-right text-gray-900 font-medium">{formatPKR(t.totalValuePkr)}</td>
                     <td className="px-4 py-3 text-gray-600">{t.dispatchDate}</td>
                     <td className="px-4 py-3 text-center">
@@ -382,7 +382,7 @@ function TransferDetailDrawer({ transferId, onClose }) {
         <div className="space-y-5">
           <div className="flex items-center gap-2">
             <StatusBadge status={t.status} />
-            <span className="text-xs text-gray-500">{(parseFloat(t.qtyMt) || 0).toFixed(1)} MT · {t.productName || 'Finished Rice'}</span>
+            <span className="text-xs text-gray-500">{Math.round((parseFloat(t.qtyMt) || 0) * 1000).toLocaleString()} kg · {t.productName || 'Finished Rice'}</span>
           </div>
 
           {/* Key facts */}
@@ -391,8 +391,8 @@ function TransferDetailDrawer({ transferId, onClose }) {
             <Fact label="Export order" value={t.exportOrderNo || (t.exportOrderId ? `#${t.exportOrderId}` : '—')} />
             <Fact label="Customer" value={t.exportCustomerName || '—'} />
             <Fact label="Dispatch date" value={t.dispatchDate || '—'} />
-            <Fact label="Qty" value={`${(parseFloat(t.qtyMt) || 0).toFixed(1)} MT`} />
-            <Fact label="Price / MT" value={formatPKR(t.transferPricePkr)} />
+            <Fact label="Qty" value={`${Math.round((parseFloat(t.qtyMt) || 0) * 1000).toLocaleString()} kg`} />
+            <Fact label="Price / kg" value={formatPKR((parseFloat(t.transferPricePkr) || 0) / 1000)} />
             <Fact label="Total (PKR)" value={formatPKR(t.totalValuePkr)} />
             <Fact label="Total (USD)" value={formatUSD(t.usdEquivalent)} />
             <Fact label="Created by" value={t.createdByName || '—'} />
@@ -432,7 +432,7 @@ function TransferDetailDrawer({ transferId, onClose }) {
                     <span className="font-medium text-gray-700">{m.lotNo || `Lot ${m.lotId}`}</span>
                     <span className="text-gray-400">·</span>
                     <span className="text-gray-600 capitalize">{String(m.movementType).replace(/_/g, ' ')}</span>
-                    <span className="ml-auto tabular-nums font-medium text-gray-800">{((parseFloat(m.qty) || 0) / 1000).toFixed(1)} MT</span>
+                    <span className="ml-auto tabular-nums font-medium text-gray-800">{Math.round(parseFloat(m.qty) || 0).toLocaleString()} kg</span>
                     <span className="text-[10px] text-gray-400 uppercase">{m.lotEntity}</span>
                   </div>
                 ))}

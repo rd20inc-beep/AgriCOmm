@@ -357,10 +357,10 @@ export default function LotInventory() {
               {fmtPKR(kpis.totalValue)}
             </div>
             <div className="text-xs opacity-90 mt-1">
-              {kpis.totalLots} lots · {(kpis.totalKg / 1000).toFixed(1)} MT total
-              {kpis.availKg    > 0 && <> · Available {(kpis.availKg    / 1000).toFixed(1)} MT</>}
-              {kpis.reservedKg > 0 && <> · Reserved {(kpis.reservedKg / 1000).toFixed(1)} MT</>}
-              {kpis.soldKg     > 0 && <> · Sold {(kpis.soldKg     / 1000).toFixed(1)} MT</>}
+              {kpis.totalLots} lots · {Math.round(kpis.totalKg).toLocaleString()} kg total
+              {kpis.availKg    > 0 && <> · Available {Math.round(kpis.availKg).toLocaleString()} kg</>}
+              {kpis.reservedKg > 0 && <> · Reserved {Math.round(kpis.reservedKg).toLocaleString()} kg</>}
+              {kpis.soldKg     > 0 && <> · Sold {Math.round(kpis.soldKg).toLocaleString()} kg</>}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -385,7 +385,7 @@ export default function LotInventory() {
         <div className="bg-white rounded-xl border border-gray-100 p-4">
           <p className="text-xs font-medium text-gray-500 uppercase">Total Stock</p>
           <p className="text-xl font-bold text-gray-900 mt-1">{getDisplayQty(kpis.totalKg).toLocaleString()} <span className="text-sm font-normal text-gray-400">{getUnitLabel()}</span></p>
-          <p className="text-xs text-gray-400">{(kpis.totalKg / 1000).toFixed(1)} MT</p>
+          <p className="text-xs text-gray-400">{Math.round(kpis.totalKg).toLocaleString()} kg</p>
         </div>
         <div className="bg-emerald-50 rounded-xl border border-emerald-100 p-4">
           <p className="text-xs font-medium text-emerald-600 uppercase">Available</p>
@@ -787,7 +787,7 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
     const options = [];
     sources.forEach(batch => {
       const statusLabel = batch.status === 'Completed' ? '  ' : batch.status === 'In Progress' ? '  ' : '';
-      const qtyLabel = batch.raw_qty_mt ? ` | ${batch.raw_qty_mt} MT` : '';
+      const qtyLabel = batch.raw_qty_kg ? ` | ${Math.round(parseFloat(batch.raw_qty_kg)).toLocaleString()} kg` : '';
       // Add the batch itself as an option
       options.push({
         value: `batch-${batch.id}`,
@@ -798,7 +798,7 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
       // Add each vehicle as a sub-option
       if (batch.vehicles && batch.vehicles.length > 0) {
         batch.vehicles.forEach(v => {
-          const wtLabel = v.weight_mt ? ` (${v.weight_mt} MT)` : '';
+          const wtLabel = v.weight_kg ? ` (${Math.round(parseFloat(v.weight_kg)).toLocaleString()} kg)` : '';
           options.push({
             value: `vehicle-${batch.id}-${v.id}`,
             label: `  \u21B3 ${v.vehicle_no}${wtLabel}${v.driver_name ? ' - ' + v.driver_name : ''} [${batch.batch_no}]`,
@@ -1108,7 +1108,7 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
                 </select>
                 {selectedBatch && (
                   <p className="text-xs text-gray-500 pt-1">
-                    {selectedBatch.batch_no} · {selectedBatch.supplier_name || '—'} · {selectedBatch.raw_qty_mt} MT · <span className="text-gray-400">{selectedBatch.status}</span>
+                    {selectedBatch.batch_no} · {selectedBatch.supplier_name || '—'} · {selectedBatch.raw_qty_kg ? Math.round(parseFloat(selectedBatch.raw_qty_kg)).toLocaleString() : '—'} kg · <span className="text-gray-400">{selectedBatch.status}</span>
                   </p>
                 )}
               </div>
