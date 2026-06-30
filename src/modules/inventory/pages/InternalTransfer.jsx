@@ -28,7 +28,7 @@ export default function InternalTransfer() {
   const [form, setForm] = useState({
     batchNo: '',
     exportOrder: '',
-    qtyMT: '',
+    qtyKg: '',
     transferPrice: '',
     dispatchDate: '',
   });
@@ -42,8 +42,8 @@ export default function InternalTransfer() {
     ? exportOrders.find(o => o.millingOrderId === selectedBatch.id)?.productName || 'Finished Rice'
     : '';
 
-  const qty = parseFloat(form.qtyMT) || 0;
-  const price = parseFloat(form.transferPrice) || 0;
+  const qty = parseFloat(form.qtyKg) || 0;       // KG
+  const price = parseFloat(form.transferPrice) || 0; // PKR per KG
   const totalAmount = qty * price;
 
   const handleChange = (field, value) => {
@@ -52,7 +52,7 @@ export default function InternalTransfer() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!form.batchNo || !form.exportOrder || !form.qtyMT || !form.transferPrice || !form.dispatchDate) {
+    if (!form.batchNo || !form.exportOrder || !form.qtyKg || !form.transferPrice || !form.dispatchDate) {
       addToast('Please fill in all required fields', 'error');
       return;
     }
@@ -70,8 +70,8 @@ export default function InternalTransfer() {
         batch_id: batchId,
         export_order_id: orderId,
         product_name: productName || 'Finished Rice',
-        qty_mt: qty,
-        transfer_price_pkr: price,
+        qty_mt: qty / 1000,            // KG → MT for the export/transfer doc boundary
+        transfer_price_pkr: price * 1000, // per-kg → per-MT
         total_value_pkr: totalAmount,
         usd_equivalent: usdEquiv,
         pkr_rate: PKR_RATE,
@@ -80,8 +80,8 @@ export default function InternalTransfer() {
       });
 
       const t = res?.data?.transfer;
-      addToast(`Transfer ${t?.transfer_no || ''} created: ${Math.round(qty * 1000).toLocaleString()} kg dispatched`, 'success');
-      setForm({ batchNo: '', exportOrder: '', qtyMT: '', transferPrice: '', dispatchDate: '' });
+      addToast(`Transfer ${t?.transfer_no || ''} created: ${Math.round(qty).toLocaleString()} kg dispatched`, 'success');
+      setForm({ batchNo: '', exportOrder: '', qtyKg: '', transferPrice: '', dispatchDate: '' });
     } catch (err) {
       addToast(err.message || 'Failed to create transfer', 'error');
     } finally {
@@ -156,27 +156,27 @@ export default function InternalTransfer() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Qty (MT)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Qty (kg)</label>
                 <input
                   type="number"
-                  step="0.1"
+                  step="1"
                   min="0"
-                  value={form.qtyMT}
-                  onChange={(e) => handleChange('qtyMT', e.target.value)}
-                  placeholder="e.g. 50"
+                  value={form.qtyKg}
+                  onChange={(e) => handleChange('qtyKg', e.target.value)}
+                  placeholder="e.g. 50000"
                   className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Transfer Price per MT (PKR)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Transfer Price per kg (PKR)</label>
                 <input
                   type="number"
-                  step="1"
+                  step="0.01"
                   min="0"
                   value={form.transferPrice}
                   onChange={(e) => handleChange('transferPrice', e.target.value)}
-                  placeholder="e.g. 72800"
+                  placeholder="e.g. 72.8"
                   className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                 />
               </div>
@@ -244,7 +244,7 @@ export default function InternalTransfer() {
                   {totalAmount > 0 ? `+${formatPKR(totalAmount)}` : 'Rs 0'}
                 </div>
                 <p className="text-xs text-blue-500 mt-1">
-                  Revenue: {qty > 0 ? `${Math.round(qty * 1000).toLocaleString()} kg` : '0 kg'} x {price > 0 ? formatPKR(price / 1000) : 'Rs 0'}/kg
+                  Revenue: {qty > 0 ? `${Math.round(qty).toLocaleString()} kg` : '0 kg'} x {price > 0 ? formatPKR(price) : 'Rs 0'}/kg
                 </p>
               </div>
 
@@ -258,7 +258,7 @@ export default function InternalTransfer() {
                   {totalAmount > 0 ? `-${formatUSD(Math.round(totalAmount / PKR_RATE))}` : '$0'}
                 </div>
                 <p className="text-xs text-amber-500 mt-1">
-                  Cost of goods: {qty > 0 ? `${Math.round(qty * 1000).toLocaleString()} kg` : '0 kg'} x {price > 0 ? formatUSD(price / PKR_RATE / 1000) : '$0'}/kg
+                  Cost of goods: {qty > 0 ? `${Math.round(qty).toLocaleString()} kg` : '0 kg'} x {price > 0 ? formatUSD(price / PKR_RATE) : '$0'}/kg
                   <span className="block mt-0.5 text-amber-400">@ 1 USD = {PKR_RATE} PKR</span>
                 </p>
               </div>
