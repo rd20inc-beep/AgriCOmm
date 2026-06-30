@@ -115,6 +115,41 @@ function enrichLot(lot) {
 // Assemble the full detail bundle for ONE lot row (already fetched with the
 // warehouse/product/supplier joins). Shared by the single-lot detail endpoint
 // and the multi-lot printable report so both stay in lockstep.
+// #8 — has this lot been drawn into milling yet? "Milling started" = the lot is
+// committed to a batch (batch_source_lots row), hard-reserved at batch start
+// (milling_reserved_qty), or already issued out to milling. Mirrors the
+// codebase's own "touched by milling" definition (see addPurchaseToLot). q is a
+// trx or db so it works inside or outside a transaction.
+async function lotMillingStarted(lot, q) {
+  if ((parseFloat(lot.milling_reserved_qty) || 0) > 0) return true;
+  const sourced = await q('batch_source_lots').where({ lot_id: lot.id }).first();
+  if (sourced) return true;
+  const issued = await q('lot_transactions')
+    .where({ lot_id: lot.id })
+    .where('transaction_type', 'milling_issue')
+    .first();
+  return !!issued;
+}
+
+// #8 — Mill Operator scoped lot editing. A Mill Operator may edit a lot ONLY if
+// they created it AND milling has not started. Every other role is governed
+// solely by the inventory.edit permission (this helper is a no-op for them).
+// Throws a 403-tagged Error (each endpoint's catch maps err.status → response).
+// Resolves the role by id (authoritative; req.user.role from the JWT is not
+// trusted), so prod/local role-id differences don't matter.
+async function assertLotEditableByOperator(req, lot, q) {
+  const roleId = req.user && req.user.role_id;
+  if (!roleId) return;
+  const role = await q('roles').where({ id: roleId }).first();
+  if (!role || role.name !== 'Mill Operator') return; // only constrains Mill Operator
+  if (String(lot.created_by ?? '') !== String(req.user.id)) {
+    const e = new Error('You can only edit lots you created.'); e.status = 403; throw e;
+  }
+  if (await lotMillingStarted(lot, q)) {
+    const e = new Error('Lot cannot be edited after milling has started.'); e.status = 403; throw e;
+  }
+}
+
 async function buildLotDetail(lot) {
   const transactions = await db('lot_transactions')
     .where({ lot_id: lot.id })
@@ -1509,6 +1544,7 @@ module.exports = {
       const result = await db.transaction(async (trx) => {
         const lot = await trx('inventory_lots').where({ id }).first();
         if (!lot) { const e = new Error('Lot not found.'); e.status = 404; throw e; }
+        await assertLotEditableByOperator(req, lot, trx);
 
         const netKg = parseFloat(lot.net_weight_kg) || 0;
         // purchase_amount + additional costs are for the ORIGINAL received intake,
@@ -1665,6 +1701,7 @@ module.exports = {
       const result = await db.transaction(async (trx) => {
         const lot = await trx('inventory_lots').where({ id }).first();
         if (!lot) { const e = new Error('Lot not found.'); e.status = 404; throw e; }
+        await assertLotEditableByOperator(req, lot, trx);
         if (lot.type !== 'raw') { const e = new Error('Only raw purchase lots can be re-priced.'); e.status = 400; throw e; }
 
         const receivedKg = parseFloat(lot.received_net_weight_kg) || parseFloat(lot.net_weight_kg) || 0;
@@ -1771,6 +1808,7 @@ module.exports = {
       const result = await db.transaction(async (trx) => {
         const lot = await trx('inventory_lots').where({ id }).first();
         if (!lot) { const e = new Error('Lot not found.'); e.status = 404; throw e; }
+        await assertLotEditableByOperator(req, lot, trx);
         if (lot.type !== 'raw') { const e = new Error('Only raw purchase lots have a received quantity.'); e.status = 400; throw e; }
 
         const oldReceived = parseFloat(lot.received_net_weight_kg) || parseFloat(lot.net_weight_kg) || 0;
@@ -1869,6 +1907,7 @@ module.exports = {
       const { id } = req.params;
       const lot = await db('inventory_lots').where({ id }).first();
       if (!lot) return res.status(404).json({ success: false, message: 'Lot not found.' });
+      await assertLotEditableByOperator(req, lot, db);
 
       const b = req.body;
       const update = {};
@@ -1908,8 +1947,9 @@ module.exports = {
       const updated = await db('inventory_lots').where({ id }).first();
       return res.json({ success: true, data: { lot: enrichLot(updated) } });
     } catch (err) {
-      console.error('updateLotQuality error:', err);
-      return res.status(500).json({ success: false, message: err.message });
+      const status = err.status || 500;
+      if (status === 500) console.error('updateLotQuality error:', err);
+      return res.status(status).json({ success: false, message: err.message });
     }
   },
 
