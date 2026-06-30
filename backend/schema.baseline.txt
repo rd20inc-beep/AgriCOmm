@@ -1448,6 +1448,8 @@ COL milling_batches.bran_mt:numeric:NOT NULL
 COL milling_batches.bran_price_per_mt:numeric:NULL
 COL milling_batches.broken_mt:numeric:NOT NULL
 COL milling_batches.broken_price_per_mt:numeric:NULL
+COL milling_batches.choba_mt:numeric:NOT NULL
+COL milling_batches.choba_price_per_mt:numeric:NULL
 COL milling_batches.completed_at:timestamp with time zone:NULL
 COL milling_batches.created_at:timestamp with time zone:NOT NULL
 COL milling_batches.created_by:integer:NOT NULL
@@ -1467,6 +1469,7 @@ COL milling_batches.milling_fee_per_kg:numeric:NULL
 COL milling_batches.moisture_loss_pct:numeric:NOT NULL
 COL milling_batches.notes:text:NULL
 COL milling_batches.operator_name:character varying:NULL
+COL milling_batches.ov_mt:numeric:NOT NULL
 COL milling_batches.parent_batch_id:integer:NULL
 COL milling_batches.pass_number:integer:NOT NULL
 COL milling_batches.planned_finished_mt:numeric:NULL
@@ -1489,6 +1492,7 @@ COL milling_batches.short_grain_price_per_mt:numeric:NULL
 COL milling_batches.sortex_rejects_mt:numeric:NOT NULL
 COL milling_batches.sortex_rejects_price_per_mt:numeric:NULL
 COL milling_batches.status:character varying:NOT NULL
+COL milling_batches.stone_mt:numeric:NOT NULL
 COL milling_batches.supplier_id:integer:NULL
 COL milling_batches.supplier_name:character varying:NULL
 COL milling_batches.sweeping_mt:numeric:NOT NULL

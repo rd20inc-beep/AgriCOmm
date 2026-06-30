@@ -803,6 +803,8 @@ const millingController = {
         husk_mt,
         sortex_rejects_mt,
         powder_mt, sweeping_mt,
+        choba_mt,
+        ov_mt, stone_mt,
         wastage_mt,
       } = req.body;
 
@@ -824,8 +826,11 @@ const millingController = {
       const sortex = parseFloat(sortex_rejects_mt) || 0;
       const powder = parseFloat(powder_mt) || 0;
       const sweeping = parseFloat(sweeping_mt) || 0;
+      const choba = parseFloat(choba_mt) || 0;          // sellable by-product
+      const ov = parseFloat(ov_mt) || 0;                // record-only residue
+      const stone = parseFloat(stone_mt) || 0;          // record-only residue
       const wastage = parseFloat(wastage_mt) || 0;
-      const totalOutput = finished + broken + bran + husk + sortex + powder + sweeping + wastage;
+      const totalOutput = finished + broken + bran + husk + sortex + powder + sweeping + choba + ov + stone + wastage;
 
       // Raw input for the yield = the batch's maintained raw_qty_mt (Σ current
       // vehicle weights / blend qty). Do NOT sum the lot's purchase_in
@@ -880,7 +885,8 @@ const millingController = {
               actual_finished_mt: finished,
               broken_mt: broken, b1_mt: b1, b2_mt: b2, b3_mt: b3, csr_mt: csr, short_grain_mt: shortGrain,
               bran_mt: bran, husk_mt: husk, sortex_rejects_mt: sortex,
-              powder_mt: powder, sweeping_mt: sweeping, wastage_mt: wastage,
+              powder_mt: powder, sweeping_mt: sweeping, choba_mt: choba,
+              ov_mt: ov, stone_mt: stone, wastage_mt: wastage,
               yield_pct: yieldPct, updated_at: trx.fn.now(),
             });
             return inventoryService.resyncBatchOutputsFromBatch(trx, parseInt(id, 10), { userId: req.user?.id });
@@ -909,6 +915,9 @@ const millingController = {
         sortex_rejects_mt: sortex,
         powder_mt: powder,
         sweeping_mt: sweeping,
+        choba_mt: choba,
+        ov_mt: ov,
+        stone_mt: stone,
         wastage_mt: wastage,
         yield_pct: yieldPct,
         updated_at: db.fn.now(),
@@ -1047,6 +1056,7 @@ const millingController = {
           sortexMT: parseFloat(sortex),
           powderMT: parseFloat(powder),
           sweepingMT: parseFloat(sweeping),
+          chobaMT: parseFloat(choba),
           productName: riceTypeName || 'Finished Rice',
           costPerMT: finAlloc.costPerMT,
           // Finished rice carries the RESIDUAL cost (Net Purchase − by-product
@@ -1069,6 +1079,7 @@ const millingController = {
             sortex:      allocations.sortex?.costPerKg      || 0,
             powder:      allocations.powder?.costPerKg      || 0,
             sweeping:    allocations.sweeping?.costPerKg    || 0,
+            choba:       allocations.choba?.costPerKg       || 0,
           },
           // Split broken into its grades (B1, B2, B3, CSR, Short Grain) so
           // each tier becomes its own inventory lot and can be sold at its

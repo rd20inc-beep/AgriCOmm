@@ -1164,7 +1164,7 @@ const reportingService = {
       const bp = await db('milling_batches').whereIn('id', myBatchIds)
         .select('id', 'finished_price_per_mt', 'b1_price_per_mt', 'b2_price_per_mt', 'b3_price_per_mt',
           'csr_price_per_mt', 'short_grain_price_per_mt', 'broken_price_per_mt', 'powder_price_per_mt',
-          'sweeping_price_per_mt', 'sortex_rejects_price_per_mt');
+          'sweeping_price_per_mt', 'choba_price_per_mt', 'sortex_rejects_price_per_mt');
       for (const b of bp) batchPriceById[b.id] = b;
     }
     const priceForLotOutput = (o, batchId) => {
@@ -1180,6 +1180,7 @@ const reportingService = {
       else if (g === 'SHORT GRAIN') perMt = num(b.short_grain_price_per_mt);
       else if (n.includes('powder')) perMt = num(b.powder_price_per_mt);
       else if (n.includes('sweep')) perMt = num(b.sweeping_price_per_mt);
+            else if (n.includes('choba')) perMt = num(b.choba_price_per_mt);
       else if (n.includes('sortex')) perMt = num(b.sortex_rejects_price_per_mt);
       else if (n.includes('broken')) perMt = num(b.broken_price_per_mt);
       return perMt / 1000;
@@ -1810,7 +1811,7 @@ const reportingService = {
         'mb.manual_other_expenses_pkr', 'mb.raw_cost_total', 'mb.total_cost_per_kg_finished',
         'mb.finished_price_per_mt', 'mb.b1_price_per_mt', 'mb.b2_price_per_mt', 'mb.b3_price_per_mt',
         'mb.csr_price_per_mt', 'mb.short_grain_price_per_mt', 'mb.broken_price_per_mt',
-        'mb.powder_price_per_mt', 'mb.sweeping_price_per_mt', 'mb.sortex_rejects_price_per_mt',
+        'mb.powder_price_per_mt', 'mb.sweeping_price_per_mt', 'mb.choba_price_per_mt', 'mb.sortex_rejects_price_per_mt',
         'mb.supplier_id', 's.name as supplier_name', 'p.name as product_name', 'eo.product_name as order_product')
       .first();
     if (!batch) return null;
@@ -1866,6 +1867,7 @@ const reportingService = {
       else if (g === 'SHORT GRAIN') perMt = num(batch.short_grain_price_per_mt);
       else if (n.includes('powder')) perMt = num(batch.powder_price_per_mt);
       else if (n.includes('sweep')) perMt = num(batch.sweeping_price_per_mt);
+      else if (n.includes('choba')) perMt = num(batch.choba_price_per_mt);
       else if (n.includes('sortex')) perMt = num(batch.sortex_rejects_price_per_mt);
       else if (n.includes('broken')) perMt = num(batch.broken_price_per_mt);
       return perMt / 1000;

@@ -604,7 +604,7 @@ const exportOrderController = {
           const priceBatches = await db('milling_batches').whereIn('id', batchIds)
             .select('id', 'batch_no', 'finished_price_per_mt', 'b1_price_per_mt', 'b2_price_per_mt', 'b3_price_per_mt',
               'csr_price_per_mt', 'short_grain_price_per_mt', 'broken_price_per_mt', 'powder_price_per_mt',
-              'sweeping_price_per_mt', 'sortex_rejects_price_per_mt');
+              'sweeping_price_per_mt', 'choba_price_per_mt', 'sortex_rejects_price_per_mt');
           const priceById = {}; const refToId = {};
           for (const b of priceBatches) { priceById[b.id] = b; refToId[`batch-${b.id}`] = b.id; if (b.batch_no) refToId[b.batch_no] = b.id; }
           const outLots = await db('inventory_lots as l').leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
@@ -623,6 +623,7 @@ const exportOrderController = {
             else if (g === 'SHORT GRAIN') perMt = num(b.short_grain_price_per_mt);
             else if (n.includes('powder')) perMt = num(b.powder_price_per_mt);
             else if (n.includes('sweep')) perMt = num(b.sweeping_price_per_mt);
+            else if (n.includes('choba')) perMt = num(b.choba_price_per_mt);
             else if (n.includes('sortex')) perMt = num(b.sortex_rejects_price_per_mt);
             else if (n.includes('broken')) perMt = num(b.broken_price_per_mt);
             return perMt / 1000;
