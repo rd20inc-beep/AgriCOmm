@@ -2202,32 +2202,30 @@ const reportingService = {
   },
 
   /**
-   * Inventory Movement Ledger — a filterable chronological feed of every
-   * stock movement (inventory_movements), enriched with lot / warehouse /
-   * reference context + a link target. Read-only.
-   * Filters: dateFrom, dateTo, movementType, entity, lotId.
+   * Inventory Movement Ledger — a filterable chronological feed of every stock
+   * movement. Reads the CANONICAL `lot_transactions` (KG, per-lot, signed
+   * quantity_kg) — not the legacy `inventory_movements`, which is an incomplete
+   * parallel copy (missing opening balances and many milling/sale rows), so the
+   * old report under-reported (P6c-A). Transaction types are mapped back to the
+   * legacy movement_type values so the API shape + the FE filter are unchanged.
+   * Read-only. Filters: dateFrom, dateTo, movementType, entity, lotId, warehouseId.
    */
   async getInventoryLedger({ dateFrom, dateTo, movementType, entity, lotId, warehouseId, limit = 300 } = {}) {
     const num = (v) => parseFloat(v) || 0;
     const cap = Math.min(parseInt(limit, 10) || 300, 1000);
-    let q = db('inventory_movements as m')
-      .leftJoin('inventory_lots as l', 'm.lot_id', 'l.id')
-      .leftJoin('warehouses as wf', 'm.from_warehouse_id', 'wf.id')
-      .leftJoin('warehouses as wt', 'm.to_warehouse_id', 'wt.id')
-      .leftJoin('milling_batches as mb', 'm.batch_id', 'mb.id');
-    if (dateFrom) q = q.where('m.created_at', '>=', dateFrom);
-    if (dateTo) q = q.where('m.created_at', '<=', dateTo);
-    if (movementType) q = q.where('m.movement_type', movementType);
-    if (entity) q = q.where(function () { this.where('m.source_entity', entity).orWhere('m.dest_entity', entity).orWhere('l.entity', entity); });
-    if (lotId) q = q.where('m.lot_id', parseInt(lotId, 10));
-    if (warehouseId) { const w = parseInt(warehouseId, 10); q = q.where(function () { this.where('m.from_warehouse_id', w).orWhere('m.to_warehouse_id', w).orWhere('l.warehouse_id', w); }); }
-    const rows = await q.select(
-      'm.id', 'm.created_at', 'm.movement_type', 'm.qty', 'm.total_cost', 'm.cost_per_unit',
-      'm.lot_id', 'm.batch_id', 'm.order_id', 'm.linked_ref', 'm.source_entity', 'm.dest_entity', 'm.notes',
-      'l.lot_no', 'l.item_name', 'l.type as lot_type', 'mb.batch_no',
-      'wf.name as from_wh', 'wt.name as to_wh',
-    ).orderBy('m.created_at', 'desc').orderBy('m.id', 'desc').limit(cap);
 
+    // lot_transactions.transaction_type → the legacy movement_type the FE filter
+    // dropdown + the labels below use. Keeps the response shape identical.
+    const TXN_TO_MT = {
+      purchase_in: 'purchase_receipt', warehouse_transfer_in: 'transfer_in', transfer_to_mill: 'transfer_in',
+      milling_issue: 'production_issue', milling_receipt: 'production_output', byproduct_receipt: 'byproduct_output',
+      warehouse_transfer_out: 'transfer_out', transfer_to_export: 'transfer_out',
+      export_dispatch_out: 'export_dispatch', local_sale_out: 'local_sale',
+      export_allocation: 'reservation_hold', export_release: 'reservation_release',
+      stock_adjustment_plus: 'adjustment_plus', stock_adjustment_minus: 'adjustment_minus',
+      damage_out: 'damage_writeoff', shortage_out: 'shortage_writeoff', return_in: 'return',
+      opening_balance: 'opening_balance', lot_split: 'adjustment_minus', lot_merge: 'adjustment_plus',
+    };
     const LABELS = {
       purchase_receipt: 'Purchase received', internal_receipt: 'Internal receipt', production_issue: 'Issued to milling',
       production_output: 'Milling output', byproduct_output: 'By-product output', transfer_out: 'Transfer out',
@@ -2236,21 +2234,54 @@ const reportingService = {
       adjustment_minus: 'Adjustment (−)', damage_writeoff: 'Damage write-off', shortage_writeoff: 'Shortage write-off',
       return: 'Return', opening_balance: 'Opening balance',
     };
-    const OUTBOUND = new Set(['production_issue', 'transfer_out', 'export_dispatch', 'local_sale', 'adjustment_minus', 'damage_writeoff', 'shortage_writeoff']);
+
+    let q = db('lot_transactions as t')
+      .leftJoin('inventory_lots as l', 't.lot_id', 'l.id')
+      .leftJoin('warehouses as wf', 't.warehouse_from_id', 'wf.id')
+      .leftJoin('warehouses as wt', 't.warehouse_to_id', 'wt.id');
+    if (dateFrom) q = q.where('t.transaction_date', '>=', dateFrom);
+    if (dateTo) q = q.where('t.transaction_date', '<=', dateTo);
+    if (movementType) {
+      // Reverse-map the requested movement_type to its lot_transaction type(s).
+      const wanted = Object.keys(TXN_TO_MT).filter((k) => TXN_TO_MT[k] === movementType);
+      q = q.whereIn('t.transaction_type', wanted.length ? wanted : [movementType]);
+    }
+    if (entity) q = q.where(function () { this.where('t.entity_from', entity).orWhere('t.entity_to', entity).orWhere('l.entity', entity); });
+    if (lotId) q = q.where('t.lot_id', parseInt(lotId, 10));
+    if (warehouseId) { const w = parseInt(warehouseId, 10); q = q.where(function () { this.where('t.warehouse_from_id', w).orWhere('t.warehouse_to_id', w).orWhere('l.warehouse_id', w); }); }
+
+    const rows = await q.select(
+      't.id', 't.transaction_date', 't.created_at', 't.transaction_type', 't.quantity_kg', 't.cost_impact', 't.total_cost',
+      't.lot_id', 't.reference_module', 't.reference_id', 't.reference_no', 't.entity_from', 't.entity_to',
+      'l.lot_no', 'l.item_name', 'l.type as lot_type',
+      'wf.name as from_wh', 'wt.name as to_wh',
+    ).orderBy('t.transaction_date', 'desc').orderBy('t.id', 'desc').limit(cap);
+
+    // Resolve batch_no for milling-batch references (lot_transactions stores the
+    // batch via reference_module='milling_batch' + reference_id, not a batch_id).
+    const batchIds = [...new Set(rows.filter((r) => r.reference_module === 'milling_batch' && r.reference_id).map((r) => r.reference_id))];
+    const batchById = {};
+    if (batchIds.length) {
+      const bs = await db('milling_batches').whereIn('id', batchIds).select('id', 'batch_no');
+      for (const b of bs) batchById[b.id] = b.batch_no;
+    }
 
     const out = rows.map((r) => {
-      const mt = String(r.movement_type || '');
-      const kg = num(r.qty) * 1000;
+      const tt = String(r.transaction_type || '');
+      const mt = TXN_TO_MT[tt] || tt.replace(/_/g, ' ');
+      const qkg = num(r.quantity_kg);
+      const isBatch = r.reference_module === 'milling_batch' && r.reference_id;
+      const isOrder = r.reference_module === 'export_order' && r.reference_id;
       let href = null;
-      if (r.batch_id) href = `/milling/${r.batch_id}`;
-      else if (r.order_id) href = `/export/${r.order_id}`;
+      if (isBatch) href = `/milling/${r.reference_id}`;
+      else if (isOrder) href = `/export/${r.reference_id}`;
       else if (r.lot_id) href = `/lot-inventory/${r.lot_id}`;
       return {
-        id: r.id, date: r.created_at, type: mt, label: LABELS[mt] || mt.replace(/_/g, ' '),
+        id: r.id, date: r.transaction_date || r.created_at, type: mt, label: LABELS[mt] || mt.replace(/_/g, ' '),
         lotId: r.lot_id, lotNo: r.lot_no, item: r.item_name, lotType: r.lot_type,
-        batchNo: r.batch_no, reference: r.linked_ref || null,
-        qtyKg: kg, direction: OUTBOUND.has(mt) ? 'out' : 'in', costPkr: num(r.total_cost),
-        fromWh: r.from_wh, toWh: r.to_wh, entity: r.dest_entity || r.source_entity || null, href,
+        batchNo: isBatch ? (batchById[r.reference_id] || null) : null, reference: r.reference_no || null,
+        qtyKg: Math.abs(qkg), direction: qkg < 0 ? 'out' : 'in', costPkr: num(r.cost_impact) || num(r.total_cost),
+        fromWh: r.from_wh, toWh: r.to_wh, entity: r.entity_to || r.entity_from || null, href,
       };
     });
     return { rows: out, totals: { count: out.length, inKg: out.filter(r => r.direction === 'in').reduce((s, r) => s + r.qtyKg, 0), outKg: out.filter(r => r.direction === 'out').reduce((s, r) => s + r.qtyKg, 0) } };
