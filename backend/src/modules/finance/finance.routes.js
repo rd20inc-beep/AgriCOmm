@@ -75,6 +75,13 @@ router.post(
   auditAction('create_internal_transfer', 'finance', (req, data) => data.data && data.data.id ? data.data.id : null),
   controller.createInternalTransfer
 );
+router.get('/internal-transfers/:id', authorize('finance', 'view'), controller.getInternalTransferDetail);
+router.put(
+  '/internal-transfers/:id/confirm-export',
+  authorize('inventory', 'transfer'),
+  auditAction('confirm_internal_transfer_export', 'internal_transfers', (req) => req.params.id),
+  controller.confirmInternalTransferExport
+);
 
 // Phase 2: Centralized finance summary endpoints
 const financeService = require('../../services/financeService');

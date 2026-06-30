@@ -766,6 +766,8 @@ COL historical_cost_repair_log.repaired_at:timestamp with time zone:NULL
 COL historical_cost_repair_log.repaired_by:integer:NULL
 COL historical_cost_repair_log.updated_at:timestamp with time zone:NULL
 COL internal_transfers.batch_id:integer:NULL
+COL internal_transfers.confirmed_at:timestamp with time zone:NULL
+COL internal_transfers.confirmed_by:integer:NULL
 COL internal_transfers.created_at:timestamp with time zone:NOT NULL
 COL internal_transfers.created_by:integer:NULL
 COL internal_transfers.dispatch_date:date:NULL
@@ -2460,6 +2462,7 @@ CON internal_transfers.chk_internal_transfers_status_valid(c)
 CON internal_transfers.chk_internal_transfers_total_value_pkr_nn(c)
 CON internal_transfers.chk_internal_transfers_transfer_price_pkr_nn(c)
 CON internal_transfers.internal_transfers_batch_id_foreign(f)
+CON internal_transfers.internal_transfers_confirmed_by_fkey(f)
 CON internal_transfers.internal_transfers_created_by_foreign(f)
 CON internal_transfers.internal_transfers_export_order_id_foreign(f)
 CON internal_transfers.internal_transfers_pkey(p)

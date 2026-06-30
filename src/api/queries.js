@@ -776,6 +776,29 @@ export function useCreateTransfer() {
   });
 }
 
+export function useInternalTransfer(id) {
+  return useQuery({
+    queryKey: ['internal-transfer', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const res = await financeApi.internalTransfer(id);
+      return transformKeys(unwrap(res) || {});
+    },
+  });
+}
+
+export function useConfirmTransferExport() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => financeApi.confirmTransferExport(id),
+    onSuccess: (_d, id) => {
+      qc.invalidateQueries({ queryKey: ['internal-transfers'] });
+      qc.invalidateQueries({ queryKey: ['internal-transfer', id] });
+      qc.invalidateQueries({ queryKey: queryKeys.financeOverview });
+    },
+  });
+}
+
 // ===================== ACCOUNTING =====================
 
 export function useProfitLoss(params = {}) {

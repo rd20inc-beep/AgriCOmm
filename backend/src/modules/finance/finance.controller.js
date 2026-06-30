@@ -1547,6 +1547,88 @@ const financeController = {
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
   },
+
+  // Full detail for one transfer + the stock movements it produced + a lifecycle
+  // timeline — backs the transfer-detail drawer (#3).
+  async getInternalTransferDetail(req, res) {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const t = await db('internal_transfers as it')
+        .leftJoin('milling_batches as mb', 'it.batch_id', 'mb.id')
+        .leftJoin('export_orders as eo', 'it.export_order_id', 'eo.id')
+        .leftJoin('customers as cust', 'eo.customer_id', 'cust.id')
+        .leftJoin('users as cb', 'it.created_by', 'cb.id')
+        .leftJoin('users as fb', 'it.confirmed_by', 'fb.id')
+        .where('it.id', id)
+        .select(
+          'it.*',
+          'mb.batch_no',
+          'eo.order_no as export_order_no',
+          'cust.name as export_customer_name',
+          'cb.full_name as created_by_name',
+          'fb.full_name as confirmed_by_name'
+        )
+        .first();
+      if (!t) return res.status(404).json({ success: false, message: 'Transfer not found.' });
+
+      // Stock movements this transfer produced (TRANSFER_OUT from mill, TRANSFER_IN
+      // to export) — linked by linked_ref 'transfer-<id>'.
+      const movements = await db('inventory_movements as im')
+        .leftJoin('inventory_lots as l', 'im.lot_id', 'l.id')
+        .where('im.linked_ref', `transfer-${id}`)
+        .select('im.id', 'im.movement_type', 'im.qty', 'im.source_entity', 'im.dest_entity',
+          'im.created_at', 'l.lot_no', 'l.entity as lot_entity')
+        .orderBy('im.id', 'asc');
+
+      // Lifecycle timeline.
+      const timeline = [
+        { key: 'created', label: 'Transfer created & stock dispatched', at: t.created_at, by: t.created_by_name, done: true },
+        { key: 'in_transit', label: 'In transit to export', at: t.created_at, done: true },
+      ];
+      const confirmed = String(t.status) === 'Received' || !!t.confirmed_at;
+      timeline.push({
+        key: 'exported',
+        label: 'Confirmed exported',
+        at: t.confirmed_at || null,
+        by: t.confirmed_by_name || null,
+        done: confirmed,
+      });
+
+      return res.json({ success: true, data: { transfer: t, movements, timeline } });
+    } catch (err) {
+      console.error('Get internal transfer detail error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  // Confirm an in-transit transfer as Exported. STATUS TRANSITION ONLY — stock
+  // was already deducted and journals posted at creation, so this must NOT move
+  // stock or post journals again (double-count guard, see GL reversal rules).
+  async confirmInternalTransferExport(req, res) {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const t = await db('internal_transfers').where({ id }).first();
+      if (!t) return res.status(404).json({ success: false, message: 'Transfer not found.' });
+      if (String(t.status) === 'Received' || t.confirmed_at) {
+        return res.status(400).json({ success: false, message: 'This transfer is already confirmed exported.' });
+      }
+      if (String(t.status) === 'Cancelled') {
+        return res.status(400).json({ success: false, message: 'A cancelled transfer cannot be confirmed.' });
+      }
+
+      // 'Received' = the export entity has received the dispatched goods (an
+      // existing allowed status). Stock + journals already happened at creation.
+      const [updated] = await db('internal_transfers')
+        .where({ id })
+        .update({ status: 'Received', confirmed_at: db.fn.now(), confirmed_by: req.user.id, updated_at: db.fn.now() })
+        .returning('*');
+
+      return res.json({ success: true, data: { transfer: updated }, message: 'Transfer confirmed exported.' });
+    } catch (err) {
+      console.error('Confirm internal transfer export error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
 };
 
 // ===================== COST ALLOCATIONS =====================
