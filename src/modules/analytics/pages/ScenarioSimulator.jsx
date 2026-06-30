@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useRunScenario, useCostPredict } from '../../../api/queries';
+import { useCommodityPrices } from '../../../modules/milling/hooks/useCommodityPrices';
 import { INCOTERMS } from '../../../shared/constants/incoterms';
 
 function formatCurrency(v, cur = 'USD') {
@@ -137,63 +138,179 @@ function FxSimulator() {
   );
 }
 
+// Sellable yield categories (KG quantity field + per-KG-derived price field on the
+// transformed batch). `rate` maps to a canonical commodity price (per-KG) used when a
+// batch has no recorded price for the category. Bran/husk are excluded — no longer sold.
+const YIELD_CATEGORIES = [
+  { key: 'finished', label: 'Finished Rice', qty: 'actualFinishedMT', price: 'finishedPricePerMT', rate: 'finished' },
+  { key: 'broken', label: 'Broken', qty: 'brokenMT', price: 'brokenPricePerMT', rate: 'broken' },
+  { key: 'b1', label: 'B1', qty: 'b1MT', price: 'b1PricePerMT', rate: 'broken' },
+  { key: 'b2', label: 'B2', qty: 'b2MT', price: 'b2PricePerMT', rate: 'broken' },
+  { key: 'b3', label: 'B3', qty: 'b3MT', price: 'b3PricePerMT', rate: 'broken' },
+  { key: 'csr', label: 'CSR', qty: 'csrMT', price: 'csrPricePerMT', rate: 'broken' },
+  { key: 'shortGrain', label: 'Short Grain', qty: 'shortGrainMT', price: 'shortGrainPricePerMT', rate: 'broken' },
+  { key: 'powder', label: 'Powder', qty: 'powderMT', price: 'powderPricePerMT', rate: null },
+  { key: 'sweeping', label: 'S.W', qty: 'sweepingMT', price: 'sweepingPricePerMT', rate: null },
+  { key: 'choba', label: 'Choba', qty: 'chobaMT', price: 'chobaPricePerMT', rate: null },
+];
+
 function YieldSimulator() {
-  const { millingBatches, settings } = useApp();
-  const [yieldPct, setYieldPct] = useState(75);
-  const [brokenPct, setBrokenPct] = useState(10);
+  const { millingBatches } = useApp();
+  const prices = useCommodityPrices(); // canonical per-MT rates (finished/broken/…)
+  const [supplier, setSupplier] = useState('All');
+  const [rawQtyKg, setRawQtyKg] = useState(50000);
+  const [yieldPct, setYieldPct] = useState(null);   // null until ref loads → historical avg
+  const [brokenPct, setBrokenPct] = useState(null);
 
-  const analysis = useMemo(() => {
-    const completedBatches = millingBatches.filter(b => b.status === 'Completed');
-    const avgYield = completedBatches.length > 0
-      ? completedBatches.reduce((s, b) => s + (b.yieldPct || 0), 0) / completedBatches.length
-      : 75;
-    const avgBroken = completedBatches.length > 0
-      ? completedBatches.reduce((s, b) => s + ((b.brokenMT || 0) / Math.max(b.rawQtyMT, 1) * 100), 0) / completedBatches.length
-      : 10;
+  const suppliers = useMemo(
+    () => [...new Set(millingBatches.filter(b => b.status === 'Completed' && b.supplierName).map(b => b.supplierName))].sort(),
+    [millingBatches]
+  );
 
-    const totalRawMT = millingBatches.reduce((s, b) => s + (b.rawQtyMT || 0), 0);
-    const finishedMTAtSimulated = totalRawMT * (yieldPct / 100);
-    const finishedMTAtAvg = totalRawMT * (avgYield / 100);
-    const yieldDiff = finishedMTAtSimulated - finishedMTAtAvg;
+  // Real reference profile derived from completed batches (optionally scoped to one supplier).
+  const ref = useMemo(() => {
+    const done = millingBatches.filter(b => b.status === 'Completed'
+      && (supplier === 'All' || b.supplierName === supplier) && (b.rawQtyMT || 0) > 0);
+    const totalRawKg = done.reduce((s, b) => s + (b.rawQtyMT || 0) * 1000, 0);
 
-    const finishedPricePerMT = 72800;
-    const brokenPricePerMT = 42000;
-    const revenueSimulated = finishedMTAtSimulated * finishedPricePerMT + (totalRawMT * brokenPct / 100) * brokenPricePerMT;
-    const revenueAvg = finishedMTAtAvg * finishedPricePerMT + (totalRawMT * avgBroken / 100) * brokenPricePerMT;
+    // Per-category: historical share of raw + qty-weighted avg price/kg (price field is per-MT → /1000).
+    const cats = YIELD_CATEGORIES.map(c => {
+      let catKg = 0, valueWeightedPrice = 0, pricedKg = 0;
+      done.forEach(b => {
+        const kg = (b[c.qty] || 0) * 1000;
+        const priceKg = (b[c.price] || 0) / 1000;
+        catKg += kg;
+        if (priceKg > 0) { valueWeightedPrice += priceKg * kg; pricedKg += kg; }
+      });
+      return {
+        ...c,
+        shareOfRaw: totalRawKg > 0 ? catKg / totalRawKg : 0,
+        avgPriceKg: pricedKg > 0 ? valueWeightedPrice / pricedKg : 0,
+      };
+    });
 
-    return { avgYield: avgYield.toFixed(1), avgBroken: avgBroken.toFixed(1), totalRawMT, finishedMTAtSimulated, yieldDiff, revenueSimulated, revenueAvg, revenueDiff: revenueSimulated - revenueAvg };
-  }, [millingBatches, yieldPct, brokenPct]);
+    const avgYield = done.length ? done.reduce((s, b) => s + (b.yieldPct || 0), 0) / done.length : 0;
+    const avgBroken = totalRawKg > 0
+      ? (done.reduce((s, b) => s + (b.brokenMT || 0) * 1000, 0) / totalRawKg) * 100 : 0;
+
+    // Real input cost per kg of raw: total raw cost ÷ raw kg, over ONLY the batches that
+    // carry a raw cost (mixing in cost-less batches would understate the rate). Fall back
+    // to raw-cost-per-finished-kg × yield where the total isn't stored.
+    let costedRawKg = 0, costedRawTotal = 0;
+    done.forEach(b => {
+      const rawKg = (b.rawQtyMT || 0) * 1000;
+      let rawCost = b.rawCostTotal || 0;
+      if (!rawCost && b.rawCostPerKgFinished > 0) rawCost = b.rawCostPerKgFinished * (b.actualFinishedMT || 0) * 1000;
+      if (rawCost > 0 && rawKg > 0) { costedRawTotal += rawCost; costedRawKg += rawKg; }
+    });
+    const rawRatePerKg = costedRawKg > 0 ? costedRawTotal / costedRawKg : 0;
+    const millingFeePerKg = done.length
+      ? done.reduce((s, b) => s + (b.millingFeePerKg || 0), 0) / done.length : 0;
+
+    return { cats, avgYield, avgBroken, rawRatePerKg, millingFeePerKg, batchCount: done.length };
+  }, [millingBatches, supplier]);
+
+  const effYield = yieldPct != null ? yieldPct : Math.round((ref.avgYield || 65) * 10) / 10;
+  const effBroken = brokenPct != null ? brokenPct : Math.round((ref.avgBroken || 8) * 10) / 10;
+
+  // Project the output mix for the entered raw quantity: finished & broken from the
+  // sliders, the remaining sellable categories from their historical share of raw.
+  const sim = useMemo(() => {
+    const raw = parseFloat(rawQtyKg) || 0;
+    const rateKg = (c) => (c.rate && prices[c.rate] ? prices[c.rate] / 1000 : 0); // per-MT → per-KG
+    const lines = ref.cats.map(c => {
+      let outKg;
+      if (c.key === 'finished') outKg = raw * (effYield / 100);
+      else if (c.key === 'broken') outKg = raw * (effBroken / 100);
+      else outKg = raw * c.shareOfRaw;
+      // Prefer the batch-recorded price; fall back to the canonical commodity rate.
+      const priceKg = c.avgPriceKg > 0 ? c.avgPriceKg : rateKg(c);
+      return { ...c, outKg, priceKg, value: outKg * priceKg };
+    }).filter(l => l.outKg > 0.01 || l.key === 'finished' || l.key === 'broken');
+
+    const revenue = lines.reduce((s, l) => s + l.value, 0);
+    const inputCost = raw * (ref.rawRatePerKg + ref.millingFeePerKg);
+    const profit = revenue - inputCost;
+    const sellableKg = lines.reduce((s, l) => s + l.outKg, 0);
+    return { lines, revenue, inputCost, profit, raw, sellableKg, profitPerKg: raw > 0 ? profit / raw : 0 };
+  }, [ref, rawQtyKg, effYield, effBroken]);
+
+  const fmtKg = (kg) => `${Math.round(kg).toLocaleString()} kg`;
+
+  if (ref.batchCount === 0) {
+    return <div className="p-10 text-center text-sm text-gray-400">No completed milling batches yet — run a batch to seed the yield model.</div>;
+  }
 
   return (
     <div className="space-y-5">
+      <div className="form-grid">
+        <div className="form-group">
+          <label className="form-label">Reference Batches</label>
+          <select value={supplier} onChange={e => { setSupplier(e.target.value); setYieldPct(null); setBrokenPct(null); }} className="form-input">
+            <option value="All">All suppliers ({ref.batchCount} batches)</option>
+            {suppliers.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+        <div className="form-group">
+          <label className="form-label">Raw Rice to Mill (kg)</label>
+          <input type="number" min={0} step={1000} value={rawQtyKg}
+            onChange={e => setRawQtyKg(e.target.value)} className="form-input" />
+        </div>
+      </div>
+
       <div className="bg-gray-50 rounded-xl p-4 space-y-4">
         <div>
           <div className="flex items-center justify-between mb-2">
             <label className="text-sm font-medium text-gray-700">Finished Rice Yield %</label>
-            <span className="text-sm font-bold text-blue-600">{yieldPct}%</span>
+            <span className="text-sm font-bold text-blue-600">{effYield}%</span>
           </div>
-          <input type="range" min={60} max={85} step={0.5} value={yieldPct}
+          <input type="range" min={50} max={85} step={0.5} value={effYield}
             onChange={e => setYieldPct(parseFloat(e.target.value))} className="w-full" />
-          <p className="text-xs text-gray-400 mt-1">Historical average: {analysis.avgYield}%</p>
+          <p className="text-xs text-gray-400 mt-1">Historical average: {ref.avgYield.toFixed(1)}%</p>
         </div>
         <div>
           <div className="flex items-center justify-between mb-2">
             <label className="text-sm font-medium text-gray-700">Broken Rice %</label>
-            <span className="text-sm font-bold text-amber-600">{brokenPct}%</span>
+            <span className="text-sm font-bold text-amber-600">{effBroken}%</span>
           </div>
-          <input type="range" min={3} max={25} step={0.5} value={brokenPct}
+          <input type="range" min={0} max={30} step={0.5} value={effBroken}
             onChange={e => setBrokenPct(parseFloat(e.target.value))} className="w-full" />
-          <p className="text-xs text-gray-400 mt-1">Historical average: {analysis.avgBroken}%</p>
+          <p className="text-xs text-gray-400 mt-1">Historical average: {ref.avgBroken.toFixed(1)}%</p>
         </div>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <ResultCard label="Total Raw (MT)" value={`${analysis.totalRawMT.toFixed(1)} MT`} />
-        <ResultCard label="Simulated Output" value={`${analysis.finishedMTAtSimulated.toFixed(1)} MT`} />
-        <ResultCard label="Output Diff" value={`${analysis.yieldDiff >= 0 ? '+' : ''}${analysis.yieldDiff.toFixed(1)} MT`}
-          positive={analysis.yieldDiff >= 0} />
-        <ResultCard label="Revenue Impact (PKR)" value={formatCurrency(Math.abs(analysis.revenueDiff), 'PKR')}
-          subtitle={analysis.revenueDiff >= 0 ? 'Increase' : 'Decrease'} positive={analysis.revenueDiff >= 0} />
+        <ResultCard label="Sellable Output" value={fmtKg(sim.sellableKg)} subtitle={`${(sim.raw ? sim.sellableKg / sim.raw * 100 : 0).toFixed(1)}% of raw`} />
+        <ResultCard label="Est. Revenue" value={formatCurrency(sim.revenue, 'PKR')} />
+        <ResultCard label="Input Cost" value={formatCurrency(sim.inputCost, 'PKR')}
+          subtitle={ref.rawRatePerKg > 0 ? `raw Rs${ref.rawRatePerKg.toFixed(1)}/kg + milling` : 'milling only — raw cost not recorded'} />
+        <ResultCard label="Est. Profit / Loss" value={formatCurrency(sim.profit, 'PKR')}
+          subtitle={`${formatCurrency(sim.profitPerKg, 'PKR')}/kg raw`} positive={sim.profit >= 0} />
+      </div>
+
+      <div className="table-container">
+        <div className="px-5 py-3 border-b border-gray-200"><h3 className="text-sm font-semibold text-gray-700 uppercase">Output Mix &amp; Value</h3></div>
+        <div className="table-scroll">
+          <table className="w-full">
+            <thead><tr><th className="text-left">Category</th><th className="text-right">Output</th><th className="text-right">% of Raw</th><th className="text-right">Price / kg</th><th className="text-right">Value</th></tr></thead>
+            <tbody>
+              {sim.lines.map(l => (
+                <tr key={l.key}>
+                  <td className="font-medium text-gray-900">{l.label}</td>
+                  <td className="text-right">{fmtKg(l.outKg)}</td>
+                  <td className="text-right text-gray-500">{sim.raw > 0 ? (l.outKg / sim.raw * 100).toFixed(1) : '0.0'}%</td>
+                  <td className="text-right">{l.priceKg > 0 ? formatCurrency(l.priceKg, 'PKR') : <span className="text-gray-300">—</span>}</td>
+                  <td className="text-right font-semibold">{l.value > 0 ? formatCurrency(l.value, 'PKR') : <span className="text-gray-300">—</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot><tr className="border-t border-gray-200 font-semibold">
+              <td className="text-gray-900">Total Revenue</td><td></td><td></td><td></td>
+              <td className="text-right text-emerald-600">{formatCurrency(sim.revenue, 'PKR')}</td>
+            </tr></tfoot>
+          </table>
+        </div>
+        <p className="px-5 py-2 text-[11px] text-gray-400">Output mix from {ref.batchCount} completed batch{ref.batchCount === 1 ? '' : 'es'}; prices use batch-recorded selling prices where available, otherwise the commodity rate master ({prices.source}). Categories with no price show "—" and add no revenue.</p>
       </div>
     </div>
   );

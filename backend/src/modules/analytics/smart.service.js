@@ -570,14 +570,18 @@ const smartService = {
     const adjustedYield = benchmarkYield + moistureAdjustment + brokenAdjustment;
 
     // Three scenarios
+    // Bran/husk are no longer modelled as sellable outputs (removed per the yield
+    // rework); the non-finished, non-broken remainder is reported as wastage/residue.
+    const residueMT = (yieldP, brokenP) =>
+      parseFloat((rawQtyMT * Math.max(0, 100 - yieldP - brokenP) / 100).toFixed(2));
+
+    const bestBroken = Math.max(brokenPct - 2, 1);
     const bestCase = {
       label: 'Best Case (Benchmark)',
       yieldPct: parseFloat(benchmarkYield.toFixed(1)),
       outputMT: parseFloat((rawQtyMT * benchmarkYield / 100).toFixed(2)),
-      brokenMT: parseFloat((rawQtyMT * Math.max(brokenPct - 2, 1) / 100).toFixed(2)),
-      branMT: parseFloat((rawQtyMT * 8 / 100).toFixed(2)),
-      huskMT: parseFloat((rawQtyMT * 20 / 100).toFixed(2)),
-      wastageMT: parseFloat((rawQtyMT * (100 - benchmarkYield - 8 - 20) / 100).toFixed(2)),
+      brokenMT: parseFloat((rawQtyMT * bestBroken / 100).toFixed(2)),
+      wastageMT: residueMT(benchmarkYield, bestBroken),
     };
 
     const expected = {
@@ -585,20 +589,17 @@ const smartService = {
       yieldPct: parseFloat(adjustedYield.toFixed(1)),
       outputMT: parseFloat((rawQtyMT * adjustedYield / 100).toFixed(2)),
       brokenMT: parseFloat((rawQtyMT * brokenPct / 100).toFixed(2)),
-      branMT: parseFloat((rawQtyMT * 9 / 100).toFixed(2)),
-      huskMT: parseFloat((rawQtyMT * 21 / 100).toFixed(2)),
-      wastageMT: parseFloat((rawQtyMT * (100 - adjustedYield - 9 - 21) / 100).toFixed(2)),
+      wastageMT: residueMT(adjustedYield, brokenPct),
     };
 
     const worstYield = adjustedYield - 5;
+    const worstBroken = brokenPct + 3;
     const worstCase = {
       label: 'Worst Case (-5%)',
       yieldPct: parseFloat(worstYield.toFixed(1)),
       outputMT: parseFloat((rawQtyMT * worstYield / 100).toFixed(2)),
-      brokenMT: parseFloat((rawQtyMT * (brokenPct + 3) / 100).toFixed(2)),
-      branMT: parseFloat((rawQtyMT * 10 / 100).toFixed(2)),
-      huskMT: parseFloat((rawQtyMT * 22 / 100).toFixed(2)),
-      wastageMT: parseFloat((rawQtyMT * (100 - worstYield - 10 - 22) / 100).toFixed(2)),
+      brokenMT: parseFloat((rawQtyMT * worstBroken / 100).toFixed(2)),
+      wastageMT: residueMT(worstYield, worstBroken),
     };
 
     // Get average selling price for this variety
