@@ -19,15 +19,17 @@ import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 const TABS = ['Profitability', 'Customer Scoring', 'Supplier Scoring', 'Risk Monitor', 'Smart Alerts'];
 
 function ScoreBar({ score, label, maxScore = 100 }) {
-  const pct = Math.min(100, Math.max(0, (score / maxScore) * 100));
+  // Absent component (no underlying data) — show "—" rather than a misleading 0.
+  const hasScore = score != null && !Number.isNaN(Number(score));
+  const pct = hasScore ? Math.min(100, Math.max(0, (score / maxScore) * 100)) : 0;
   const color = pct >= 75 ? 'bg-emerald-500' : pct >= 50 ? 'bg-amber-500' : pct >= 25 ? 'bg-orange-500' : 'bg-red-500';
   return (
     <div className="flex items-center gap-3">
       <span className="text-xs text-gray-500 w-20 text-right">{label}</span>
       <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-        <div className={`h-full ${color} rounded-full transition-all`} style={{ width: `${pct}%` }} />
+        {hasScore && <div className={`h-full ${color} rounded-full transition-all`} style={{ width: `${pct}%` }} />}
       </div>
-      <span className="text-xs font-semibold text-gray-700 w-8">{Math.round(score)}</span>
+      <span className="text-xs font-semibold text-gray-700 w-8">{hasScore ? Math.round(score) : '—'}</span>
     </div>
   );
 }
@@ -202,23 +204,29 @@ function ScoringTab({ type }) {
       })).map(c => ({ ...c, overallScore: Math.round((c.paymentScore * 0.4 + c.profitabilityScore * 0.35 + c.volumeScore * 0.25)) }))
         .sort((a, b) => b.overallScore - a.overallScore);
     } else {
+      // Real fallback when the backend scoreboard is unavailable: derive Quality from
+      // actual milling yield only. Delivery/Price need purchase/GRN data the client
+      // doesn't hold, so they stay null (shown as "—") — never fabricated.
       const map = {};
       millingBatches.forEach(b => {
         const key = b.supplierName || 'Unknown';
-        if (!map[key]) map[key] = { name: key, batches: 0, totalYield: 0, totalRaw: 0 };
+        if (!map[key]) map[key] = { name: key, batches: 0, totalYield: 0, yieldCount: 0, totalRaw: 0 };
         map[key].batches += 1;
-        map[key].totalYield += b.yieldPct || 0;
+        if (b.yieldPct > 0) { map[key].totalYield += b.yieldPct; map[key].yieldCount += 1; }
         map[key].totalRaw += b.rawQtyMT || 0;
       });
-      return Object.values(map).map(s => ({
-        ...s,
-        avgYield: s.batches > 0 ? (s.totalYield / s.batches).toFixed(1) : 0,
-        qualityScore: s.batches > 0 ? Math.min(100, Math.round((s.totalYield / s.batches) * 1.3)) : 50,
-        deliveryScore: 70 + Math.floor(Math.random() * 20),
-        priceScore: 60 + Math.floor(Math.random() * 30),
-        overallScore: 0,
-      })).map(s => ({ ...s, overallScore: Math.round(s.qualityScore * 0.5 + s.deliveryScore * 0.3 + s.priceScore * 0.2) }))
-        .sort((a, b) => b.overallScore - a.overallScore);
+      return Object.values(map).map(s => {
+        const avgYield = s.yieldCount > 0 ? s.totalYield / s.yieldCount : null;
+        const qualityScore = avgYield != null ? Math.min(100, Math.round(avgYield * 1.3)) : null;
+        return {
+          ...s,
+          avgYield: avgYield != null ? avgYield.toFixed(1) : null,
+          qualityScore,
+          deliveryScore: null,
+          priceScore: null,
+          overallScore: qualityScore != null ? qualityScore : 0,
+        };
+      }).sort((a, b) => b.overallScore - a.overallScore);
     }
   }, [scoreboard, exportOrders, millingBatches, isCustomer]);
 
@@ -237,27 +245,37 @@ function ScoringTab({ type }) {
         </div>
         <div className="bg-red-50 rounded-xl border border-red-100 p-4">
           <p className="text-xs font-medium text-red-600 uppercase">At Risk (&lt;50)</p>
-          <p className="text-2xl font-bold text-red-700 mt-1">{scores.filter(s => s.overallScore < 50).length}</p>
+          <p className="text-2xl font-bold text-red-700 mt-1">{scores.filter(s => s.overallScore != null && s.overallScore < 50).length}</p>
         </div>
       </div>
 
       {/* Scorecard list */}
       <div className="space-y-3">
         {scores.slice(0, 15).map((entity, idx) => {
-          const scoreColor = entity.overallScore >= 75 ? 'text-emerald-600 bg-emerald-50' : entity.overallScore >= 50 ? 'text-amber-600 bg-amber-50' : 'text-red-600 bg-red-50';
+          const rated = entity.overallScore != null;
+          const scoreColor = !rated ? 'text-gray-400 bg-gray-100' : entity.overallScore >= 75 ? 'text-emerald-600 bg-emerald-50' : entity.overallScore >= 50 ? 'text-amber-600 bg-amber-50' : 'text-red-600 bg-red-50';
           return (
             <div key={entity.name || idx} className="bg-white rounded-xl border border-gray-100 p-4 hover:shadow-md transition-shadow">
               <div className="flex items-center gap-4">
                 <div className={`w-12 h-12 rounded-xl ${scoreColor} flex items-center justify-center flex-shrink-0`}>
-                  <span className="text-lg font-bold">{Math.round(entity.overallScore)}</span>
+                  <span className="text-lg font-bold">{rated ? Math.round(entity.overallScore) : '—'}</span>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-2">
+                  <div className="flex items-center gap-2 mb-1">
                     <h3 className="text-sm font-semibold text-gray-900 truncate">{entity.name}</h3>
                     <span className="text-xs text-gray-400">#{idx + 1}</span>
                     {entity.orders && <span className="text-xs text-gray-400">{entity.orders} orders</span>}
                     {entity.batches && <span className="text-xs text-gray-400">{entity.batches} batches</span>}
+                    {entity.riskLevel === 'Unrated' && <span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-400">insufficient data</span>}
                   </div>
+                  {!isCustomer && (entity.avgYield != null || entity.avgRatePerKg != null || entity.totalQtyKg > 0) && (
+                    <div className="flex items-center gap-3 mb-2 text-[11px] text-gray-500">
+                      {entity.avgYield != null && <span>Yield <span className="font-semibold text-gray-700">{entity.avgYield}%</span></span>}
+                      {entity.avgRatePerKg != null && <span>Rate <span className="font-semibold text-gray-700">Rs {entity.avgRatePerKg}/kg</span></span>}
+                      {entity.totalQtyKg > 0 && <span>Supplied <span className="font-semibold text-gray-700">{(entity.totalQtyKg / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 })} MT</span></span>}
+                      {entity.rejectionPct != null && entity.rejectionPct > 0 && <span>Reject <span className="font-semibold text-amber-600">{entity.rejectionPct}%</span></span>}
+                    </div>
+                  )}
                   <div className="space-y-1.5">
                     {isCustomer ? (
                       <>
