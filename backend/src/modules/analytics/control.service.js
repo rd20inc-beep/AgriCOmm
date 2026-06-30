@@ -514,33 +514,132 @@ const controlService = {
     return { ...record, supplier_name: supplier.name };
   },
 
+  // Live supplier scoreboard computed from REAL operational data so it is always
+  // populated regardless of whether the PO/GRN procurement flow is used (this mill
+  // intakes mostly via direct vehicle arrivals). Each score is derived from genuine
+  // signals; a component with no underlying data is left null (rendered as "—") and
+  // excluded from the renormalised overall — we never fabricate a number.
+  //   Quality  = milling yield % for the supplier's raw (real), less GRN rejection %.
+  //   Price    = supplier avg purchase rate/kg vs market avg (cheaper ⇒ higher).
+  //   Delivery = GRN late-days vs PO promised date, else GRN rejection, else null.
   async getSupplierScoreboard({ periodStart, periodEnd }) {
-    const query = db('supplier_scores as ss')
-      .join('suppliers as s', 'ss.supplier_id', 's.id')
-      .select(
-        'ss.*',
-        's.name as supplier_name',
-        's.type as supplier_type',
-        's.country as supplier_country'
-      );
+    const period = (q, col) => {
+      if (periodStart) q.where(col, '>=', periodStart);
+      if (periodEnd) q.where(col, '<=', periodEnd);
+      return q;
+    };
 
-    if (periodStart) query.where('ss.period_start', '>=', periodStart);
-    if (periodEnd) query.where('ss.period_end', '<=', periodEnd);
+    const batches = await period(
+      db('milling_batches').whereNotNull('supplier_id'), 'created_at'
+    ).select('supplier_id', 'yield_pct', 'raw_qty_kg');
 
-    // Get latest score per supplier
-    const rows = await query.orderBy('ss.overall_score', 'desc');
+    const lots = await period(
+      db('inventory_lots').whereNotNull('supplier_id'), 'created_at'
+    ).select('supplier_id', 'type', 'rate_per_kg', 'landed_cost_per_kg');
 
-    // Deduplicate: keep only latest per supplier
-    const seen = new Set();
-    const unique = [];
-    for (const row of rows) {
-      if (!seen.has(row.supplier_id)) {
-        seen.add(row.supplier_id);
-        unique.push(row);
+    const grns = await period(
+      db('goods_receipt_notes').whereNotNull('supplier_id'), 'receipt_date'
+    ).select('supplier_id', 'po_id', 'receipt_date', 'accepted_qty_mt', 'rejected_qty_mt');
+
+    const poIds = [...new Set(grns.map(g => g.po_id).filter(Boolean))];
+    const pos = poIds.length
+      ? await db('purchase_orders').whereIn('id', poIds).select('id', 'delivery_date')
+      : [];
+    const poById = Object.fromEntries(pos.map(p => [p.id, p]));
+
+    const supIds = [...new Set([...batches, ...lots, ...grns].map(r => r.supplier_id))];
+    if (supIds.length === 0) return { data: [], total: 0 };
+    const suppliers = await db('suppliers').whereIn('id', supIds).select('id', 'name');
+    const nameById = Object.fromEntries(suppliers.map(s => [s.id, s.name]));
+
+    // Market benchmark: avg raw purchase rate (fall back to any priced lot if raw is sparse).
+    const rate = (l) => parseFloat(l.rate_per_kg) || parseFloat(l.landed_cost_per_kg) || 0;
+    let bench = lots.filter(l => l.type === 'raw' && rate(l) > 0).map(rate);
+    if (bench.length === 0) bench = lots.filter(l => rate(l) > 0).map(rate);
+    const marketAvgRate = bench.length ? bench.reduce((a, b) => a + b, 0) / bench.length : 0;
+
+    const byS = {};
+    const ensure = (id) => (byS[id] ||= {
+      supplier_id: id, name: nameById[id] || `Supplier #${id}`,
+      yields: [], rawKg: 0, batches: 0, lots: 0, rawRates: [], anyRates: [],
+      accepted: 0, rejected: 0, lateDays: [],
+    });
+
+    for (const b of batches) {
+      const s = ensure(b.supplier_id);
+      s.batches++;
+      s.rawKg += parseFloat(b.raw_qty_kg) || 0;
+      if (parseFloat(b.yield_pct) > 0) s.yields.push(parseFloat(b.yield_pct));
+    }
+    for (const l of lots) {
+      const s = ensure(l.supplier_id);
+      s.lots++;
+      const r = rate(l);
+      if (r > 0) { s.anyRates.push(r); if (l.type === 'raw') s.rawRates.push(r); }
+    }
+    for (const g of grns) {
+      const s = ensure(g.supplier_id);
+      s.accepted += parseFloat(g.accepted_qty_mt) || 0;
+      s.rejected += parseFloat(g.rejected_qty_mt) || 0;
+      const po = g.po_id ? poById[g.po_id] : null;
+      if (po && po.delivery_date && g.receipt_date) {
+        s.lateDays.push(Math.max(0, (new Date(g.receipt_date) - new Date(po.delivery_date)) / 86400000));
       }
     }
 
-    return { data: unique, total: unique.length };
+    const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
+
+    const rows = Object.values(byS).map((s) => {
+      const avgYield = avg(s.yields);
+      const priceRates = s.rawRates.length ? s.rawRates : s.anyRates;
+      const avgRate = avg(priceRates);
+      const intake = s.accepted + s.rejected;
+      const rejectionPct = intake > 0 ? (s.rejected / intake) * 100 : null;
+      const avgLate = avg(s.lateDays);
+
+      let qualityScore = avgYield != null ? Math.max(0, Math.min(100, avgYield * 1.3)) : null;
+      if (qualityScore != null && rejectionPct != null) qualityScore = Math.max(0, qualityScore - rejectionPct);
+
+      const priceScore = (avgRate != null && marketAvgRate > 0)
+        ? Math.max(0, Math.min(100, 100 - ((avgRate - marketAvgRate) / marketAvgRate) * 100 * 2))
+        : null;
+
+      let deliveryScore = null;
+      if (avgLate != null) deliveryScore = Math.max(0, Math.min(100, 100 - avgLate * 5));
+      else if (rejectionPct != null) deliveryScore = Math.max(0, Math.min(100, 100 - rejectionPct * 2));
+
+      const comps = [[qualityScore, 0.5], [priceScore, 0.3], [deliveryScore, 0.2]].filter(([v]) => v != null);
+      const wsum = comps.reduce((a, [, w]) => a + w, 0);
+      const rated = wsum > 0;
+      const overallScore = rated ? Math.round(comps.reduce((a, [v, w]) => a + v * w, 0) / wsum) : null;
+
+      let riskLevel = 'Unrated';
+      if (rated) {
+        riskLevel = 'Low';
+        if (overallScore < 40) riskLevel = 'Critical';
+        else if (overallScore < 55) riskLevel = 'High';
+        else if (overallScore < 70) riskLevel = 'Medium';
+      }
+
+      return {
+        supplier_id: s.supplier_id,
+        name: s.name,
+        batches: s.batches,
+        lots: s.lots,
+        total_qty_kg: Math.round(s.rawKg),
+        avg_yield: avgYield != null ? Math.round(avgYield * 10) / 10 : null,
+        avg_rate_per_kg: avgRate != null ? Math.round(avgRate * 100) / 100 : null,
+        market_avg_rate_per_kg: marketAvgRate ? Math.round(marketAvgRate * 100) / 100 : null,
+        rejection_pct: rejectionPct != null ? Math.round(rejectionPct * 10) / 10 : null,
+        quality_score: qualityScore != null ? Math.round(qualityScore) : null,
+        delivery_score: deliveryScore != null ? Math.round(deliveryScore) : null,
+        price_score: priceScore != null ? Math.round(priceScore) : null,
+        overall_score: overallScore,
+        risk_level: riskLevel,
+      };
+    }).sort((a, b) => (b.overall_score ?? -1) - (a.overall_score ?? -1));
+
+    return { data: rows, total: rows.length };
   },
 
   // ═══════════════════════════════════════════════════════════════════
