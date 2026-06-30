@@ -97,9 +97,9 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
         lot_id: lot.id,
         qty_mt: qtyToAllocate,
         item_id: lineId || undefined,
-        notes: `Allocated ${qtyToAllocate.toFixed(2)} MT from ${lot.lot_no}`,
+        notes: `Allocated ${Math.round(qtyToAllocate * 1000).toLocaleString()} kg from ${lot.lot_no}`,
       });
-      addToast(`${qtyToAllocate.toFixed(2)} MT allocated from ${lot.lot_no}`, 'success');
+      addToast(`${Math.round(qtyToAllocate * 1000).toLocaleString()} kg allocated from ${lot.lot_no}`, 'success');
       setCustomQty(prev => ({ ...prev, [lot.id]: '' }));
       setFetchTrigger(t => t + 1); // refresh available lots
       if (onStockAllocated) onStockAllocated();
@@ -122,22 +122,22 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-gray-500">Estimated Raw Qty Required</span>
-            <span className="font-medium text-gray-900">{estimatedRawQty} MT</span>
+            <span className="font-medium text-gray-900">{Math.round(estimatedRawQty * 1000).toLocaleString()} kg</span>
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-gray-500">Finished Qty Target</span>
-            <span className="font-medium text-gray-900">{order.qtyMT} MT</span>
+            <span className="font-medium text-gray-900">{Math.round(order.qtyMT * 1000).toLocaleString()} kg</span>
           </div>
           {finishedLots.length > 0 && (
             <>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500">Allocated from Lots</span>
-                <span className="font-medium text-gray-900">{totalAllocatedMT.toFixed(2)} MT</span>
+                <span className="font-medium text-gray-900">{Math.round(totalAllocatedMT * 1000).toLocaleString()} kg</span>
               </div>
               {remainingNeeded > 0 && (
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">Remaining to Allocate</span>
-                  <span className="font-medium text-amber-600">{remainingNeeded.toFixed(2)} MT</span>
+                  <span className="font-medium text-amber-600">{Math.round(remainingNeeded * 1000).toLocaleString()} kg</span>
                 </div>
               )}
               <div className="mt-2">
@@ -286,7 +286,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
           </div>
           <p className="text-xs text-gray-400 mb-4">
             {remainingNeeded > 0
-              ? <>Need <span className="font-semibold text-emerald-700">{remainingNeeded.toFixed(2)} MT</span> more. Enter qty or click Allocate for full amount.</>
+              ? <>Need <span className="font-semibold text-emerald-700">{Math.round(remainingNeeded * 1000).toLocaleString()} kg</span> more. Enter qty or click Allocate for full amount.</>
               : <span className="text-green-600 font-medium">Fully allocated!</span>
             }
           </p>
@@ -298,7 +298,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
                 className="w-full sm:w-auto border border-gray-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 outline-none">
                 <option value="">Order-wide (no specific line)</option>
                 {orderItems.map(it => (
-                  <option key={it.id} value={it.id}>Line {it.lineNo}: {it.productName || 'Product'} ({it.qtyMt} MT)</option>
+                  <option key={it.id} value={it.id}>Line {it.lineNo}: {it.productName || 'Product'} ({Math.round(it.qtyMt * 1000).toLocaleString()} kg)</option>
                 ))}
               </select>
               <p className="text-[11px] text-gray-400 mt-1">Multi-product order — the lots you allocate below are reserved against this line.</p>
@@ -329,7 +329,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
                       </div>
                       <p className="text-xs text-gray-600 mb-2">{lot.item_name || lot.product_name || 'Finished Rice'}</p>
                       <div className="grid grid-cols-4 gap-2 text-xs">
-                        <div><span className="text-gray-400">Available</span><br/><span className="font-bold text-emerald-700">{availMT.toFixed(2)} MT</span></div>
+                        <div><span className="text-gray-400">Available</span><br/><span className="font-bold text-emerald-700">{Math.round(availMT * 1000).toLocaleString()} kg</span></div>
                         <div><span className="text-gray-400">Entity</span><br/><span className="font-semibold text-gray-900">{lot.entity || '—'}</span></div>
                         <div><span className="text-gray-400">Supplier</span><br/><span className="font-semibold text-gray-900">{lot.supplier_name || '—'}</span></div>
                         <div><span className="text-gray-400">Warehouse</span><br/><span className="font-semibold text-gray-900">{lot.warehouse_name || '—'}</span></div>
@@ -358,7 +358,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
                         {isAllocating ? (
                           <><span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Allocating...</>
                         ) : (
-                          <><Plus className="w-3 h-3" /> Allocate {willAllocate.toFixed(2)} MT</>
+                          <><Plus className="w-3 h-3" /> Allocate {Math.round(willAllocate * 1000).toLocaleString()} kg</>
                         )}
                       </button>
                     </div>
@@ -412,7 +412,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
                 <th className="text-left pb-2 font-semibold text-gray-600">Product</th>
                 <th className="text-left pb-2 font-semibold text-gray-600">Supplier</th>
                 <th className="text-right pb-2 font-semibold text-gray-600">Allocated</th>
-                <th className="text-right pb-2 font-semibold text-gray-600">Rate/MT</th>
+                <th className="text-right pb-2 font-semibold text-gray-600">Rate/kg</th>
                 <th className="text-left pb-2 font-semibold text-gray-600">Warehouse</th>
                 <th className="text-center pb-2 font-semibold text-gray-600">Status</th>
               </tr>
@@ -423,7 +423,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
                   const allocKg = parseFloat(lot.allocated_qty_kg) || parseFloat(lot.net_weight_kg) || (parseFloat(lot.qty) || 0);
                   const allocMT = (allocKg / 1000).toFixed(2);
                   const ratePerKg = parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.rate_per_kg) || 0;
-                  const ratePerMT = ratePerKg > 0 ? Math.round(ratePerKg * 1000).toLocaleString() : '\u2014';
+                  const ratePerKgDisplay = ratePerKg > 0 ? Math.round(ratePerKg).toLocaleString() : '\u2014';
 
                   return (
                     <tr key={lot.id || idx} className="border-b border-gray-100 hover:bg-gray-50">
@@ -440,9 +440,9 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
                       </td>
                       <td className="py-2.5 text-gray-700">{lot.product_name || lot.item_name || '\u2014'}</td>
                       <td className="py-2.5 text-gray-700">{lot.supplier_name || '\u2014'}</td>
-                      <td className="py-2.5 text-right font-medium text-gray-900">{allocMT} MT</td>
+                      <td className="py-2.5 text-right font-medium text-gray-900">{Math.round(allocKg).toLocaleString()} kg</td>
                       <td className="py-2.5 text-right text-gray-700">
-                        {ratePerKg > 0 ? `PKR ${ratePerMT}` : '\u2014'}
+                        {ratePerKg > 0 ? `PKR ${ratePerKgDisplay}` : '\u2014'}
                       </td>
                       <td className="py-2.5 text-gray-700">
                         {lot.warehouse_name ? (
@@ -474,7 +474,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
         {finishedLots.length > 0 && (
           <div className="mt-3 pt-3 border-t border-gray-200 flex justify-between text-sm">
             <span className="font-semibold text-gray-700">Total Allocated</span>
-            <span className="font-bold text-gray-900">{totalAllocatedMT.toFixed(2)} MT / {order.qtyMT} MT required</span>
+            <span className="font-bold text-gray-900">{Math.round(totalAllocatedMT * 1000).toLocaleString()} kg / {Math.round(order.qtyMT * 1000).toLocaleString()} kg required</span>
           </div>
         )}
       </div>
@@ -489,7 +489,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
                 <tr className="border-b border-gray-200">
                   <th className="text-left pb-2 font-semibold text-gray-600">Lot ID</th>
                   <th className="text-left pb-2 font-semibold text-gray-600">Product</th>
-                  <th className="text-right pb-2 font-semibold text-gray-600">Qty MT</th>
+                  <th className="text-right pb-2 font-semibold text-gray-600">Qty kg</th>
                   <th className="text-left pb-2 font-semibold text-gray-600">Warehouse</th>
                   <th className="text-center pb-2 font-semibold text-gray-600">Status</th>
                 </tr>
@@ -503,7 +503,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
                       </Link>
                     </td>
                     <td className="py-2 text-gray-700">{lot.product_name || lot.item_name}</td>
-                    <td className="py-2 text-right text-gray-900">{(parseFloat(lot.qty) || 0).toFixed(2)}</td>
+                    <td className="py-2 text-right text-gray-900">{Math.round((parseFloat(lot.qty) || 0) * 1000).toLocaleString()}</td>
                     <td className="py-2 text-gray-700">{lot.warehouse_name || '\u2014'}</td>
                     <td className="py-2 text-center"><StatusBadge status={lot.status} /></td>
                   </tr>
@@ -556,7 +556,7 @@ function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
         dispatch_date: new Date().toISOString().split('T')[0],
         status: 'In Transit',
       });
-      addToast(`${finishedMT} MT transferred from mill to export — ${linkedBatch.id}`, 'success');
+      addToast(`${Math.round(finishedMT * 1000).toLocaleString()} kg transferred from mill to export — ${linkedBatch.id}`, 'success');
       if (onTransferComplete) onTransferComplete();
     } catch (err) {
       addToast(`Transfer failed: ${err.message}`, 'error');
@@ -581,7 +581,7 @@ function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
         <>
           <p className="text-sm text-amber-700 mb-4">
             Milling batch <span className="font-bold">{linkedBatch.id}</span> has completed with{' '}
-            <span className="font-bold">{finishedMT} MT</span> finished rice.
+            <span className="font-bold">{Math.round(finishedMT * 1000).toLocaleString()} kg</span> finished rice.
             Transfer this stock from the mill to your export warehouse to make it available for allocation.
           </p>
 
@@ -593,7 +593,7 @@ function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
               </div>
               <div>
                 <span className="text-xs text-gray-500">Finished Output</span>
-                <p className="font-bold text-gray-900">{finishedMT} MT</p>
+                <p className="font-bold text-gray-900">{Math.round(finishedMT * 1000).toLocaleString()} kg</p>
               </div>
               <div>
                 <span className="text-xs text-gray-500">Yield</span>
@@ -617,7 +617,7 @@ function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
                 <div>
                   <span className="text-gray-500">Total Finished Cost</span>
                   <p className="font-bold text-emerald-700">PKR {(linkedBatch.totalCostPerKgFinished || 0).toFixed(2)}/KG</p>
-                  <p className="text-gray-400">= PKR {Math.round((linkedBatch.totalCostPerKgFinished || 0) * 1000).toLocaleString()}/MT</p>
+                  <p className="text-gray-400">= PKR {Math.round(linkedBatch.totalCostPerKgFinished || 0).toLocaleString()}/kg</p>
                 </div>
               </div>
             )}
@@ -652,7 +652,7 @@ function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
               ) : (
                 <>
                   <ArrowRight className="w-4 h-4" />
-                  Receive {finishedMT} MT from Mill
+                  Receive {Math.round(finishedMT * 1000).toLocaleString()} kg from Mill
                 </>
               )}
             </button>

@@ -190,7 +190,7 @@ export default function StockAdjustments() {
                 <thead>
                   <tr className="border-b text-xs uppercase text-gray-500">
                     <th className="text-left py-2">Lot</th>
-                    <th className="text-right py-2">System (MT)</th>
+                    <th className="text-right py-2">System (kg)</th>
                     <th className="text-right py-2">Ledger (KG)</th>
                     <th className="text-right py-2">Discrepancy</th>
                   </tr>
@@ -199,7 +199,7 @@ export default function StockAdjustments() {
                   {reconciliation.discrepancies.map((d) => (
                     <tr key={d.lotId} className="border-b border-gray-100 hover:bg-red-50">
                       <td className="py-2 font-medium text-blue-600">{d.lotNo}</td>
-                      <td className="py-2 text-right">{d.systemQtyMT?.toFixed(2)} MT</td>
+                      <td className="py-2 text-right">{Math.round((d.systemQtyMT || 0) * 1000).toLocaleString()} kg</td>
                       <td className="py-2 text-right">{d.ledgerQtyKg?.toFixed(0)} KG</td>
                       <td className="py-2 text-right text-red-600 font-medium">{d.discrepancyKg?.toFixed(0)} KG</td>
                     </tr>
@@ -312,7 +312,7 @@ export default function StockAdjustments() {
             <SearchSelect
               value={form.lot_id}
               onChange={(v) => setForm((p) => ({ ...p, lot_id: v }))}
-              options={lots.map((l) => ({ value: l.id, label: l.lotNo, sub: `${l.itemName} — ${(parseFloat(l.qty) / 1000).toFixed(1)} MT` }))}
+              options={lots.map((l) => ({ value: l.id, label: l.lotNo, sub: `${l.itemName} — ${Math.round(parseFloat(l.qty) || 0).toLocaleString()} kg` }))}
               placeholder="Search lot…"
             />
           </div>
@@ -365,7 +365,7 @@ export default function StockAdjustments() {
                   </div>
                   <div className="text-[11px] text-gray-600 mt-0.5">
                     {costPreview.qty.toLocaleString()} KG × {PKR(costPreview.costPerKg)}/kg ·
-                    Lot {costPreview.lotNo} ({costPreview.lotName} · {costPreview.lotQtyMT?.toFixed(2)} MT on hand)
+                    Lot {costPreview.lotNo} ({costPreview.lotName} · {Math.round(costPreview.lotQtyMT || 0).toLocaleString()} kg on hand)
                   </div>
                 </div>
               </div>

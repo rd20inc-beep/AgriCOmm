@@ -416,7 +416,7 @@ export default function MillingDashboard() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Link to="/lot-inventory?type=raw" className="bg-white rounded-xl border p-4 hover:shadow-sm transition-shadow">
           <p className="text-xs text-gray-500 font-medium uppercase">Raw Stock</p>
-          <p className="text-xl font-bold text-gray-900 mt-1">{rawRiceStock.toFixed(1)} MT</p>
+          <p className="text-xl font-bold text-gray-900 mt-1">{Math.round(rawRiceStock * 1000).toLocaleString()} kg</p>
         </Link>
         <div className="bg-white rounded-xl border p-4">
           <p className="text-xs text-gray-500 font-medium uppercase">Pending Batches</p>
@@ -441,7 +441,7 @@ export default function MillingDashboard() {
               <tr className="border-b border-gray-100">
                 <th className="text-left py-2 px-2 text-xs font-medium text-gray-500 uppercase">Batch</th>
                 <th className="text-left py-2 px-2 text-xs font-medium text-gray-500 uppercase">Supplier</th>
-                <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 uppercase">Raw MT</th>
+                <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 uppercase">Raw kg</th>
                 <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 uppercase">Finished</th>
                 <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 uppercase">Yield%</th>
                 <th className="text-left py-2 px-2 text-xs font-medium text-gray-500 uppercase">Status</th>
@@ -455,8 +455,8 @@ export default function MillingDashboard() {
                     {batch.linkedExportOrder && <p className="text-[10px] text-gray-400">→ {batch.linkedExportOrder}</p>}
                   </td>
                   <td className="py-2.5 px-2 text-gray-600"><PartyLink type="supplier" id={batch.supplierId} name={batch.supplierName} /></td>
-                  <td className="py-2.5 px-2 text-right">{batch.rawQtyMT}</td>
-                  <td className="py-2.5 px-2 text-right">{batch.actualFinishedMT || '—'}</td>
+                  <td className="py-2.5 px-2 text-right">{Math.round(batch.rawQtyKg).toLocaleString()}</td>
+                  <td className="py-2.5 px-2 text-right">{batch.actualFinishedKg ? Math.round(batch.actualFinishedKg).toLocaleString() : '—'}</td>
                   <td className={`py-2.5 px-2 text-right font-medium ${batch.yieldPct >= 60 ? 'text-green-600' : batch.yieldPct > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
                     {batch.yieldPct > 0 ? `${batch.yieldPct}%` : '—'}
                   </td>
@@ -478,17 +478,17 @@ export default function MillingDashboard() {
             <div className="bg-amber-50 rounded-lg p-4">
               <p className="text-xs font-medium text-amber-600 uppercase">Raw Rice</p>
               <p className="text-lg font-bold text-amber-900">{formatPKR(rawInventoryValue)}</p>
-              <p className="text-xs text-amber-500">{rawRiceStock.toFixed(1)} MT in stock</p>
+              <p className="text-xs text-amber-500">{Math.round(rawRiceStock * 1000).toLocaleString()} kg in stock</p>
             </div>
             <div className="bg-green-50 rounded-lg p-4">
               <p className="text-xs font-medium text-green-600 uppercase">Finished Rice</p>
               <p className="text-lg font-bold text-green-900">{formatPKR(finishedInventoryValue)}</p>
-              <p className="text-xs text-green-500">{finishedRiceStock.toFixed(1)} MT in stock</p>
+              <p className="text-xs text-green-500">{Math.round(finishedRiceStock * 1000).toLocaleString()} kg in stock</p>
             </div>
             <div className="bg-purple-50 rounded-lg p-4">
               <p className="text-xs font-medium text-purple-600 uppercase">Byproducts</p>
               <p className="text-lg font-bold text-purple-900">{formatPKR(byproductInventoryValue)}</p>
-              <p className="text-xs text-purple-500">{byproductStock.toFixed(1)} MT in stock</p>
+              <p className="text-xs text-purple-500">{Math.round(byproductStock * 1000).toLocaleString()} kg in stock</p>
             </div>
             <div className="bg-blue-50 rounded-lg p-4">
               <p className="text-xs font-medium text-blue-600 uppercase">Total Inventory</p>
@@ -566,7 +566,7 @@ export default function MillingDashboard() {
                   <p className={`text-xs ${netProfit >= 0 ? 'text-emerald-500' : 'text-red-500'} mt-1`}>Margin: {margin}%</p>
                   <div className="mt-2 space-y-1 text-xs">
                     <div className="flex justify-between"><span className="text-gray-500">Batches</span><span className="font-bold">{completed.length}</span></div>
-                    <div className="flex justify-between"><span className="text-gray-500">Processed</span><span className="font-bold">{completed.reduce((s, b) => s + b.rawQtyMT, 0).toFixed(1)} MT</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">Processed</span><span className="font-bold">{Math.round(completed.reduce((s, b) => s + b.rawQtyKg, 0)).toLocaleString()} kg</span></div>
                   </div>
                 </div>
               </div>
@@ -579,8 +579,8 @@ export default function MillingDashboard() {
                     <table className="w-full text-xs">
                       <thead><tr className="border-b border-gray-200">
                         <th className="text-left py-2 px-2 font-semibold text-gray-600">Batch</th>
-                        <th className="text-right py-2 px-2 font-semibold text-gray-600">Raw MT</th>
-                        <th className="text-right py-2 px-2 font-semibold text-gray-600">Finished MT</th>
+                        <th className="text-right py-2 px-2 font-semibold text-gray-600">Raw kg</th>
+                        <th className="text-right py-2 px-2 font-semibold text-gray-600">Finished kg</th>
                         <th className="text-right py-2 px-2 font-semibold text-gray-600">Yield %</th>
                         <th className="text-right py-2 px-2 font-semibold text-gray-600">Raw Cost</th>
                         <th className="text-right py-2 px-2 font-semibold text-gray-600">Cost/KG</th>
@@ -595,8 +595,8 @@ export default function MillingDashboard() {
                           return (
                             <tr key={b.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => navigate(`/milling/${b.id}`)}>
                               <td className="py-2 px-2 font-medium text-blue-600">{b.id}</td>
-                              <td className="py-2 px-2 text-right">{b.rawQtyMT}</td>
-                              <td className="py-2 px-2 text-right">{b.actualFinishedMT}</td>
+                              <td className="py-2 px-2 text-right">{Math.round(b.rawQtyKg).toLocaleString()}</td>
+                              <td className="py-2 px-2 text-right">{Math.round(b.actualFinishedKg).toLocaleString()}</td>
                               <td className="py-2 px-2 text-right">{b.yieldPct}%</td>
                               <td className="py-2 px-2 text-right">{formatPKR(bCost)}</td>
                               <td className="py-2 px-2 text-right">{b.totalCostPerKgFinished ? `Rs ${b.totalCostPerKgFinished.toFixed(2)}` : '—'}</td>
@@ -674,12 +674,12 @@ export default function MillingDashboard() {
                       </td>
                       <td className="py-2 px-3 text-gray-700">{lot.itemName || lot.productName || '—'}</td>
                       <td className="py-2 px-3 text-gray-600"><PartyLink type="supplier" id={lot.supplierId} name={lot.supplierName} /></td>
-                      <td className="py-2 px-3 text-right font-medium">{((parseFloat(lot.qty) || 0) / 1000).toFixed(2)} MT</td>
+                      <td className="py-2 px-3 text-right font-medium">{Math.round(parseFloat(lot.qty) || 0).toLocaleString()} kg</td>
                       <td className="py-2 px-3 text-right">
-                        {!isAtExport ? <span className="text-emerald-700 font-medium">{avail.toFixed(2)} MT</span> : <span className="text-gray-400">—</span>}
+                        {!isAtExport ? <span className="text-emerald-700 font-medium">{Math.round(avail).toLocaleString()} kg</span> : <span className="text-gray-400">—</span>}
                       </td>
                       <td className="py-2 px-3 text-right">
-                        {reserved > 0 ? <span className="text-amber-700 font-medium">{reserved.toFixed(2)} MT</span> : <span className="text-gray-400">—</span>}
+                        {reserved > 0 ? <span className="text-amber-700 font-medium">{Math.round(reserved).toLocaleString()} kg</span> : <span className="text-gray-400">—</span>}
                       </td>
                       <td className="py-2 px-3">
                         {lot.reservedAgainst ? (
@@ -727,10 +727,10 @@ export default function MillingDashboard() {
                   </div>
                 )}
                 <div className="text-xs text-gray-500">
-                  Raw: {batch.rawQtyMT} MT
+                  Raw: {Math.round(batch.rawQtyKg).toLocaleString()} kg
                 </div>
                 <div className="text-xs text-gray-500">
-                  Target: {batch.plannedFinishedMT} MT
+                  Target: {Math.round(batch.plannedFinishedKg).toLocaleString()} kg
                 </div>
                 <div className="flex items-center gap-1 mt-2 text-blue-600 text-xs font-medium">
                   View Details <ArrowRight size={12} />
@@ -814,9 +814,9 @@ export default function MillingDashboard() {
               <thead>
                 <tr className="border-b border-gray-100">
                   <th className="text-left py-2 px-2 text-xs font-medium text-gray-500 uppercase">Batch</th>
-                  <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 uppercase">Raw</th>
-                  <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 uppercase">Finished</th>
-                  <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 uppercase">Broken</th>
+                  <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 uppercase">Raw kg</th>
+                  <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 uppercase">Finished kg</th>
+                  <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 uppercase">Broken kg</th>
                   <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 uppercase">Yield%</th>
                   <th className="text-left py-2 px-2 text-xs font-medium text-gray-500 uppercase">Status</th>
                 </tr>
@@ -832,9 +832,9 @@ export default function MillingDashboard() {
                         {batch.id}
                       </Link>
                     </td>
-                    <td className="py-2.5 px-2 text-right text-gray-600">{batch.rawQtyMT}</td>
-                    <td className="py-2.5 px-2 text-right text-gray-600">{batch.actualFinishedMT}</td>
-                    <td className="py-2.5 px-2 text-right text-gray-600">{batch.brokenMT}</td>
+                    <td className="py-2.5 px-2 text-right text-gray-600">{Math.round(batch.rawQtyKg).toLocaleString()}</td>
+                    <td className="py-2.5 px-2 text-right text-gray-600">{Math.round(batch.actualFinishedKg).toLocaleString()}</td>
+                    <td className="py-2.5 px-2 text-right text-gray-600">{Math.round(batch.brokenKg).toLocaleString()}</td>
                     <td className={`py-2.5 px-2 text-right font-medium ${
                       batch.yieldPct >= 75 ? 'text-green-600' : batch.yieldPct > 0 ? 'text-amber-600' : 'text-gray-400'
                     }`}>
@@ -1156,7 +1156,7 @@ export default function MillingDashboard() {
                             <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${CAT_COLOR[cat] || 'bg-gray-100 text-gray-600'}`}>{cat}</span>
                             <span className="min-w-0 flex-1">
                               <span className="block text-sm text-gray-800 truncate">{l.lotNo || l.itemName}</span>
-                              <span className="block text-[11px] text-gray-400 truncate">{l.variety || (l.type === 'finished' ? 'Finished' : 'Raw')} · {avail.toFixed(1)} MT{costKg > 0 ? ` · Rs${costKg.toLocaleString()}/kg` : ''}</span>
+                              <span className="block text-[11px] text-gray-400 truncate">{l.variety || (l.type === 'finished' ? 'Finished' : 'Raw')} · {Math.round(avail).toLocaleString()} kg{costKg > 0 ? ` · Rs${costKg.toLocaleString()}/kg` : ''}</span>
                             </span>
                           </button>
                           {sel && (
@@ -1170,7 +1170,7 @@ export default function MillingDashboard() {
                             </div>
                           )}
                         </div>
-                        {over && <p className="ml-6 mt-0.5 text-[11px] text-red-600">Only {avail.toFixed(2)} MT available</p>}
+                        {over && <p className="ml-6 mt-0.5 text-[11px] text-red-600">Only {Math.round(avail).toLocaleString()} kg available</p>}
                       </div>
                     );
                   })}
@@ -1179,7 +1179,7 @@ export default function MillingDashboard() {
               {blendTotals.mt > 0 && (
                 <div className="flex justify-between text-sm border-t border-blue-200 pt-2">
                   <span className="text-gray-600">Combined total</span>
-                  <span className="font-semibold">{blendTotals.mt.toFixed(2)} MT · Rs {Math.round(blendTotals.cost).toLocaleString()} <span className="text-gray-400 font-normal">(≈Rs {Math.round(blendTotals.cost / (blendTotals.mt * 1000))}/kg)</span></span>
+                  <span className="font-semibold">{Math.round(blendTotals.kg).toLocaleString()} kg · Rs {Math.round(blendTotals.cost).toLocaleString()} <span className="text-gray-400 font-normal">(≈Rs {Math.round(blendTotals.cost / (blendTotals.mt * 1000))}/kg)</span></span>
                 </div>
               )}
               {/* Live recipe + processing type — yield is computed against the combined total above */}
@@ -1252,7 +1252,7 @@ export default function MillingDashboard() {
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none"
               />
               {batchForm.rawQtyKg && (
-                <p className="text-xs text-gray-400 mt-0.5">{(parseFloat(batchForm.rawQtyKg) / 1000).toFixed(2)} MT</p>
+                <p className="text-xs text-gray-400 mt-0.5">{Math.round(parseFloat(batchForm.rawQtyKg) || 0).toLocaleString()} kg</p>
               )}
             </div>
             <div>

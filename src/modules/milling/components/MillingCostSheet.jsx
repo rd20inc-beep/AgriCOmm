@@ -307,9 +307,8 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
                   <thead>
                     <tr className="text-amber-700 border-b border-amber-200">
                       <th className="text-left py-1 font-semibold">Lot / Supplier</th>
-                      <th className="text-right font-semibold">Qty (MT)</th>
-                      <th className="text-right font-semibold">Agreed Price /MT</th>
-                      <th className="text-right font-semibold">/KG</th>
+                      <th className="text-right font-semibold">Qty (kg)</th>
+                      <th className="text-right font-semibold">Agreed Price /kg</th>
                       <th className="text-right font-semibold">Total</th>
                     </tr>
                   </thead>
@@ -319,9 +318,8 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
                       return (
                         <tr key={l.id} className="border-b border-amber-100">
                           <td className="py-1 text-gray-800">{l.lot_no}{l.supplier_name ? ` · ${l.supplier_name}` : ''}</td>
-                          <td className="text-right text-gray-900">{pf(l.qty_mt).toFixed(2)}</td>
-                          <td className="text-right text-gray-900">{fmtPKR(perMt)}</td>
-                          <td className="text-right text-gray-500">{fmtPKR(perMt / 1000)}</td>
+                          <td className="text-right text-gray-900">{Math.round(pf(l.qty_kg)).toLocaleString()}</td>
+                          <td className="text-right text-gray-900">{fmtPKR(perMt / 1000)}</td>
                           <td className="text-right text-gray-900">{fmtPKR(pf(l.cost_total_pkr))}</td>
                         </tr>
                       );
@@ -330,8 +328,7 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
                   <tfoot>
                     <tr className="font-bold text-gray-900 border-t-2 border-amber-300">
                       <td className="py-1.5">{isBlend ? 'Blended average' : 'Weighted average'}</td>
-                      <td className="text-right">{rawQtyMT} MT</td>
-                      <td className="text-right text-blue-900">{fmtPKR(avgPerMt)}</td>
+                      <td className="text-right">{Math.round(rawQtyKG).toLocaleString()} kg</td>
                       <td className="text-right text-blue-900">{fmtPKR(avgPerMt / 1000)}</td>
                       <td className="text-right">{fmtPKR(effectiveRawRiceCost)}</td>
                     </tr>
@@ -344,10 +341,10 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
             <>
               <p className="text-[10px] font-bold text-amber-800 uppercase tracking-widest mb-2">Section B — Raw Material Buying Cost {inputPriceMT > 0 ? '(Auto-populated from Quality Sheet)' : '(Manual Entry)'}</p>
               <div className="grid grid-cols-5 gap-4">
-                <div><p className="text-xs text-amber-700">Input Quantity</p><p className="text-base font-bold text-gray-900">{rawQtyMT} MT</p><p className="text-[10px] text-gray-500">{rawQtyKG.toLocaleString()} KG</p></div>
-                <div><p className="text-xs text-amber-700">{safeSample?.pricePerMT ? 'Sample Price' : 'Rate'}</p><p className="text-base font-bold text-gray-900">{safeSample?.pricePerMT ? fmtPKR(safeSample.pricePerMT) : '—'}<span className="text-xs font-normal text-gray-500"> /MT</span></p></div>
-                <div><p className="text-xs text-amber-700">{safeArrival?.pricePerMT ? 'Agreed/Arrival Price' : 'Agreed Price'}</p><p className="text-base font-bold text-blue-900">{inputPriceMT > 0 ? fmtPKR(inputPriceMT) : '—'}<span className="text-xs font-normal text-gray-500"> /MT</span></p></div>
-                <div><p className="text-xs text-amber-700">Rate per KG</p><p className="text-base font-bold text-gray-900">{inputPriceKG > 0 ? fmtPKR(inputPriceKG) : '—'}</p></div>
+                <div><p className="text-xs text-amber-700">Input Quantity</p><p className="text-base font-bold text-gray-900">{Math.round(rawQtyKG).toLocaleString()} kg</p></div>
+                <div><p className="text-xs text-amber-700">{safeSample?.pricePerMT ? 'Sample Price' : 'Rate'}</p><p className="text-base font-bold text-gray-900">{safeSample?.pricePerMT ? fmtPKR(pf(safeSample.pricePerMT) / 1000) : '—'}<span className="text-xs font-normal text-gray-500"> /kg</span></p></div>
+                <div><p className="text-xs text-amber-700">{safeArrival?.pricePerMT ? 'Agreed/Arrival Price' : 'Agreed Price'}</p><p className="text-base font-bold text-blue-900">{inputPriceMT > 0 ? fmtPKR(inputPriceMT / 1000) : '—'}<span className="text-xs font-normal text-gray-500"> /kg</span></p></div>
+                <div><p className="text-xs text-amber-700">Rate per kg</p><p className="text-base font-bold text-gray-900">{inputPriceKG > 0 ? fmtPKR(inputPriceKG) : '—'}</p></div>
                 <div><p className="text-xs text-amber-700">Total Raw Material Cost</p><p className="text-base font-bold text-gray-900">{rawMaterialCost > 0 ? fmtPKR(rawMaterialCost) : fmtPKR(effectiveRawRiceCost)}</p></div>
               </div>
               {rawRiceCostManual > 0 && rawMaterialCost > 0 && Math.abs(rawRiceCostManual - rawMaterialCost) > 100 && (
@@ -369,7 +366,7 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
               <tr style={{ backgroundColor: H }}>
                 <th className="text-left px-6 py-2 text-xs font-bold text-white uppercase">Cost Item</th>
                 <th className="text-right px-6 py-2 text-xs font-bold text-white uppercase">Amount (PKR)</th>
-                <th className="text-right px-6 py-2 text-xs font-bold text-white uppercase">Per MT (Raw)</th>
+                <th className="text-right px-6 py-2 text-xs font-bold text-white uppercase">Per kg (Raw)</th>
                 <th className="text-right px-6 py-2 text-xs font-bold text-white uppercase">% of Total</th>
               </tr>
             </thead>
@@ -378,7 +375,7 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
               <tr className="bg-amber-50 border-b border-amber-100">
                 <td className="px-6 py-2 font-semibold text-amber-900">Raw Rice Purchase</td>
                 <td className="px-6 py-2 text-right font-bold text-amber-900">{fmtPKR(effectiveRawRiceCost)}</td>
-                <td className="px-6 py-2 text-right text-amber-700">{rawQtyMT > 0 ? fmtPKR(effectiveRawRiceCost / rawQtyMT) : '—'}</td>
+                <td className="px-6 py-2 text-right text-amber-700">{rawQtyKG > 0 ? fmtPKR(effectiveRawRiceCost / rawQtyKG) : '—'}</td>
                 <td className="px-6 py-2 text-right text-amber-700">{totalBatchCost > 0 ? ((effectiveRawRiceCost / totalBatchCost) * 100).toFixed(1) : '—'}%</td>
               </tr>
               {/* Milling Cost + Other Expenses — the residual-model cost lines
@@ -388,20 +385,20 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
               <tr className="bg-white">
                 <td className="px-6 py-1.5 text-gray-900">Milling Cost</td>
                 <td className="px-6 py-1.5 text-right text-gray-700">{millingCostVal > 0 ? fmtPKR(millingCostVal) : '—'}</td>
-                <td className="px-6 py-1.5 text-right text-gray-500">{millingCostVal > 0 && rawQtyMT > 0 ? fmtPKR(millingCostVal / rawQtyMT) : '—'}</td>
+                <td className="px-6 py-1.5 text-right text-gray-500">{millingCostVal > 0 && rawQtyKG > 0 ? fmtPKR(millingCostVal / rawQtyKG) : '—'}</td>
                 <td className="px-6 py-1.5 text-right text-gray-500">{millingCostVal > 0 && totalBatchCost > 0 ? ((millingCostVal / totalBatchCost) * 100).toFixed(1) + '%' : '—'}</td>
               </tr>
               <tr className="bg-gray-50">
                 <td className="px-6 py-1.5 text-gray-900">Other Expenses</td>
                 <td className="px-6 py-1.5 text-right text-gray-700">{otherExpVal > 0 ? fmtPKR(otherExpVal) : '—'}</td>
-                <td className="px-6 py-1.5 text-right text-gray-500">{otherExpVal > 0 && rawQtyMT > 0 ? fmtPKR(otherExpVal / rawQtyMT) : '—'}</td>
+                <td className="px-6 py-1.5 text-right text-gray-500">{otherExpVal > 0 && rawQtyKG > 0 ? fmtPKR(otherExpVal / rawQtyKG) : '—'}</td>
                 <td className="px-6 py-1.5 text-right text-gray-500">{otherExpVal > 0 && totalBatchCost > 0 ? ((otherExpVal / totalBatchCost) * 100).toFixed(1) + '%' : '—'}</td>
               </tr>
               {packingCostVal > 0 && (
                 <tr className="bg-gray-50">
                   <td className="px-6 py-1.5 text-gray-900">Packing / Bags</td>
                   <td className="px-6 py-1.5 text-right text-gray-700">{fmtPKR(packingCostVal)}</td>
-                  <td className="px-6 py-1.5 text-right text-gray-500">{rawQtyMT > 0 ? fmtPKR(packingCostVal / rawQtyMT) : '—'}</td>
+                  <td className="px-6 py-1.5 text-right text-gray-500">{rawQtyKG > 0 ? fmtPKR(packingCostVal / rawQtyKG) : '—'}</td>
                   <td className="px-6 py-1.5 text-right text-gray-500">{totalBatchCost > 0 ? ((packingCostVal / totalBatchCost) * 100).toFixed(1) + '%' : '—'}</td>
                 </tr>
               )}
@@ -416,7 +413,7 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
                   <tr key={`pb-${i}`} className="bg-white text-xs text-gray-500">
                     <td className="pl-12 pr-6 py-1">↳ {r.label}</td>
                     <td className="px-6 py-1 text-right">{fmtPKR(r.val)}</td>
-                    <td className="px-6 py-1 text-right">{rawQtyMT > 0 ? fmtPKR(r.val / rawQtyMT) : '—'}</td>
+                    <td className="px-6 py-1 text-right">{rawQtyKG > 0 ? fmtPKR(r.val / rawQtyKG) : '—'}</td>
                     <td className="px-6 py-1 text-right">{totalBatchCost > 0 ? ((r.val / totalBatchCost) * 100).toFixed(1) + '%' : '—'}</td>
                   </tr>
                 ))
@@ -426,7 +423,7 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
               <tr className="border-t-2 border-gray-300 bg-gray-100">
                 <td className="px-6 py-2 font-bold text-gray-900">Total Batch Cost (A)</td>
                 <td className="px-6 py-2 text-right font-bold text-gray-900">{fmtPKR(totalBatchCost)}</td>
-                <td className="px-6 py-2 text-right font-semibold text-gray-700">{fmtPKR(costPerMT)}<span className="text-[10px] font-normal"> /MT</span></td>
+                <td className="px-6 py-2 text-right font-semibold text-gray-700">{fmtPKR(costPerMT / 1000)}<span className="text-[10px] font-normal"> /kg</span></td>
                 <td className="px-6 py-2 text-right font-bold text-gray-900">100%</td>
               </tr>
             </tfoot>
@@ -437,10 +434,10 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
         <div className="border-x border-t border-gray-200 px-6 py-3" style={{ backgroundColor: '#eff6ff' }}>
           <p className="text-[10px] font-bold text-blue-800 uppercase tracking-widest mb-2">Section D — Milling Yield & Output</p>
           <div className="grid grid-cols-5 gap-4 mb-3">
-            <div><p className="text-xs text-blue-600">Raw Input</p><p className="text-base font-bold text-gray-900">{rawQtyMT} MT</p></div>
-            <div><p className="text-xs text-blue-600">Finished Rice</p><p className="text-base font-bold text-blue-900">{finishedMT} MT</p></div>
+            <div><p className="text-xs text-blue-600">Raw Input</p><p className="text-base font-bold text-gray-900">{Math.round(rawQtyKG).toLocaleString()} kg</p></div>
+            <div><p className="text-xs text-blue-600">Finished Rice</p><p className="text-base font-bold text-blue-900">{Math.round(finishedKG).toLocaleString()} kg</p></div>
             <div><p className="text-xs text-blue-600">Yield %</p><p className={`text-base font-bold ${pf(finishedYieldPct) >= 65 ? 'text-green-700' : 'text-red-700'}`}>{finishedYieldPct}%</p></div>
-            <div><p className="text-xs text-blue-600">Total Output</p><p className="text-base font-bold text-gray-900">{totalOutputMT.toFixed(1)} MT</p></div>
+            <div><p className="text-xs text-blue-600">Total Output</p><p className="text-base font-bold text-gray-900">{Math.round(totalOutputMT * 1000).toLocaleString()} kg</p></div>
             <div><p className="text-xs text-blue-600">Recovery %</p><p className={`text-base font-bold ${pf(totalRecoveryPct) > 100 ? 'text-red-700' : 'text-green-700'}`}>{totalRecoveryPct}%</p>
               {pf(totalRecoveryPct) > 100.5 && <p className="text-[10px] text-red-600">⚠ Exceeds 100%</p>}
             </div>
@@ -449,7 +446,7 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
           {/* Yield breakdown bar */}
           <div className="flex rounded overflow-hidden h-5 mb-2">
             {finishedMT > 0 && <div className="bg-blue-500 flex items-center justify-center text-white text-[9px] font-bold" style={{ width: `${(finishedMT / rawQtyMT) * 100}%` }}>Rice {finishedYieldPct}%</div>}
-            {byProducts.map(bp => bp.qty > 0 && <div key={bp.key} className={`flex items-center justify-center text-white text-[9px] font-bold ${bp.color || 'bg-gray-400'}`} style={{ width: `${(bp.qty / rawQtyMT) * 100}%` }} title={`${bp.type}: ${bp.qty.toFixed(2)} MT`}>{bp.yieldPct}%</div>)}
+            {byProducts.map(bp => bp.qty > 0 && <div key={bp.key} className={`flex items-center justify-center text-white text-[9px] font-bold ${bp.color || 'bg-gray-400'}`} style={{ width: `${(bp.qty / rawQtyMT) * 100}%` }} title={`${bp.type}: ${Math.round(bp.qtyKG).toLocaleString()} kg`}>{bp.yieldPct}%</div>)}
             {wastageMT > 0 && <div className="bg-red-400 flex items-center justify-center text-white text-[9px] font-bold" style={{ width: `${(wastageMT / rawQtyMT) * 100}%` }}>W</div>}
           </div>
         </div>
@@ -463,9 +460,9 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
             <thead>
               <tr style={{ backgroundColor: '#065f46' }}>
                 <th className="text-left px-6 py-2 text-xs font-bold text-white uppercase">By-Product</th>
-                <th className="text-right px-6 py-2 text-xs font-bold text-white uppercase">Qty (MT)</th>
+                <th className="text-right px-6 py-2 text-xs font-bold text-white uppercase">Qty (kg)</th>
                 <th className="text-right px-6 py-2 text-xs font-bold text-white uppercase">Yield %</th>
-                <th className="text-right px-6 py-2 text-xs font-bold text-white uppercase">Rate / MT</th>
+                <th className="text-right px-6 py-2 text-xs font-bold text-white uppercase">Rate / kg</th>
                 <th className="text-right px-6 py-2 text-xs font-bold text-white uppercase">Value (PKR)</th>
               </tr>
             </thead>
@@ -473,15 +470,15 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
               {byProducts.map((bp, idx) => (
                 <tr key={bp.key} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                   <td className="px-6 py-2 font-medium text-gray-900">{bp.type}</td>
-                  <td className="px-6 py-2 text-right text-gray-700">{bp.qty > 0 ? bp.qty.toFixed(1) : '—'}</td>
+                  <td className="px-6 py-2 text-right text-gray-700">{bp.qty > 0 ? Math.round(bp.qtyKG).toLocaleString() : '—'}</td>
                   <td className="px-6 py-2 text-right text-gray-600">{bp.qty > 0 ? bp.yieldPct + '%' : '—'}</td>
-                  <td className="px-6 py-2 text-right text-gray-600">{fmtPKR(bp.rate)}</td>
+                  <td className="px-6 py-2 text-right text-gray-600">{fmtPKR(bp.rate / 1000)}</td>
                   <td className="px-6 py-2 text-right font-medium text-green-700">{bp.value > 0 ? fmtPKR(bp.value) : '—'}</td>
                 </tr>
               ))}
               <tr className="bg-gray-50">
                 <td className="px-6 py-1.5 text-gray-500 italic">Wastage / Loss</td>
-                <td className="px-6 py-1.5 text-right text-red-600">{wastageMT > 0 ? wastageMT.toFixed(1) : '—'}</td>
+                <td className="px-6 py-1.5 text-right text-red-600">{wastageMT > 0 ? Math.round(wastageMT * 1000).toLocaleString() : '—'}</td>
                 <td className="px-6 py-1.5 text-right text-red-500">{rawQtyMT > 0 && wastageMT > 0 ? (wastageMT / rawQtyMT * 100).toFixed(1) + '%' : '—'}</td>
                 <td className="px-6 py-1.5 text-right text-gray-400">—</td>
                 <td className="px-6 py-1.5 text-right text-gray-400">—</td>
@@ -490,7 +487,7 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
             <tfoot>
               <tr className="border-t-2 border-green-300 bg-green-50">
                 <td className="px-6 py-2 font-bold text-green-900">Total By-Product Value (B)</td>
-                <td className="px-6 py-2 text-right font-bold text-green-900">{byProducts.reduce((s, bp) => s + bp.qty, 0).toFixed(1)}</td>
+                <td className="px-6 py-2 text-right font-bold text-green-900">{Math.round(byProducts.reduce((s, bp) => s + bp.qty, 0) * 1000).toLocaleString()}</td>
                 <td className="px-6 py-2"></td>
                 <td className="px-6 py-2"></td>
                 <td className="px-6 py-2 text-right font-bold text-green-900">{fmtPKR(totalByproductValue)}</td>
@@ -514,7 +511,7 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
 
           {/* Per-unit costs */}
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-3">
-            <div className="bg-white rounded-lg border p-3 text-center"><p className="text-[10px] text-gray-500 uppercase">Finished Rice</p><p className="text-lg font-bold text-blue-900">{finishedMT} MT</p></div>
+            <div className="bg-white rounded-lg border p-3 text-center"><p className="text-[10px] text-gray-500 uppercase">Finished Rice</p><p className="text-lg font-bold text-blue-900">{Math.round(finishedKG).toLocaleString()} kg</p></div>
             <div className="bg-white rounded-lg border p-3 text-center"><p className="text-[10px] text-gray-500 uppercase">Cost / KG</p><p className="text-lg font-bold text-gray-900">{fmtPKR(finalCostPerKG)}</p></div>
             <div className="bg-white rounded-lg border p-3 text-center"><p className="text-[10px] text-gray-500 uppercase">Cost / Maund</p><p className="text-lg font-bold text-gray-900">{fmtPKR(finalCostPerMaund)}</p></div>
             <div className="bg-white rounded-lg border p-3 text-center"><p className="text-[10px] text-gray-500 uppercase">Cost / Katta (50kg)</p><p className="text-lg font-bold text-gray-900">{fmtPKR(finalCostPerKatta)}</p></div>
@@ -533,7 +530,7 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
                 <th className="text-left py-1.5 font-semibold text-gray-500">#</th>
                 <th className="text-left py-1.5 font-semibold text-gray-500">Vehicle No</th>
                 <th className="text-left py-1.5 font-semibold text-gray-500">Driver</th>
-                <th className="text-right py-1.5 font-semibold text-gray-500">Weight (MT)</th>
+                <th className="text-right py-1.5 font-semibold text-gray-500">Weight (kg)</th>
                 <th className="text-left py-1.5 font-semibold text-gray-500">Date</th>
               </tr></thead>
               <tbody>
@@ -542,14 +539,14 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
                     <td className="py-1.5 text-gray-500">{i + 1}</td>
                     <td className="py-1.5 font-mono font-bold text-gray-900">{v.vehicleNo || v.vehicle_no || '—'}</td>
                     <td className="py-1.5 text-gray-600">{v.driverName || v.driver_name || '—'}</td>
-                    <td className="py-1.5 text-right text-gray-900">{pf(v.weightMT || v.weight_mt) || '—'}</td>
+                    <td className="py-1.5 text-right text-gray-900">{pf(v.weight_kg) ? Math.round(pf(v.weight_kg)).toLocaleString() : '—'}</td>
                     <td className="py-1.5 text-gray-600">{fmtDate(v.arrivalDate || v.arrival_date)}</td>
                   </tr>
                 ))}
               </tbody>
               <tfoot><tr className="border-t border-gray-200">
                 <td colSpan={3} className="py-1.5 font-bold text-gray-900">Total</td>
-                <td className="py-1.5 text-right font-bold text-gray-900">{vehicles.reduce((s, v) => s + pf(v.weightMT || v.weight_mt), 0).toFixed(1)} MT</td>
+                <td className="py-1.5 text-right font-bold text-gray-900">{Math.round(vehicles.reduce((s, v) => s + pf(v.weight_kg), 0)).toLocaleString()} kg</td>
                 <td></td>
               </tr></tfoot>
             </table>

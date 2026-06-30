@@ -6,8 +6,8 @@ import { lotInventoryApi } from '../api/services';
 
 const n = (v) => Number(v) || 0;
 const toMT = (kg) => n(kg) / 1000;
-const fmtMT = (kg) => `${toMT(kg).toLocaleString(undefined, { maximumFractionDigits: 2 })} MT`;
-const fmtMTnum = (mt) => `${n(mt).toLocaleString(undefined, { maximumFractionDigits: 2 })} MT`;
+const fmtMT = (kg) => `${Math.round(n(kg)).toLocaleString()} kg`;
+const fmtMTnum = (mt) => `${Math.round(n(mt) * 1000).toLocaleString()} kg`;
 const fmtPKR = (v) => `Rs ${Math.round(n(v)).toLocaleString('en-PK')}`;
 
 const ENTITIES = [{ v: '', l: 'All' }, { v: 'mill', l: 'Mill' }, { v: 'export', l: 'Export' }];

@@ -2379,8 +2379,8 @@ export function useLotDetail(id) {
 export function useAllocateLotToBatch() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ lotId, batchId, weightMt, notes }) =>
-      lotInventoryApi.allocateLotToBatch(lotId, { batch_id: batchId, weight_mt: weightMt, notes }),
+    mutationFn: ({ lotId, batchId, weightKg, notes }) =>
+      lotInventoryApi.allocateLotToBatch(lotId, { batch_id: batchId, weight_kg: weightKg, notes }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['lot-inventory'] });
       qc.invalidateQueries({ queryKey: ['milling'] });
