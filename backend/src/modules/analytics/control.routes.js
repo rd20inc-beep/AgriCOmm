@@ -96,6 +96,12 @@ router.put(
   controller.recordCountItem
 );
 router.put(
+  '/stock-counts/:id/items/:itemId/review',
+  authorize('inventory', 'update'),
+  auditAction('review_stock_count_line', 'stock_count_items'),
+  controller.reviewCountItem
+);
+router.put(
   '/stock-counts/:id/approve',
   authorize('inventory', 'update'),
   auditAction('approve_stock_count', 'stock_counts'),

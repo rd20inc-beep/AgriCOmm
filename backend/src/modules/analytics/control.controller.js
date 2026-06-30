@@ -312,6 +312,31 @@ const controlController = {
     }
   },
 
+  async reviewCountItem(req, res) {
+    try {
+      const result = await db.transaction(async (trx) => {
+        return controlService.reviewCountItem(trx, {
+          stockCountId: parseInt(req.params.id, 10),
+          itemId: parseInt(req.params.itemId, 10),
+          decision: req.body.decision,
+          reason: req.body.reason,
+          userId: req.user.id,
+        });
+      });
+      return res.json({
+        success: true,
+        data: result,
+        message: result.status === 'Approved' ? 'Discrepancy approved.' : 'Discrepancy rejected.',
+      });
+    } catch (err) {
+      console.error('Review count item error:', err);
+      const status = err.message.includes('not found') ? 404
+        : /already|cancelled|must be|required|matches the system|Count this item/.test(err.message) ? 400
+        : 500;
+      return res.status(status).json({ success: false, message: err.message || 'Internal server error.' });
+    }
+  },
+
   async approveStockCount(req, res) {
     try {
       const result = await db.transaction(async (trx) => {
@@ -326,6 +351,7 @@ const controlController = {
       const status = err.message.includes('not found') ? 404
         : err.message.includes('already') ? 400
         : err.message.includes('not been counted') ? 400
+        : err.message.includes('need review') ? 400
         : 500;
       return res.status(status).json({ success: false, message: err.message || 'Internal server error.' });
     }

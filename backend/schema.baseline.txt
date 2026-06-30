@@ -2007,6 +2007,9 @@ COL stock_count_items.id:integer:NOT NULL
 COL stock_count_items.item_name:character varying:NULL
 COL stock_count_items.lot_id:integer:NULL
 COL stock_count_items.notes:text:NULL
+COL stock_count_items.review_notes:text:NULL
+COL stock_count_items.reviewed_at:timestamp with time zone:NULL
+COL stock_count_items.reviewed_by:integer:NULL
 COL stock_count_items.status:character varying:NOT NULL
 COL stock_count_items.stock_count_id:integer:NULL
 COL stock_count_items.system_qty:numeric:NULL
@@ -2986,6 +2989,7 @@ CON stock_count_items.chk_stock_count_items_counted_qty_nn(c)
 CON stock_count_items.chk_stock_count_items_system_qty_nn(c)
 CON stock_count_items.stock_count_items_lot_id_foreign(f)
 CON stock_count_items.stock_count_items_pkey(p)
+CON stock_count_items.stock_count_items_reviewed_by_fkey(f)
 CON stock_count_items.stock_count_items_status_check(c)
 CON stock_count_items.stock_count_items_stock_count_id_foreign(f)
 CON stock_counts.stock_counts_approved_by_foreign(f)
