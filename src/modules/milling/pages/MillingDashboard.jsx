@@ -106,15 +106,16 @@ export default function MillingDashboard() {
     blendTag === 'All' ? blendableLots : blendableLots.filter(l => lotCategory(l) === blendTag)
   ), [blendableLots, blendTag]);
   const blendTotals = useMemo(() => {
-    let mt = 0, cost = 0;
+    // qtyMt now holds KG (Phase 5c). availableQty/landedCostPerKg are KG/per-KG.
+    let kg = 0, cost = 0;
     for (const r of blendRows) {
       const lot = blendableLots.find(l => String(l.id) === String(r.lotId));
       const q = parseFloat(r.qtyMt) || 0;
       if (!lot || q <= 0) continue;
-      mt += q;
-      cost += (parseFloat(lot.landedCostPerKg) || parseFloat(lot.ratePerKg) || 0) * q * 1000;
+      kg += q;
+      cost += (parseFloat(lot.landedCostPerKg) || parseFloat(lot.ratePerKg) || 0) * q;
     }
-    return { mt, cost };
+    return { kg, mt: kg / 1000, cost };
   }, [blendRows, blendableLots]);
   // Live recipe: each input's variety + share, and whether this is a true blend
   // (>1 distinct variety) — drives the processing_type sent to the backend so
@@ -166,7 +167,7 @@ export default function MillingDashboard() {
     const blendLots = useBlend
       ? blendRows
           .filter(r => r.lotId && parseFloat(r.qtyMt) > 0)
-          .map(r => ({ lot_id: parseInt(r.lotId), qty_mt: parseFloat(r.qtyMt) }))
+          .map(r => ({ lot_id: parseInt(r.lotId), qty_kg: parseFloat(r.qtyMt) }))
       : [];
     if (useBlend) {
       if (blendLots.length === 0) { addToast('Add at least one stock lot with a quantity', 'error'); return; }
@@ -180,7 +181,7 @@ export default function MillingDashboard() {
       for (const r of blendRows) {
         const lot = blendableLots.find(l => String(l.id) === String(r.lotId));
         if (lot && parseFloat(r.qtyMt) > parseFloat(lot.availableQty) + 1e-6) {
-          addToast(`${lot.lotNo || lot.itemName}: only ${lot.availableQty} MT available`, 'error');
+          addToast(`${lot.lotNo || lot.itemName}: only ${lot.availableQty} KG available`, 'error');
           return;
         }
       }
@@ -195,24 +196,22 @@ export default function MillingDashboard() {
       addToast('Client name is required for service milling', 'error');
       return;
     }
-    const rawKg = parseFloat(batchForm.rawQtyKg) || 0;
-    const rawQty = rawKg / 1000; // backend stores MT
+    const rawKg = parseFloat(batchForm.rawQtyKg) || 0; // backend stores KG (Phase 5c)
     const plannedKg = parseFloat(batchForm.plannedFinishedKg)
-      || Math.round((useBlend ? blendTotals.mt * 1000 : rawKg) * 0.65);
-    const planned = plannedKg / 1000;
+      || Math.round((useBlend ? blendTotals.kg : rawKg) * 0.65);
 
     try {
       const payload = {
         milling_fee_per_kg: 0, // fee removed from the form; milling cost is entered in the Costing dialog
         mill_id: batchForm.millId ? parseInt(batchForm.millId) : null,
         shift: batchForm.shift,
-        planned_finished_mt: planned,
+        planned_finished_kg: plannedKg,
         notes: batchForm.millingType === 'service_milling'
           ? `[SERVICE MILLING] Client: ${batchForm.clientName}${batchForm.clientContact ? ` | Contact: ${batchForm.clientContact}` : ''}${batchForm.millingFeePerMT ? ` | Fee: PKR ${batchForm.millingFeePerMT}/MT` : ''}${batchForm.notes ? ` | ${batchForm.notes}` : ''}`
           : batchForm.notes || null,
         ...(useBlend
           ? { source_lots: blendLots, product_id: blendProductId ? parseInt(blendProductId) : null, processing_type: blendRecipe.processingType }
-          : { supplier_id: parseInt(batchForm.supplierId), raw_qty_mt: rawQty, product_id: parseInt(batchForm.productId) }),
+          : { supplier_id: parseInt(batchForm.supplierId), raw_qty_kg: rawKg, product_id: parseInt(batchForm.productId) }),
       };
       const res = await createBatchMut.mutateAsync(payload);
       const batchNo = res?.data?.batch?.batch_no || res?.data?.batch?.id;
@@ -293,7 +292,7 @@ export default function MillingDashboard() {
         }
       }
       if (!costKg) costKg = 190; // default Rs 190/KG finished rice
-      return s + costKg * pf(i.availableQty) * 1000;
+      return s + costKg * pf(i.availableQty);
     }, 0);
   }, [finishedAll, millingBatches]);
 
@@ -306,7 +305,7 @@ export default function MillingDashboard() {
     return inventory.filter(i => i.type === 'byproduct').reduce((s, i) => {
       const name = (i.itemName || '').toLowerCase();
       const rateKg = name.includes('broken') ? brokenRateKg : name.includes('bran') ? branRateKg : huskRateKg;
-      return s + pf(i.availableQty) * 1000 * rateKg; // availableQty in MT → convert to KG
+      return s + pf(i.availableQty) * rateKg; // availableQty is KG (Phase 5c)
     }, 0);
   }, [inventory, millingBatches]);
 
@@ -675,7 +674,7 @@ export default function MillingDashboard() {
                       </td>
                       <td className="py-2 px-3 text-gray-700">{lot.itemName || lot.productName || '—'}</td>
                       <td className="py-2 px-3 text-gray-600"><PartyLink type="supplier" id={lot.supplierId} name={lot.supplierName} /></td>
-                      <td className="py-2 px-3 text-right font-medium">{parseFloat(lot.qty)?.toFixed(2)} MT</td>
+                      <td className="py-2 px-3 text-right font-medium">{((parseFloat(lot.qty) || 0) / 1000).toFixed(2)} MT</td>
                       <td className="py-2 px-3 text-right">
                         {!isAtExport ? <span className="text-emerald-700 font-medium">{avail.toFixed(2)} MT</span> : <span className="text-gray-400">—</span>}
                       </td>
@@ -1162,7 +1161,7 @@ export default function MillingDashboard() {
                           </button>
                           {sel && (
                             <div className="shrink-0 flex items-center gap-1">
-                              <input type="number" value={sel.qtyMt} placeholder="MT" min="0" max={avail} step="0.01" autoFocus
+                              <input type="number" value={sel.qtyMt} placeholder="KG" min="0" max={avail} step="0.01" autoFocus
                                 onChange={e => setBlendRows(rs => rs.map(r => String(r.lotId) === String(l.id) ? { ...r, qtyMt: e.target.value } : r))}
                                 className={`w-20 border rounded-lg px-2 py-1.5 text-sm outline-none ${over ? 'border-red-400 bg-red-50' : 'border-gray-300'}`} />
                               <button type="button" title="Use all"

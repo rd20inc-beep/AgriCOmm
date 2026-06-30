@@ -420,7 +420,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
             <tbody>
               {finishedLots.length > 0 ? (
                 finishedLots.map((lot, idx) => {
-                  const allocKg = parseFloat(lot.allocated_qty_kg) || parseFloat(lot.net_weight_kg) || (parseFloat(lot.qty) || 0) * 1000;
+                  const allocKg = parseFloat(lot.allocated_qty_kg) || parseFloat(lot.net_weight_kg) || (parseFloat(lot.qty) || 0);
                   const allocMT = (allocKg / 1000).toFixed(2);
                   const ratePerKg = parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.rate_per_kg) || 0;
                   const ratePerMT = ratePerKg > 0 ? Math.round(ratePerKg * 1000).toLocaleString() : '\u2014';

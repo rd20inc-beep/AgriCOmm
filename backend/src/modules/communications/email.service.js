@@ -312,7 +312,7 @@ const emailService = {
         variables: {
           batchNo: batch.batch_no,
           supplierName: batch.supplier_id ? (await db('suppliers').where({ id: batch.supplier_id }).select('name').first())?.name : 'Unknown',
-          rawQty: batch.raw_qty_mt,
+          rawQty: (parseFloat(batch.raw_qty_kg) || 0) / 1000,
         },
         linkedType: 'milling_batch',
         linkedId: batchId,

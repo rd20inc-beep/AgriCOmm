@@ -251,7 +251,7 @@ function ProductStockDrawer({ row, entity, status, onClose, onOpenLot }) {
           ) : (
             lots.map((l) => {
               const onHand = onHandKg(l);
-              const perKg = n(l.landed_cost_per_kg) || n(l.rate_per_kg) || n(l.cost_per_unit) / 1000 || 0;
+              const perKg = n(l.landed_cost_per_kg) || n(l.rate_per_kg) || n(l.cost_per_unit) || 0;
               const value = onHand * perKg; // value of what's on hand now, not the original intake
               const bags = Math.round(n(l.total_bags));
               const receivedKg = n(l.received_net_weight_kg);

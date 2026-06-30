@@ -188,7 +188,7 @@ COL batch_source_lots.id:integer:NOT NULL
 COL batch_source_lots.lot_id:integer:NOT NULL
 COL batch_source_lots.lot_type:character varying:NULL
 COL batch_source_lots.notes:text:NULL
-COL batch_source_lots.qty_mt:numeric:NOT NULL
+COL batch_source_lots.qty_kg:numeric:NOT NULL
 COL batch_source_lots.ratio_pct:numeric:NULL
 COL batch_source_lots.unit_cost_pkr:numeric:NULL
 COL batch_source_lots.variety:character varying:NULL
@@ -775,7 +775,7 @@ COL internal_transfers.export_order_id:integer:NULL
 COL internal_transfers.id:integer:NOT NULL
 COL internal_transfers.pkr_rate:numeric:NULL
 COL internal_transfers.product_name:character varying:NULL
-COL internal_transfers.qty_mt:numeric:NULL
+COL internal_transfers.qty_kg:numeric:NULL
 COL internal_transfers.status:character varying:NOT NULL
 COL internal_transfers.total_value_pkr:numeric:NULL
 COL internal_transfers.transfer_no:character varying:NOT NULL
@@ -1433,31 +1433,31 @@ COL mill_workers.portal_enabled:boolean:NOT NULL
 COL mill_workers.portal_pin_hash:character varying:NULL
 COL mill_workers.role:character varying:NULL
 COL mill_workers.updated_at:timestamp with time zone:NOT NULL
-COL milling_batches.actual_finished_mt:numeric:NOT NULL
+COL milling_batches.actual_finished_kg:numeric:NOT NULL
 COL milling_batches.approved_at:timestamp with time zone:NULL
 COL milling_batches.approved_by:integer:NULL
-COL milling_batches.b1_mt:numeric:NOT NULL
-COL milling_batches.b1_price_per_mt:numeric:NULL
-COL milling_batches.b2_mt:numeric:NOT NULL
-COL milling_batches.b2_price_per_mt:numeric:NULL
-COL milling_batches.b3_mt:numeric:NOT NULL
-COL milling_batches.b3_price_per_mt:numeric:NULL
+COL milling_batches.b1_kg:numeric:NOT NULL
+COL milling_batches.b1_price_per_kg:numeric:NULL
+COL milling_batches.b2_kg:numeric:NOT NULL
+COL milling_batches.b2_price_per_kg:numeric:NULL
+COL milling_batches.b3_kg:numeric:NOT NULL
+COL milling_batches.b3_price_per_kg:numeric:NULL
 COL milling_batches.batch_no:character varying:NOT NULL
 COL milling_batches.benchmark_id:integer:NULL
-COL milling_batches.bran_mt:numeric:NOT NULL
-COL milling_batches.bran_price_per_mt:numeric:NULL
-COL milling_batches.broken_mt:numeric:NOT NULL
-COL milling_batches.broken_price_per_mt:numeric:NULL
-COL milling_batches.choba_mt:numeric:NOT NULL
-COL milling_batches.choba_price_per_mt:numeric:NULL
+COL milling_batches.bran_kg:numeric:NOT NULL
+COL milling_batches.bran_price_per_kg:numeric:NULL
+COL milling_batches.broken_kg:numeric:NOT NULL
+COL milling_batches.broken_price_per_kg:numeric:NULL
+COL milling_batches.choba_kg:numeric:NOT NULL
+COL milling_batches.choba_price_per_kg:numeric:NULL
 COL milling_batches.completed_at:timestamp with time zone:NULL
 COL milling_batches.created_at:timestamp with time zone:NOT NULL
 COL milling_batches.created_by:integer:NOT NULL
-COL milling_batches.csr_mt:numeric:NOT NULL
-COL milling_batches.csr_price_per_mt:numeric:NULL
-COL milling_batches.finished_price_per_mt:numeric:NULL
-COL milling_batches.husk_mt:numeric:NOT NULL
-COL milling_batches.husk_price_per_mt:numeric:NULL
+COL milling_batches.csr_kg:numeric:NOT NULL
+COL milling_batches.csr_price_per_kg:numeric:NULL
+COL milling_batches.finished_price_per_kg:numeric:NULL
+COL milling_batches.husk_kg:numeric:NOT NULL
+COL milling_batches.husk_price_per_kg:numeric:NULL
 COL milling_batches.id:integer:NOT NULL
 COL milling_batches.linked_export_order_id:integer:NULL
 COL milling_batches.machine_line:character varying:NULL
@@ -1469,13 +1469,13 @@ COL milling_batches.milling_fee_per_kg:numeric:NULL
 COL milling_batches.moisture_loss_pct:numeric:NOT NULL
 COL milling_batches.notes:text:NULL
 COL milling_batches.operator_name:character varying:NULL
-COL milling_batches.ov_mt:numeric:NOT NULL
+COL milling_batches.ov_kg:numeric:NOT NULL
 COL milling_batches.parent_batch_id:integer:NULL
 COL milling_batches.pass_number:integer:NOT NULL
-COL milling_batches.planned_finished_mt:numeric:NULL
+COL milling_batches.planned_finished_kg:numeric:NULL
 COL milling_batches.post_milling_grade:character varying:NULL
-COL milling_batches.powder_mt:numeric:NOT NULL
-COL milling_batches.powder_price_per_mt:numeric:NULL
+COL milling_batches.powder_kg:numeric:NOT NULL
+COL milling_batches.powder_price_per_kg:numeric:NULL
 COL milling_batches.prices_confirmed:boolean:NOT NULL
 COL milling_batches.processing_hours:numeric:NOT NULL
 COL milling_batches.processing_type:character varying:NOT NULL
@@ -1483,24 +1483,24 @@ COL milling_batches.product_id:integer:NULL
 COL milling_batches.purchase_price_per_kg:numeric:NULL
 COL milling_batches.raw_cost_per_kg_finished:numeric:NULL
 COL milling_batches.raw_cost_total:numeric:NULL
-COL milling_batches.raw_qty_mt:numeric:NULL
+COL milling_batches.raw_qty_kg:numeric:NULL
 COL milling_batches.rejected_by:integer:NULL
 COL milling_batches.rejection_reason:text:NULL
 COL milling_batches.shift:character varying:NULL
-COL milling_batches.short_grain_mt:numeric:NOT NULL
-COL milling_batches.short_grain_price_per_mt:numeric:NULL
-COL milling_batches.sortex_rejects_mt:numeric:NOT NULL
-COL milling_batches.sortex_rejects_price_per_mt:numeric:NULL
+COL milling_batches.short_grain_kg:numeric:NOT NULL
+COL milling_batches.short_grain_price_per_kg:numeric:NULL
+COL milling_batches.sortex_rejects_kg:numeric:NOT NULL
+COL milling_batches.sortex_rejects_price_per_kg:numeric:NULL
 COL milling_batches.status:character varying:NOT NULL
-COL milling_batches.stone_mt:numeric:NOT NULL
+COL milling_batches.stone_kg:numeric:NOT NULL
 COL milling_batches.supplier_id:integer:NULL
 COL milling_batches.supplier_name:character varying:NULL
-COL milling_batches.sweeping_mt:numeric:NOT NULL
-COL milling_batches.sweeping_price_per_mt:numeric:NULL
+COL milling_batches.sweeping_kg:numeric:NOT NULL
+COL milling_batches.sweeping_price_per_kg:numeric:NULL
 COL milling_batches.total_cost_per_kg_finished:numeric:NULL
 COL milling_batches.transport_mode:character varying:NOT NULL
 COL milling_batches.updated_at:timestamp with time zone:NOT NULL
-COL milling_batches.wastage_mt:numeric:NOT NULL
+COL milling_batches.wastage_kg:numeric:NOT NULL
 COL milling_batches.yield_pct:numeric:NOT NULL
 COL milling_costs.amount:numeric:NOT NULL
 COL milling_costs.batch_id:integer:NOT NULL
@@ -1512,16 +1512,16 @@ COL milling_costs.id:integer:NOT NULL
 COL milling_costs.notes:text:NULL
 COL milling_costs.updated_at:timestamp with time zone:NOT NULL
 COL milling_output_market_prices.batch_id:integer:NOT NULL
-COL milling_output_market_prices.bran_price_per_mt:numeric:NULL
-COL milling_output_market_prices.broken_price_per_mt:numeric:NULL
+COL milling_output_market_prices.bran_price_per_kg:numeric:NULL
+COL milling_output_market_prices.broken_price_per_kg:numeric:NULL
 COL milling_output_market_prices.confirmed_at:timestamp with time zone:NULL
 COL milling_output_market_prices.confirmed_by:integer:NULL
 COL milling_output_market_prices.created_at:timestamp with time zone:NULL
-COL milling_output_market_prices.finished_price_per_mt:numeric:NOT NULL
-COL milling_output_market_prices.husk_price_per_mt:numeric:NULL
+COL milling_output_market_prices.finished_price_per_kg:numeric:NOT NULL
+COL milling_output_market_prices.husk_price_per_kg:numeric:NULL
 COL milling_output_market_prices.id:integer:NOT NULL
 COL milling_output_market_prices.notes:text:NULL
-COL milling_output_market_prices.other_output_price_per_mt:numeric:NULL
+COL milling_output_market_prices.other_output_price_per_kg:numeric:NULL
 COL milling_output_market_prices.updated_at:timestamp with time zone:NULL
 COL milling_quality_post.batch_id:integer:NULL
 COL milling_quality_post.broken_pct:numeric:NULL
@@ -1574,7 +1574,7 @@ COL milling_vehicle_arrivals.notes:text:NULL
 COL milling_vehicle_arrivals.quality_json:jsonb:NULL
 COL milling_vehicle_arrivals.total_bags:integer:NULL
 COL milling_vehicle_arrivals.vehicle_no:character varying:NOT NULL
-COL milling_vehicle_arrivals.weight_mt:numeric:NULL
+COL milling_vehicle_arrivals.weight_kg:numeric:NULL
 COL mills.capacity_mt_per_day:numeric:NULL
 COL mills.contact_person:character varying:NULL
 COL mills.created_at:timestamp with time zone:NOT NULL

@@ -421,10 +421,10 @@ const millingAdvancedController = {
   async addSourceLot(req, res) {
     try {
       const { id } = req.params;
-      const { lot_id, qty_mt } = req.body;
+      const { lot_id, qty_kg } = req.body;
 
-      if (!lot_id || !qty_mt) {
-        return res.status(400).json({ success: false, message: 'lot_id and qty_mt are required.' });
+      if (!lot_id || !qty_kg) {
+        return res.status(400).json({ success: false, message: 'lot_id and qty_kg are required.' });
       }
 
       const batch = await db('milling_batches').where({ id }).first();
@@ -436,7 +436,7 @@ const millingAdvancedController = {
         return millingService.addSourceLot(trx, {
           batchId: id,
           lotId: lot_id,
-          qtyMT: qty_mt,
+          qtyKg: qty_kg,
         });
       });
 

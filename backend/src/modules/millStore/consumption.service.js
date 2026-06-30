@@ -18,7 +18,8 @@ const consumptionService = {
     const batch = await db('milling_batches').where('id', batchId).first();
     if (!batch) throw new NotFoundError('Batch not found.');
 
-    const rawQtyMT = Number(batch.raw_qty_mt) || 0;
+    // raw_qty_kg is KG (Phase 5c); consumption ratios are per-MT, so work in MT here.
+    const rawQtyMT = (Number(batch.raw_qty_kg) || 0) / 1000;
     if (rawQtyMT <= 0) throw new ValidationError('Batch has no raw quantity.');
 
     const productId = batch.linked_export_order_id
@@ -57,14 +58,14 @@ const consumptionService = {
           .join('milling_batches as mb', 'mb.id', 'cl.batch_id')
           .where('cl.item_id', item.id)
           .where('mb.status', 'Completed')
-          .where('mb.raw_qty_mt', '>', 0)
+          .where('mb.raw_qty_kg', '>', 0)
           .orderBy('cl.created_at', 'desc')
           .limit(5)
-          .select('cl.quantity_used', 'mb.raw_qty_mt');
+          .select('cl.quantity_used', 'mb.raw_qty_kg');
 
         if (history.length > 0) {
           const avgPerMT = history.reduce((s, h) =>
-            s + (Number(h.quantity_used) / Number(h.raw_qty_mt)), 0) / history.length;
+            s + (Number(h.quantity_used) / (Number(h.raw_qty_kg) / 1000)), 0) / history.length;
           suggestedQty = Number((rawQtyMT * avgPerMT).toFixed(3));
           source = 'history';
         }
@@ -211,7 +212,7 @@ const consumptionService = {
       // Recompute total_cost_per_kg_finished if batch has finished output
       const allCosts = await trx('milling_costs').where('batch_id', batchId);
       const totalBatchCost = allCosts.reduce((s, c) => s + (Number(c.amount) || 0), 0);
-      const finishedKg = (Number(batch.actual_finished_mt) || 0) * 1000;
+      const finishedKg = (Number(batch.actual_finished_kg) || 0);
       if (finishedKg > 0) {
         await trx('milling_batches').where('id', batchId).update({
           total_cost_per_kg_finished: Number((totalBatchCost / finishedKg).toFixed(4)),

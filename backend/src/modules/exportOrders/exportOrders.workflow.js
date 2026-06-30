@@ -113,7 +113,7 @@ async function runTransitionSideEffects(trx, order, toStatus, userId) {
     await inventoryService.dispatchForShipment(trx, {
       orderId: order.id,
       lotId: r.lot_id,
-      qtyMT: qty,
+      qtyKg: qty,
       userId,
     });
     // releaseReservation marks it 'Released'; record that it actually shipped.

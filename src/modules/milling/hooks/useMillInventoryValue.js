@@ -34,14 +34,14 @@ export function useMillInventoryValue() {
     const rawQty = rawLots.reduce((s, l) => s + (parseFloat(l.qty) || 0), 0);
     const rawValue = rawLots.reduce((s, l) => {
       const rateKG = parseFloat(l.ratePerKg) || parseFloat(l.landedCostPerKg) || 0;
-      const weightKG = parseFloat(l.netWeightKg) || (parseFloat(l.qty) || 0) * 1000;
+      const weightKG = parseFloat(l.netWeightKg) || (parseFloat(l.qty) || 0);
       return s + rateKG * weightKG;
     }, 0);
 
     const finishedQty = finishedLots.reduce((s, l) => s + (parseFloat(l.qty) || 0), 0);
     const finishedValue = finishedLots.reduce((s, l) => {
-      const rateKG = parseFloat(l.ratePerKg) || parseFloat(l.landedCostPerKg) || parseFloat(l.costPerUnit) / 1000 || 0;
-      const weightKG = parseFloat(l.netWeightKg) || (parseFloat(l.qty) || 0) * 1000;
+      const rateKG = parseFloat(l.ratePerKg) || parseFloat(l.landedCostPerKg) || parseFloat(l.costPerUnit) || 0;
+      const weightKG = parseFloat(l.netWeightKg) || (parseFloat(l.qty) || 0);
       return s + rateKG * weightKG;
     }, 0);
 
@@ -50,7 +50,7 @@ export function useMillInventoryValue() {
       const name = (l.itemName || '').toLowerCase();
       const marketRate = name.includes('broken') ? brokenRateKG : name.includes('bran') ? branRateKG : huskRateKG;
       const rateKG = parseFloat(l.ratePerKg) || parseFloat(l.landedCostPerKg) || marketRate;
-      const weightKG = parseFloat(l.netWeightKg) || (parseFloat(l.qty) || 0) * 1000;
+      const weightKG = parseFloat(l.netWeightKg) || (parseFloat(l.qty) || 0);
       return s + rateKG * weightKG;
     }, 0);
 

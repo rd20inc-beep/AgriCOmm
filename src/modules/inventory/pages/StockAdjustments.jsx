@@ -312,7 +312,7 @@ export default function StockAdjustments() {
             <SearchSelect
               value={form.lot_id}
               onChange={(v) => setForm((p) => ({ ...p, lot_id: v }))}
-              options={lots.map((l) => ({ value: l.id, label: l.lotNo, sub: `${l.itemName} — ${parseFloat(l.qty).toFixed(1)} MT` }))}
+              options={lots.map((l) => ({ value: l.id, label: l.lotNo, sub: `${l.itemName} — ${(parseFloat(l.qty) / 1000).toFixed(1)} MT` }))}
               placeholder="Search lot…"
             />
           </div>

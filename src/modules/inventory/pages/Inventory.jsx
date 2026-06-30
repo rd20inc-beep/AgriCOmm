@@ -224,7 +224,7 @@ export default function Inventory() {
                 }
                 const lot = row;
                 const netKg = parseFloat(lot.netWeightKg) || parseFloat(lot.qty) * 1000 || 0;
-                const availKg = (parseFloat(lot.availableQty) || 0) * 1000;
+                const availKg = (parseFloat(lot.availableQty) || 0);
                 const bw = parseFloat(lot.bagWeightKg) || 50;
                 return (
                   <tr key={lot.id || idx}>

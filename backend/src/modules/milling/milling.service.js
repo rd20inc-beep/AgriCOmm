@@ -244,12 +244,12 @@ const millingService = {
       return { batch, benchmark: null, comparison: null, message: 'No benchmark found for this batch' };
     }
 
-    const rawQty = parseFloat(batch.raw_qty_mt) || 1;
-    const actualFinished = parseFloat(batch.actual_finished_mt) || 0;
-    const actualBroken = parseFloat(batch.broken_mt) || 0;
-    const actualBran = parseFloat(batch.bran_mt) || 0;
-    const actualHusk = parseFloat(batch.husk_mt) || 0;
-    const actualWastage = parseFloat(batch.wastage_mt) || 0;
+    const rawQty = parseFloat(batch.raw_qty_kg) || 1;
+    const actualFinished = parseFloat(batch.actual_finished_kg) || 0;
+    const actualBroken = parseFloat(batch.broken_kg) || 0;
+    const actualBran = parseFloat(batch.bran_kg) || 0;
+    const actualHusk = parseFloat(batch.husk_kg) || 0;
+    const actualWastage = parseFloat(batch.wastage_kg) || 0;
 
     const actualYieldPct = (actualFinished / rawQty) * 100;
     const actualBrokenPct = (actualBroken / rawQty) * 100;
@@ -349,12 +349,12 @@ const millingService = {
   // Source Lot Management
   // =========================================================================
 
-  async addSourceLot(trx, { batchId, lotId, qtyMT }) {
+  async addSourceLot(trx, { batchId, lotId, qtyKg }) {
     const lot = await trx('inventory_lots').where({ id: lotId }).first();
     if (!lot) throw new Error(`Inventory lot ${lotId} not found`);
 
     const availableQty = parseFloat(lot.available_qty) || 0;
-    const requestedQty = parseFloat(qtyMT);
+    const requestedQty = parseFloat(qtyKg);
     if (availableQty < requestedQty) {
       throw new Error(
         `Insufficient available qty in lot ${lot.lot_no}: available ${availableQty} ${lot.unit}, requested ${requestedQty}`
@@ -365,7 +365,7 @@ const millingService = {
       .insert({
         batch_id: batchId,
         lot_id: lotId,
-        qty_mt: requestedQty,
+        qty_kg: requestedQty,
       })
       .returning('*');
 
@@ -383,7 +383,7 @@ const millingService = {
       .leftJoin('suppliers as s', 'il.supplier_id', 's.id')
       .leftJoin('products as p', 'il.product_id', 'p.id')
       .select(
-        'bsl.id', 'bsl.batch_id', 'bsl.lot_id', 'bsl.qty_mt',
+        'bsl.id', 'bsl.batch_id', 'bsl.lot_id', 'bsl.qty_kg',
         'bsl.lot_type', 'bsl.unit_cost_pkr', 'bsl.cost_total_pkr', 'bsl.notes', 'bsl.created_at',
         'il.lot_no', 'il.item_name', 'il.type', 'il.variety', 'il.grade',
         'il.available_qty as lot_available_qty', 'il.purchase_date',
@@ -418,7 +418,7 @@ const millingService = {
           if (originBatchIds.length) this.orWhereIn('batch_id', originBatchIds);
         })
         .select('id', 'lot_id', 'batch_id', 'vehicle_no', 'driver_name', 'driver_phone',
-          'weight_mt', 'bag_size_kg', 'total_bags', 'arrival_date', 'quality_json')
+          'weight_kg', 'bag_size_kg', 'total_bags', 'arrival_date', 'quality_json')
         .orderBy('created_at', 'asc')
       : [];
     // Attach a vehicle to a lot when its lot_id matches, OR (batch-level arrival
@@ -437,10 +437,10 @@ const millingService = {
       const k = l.supplier_id;
       if (!supMap[k]) {
         supMap[k] = { supplier_id: l.supplier_id, supplier_name: l.supplier_name,
-          phone: l.supplier_phone, lot_count: 0, qty_mt: 0, cost_total_pkr: 0 };
+          phone: l.supplier_phone, lot_count: 0, qty_kg: 0, cost_total_pkr: 0 };
       }
       supMap[k].lot_count += 1;
-      supMap[k].qty_mt += parseFloat(l.qty_mt) || 0;
+      supMap[k].qty_kg += parseFloat(l.qty_kg) || 0;
       supMap[k].cost_total_pkr += parseFloat(l.cost_total_pkr) || 0;
     }
 
@@ -578,7 +578,7 @@ const millingService = {
   async getRecoveryTrends({ supplierId, productId, dateFrom, dateTo }) {
     let query = db('milling_batches as mb')
       .where('mb.status', 'Completed')
-      .where('mb.raw_qty_mt', '>', 0);
+      .where('mb.raw_qty_kg', '>', 0);
 
     if (supplierId) query = query.where('mb.supplier_id', supplierId);
     if (productId) query = query.where('mb.product_id', productId);
@@ -589,12 +589,12 @@ const millingService = {
       .select(
         'mb.id',
         'mb.batch_no',
-        'mb.raw_qty_mt',
-        'mb.actual_finished_mt',
-        'mb.broken_mt',
-        'mb.bran_mt',
-        'mb.husk_mt',
-        'mb.wastage_mt',
+        'mb.raw_qty_kg',
+        'mb.actual_finished_kg',
+        'mb.broken_kg',
+        'mb.bran_kg',
+        'mb.husk_kg',
+        'mb.wastage_kg',
         'mb.yield_pct',
         'mb.completed_at',
         'mb.supplier_id'
@@ -602,17 +602,17 @@ const millingService = {
       .orderBy('mb.completed_at', 'asc');
 
     const trends = batches.map((b) => {
-      const raw = parseFloat(b.raw_qty_mt) || 1;
+      const raw = parseFloat(b.raw_qty_kg) || 1;
       return {
         batch_id: b.id,
         batch_no: b.batch_no,
         completed_at: b.completed_at,
         supplier_id: b.supplier_id,
-        yield_pct: parseFloat(((parseFloat(b.actual_finished_mt) / raw) * 100).toFixed(2)),
-        broken_pct: parseFloat(((parseFloat(b.broken_mt) / raw) * 100).toFixed(2)),
-        bran_pct: parseFloat(((parseFloat(b.bran_mt) / raw) * 100).toFixed(2)),
-        husk_pct: parseFloat(((parseFloat(b.husk_mt) / raw) * 100).toFixed(2)),
-        wastage_pct: parseFloat(((parseFloat(b.wastage_mt) / raw) * 100).toFixed(2)),
+        yield_pct: parseFloat(((parseFloat(b.actual_finished_kg) / raw) * 100).toFixed(2)),
+        broken_pct: parseFloat(((parseFloat(b.broken_kg) / raw) * 100).toFixed(2)),
+        bran_pct: parseFloat(((parseFloat(b.bran_kg) / raw) * 100).toFixed(2)),
+        husk_pct: parseFloat(((parseFloat(b.husk_kg) / raw) * 100).toFixed(2)),
+        wastage_pct: parseFloat(((parseFloat(b.wastage_kg) / raw) * 100).toFixed(2)),
       };
     });
 
@@ -633,15 +633,15 @@ const millingService = {
     const rows = await db('milling_batches as mb')
       .leftJoin('suppliers as s', 'mb.supplier_id', 's.id')
       .where('mb.status', 'Completed')
-      .where('mb.raw_qty_mt', '>', 0)
+      .where('mb.raw_qty_kg', '>', 0)
       .select(
         'mb.supplier_id',
         's.name as supplier_name'
       )
       .avg('mb.yield_pct as avg_yield_pct')
-      .sum('mb.raw_qty_mt as total_raw_mt')
-      .sum('mb.actual_finished_mt as total_finished_mt')
-      .sum('mb.broken_mt as total_broken_mt')
+      .sum('mb.raw_qty_kg as total_raw_mt')
+      .sum('mb.actual_finished_kg as total_finished_mt')
+      .sum('mb.broken_kg as total_broken_mt')
       .count('mb.id as batch_count')
       .groupBy('mb.supplier_id', 's.name')
       .orderBy('avg_yield_pct', 'desc');
@@ -689,7 +689,7 @@ const millingService = {
         'mb.id',
         'mb.batch_no',
         'mb.moisture_loss_pct',
-        'mb.raw_qty_mt'
+        'mb.raw_qty_kg'
       )
       .orderBy('mb.completed_at', 'asc');
 
@@ -747,12 +747,12 @@ const millingService = {
       benchmark = await db('recovery_benchmarks').where({ id: batch.benchmark_id }).first();
     }
 
-    const rawQty = parseFloat(batch.raw_qty_mt) || 0;
-    const finishedQty = parseFloat(batch.actual_finished_mt) || 0;
-    const brokenQty = parseFloat(batch.broken_mt) || 0;
+    const rawQty = parseFloat(batch.raw_qty_kg) || 0;
+    const finishedQty = parseFloat(batch.actual_finished_kg) || 0;
+    const brokenQty = parseFloat(batch.broken_kg) || 0;
 
     // Estimate expected quantities from benchmark
-    let expectedFinished = parseFloat(batch.planned_finished_mt) || 0;
+    let expectedFinished = parseFloat(batch.planned_finished_kg) || 0;
     let expectedBroken = 0;
     if (benchmark) {
       expectedFinished = rawQty * ((parseFloat(benchmark.expected_yield_pct) || 0) / 100);
@@ -781,15 +781,15 @@ const millingService = {
     return {
       batch_id: batchId,
       batch_no: batch.batch_no,
-      raw_qty_mt: rawQty,
+      raw_qty_mt: rawQty / 1000, // qty values are KG (Phase 5c) → MT for display
       expected: {
-        finished_mt: parseFloat(expectedFinished.toFixed(2)),
-        broken_mt: parseFloat(expectedBroken.toFixed(2)),
+        finished_mt: parseFloat((expectedFinished / 1000).toFixed(2)),
+        broken_mt: parseFloat((expectedBroken / 1000).toFixed(2)),
         revenue: parseFloat(expectedRevenue.toFixed(2)),
       },
       actual: {
-        finished_mt: finishedQty,
-        broken_mt: brokenQty,
+        finished_mt: finishedQty / 1000,
+        broken_mt: brokenQty / 1000,
         revenue: parseFloat(actualRevenue.toFixed(2)),
       },
       revenue_variance: parseFloat((actualRevenue - expectedRevenue).toFixed(2)),

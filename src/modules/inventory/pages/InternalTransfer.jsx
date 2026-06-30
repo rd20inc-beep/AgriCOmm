@@ -432,7 +432,7 @@ function TransferDetailDrawer({ transferId, onClose }) {
                     <span className="font-medium text-gray-700">{m.lotNo || `Lot ${m.lotId}`}</span>
                     <span className="text-gray-400">·</span>
                     <span className="text-gray-600 capitalize">{String(m.movementType).replace(/_/g, ' ')}</span>
-                    <span className="ml-auto tabular-nums font-medium text-gray-800">{(parseFloat(m.qty) || 0).toFixed(1)} MT</span>
+                    <span className="ml-auto tabular-nums font-medium text-gray-800">{((parseFloat(m.qty) || 0) / 1000).toFixed(1)} MT</span>
                     <span className="text-[10px] text-gray-400 uppercase">{m.lotEntity}</span>
                   </div>
                 ))}

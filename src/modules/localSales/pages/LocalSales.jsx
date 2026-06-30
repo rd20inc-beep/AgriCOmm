@@ -500,7 +500,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   const selectedPkg = pkgItems.find(i => String(i.id) === String(line.mill_item_id));
   const cartQtyForLot = (lotId) => cart.filter(c => lotId && String(c.lot_id) === String(lotId)).reduce((s, c) => s + c.qtyKg, 0);
   const cartCountForPkg = (mid) => cart.filter(c => mid && String(c.mill_item_id) === String(mid)).reduce((s, c) => s + (c.count || 0), 0);
-  const lineAvailKg = selectedLot ? (parseFloat(selectedLot.availableQty) || 0) * 1000 - cartQtyForLot(selectedLot.id) : null;
+  const lineAvailKg = selectedLot ? (parseFloat(selectedLot.availableQty) || 0) - cartQtyForLot(selectedLot.id) : null;
   const lineAvailCount = selectedPkg ? Number(selectedPkg.quantity_available) - cartCountForPkg(selectedPkg.id) : null;
   const lineOverSell = isPkg
     ? (lineAvailCount != null && lineCount > lineAvailCount + 0.01)
@@ -729,7 +729,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                 <select value={line.lot_id} onChange={e => pickLot(e.target.value)} className={SELECT}>
                   <option value="">No lot (manual entry)</option>
                   {filteredLots.map(l => {
-                    const avail = (parseFloat(l.availableQty) || 0) * 1000 - cartQtyForLot(l.id);
+                    const avail = (parseFloat(l.availableQty) || 0) - cartQtyForLot(l.id);
                     const costKg = parseFloat(l.landedCostPerKg) || parseFloat(l.ratePerKg) || (parseFloat(l.costPerUnit) || 0) / 1000;
                     const costLabel = costKg > 0 ? ` · Rs ${Math.round(costKg).toLocaleString()}/kg cost` : '';
                     return <option key={l.id} value={l.id} disabled={avail <= 0}>{l.lotNo} — {l.itemName} ({Math.round(avail).toLocaleString()} KG){costLabel}</option>;

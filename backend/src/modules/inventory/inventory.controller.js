@@ -375,7 +375,7 @@ const inventoryController = {
         return inventoryService.reserveStock(trx, {
           lotId: lot_id,
           orderId: order_id,
-          qtyMT: parseFloat(qty),
+          qtyKg: parseFloat(qty),
           userId: req.user.id,
         });
       });

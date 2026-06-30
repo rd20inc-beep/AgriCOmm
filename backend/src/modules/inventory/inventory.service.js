@@ -323,10 +323,13 @@ const inventoryService = {
     if (!lotId) throw new Error('lotId is required');
     if (qty == null || qty <= 0) throw new Error('qty must be a positive number');
 
+    // Units (Phase 5c): qty is now KG and costPerUnit is per-KG — so qty/cost
+    // columns are stored natively in KG. totalCost = cost × qty is invariant
+    // (the old MT×perMT gave the same PKR). net_weight_kg tracks qty 1:1.
     const parsedQty = parseFloat(qty);
     const parsedCost = parseFloat(costPerUnit) || 0;
     const totalCost = parsedCost * parsedQty;
-    const movementQtyKg = parsedQty * 1000;
+    const movementQtyKg = parsedQty;
     const direction = getMovementDirection(movementType);
 
     // 1. Validate lot exists
@@ -390,7 +393,7 @@ const inventoryService = {
 
     // 5. available_qty = qty - reserved_qty (export) - milling_reserved_qty (P6a)
     const newAvailable = newQty - currentReserved - currentMillingReserved;
-    const currentNetWeightKg = parseFloat(lot.net_weight_kg) || currentQty * 1000;
+    const currentNetWeightKg = parseFloat(lot.net_weight_kg) || currentQty;
     const newNetWeightKg = currentNetWeightKg + (direction * movementQtyKg);
     const newGrossWeightKg = newNetWeightKg;
 
@@ -431,13 +434,13 @@ const inventoryService = {
       reference_no: linkedRef || null,
       warehouse_from_id: fromWarehouseId || null,
       warehouse_to_id: toWarehouseId || null,
-      input_unit: 'MT',
+      input_unit: 'KG',
       input_qty: parsedQty,
       quantity_kg: direction * movementQtyKg,
       quantity_bags: direction * Math.round(movementQtyKg / (parseFloat(lot.bag_weight_kg) || 50)),
-      rate_input_unit: 'MT',
+      rate_input_unit: 'KG',
       rate_input_value: parsedCost || null,
-      rate_per_kg: parsedCost > 0 ? parsedCost / 1000 : null,
+      rate_per_kg: parsedCost > 0 ? parsedCost : null,
       cost_impact: totalCost,
       currency: currency || 'PKR',
       balance_kg: newNetWeightKg,
@@ -445,7 +448,7 @@ const inventoryService = {
       remarks: notes || null,
       created_by: userId || null,
       // Phase 1 new columns
-      unit_cost: parsedCost > 0 ? parsedCost / 1000 : null,
+      unit_cost: parsedCost > 0 ? parsedCost : null,
       total_cost: totalCost || null,
       entity_from: sourceEntity || lot.entity || null,
       entity_to: destEntity || lot.entity || null,
@@ -488,7 +491,7 @@ const inventoryService = {
         entity: entity || 'mill',
         warehouse_id: warehouseId || null,
         qty: 0,
-        unit: unit || 'MT',
+        unit: unit || 'KG',
         product_id: productId || null,
         batch_ref: batchRef || null,
         cost_per_unit: 0,
@@ -536,8 +539,8 @@ const inventoryService = {
   // =========================================================================
   async receiveRice(trx, {
     batchId,
-    weightMT,
-    costPerMT,
+    weightKg,
+    costPerKg,
     currency,
     supplierId,
     productId,
@@ -546,8 +549,8 @@ const inventoryService = {
   }) {
     if (!trx) throw new Error('receiveRice requires a transaction');
 
-    const parsedWeight = parseFloat(weightMT);
-    const parsedCost = parseFloat(costPerMT) || 0;
+    const parsedWeight = parseFloat(weightKg);
+    const parsedCost = parseFloat(costPerKg) || 0;
 
     // Look for an existing rice lot for this batch in Mill Raw Stock.
     // Vehicles auto-attach to today's open batch (see receiveRice controller),
@@ -637,7 +640,7 @@ const inventoryService = {
           warehouse_id: warehouse.id,
           product_id: riceProductId,
           qty: 0,
-          unit: 'MT',
+          unit: 'KG',
           batch_ref: `batch-${batchId}`,
           cost_per_unit: 0,
           cost_currency: currency || 'PKR',
@@ -682,11 +685,11 @@ const inventoryService = {
     // cost_per_unit / total_value — so without this a raw rice lot showed
     // "Lot Value", rate/kg and landed cost all as 0 despite a real cost.
     if (lot) {
-      const cpu = parseFloat(lot.cost_per_unit) || 0; // per MT
+      const cpu = parseFloat(lot.cost_per_unit) || 0; // per KG (Phase 5c)
       const tv = parseFloat(lot.total_value) || 0;
       await trx('inventory_lots').where('id', lot.id).update({
-        rate_per_kg: cpu / 1000,
-        landed_cost_per_kg: cpu / 1000,
+        rate_per_kg: cpu,
+        landed_cost_per_kg: cpu,
         landed_cost_total: tv,
         purchase_amount: tv,
         updated_at: trx.fn.now(),
@@ -700,7 +703,7 @@ const inventoryService = {
   // =========================================================================
   // Consume raw material for milling
   // =========================================================================
-  async consumeForMilling(trx, { batchId, qtyMT, userId }) {
+  async consumeForMilling(trx, { batchId, qtyKg, userId }) {
     if (!trx) throw new Error('consumeForMilling requires a transaction');
 
     // Blended batch: draw down the committed partial qty from EACH source lot
@@ -713,7 +716,7 @@ const inventoryService = {
       for (const s of sources) {
         const lot = await trx('inventory_lots').where({ id: s.lot_id }).first();
         if (!lot) continue;
-        const want = parseFloat(s.qty_mt) || 0;
+        const want = parseFloat(s.qty_kg) || 0;
         // P6a: release THIS batch's milling hold first so the committed qty is
         // consumable. Availability subtracts milling_reserved_qty, so without
         // releasing, a fully-reserved lot would read available 0 and consume
@@ -738,10 +741,9 @@ const inventoryService = {
           sourceEntity: 'mill',
           linkedRef: `batch-${batchId}`,
           notes: `${lot.type === 'finished' ? 'Finished rice re-milled' : 'Rice consumed'} for milling batch ${batchId} (lot ${lot.lot_no || lot.id})`,
-          // postMovement expects costPerUnit PER MT (totalCost = costPerUnit × qtyMT);
-          // landed_cost_per_kg is per KG, so scale by 1000 — else the ledger cost
-          // impact comes out 1000× too small (e.g. Rs 2,820 instead of 2,820,000).
-          costPerUnit: (parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.rate_per_kg) || 0) * 1000,
+          // postMovement expects costPerUnit PER KG (Phase 5c) — landed_cost_per_kg
+          // is already per KG, so pass it directly.
+          costPerUnit: (parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.rate_per_kg) || 0),
           currency: lot.cost_currency || 'PKR',
           batchId,
           userId,
@@ -757,7 +759,7 @@ const inventoryService = {
     }
 
     // ── Legacy single-lot path (procurement/GRN-fed batches) ──
-    const parsedQty = parseFloat(qtyMT);
+    const parsedQty = parseFloat(qtyKg);
 
     // Find rice lot for this batch
     const lot = await trx('inventory_lots')
@@ -787,9 +789,8 @@ const inventoryService = {
       sourceEntity: 'mill',
       linkedRef: `batch-${batchId}`,
       notes: `Rice consumed for milling batch ${batchId}`,
-      // Per-MT cost (postMovement multiplies by qtyMT). landed_cost_per_kg is per
-      // KG → scale by 1000 so the ledger cost impact isn't 1000× too small.
-      costPerUnit: (parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.rate_per_kg) || 0) * 1000,
+      // costPerUnit is per KG (Phase 5c); landed_cost_per_kg is already per KG.
+      costPerUnit: (parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.rate_per_kg) || 0),
       currency: lot.cost_currency || 'PKR',
       batchId,
       userId,
@@ -803,20 +804,20 @@ const inventoryService = {
   // =========================================================================
   async recordMillingOutput(trx, {
     batchId,
-    finishedMT,
-    brokenMT,
-    branMT,
-    huskMT,
-    sortexMT,
-    powderMT,
-    sweepingMT,
-    chobaMT,
+    finishedKg,
+    brokenKg,
+    branKg,
+    huskKg,
+    sortexKg,
+    powderKg,
+    sweepingKg,
+    chobaKg,
     productName,
-    costPerMT,
+    costPerKg,
     rawCostComponent,
     millingCostComponent,
     byproductCosts, // { broken, bran, husk, sortex, powder, sweeping, choba } cost per kg
-    // Optional per-grade split of brokenMT. When supplied, recordMillingOutput
+    // Optional per-grade split of brokenKg. When supplied, recordMillingOutput
     // creates one byproduct lot per non-zero grade (B1, B2, B3, CSR, Short
     // Grain) instead of collapsing them into a single "Broken Rice" lot.
     // Each lot is stamped with the grade on inventory_lots.grade + variety
@@ -938,10 +939,10 @@ const inventoryService = {
         .returning('*');
     }
 
-    const parsedCost = parseFloat(costPerMT) || 0;
+    const parsedCost = parseFloat(costPerKg) || 0; // per KG (Phase 5c)
 
     // --- Finished rice ---
-    const finishedQty = parseFloat(finishedMT) || 0;
+    const finishedQty = parseFloat(finishedKg) || 0;
     if (finishedQty > 0) {
       const lotNo = await inventoryService.generateOutputLotNo(trx, {
         batchNo: batchRow && batchRow.batch_no,
@@ -956,7 +957,7 @@ const inventoryService = {
           warehouse_id: fgWarehouse.id,
           product_id: finishedProductId,
           qty: 0,
-          unit: 'MT',
+          unit: 'KG',
           batch_ref: `batch-${batchId}`,
           processing_type: isBlend ? 'blended' : 'single_variety',
           blend_batch_no: blendNo,
@@ -1038,25 +1039,24 @@ const inventoryService = {
             qty: parseFloat(grades[g.key]) || 0,
           }))
           .filter(x => x.qty > 0)
-      : ((parseFloat(brokenMT) || 0) > 0
-          ? [{ name: 'Broken Rice', key: 'broken', grade: null, qty: parseFloat(brokenMT) }]
+      : ((parseFloat(brokenKg) || 0) > 0
+          ? [{ name: 'Broken Rice', key: 'broken', grade: null, qty: parseFloat(brokenKg) }]
           : []);
 
     const byproducts = [
       ...brokenItems,
-      { name: 'Rice Bran',      key: 'bran',   grade: null, qty: parseFloat(branMT) || 0 },
-      { name: 'Rice Husk',      key: 'husk',   grade: null, qty: parseFloat(huskMT) || 0 },
-      { name: 'Sortex', key: 'sortex', grade: null, qty: parseFloat(sortexMT) || 0 },
-      { name: 'Powder',         key: 'powder', grade: null, qty: parseFloat(powderMT) || 0 },
-      { name: 'Sweeping',       key: 'sweeping', grade: null, qty: parseFloat(sweepingMT) || 0 },
-      { name: 'Choba',          key: 'choba', grade: null, qty: parseFloat(chobaMT) || 0 },
+      { name: 'Rice Bran',      key: 'bran',   grade: null, qty: parseFloat(branKg) || 0 },
+      { name: 'Rice Husk',      key: 'husk',   grade: null, qty: parseFloat(huskKg) || 0 },
+      { name: 'Sortex', key: 'sortex', grade: null, qty: parseFloat(sortexKg) || 0 },
+      { name: 'Powder',         key: 'powder', grade: null, qty: parseFloat(powderKg) || 0 },
+      { name: 'Sweeping',       key: 'sweeping', grade: null, qty: parseFloat(sweepingKg) || 0 },
+      { name: 'Choba',          key: 'choba', grade: null, qty: parseFloat(chobaKg) || 0 },
     ];
 
     for (const bp of byproducts) {
       if (bp.qty <= 0) continue;
 
       const bpCostPerKg = parseFloat(bpCosts[bp.key]) || 0;
-      const bpCostPerMT = bpCostPerKg * 1000;
 
       // Output lot number is keyed on batch + type/grade so the lot
       // ID itself tells the operator what it is.
@@ -1081,11 +1081,11 @@ const inventoryService = {
           warehouse_id: bpWarehouse.id,
           product_id: bpProductId,
           qty: 0,
-          unit: 'MT',
+          unit: 'KG',
           batch_ref: `batch-${batchId}`,
           processing_type: isBlend ? 'blended' : 'single_variety',
           blend_batch_no: blendNo,
-          cost_per_unit: bpCostPerMT,
+          cost_per_unit: bpCostPerKg,
           cost_currency: 'PKR',
           total_value: 0,
           reserved_qty: 0,
@@ -1115,7 +1115,7 @@ const inventoryService = {
         destEntity: 'mill',
         linkedRef: `batch-${batchId}`,
         notes: `${bp.name} from milling batch ${batchId}`,
-        costPerUnit: bpCostPerMT,
+        costPerUnit: bpCostPerKg,
         currency: 'PKR',
         batchId,
         userId,
@@ -1132,8 +1132,8 @@ const inventoryService = {
 
     for (const rawLot of rawLots) {
       for (const outputLot of results.lots) {
-        const outputQtyKg = (parseFloat(outputLot.qty) || 0) * 1000;
-        const rawQtyKg = (parseFloat(rawLot.qty) || 0) * 1000;
+        const outputQtyKg = parseFloat(outputLot.qty) || 0;
+        const rawQtyKg = parseFloat(rawLot.qty) || 0;
         const costShare = outputQtyKg > 0 ? (parseFloat(outputLot.rate_per_kg) || 0) * outputQtyKg : 0;
 
         await trx('lot_source_mapping').insert({
@@ -1153,14 +1153,16 @@ const inventoryService = {
   // =========================================================================
   // Transfer from mill to export
   // =========================================================================
-  async transferToExport(trx, { transferId, lotId, qtyMT, productName, orderId, transferPricePerMT, totalValuePkr, userId }) {
+  async transferToExport(trx, { transferId, lotId, qtyKg, productName, orderId, transferPricePerMT, totalValuePkr, userId }) {
     if (!trx) throw new Error('transferToExport requires a transaction');
 
-    const parsedQty = parseFloat(qtyMT);
+    // qtyKg is KG (engine). transferPricePerMT is the transfer DOC price (PKR/MT),
+    // so convert to per-KG at this boundary (ratePerKg).
+    const parsedQty = parseFloat(qtyKg);
     const pricePerMT = parseFloat(transferPricePerMT) || 0;
-    const totalValue = parseFloat(totalValuePkr) || (pricePerMT * parsedQty);
     const ratePerKg = pricePerMT / 1000;
-    const netKg = parsedQty * 1000;
+    const totalValue = parseFloat(totalValuePkr) || (ratePerKg * parsedQty);
+    const netKg = parsedQty;
 
     // Source lot
     const sourceLot = await trx('inventory_lots').where('id', lotId).first();
@@ -1212,9 +1214,9 @@ const inventoryService = {
         warehouse_id: exportWarehouse.id,
         product_id: sourceLot.product_id || null,
         qty: 0,
-        unit: sourceLot.unit || 'MT',
+        unit: sourceLot.unit || 'KG',
         batch_ref: sourceLot.batch_ref || null,
-        cost_per_unit: pricePerMT,
+        cost_per_unit: ratePerKg,
         cost_currency: sourceLot.cost_currency || 'PKR',
         total_value: totalValue,
         reserved_qty: 0,
@@ -1266,7 +1268,7 @@ const inventoryService = {
       reservation = await inventoryService.reserveStock(trx, {
         lotId: exportLot.id,
         orderId,
-        qtyMT: parsedQty,
+        qtyKg: parsedQty,
         userId,
       });
     }
@@ -1278,18 +1280,19 @@ const inventoryService = {
   // =========================================================================
   // Transfer stock back from export to mill (mirror of transferToExport)
   // =========================================================================
-  async transferToMill(trx, { transferId, lotId, qtyMT, productName, transferPricePerMT, totalValuePkr, userId }) {
+  async transferToMill(trx, { transferId, lotId, qtyKg, productName, transferPricePerMT, totalValuePkr, userId }) {
     if (!trx) throw new Error('transferToMill requires a transaction');
 
-    const parsedQty = parseFloat(qtyMT);
+    const parsedQty = parseFloat(qtyKg); // KG (engine)
     const sourceLot = await trx('inventory_lots').where('id', lotId).first();
     if (!sourceLot) throw new Error(`Source lot ${lotId} not found`);
 
-    const pricePerMT = (transferPricePerMT != null && transferPricePerMT !== '')
-      ? parseFloat(transferPricePerMT)
+    // transferPricePerMT is the transfer DOC price (PKR/MT) → per-KG; else fall
+    // back to the source lot's cost_per_unit, which is already per-KG (Phase 5c).
+    const ratePerKg = (transferPricePerMT != null && transferPricePerMT !== '')
+      ? parseFloat(transferPricePerMT) / 1000
       : (parseFloat(sourceLot.cost_per_unit) || 0);
-    const totalValue = parseFloat(totalValuePkr) || (pricePerMT * parsedQty);
-    const ratePerKg = pricePerMT / 1000;
+    const totalValue = parseFloat(totalValuePkr) || (ratePerKg * parsedQty);
 
     // Post transfer_out (reduces export lot)
     const outMovement = await inventoryService.postMovement(trx, {
@@ -1332,9 +1335,9 @@ const inventoryService = {
         warehouse_id: millWarehouse.id,
         product_id: sourceLot.product_id || null,
         qty: 0,
-        unit: sourceLot.unit || 'MT',
+        unit: sourceLot.unit || 'KG',
         batch_ref: sourceLot.batch_ref || null,
-        cost_per_unit: pricePerMT,
+        cost_per_unit: ratePerKg,
         cost_currency: sourceLot.cost_currency || 'PKR',
         total_value: totalValue,
         reserved_qty: 0,
@@ -1378,10 +1381,10 @@ const inventoryService = {
   // =========================================================================
   // Dispatch for export shipment
   // =========================================================================
-  async dispatchForShipment(trx, { orderId, lotId, qtyMT, userId }) {
+  async dispatchForShipment(trx, { orderId, lotId, qtyKg, userId }) {
     if (!trx) throw new Error('dispatchForShipment requires a transaction');
 
-    const parsedQty = parseFloat(qtyMT);
+    const parsedQty = parseFloat(qtyKg);
 
     const lot = await trx('inventory_lots').where('id', lotId).first();
     if (!lot) throw new Error(`Lot ${lotId} not found`);
@@ -1406,10 +1409,10 @@ const inventoryService = {
   // =========================================================================
   // Reserve stock against an export order
   // =========================================================================
-  async reserveStock(trx, { lotId, orderId, qtyMT, itemId = null, userId }) {
+  async reserveStock(trx, { lotId, orderId, qtyKg, itemId = null, userId }) {
     if (!trx) throw new Error('reserveStock requires a transaction');
 
-    const parsedQty = parseFloat(qtyMT);
+    const parsedQty = parseFloat(qtyKg);
 
     const lot = await trx('inventory_lots').where('id', lotId).first();
     if (!lot) throw new Error(`Lot ${lotId} not found`);
@@ -1459,8 +1462,8 @@ const inventoryService = {
       reference_module: 'export_order',
       reference_id: orderId,
       quantity_kg: 0, // no physical movement
-      reservation_effect: parsedQty * 1000,
-      remarks: `Reserved ${parsedQty} MT for order ${orderId}`,
+      reservation_effect: parsedQty,
+      remarks: `Reserved ${parsedQty} KG for order ${orderId}`,
       created_by: userId || null, // NOT NULL since migration 066 — must be set
       performed_by: userId || null,
       performed_at: new Date(),
@@ -1674,7 +1677,7 @@ const inventoryService = {
         'lsm.*',
         'parent.lot_no as parent_lot_no', 'parent.item_name as parent_item',
         'parent.type as parent_type', 'parent.rate_per_kg as parent_rate',
-        'mb.batch_no', 'mb.raw_qty_mt', 'mb.actual_finished_mt', 'mb.yield_pct'
+        'mb.batch_no', 'mb.raw_qty_kg', 'mb.actual_finished_kg', 'mb.yield_pct'
       )
       .where('lsm.child_lot_id', lotId)
       .orderBy('lsm.created_at');
@@ -1691,7 +1694,7 @@ const inventoryService = {
         .leftJoin('milling_batches as mb', 'bsl.batch_id', 'mb.id')
         .where('bsl.batch_id', batchId)
         .select(
-          'bsl.lot_id as parent_lot_id', 'bsl.qty_mt', 'bsl.cost_total_pkr',
+          'bsl.lot_id as parent_lot_id', 'bsl.qty_kg', 'bsl.cost_total_pkr',
           'src.lot_no as parent_lot_no', 'src.item_name as parent_item', 'src.type as parent_type',
           'mb.batch_no'
         );
@@ -1703,7 +1706,7 @@ const inventoryService = {
           parent_item: s.parent_item,
           parent_type: s.parent_type,
           batch_no: s.batch_no,
-          quantity_kg: (parseFloat(s.qty_mt) || 0) * 1000,
+          quantity_kg: parseFloat(s.qty_kg) || 0,
           cost_share_amount: parseFloat(s.cost_total_pkr) || 0,
           via_blend: true,
         });
@@ -1722,8 +1725,8 @@ const inventoryService = {
       .join('milling_batches as mb', 'bsl.batch_id', 'mb.id')
       .where('bsl.lot_id', lotId)
       .select(
-        'bsl.batch_id', 'bsl.qty_mt', 'bsl.ratio_pct', 'bsl.notes', 'bsl.created_at',
-        'mb.batch_no', 'mb.status', 'mb.raw_qty_mt', 'mb.actual_finished_mt'
+        'bsl.batch_id', 'bsl.qty_kg', 'bsl.ratio_pct', 'bsl.notes', 'bsl.created_at',
+        'mb.batch_no', 'mb.status', 'mb.raw_qty_kg', 'mb.actual_finished_kg'
       )
       .orderBy('bsl.created_at');
     for (const r of rows) {
@@ -1842,7 +1845,7 @@ const inventoryService = {
       if (!lot) continue;
 
       const costPerKg = parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.rate_per_kg) || 0;
-      const qtyKg = parseFloat(r.reserved_qty) * 1000;
+      const qtyKg = parseFloat(r.reserved_qty); // KG (Phase 5c)
       totalCOGS += costPerKg * qtyKg;
       totalQtyKg += qtyKg;
     }
@@ -1855,11 +1858,12 @@ const inventoryService = {
     // Path 2: internal transfers
     const transfers = await conn('internal_transfers')
       .where('export_order_id', orderId)
-      .select('qty_mt', 'transfer_price_pkr');
+      .select('qty_kg', 'transfer_price_pkr');
 
     for (const t of transfers) {
-      totalCOGS += parseFloat(t.transfer_price_pkr) * parseFloat(t.qty_mt);
-      totalQtyKg += parseFloat(t.qty_mt) * 1000;
+      // transfer_price_pkr is PKR/MT (doc); qty_kg is KG → ÷1000 to combine.
+      totalCOGS += parseFloat(t.transfer_price_pkr) * parseFloat(t.qty_kg) / 1000;
+      totalQtyKg += parseFloat(t.qty_kg);
     }
 
     if (totalCOGS > 0) {
@@ -1875,15 +1879,16 @@ const inventoryService = {
       if (batch) {
         const batchCostsRows = await conn('milling_costs').where('batch_id', batch.id).select('amount');
         const batchCostsTotal = batchCostsRows.reduce((s, c) => s + (parseFloat(c.amount) || 0), 0);
-        const batchFinishedMt = parseFloat(batch.actual_finished_mt) || 0;
-        const orderQtyMt = parseFloat(order.qty_mt) || 0;
-        if (batchCostsTotal > 0 && batchFinishedMt > 0 && orderQtyMt > 0) {
-          // Pro-rate batch cost by the share of finished MT this order took.
+        const batchFinishedKg = parseFloat(batch.actual_finished_kg) || 0; // KG
+        // export_orders.qty_mt stays MT (doc) → ×1000 to KG to combine.
+        const orderQtyKg = (parseFloat(order.qty_mt) || 0) * 1000;
+        if (batchCostsTotal > 0 && batchFinishedKg > 0 && orderQtyKg > 0) {
+          // Pro-rate batch cost by the share of finished weight this order took.
           // For seed data where order_qty == batch_finished, this is just
           // the full batch cost; for partial allocations it scales down.
-          const ratio = Math.min(orderQtyMt / batchFinishedMt, 1);
+          const ratio = Math.min(orderQtyKg / batchFinishedKg, 1);
           const proratedCogs = batchCostsTotal * ratio;
-          const totalQtyKgFromBatch = orderQtyMt * 1000;
+          const totalQtyKgFromBatch = orderQtyKg;
           const cogsPerKg = totalQtyKgFromBatch > 0 ? proratedCogs / totalQtyKgFromBatch : 0;
           return {
             totalCOGS: proratedCogs,
@@ -2009,17 +2014,15 @@ const inventoryService = {
       : ['shortage_found', 'bag_loss'].includes(adj.adjustment_type) ? MOVEMENT_TYPES.SHORTAGE_WRITEOFF
       : MOVEMENT_TYPES.ADJUSTMENT_MINUS;
 
-    const qtyMT = Math.abs(qtyKg) / 1000;
-
-    // Post movement through ledger
+    // Post movement through ledger (qty + cost are per KG — Phase 5c).
     await inventoryService.postMovement(trx, {
       movementType,
       lotId: adj.lot_id,
-      qty: qtyMT,
+      qty: Math.abs(qtyKg),
       sourceEntity: lot.entity,
       linkedRef: `adjustment-${adjustmentId}`,
       notes: `${adj.adjustment_type}: ${adj.reason || 'No reason'}`,
-      costPerUnit: parseFloat(adj.unit_cost) * 1000 || 0, // per MT
+      costPerUnit: parseFloat(adj.unit_cost) || 0, // per KG
       currency: 'PKR',
       userId: approverId,
     });
@@ -2069,13 +2072,13 @@ const inventoryService = {
       .first();
 
     const ledgerBalanceKg = parseFloat(txnSum?.total_kg) || 0;
-    const systemBalanceKg = (parseFloat(lot.qty) || 0) * 1000;
+    const systemBalanceKg = parseFloat(lot.qty) || 0; // qty is KG (Phase 5c)
     const discrepancyKg = systemBalanceKg - ledgerBalanceKg;
 
     return {
       lotId,
       lotNo: lot.lot_no,
-      systemQtyMT: parseFloat(lot.qty),
+      systemQtyMT: systemBalanceKg / 1000,
       systemQtyKg: systemBalanceKg,
       ledgerQtyKg: ledgerBalanceKg,
       discrepancyKg,
@@ -2116,7 +2119,7 @@ const inventoryService = {
       const key = `${lot.entity || 'unknown'}|${lot.type || 'unknown'}`;
       if (!groups[key]) groups[key] = { entity: lot.entity, type: lot.type, totalKg: 0, totalValue: 0 };
       const costKg = parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.rate_per_kg) || 0;
-      const qtyKg = parseFloat(lot.available_qty) * 1000;
+      const qtyKg = parseFloat(lot.available_qty); // KG (Phase 5c)
       groups[key].totalKg += qtyKg;
       groups[key].totalValue += costKg * qtyKg;
     }
@@ -2180,34 +2183,34 @@ const inventoryService = {
       if (batch) {
         const costs = await conn('milling_costs').where('batch_id', batch.id);
         const totalCost = costs.reduce((s, c) => s + (parseFloat(c.amount) || 0), 0);
-        const finishedKg = (parseFloat(batch.actual_finished_mt) || 0) * 1000;
+        const finishedKg = parseFloat(batch.actual_finished_kg) || 0;
 
         if (lot.type === 'finished' && finishedKg > 0) {
           newCostPerKg = totalCost / finishedKg;
         } else if (lot.type === 'byproduct') {
           const prices = await conn('milling_output_market_prices').where('batch_id', batch.id).first();
-          const fp = parseFloat(prices?.finished_price_per_mt || batch.finished_price_per_mt) || 72800;
-          const bp = parseFloat(prices?.broken_price_per_mt || batch.broken_price_per_mt) || 38000;
-          const np = parseFloat(prices?.bran_price_per_mt || batch.bran_price_per_mt) || 28000;
-          const hp = parseFloat(prices?.husk_price_per_mt || batch.husk_price_per_mt) || 8400;
+          const fp = parseFloat(prices?.finished_price_per_kg || batch.finished_price_per_kg) || 72.8;
+          const bp = parseFloat(prices?.broken_price_per_kg || batch.broken_price_per_kg) || 38;
+          const np = parseFloat(prices?.bran_price_per_kg || batch.bran_price_per_kg) || 28;
+          const hp = parseFloat(prices?.husk_price_per_kg || batch.husk_price_per_kg) || 8.4;
           const name = (lot.item_name || '').toLowerCase();
           const myPrice = name.includes('broken') ? bp : name.includes('bran') ? np : hp;
-          const myQty = parseFloat(lot.qty) || 0;
-          const totalMV = (parseFloat(batch.actual_finished_mt) || 0) * fp + (parseFloat(batch.broken_mt) || 0) * bp + (parseFloat(batch.bran_mt) || 0) * np + (parseFloat(batch.husk_mt) || 0) * hp;
+          const myQty = parseFloat(lot.qty) || 0; // KG
+          const totalMV = (parseFloat(batch.actual_finished_kg) || 0) * fp + (parseFloat(batch.broken_kg) || 0) * bp + (parseFloat(batch.bran_kg) || 0) * np + (parseFloat(batch.husk_kg) || 0) * hp;
           if (totalMV > 0 && myQty > 0) {
-            newCostPerKg = totalCost * (myQty * myPrice / totalMV) / (myQty * 1000);
+            newCostPerKg = totalCost * (myQty * myPrice / totalMV) / myQty;
           }
         }
       }
     }
 
     if (newCostPerKg > 0) {
-      const qtyKg = (parseFloat(lot.qty) || 0) * 1000;
+      const qtyKg = parseFloat(lot.qty) || 0; // KG
       await conn('inventory_lots').where('id', lotId).update({
         rate_per_kg: newCostPerKg,
         landed_cost_per_kg: newCostPerKg,
         landed_cost_total: newCostPerKg * qtyKg,
-        cost_per_unit: newCostPerKg * 1000,
+        cost_per_unit: newCostPerKg,
         total_value: newCostPerKg * qtyKg,
         cost_incomplete: false,
       });
@@ -2273,20 +2276,23 @@ const inventoryService = {
     const packing = p(packingCost);
     const netPurchase = rawCostTotal + millingCost + otherExpenses + packing;
 
-    const finished = p(batch.actual_finished_mt);
-    const broken = p(batch.broken_mt), bran = p(batch.bran_mt), husk = p(batch.husk_mt), sortex = p(batch.sortex_rejects_mt);
-    const b1 = p(batch.b1_mt), b2 = p(batch.b2_mt), b3 = p(batch.b3_mt), csr = p(batch.csr_mt), shortGrain = p(batch.short_grain_mt);
-    const powder = p(batch.powder_mt), sweeping = p(batch.sweeping_mt), choba = p(batch.choba_mt);
-    const brokenPrice = p(batch.broken_price_per_mt);
+    // Units (Phase 5c): yield quantities are KG, prices are per-KG. byproductValue
+    // = qty(KG) × price(/KG) = PKR (was MT × /MT — same PKR). finishedKg is the
+    // finished qty directly (already KG); by-product cost/kg is just the price.
+    const finished = p(batch.actual_finished_kg);
+    const broken = p(batch.broken_kg), bran = p(batch.bran_kg), husk = p(batch.husk_kg), sortex = p(batch.sortex_rejects_kg);
+    const b1 = p(batch.b1_kg), b2 = p(batch.b2_kg), b3 = p(batch.b3_kg), csr = p(batch.csr_kg), shortGrain = p(batch.short_grain_kg);
+    const powder = p(batch.powder_kg), sweeping = p(batch.sweeping_kg), choba = p(batch.choba_kg);
+    const brokenPrice = p(batch.broken_price_per_kg);
     const price = {
-      b1: p(batch.b1_price_per_mt) || brokenPrice, b2: p(batch.b2_price_per_mt) || brokenPrice,
-      b3: p(batch.b3_price_per_mt) || brokenPrice, csr: p(batch.csr_price_per_mt) || brokenPrice,
-      short_grain: p(batch.short_grain_price_per_mt) || brokenPrice, broken: brokenPrice,
-      bran: p(batch.bran_price_per_mt), husk: p(batch.husk_price_per_mt), sortex: p(batch.sortex_rejects_price_per_mt),
-      powder: p(batch.powder_price_per_mt), sweeping: p(batch.sweeping_price_per_mt), choba: p(batch.choba_price_per_mt),
+      b1: p(batch.b1_price_per_kg) || brokenPrice, b2: p(batch.b2_price_per_kg) || brokenPrice,
+      b3: p(batch.b3_price_per_kg) || brokenPrice, csr: p(batch.csr_price_per_kg) || brokenPrice,
+      short_grain: p(batch.short_grain_price_per_kg) || brokenPrice, broken: brokenPrice,
+      bran: p(batch.bran_price_per_kg), husk: p(batch.husk_price_per_kg), sortex: p(batch.sortex_rejects_price_per_kg),
+      powder: p(batch.powder_price_per_kg), sweeping: p(batch.sweeping_price_per_kg), choba: p(batch.choba_price_per_kg),
     };
     const hasPerGradeBroken = (b1 + b2 + b3 + csr + shortGrain) > 0;
-    // O.V (ov_mt) and Stone (stone_mt) are record-only residue — like wastage,
+    // O.V (ov_kg) and Stone (stone_kg) are record-only residue — like wastage,
     // they carry no sale value and are NOT credited here, so their weight is
     // absorbed into the finished cost.
     const byQty = hasPerGradeBroken
@@ -2297,12 +2303,12 @@ const inventoryService = {
     const byCostPerKg = {};
     for (const [k, qty] of Object.entries(byQty)) {
       byproductValue += qty * price[k];
-      byCostPerKg[k] = price[k] / 1000; // by-product valued at sale price
+      byCostPerKg[k] = price[k]; // by-product valued at sale price (already per-KG)
     }
     const residual = netPurchase - byproductValue;
     const clamped = residual < 0;
     const finishedTotal = Math.max(0, residual);
-    const finishedKg = finished * 1000;
+    const finishedKg = finished;
     const finishedCostPerKg = finishedKg > 0 ? finishedTotal / finishedKg : 0;
     const rawFrac = netPurchase > 0 ? rawCostTotal / netPurchase : 0;
     const millFrac = netPurchase > 0 ? (millingCost + otherExpenses + packing) / netPurchase : 0;
@@ -2310,8 +2316,8 @@ const inventoryService = {
     // recorded per-grade quantities (qty-weighted average sale price).
     const gradeQty = b1 + b2 + b3 + csr + shortGrain;
     const brokenTierCostPerKg = gradeQty > 0
-      ? (b1 * price.b1 + b2 * price.b2 + b3 * price.b3 + csr * price.csr + shortGrain * price.short_grain) / gradeQty / 1000
-      : brokenPrice / 1000;
+      ? (b1 * price.b1 + b2 * price.b2 + b3 * price.b3 + csr * price.csr + shortGrain * price.short_grain) / gradeQty
+      : brokenPrice;
     return { netPurchase, millingCost, otherExpenses, packing, byproductValue, finishedTotal,
       finishedCostPerKg, byCostPerKg, brokenTierCostPerKg, hasPerGradeBroken, rawFrac, millFrac, clamped, finished };
   },
@@ -2331,18 +2337,18 @@ const inventoryService = {
     const srcLots = await trx('batch_source_lots as bsl')
       .leftJoin('inventory_lots as il', 'bsl.lot_id', 'il.id')
       .where('bsl.batch_id', batchId)
-      .select('bsl.id', 'bsl.qty_mt', 'il.lot_no', 'il.landed_cost_per_kg', 'il.rate_per_kg');
+      .select('bsl.id', 'bsl.qty_kg', 'il.lot_no', 'il.landed_cost_per_kg', 'il.rate_per_kg');
     if (!srcLots.length) return 0;
 
     let rawTotal = 0;
     const labels = [];
     for (const s of srcLots) {
       const costKg = parseFloat(s.landed_cost_per_kg) || parseFloat(s.rate_per_kg) || 0;
-      const qtyKg = (parseFloat(s.qty_mt) || 0) * 1000;
+      const qtyKg = parseFloat(s.qty_kg) || 0;
       const costTotal = Math.round(costKg * qtyKg * 100) / 100;
       rawTotal += costTotal;
       await trx('batch_source_lots').where('id', s.id).update({ unit_cost_pkr: costKg, cost_total_pkr: costTotal });
-      labels.push(`${s.lot_no || s.id}×${parseFloat(s.qty_mt) || 0}MT`);
+      labels.push(`${s.lot_no || s.id}×${parseFloat(s.qty_kg) || 0}KG`);
     }
     if (rawTotal > 0) {
       await trx('milling_costs').insert({
@@ -2366,24 +2372,25 @@ const inventoryService = {
     if (!vrows.length) return;
     let pricedW = 0, pricedCost = 0, totalW = 0;
     for (const v of vrows) {
-      const w = parseFloat(v.weight_mt) || 0;
+      const w = parseFloat(v.weight_kg) || 0; // KG (Phase 5c)
       totalW += w;
       const qj = v.quality_json || {};
-      const p = qj.price_per_mt != null ? parseFloat(qj.price_per_mt) : null;
+      // quality_json.price_per_mt is the per-truck DOC price (PKR/MT) → per-KG.
+      const p = qj.price_per_mt != null ? parseFloat(qj.price_per_mt) / 1000 : null;
       if (p != null && !Number.isNaN(p) && p > 0) { pricedW += w; pricedCost += w * p; }
     }
     if (totalW > 0) {
-      const b = await trx('milling_batches').where({ id: batchId }).first('actual_finished_mt');
-      const fin = parseFloat(b?.actual_finished_mt) || 0;
+      const b = await trx('milling_batches').where({ id: batchId }).first('actual_finished_kg');
+      const fin = parseFloat(b?.actual_finished_kg) || 0;
       if (fin > 0) {
         await trx('milling_batches').where({ id: batchId })
           .update({ yield_pct: Math.round((fin / totalW) * 1000) / 10, updated_at: trx.fn.now() });
       }
     }
     if (pricedW <= 0) return; // no per-truck price anywhere — leave any existing cost alone
-    const avg = pricedCost / pricedW;
+    const avg = pricedCost / pricedW; // per KG
     const rawRiceCost = Math.round((pricedCost + Math.max(0, totalW - pricedW) * avg) * 100) / 100;
-    const notes = `Auto from ${vrows.length} vehicle(s): ${Math.round(totalW * 100) / 100} MT @ ~Rs ${Math.round(avg).toLocaleString()}/MT`;
+    const notes = `Auto from ${vrows.length} vehicle(s): ${Math.round(totalW * 100) / 100} KG @ ~Rs ${Math.round(avg).toLocaleString()}/KG`;
     const existing = await trx('milling_costs').where({ batch_id: batchId, category: 'raw_rice' }).first();
     if (existing) {
       await trx('milling_costs').where({ id: existing.id }).update({ amount: rawRiceCost, notes, updated_at: trx.fn.now() });
@@ -2398,7 +2405,7 @@ const inventoryService = {
   async reallocateBatchCosts(trx, batchId) {
     const batch = await trx('milling_batches').where({ id: batchId }).first();
     if (!batch) return null;
-    const finished = parseFloat(batch.actual_finished_mt) || 0;
+    const finished = parseFloat(batch.actual_finished_kg) || 0;
     if (finished <= 0) return { skipped: 'no-yield' };
 
     await inventoryService.ensureRawCostFromSourceLots(trx, batchId);
@@ -2417,7 +2424,7 @@ const inventoryService = {
     for (const [k, perKg] of Object.entries(a.byCostPerKg)) alloc[k] = { qty: 1, costPerKg: perKg };
     const brokenTierCostPerKg = a.brokenTierCostPerKg;
 
-    const finishedKg = finished * 1000;
+    const finishedKg = finished;
     await trx('milling_batches').where({ id: batchId }).update({
       raw_cost_total: rawCostTotal,
       raw_cost_per_kg_finished: a.finishedCostPerKg * a.rawFrac,
@@ -2469,11 +2476,11 @@ const inventoryService = {
         else if (BROKEN_KEYS.includes(key)) costKg = brokenTierCostPerKg;
         else costKg = 0;
       }
-      const qtyKg = (parseFloat(lot.qty) || 0) * 1000;
+      const qtyKg = parseFloat(lot.qty) || 0;
       await trx('inventory_lots').where({ id: lot.id }).update({
         landed_cost_per_kg: costKg,
         landed_cost_total: costKg * qtyKg,
-        cost_per_unit: costKg * 1000,
+        cost_per_unit: costKg,
         total_value: costKg * qtyKg,
         rate_per_kg: costKg,
         raw_cost_component: costKg * rawFrac,
@@ -2521,7 +2528,7 @@ const inventoryService = {
       if (myRows.length > 0) {
         // Blend / source-lots flow: each source lot carries its own cost_total.
         for (const r of myRows) {
-          const costTotal = Math.round(newCostKg * (parseFloat(r.qty_mt) || 0) * 1000 * 100) / 100;
+          const costTotal = Math.round(newCostKg * (parseFloat(r.qty_kg) || 0) * 100) / 100;
           await trx('batch_source_lots').where({ id: r.id }).update({ unit_cost_pkr: newCostKg, cost_total_pkr: costTotal });
         }
         const poolRow = await trx('batch_source_lots').where({ batch_id: batchId }).sum('cost_total_pkr as t').first();
@@ -2532,7 +2539,7 @@ const inventoryService = {
         // unambiguous — price the batch's authoritative raw_qty_mt at the lot cost.
         const rawCount = await trx('inventory_lots').where({ batch_ref: `batch-${batchId}`, type: 'raw' }).count('id as c').first();
         if (parseInt(rawCount.c, 10) !== 1) continue;
-        newRawPool = Math.round(newCostKg * (parseFloat(batch.raw_qty_mt) || 0) * 1000 * 100) / 100;
+        newRawPool = Math.round(newCostKg * (parseFloat(batch.raw_qty_kg) || 0) * 100) / 100;
       }
       const existingRaw = await trx('milling_costs').where({ batch_id: batchId, category: 'raw_rice' }).first();
       if (existingRaw) {
@@ -2654,14 +2661,14 @@ const inventoryService = {
   async reconcileBatchKatta(trx, batchId, userId) {
     const num = (v) => parseFloat(v) || 0;
     const vehs = await trx('milling_vehicle_arrivals').where('batch_id', batchId)
-      .select('total_bags', 'bag_size_kg', 'weight_mt');
+      .select('total_bags', 'bag_size_kg', 'weight_kg');
 
     // Freed katta grouped by bag size.
     const bySize = new Map(); // sizeKg → bags
     for (const v of vehs) {
       const bags = Math.round(num(v.total_bags));
       if (bags <= 0) continue;
-      const wKg = num(v.weight_mt) * 1000;
+      const wKg = num(v.weight_kg);
       let size = Math.round(num(v.bag_size_kg));
       if (size <= 0) size = wKg > 0 ? Math.round(wKg / bags) : 0;
       if (size <= 0) continue;
@@ -2704,7 +2711,7 @@ const inventoryService = {
     const outLots = await trx('inventory_lots').where({ batch_ref: `batch-${batchId}` }).whereIn('type', ['finished', 'byproduct']);
     let packed = 0;
     for (const l of outLots) {
-      const kg = num(l.net_weight_kg) > 0 ? num(l.net_weight_kg) : num(l.qty) * 1000;
+      const kg = num(l.net_weight_kg) > 0 ? num(l.net_weight_kg) : num(l.qty);
       const bags = Math.ceil(kg / predSize);
       packed += bags;
       await trx('inventory_lots').where('id', l.id).update({ total_bags: bags, bag_size_kg: predSize, updated_at: trx.fn.now() });
@@ -2742,11 +2749,11 @@ const inventoryService = {
     const batch = await trx('milling_batches').where({ id: batchId }).first();
     if (!batch) { const e = new Error('Milling batch not found.'); e.status = 404; throw e; }
 
-    const finished = p(batch.actual_finished_mt);
-    const b1 = p(batch.b1_mt), b2 = p(batch.b2_mt), b3 = p(batch.b3_mt), csr = p(batch.csr_mt), shortGrain = p(batch.short_grain_mt);
-    const broken = (b1 + b2 + b3 + csr + shortGrain) || p(batch.broken_mt);
-    const bran = p(batch.bran_mt), husk = p(batch.husk_mt), sortex = p(batch.sortex_rejects_mt);
-    const powder = p(batch.powder_mt), sweeping = p(batch.sweeping_mt), choba = p(batch.choba_mt);
+    const finished = p(batch.actual_finished_kg);
+    const b1 = p(batch.b1_kg), b2 = p(batch.b2_kg), b3 = p(batch.b3_kg), csr = p(batch.csr_kg), shortGrain = p(batch.short_grain_kg);
+    const broken = (b1 + b2 + b3 + csr + shortGrain) || p(batch.broken_kg);
+    const bran = p(batch.bran_kg), husk = p(batch.husk_kg), sortex = p(batch.sortex_rejects_kg);
+    const powder = p(batch.powder_kg), sweeping = p(batch.sweeping_kg), choba = p(batch.choba_kg);
 
     // 1. Existing output lots + safety: must be untouched (not reserved/sold/consumed).
     const outLots = await trx('inventory_lots')
@@ -2784,7 +2791,7 @@ const inventoryService = {
       raw_cost_per_kg_finished: a.finishedCostPerKg * a.rawFrac,
       milling_cost_per_kg_finished: a.finishedCostPerKg * a.millFrac,
       total_cost_per_kg_finished: a.finishedCostPerKg,
-      finished_price_per_mt: a.finishedCostPerKg * 1000,
+      finished_price_per_kg: a.finishedCostPerKg,
     });
 
     // 4. Recreate output lots (finished + by-products) with the allocated costs.
@@ -2793,9 +2800,9 @@ const inventoryService = {
     const riceTypeName = batchProduct?.name || null;
     const arrivalQuality = await trx('milling_quality_samples').where({ batch_id: batchId, analysis_type: 'arrival' }).first();
     await inventoryService.recordMillingOutput(trx, {
-      batchId, finishedMT: finished, brokenMT: broken, branMT: bran, huskMT: husk,
-      sortexMT: sortex, powderMT: powder, sweepingMT: sweeping, chobaMT: choba,
-      productName: riceTypeName || 'Finished Rice', costPerMT: a.finishedCostPerKg * 1000,
+      batchId, finishedKg: finished, brokenKg: broken, branKg: bran, huskKg: husk,
+      sortexKg: sortex, powderKg: powder, sweepingKg: sweeping, chobaKg: choba,
+      productName: riceTypeName || 'Finished Rice', costPerKg: a.finishedCostPerKg,
       rawCostComponent: a.finishedCostPerKg * a.rawFrac, millingCostComponent: a.finishedCostPerKg * a.millFrac,
       byproductCosts: {
         broken: alloc.broken || 0, b1: alloc.b1 || 0, b2: alloc.b2 || 0, b3: alloc.b3 || 0,

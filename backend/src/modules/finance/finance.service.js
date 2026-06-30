@@ -106,18 +106,15 @@ const financeService = {
 
     let millRevenue = 0, millCost = 0, millPricesConfirmed = 0;
     for (const b of batches) {
-      // Use batch-confirmed prices first, then commodity rate master, then 0
-      const fp = parseFloat(b.finished_price_per_mt) || millRates.finished_rice || 0;
-      const bp = parseFloat(b.broken_price_per_mt) || millRates.broken_rice || 0;
-      const np = parseFloat(b.bran_price_per_mt) || millRates.bran || 0;
-      const hp = parseFloat(b.husk_price_per_mt) || millRates.husk || 0;
+      // Prices are per-KG and quantities are KG (Phase 5c) — qty×price = PKR is
+      // invariant. Commodity-rate fallbacks are per-MT, so ÷1000 to per-KG.
+      const fp = parseFloat(b.finished_price_per_kg) || (millRates.finished_rice || 0) / 1000;
+      const bp = parseFloat(b.broken_price_per_kg) || (millRates.broken_rice || 0) / 1000;
       const usedConfirmed = !!b.prices_confirmed;
       const usedFallback = !usedConfirmed && (fp > 0 || bp > 0);
 
-      millRevenue += (parseFloat(b.actual_finished_mt) || 0) * fp
-        + (parseFloat(b.broken_mt) || 0) * bp
-        + (parseFloat(b.bran_mt) || 0) * np
-        + (parseFloat(b.husk_mt) || 0) * hp;
+      millRevenue += (parseFloat(b.actual_finished_kg) || 0) * fp
+        + (parseFloat(b.broken_kg) || 0) * bp;
       if (usedConfirmed) millPricesConfirmed++;
 
       const bCosts = batchCosts.filter(c => c.batch_id === b.id);
@@ -369,16 +366,14 @@ const financeService = {
 
     const millRows = batches.map(b => {
       const costs = batchCosts.filter(c => c.batch_id === b.id).reduce((s, c) => s + (parseFloat(c.amount) || 0), 0);
-      const fp = parseFloat(b.finished_price_per_mt) || millRates.finished_rice || 0;
-      const bp = parseFloat(b.broken_price_per_mt) || millRates.broken_rice || 0;
-      const np = parseFloat(b.bran_price_per_mt) || millRates.bran || 0;
-      const hp = parseFloat(b.husk_price_per_mt) || millRates.husk || 0;
-      const revenue = (parseFloat(b.actual_finished_mt) || 0) * fp + (parseFloat(b.broken_mt) || 0) * bp
-        + (parseFloat(b.bran_mt) || 0) * np + (parseFloat(b.husk_mt) || 0) * hp;
+      // per-KG prices × KG qty = PKR (invariant); fallbacks per-MT → ÷1000.
+      const fp = parseFloat(b.finished_price_per_kg) || (millRates.finished_rice || 0) / 1000;
+      const bp = parseFloat(b.broken_price_per_kg) || (millRates.broken_rice || 0) / 1000;
+      const revenue = (parseFloat(b.actual_finished_kg) || 0) * fp + (parseFloat(b.broken_kg) || 0) * bp;
       const profit = revenue - costs;
       return {
         id: b.id, batchNo: b.batch_no, status: b.status,
-        rawQtyMT: parseFloat(b.raw_qty_mt), finishedMT: parseFloat(b.actual_finished_mt),
+        rawQtyMT: parseFloat(b.raw_qty_kg) / 1000, finishedMT: parseFloat(b.actual_finished_kg) / 1000,
         yieldPct: parseFloat(b.yield_pct), revenue, costs, grossProfit: profit,
         marginPct: revenue > 0 ? parseFloat((profit / revenue * 100).toFixed(1)) : 0,
         pricesConfirmed: !!b.prices_confirmed,

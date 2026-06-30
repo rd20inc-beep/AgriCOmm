@@ -99,7 +99,7 @@ export default function LotDetail() {
         if (!d?.batch) return;
         const vehicles = (d.vehicles || []).map(v => ({
           id: v.id, vehicleNo: v.vehicle_no, driverName: v.driver_name,
-          weightMT: pf(v.weight_mt), arrivalDate: v.arrival_date,
+          weightMT: (pf(v.weight_kg) / 1000), arrivalDate: v.arrival_date,
         }));
         const quality = d.quality || {};
         const sample = quality.sample?.[0];
@@ -140,8 +140,8 @@ export default function LotDetail() {
 
   const bw = parseFloat(lot.bagWeightKg) || 50;
   const netKg = parseFloat(lot.netWeightKg) || parseFloat(lot.grossWeightKg) || 0;
-  const availKg = (parseFloat(lot.availableQty) || 0) * 1000;
-  const reservedKg = (parseFloat(lot.reservedQty) || 0) * 1000;
+  const availKg = (parseFloat(lot.availableQty) || 0);
+  const reservedKg = (parseFloat(lot.reservedQty) || 0);
   const soldKg = parseFloat(lot.soldWeightKg) || 0;
   const damagedKg = parseFloat(lot.damagedWeightKg) || 0;
   const consumedKg = netKg - availKg - reservedKg;
@@ -1078,7 +1078,7 @@ export default function LotDetail() {
             {reservations.length > 0 ? (
               <div className="space-y-2">
                 {reservations.map(r => {
-                  const rKg = (parseFloat(r.reservedQty) || 0) * 1000;
+                  const rKg = (parseFloat(r.reservedQty) || 0);
                   const pct = netKg > 0 ? Math.round((rKg / netKg) * 100) : 0;
                   return (
                     <div key={r.id} className="flex items-center gap-3 bg-amber-50 border border-amber-100 rounded-lg p-3">
@@ -1189,7 +1189,7 @@ export default function LotDetail() {
                 {reservations.map(r => (
                   <div key={r.id} className="flex items-center justify-between bg-gray-50 rounded-lg p-3">
                     <Link to={`/export/${r.orderNo || r.orderId}`} className="text-sm font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1"><ChevronRight className="w-3 h-3" />{r.orderNo || `Order #${r.orderId}`}</Link>
-                    <span className="text-sm text-gray-600">{dv((parseFloat(r.reservedQty) || 0) * 1000).toLocaleString()} {ul()}</span>
+                    <span className="text-sm text-gray-600">{dv((parseFloat(r.reservedQty) || 0)).toLocaleString()} {ul()}</span>
                     <StatusBadge status={r.status} />
                   </div>
                 ))}
@@ -1784,7 +1784,7 @@ function LotLineage({ lotId, lotNo }) {
                   <span className={`ml-2 text-xs px-1.5 py-0.5 rounded ${d.child_type === 'finished' ? 'bg-green-100 text-green-700' : 'bg-purple-100 text-purple-700'}`}>{d.child_type}</span>
                 </div>
                 <div className="text-right text-xs">
-                  <span className="text-gray-500">{parseFloat(d.qty).toFixed(2)} MT</span>
+                  <span className="text-gray-500">{(parseFloat(d.qty) / 1000).toFixed(2)} MT</span>
                   <span className={`ml-2 px-1.5 py-0.5 rounded text-xs ${d.entity === 'mill' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>{d.entity}</span>
                 </div>
               </div>
@@ -1804,14 +1804,14 @@ function LotLineage({ lotId, lotNo }) {
                     <Link to={`/milling/${c.batch_no}`} className="font-medium text-blue-600 hover:underline">Batch {c.batch_no}</Link>
                     <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{c.status}</span>
                   </div>
-                  <span className="text-xs text-gray-600">{parseFloat(c.qty_mt).toFixed(2)} MT{c.ratio_pct ? ` · ${parseFloat(c.ratio_pct).toFixed(1)}% of blend` : ''}</span>
+                  <span className="text-xs text-gray-600">{(parseFloat(c.qty_kg) / 1000).toFixed(2)} MT{c.ratio_pct ? ` · ${parseFloat(c.ratio_pct).toFixed(1)}% of blend` : ''}</span>
                 </div>
                 {c.outputs?.length > 0 && (
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
                     {c.outputs.map((o, j) => (
                       <Link key={j} to={`/lot-inventory/${o.lot_no}`}
                         className={`text-[11px] px-1.5 py-0.5 rounded hover:underline ${o.type === 'finished' ? 'bg-green-100 text-green-700' : 'bg-purple-100 text-purple-700'}`}>
-                        {o.lot_no} ({parseFloat(o.qty).toFixed(1)} MT)
+                        {o.lot_no} ({(parseFloat(o.qty) / 1000).toFixed(1)} MT)
                       </Link>
                     ))}
                   </div>
@@ -1937,7 +1937,7 @@ function LotVehiclesPanel({ lot, vehicles, onAdd, onRefresh, addToast }) {
       addToast?.(err?.response?.data?.message || err.message || 'Failed to remove vehicle', 'error');
     }
   }
-  const totalMT = safe.reduce((s, v) => s + (parseFloat(v.weight_mt) || 0), 0);
+  const totalMT = safe.reduce((s, v) => s + ((parseFloat(v.weight_kg) || 0) / 1000), 0);
   return (
     <div className="bg-white rounded-xl border border-gray-100 p-5">
       <div className="flex items-center justify-between mb-4">
@@ -1976,7 +1976,7 @@ function LotVehiclesPanel({ lot, vehicles, onAdd, onRefresh, addToast }) {
                     {v.driver_name || '—'}
                     {v.driver_phone && <span className="text-xs text-gray-400 ml-1">· {v.driver_phone}</span>}
                   </td>
-                  <td className="py-2 text-right tabular-nums font-medium">{parseFloat(v.weight_mt || 0).toFixed(2)}</td>
+                  <td className="py-2 text-right tabular-nums font-medium">{(parseFloat(v.weight_kg || 0) / 1000).toFixed(2)}</td>
                   <td className="py-2 text-right tabular-nums">{v.total_bags || '—'}</td>
                   <td className="py-2 text-gray-600">{fmtDate(v.arrival_date)}</td>
                   <td className="py-2 text-center">
@@ -2120,17 +2120,17 @@ function AddLotVehicleModal({ isOpen, onClose, lot, addToast, onSaved }) {
 // ─── Start Milling Modal ───
 function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
   const isReMill = lot?.type === 'finished';
-  const [form, setForm] = useState({ notes: '', qty_mt: '' });
+  const [form, setForm] = useState({ notes: '', qty_kg: '' });
   const [vehicles, setVehicles] = useState([]);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
-    const availMT = parseFloat(lot?.availableQty) || 0;
+    const availKg = parseFloat(lot?.availableQty) || 0; // KG (Phase 5c)
     // Default the quantity to the whole lot — the operator can lower it to mill
     // only part of the lot. Single mill, so mill/shift/line are dropped; the
     // milling fee is entered later in the batch Costing tab.
-    setForm({ notes: '', qty_mt: availMT > 0 ? String(availMT) : '' });
+    setForm({ notes: '', qty_kg: availKg > 0 ? String(availKg) : '' });
     setVehicles([]);
     if (lot?.id) {
       lotInventoryApi.listLotVehicles(lot.id)
@@ -2139,30 +2139,30 @@ function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
     }
   }, [isOpen, lot?.id]);
 
-  const availableMT = parseFloat(lot?.availableQty) || 0;
+  const availableKg = parseFloat(lot?.availableQty) || 0; // KG (Phase 5c)
   // Vehicles that will be carried into the new batch — i.e. attached to
   // the lot but not yet routed into any other batch.
   const inheritableVehicles = vehicles.filter(v => !v.batch_id);
-  const inheritedMT = inheritableVehicles.reduce((s, v) => s + (parseFloat(v.weight_mt) || 0), 0);
+  const inheritedMT = inheritableVehicles.reduce((s, v) => s + ((parseFloat(v.weight_kg) || 0) / 1000), 0);
 
-  const qtyToMill = parseFloat(form.qty_mt);
-  const qtyValid = form.qty_mt !== '' && qtyToMill > 0 && qtyToMill <= availableMT + 1e-6;
-  const remainingMT = qtyValid ? Math.max(0, availableMT - qtyToMill) : 0;
+  const qtyToMill = parseFloat(form.qty_kg);
+  const qtyValid = form.qty_kg !== '' && qtyToMill > 0 && qtyToMill <= availableKg + 1e-6;
+  const remainingKg = qtyValid ? Math.max(0, availableKg - qtyToMill) : 0;
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (availableMT <= 0) {
+    if (availableKg <= 0) {
       addToast?.('This lot has no available stock to mill.', 'error');
       return;
     }
     if (!qtyValid) {
-      addToast?.(`Enter a quantity between 0 and ${availableMT.toFixed(2)} MT.`, 'error');
+      addToast?.(`Enter a quantity between 0 and ${availableKg.toFixed(2)} KG.`, 'error');
       return;
     }
     setSubmitting(true);
     try {
       const res = await lotInventoryApi.startMillingForLot(lot.id, {
-        raw_qty_mt: qtyToMill,
+        raw_qty_kg: qtyToMill,
         notes: form.notes.trim() || null,
       });
       const data = res?.data || res;
@@ -2188,7 +2188,7 @@ function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
       <span className="text-xs text-gray-500">{qtyValid ? `${qtyToMill.toFixed(2)} MT → new batch` : 'Set a quantity to mill'}</span>
       <div className="flex gap-2">
         <button type="button" onClick={onClose} className="btn btn-secondary btn-sm">Cancel</button>
-        <button type="button" onClick={handleSubmit} disabled={submitting || availableMT <= 0 || !qtyValid}
+        <button type="button" onClick={handleSubmit} disabled={submitting || availableKg <= 0 || !qtyValid}
           className="btn btn-primary btn-sm disabled:opacity-50 inline-flex items-center gap-1.5">
           {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
           {isReMill ? 'Start Re-Milling' : 'Start Milling'}
@@ -2209,7 +2209,7 @@ function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
           ) : (
             <>
               <strong>First pass.</strong> {lot.itemName}{lot.variety ? ` (${lot.variety})` : ''} —
-              {' '}<span className="font-medium">{availableMT.toFixed(2)} MT available</span>.
+              {' '}<span className="font-medium">{availableKg.toFixed(2)} KG available</span>.
             </>
           )}
         </div>
@@ -2240,7 +2240,7 @@ function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
                     {v.driver_name && <span className="text-gray-500 ml-1.5">· {v.driver_name}</span>}
                   </span>
                   <span className="text-gray-500 tabular-nums">
-                    {parseFloat(v.weight_mt || 0).toFixed(2)} MT
+                    {(parseFloat(v.weight_kg || 0) / 1000).toFixed(2)} MT
                   </span>
                 </li>
               ))}
@@ -2259,19 +2259,19 @@ function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
           </label>
           <div className="flex items-center gap-2">
             <input
-              type="number" step="0.01" min="0" max={availableMT}
-              value={form.qty_mt}
-              onChange={(e) => setForm(p => ({ ...p, qty_mt: e.target.value }))}
+              type="number" step="0.01" min="0" max={availableKg}
+              value={form.qty_kg}
+              onChange={(e) => setForm(p => ({ ...p, qty_kg: e.target.value }))}
               className="w-40 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
-            <button type="button" onClick={() => setForm(p => ({ ...p, qty_mt: String(availableMT) }))}
-              className="text-xs text-blue-600 hover:underline">Mill all ({availableMT.toFixed(2)} MT)</button>
+            <button type="button" onClick={() => setForm(p => ({ ...p, qty_kg: String(availableKg) }))}
+              className="text-xs text-blue-600 hover:underline">Mill all ({availableKg.toFixed(2)} KG)</button>
           </div>
           <p className="text-xs mt-1">
             {!qtyValid ? (
-              <span className="text-red-500">Enter a value between 0 and {availableMT.toFixed(2)} MT.</span>
-            ) : remainingMT > 0 ? (
-              <span className="text-amber-600">{qtyToMill.toFixed(2)} MT will be milled · <span className="font-medium">{remainingMT.toFixed(2)} MT stays in the lot</span>.</span>
+              <span className="text-red-500">Enter a value between 0 and {availableKg.toFixed(2)} KG.</span>
+            ) : remainingKg > 0 ? (
+              <span className="text-amber-600">{qtyToMill.toFixed(2)} KG will be milled · <span className="font-medium">{remainingKg.toFixed(2)} KG stays in the lot</span>.</span>
             ) : (
               <span className="text-gray-500">Milling the whole lot.</span>
             )}
@@ -2296,8 +2296,8 @@ function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
 // this lot and creates a matching export-entity lot (lot-precise, validated).
 function TransferToExportDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
   const { exportOrders } = useApp();
-  const availMT = parseFloat(lot?.availableQty) || 0;
-  const defaultPrice = Math.round(parseFloat(lot?.costPerUnit) || 0); // per MT
+  const availableKg = parseFloat(lot?.availableQty) || 0;
+  const defaultPrice = Math.round((parseFloat(lot?.costPerUnit) || 0) * 1000); // per MT (cost is per-KG)
   const [qty, setQty] = useState('');
   const [price, setPrice] = useState('');
   const [orderId, setOrderId] = useState('');
@@ -2305,7 +2305,7 @@ function TransferToExportDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
 
   useEffect(() => {
     if (!isOpen) return;
-    setQty(availMT ? String(availMT) : '');
+    setQty(availableKg ? String(availableKg) : '');
     setPrice(defaultPrice ? String(defaultPrice) : '');
     setOrderId('');
   }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -2313,19 +2313,19 @@ function TransferToExportDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
   if (!lot) return null;
 
   const q = parseFloat(qty) || 0;
-  const exceeds = q > availMT + 0.0001;
-  const totalVal = q * (parseFloat(price) || 0);
+  const exceeds = q > availableKg + 0.0001;
+  const totalVal = (q / 1000) * (parseFloat(price) || 0);
   const activeOrders = (Array.isArray(exportOrders) ? exportOrders : [])
     .filter(o => !['Closed', 'Cancelled', 'Draft'].includes(o.status));
 
   async function handleSubmit(e) {
     e.preventDefault();
     if (!q || q <= 0) { addToast('Enter a quantity', 'error'); return; }
-    if (exceeds) { addToast(`Only ${availMT} MT available`, 'error'); return; }
+    if (exceeds) { addToast(`Only ${availableKg} KG available`, 'error'); return; }
     setSaving(true);
     try {
       const res = await lotInventoryApi.transferLotToExport(lot.id, {
-        qty_mt: q,
+        qty_kg: q,
         transfer_price_pkr: price === '' ? null : parseFloat(price),
         export_order_id: orderId ? Number(orderId) : null,
       });
@@ -2355,13 +2355,13 @@ function TransferToExportDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
     <SlideDrawer open={isOpen} onClose={onClose} title="Transfer to Export" subtitle={lot.lotNo} icon={ArrowRightLeft} size="md" footer={footer}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 text-sm text-blue-900">
-          Moves finished rice from the <b>mill</b> entity to <b>export</b>. A new export-entity lot is created and this lot is drawn down. Available: <b>{availMT} MT</b>.
+          Moves finished rice from the <b>mill</b> entity to <b>export</b>. A new export-entity lot is created and this lot is drawn down. Available: <b>{availableKg} KG</b>.
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Quantity (MT) *</label>
-          <input type="number" min="0" max={availMT} step="any" value={qty} onChange={e => setQty(e.target.value)}
+          <label className="block text-sm font-medium text-gray-700 mb-1">Quantity (KG) *</label>
+          <input type="number" min="0" max={availableKg} step="any" value={qty} onChange={e => setQty(e.target.value)}
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
-          {exceeds && <p className="text-xs text-red-600 mt-1">Only {availMT} MT available.</p>}
+          {exceeds && <p className="text-xs text-red-600 mt-1">Only {availableKg} KG available.</p>}
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Transfer price (Rs / MT)</label>
@@ -2388,33 +2388,33 @@ function TransferToExportDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
 // Transfer an export lot's stock back to the mill entity. Deducts this export
 // lot (only its available qty) and creates a matching mill-entity lot.
 function TransferToMillDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
-  const availMT = parseFloat(lot?.availableQty) || 0;
-  const reservedMT = parseFloat(lot?.reservedQty) || 0;
-  const defaultPrice = Math.round(parseFloat(lot?.costPerUnit) || 0); // per MT
+  const availableKg = parseFloat(lot?.availableQty) || 0;
+  const reservedKg = parseFloat(lot?.reservedQty) || 0;
+  const defaultPrice = Math.round((parseFloat(lot?.costPerUnit) || 0) * 1000); // per MT (cost is per-KG)
   const [qty, setQty] = useState('');
   const [price, setPrice] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
-    setQty(availMT ? String(availMT) : '');
+    setQty(availableKg ? String(availableKg) : '');
     setPrice(defaultPrice ? String(defaultPrice) : '');
   }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!lot) return null;
 
   const q = parseFloat(qty) || 0;
-  const exceeds = q > availMT + 0.0001;
-  const totalVal = q * (parseFloat(price) || 0);
+  const exceeds = q > availableKg + 0.0001;
+  const totalVal = (q / 1000) * (parseFloat(price) || 0);
 
   async function handleSubmit(e) {
     e.preventDefault();
     if (!q || q <= 0) { addToast('Enter a quantity', 'error'); return; }
-    if (exceeds) { addToast(`Only ${availMT} MT available`, 'error'); return; }
+    if (exceeds) { addToast(`Only ${availableKg} KG available`, 'error'); return; }
     setSaving(true);
     try {
       const res = await lotInventoryApi.transferLotToMill(lot.id, {
-        qty_mt: q,
+        qty_kg: q,
         transfer_price_pkr: price === '' ? null : parseFloat(price),
       });
       addToast(res?.message || 'Transferred back to mill', 'success');
@@ -2443,13 +2443,13 @@ function TransferToMillDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
     <SlideDrawer open={isOpen} onClose={onClose} title="Transfer to Mill" subtitle={lot.lotNo} icon={ArrowRightLeft} size="md" footer={footer}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">
-          Moves stock from the <b>export</b> entity back to <b>mill</b>. A new mill-entity lot is created and this lot is drawn down. Available: <b>{availMT} MT</b>{reservedMT > 0 ? ` (${reservedMT} MT reserved for an order can't move)` : ''}.
+          Moves stock from the <b>export</b> entity back to <b>mill</b>. A new mill-entity lot is created and this lot is drawn down. Available: <b>{availableKg} KG</b>{reservedKg > 0 ? ` (${reservedKg} MT reserved for an order can't move)` : ''}.
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Quantity (MT) *</label>
-          <input type="number" min="0" max={availMT} step="any" value={qty} onChange={e => setQty(e.target.value)}
+          <label className="block text-sm font-medium text-gray-700 mb-1">Quantity (KG) *</label>
+          <input type="number" min="0" max={availableKg} step="any" value={qty} onChange={e => setQty(e.target.value)}
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
-          {exceeds && <p className="text-xs text-red-600 mt-1">Only {availMT} MT available.</p>}
+          {exceeds && <p className="text-xs text-red-600 mt-1">Only {availableKg} KG available.</p>}
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Transfer price (Rs / MT)</label>

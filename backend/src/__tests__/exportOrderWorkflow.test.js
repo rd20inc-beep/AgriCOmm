@@ -614,8 +614,8 @@ describe('Export order workflow', () => {
       body: {
         supplier_id: 9,
         linked_export_order_id: order.id,
-        raw_qty_mt: 65,
-        planned_finished_mt: 50,
+        raw_qty_kg: 65000,
+        planned_finished_kg: 50000,
       },
     });
     res = makeRes();
@@ -650,8 +650,8 @@ describe('Export order workflow', () => {
       body: {
         supplier_id: 9,
         linked_export_order_id: order.id,
-        raw_qty_mt: 65,
-        planned_finished_mt: 50,
+        raw_qty_kg: 65000,
+        planned_finished_kg: 50000,
       },
     });
     res = makeRes();

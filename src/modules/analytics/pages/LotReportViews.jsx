@@ -30,7 +30,7 @@ function typeLabel(t) {
 function netKg(lot) {
   const raw = num(lot.net_weight_kg);
   if (raw && raw > 0) return raw;
-  return (num(lot.qty) || 0) * 1000;
+  return (num(lot.qty) || 0);
 }
 function lotValuePkr(lot) {
   const landed = num(lot.landed_cost_per_kg) ?? num(lot.rate_per_kg) ?? 0;
