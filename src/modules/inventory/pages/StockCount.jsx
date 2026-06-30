@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ClipboardCheck, Plus, X, CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react';
+import { ClipboardCheck, Plus, X, CheckCircle2, AlertTriangle, Loader2, Check, XCircle } from 'lucide-react';
 import { stockCountApi } from '../api/services';
 import { useWarehouses } from '../../../api/queries';
 
@@ -14,6 +14,14 @@ const STATUS_STYLES = {
   Cancelled: 'bg-red-100 text-red-600',
 };
 const TYPE_LABEL = { full: 'Full count', cycle: 'Cycle count', spot: 'Spot check' };
+// Per-line review state badges
+const ITEM_STATUS_STYLES = {
+  Pending: 'bg-gray-100 text-gray-500',
+  Counted: 'bg-amber-100 text-amber-700',
+  Approved: 'bg-emerald-100 text-emerald-700',
+  Adjusted: 'bg-blue-100 text-blue-700',
+  Rejected: 'bg-red-100 text-red-600',
+};
 
 // Stock-take (physical count) workflow — create a count, enter what you
 // physically have lot-by-lot, and approve to auto-adjust the variance.
@@ -166,11 +174,22 @@ function CountDetailDrawer({ countId, onClose, onChanged }) {
     mutationFn: () => stockCountApi.approve(countId),
     onSuccess: () => { refetch(); onClose(); },
   });
+  const [rejectId, setRejectId] = useState(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const review = useMutation({
+    mutationFn: ({ itemId, decision, reason }) => stockCountApi.review(countId, itemId, { decision, reason }),
+    onSuccess: () => { setRejectId(null); setRejectReason(''); refetch(); },
+  });
 
   const items = count?.items || [];
   const completed = count?.status === 'Completed' || count?.status === 'Cancelled';
   const pendingCount = useMemo(() => items.filter((i) => i.status === 'Pending').length, [items]);
   const varianceCount = useMemo(() => items.filter((i) => n(i.variance_qty) !== 0).length, [items]);
+  // Discrepancy lines that have been counted but not yet approved/rejected.
+  const unreviewedCount = useMemo(
+    () => items.filter((i) => i.status === 'Counted' && n(i.variance_qty) !== 0).length,
+    [items]
+  );
 
   return (
     <Drawer title={count?.count_no || 'Stock count'} subtitle={count ? `${TYPE_LABEL[count.count_type] || count.count_type} · ${count.warehouse_name || 'All warehouses'}` : ''} onClose={onClose} wide>
@@ -180,11 +199,11 @@ function CountDetailDrawer({ countId, onClose, onChanged }) {
         <div className="space-y-4">
           <div className="flex items-center gap-2">
             <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[count.status] || 'bg-gray-100 text-gray-600'}`}>{count.status}</span>
-            <span className="text-xs text-gray-500">{items.length} items · {pendingCount} left to count · {varianceCount} with a difference</span>
+            <span className="text-xs text-gray-500">{items.length} items · {pendingCount} left to count · {varianceCount} with a difference{unreviewedCount > 0 ? ` · ${unreviewedCount} awaiting review` : ''}</span>
           </div>
           {!completed && (
             <p className="text-xs text-gray-500 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
-              Type what you physically counted for each item and hit <span className="font-medium">Save</span>. When every item is counted, hit <span className="font-medium">Approve</span> and the system corrects each product's stock for you.
+              Type what you physically counted for each item and hit <span className="font-medium">Save</span>. Any line that differs from the records must then be <span className="font-medium text-emerald-700">Approved</span> (the system will be corrected) or <span className="font-medium text-red-600">Rejected</span> (the records stand). Once every difference is reviewed, hit <span className="font-medium">Approve &amp; update stock</span>.
             </p>
           )}
 
@@ -220,16 +239,63 @@ function CountDetailDrawer({ countId, onClose, onChanged }) {
                       <td className={`px-3 py-2 text-right tabular-nums font-medium ${variance == null ? 'text-gray-300' : variance === 0 ? 'text-gray-400' : variance > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                         {variance == null ? '—' : `${variance > 0 ? '+' : ''}${variance.toFixed(3)}`}
                       </td>
-                      <td className="px-3 py-2 text-right">
-                        {!completed && (
-                          <button disabled={counted === '' || busy}
-                            onClick={() => record.mutate({ itemId: it.id, countedQty: n(counted) })}
-                            className="text-xs font-medium text-blue-600 hover:text-blue-800 disabled:text-gray-300 inline-flex items-center gap-1">
-                            {busy ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={13} />}
-                            {it.status === 'Pending' ? 'Save' : 'Update'}
-                          </button>
-                        )}
-                        {completed && <span className="text-[11px] text-gray-400">{it.status}</span>}
+                      <td className="px-3 py-2">
+                        {(() => {
+                          // Review acts on the SAVED count (server variance), not the live draft.
+                          const recordedVariance = n(it.variance_qty);
+                          const isDiscrepancy = it.status !== 'Pending' && recordedVariance !== 0;
+                          const reviewBusy = review.isPending && review.variables?.itemId === it.id;
+                          return (
+                            <div className="flex flex-col items-end gap-1.5">
+                              {!completed && (
+                                <button disabled={counted === '' || busy}
+                                  onClick={() => record.mutate({ itemId: it.id, countedQty: n(counted) })}
+                                  className="text-xs font-medium text-blue-600 hover:text-blue-800 disabled:text-gray-300 inline-flex items-center gap-1">
+                                  {busy ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={13} />}
+                                  {it.status === 'Pending' ? 'Save' : 'Update'}
+                                </button>
+                              )}
+
+                              {/* Per-line discrepancy review */}
+                              {!completed && isDiscrepancy && rejectId !== it.id && (
+                                <div className="flex items-center gap-1">
+                                  <button disabled={reviewBusy}
+                                    onClick={() => review.mutate({ itemId: it.id, decision: 'approve' })}
+                                    className={`px-2 py-0.5 rounded text-[11px] font-medium inline-flex items-center gap-1 border ${it.status === 'Approved' ? 'bg-emerald-600 text-white border-emerald-600' : 'border-emerald-300 text-emerald-700 hover:bg-emerald-50'}`}>
+                                    <Check size={12} /> Approve
+                                  </button>
+                                  <button disabled={reviewBusy}
+                                    onClick={() => { setRejectId(it.id); setRejectReason(it.review_notes || ''); }}
+                                    className={`px-2 py-0.5 rounded text-[11px] font-medium inline-flex items-center gap-1 border ${it.status === 'Rejected' ? 'bg-red-600 text-white border-red-600' : 'border-red-300 text-red-600 hover:bg-red-50'}`}>
+                                    <XCircle size={12} /> Reject
+                                  </button>
+                                </div>
+                              )}
+
+                              {/* Reject reason capture */}
+                              {!completed && rejectId === it.id && (
+                                <div className="flex items-center gap-1">
+                                  <input autoFocus value={rejectReason} placeholder="Reason…"
+                                    onChange={(e) => setRejectReason(e.target.value)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter' && rejectReason.trim()) review.mutate({ itemId: it.id, decision: 'reject', reason: rejectReason.trim() }); }}
+                                    className="w-28 border border-red-300 rounded px-1.5 py-0.5 text-[11px]" />
+                                  <button disabled={!rejectReason.trim() || reviewBusy}
+                                    onClick={() => review.mutate({ itemId: it.id, decision: 'reject', reason: rejectReason.trim() })}
+                                    className="px-1.5 py-0.5 rounded text-[11px] font-medium bg-red-600 text-white disabled:opacity-40">
+                                    {reviewBusy ? <Loader2 size={11} className="animate-spin" /> : 'Confirm'}
+                                  </button>
+                                  <button onClick={() => { setRejectId(null); setRejectReason(''); }} className="text-gray-400 hover:text-gray-600"><X size={13} /></button>
+                                </div>
+                              )}
+
+                              {/* Status badge + rejection reason */}
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${ITEM_STATUS_STYLES[it.status] || 'bg-gray-100 text-gray-500'}`}>{it.status}</span>
+                              {it.status === 'Rejected' && it.review_notes && rejectId !== it.id && (
+                                <span className="text-[10px] text-gray-400 italic max-w-[140px] truncate" title={it.review_notes}>“{it.review_notes}”</span>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </td>
                     </tr>
                   );
@@ -240,14 +306,16 @@ function CountDetailDrawer({ countId, onClose, onChanged }) {
 
           {!completed && (
             <div className="space-y-2">
+              {review.isError && <p className="text-xs text-red-600 flex items-center gap-1"><AlertTriangle size={13} /> {review.error?.message || 'Review failed.'}</p>}
               {approve.isError && <p className="text-xs text-red-600 flex items-center gap-1"><AlertTriangle size={13} /> {approve.error?.message || 'Approval failed.'}</p>}
               {pendingCount > 0 && <p className="text-[11px] text-amber-600">Count all {pendingCount} remaining line(s) before approving.</p>}
-              <button onClick={() => approve.mutate()} disabled={pendingCount > 0 || approve.isPending}
+              {pendingCount === 0 && unreviewedCount > 0 && <p className="text-[11px] text-amber-600">Approve or reject {unreviewedCount} difference(s) before finishing.</p>}
+              <button onClick={() => approve.mutate()} disabled={pendingCount > 0 || unreviewedCount > 0 || approve.isPending}
                 className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-medium py-2.5 rounded-lg inline-flex items-center justify-center gap-2">
                 {approve.isPending ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={16} />}
                 Approve &amp; update stock
               </button>
-              <p className="text-[11px] text-gray-400 text-center">Any differences are written off or added so your stock matches the count.</p>
+              <p className="text-[11px] text-gray-400 text-center">Approved differences are written off or added so your stock matches the count. Rejected differences leave the records unchanged.</p>
             </div>
           )}
           {completed && count.completed_at && (

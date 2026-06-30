@@ -1019,6 +1019,61 @@ const controlService = {
     return updated;
   },
 
+  // Per-line discrepancy review (#2). A counted line whose physical count
+  // differs from the system (variance ≠ 0) must be individually APPROVED (its
+  // adjustment will be applied when the count is completed) or REJECTED (the
+  // system stands — no adjustment; the discrepancy is recorded). Matched lines
+  // (zero variance) need no review. Re-decidable until the count is completed.
+  async reviewCountItem(trx, { stockCountId, itemId, decision, reason, userId }) {
+    const knex = trx || db;
+    const dec = String(decision || '').toLowerCase();
+    if (dec !== 'approve' && dec !== 'reject') {
+      throw new Error("decision must be 'approve' or 'reject'.");
+    }
+
+    const stockCount = await knex('stock_counts').where({ id: stockCountId }).first();
+    if (!stockCount) throw new Error('Stock count not found.');
+    if (stockCount.status === 'Completed') throw new Error('Stock count already completed.');
+    if (stockCount.status === 'Cancelled') throw new Error('Stock count is cancelled.');
+
+    const item = await knex('stock_count_items').where({ id: itemId, stock_count_id: stockCountId }).first();
+    if (!item) throw new Error('Stock count item not found.');
+    if (item.status === 'Pending') throw new Error('Count this item before reviewing it.');
+    if (parseFloat(item.variance_qty || 0) === 0) {
+      throw new Error('This line matches the system — there is no discrepancy to review.');
+    }
+    if (dec === 'reject' && !String(reason || '').trim()) {
+      throw new Error('A reason is required to reject a discrepancy.');
+    }
+
+    const [updated] = await knex('stock_count_items')
+      .where({ id: itemId })
+      .update({
+        status: dec === 'approve' ? 'Approved' : 'Rejected',
+        reviewed_by: userId,
+        reviewed_at: new Date(),
+        review_notes: String(reason || '').trim() || null,
+        updated_at: new Date(),
+      })
+      .returning('*');
+
+    await auditService.log({
+      userId,
+      action: dec === 'approve' ? 'approve_stock_count_line' : 'reject_stock_count_line',
+      entityType: 'stock_count_item',
+      entityId: itemId,
+      details: {
+        countNo: stockCount.count_no,
+        itemName: item.item_name,
+        varianceQty: parseFloat(item.variance_qty || 0),
+        reason: String(reason || '').trim() || null,
+      },
+      db_instance: knex,
+    });
+
+    return updated;
+  },
+
   async approveStockCount(trx, { stockCountId, userId }) {
     const knex = trx || db;
 
@@ -1034,8 +1089,19 @@ const controlService = {
       throw new Error(`${uncounted.length} item(s) have not been counted yet.`);
     }
 
-    // For items with variance: create inventory adjustment movements
-    const itemsWithVariance = items.filter(i => parseFloat(i.variance_qty || 0) !== 0);
+    // Every discrepancy line must be reviewed (approved or rejected) before the
+    // count can be completed — a 'Counted' line with a variance is still pending
+    // review. Matched lines (variance 0) never need review.
+    const unreviewed = items.filter(i => i.status === 'Counted' && parseFloat(i.variance_qty || 0) !== 0);
+    if (unreviewed.length > 0) {
+      throw new Error(`${unreviewed.length} discrepancy line(s) still need review (approve or reject).`);
+    }
+
+    // Only APPROVED discrepancies are written into inventory; rejected ones are
+    // left untouched (system stands).
+    const itemsWithVariance = items.filter(
+      i => i.status === 'Approved' && parseFloat(i.variance_qty || 0) !== 0
+    );
 
     for (const item of itemsWithVariance) {
       const varianceQty = parseFloat(item.variance_qty);
@@ -1099,6 +1165,7 @@ const controlService = {
         countNo: stockCount.count_no,
         totalItems: items.length,
         adjustedItems: itemsWithVariance.length,
+        rejectedItems: items.filter(i => i.status === 'Rejected').length,
       },
       db_instance: knex,
     });
