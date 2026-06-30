@@ -58,7 +58,7 @@ const qualityParams = [
   { key: 'b3Pct',          label: 'B-3',              unit: '%', backendKey: 'b3_pct' },
   { key: 'csrPct',         label: 'C.S',              unit: '%', backendKey: 'csr_pct' },
   { key: 'shortGrainPct',  label: 'Short Grain',      unit: '%', backendKey: 'short_grain_pct' },
-  { key: 'cobbaPct',       label: 'Cobba',            unit: '%', backendKey: 'cobba_pct' },
+  { key: 'cobbaPct',       label: 'Choba',            unit: '%', backendKey: 'cobba_pct' },
   { key: 'nbPct',          label: 'N.B',              unit: '%', backendKey: 'nb_pct' },
   { key: 'ovPct',          label: 'O.V',              unit: '%', backendKey: 'ov_pct' },
 ];
@@ -143,7 +143,9 @@ export default function MillingBatchDetail() {
   const [showYieldModal, setShowYieldModal] = useState(false);
   const [yieldForm, setYieldForm] = useState({
     actualFinishedMT: '', brokenMT: '', b1MT: '', b2MT: '', b3MT: '', csrMT: '', shortGrainMT: '',
-    sortexMT: '', powderMT: '', sweepingMT: '', wastageMT: '',
+    sortexMT: '', powderMT: '', sweepingMT: '', chobaMT: '',
+    // O.V + Stone are record-only residue (no price / no inventory lot)
+    ovMT: '', stoneMT: '', wastageMT: '',
     // bran/husk retained in payload for legacy batches but no longer surfaced in the form
     branMT: '', huskMT: '',
   });
@@ -155,7 +157,7 @@ export default function MillingBatchDetail() {
   const [showSupplierModal, setShowSupplierModal] = useState(false);
   const [selectedSupplier, setSelectedSupplier] = useState('');
   const [priceForm, setPriceForm] = useState({
-    broken: '', sortex: '', bran: '', husk: '',
+    broken: '', sortex: '', bran: '', husk: '', choba: '',
     b1: '', b2: '', b3: '', csr: '', shortGrain: '',
     // Residual costing inputs (PKR totals) — finished cost is derived.
     millingCost: '', otherExpenses: '',
@@ -383,6 +385,9 @@ export default function MillingBatchDetail() {
       sortexMT: batch.sortexRejectsMT || batch.sortex_rejects_mt || '',
       powderMT: batch.powderMT || batch.powder_mt || '',
       sweepingMT: batch.sweepingMT || batch.sweeping_mt || '',
+      chobaMT: batch.chobaMT || batch.choba_mt || '',
+      ovMT: batch.ovMT || batch.ov_mt || '',
+      stoneMT: batch.stoneMT || batch.stone_mt || '',
       wastageMT: batch.wastageMT || '',
       // Carry forward legacy bran/husk so re-submitting an old batch
       // doesn't zero them out.
@@ -427,8 +432,11 @@ export default function MillingBatchDetail() {
     const sortex = parseFloat(yieldForm.sortexMT) || 0;
     const powder = parseFloat(yieldForm.powderMT) || 0;
     const sweeping = parseFloat(yieldForm.sweepingMT) || 0;
+    const choba = parseFloat(yieldForm.chobaMT) || 0;
+    const ov = parseFloat(yieldForm.ovMT) || 0;
+    const stone = parseFloat(yieldForm.stoneMT) || 0;
     const wastage = parseFloat(yieldForm.wastageMT) || 0;
-    const totalOutput = finished + broken + bran + husk + sortex + powder + sweeping + wastage;
+    const totalOutput = finished + broken + bran + husk + sortex + powder + sweeping + choba + ov + stone + wastage;
     const yieldPct = batch.rawQtyMT > 0 ? parseFloat(((finished / batch.rawQtyMT) * 100).toFixed(1)) : 0;
 
     try {
@@ -447,6 +455,9 @@ export default function MillingBatchDetail() {
           sortex_rejects_mt: sortex,
           powder_mt: powder,
           sweeping_mt: sweeping,
+          choba_mt: choba,
+          ov_mt: ov,
+          stone_mt: stone,
           wastage_mt: wastage,
         },
       });
@@ -1942,12 +1953,36 @@ export default function MillingBatchDetail() {
               <p className="text-[11px] text-gray-400 mt-0.5">Rice powder — sellable, goes to inventory</p>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Sweeping (MT)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">S.W (MT)</label>
               <input type="number" step="0.01" min="0" value={yieldForm.sweepingMT}
                 onChange={(e) => setYieldForm(prev => ({ ...prev, sweepingMT: e.target.value }))}
                 placeholder="e.g. 0.3"
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
-              <p className="text-[11px] text-gray-400 mt-0.5">Floor sweepings — sellable, goes to inventory</p>
+              <p className="text-[11px] text-gray-400 mt-0.5">Sweeping — sellable, goes to inventory</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Choba (MT)</label>
+              <input type="number" step="0.01" min="0" value={yieldForm.chobaMT}
+                onChange={(e) => setYieldForm(prev => ({ ...prev, chobaMT: e.target.value }))}
+                placeholder="e.g. 0.4"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+              <p className="text-[11px] text-gray-400 mt-0.5">Choba — sellable, goes to inventory</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">O.V (MT)</label>
+              <input type="number" step="0.01" min="0" value={yieldForm.ovMT}
+                onChange={(e) => setYieldForm(prev => ({ ...prev, ovMT: e.target.value }))}
+                placeholder="e.g. 0.2"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+              <p className="text-[11px] text-gray-400 mt-0.5">Record-only — not priced or stocked</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Stone (MT)</label>
+              <input type="number" step="0.01" min="0" value={yieldForm.stoneMT}
+                onChange={(e) => setYieldForm(prev => ({ ...prev, stoneMT: e.target.value }))}
+                placeholder="e.g. 0.1"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+              <p className="text-[11px] text-gray-400 mt-0.5">Record-only — not priced or stocked</p>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Wastage (MT)</label>
@@ -1977,13 +2012,16 @@ export default function MillingBatchDetail() {
             const sx = parseFloat(yieldForm.sortexMT) || 0;
             const pw = parseFloat(yieldForm.powderMT) || 0;
             const sw = parseFloat(yieldForm.sweepingMT) || 0;
+            const ch = parseFloat(yieldForm.chobaMT) || 0;
+            const ovv = parseFloat(yieldForm.ovMT) || 0;
+            const st = parseFloat(yieldForm.stoneMT) || 0;
             const w = parseFloat(yieldForm.wastageMT) || 0;
             const gradeTotal = b1 + b2 + b3 + csr + sg;
             // Broken total derives from the per-grade inputs (gradeTotal)
             // — falls back to legacy yieldForm.brokenMT only for batches
             // saved before this change.
             const b = gradeTotal > 0 ? gradeTotal : (parseFloat(yieldForm.brokenMT) || 0);
-            const total = f + b + br + h + sx + pw + sw + w;
+            const total = f + b + br + h + sx + pw + sw + ch + ovv + st + w;
             const rawQty = batch.rawQtyMT || 0;
             const yieldPct = rawQty > 0 ? ((f / rawQty) * 100).toFixed(1) : '0.0';
             const accounted = rawQty > 0 ? ((total / rawQty) * 100).toFixed(1) : '0.0';
@@ -1999,7 +2037,10 @@ export default function MillingBatchDetail() {
             if (sg) rows.push({ label: '  Short Grain', value: sg, indent: true });
             rows.push({ label: 'Sortex Rejects', value: sx, color: 'text-orange-700' });
             if (pw > 0) rows.push({ label: 'Powder', value: pw, color: 'text-gray-600' });
-            if (sw > 0) rows.push({ label: 'Sweeping', value: sw, color: 'text-gray-600' });
+            if (sw > 0) rows.push({ label: 'S.W', value: sw, color: 'text-gray-600' });
+            if (ch > 0) rows.push({ label: 'Choba', value: ch, color: 'text-gray-600' });
+            if (ovv > 0) rows.push({ label: 'O.V (record-only)', value: ovv, color: 'text-gray-500' });
+            if (st > 0) rows.push({ label: 'Stone (record-only)', value: st, color: 'text-gray-500' });
             rows.push({ label: 'Wastage', value: w, color: 'text-red-600' });
             // Show bran/husk in the preview only when they were carried from
             // an existing batch — keeps the math correct for legacy batches.
@@ -2275,7 +2316,7 @@ export default function MillingBatchDetail() {
                       {pctInput('b3',         'B3 %')}
                       {pctInput('csr',        'CSR %')}
                       {pctInput('shortGrain', 'Short Grain %')}
-                      {pctInput('cobba',      'Cobba %')}
+                      {pctInput('cobba',      'Choba %')}
                       {pctInput('nb',         'N.B %')}
                       {pctInput('ov',         'O.V %')}
                     </div>
@@ -2327,6 +2368,7 @@ export default function MillingBatchDetail() {
           const sgMT = parseFloat(batch?.shortGrainMT) || 0;
           const powderMT = parseFloat(batch?.powderMT) || 0;
           const sweepingMT = parseFloat(batch?.sweepingMT) || 0;
+          const chobaMT = parseFloat(batch?.chobaMT) || 0;
           const wastageMT = parseFloat(batch?.wastageMT) || 0;
           const finishedMT = parseFloat(batch?.actualFinishedMT) || 0;
           const usePerGrade = (b1MT + b2MT + b3MT + csrMT + sgMT) > 0;
@@ -2341,7 +2383,8 @@ export default function MillingBatchDetail() {
             // Powder & Sweeping always show so their sale price can be set even
             // before a quantity is recorded (keep: true bypasses the qty filter).
             { key: 'powder', label: 'Powder', qty: powderMT, keep: true },
-            { key: 'sweeping', label: 'Sweeping', qty: sweepingMT, keep: true },
+            { key: 'sweeping', label: 'S.W', qty: sweepingMT, keep: true },
+            { key: 'choba', label: 'Choba', qty: chobaMT, keep: true },
             ...(branMT > 0 ? [{ key: 'bran', label: 'Rice Bran', qty: branMT }] : []),
             ...(huskMT > 0 ? [{ key: 'husk', label: 'Rice Husk', qty: huskMT }] : []),
           ].filter(f => f.keep || f.qty > 0);
@@ -2436,6 +2479,7 @@ export default function MillingBatchDetail() {
                       short_grain_price_per_mt: num(priceForm.shortGrain),
                       powder_price_per_mt: num(priceForm.powder),
                       sweeping_price_per_mt: num(priceForm.sweeping),
+                      choba_price_per_mt: num(priceForm.choba),
                       manual_milling_cost_pkr: millingCost,
                       manual_other_expenses_pkr: otherExpenses,
                     });

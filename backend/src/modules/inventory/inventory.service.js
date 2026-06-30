@@ -242,6 +242,7 @@ const inventoryService = {
       husk:     'HUSK',
       powder:   'POWDER',
       sweeping: 'SWEEP',
+      choba:    'CHOBA',
     };
     const GRADE_CODES = {
       'B1': 'B1', 'B2': 'B2', 'B3': 'B3', 'CSR': 'CSR', 'Short Grain': 'SG',
@@ -809,11 +810,12 @@ const inventoryService = {
     sortexMT,
     powderMT,
     sweepingMT,
+    chobaMT,
     productName,
     costPerMT,
     rawCostComponent,
     millingCostComponent,
-    byproductCosts, // { broken, bran, husk, sortex, powder, sweeping } cost per kg
+    byproductCosts, // { broken, bran, husk, sortex, powder, sweeping, choba } cost per kg
     // Optional per-grade split of brokenMT. When supplied, recordMillingOutput
     // creates one byproduct lot per non-zero grade (B1, B2, B3, CSR, Short
     // Grain) instead of collapsing them into a single "Broken Rice" lot.
@@ -896,6 +898,7 @@ const inventoryService = {
         'Sortex Rejects': ['PROD-SORTEX-REJECTS', 'SORTEX-REJECTS'],
         'Powder':         ['PROD-POWDER',         'POWDER'],
         'Sweeping':       ['PROD-SWEEPING',       'SWEEPING'],
+        'Choba':          ['PROD-CHOBA',          'CHOBA'],
       }[baseName] || [];
       for (const code of byCode) {
         const p = await trx('products').where({ code }).first('id');
@@ -1046,6 +1049,7 @@ const inventoryService = {
       { name: 'Sortex', key: 'sortex', grade: null, qty: parseFloat(sortexMT) || 0 },
       { name: 'Powder',         key: 'powder', grade: null, qty: parseFloat(powderMT) || 0 },
       { name: 'Sweeping',       key: 'sweeping', grade: null, qty: parseFloat(sweepingMT) || 0 },
+      { name: 'Choba',          key: 'choba', grade: null, qty: parseFloat(chobaMT) || 0 },
     ];
 
     for (const bp of byproducts) {
@@ -2272,19 +2276,22 @@ const inventoryService = {
     const finished = p(batch.actual_finished_mt);
     const broken = p(batch.broken_mt), bran = p(batch.bran_mt), husk = p(batch.husk_mt), sortex = p(batch.sortex_rejects_mt);
     const b1 = p(batch.b1_mt), b2 = p(batch.b2_mt), b3 = p(batch.b3_mt), csr = p(batch.csr_mt), shortGrain = p(batch.short_grain_mt);
-    const powder = p(batch.powder_mt), sweeping = p(batch.sweeping_mt);
+    const powder = p(batch.powder_mt), sweeping = p(batch.sweeping_mt), choba = p(batch.choba_mt);
     const brokenPrice = p(batch.broken_price_per_mt);
     const price = {
       b1: p(batch.b1_price_per_mt) || brokenPrice, b2: p(batch.b2_price_per_mt) || brokenPrice,
       b3: p(batch.b3_price_per_mt) || brokenPrice, csr: p(batch.csr_price_per_mt) || brokenPrice,
       short_grain: p(batch.short_grain_price_per_mt) || brokenPrice, broken: brokenPrice,
       bran: p(batch.bran_price_per_mt), husk: p(batch.husk_price_per_mt), sortex: p(batch.sortex_rejects_price_per_mt),
-      powder: p(batch.powder_price_per_mt), sweeping: p(batch.sweeping_price_per_mt),
+      powder: p(batch.powder_price_per_mt), sweeping: p(batch.sweeping_price_per_mt), choba: p(batch.choba_price_per_mt),
     };
     const hasPerGradeBroken = (b1 + b2 + b3 + csr + shortGrain) > 0;
+    // O.V (ov_mt) and Stone (stone_mt) are record-only residue — like wastage,
+    // they carry no sale value and are NOT credited here, so their weight is
+    // absorbed into the finished cost.
     const byQty = hasPerGradeBroken
-      ? { b1, b2, b3, csr, short_grain: shortGrain, bran, husk, sortex, powder, sweeping }
-      : { broken, bran, husk, sortex, powder, sweeping };
+      ? { b1, b2, b3, csr, short_grain: shortGrain, bran, husk, sortex, powder, sweeping, choba }
+      : { broken, bran, husk, sortex, powder, sweeping, choba };
 
     let byproductValue = 0;
     const byCostPerKg = {};
@@ -2435,6 +2442,7 @@ const inventoryService = {
       if (n.includes('sortex')) return 'sortex';
       if (n.includes('powder')) return 'powder';
       if (n.includes('sweeping')) return 'sweeping';
+      if (n.includes('choba')) return 'choba';
       // Grade can live in the grade column OR the lot_no / item_name (e.g.
       // "M-002-B1-01", "Blend M-002 — B1"). Output lots created at yield left the
       // grade column blank, which collapsed every broken grade onto the tier
@@ -2738,7 +2746,7 @@ const inventoryService = {
     const b1 = p(batch.b1_mt), b2 = p(batch.b2_mt), b3 = p(batch.b3_mt), csr = p(batch.csr_mt), shortGrain = p(batch.short_grain_mt);
     const broken = (b1 + b2 + b3 + csr + shortGrain) || p(batch.broken_mt);
     const bran = p(batch.bran_mt), husk = p(batch.husk_mt), sortex = p(batch.sortex_rejects_mt);
-    const powder = p(batch.powder_mt), sweeping = p(batch.sweeping_mt);
+    const powder = p(batch.powder_mt), sweeping = p(batch.sweeping_mt), choba = p(batch.choba_mt);
 
     // 1. Existing output lots + safety: must be untouched (not reserved/sold/consumed).
     const outLots = await trx('inventory_lots')
@@ -2786,13 +2794,14 @@ const inventoryService = {
     const arrivalQuality = await trx('milling_quality_samples').where({ batch_id: batchId, analysis_type: 'arrival' }).first();
     await inventoryService.recordMillingOutput(trx, {
       batchId, finishedMT: finished, brokenMT: broken, branMT: bran, huskMT: husk,
-      sortexMT: sortex, powderMT: powder, sweepingMT: sweeping,
+      sortexMT: sortex, powderMT: powder, sweepingMT: sweeping, chobaMT: choba,
       productName: riceTypeName || 'Finished Rice', costPerMT: a.finishedCostPerKg * 1000,
       rawCostComponent: a.finishedCostPerKg * a.rawFrac, millingCostComponent: a.finishedCostPerKg * a.millFrac,
       byproductCosts: {
         broken: alloc.broken || 0, b1: alloc.b1 || 0, b2: alloc.b2 || 0, b3: alloc.b3 || 0,
         csr: alloc.csr || 0, short_grain: alloc.short_grain || 0, bran: alloc.bran || 0,
         husk: alloc.husk || 0, sortex: alloc.sortex || 0, powder: alloc.powder || 0, sweeping: alloc.sweeping || 0,
+        choba: alloc.choba || 0,
       },
       brokenGrades: { b1, b2, b3, csr, shortGrain },
       userId, supplierInfo: { supplierId: batch.supplier_id },
