@@ -5,7 +5,7 @@ import {
   ArrowLeft, Package, Truck, DollarSign, FileText, BarChart3,
   Plus, Save, Edit3, AlertTriangle, Warehouse, ShoppingBag, Scale,
   Activity, ChevronRight, TrendingUp, Clock, Factory, Play, Trash2, Loader2, Printer,
-  ArrowDownLeft, ArrowUpRight, Calendar, Hash, Wrench, Boxes, ArrowRightLeft,
+  ArrowDownLeft, ArrowUpRight, Calendar, Hash, Wrench, Boxes, ArrowRightLeft, Lock,
 } from 'lucide-react';
 import {
   useLotDetail, useRecordLotTransaction, useLocalSalesByLot,
@@ -13,6 +13,7 @@ import {
 } from '../../../api/queries';
 import SupplierPicker from '../../../components/SupplierPicker';
 import { useApp } from '../../../context/AppContext';
+import { useAuth } from '../../../context/AuthContext';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 import StatusBadge from '../../../components/StatusBadge';
 import Modal from '../../../components/Modal';
@@ -56,6 +57,7 @@ export default function LotDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { addToast, warehousesList, companyProfileData } = useApp();
+  const { user, hasPermission } = useAuth();
   const { data: suppliersList = [] } = useSuppliers();
   const [activeTab, setActiveTab] = useState('overview');
   const [displayUnit, setDisplayUnit] = useState('katta');
@@ -198,6 +200,26 @@ export default function LotDetail() {
   const outboundTxns = transactions.filter(t => parseFloat(t.quantityKg) < 0);
   const totalInKg = inboundTxns.reduce((s, t) => s + Math.abs(parseFloat(t.quantityKg) || 0), 0);
   const totalOutKg = outboundTxns.reduce((s, t) => s + Math.abs(parseFloat(t.quantityKg) || 0), 0);
+
+  // #8 — lot-edit gating. A Mill Operator may edit a lot ONLY if they created it
+  // AND milling has not started; every other role follows the inventory.edit
+  // permission as before. Mirrors the backend guard (assertLotEditableByOperator)
+  // so the UI and API agree. "Milling started" = drawn into a batch / hard-reserved
+  // / issued out.
+  const millingStarted = millingBatches.length > 0
+    || outboundTxns.length > 0
+    || (parseFloat(lot.millingReservedQty) || 0) > 0
+    || ['In Milling', 'Consumed', 'Milled'].includes(lot.millingStatus);
+  const isOperator = user?.role === 'Mill Operator';
+  const ownsLot = String(lot.createdBy ?? '') === String(user?.id ?? '');
+  const canEditLot = isOperator
+    ? (hasPermission('inventory', 'edit') && ownsLot && !millingStarted)
+    : hasPermission('inventory', 'edit');
+  // Only show the lock note when the operator owns the lot but milling has begun
+  // (the actionable case); for a lot they didn't create we simply hide the controls.
+  const editLockMsg = isOperator && ownsLot && millingStarted
+    ? 'Lot cannot be edited after milling has started.'
+    : null;
 
   return (
     <div className="space-y-6">
@@ -468,7 +490,9 @@ export default function LotDetail() {
           <div className="bg-white rounded-xl border border-gray-100 p-5">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider flex items-center gap-2"><BarChart3 className="w-4 h-4 text-violet-600" /> Quality Specifications</h3>
-              <button onClick={() => setShowQualityModal(true)} className="btn btn-sm btn-secondary"><Edit3 className="w-3.5 h-3.5" /> Edit</button>
+              {canEditLot
+                ? <button onClick={() => setShowQualityModal(true)} className="btn btn-sm btn-secondary"><Edit3 className="w-3.5 h-3.5" /> Edit</button>
+                : editLockMsg && <span className="text-xs text-amber-600 flex items-center gap-1"><Lock className="w-3.5 h-3.5" /> {editLockMsg}</span>}
             </div>
             {(() => {
               // Merge every source of quality for this lot, in priority order:
@@ -637,11 +661,14 @@ export default function LotDetail() {
           <div className="bg-blue-50 rounded-xl border border-blue-100 p-5 lg:col-span-2">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-blue-700 uppercase tracking-wider">Purchase Pricing</h3>
-              {lot.type === 'raw' && (
+              {lot.type === 'raw' && canEditLot && (
                 <div className="flex items-center gap-2">
                   <button onClick={() => setShowReceivedModal(true)} className="btn btn-sm btn-secondary"><Scale className="w-3.5 h-3.5" /> Edit Received</button>
                   <button onClick={() => setShowPriceModal(true)} className="btn btn-sm btn-secondary"><Edit3 className="w-3.5 h-3.5" /> Edit Price</button>
                 </div>
+              )}
+              {lot.type === 'raw' && !canEditLot && editLockMsg && (
+                <span className="text-xs text-amber-600 flex items-center gap-1"><Lock className="w-3.5 h-3.5" /> {editLockMsg}</span>
               )}
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -765,8 +792,11 @@ export default function LotDetail() {
           <div className="bg-white rounded-xl border border-gray-100 p-5">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">{isMilled ? 'Milling Allocation' : 'Additional Costs'}</h3>
-              {!isMilled && (
+              {!isMilled && canEditLot && (
                 <button onClick={() => setShowCostModal(true)} className="btn btn-sm btn-secondary"><Edit3 className="w-3.5 h-3.5" /> Edit</button>
+              )}
+              {!isMilled && !canEditLot && editLockMsg && (
+                <span className="text-xs text-amber-600 flex items-center gap-1"><Lock className="w-3.5 h-3.5" /> {editLockMsg}</span>
               )}
             </div>
             {isMilled ? (
