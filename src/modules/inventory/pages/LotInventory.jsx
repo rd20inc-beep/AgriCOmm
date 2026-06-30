@@ -821,12 +821,14 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
 
     const { batch, vehicle } = option;
     const quality = batch.quality?.arrival || batch.quality?.sample || {};
-    const pricePerMt = parseFloat(quality.price_per_mt) || 0;
+    // Engine is KG/per-kg since 5c; tolerate legacy per-MT just in case.
+    const pricePerKg = parseFloat(quality.price_per_kg)
+      || (parseFloat(quality.price_per_mt) || 0) / 1000;
 
-    // Determine quantity: vehicle weight or batch raw_qty_mt
-    const qtyMT = vehicle?.weight_mt
-      ? parseFloat(vehicle.weight_mt)
-      : parseFloat(batch.raw_qty_mt) || 0;
+    // Determine quantity (KG): vehicle weight or batch raw quantity.
+    const qtyKg = vehicle?.weight_kg
+      ? parseFloat(vehicle.weight_kg)
+      : parseFloat(batch.raw_qty_kg) || 0;
 
     // Determine purchase date from vehicle arrival or today
     const purchaseDate = vehicle?.arrival_date || new Date().toISOString().slice(0, 10);
@@ -841,7 +843,7 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
       ? `Raw Rice (${vehicle.vehicle_no})`
       : `Raw Rice (${batch.batch_no})`;
 
-    const kgFromSource = qtyMT > 0 ? Math.round(qtyMT * 1000) : 0;
+    const kgFromSource = qtyKg > 0 ? Math.round(qtyKg) : 0;
     const bagsFromVehicle = vehicle?.total_bags ? parseInt(vehicle.total_bags, 10) : '';
 
     setForm(prev => ({
@@ -859,9 +861,9 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
       // Quantity auto-fill (kg-first)
       weight_kg: kgFromSource > 0 ? String(kgFromSource) : '',
       total_bags: bagsFromVehicle ? String(bagsFromVehicle) : '',
-      // Rate auto-fill from quality price (per MT → keep MT unit so user sees what they entered upstream)
-      rate_input: pricePerMt > 0 ? String(pricePerMt) : '',
-      rate_unit: 'ton',
+      // Rate auto-fill from quality price (per kg, matching the engine unit)
+      rate_input: pricePerKg > 0 ? String(pricePerKg) : '',
+      rate_unit: 'kg',
       // Notes
       notes: vehicle
         ? `From ${batch.batch_no}, Vehicle: ${vehicle.vehicle_no}${vehicle.driver_name ? ', Driver: ' + vehicle.driver_name : ''}`

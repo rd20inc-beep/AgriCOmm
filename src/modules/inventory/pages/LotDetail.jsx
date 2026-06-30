@@ -1831,9 +1831,9 @@ function LotLineage({ lotId, lotNo }) {
 // which decrements the lot's available_qty, increments batch.raw_qty_mt,
 // and writes a milling_vehicle_arrivals row so the batch traces back.
 function AllocateToBatchModal({ isOpen, onClose, lot, addToast, refetch }) {
-  const availableMt = parseFloat(lot?.availableQty) || 0;
+  const availableKg = parseFloat(lot?.availableQty) || 0; // availableQty is KG (post-5c)
   const [batchId, setBatchId] = useState('');
-  const [weightMt, setWeightMt] = useState(String(availableMt));
+  const [weightKg, setWeightKg] = useState(String(availableKg));
   const [notes, setNotes] = useState('');
   const { data: batches = [] } = useMillingBatches({ limit: 200 });
   const allocateMut = useAllocateLotToBatch();
@@ -1842,21 +1842,21 @@ function AllocateToBatchModal({ isOpen, onClose, lot, addToast, refetch }) {
   useEffect(() => {
     if (isOpen) {
       setBatchId('');
-      setWeightMt(String(availableMt));
+      setWeightKg(String(availableKg));
       setNotes('');
     }
-  }, [isOpen, availableMt]);
+  }, [isOpen, availableKg]);
 
   const openBatches = (batches || []).filter(b => !['Completed', 'Cancelled', 'Rejected'].includes(b.status));
 
   async function handleSubmit(e) {
     e.preventDefault();
     if (!batchId)                       return addToast('Pick a milling batch', 'error');
-    const w = parseFloat(weightMt);
+    const w = parseFloat(weightKg);
     if (!w || w <= 0)                    return addToast('Weight must be greater than 0', 'error');
-    if (w > availableMt + 0.0001)        return addToast(`Lot only has ${Math.round(availableMt).toLocaleString()} kg available`, 'error');
+    if (w > availableKg + 0.0001)        return addToast(`Lot only has ${Math.round(availableKg).toLocaleString()} kg available`, 'error');
     try {
-      const res = await allocateMut.mutateAsync({ lotId: lot.id, batchId: parseInt(batchId, 10), weightMt: w, notes });
+      const res = await allocateMut.mutateAsync({ lotId: lot.id, batchId: parseInt(batchId, 10), weightKg: w, notes });
       const data = res?.data || res;
       addToast(
         data?.fully_consumed
@@ -1878,7 +1878,7 @@ function AllocateToBatchModal({ isOpen, onClose, lot, addToast, refetch }) {
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
           <p><strong>{lot.itemName}</strong>{lot.variety ? ` — ${lot.variety}` : ''}</p>
-          <p>Available: <strong>{Math.round(availableMt).toLocaleString()} kg</strong></p>
+          <p>Available: <strong>{Math.round(availableKg).toLocaleString()} kg</strong></p>
         </div>
 
         <div>
@@ -1899,8 +1899,8 @@ function AllocateToBatchModal({ isOpen, onClose, lot, addToast, refetch }) {
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Weight to allocate (kg) *</label>
-          <input type="number" step="0.01" min="0.01" max={availableMt} required
-            value={weightMt} onChange={e => setWeightMt(e.target.value)}
+          <input type="number" step="0.01" min="0.01" max={availableKg} required
+            value={weightKg} onChange={e => setWeightKg(e.target.value)}
             className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm" />
           <p className="text-xs text-gray-400 mt-1">Defaults to the full lot. Reduce to allocate a portion.</p>
         </div>

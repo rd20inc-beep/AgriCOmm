@@ -178,7 +178,8 @@ export default function MillHomeDashboard() {
       ['In Progress', 'Queued', 'Pending Approval'].includes(b.status)
     ).length;
 
-    const rawStockMT = inventory
+    // i.qty is KG (post-5c); keep consumption in KG too so days-of-cover is consistent.
+    const rawStockKg = inventory
       .filter(i => i.type === 'raw')
       .reduce((s, i) => s + (Number(i.qty) || 0), 0);
 
@@ -187,9 +188,9 @@ export default function MillHomeDashboard() {
       if (b.status !== 'Completed' || !b.completedAt) return false;
       return new Date(b.completedAt) >= weekAgo;
     });
-    const rawConsumedLast7 = completedLastWeek.reduce((s, b) => s + (Number(b.rawQtyMT) || 0), 0);
+    const rawConsumedLast7 = completedLastWeek.reduce((s, b) => s + (Number(b.rawQtyKg) || 0), 0);
     const dailyConsumption = rawConsumedLast7 / 7;
-    const daysOfCover = dailyConsumption > 0 ? Math.round(rawStockMT / dailyConsumption) : null;
+    const daysOfCover = dailyConsumption > 0 ? Math.round(rawStockKg / dailyConsumption) : null;
 
     const yieldLast7 = completedLastWeek.length > 0
       ? completedLastWeek.reduce((s, b) => s + (Number(b.yieldPct) || 0), 0) / completedLastWeek.length
@@ -237,7 +238,7 @@ export default function MillHomeDashboard() {
       varianceFlagged: varianceFlagged.length,
       stalledBatches: stalledBatches.length,
       batchesInProgress,
-      rawStockMT,
+      rawStockKg,
       daysOfCover,
       yieldLast7,
       completedThisWeek,
@@ -359,7 +360,7 @@ export default function MillHomeDashboard() {
         <KPI
           icon={Wheat}
           label="Raw Rice Stock"
-          value={formatKg(data.rawStockMT)}
+          value={formatKg(data.rawStockKg)}
           sub={data.daysOfCover != null ? `${data.daysOfCover} days of cover` : 'no recent consumption'}
           accent={data.daysOfCover != null && data.daysOfCover < 3 ? 'red' : 'amber'}
         />
