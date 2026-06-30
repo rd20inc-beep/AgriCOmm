@@ -1,10 +1,13 @@
 import { useState } from 'react';
-import { ArrowRightLeft, Package, DollarSign, Calendar, Warehouse, CheckCircle, Building2 } from 'lucide-react';
+import { ArrowRightLeft, Package, DollarSign, Calendar, Warehouse, CheckCircle, Building2, Clock, Truck, Loader2, ArrowDown } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
-import { useInternalTransfers, useCreateTransfer } from '../../../api/queries';
+import { useInternalTransfers, useCreateTransfer, useInternalTransfer, useConfirmTransferExport } from '../../../api/queries';
 import StatusBadge from '../../../components/StatusBadge';
+import SlideDrawer from '../../../components/SlideDrawer';
 
 const PKR_RATE = 280; // PKR per USD
+const formatPKR = (value) => 'Rs ' + Math.round(parseFloat(value) || 0).toLocaleString('en-PK');
+const formatUSD = (value) => '$' + (parseFloat(value) || 0).toLocaleString('en-US');
 
 export default function InternalTransfer() {
   const { millingBatches, exportOrders, addToast } = useApp();
@@ -30,6 +33,7 @@ export default function InternalTransfer() {
     dispatchDate: '',
   });
   const [submitting, setSubmitting] = useState(false);
+  const [openId, setOpenId] = useState(null);
 
   const selectedBatch = completedBatches.find(b => b.id === form.batchNo);
   const selectedOrder = activeExportOrders.find(o => o.id === form.exportOrder);
@@ -84,9 +88,6 @@ export default function InternalTransfer() {
       setSubmitting(false);
     }
   };
-
-  const formatPKR = (value) => 'Rs ' + Math.round(parseFloat(value) || 0).toLocaleString('en-PK');
-  const formatUSD = (value) => '$' + (parseFloat(value) || 0).toLocaleString('en-US');
 
   return (
     <div className="space-y-6">
@@ -320,8 +321,8 @@ export default function InternalTransfer() {
                 <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-400">No transfers yet</td></tr>
               ) : (
                 transfers.map(t => (
-                  <tr key={t.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3 font-medium text-blue-600">{t.transferNo}</td>
+                  <tr key={t.id} onClick={() => setOpenId(t.id)} className="hover:bg-blue-50/50 transition-colors cursor-pointer">
+                    <td className="px-4 py-3 font-medium text-blue-600 hover:underline">{t.transferNo}</td>
                     <td className="px-4 py-3 text-gray-900">{t.batchNo || `B-${t.batchId}`}</td>
                     <td className="px-4 py-3 text-gray-900">{t.exportOrderNo || `#${t.exportOrderId}`}</td>
                     <td className="px-4 py-3 text-gray-600">{t.productName}</td>
@@ -339,6 +340,117 @@ export default function InternalTransfer() {
           </table>
         </div>
       </div>
+
+      <TransferDetailDrawer transferId={openId} onClose={() => setOpenId(null)} />
+    </div>
+  );
+}
+
+function TransferDetailDrawer({ transferId, onClose }) {
+  const { addToast } = useApp();
+  const { data, isLoading } = useInternalTransfer(transferId);
+  const confirmMut = useConfirmTransferExport();
+
+  const t = data?.transfer || null;
+  const movements = data?.movements || [];
+  const timeline = data?.timeline || [];
+  const isExported = t && (t.status === 'Received' || !!t.confirmedAt);
+
+  const handleConfirm = async () => {
+    try {
+      await confirmMut.mutateAsync(transferId);
+      addToast('Transfer confirmed exported.', 'success');
+    } catch (err) {
+      addToast(err.message || 'Failed to confirm transfer.', 'error');
+    }
+  };
+
+  const footer = t && !isExported && t.status !== 'Cancelled' ? (
+    <button onClick={handleConfirm} disabled={confirmMut.isPending}
+      className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-medium py-2.5 rounded-lg inline-flex items-center justify-center gap-2">
+      {confirmMut.isPending ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle size={16} />}
+      Confirm export
+    </button>
+  ) : null;
+
+  return (
+    <SlideDrawer open={!!transferId} onClose={onClose} title={t?.transferNo || 'Transfer'}
+      subtitle={t ? `Mill Finished Goods → Export Dispatch` : ''} icon={ArrowRightLeft} size="lg" footer={footer}>
+      {isLoading || !t ? (
+        <p className="text-sm text-gray-400 py-10 text-center">Loading…</p>
+      ) : (
+        <div className="space-y-5">
+          <div className="flex items-center gap-2">
+            <StatusBadge status={t.status} />
+            <span className="text-xs text-gray-500">{(parseFloat(t.qtyMt) || 0).toFixed(1)} MT · {t.productName || 'Finished Rice'}</span>
+          </div>
+
+          {/* Key facts */}
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <Fact label="Batch" value={t.batchNo || (t.batchId ? `B-${t.batchId}` : '—')} />
+            <Fact label="Export order" value={t.exportOrderNo || (t.exportOrderId ? `#${t.exportOrderId}` : '—')} />
+            <Fact label="Customer" value={t.exportCustomerName || '—'} />
+            <Fact label="Dispatch date" value={t.dispatchDate || '—'} />
+            <Fact label="Qty" value={`${(parseFloat(t.qtyMt) || 0).toFixed(1)} MT`} />
+            <Fact label="Price / MT" value={formatPKR(t.transferPricePkr)} />
+            <Fact label="Total (PKR)" value={formatPKR(t.totalValuePkr)} />
+            <Fact label="Total (USD)" value={formatUSD(t.usdEquivalent)} />
+            <Fact label="Created by" value={t.createdByName || '—'} />
+            <Fact label="FX rate" value={`1 USD = ${parseFloat(t.pkrRate) || PKR_RATE} PKR`} />
+          </div>
+
+          {/* Timeline */}
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">Timeline</h3>
+            <ol className="space-y-3">
+              {timeline.map((step) => (
+                <li key={step.key} className="flex items-start gap-3">
+                  <span className={`mt-0.5 w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${step.done ? 'bg-emerald-100 text-emerald-600' : 'bg-gray-100 text-gray-300'}`}>
+                    {step.done ? <CheckCircle size={13} /> : <Clock size={13} />}
+                  </span>
+                  <div className="min-w-0">
+                    <p className={`text-sm font-medium ${step.done ? 'text-gray-800' : 'text-gray-400'}`}>{step.label}</p>
+                    <p className="text-[11px] text-gray-400">
+                      {step.at ? new Date(step.at).toLocaleString() : 'Pending'}{step.by ? ` · ${step.by}` : ''}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </div>
+
+          {/* Stock movements */}
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">Stock movement</h3>
+            {movements.length === 0 ? (
+              <p className="text-xs text-gray-400">No linked stock movements recorded.</p>
+            ) : (
+              <div className="space-y-2">
+                {movements.map((m) => (
+                  <div key={m.id} className="flex items-center gap-2 text-xs bg-gray-50 rounded-lg px-3 py-2">
+                    {String(m.movementType).includes('out') ? <Truck size={14} className="text-red-500" /> : <ArrowDown size={14} className="text-emerald-600" />}
+                    <span className="font-medium text-gray-700">{m.lotNo || `Lot ${m.lotId}`}</span>
+                    <span className="text-gray-400">·</span>
+                    <span className="text-gray-600 capitalize">{String(m.movementType).replace(/_/g, ' ')}</span>
+                    <span className="ml-auto tabular-nums font-medium text-gray-800">{(parseFloat(m.qty) || 0).toFixed(1)} MT</span>
+                    <span className="text-[10px] text-gray-400 uppercase">{m.lotEntity}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="text-[11px] text-gray-400 mt-2">Stock was deducted from the mill and received into export when the transfer was created. Confirming export only marks the dispatch complete — it does not move stock again.</p>
+          </div>
+        </div>
+      )}
+    </SlideDrawer>
+  );
+}
+
+function Fact({ label, value }) {
+  return (
+    <div>
+      <p className="text-[11px] uppercase tracking-wider text-gray-400">{label}</p>
+      <p className="text-sm font-medium text-gray-800 truncate" title={String(value)}>{value}</p>
     </div>
   );
 }
