@@ -2832,11 +2832,11 @@ function KpiTile({ icon: Icon, tone = 'gray', label, primary, secondary, loading
   const t = tones[tone] || tones.gray;
   return (
     <div className={`bg-white rounded-xl border border-gray-200 p-4 ring-1 ${t.ring}`}>
-      <div className="flex items-start justify-between mb-2">
-        <span className="text-[11px] uppercase tracking-wider text-gray-500 font-medium">{label}</span>
-        {Icon && <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${t.icon}`}><Icon size={14} /></span>}
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <span className="text-[11px] uppercase tracking-wider text-gray-500 font-medium min-w-0 truncate">{label}</span>
+        {Icon && <span className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${t.icon}`}><Icon size={14} /></span>}
       </div>
-      <div className="text-xl font-bold text-gray-900 leading-none">
+      <div className="text-xl font-bold text-gray-900 leading-none truncate">
         {loading ? <span className="inline-block w-16 h-4 bg-gray-100 rounded animate-pulse" /> : primary}
       </div>
       {secondary && <div className="text-[11px] text-gray-500 mt-1">{secondary}</div>}

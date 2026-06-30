@@ -182,7 +182,7 @@ export default function EmployeePortal() {
   // ── Login screen ──
   if (!token || !me) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center p-4">
+      <div className="min-h-screen w-full flex-1 bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center p-4">
         <div className="w-full max-w-sm bg-white rounded-2xl shadow-lg p-7">
           <div className="text-center mb-5">
             <div className="text-xl font-extrabold text-[#1e3a5f]">Employee Self-Service</div>
@@ -209,19 +209,21 @@ export default function EmployeePortal() {
   const w = me.worker; const co = me.company;
   // ── Home ──
   return (
-    <div className="min-h-screen bg-slate-100">
-      <header className="bg-[#1e3a5f] text-white px-4 py-3 flex items-center justify-between">
-        <div>
-          <div className="text-sm font-semibold">{co?.legalName || co?.name || 'Agri Commodities'}</div>
-          <div className="text-[11px] text-slate-300">Employee Self-Service</div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => { setPinOpen((v) => !v); setMsg(''); setErr(''); }} className="text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20">Change PIN</button>
-          <button onClick={logout} className="text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20">Sign out</button>
+    <div className="min-h-screen w-full flex-1 bg-slate-100">
+      <header className="bg-[#1e3a5f] text-white">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
+          <div>
+            <div className="text-sm font-semibold">{co?.legalName || co?.name || 'Agri Commodities'}</div>
+            <div className="text-[11px] text-slate-300">Employee Self-Service</div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => { setPinOpen((v) => !v); setMsg(''); setErr(''); }} className="text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20">Change PIN</button>
+            <button onClick={logout} className="text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20">Sign out</button>
+          </div>
         </div>
       </header>
 
-      <main className="max-w-2xl mx-auto p-4 space-y-4">
+      <main className="max-w-6xl mx-auto p-4 sm:p-6 space-y-4">
         {/* Profile */}
         <div className="bg-white rounded-xl shadow-sm p-4">
           <div className="text-lg font-bold text-gray-900">{w.name}</div>
