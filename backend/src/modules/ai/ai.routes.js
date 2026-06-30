@@ -28,21 +28,90 @@ router.get('/status', (req, res) => {
   res.json({ success: true, data: { enabled: ai.enabled(), model: ai.enabled() ? config.ai.model : null } });
 });
 
-// ── Schema context for text-to-SQL (cached per process) ──
+// ── Curated, annotated schema for text-to-SQL ──────────────────────────────
+// Only these core business tables are exposed to the model. Columns are read live
+// from information_schema (so they never drift), but the table set is an allowlist:
+// dead/analytical/system/auth tables are deliberately omitted — both to focus the
+// model on the right tables and to keep sensitive data out of its reach. Each entry
+// is a one-line purpose hint that materially improves the SQL the model writes.
+const CURATED = {
+  // Inventory & lots
+  inventory_lots: 'Current stock lots. qty/available_qty/reserved_qty in KG; rate_per_kg & landed_cost_per_kg in PKR/kg; type=raw|finished|byproduct; entity=mill|export; variety=rice type; supplier_id→suppliers.',
+  lot_transactions: 'Per-lot stock ledger (purchases, milling issues/receipts, sales). quantity_kg, rate_per_kg, total_cost (PKR); transaction_type.',
+  inventory_movements: 'Stock movement log; qty in KG.',
+  inventory_reservations: 'Soft reservations against lots; reserved_qty in KG.',
+  batch_source_lots: 'Raw lots consumed by a milling batch; qty_kg.',
+  // Milling
+  milling_batches: 'Milling runs. raw_qty_kg, actual_finished_kg, broken_kg & per-grade *_kg; yield_pct; *_price_per_kg (PKR/kg); raw_cost_per_kg_finished/total_cost_per_kg_finished; supplier_id/supplier_name; status (Completed/In Progress/…).',
+  milling_output_market_prices: 'Recorded selling prices per batch (finished/broken/… _price_per_kg in PKR/kg).',
+  milling_costs: 'Milling cost lines per batch (category, amount in PKR).',
+  milling_quality_samples: 'Quality grade samples per batch.',
+  milling_vehicle_arrivals: 'Trucks delivering raw rice to a batch; weight_kg.',
+  // Sales & export
+  local_sales: 'Domestic sales (a row IS the invoice). quantity_kg, rate_per_kg, total (PKR); customer_id; payment_method; sale_group_no groups multi-item sales.',
+  export_orders: 'Export contracts. qty_mt in METRIC TONNES (×1000=kg); contract_value & price_per_mt usually USD; customer_id; country; status.',
+  export_order_items: 'Line items on an export order.',
+  export_order_costs: 'Cost lines on an export order (amount in PKR).',
+  // Parties & products
+  suppliers: 'Suppliers (name, type, country).',
+  customers: 'Customers (name, customer_type=local|export, country).',
+  products: 'Products / rice varieties (name, category).',
+  // Finance / GL
+  journal_entries: "GL journal headers. status — use 'Posted'; journal_no; entry_date; entity.",
+  journal_lines: 'GL lines. journal_id→journal_entries.id; account_id→chart_of_accounts.id; debit & credit are separate columns (PKR).',
+  chart_of_accounts: 'GL accounts (code, name, type).',
+  payables: 'Amounts owed to suppliers/vendors. outstanding & amount (PKR); due_date; source_table/source_id (no name column — join via source).',
+  payments: 'Recorded payments (made/received).',
+  bank_accounts: 'Cash & bank accounts; current_balance (PKR); type (incl. cash).',
+  bank_transactions: "Bank/cash ledger; type=credit|debit; status='posted'.",
+  business_expenses: 'Operating expenses; amount_pkr; category; expense_date; vendor_name.',
+  fund_transfers: 'Head-Office ⇄ Mill money transfers.',
+  // Payroll
+  mill_workers: 'Mill employees (name, type daily|salaried, wage/salary).',
+  mill_payroll_runs: 'Monthly payroll runs (period, pay_date, net_total, employee_count).',
+  mill_payroll_lines: 'Per-employee payroll line within a run.',
+  mill_attendance: 'Daily attendance register.',
+  mill_worker_advances: 'Salary advances to workers.',
+  // Procurement
+  purchase_orders: 'Purchase orders (price_per_mt — doc, per MT).',
+  goods_receipt_notes: 'Goods receipts against POs (accepted_qty_mt/rejected_qty_mt — MT).',
+};
+
+const CONVENTIONS = [
+  'CONVENTIONS (read carefully):',
+  '- Quantities are in KILOGRAMS: every column ending _kg, plus inventory_lots.qty/available_qty/reserved_qty and inventory_movements.qty. EXCEPTION: export_orders/purchase_orders/goods_receipt_notes use *_mt in metric TONNES (×1000 for kg).',
+  '- Money is PKR unless a currency column says otherwise; export_orders.contract_value/price_per_mt are usually USD.',
+  '- Per-kg prices are columns ending _price_per_kg or rate_per_kg.',
+  "- Financials/trial balance: join journal_lines.journal_id = journal_entries.id and filter journal_entries.status = 'Posted'; net = SUM(debit) - SUM(credit).",
+  '- Domestic sales = local_sales; export sales = export_orders. There is no generic "sales" or "invoices" table (a sale row IS the invoice).',
+  '- Current stock on hand = inventory_lots (SUM(available_qty)); full history = lot_transactions.',
+  '- Transaction tables store supplier_id/customer_id, NOT names — join suppliers/customers by id.',
+  "- Text/status values are Capitalized (e.g. 'Completed', 'Posted', 'Available'); match names with ILIKE '%term%'.",
+].join('\n');
+
 let _schema = null;
 async function schemaContext() {
   if (_schema) return _schema;
-  const rows = await db.raw(`
-    SELECT table_name, column_name FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name NOT LIKE 'knex_%'
-    ORDER BY table_name, ordinal_position`);
+  const names = Object.keys(CURATED);
+  const rows = await db.raw(
+    `SELECT table_name, column_name FROM information_schema.columns
+     WHERE table_schema = 'public' AND table_name = ANY(?)
+     ORDER BY table_name, ordinal_position`, [names]);
   const byTable = {};
   for (const r of rows.rows) (byTable[r.table_name] = byTable[r.table_name] || []).push(r.column_name);
-  _schema = Object.entries(byTable).map(([t, cols]) => `${t}(${cols.join(', ')})`).join('\n');
+  const lines = names.filter((t) => byTable[t]).map((t) => `${t}(${byTable[t].join(', ')})  -- ${CURATED[t]}`);
+  _schema = `${CONVENTIONS}\n\nTABLES (table(columns) -- purpose):\n${lines.join('\n')}`;
   return _schema;
 }
 
 const WRITE_RE = /\b(insert|update|delete|drop|alter|truncate|create|grant|revoke|comment|copy|merge|call|do)\b/i;
+// Dangerous functions / system catalogs / file & network access — blocked even though
+// the query runs read-only, to prevent metadata recon and server-side file/network reads.
+const DANGER_RE = /\b(pg_sleep|pg_read_file|pg_read_binary_file|pg_ls_dir|pg_stat_file|lo_import|lo_export|lo_get|dblink|set_config|current_setting|pg_catalog|pg_authid|pg_shadow|pg_user|pg_roles|information_schema)\b/i;
+// Auth / PII / access-control tables — never queryable via NL→SQL (a read-only SELECT
+// could still leak password hashes / role grants without this).
+const SENSITIVE_TABLES = ['users', 'password_reset_tokens', 'user_preferences', 'roles', 'role_permissions', 'permissions', 'sessions', 'user_sessions', 'api_integrations', 'api_sync_log', 'approval_authorizations'];
+const SENSITIVE_RE = new RegExp(`\\b(${SENSITIVE_TABLES.join('|')})\\b`, 'i');
 
 // ── 1) Natural-language report query ──
 router.post('/query', noFinanceForOperator, async (req, res) => {
@@ -53,11 +122,12 @@ router.post('/query', noFinanceForOperator, async (req, res) => {
 
     const schema = await schemaContext();
     const out = await ai.complete({
-      system: 'You write PostgreSQL for a rice-mill ERP. Output JSON only — no prose, no markdown.',
-      prompt: `Database schema as table(columns):\n${schema}\n\nUser question: "${question}"\n\n`
+      system: 'You write PostgreSQL for a rice-mill ERP. Use ONLY the tables and columns given, and follow the stated CONVENTIONS exactly (units, PKR vs USD, the Posted-journal rule). Output JSON only — no prose, no markdown.',
+      prompt: `${schema}\n\nUser question: "${question}"\n\n`
         + 'Write ONE read-only PostgreSQL query that answers it.\nRules:\n'
         + '- SELECT or WITH only. Never write data or DDL. Single statement, no semicolons.\n'
-        + '- All money columns are in PKR. Use ILIKE \'%term%\' for name matching.\n'
+        + '- Use only the tables/columns listed above; honour the CONVENTIONS (KG quantities, PKR money, Posted journals).\n'
+        + "- Use ILIKE '%term%' for name matching; join suppliers/customers/products by id to show names.\n"
         + '- Add LIMIT 200 unless the result is a single aggregate row.\n'
         + '- Select human-readable columns (names, dates, amounts) rather than raw ids where possible.\n'
         + 'Return JSON: {"sql":"<query>","explanation":"<one sentence>"}.',
@@ -66,8 +136,13 @@ router.post('/query', noFinanceForOperator, async (req, res) => {
 
     let sql = String(out.sql || '').trim().replace(/;+\s*$/, '');
     if (!/^(select|with)\b/i.test(sql)) return res.status(400).json({ success: false, message: 'Could not turn that into a read query — try rephrasing.', data: { sql } });
-    if (WRITE_RE.test(sql) || sql.includes(';')) return res.status(400).json({ success: false, message: 'Only read-only queries are allowed.', data: { sql } });
-    if (!/\blimit\s+\d+/i.test(sql)) sql += ' LIMIT 200';
+    if (sql.includes(';')) return res.status(400).json({ success: false, message: 'Only a single read-only statement is allowed.', data: { sql } });
+    if (WRITE_RE.test(sql) || DANGER_RE.test(sql)) return res.status(400).json({ success: false, message: 'Only plain read-only queries are allowed (no writes, system functions, or catalog access).', data: { sql } });
+    if (SENSITIVE_RE.test(sql)) return res.status(400).json({ success: false, message: 'That query touches restricted data (users, roles, or credentials) and was blocked.', data: { sql } });
+    // Enforce a sane row cap: add LIMIT when missing, clamp an over-large one.
+    const limitMatch = sql.match(/\blimit\s+(\d+)/i);
+    if (!limitMatch) sql += ' LIMIT 200';
+    else if (parseInt(limitMatch[1], 10) > 1000) sql = sql.replace(/\blimit\s+\d+/i, 'LIMIT 1000');
 
     let rows;
     try {
