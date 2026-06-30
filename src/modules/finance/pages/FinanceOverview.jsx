@@ -416,11 +416,11 @@ function KpiTile({ icon: Icon, tone = 'gray', label, primary, secondary, hint, h
       onClick={onClick}
       className={`bg-white rounded-xl border border-gray-200 ${onClick ? 'hover:border-gray-300 cursor-pointer hover:shadow-sm' : ''} transition-all p-4 text-left ring-1 ${t.ring}`}
     >
-      <div className="flex items-start justify-between mb-2">
-        <span className="text-[11px] uppercase tracking-wider text-gray-500 font-medium">{label}</span>
-        {Icon && <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${t.icon}`}><Icon size={14} /></span>}
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <span className="text-[11px] uppercase tracking-wider text-gray-500 font-medium min-w-0 truncate">{label}</span>
+        {Icon && <span className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${t.icon}`}><Icon size={14} /></span>}
       </div>
-      <div className="text-xl font-bold text-gray-900 leading-none">{primary}</div>
+      <div className="text-xl font-bold text-gray-900 leading-none truncate">{primary}</div>
       {secondary && <div className="text-[11px] text-gray-500 mt-1">{secondary}</div>}
       {hint && (
         <div className={`text-[11px] mt-2 ${hintBad ? 'text-rose-600' : 'text-emerald-600'} font-medium`}>
