@@ -38,8 +38,6 @@ const SUBTYPE_OPTIONS = [
   { value: 'sortex',        label: 'Sortex' },
   { value: 'powder',        label: 'Powder' },
   { value: 'sweeping',      label: 'Sweeping' },
-  { value: 'bran',          label: 'Rice Bran (legacy)' },
-  { value: 'husk',          label: 'Rice Husk (legacy)' },
 ];
 
 // A blended broken lot carries a batch-scoped grade ('M-033-B1'); strip the
