@@ -1727,8 +1727,17 @@ const intelligenceService = {
         return { data: [], pagination: { page: 1, limit, total: 0, totalPages: 0 }, message: `Unknown KPI: ${kpiName}` };
     }
 
-    if (dateFrom) query.where(db.raw('1=1')); // dateFrom filter placeholder
-    if (dateTo) query.where(db.raw('1=1'));
+    // Apply the date-range filter on each KPI's record-creation date. (Was a
+    // no-op `1=1` placeholder — dateFrom/dateTo were silently ignored.)
+    const DATE_COL = {
+      activeOrders: 'eo.created_at', advancePending: 'eo.created_at', balancePending: 'eo.created_at',
+      shipmentsInTransit: 'eo.created_at', lowMarginOrders: 'eo.created_at',
+      activeBatches: 'mb.created_at', totalReceivables: 'r.created_at', totalPayables: 'p.created_at',
+    };
+    const dateCol = DATE_COL[kpiName];
+    if (dateCol && dateFrom) query.where(dateCol, '>=', dateFrom);
+    // Make a plain YYYY-MM-DD dateTo inclusive of the whole day (created_at is a timestamp).
+    if (dateCol && dateTo) query.where(dateCol, '<=', /[T:]/.test(String(dateTo)) ? dateTo : `${dateTo} 23:59:59`);
 
     countQuery = query.clone().clearSelect().clearOrder().count('* as total').first();
     const [data, countResult] = await Promise.all([
