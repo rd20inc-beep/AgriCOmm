@@ -125,9 +125,11 @@ async function runTransitionSideEffects(trx, order, toStatus, userId) {
     }
   }
 
-  // Phase 5: Lock COGS at dispatch
+  // Phase 5: Lock COGS at dispatch — value the contract in PKR at the order's
+  // BOOKED rate (the same rate revenue recognition uses below), not a flat 280,
+  // so gross profit isn't computed on a different FX rate than revenue.
   try {
-    await inventoryService.lockOrderCOGS(trx, order.id, 280);
+    await inventoryService.lockOrderCOGS(trx, order.id, parseFloat(order.booked_fx_rate) || null);
   } catch (e) {
     console.warn('COGS lock failed (non-blocking):', e.message);
   }
