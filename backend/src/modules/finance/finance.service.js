@@ -149,8 +149,11 @@ const financeService = {
     const localMargin = localRevenue > 0 ? (localGrossProfit / localRevenue * 100) : 0;
 
     // ── Receivables ──
+    // Exclude local-sale receivables (local_sale_id set): those are already
+    // captured in the `local` KPI above from local_sales.due_amount, so counting
+    // them here too would double the same debt across the two KPIs.
     const hasRecvBasePkr = await db.schema.hasColumn('receivables', 'base_amount_pkr');
-    const recvStats = await db('receivables').whereNot('status', 'Paid').select(
+    const recvStats = await db('receivables').whereNot('status', 'Paid').whereNull('local_sale_id').select(
       db.raw("COUNT(*) as count"),
       db.raw("COALESCE(SUM(outstanding), 0) as total_outstanding"),
       db.raw(hasRecvBasePkr
