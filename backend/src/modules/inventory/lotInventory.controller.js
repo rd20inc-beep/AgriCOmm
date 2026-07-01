@@ -2322,7 +2322,7 @@ module.exports = {
 
       return res.status(201).json({
         success: true,
-        message: `Transferred ${qty} MT from ${result.sourceLotNo} to export lot ${result.exportLot.lot_no}.`,
+        message: `Transferred ${Math.round(qty).toLocaleString()} kg from ${result.sourceLotNo} to export lot ${result.exportLot.lot_no}.`,
         data: result,
       });
     } catch (err) {
@@ -2375,7 +2375,7 @@ module.exports = {
 
       return res.status(201).json({
         success: true,
-        message: `Transferred ${qty} MT from ${result.exportLotNo} back to mill lot ${result.millLot.lot_no}.`,
+        message: `Transferred ${Math.round(qty).toLocaleString()} kg from ${result.exportLotNo} back to mill lot ${result.millLot.lot_no}.`,
         data: result,
       });
     } catch (err) {
