@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../../config/database');
+const { nextDocNo } = require('../../utils/docNumber');
 const controller = require('../../controllers/millingController');
 const advancedController = require('../../controllers/millingAdvancedController');
 const authorize = require('../../middleware/rbac');
@@ -1720,8 +1721,7 @@ router.post('/payroll/statutory-remittances', authorize('payroll', 'pay'),
       if (acctId) {
         await trx('bank_accounts').where('id', acctId).update({ current_balance: trx.raw('current_balance - ?', [amount]), updated_at: trx.fn.now() });
         const acctRow = await trx('bank_accounts').where('id', acctId).first();
-        const btCount = await trx('bank_transactions').count('id as c').first();
-        const btNo = `BT-${String((parseInt(btCount?.c) || 0) + 1).padStart(4, '0')}`;
+        const btNo = await nextDocNo(trx, { table: 'bank_transactions', column: 'transaction_no', prefix: 'BT-' });
         await trx('bank_transactions').insert({
           transaction_no: btNo, bank_account_id: acctId, type: 'debit', amount, currency: 'PKR',
           status: 'posted', transaction_date: remitDate, reference: remitNo,

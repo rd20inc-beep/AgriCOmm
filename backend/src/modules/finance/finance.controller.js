@@ -1,6 +1,7 @@
 const db = require('../../config/database');
 const inventoryService = require('../../services/inventoryService');
 const accountingService = require('../../services/accountingService');
+const { nextDocNo } = require('../../utils/docNumber');
 
 // Resolve a payment row to its PKR equivalent using the strongest
 // signal we have: stored base_amount_pkr first, then amount × fx_rate
@@ -2037,9 +2038,8 @@ financeController.payPurchase = async (req, res) => {
           this.where({ source_table: sourceTable, source_id: id });
           if (natRef) this.orWhere(function () { this.where('linked_ref', natRef).andWhere(function () { this.whereNull('source_table').orWhereNot('source_table', 'lot_transport'); }); });
         }).first();
-        const payCount = await trx('payments').count('id as c').first();
         await trx('payments').insert({
-          payment_no: `PP-${(parseInt(payCount?.c) || 0) + 1}`,
+          payment_no: await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'PP-', pad: 0 }),
           type: 'payment', amount: amountPkr, currency: 'PKR', fx_rate: 1, base_amount_pkr: amountPkr,
           payment_method, bank_account_id: bank_account_id || null,
           bank_reference: payment_reference || null, due_date, cleared: false,
@@ -2105,9 +2105,8 @@ financeController.payPurchase = async (req, res) => {
         });
         // Canonical payment row (so the payment-trail + dashboard cheque view
         // see it uniformly). Deduped against the bank_transaction by the trail.
-        const payCount = await trx('payments').count('id as c').first();
         await trx('payments').insert({
-          payment_no: `PP-${(parseInt(payCount?.c) || 0) + 1}`,
+          payment_no: await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'PP-', pad: 0 }),
           type: 'payment', amount: amountPkr, currency: 'PKR', fx_rate: 1, base_amount_pkr: amountPkr,
           payment_method: payment_method || null, bank_account_id: bank_account_id || null,
           bank_reference: payment_reference || null, due_date: due_date || null,

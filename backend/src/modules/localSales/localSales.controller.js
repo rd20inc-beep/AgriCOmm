@@ -7,10 +7,10 @@ const uc = require('../../services/unitConversion');
 const inventoryService = require('../../services/inventoryService');
 const accountingService = require('../accounting/accounting.service');
 const { resolveCashAccountId } = require('../../shared/cashAccounts');
+const { nextDocNo } = require('../../utils/docNumber');
 
 async function generateSaleNo(trx) {
-  const count = await (trx || db)('local_sales').count('id as c').first();
-  return `LS-${String((parseInt(count?.c) || 0) + 1).padStart(4, '0')}`;
+  return nextDocNo(trx || db, { table: 'local_sales', column: 'sale_no', prefix: 'LS-' });
 }
 
 // Which account a receipt lands in: cash → the cash-type account; bank transfer
@@ -572,13 +572,12 @@ module.exports = {
           }).returning('*');
 
           if (l.paid > 0) {
-            const payCount = await trx('payments').count('id as c').first();
             // 'credit' is a sale MODE, not a tender method — an actual receipt
             // (partial payment on a credit sale) is recorded as cash so it passes
             // the payments.payment_method check constraint.
             const payMethod = (payment_mode && payment_mode !== 'credit') ? payment_mode : 'cash';
             const [payRow] = await trx('payments').insert({
-              payment_no: `PL-${(parseInt(payCount?.c) || 0) + 1}`, type: 'receipt',
+              payment_no: await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'PL-', pad: 0 }), type: 'receipt',
               amount: l.paid, currency: 'PKR', fx_rate: 1, base_amount_pkr: l.paid,
               payment_method: payMethod, bank_reference: payment_reference || null,
               bank_account_id: receiptAccountId || bank_account_id || null, due_date: due_date || null,
@@ -594,9 +593,8 @@ module.exports = {
           }
 
           if (dueAmt > 0) {
-            const rcvCount = await trx('receivables').count('id as c').first();
             await trx('receivables').insert({
-              recv_no: `RCV-LS-${(parseInt(rcvCount?.c) || 0) + 1}`, entity: 'mill',
+              recv_no: await nextDocNo(trx, { table: 'receivables', column: 'recv_no', prefix: 'RCV-LS-', pad: 0 }), entity: 'mill',
               customer_id: resolvedCustomerId, local_sale_id: sale.id, type: 'Local Sale',
               expected_amount: l.total, received_amount: l.paid, outstanding: dueAmt,
               due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
@@ -676,9 +674,8 @@ module.exports = {
 
         // Create payment record (cleared=false for an uncleared post-dated cheque).
         const receiptAccountId = isPostDated ? null : await resolveReceiptAccountId(trx, { paymentMode: payment_method, bankAccountId: bank_account_id, amount: payAmount, collectionLocation: collection_location });
-        const payCount = await trx('payments').count('id as c').first();
         const [payRow] = await trx('payments').insert({
-          payment_no: `PL-${(parseInt(payCount?.c) || 0) + 1}`,
+          payment_no: await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'PL-', pad: 0 }),
           type: 'receipt',
           amount: payAmount,
           currency: 'PKR',

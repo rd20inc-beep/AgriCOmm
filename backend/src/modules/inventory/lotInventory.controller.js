@@ -11,11 +11,12 @@ const accountingService = require('../../services/accountingService');
 // Add Vehicle flow on the same SUP-VARIETY-YYMMDD-SEQ format.
 const inventoryService = require('./inventory.service');
 const { blendPurchaseIntoLot } = require('./lotCosting');
+const { nextDocNo } = require('../../utils/docNumber');
 
 async function generateTxnNo(trx) {
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const count = await trx('lot_transactions').count('id as c').first();
-  return `TXN-${today}-${String((count?.c || 0) + 1).padStart(4, '0')}`;
+  // Per-day sequence, collision-safe (MAX+1, not count+1 which reuses a deleted no.).
+  return nextDocNo(trx, { table: 'lot_transactions', column: 'transaction_no', prefix: `TXN-${today}-` });
 }
 
 // Whitelist + coerce the extended quality payload for inventory_lots.quality_json.
