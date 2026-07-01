@@ -1776,17 +1776,27 @@ const exportOrderController = {
           reason: `Advance payment of ${confirmedAmount} confirmed`,
         });
 
-        // Reserve stock if available
+        // Best-effort auto-reserve of the STILL-UNRESERVED portion of the order.
+        // Idempotent: a repeat/partial advance won't re-reserve the full quantity
+        // (previously every advance reserved order.qty_mt again against another lot,
+        // double-holding stock). The precise, guaranteed path is Allocate Stock.
         try {
-          const availableLot = await trx('inventory_lots')
-            .where({ entity: 'export', type: 'finished', status: 'Available' })
-            .where('available_qty', '>=', order.qty_mt * 1000) // order qty MT (doc) → KG
-            .first();
-          if (availableLot) {
-            await inventoryService.reserveStock(trx, {
-              lotId: availableLot.id, orderId: order.id,
-              qtyKg: order.qty_mt * 1000, userId: req.user?.id,
-            });
+          const targetKg = (parseFloat(order.qty_mt) || 0) * 1000; // MT (doc) → KG
+          const alreadyRow = await trx('inventory_reservations')
+            .where({ order_id: order.id, status: 'Active' })
+            .sum('reserved_qty as r').first();
+          const remainingKg = targetKg - (parseFloat(alreadyRow?.r) || 0);
+          if (remainingKg > 0.0001) {
+            const availableLot = await trx('inventory_lots')
+              .where({ entity: 'export', type: 'finished', status: 'Available' })
+              .where('available_qty', '>=', remainingKg)
+              .first();
+            if (availableLot) {
+              await inventoryService.reserveStock(trx, {
+                lotId: availableLot.id, orderId: order.id,
+                qtyKg: remainingKg, userId: req.user?.id,
+              });
+            }
           }
         } catch (e) { console.warn('Stock reservation failed:', e.message); }
 

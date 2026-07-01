@@ -1938,9 +1938,14 @@ const inventoryService = {
     const order = await trx('export_orders').where('id', orderId).first();
     if (!order) return;
 
-    const contractValuePKR = parseFloat(order.contract_value) * (pkrRate || 280);
+    // Value the contract in PKR at the order's BOOKED rate (fall back to the caller
+    // rate, then 280) and prefer the already-locked PKR figure so COGS/profit use
+    // the SAME PKR revenue basis as revenue recognition — not a flat 280.
+    const rate = pkrRate || parseFloat(order.booked_fx_rate) || 280;
+    const contractValuePKR = parseFloat(order.contract_value_pkr_locked)
+      || (parseFloat(order.contract_value) || 0) * rate;
     const grossProfitPKR = contractValuePKR - cogs.totalCOGS;
-    const grossProfitUSD = grossProfitPKR / (pkrRate || 280);
+    const grossProfitUSD = rate > 0 ? grossProfitPKR / rate : 0;
     const isExact = cogs.source === 'reservations' || cogs.source === 'internal_transfers';
 
     await trx('export_orders').where('id', orderId).update({
