@@ -47,17 +47,28 @@ export function useMillSummary(opts = {}) {
         .reduce((s, [, v]) => s + (parseFloat(v) || 0), 0);
       const totalCost = rawCost + otherCosts;
 
-      // Use batch-confirmed prices first, then commodity rates
-      const fp = parseFloat(b.finishedPricePerMT) || prices.finished;
-      const bp = parseFloat(b.brokenPricePerMT) || prices.broken;
-      const np = parseFloat(b.branPricePerMT) || prices.bran;
-      const hp = parseFloat(b.huskPricePerMT) || prices.husk;
-
-      const finishedRev = (parseFloat(b.actualFinishedMT) || 0) * fp;
-      const brokenRev = (parseFloat(b.brokenMT) || 0) * bp;
-      const branRev = (parseFloat(b.branMT) || 0) * np;
-      const huskRev = (parseFloat(b.huskMT) || 0) * hp;
-      const batchRevenue = finishedRev + brokenRev + branRev + huskRev;
+      // Value the sellable outputs at batch-confirmed prices first, then commodity
+      // rates. Broken is stored BOTH as an aggregate and per-grade split
+      // (broken_kg == b1+b2+b3+csr+short_grain) — value the per-grade split when it
+      // exists, else the aggregate, so it isn't double-counted. Powder / S.W / Choba
+      // / Sortex are also sellable (priced only when a sale price was recorded).
+      // Bran/husk are no longer sold, so they carry NO revenue.
+      const num = (v) => parseFloat(v) || 0;
+      const finishedRev = num(b.actualFinishedMT) * (num(b.finishedPricePerMT) || prices.finished);
+      const gradeQty = num(b.b1MT) + num(b.b2MT) + num(b.b3MT) + num(b.csrMT) + num(b.shortGrainMT);
+      const brokenRev = gradeQty > 0
+        ? num(b.b1MT) * (num(b.b1PricePerMT) || prices.broken)
+          + num(b.b2MT) * (num(b.b2PricePerMT) || prices.broken)
+          + num(b.b3MT) * (num(b.b3PricePerMT) || prices.broken)
+          + num(b.csrMT) * (num(b.csrPricePerMT) || prices.broken)
+          + num(b.shortGrainMT) * (num(b.shortGrainPricePerMT) || prices.broken)
+        : num(b.brokenMT) * (num(b.brokenPricePerMT) || prices.broken);
+      const otherByproductRev = num(b.powderMT) * num(b.powderPricePerMT)
+        + num(b.sweepingMT) * num(b.sweepingPricePerMT)
+        + num(b.chobaMT) * num(b.chobaPricePerMT)
+        + num(b.sortexRejectsMT) * num(b.sortexRejectsPricePerMT);
+      const byproductRev = brokenRev + otherByproductRev;
+      const batchRevenue = finishedRev + byproductRev;
 
       const finishedKG = (parseFloat(b.actualFinishedMT) || 0) * 1000;
       const costPerKG = finishedKG > 0 ? totalCost / finishedKG : 0;
@@ -75,6 +86,8 @@ export function useMillSummary(opts = {}) {
         otherCosts,
         totalCost,
         revenue: batchRevenue,
+        finishedRev,
+        byproductRev,
         profit: batchRevenue - totalCost,
         costPerKG,
         pricesConfirmed: !!b.pricesConfirmed,
@@ -82,10 +95,8 @@ export function useMillSummary(opts = {}) {
     });
 
     // Aggregates
-    const totalFinishedRevenue = batchBreakdown.reduce((s, b) => s + b.revenue, 0);
-    const totalByproductRevenue = batchBreakdown.reduce((s, b) => {
-      return s + ((b.brokenMT * (prices.broken)) + (b.branMT * (prices.bran)) + (b.huskMT * (prices.husk)));
-    }, 0);
+    const totalFinishedRevenue = batchBreakdown.reduce((s, b) => s + b.finishedRev, 0);
+    const totalByproductRevenue = batchBreakdown.reduce((s, b) => s + b.byproductRev, 0);
     const totalRawCost = batchBreakdown.reduce((s, b) => s + b.rawCost, 0);
     const totalOtherCosts = batchBreakdown.reduce((s, b) => s + b.otherCosts, 0);
     const totalDirectCosts = totalRawCost + totalOtherCosts;
@@ -94,7 +105,7 @@ export function useMillSummary(opts = {}) {
     const expenseSummary = expenseData?.summary || [];
     const overheads = expenseSummary.reduce((s, cat) => s + (parseFloat(cat.total) || 0), 0);
 
-    const totalRevenue = totalFinishedRevenue;
+    const totalRevenue = totalFinishedRevenue + totalByproductRevenue;
     const totalCost = totalDirectCosts + overheads;
     const grossProfit = totalRevenue - totalCost;
     const marginPct = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
