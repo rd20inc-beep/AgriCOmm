@@ -189,6 +189,43 @@ async function runTransitionSideEffects(trx, order, toStatus, userId) {
           });
         }
 
+        // Apply the customer advance against AR. The advance was banked as a
+        // LIABILITY (advance_receipt: DR Bank / CR 1310 Customer Advances
+        // Received); revenue above just debited the FULL contract to AR (1110).
+        // Without this reclassification AR stays overstated by the advance and
+        // 1310 lingers on the books forever. Reclassify the banked advance (PKR)
+        // 1310 → 1110. Any gap between the receipt-date rate (what's banked) and
+        // the booked rate (what AR was recognized at) stays as a residual on the
+        // customer ledger — the legitimate FX gain/loss the revenue note above
+        // describes. Inside the same revenue_posted SAVEPOINT, so it posts once.
+        const advanceAppliedPkr = parseFloat(o.advance_received_pkr)
+          || (parseFloat(o.advance_received) || 0) * ((o.currency || 'PKR') === 'PKR' ? 1 : (bookedRate || 0));
+        if (advanceAppliedPkr > 0.01) {
+          const [advLiab, exportAR] = await Promise.all([
+            sp('chart_of_accounts').where({ code: '1310' }).first(),
+            sp('chart_of_accounts').where({ code: '1110' }).first(),
+          ]);
+          if (advLiab && exportAR) {
+            const applied = parseFloat(advanceAppliedPkr.toFixed(2));
+            const jrnl = await accountingService.createJournal(sp, {
+              date: new Date().toISOString().slice(0, 10),
+              entity: 'export',
+              refType: 'Export Order', refNo: o.order_no,
+              description: `Advance applied to AR ${o.order_no}`,
+              currency: 'PKR', fxRate: 1, isAuto: true, userId,
+              partyType: o.customer_id ? 'customer' : null,
+              partyId: o.customer_id || null,
+              lines: [
+                { account_id: advLiab.id,  account: advLiab.name,  debit: applied, credit: 0,       narration: `DR ${advLiab.code} ${advLiab.name} — advance applied ${o.order_no}` },
+                { account_id: exportAR.id, account: exportAR.name, debit: 0,       credit: applied, narration: `CR ${exportAR.code} ${exportAR.name} — advance applied ${o.order_no}` },
+              ],
+            });
+            if (jrnl?.id) await accountingService.postJournal(sp, jrnl.id);
+          } else {
+            console.warn(`Advance application skipped for ${o.order_no}: chart_of_accounts missing 1310/1110`);
+          }
+        }
+
         await sp('export_orders').where({ id: o.id }).update({ revenue_posted: true });
       });
     } catch (e) {
