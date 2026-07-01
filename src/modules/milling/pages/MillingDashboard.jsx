@@ -73,6 +73,8 @@ export default function MillingDashboard() {
     productId: '',
     supplierId: '', rawQtyKg: '', totalBags: '', plannedFinishedKg: '',
     millId: '', shift: 'Day', notes: '',
+    // Custom label + free-form tags for easy referencing (esp. blends).
+    batchName: '', customTags: '',
     // Service milling fields
     clientName: '', clientContact: '', serviceFeePerKg: '',
   });
@@ -143,7 +145,7 @@ export default function MillingDashboard() {
     setBatchForm({
       millingType: 'own_stock', productId: '', supplierId: '', rawQtyKg: '', totalBags: '', plannedFinishedKg: '',
       millingFeePerKg: '5',
-      millId: '', shift: 'Day', notes: '', clientName: '', clientContact: '', serviceFeePerKg: '',
+      millId: '', shift: 'Day', notes: '', batchName: '', customTags: '', clientName: '', clientContact: '', serviceFeePerKg: '',
     });
     setUseBlend(true); setBlendProductId(''); setBlendRows([]); setBlendTag('All');
   };
@@ -206,6 +208,8 @@ export default function MillingDashboard() {
         mill_id: batchForm.millId ? parseInt(batchForm.millId) : null,
         shift: batchForm.shift,
         planned_finished_kg: plannedKg,
+        batch_name: batchForm.batchName?.trim() || null,
+        custom_tags: batchForm.customTags,  // comma string → backend normalises to array
         notes: batchForm.millingType === 'service_milling'
           ? `[SERVICE MILLING] Client: ${batchForm.clientName}${batchForm.clientContact ? ` | Contact: ${batchForm.clientContact}` : ''}${batchForm.serviceFeePerKg ? ` | Fee: PKR ${batchForm.serviceFeePerKg}/kg` : ''}${batchForm.notes ? ` | ${batchForm.notes}` : ''}`
           : batchForm.notes || null,
@@ -1280,6 +1284,29 @@ export default function MillingDashboard() {
 
           {/* Milling fee removed — milling cost is entered per batch in the
               Costing dialog (residual model), not as a flat per-KG fee here. */}
+
+          {/* Batch name + tags — for easy referencing later, esp. blends */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Batch Name {useBlend && blendRecipe.processingType === 'blended' && <span className="text-gray-400 font-normal">(recommended for blends)</span>}
+            </label>
+            <input type="text" value={batchForm.batchName} onChange={e => setBF('batchName', e.target.value)} maxLength={200}
+              placeholder="e.g. Super Kernel Export Blend - June 2026"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Tags <span className="text-gray-400 font-normal">(comma-separated)</span></label>
+            <input type="text" value={batchForm.customTags} onChange={e => setBF('customTags', e.target.value)}
+              placeholder="e.g. Export, June Production, Customer Batch"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+            {batchForm.customTags.trim() && (
+              <div className="flex flex-wrap gap-1 mt-1.5">
+                {batchForm.customTags.split(',').map(t => t.trim()).filter(Boolean).map((t, i) => (
+                  <span key={i} className="text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100">{t}</span>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Notes */}
           <div>

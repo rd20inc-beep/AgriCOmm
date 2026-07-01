@@ -285,11 +285,21 @@ const millingController = {
         machine_line,
         shift,
         notes,
+        // Human label + free-form tags for easy referencing (esp. blends).
+        batch_name,
+        custom_tags,
         // Blend input: partial quantities from multiple existing lots (raw
         // and/or leftover finished rice, mixed varieties). [{ lot_id, qty_kg }].
         // When given, raw_qty_kg + the weighted raw cost are derived from it.
         source_lots,
       } = req.body;
+      // Normalise tags → array of trimmed non-empty strings.
+      const normalizeTags = (t) => {
+        const arr = Array.isArray(t) ? t : (typeof t === 'string' ? t.split(',') : []);
+        return [...new Set(arr.map((x) => String(x).trim()).filter(Boolean))];
+      };
+      const cleanTags = normalizeTags(custom_tags);
+      const cleanName = batch_name ? String(batch_name).trim().slice(0, 200) : null;
 
       const blendLots = Array.isArray(source_lots)
         ? source_lots.filter((s) => s && s.lot_id && parseFloat(s.qty_kg) > 0)
@@ -433,6 +443,8 @@ const millingController = {
             machine_line: machine_line || null,
             shift: shift || 'Day',
             notes: notes || null,
+            batch_name: cleanName,
+            custom_tags: JSON.stringify(cleanTags),
             status: 'Pending Approval',
             created_by: req.user.id,
           })

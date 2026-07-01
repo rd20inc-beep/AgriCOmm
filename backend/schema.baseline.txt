@@ -1442,6 +1442,7 @@ COL milling_batches.b2_kg:numeric:NOT NULL
 COL milling_batches.b2_price_per_kg:numeric:NULL
 COL milling_batches.b3_kg:numeric:NOT NULL
 COL milling_batches.b3_price_per_kg:numeric:NULL
+COL milling_batches.batch_name:character varying:NULL
 COL milling_batches.batch_no:character varying:NOT NULL
 COL milling_batches.benchmark_id:integer:NULL
 COL milling_batches.bran_kg:numeric:NOT NULL
@@ -1455,6 +1456,7 @@ COL milling_batches.created_at:timestamp with time zone:NOT NULL
 COL milling_batches.created_by:integer:NOT NULL
 COL milling_batches.csr_kg:numeric:NOT NULL
 COL milling_batches.csr_price_per_kg:numeric:NULL
+COL milling_batches.custom_tags:jsonb:NOT NULL
 COL milling_batches.finished_price_per_kg:numeric:NULL
 COL milling_batches.husk_kg:numeric:NOT NULL
 COL milling_batches.husk_price_per_kg:numeric:NULL

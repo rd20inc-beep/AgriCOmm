@@ -253,6 +253,11 @@ export function transformBatch(dbBatch) {
     linkedExportOrder: dbBatch.linked_export_order_id,
     status: dbBatch.status || 'Queued',
     processingType: dbBatch.processing_type || null,
+    // Custom human label + free-form tags for easy referencing (esp. blends).
+    batchName: dbBatch.batch_name || null,
+    customTags: Array.isArray(dbBatch.custom_tags)
+      ? dbBatch.custom_tags
+      : (() => { try { return JSON.parse(dbBatch.custom_tags || '[]'); } catch { return []; } })(),
     rawQtyMT: (parseFloat(dbBatch.raw_qty_kg) || 0) / 1000,
     plannedFinishedMT: (parseFloat(dbBatch.planned_finished_kg) || 0) / 1000,
     actualFinishedMT: (parseFloat(dbBatch.actual_finished_kg) || 0) / 1000,

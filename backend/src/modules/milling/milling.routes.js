@@ -29,10 +29,17 @@ router.put('/batches/:id', authorize('milling', 'edit'),
       if (!id) return res.status(404).json({ success: false, message: 'Batch not found' });
 
       const allowed = ['supplier_id', 'raw_qty_kg', 'planned_finished_kg', 'milling_fee_per_kg',
-        'mill_id', 'machine_line', 'shift', 'notes', 'variance_status', 'status'];
+        'mill_id', 'machine_line', 'shift', 'notes', 'variance_status', 'status', 'batch_name'];
       const updates = {};
       for (const key of allowed) {
         if (req.body[key] !== undefined) updates[key] = req.body[key];
+      }
+      if (updates.batch_name != null) updates.batch_name = String(updates.batch_name).trim().slice(0, 200) || null;
+      // Tags: accept an array or comma string → normalised jsonb array.
+      if (req.body.custom_tags !== undefined) {
+        const raw = req.body.custom_tags;
+        const arr = Array.isArray(raw) ? raw : (typeof raw === 'string' ? raw.split(',') : []);
+        updates.custom_tags = JSON.stringify([...new Set(arr.map((x) => String(x).trim()).filter(Boolean))]);
       }
       // Also update supplier_name if supplier_id is set
       if (updates.supplier_id) {
