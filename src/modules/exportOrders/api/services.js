@@ -5,6 +5,7 @@ export const exportOrdersApi = {
   create: (data) => api.post('/api/export-orders', data),
   update: (id, data) => api.put(`/api/export-orders/${id}`, data),
   updateStatus: (id, data) => api.put(`/api/export-orders/${id}/status`, data),
+  cancel: (id, data) => api.post(`/api/export-orders/${id}/cancel`, data),
   confirmAdvance: (id, data) => api.post(`/api/export-orders/${id}/confirm-advance`, data),
   confirmBalance: (id, data) => api.post(`/api/export-orders/${id}/confirm-balance`, data),
   addCost: (id, data) => api.post(`/api/export-orders/${id}/costs`, data),

@@ -9,7 +9,7 @@ import api from '../../../api/client';
 import { queryKeys } from '../../../api/queryClient';
 import {
   useExportOrder, useConfirmAdvance, useConfirmBalance,
-  useUpdateOrderStatus, useAddOrderCost, useUpdateShipment,
+  useUpdateOrderStatus, useAddOrderCost, useUpdateShipment, useCancelOrder,
   useStartDocs, useUploadDocument, useApproveDocument,
 } from '../../../api/queries';
 import { useCreateMillingBatch } from '../../../api/queries';
@@ -53,6 +53,7 @@ export default function ExportOrderDetail() {
   const confirmAdvanceMut = useConfirmAdvance();
   const confirmBalanceMut = useConfirmBalance();
   const updateStatusMut = useUpdateOrderStatus();
+  const cancelOrderMut = useCancelOrder();
   const addCostMut = useAddOrderCost();
   const updateShipmentMut = useUpdateShipment();
   const startDocsMut = useStartDocs();
@@ -583,6 +584,26 @@ export default function ExportOrderDetail() {
   })();
   const canPutOnHold = backendActions.canPutOnHold ?? !['Closed', 'Cancelled'].includes(order.status);
   const canCloseOrder = backendActions.canCloseOrder ?? (order.status === 'Arrived' || (order.balanceReceived >= order.balanceExpected && order.status === 'Shipped'));
+  const canCancel = backendActions.canCancel ?? !['Shipped', 'Arrived', 'Closed', 'Cancelled'].includes(order.status);
+
+  const handleCancelOrder = async () => {
+    setShowActions(false);
+    // eslint-disable-next-line no-alert
+    const reason = window.prompt(
+      `Cancel export order ${order.orderNo || order.id}?\n\nThis frees any reserved stock, reverses receipt journals, refunds banked advance/balance cash, and writes off the receivables. Incurred vendor costs remain payable.\n\nReason (optional):`,
+      '',
+    );
+    if (reason === null) return; // user dismissed
+    try {
+      await requestOwnerApproval((ownerId) => cancelOrderMut.mutateAsync({
+        id: orderId,
+        data: { reason: reason || undefined, authorized_by_owner_id: ownerId },
+      }));
+      addToast(`Order ${order.orderNo || order.id} cancelled`);
+    } catch (err) {
+      addToast(`Failed to cancel order: ${err.message || 'Server error'}`, 'error');
+    }
+  };
 
   const handleCloseOrder = async () => {
     try {
@@ -629,6 +650,8 @@ export default function ExportOrderDetail() {
         canUpdateShipment={canUpdateShipment}
         canPutOnHold={canPutOnHold}
         canCloseOrder={canCloseOrder}
+        canCancel={canCancel}
+        onCancelOrder={handleCancelOrder}
         onOpenAdvanceModal={openAdvanceModal}
         onStartDocsPreparation={handleStartDocsPreparation}
         onOpenBalanceModal={openBalanceModal}

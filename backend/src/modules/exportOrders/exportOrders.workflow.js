@@ -65,6 +65,10 @@ function getAllowedActions(order) {
     canUpdateShipment: ['Ready to Ship', 'Shipped'].includes(order.status),
     canPutOnHold: !isTerminal,
     canCloseOrder: order.status === 'Arrived' || (order.status === 'Shipped' && balanceReceived >= balanceExpected),
+    // Cancel is an out-of-band action (not part of the linear STATUS_TRANSITIONS
+    // map). Allowed any time before dispatch; once Shipped/Arrived the goods have
+    // moved and it must be handled via returns / Danger Zone.
+    canCancel: !['Shipped', 'Arrived', 'Closed', 'Cancelled'].includes(order.status),
   };
 }
 

@@ -113,6 +113,13 @@ router.post(
   controller.addCost
 );
 router.post(
+  '/:id/cancel',
+  authorize('export_orders', 'approve'),
+  ownerApproval('export_cancel'),
+  auditAction('cancel', 'export_order', (req) => req.params.id),
+  controller.cancelOrder
+);
+router.post(
   '/:id/confirm-advance',
   authorizeAny(['export_orders', 'confirm_advance'], ['finance', 'confirm_payment']),
   ownerApproval('export_advance'),

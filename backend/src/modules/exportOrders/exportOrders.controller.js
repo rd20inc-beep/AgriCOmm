@@ -1174,6 +1174,121 @@ const exportOrderController = {
     }
   },
 
+  // Cancel an export order and fully unwind it, keeping the record (unlike the
+  // Danger Zone hard-delete). Closes the audit gap where a force-set 'Cancelled'
+  // would orphan reservations, receivables and receipt journals. Allowed only
+  // before dispatch — once Shipped the goods have moved (use returns / Danger
+  // Zone). The unwind: release held stock, reverse the order's own Posted GL
+  // (receipts; revenue/COGS can't exist pre-Shipped) leaving incurred vendor
+  // costs payable, refund banked advance/balance cash + void those payments,
+  // write off the receivables, and reset the order's money state.
+  async cancelOrder(req, res) {
+    try {
+      const id = await resolveExportOrderId(req.params.id);
+      if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
+      const reason = (req.body && req.body.reason) || null;
+
+      const result = await db.transaction(async (trx) => {
+        const order = await lockRow(trx('export_orders').where({ id })).first();
+        if (!order) { const e = new Error('Export order not found.'); e.statusCode = 404; throw e; }
+
+        if (['Shipped', 'Arrived', 'Closed', 'Cancelled'].includes(order.status)) {
+          const e = new Error(`Cannot cancel an order in '${order.status}' status. Shipped or closed orders must be handled via returns or the Danger Zone.`);
+          e.statusCode = 400; throw e;
+        }
+
+        // 1) Release active inventory reservations (free the held stock).
+        const reservations = await trx('inventory_reservations').where({ order_id: id, status: 'Active' });
+        for (const r of reservations) {
+          await inventoryService.releaseReservation(trx, { reservationId: r.id, userId: req.user.id });
+        }
+        // Clear stale reserved_against tags on now fully-unreserved lots.
+        for (const lid of [...new Set(reservations.map((r) => r.lot_id))]) {
+          const lot = await trx('inventory_lots').where({ id: lid }).first();
+          if (lot && parseFloat(lot.reserved_qty) <= 0.0001) {
+            await trx('inventory_lots').where({ id: lid }).update({ reserved_against: null, updated_at: trx.fn.now() });
+          }
+        }
+
+        // 2) Reverse the order's own Posted GL (ref_type 'Export Order' scopes to
+        //    receipts/revenue/COGS/advance-application; the separate
+        //    'Export Order Cost' journals for incurred vendor costs are left
+        //    intact — cancelling the order doesn't void a freight bill already run).
+        const journals = await trx('journal_entries')
+          .where({ ref_type: 'Export Order', ref_no: order.order_no, status: 'Posted' })
+          .select('id');
+        for (const j of journals) {
+          await accountingService.reverseJournal(trx, {
+            journalId: j.id,
+            reason: `Order ${order.order_no} cancelled${reason ? ': ' + reason : ''}`,
+            userId: req.user.id,
+          });
+        }
+
+        // 3) Refund the cash actually banked for advance/balance receipts (mirror
+        //    the currency-aware credit used at receipt time), drop the bank trail,
+        //    then void the payment rows — the receipt is undone.
+        const recvIds = (await trx('receivables').where({ order_id: id }).select('id')).map((r) => r.id);
+        let payments = [];
+        if (recvIds.length) {
+          payments = await trx('payments').whereIn('linked_receivable_id', recvIds);
+          for (const p of payments) {
+            if (p.bank_account_id) {
+              const bank = await trx('bank_accounts').where({ id: p.bank_account_id }).first();
+              const debit = bank && bank.currency === p.currency
+                ? (parseFloat(p.amount) || 0)
+                : (parseFloat(p.base_amount_pkr) || 0);
+              if (debit > 0) {
+                await trx('bank_accounts').where({ id: p.bank_account_id }).decrement('current_balance', debit);
+              }
+            }
+          }
+          const payIds = payments.map((p) => p.id);
+          if (payIds.length) {
+            await trx('bank_transactions').whereIn('linked_payment_id', payIds).del();
+            await trx('payments').whereIn('id', payIds).del();
+          }
+        }
+
+        // 4) Write off the receivables (constraint has no 'Cancelled' status).
+        await trx('receivables').where({ order_id: id }).update({
+          status: 'Written Off', outstanding: 0, received_amount: 0, updated_at: trx.fn.now(),
+        });
+
+        // 5) Reset the order's money state and mark it Cancelled + history.
+        await trx('export_orders').where({ id }).update({
+          status: 'Cancelled',
+          advance_received: 0, advance_received_pkr: 0,
+          balance_received: 0, balance_received_pkr: 0,
+          revenue_posted: false,
+          updated_at: trx.fn.now(),
+        });
+        await trx('export_order_status_history').insert({
+          order_id: id, from_status: order.status, to_status: 'Cancelled',
+          changed_by: req.user.id, reason: reason || 'Order cancelled',
+        });
+
+        return {
+          orderNo: order.order_no,
+          freedReservations: reservations.length,
+          reversedJournals: journals.length,
+          refundedPayments: payments.length,
+        };
+      });
+
+      emitExportOrderUpdate(id, 'cancelled', { status: 'Cancelled' });
+      return res.json({
+        success: true,
+        data: result,
+        message: `Export order ${result.orderNo} cancelled — ${result.freedReservations} reservation(s) freed, ${result.reversedJournals} journal(s) reversed, ${result.refundedPayments} payment(s) refunded.`,
+      });
+    } catch (err) {
+      const code = err.statusCode || 500;
+      if (code === 500) console.error('Export order cancel error:', err);
+      return res.status(code).json({ success: false, message: code === 500 ? 'Internal server error.' : err.message });
+    }
+  },
+
   async updateShipment(req, res) {
     try {
       const id = await resolveExportOrderId(req.params.id);
