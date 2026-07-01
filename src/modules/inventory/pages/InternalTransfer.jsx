@@ -10,7 +10,7 @@ const formatPKR = (value) => 'Rs ' + Math.round(parseFloat(value) || 0).toLocale
 const formatUSD = (value) => '$' + (parseFloat(value) || 0).toLocaleString('en-US');
 
 export default function InternalTransfer() {
-  const { millingBatches, exportOrders, addToast } = useApp();
+  const { millingBatches, exportOrders, addToast, settings } = useApp();
   const { data: transfers = [], isLoading: loading } = useInternalTransfers();
   const createTransferMut = useCreateTransfer();
 
@@ -45,6 +45,11 @@ export default function InternalTransfer() {
   const qty = parseFloat(form.qtyKg) || 0;       // KG
   const price = parseFloat(form.transferPrice) || 0; // PKR per KG
   const totalAmount = qty * price;
+  // Convert to USD at the selected order's locked (booked) rate — the transfer
+  // becomes an export cost against that order, so its USD must match the order's
+  // rate (the backend books the cost at booked_fx_rate too). Fall back to the live
+  // settings rate, then the module default. NOT a hardcoded 280.
+  const fxRate = parseFloat(selectedOrder?.bookedFxRate) || parseFloat(settings?.pkrRate) || PKR_RATE;
   // Cap the transfer to the selected batch's finished output (KG).
   const batchFinishedKg = selectedBatch ? (parseFloat(selectedBatch.actualFinishedKg) || 0) : 0;
   const exceedsStock = batchFinishedKg > 0 && qty > batchFinishedKg + 1e-6;
@@ -69,7 +74,7 @@ export default function InternalTransfer() {
     const order = activeExportOrders.find(o => o.id === form.exportOrder);
     const batchId = batch?.dbId || parseInt(form.batchNo) || null;
     const orderId = order?.dbId || parseInt(form.exportOrder) || null;
-    const usdEquiv = Math.round(totalAmount / PKR_RATE);
+    const usdEquiv = Math.round(totalAmount / fxRate);
 
     setSubmitting(true);
     try {
@@ -81,7 +86,7 @@ export default function InternalTransfer() {
         transfer_price_pkr: price * 1000, // per-kg → per-MT
         total_value_pkr: totalAmount,
         usd_equivalent: usdEquiv,
-        pkr_rate: PKR_RATE,
+        pkr_rate: fxRate,
         dispatch_date: form.dispatchDate,
         status: 'In Transit',
       });
@@ -268,11 +273,11 @@ export default function InternalTransfer() {
                 </div>
                 <p className="text-xs text-amber-600 mb-1">Records purchase cost (USD equivalent)</p>
                 <div className="text-lg font-bold text-amber-900">
-                  {totalAmount > 0 ? `-${formatUSD(Math.round(totalAmount / PKR_RATE))}` : '$0'}
+                  {totalAmount > 0 ? `-${formatUSD(Math.round(totalAmount / fxRate))}` : '$0'}
                 </div>
                 <p className="text-xs text-amber-500 mt-1">
-                  Cost of goods: {qty > 0 ? `${Math.round(qty).toLocaleString()} kg` : '0 kg'} x {price > 0 ? formatUSD(price / PKR_RATE) : '$0'}/kg
-                  <span className="block mt-0.5 text-amber-400">@ 1 USD = {PKR_RATE} PKR</span>
+                  Cost of goods: {qty > 0 ? `${Math.round(qty).toLocaleString()} kg` : '0 kg'} x {price > 0 ? formatUSD(price / fxRate) : '$0'}/kg
+                  <span className="block mt-0.5 text-amber-400">@ 1 USD = {fxRate} PKR</span>
                 </p>
               </div>
 
@@ -288,12 +293,12 @@ export default function InternalTransfer() {
                   </div>
                   <div className="flex justify-between">
                     <span>Transfer Cost (USD):</span>
-                    <span className="font-medium text-gray-900">{formatUSD(Math.round(totalAmount / PKR_RATE))}</span>
+                    <span className="font-medium text-gray-900">{formatUSD(Math.round(totalAmount / fxRate))}</span>
                   </div>
                   <div className="flex justify-between border-t border-gray-200 pt-1 mt-1">
                     <span>Rice Cost % of Contract:</span>
                     <span className="font-semibold text-gray-900">
-                      {(((totalAmount / PKR_RATE) / selectedOrder.contractValue) * 100).toFixed(1)}%
+                      {(((totalAmount / fxRate) / selectedOrder.contractValue) * 100).toFixed(1)}%
                     </span>
                   </div>
                 </div>

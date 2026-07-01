@@ -546,7 +546,9 @@ function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
     setTransferring(true);
     try {
       const totalPKR = Math.round(price * finishedMT * 1000); // per-kg × finished kg
-      const pkrRate = 280;
+      // Convert at the order's locked (booked) FX rate, not a hardcoded 280 — the
+      // backend books the resulting export cost at booked_fx_rate too.
+      const pkrRate = parseFloat(order?.bookedFxRate) || 280;
       await financeApi.createTransfer({
         batch_id: batchId,
         export_order_id: orderId,
@@ -639,7 +641,7 @@ function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
               />
               {transferPrice && finishedMT > 0 && (
                 <p className="text-xs text-amber-600 mt-1">
-                  Total: PKR {Math.round(parseFloat(transferPrice) * finishedMT * 1000).toLocaleString()} (~${Math.round((parseFloat(transferPrice) * finishedMT * 1000) / 280).toLocaleString()})
+                  Total: PKR {Math.round(parseFloat(transferPrice) * finishedMT * 1000).toLocaleString()} (~${Math.round((parseFloat(transferPrice) * finishedMT * 1000) / (parseFloat(order?.bookedFxRate) || 280)).toLocaleString()})
                 </p>
               )}
             </div>
