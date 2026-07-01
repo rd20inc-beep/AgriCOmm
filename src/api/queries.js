@@ -139,6 +139,18 @@ export function useUpdateOrder() {
   });
 }
 
+export function useCancelOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => exportOrdersApi.cancel(id, data),
+    onSuccess: (_, { id }) => {
+      qc.invalidateQueries({ queryKey: queryKeys.orders.all });
+      qc.invalidateQueries({ queryKey: queryKeys.orders.detail(id) });
+      qc.invalidateQueries({ queryKey: queryKeys.receivables.all });
+    },
+  });
+}
+
 export function useUpdateOrderStatus() {
   const qc = useQueryClient();
   return useMutation({

@@ -22,6 +22,8 @@ export default function OrderHeader({
   canUpdateShipment,
   canPutOnHold,
   canCloseOrder,
+  canCancel,
+  onCancelOrder,
   onOpenAdvanceModal,
   onOpenBalanceModal,
   onOpenMillingModal,
@@ -82,6 +84,7 @@ export default function OrderHeader({
               <button disabled={!canUpdateShipment} className={`w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 ${!canUpdateShipment ? 'opacity-50 cursor-not-allowed' : ''}`} onClick={() => { if (!canUpdateShipment) return; onOpenShipmentModal(); setShowActions(false); }}>Update Shipment</button>
               <button disabled={!canPutOnHold} className={`w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 ${!canPutOnHold ? 'opacity-50 cursor-not-allowed' : ''}`} onClick={() => { if (!canPutOnHold) return; onOpenHoldModal(); setShowActions(false); }}>Put On Hold</button>
               <button disabled={!canCloseOrder} className={`w-full text-left px-4 py-2 text-sm text-green-700 hover:bg-green-50 ${!canCloseOrder ? 'opacity-50 cursor-not-allowed' : ''}`} onClick={() => { if (!canCloseOrder) return; onCloseOrder(); }}>Close Order</button>
+              <button disabled={!canCancel} className={`w-full text-left px-4 py-2 text-sm text-red-700 hover:bg-red-50 ${!canCancel ? 'opacity-50 cursor-not-allowed' : ''}`} onClick={() => { if (!canCancel) return; onCancelOrder(); }}>Cancel Order</button>
               <div className="border-t border-gray-100 my-1" />
               <button className="w-full text-left px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 flex items-center gap-2" onClick={() => { if (onDuplicate) onDuplicate(); setShowActions(false); }}>
                 <Copy className="w-3.5 h-3.5" /> Duplicate Order
