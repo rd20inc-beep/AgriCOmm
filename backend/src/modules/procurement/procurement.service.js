@@ -433,17 +433,10 @@ const procurementService = {
         }
       }
 
-      if (grn.batch_id && parseFloat(grn.accepted_qty_mt) > 0) {
-        await inventoryService.receiveRice(trx, {
-          batchId: grn.batch_id,
-          weightKg: (parseFloat(grn.accepted_qty_mt) || 0) * 1000, // MT (doc) → KG (engine)
-          costPerKg: (parseFloat(grn.price_per_mt) || 0) / 1000, // per-MT → per-KG
-          currency: grn.currency || 'PKR',
-          supplierId: grn.supplier_id,
-          vehicleNo: grn.vehicle_no || null,
-          userId: inspectedBy,
-        });
-      }
+      // NOTE: the goods were already received into inventory by createGRN (which
+      // posts the full accepted qty). Quality approval only ADJUSTS that stock —
+      // it must NOT receive again (that double-counted the raw rice + its value).
+      // A deduction above lowers the received stock by the deducted amount.
     }
 
     const [updated] = await trx('goods_receipt_notes')
@@ -599,7 +592,10 @@ const procurementService = {
 
         if (lot) {
           await inventoryService.postMovement(trx, {
-            movementType: inventoryService.MOVEMENT_TYPES.RETURN,
+            // A purchase return sends goods BACK to the supplier, so stock must
+            // DECREASE. MOVEMENT_TYPES.RETURN is inbound (used for katta returns),
+            // so use ADJUSTMENT_MINUS — consistent with the quality-rejection path.
+            movementType: inventoryService.MOVEMENT_TYPES.ADJUSTMENT_MINUS,
             lotId: lot.id,
             qty: qtyMt * 1000, // purchase return qty is MT (doc) → KG (engine)
             fromWarehouseId: lot.warehouse_id,
