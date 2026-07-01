@@ -10,7 +10,7 @@ import TransactionDocument from '../../../components/TransactionDocument';
 import StatusBadge from '../../../components/StatusBadge';
 import PartyLink from '../../../shared/components/PartyLink';
 import { toPkr } from '../utils/fx';
-import { ageBucket } from '../utils/aging';
+import { bucketize, BUCKET_KEYS } from '../utils/aging';
 import { shortenRef } from '../utils/refs';
 
 // Currency-aware formatter — picks $ / Rs / € / £ from the row's currency.
@@ -98,12 +98,10 @@ export default function MoneyIn() {
   // Aging data — bucket edges live in ../utils/aging so they can't
   // drift away from the Overview's aging chart.
   const agingData = useMemo(() => {
-    const buckets = { '0-30': 0, '31-60': 0, '61-90': 0, '90+': 0 };
-    receivables.filter(r => r.status !== 'Paid').forEach(r => {
-      const b = ageBucket(r.aging || 0) || '90+';
-      buckets[b] += parseFloat(r.outstanding) || 0;
-    });
-    return Object.entries(buckets).map(([name, value]) => ({ name, value: Math.round(value) }));
+    // Bucket by real days-overdue (from due_date) via the shared helper — the
+    // stored r.aging column is always 0, which put every receivable in "0-30".
+    const b = bucketize(receivables, { mode: 'mixed' });
+    return BUCKET_KEYS.map(name => ({ name, value: Math.round(b[name].totalPkr) }));
   }, [receivables]);
 
   const columns = [
