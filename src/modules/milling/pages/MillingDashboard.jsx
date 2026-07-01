@@ -33,6 +33,7 @@ import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { useCreateMillingBatch, useMillExpenses, useCreateMillExpense, useInventory, useProducts } from '../../../api/queries';
 import { useCommodityPrices } from '../hooks/useCommodityPrices';
+import { useMillSummary } from '../hooks/useMillSummary';
 import KPICard from '../../../components/KPICard';
 import StatusBadge from '../../../components/StatusBadge';
 import Modal from '../../../components/Modal';
@@ -58,6 +59,12 @@ export default function MillingDashboard() {
   const inventory = Array.isArray(directInv) ? directInv : [];
   const commodityPrices = useCommodityPrices();
   const MILL_PRICES_PKR = { finishedRicePerMT: commodityPrices.finished, brokenPerMT: commodityPrices.broken, branPerMT: commodityPrices.bran, huskPerMT: commodityPrices.husk };
+  // Canonical mill P&L (values every sellable output at recorded prices).
+  const { summary: millSummary } = useMillSummary();
+  const millBatchRev = useMemo(
+    () => Object.fromEntries((millSummary?.batchBreakdown || []).map((x) => [x.id, x])),
+    [millSummary],
+  );
   const createBatchMut = useCreateMillingBatch();
   const { data: expenseData } = useMillExpenses();
   const millExpenses = expenseData?.expenses || [];
@@ -567,27 +574,17 @@ export default function MillingDashboard() {
         </div>
         {(() => {
           const completed = millingBatches.filter(b => b.status === 'Completed');
-          // Raw cost = rawRice category from batch costs
-          const totalRawCost = completed.reduce((s, b) => {
-            if (b.rawCostTotal) return s + b.rawCostTotal;
-            const costs = b.costs || {};
-            return s + (parseFloat(costs.rawRice) || parseFloat(costs.raw_rice) || 0);
-          }, 0);
-          // Other batch costs (transport, electricity, labor, etc.) — everything except rawRice
-          const totalOtherBatchCosts = completed.reduce((s, b) => {
-            const costs = b.costs || {};
-            return s + Object.entries(costs).reduce((cs, [k, v]) => {
-              if (k === 'rawRice' || k === 'raw_rice') return cs;
-              return cs + (parseFloat(v) || 0);
-            }, 0);
-          }, 0);
-          const finishedRevenue = completed.reduce((s, b) => s + (b.actualFinishedMT * MILL_PRICES_PKR.finishedRicePerMT), 0);
-          const byproductRevenue = completed.reduce((s, b) =>
-            s + (b.brokenMT * MILL_PRICES_PKR.brokenPerMT), 0);
-          const totalRevenue = finishedRevenue + byproductRevenue;
-          const totalCost = totalRawCost + totalOtherBatchCosts + totalOverhead;
-          const netProfit = totalRevenue - totalCost;
-          const margin = totalRevenue > 0 ? (netProfit / totalRevenue * 100).toFixed(1) : 0;
+          // Canonical figures from useMillSummary — values every sellable output
+          // (finished + broken/grades + powder/S.W/choba/sortex) at recorded prices,
+          // not the old finished+broken-only estimate.
+          const finishedRevenue = millSummary?.revenue?.finished || 0;
+          const byproductRevenue = millSummary?.revenue?.byproduct || 0;
+          const totalRevenue = millSummary?.revenue?.total || 0;
+          const totalRawCost = millSummary?.costs?.rawMaterial || 0;
+          const totalOtherBatchCosts = millSummary?.costs?.otherDirect || 0;
+          const totalCost = millSummary?.costs?.total || 0;
+          const netProfit = millSummary?.profit?.gross || 0;
+          const margin = totalRevenue > 0 ? (millSummary?.profit?.margin || 0).toFixed(1) : 0;
 
           return (
             <>
@@ -647,9 +644,10 @@ export default function MillingDashboard() {
                       </tr></thead>
                       <tbody className="divide-y divide-gray-100">
                         {completed.map(b => {
-                          const bRevenue = (b.actualFinishedMT * MILL_PRICES_PKR.finishedRicePerMT) + (b.brokenMT * MILL_PRICES_PKR.brokenPerMT);
-                          const bCost = Object.values(b.costs || {}).reduce((s, c) => s + (parseFloat(c) || 0), 0);
-                          const bProfit = bRevenue - bCost;
+                          const sb = millBatchRev[b.id] || {};
+                          const bRevenue = sb.revenue || 0;
+                          const bCost = sb.totalCost != null ? sb.totalCost : Object.values(b.costs || {}).reduce((s, c) => s + (parseFloat(c) || 0), 0);
+                          const bProfit = sb.profit != null ? sb.profit : (bRevenue - bCost);
                           return (
                             <tr key={b.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => navigate(`/milling/${b.id}`)}>
                               <td className="py-2 px-2 font-medium text-blue-600">{b.id}{b.batchName && <span className="text-gray-400"> · {b.batchName}</span>}</td>
