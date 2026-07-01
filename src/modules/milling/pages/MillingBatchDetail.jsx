@@ -2379,6 +2379,9 @@ export default function MillingBatchDetail() {
 
           const num = (v) => parseFloat(v) || 0;
           const rawPurchase = num(batch?.costs?.raw_rice);
+          // Raw rice cost per kg — useful when only part of a lot is milled.
+          const rawQtyKg = parseFloat(batch?.rawQtyKg) || 0;
+          const rawCostPerKg = rawQtyKg > 0 ? rawPurchase / rawQtyKg : 0;
           const millingCost = num(priceForm.millingCost);
           const otherExpenses = num(priceForm.otherExpenses);
           const packingCost = num(batch?.costs?.packaging); // auto from packing logs, always added
@@ -2399,6 +2402,11 @@ export default function MillingBatchDetail() {
                   <div>
                     <label className="block text-xs text-gray-600 mb-1">Raw Purchase</label>
                     <div className="w-full border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm text-gray-700">{Rs(rawPurchase)}</div>
+                    {rawQtyKg > 0 && (
+                      <p className="text-[11px] text-gray-500 mt-1">
+                        <span className="font-semibold text-gray-700">{Rs(rawCostPerKg)}/kg</span> · {Math.round(rawQtyKg).toLocaleString()} kg raw milled
+                      </p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-xs text-gray-600 mb-1">Milling Cost</label>
