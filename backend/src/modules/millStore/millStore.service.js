@@ -1,4 +1,5 @@
 const db = require('../../config/database');
+const { nextDocNo } = require('../../utils/docNumber');
 const repo = require('./millStore.repository');
 const { NotFoundError, ValidationError, ConflictError } = require('../../shared/errors');
 
@@ -150,9 +151,8 @@ const millStoreService = {
         const payable = await trx('payables').where(function () {
           this.where({ source_table: 'mill_purchases', source_id: parseInt(id, 10) }).orWhere('linked_ref', purchase.purchase_no);
         }).first();
-        const payCount = await trx('payments').count('id as c').first();
         await trx('payments').insert({
-          payment_no: `MP-PAY-${(parseInt(payCount?.c) || 0) + 1}`,
+          payment_no: await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'MP-PAY-', pad: 0 }),
           type: 'payment', amount, currency: 'PKR', fx_rate: 1, base_amount_pkr: amount,
           payment_method: method, bank_account_id: bankId, bank_reference: data.payment_reference || null,
           due_date: data.due_date || null, cleared: false,
@@ -186,9 +186,8 @@ const millStoreService = {
       }
 
       // Canonical payment record (this is what the trail reads via the payable).
-      const payCount = await trx('payments').count('id as c').first();
       const [pay] = await trx('payments').insert({
-        payment_no: `MP-PAY-${(parseInt(payCount?.c) || 0) + 1}`,
+        payment_no: await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'MP-PAY-', pad: 0 }),
         type: 'payment', amount, currency: 'PKR', fx_rate: 1, base_amount_pkr: amount,
         payment_method: method, bank_account_id: bankId,
         bank_reference: data.payment_reference || null, due_date: data.due_date || null,

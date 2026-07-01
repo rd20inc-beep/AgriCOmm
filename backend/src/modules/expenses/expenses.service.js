@@ -1,5 +1,6 @@
 const db = require('../../config/database');
 const { NotFoundError, ValidationError } = require('../../shared/errors');
+const { nextDocNo } = require('../../utils/docNumber');
 const accountingService = require('../accounting/accounting.service');
 const { resolveCashAccountId } = require('../../shared/cashAccounts');
 
@@ -225,8 +226,7 @@ const expensesService = {
       // with the pay-later (markPaid) flow (payment trail + GL both move). ───
       if (pay_now) {
         const payDate = (expense_date instanceof Date ? expense_date.toISOString().slice(0, 10) : expense_date) || new Date().toISOString().split('T')[0];
-        const payCount = await trx('payments').count('id as c').first();
-        const paymentNo = `EXP-PAY-${(parseInt(payCount?.c) || 0) + 1}`;
+        const paymentNo = await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'EXP-PAY-', pad: 0 });
         // payments.payment_method is constrained to the canonical set
         // (cash/bank_transfer/cheque/...); the UI shorthand 'bank' maps to
         // 'bank_transfer' so a bank-paid expense doesn't violate the CHECK.
@@ -249,8 +249,7 @@ const expensesService = {
           // in localSales.postReceiptToAccount). Best-effort.
           try {
             const acct = await trx('bank_accounts').where('id', resolvedAccountId).first();
-            const btCount = await trx('bank_transactions').count('id as c').first();
-            const btNo = `BT-${String((parseInt(btCount?.c) || 0) + 1).padStart(4, '0')}`;
+            const btNo = await nextDocNo(trx, { table: 'bank_transactions', column: 'transaction_no', prefix: 'BT-' });
             const paymentRow = await trx('payments').where('payment_no', paymentNo).first();
             await trx('bank_transactions').insert({
               transaction_no: btNo,
@@ -391,9 +390,8 @@ const expensesService = {
     if (isPostDated) {
       return db.transaction(async (trx) => {
         const payable = await trx('payables').where({ source_table: 'business_expenses', source_id: id }).first();
-        const payCount = await trx('payments').count('id as c').first();
         await trx('payments').insert({
-          payment_no: `EXP-PAY-${(parseInt(payCount?.c) || 0) + 1}`,
+          payment_no: await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'EXP-PAY-', pad: 0 }),
           type: 'payment', amount: payAmt, currency: 'PKR', fx_rate: 1, base_amount_pkr: payAmt,
           payment_method, bank_account_id: bank_account_id || null, bank_reference: payment_reference || null,
           due_date: due_date || null, cleared: false,
@@ -431,8 +429,7 @@ const expensesService = {
       }
 
       // Canonical payment row for this installment.
-      const payCount = await trx('payments').count('id as c').first();
-      const paymentNo = `EXP-PAY-${(parseInt(payCount?.c) || 0) + 1}`;
+      const paymentNo = await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'EXP-PAY-', pad: 0 });
       const [payRow] = await trx('payments').insert({
         payment_no: paymentNo,
         type: 'payment', amount: payAmt, currency: 'PKR', fx_rate: 1, base_amount_pkr: payAmt,
@@ -451,8 +448,7 @@ const expensesService = {
         });
         try {
           const acct = await trx('bank_accounts').where('id', acctId).first();
-          const btCount = await trx('bank_transactions').count('id as c').first();
-          const btNo = `BT-${String((parseInt(btCount?.c) || 0) + 1).padStart(4, '0')}`;
+          const btNo = await nextDocNo(trx, { table: 'bank_transactions', column: 'transaction_no', prefix: 'BT-' });
           await trx('bank_transactions').insert({
             transaction_no: btNo,
             bank_account_id: acctId,
