@@ -74,7 +74,7 @@ export default function MillingDashboard() {
     supplierId: '', rawQtyKg: '', totalBags: '', plannedFinishedKg: '',
     millId: '', shift: 'Day', notes: '',
     // Service milling fields
-    clientName: '', clientContact: '', millingFeePerMT: '',
+    clientName: '', clientContact: '', serviceFeePerKg: '',
   });
   const setBF = (k, v) => setBatchForm(p => ({ ...p, [k]: v }));
   // Blend: consume partial quantities from multiple stock lots (mixed
@@ -143,7 +143,7 @@ export default function MillingDashboard() {
     setBatchForm({
       millingType: 'own_stock', productId: '', supplierId: '', rawQtyKg: '', totalBags: '', plannedFinishedKg: '',
       millingFeePerKg: '5',
-      millId: '', shift: 'Day', notes: '', clientName: '', clientContact: '', millingFeePerMT: '',
+      millId: '', shift: 'Day', notes: '', clientName: '', clientContact: '', serviceFeePerKg: '',
     });
     setUseBlend(true); setBlendProductId(''); setBlendRows([]); setBlendTag('All');
   };
@@ -207,7 +207,7 @@ export default function MillingDashboard() {
         shift: batchForm.shift,
         planned_finished_kg: plannedKg,
         notes: batchForm.millingType === 'service_milling'
-          ? `[SERVICE MILLING] Client: ${batchForm.clientName}${batchForm.clientContact ? ` | Contact: ${batchForm.clientContact}` : ''}${batchForm.millingFeePerMT ? ` | Fee: PKR ${batchForm.millingFeePerMT}/MT` : ''}${batchForm.notes ? ` | ${batchForm.notes}` : ''}`
+          ? `[SERVICE MILLING] Client: ${batchForm.clientName}${batchForm.clientContact ? ` | Contact: ${batchForm.clientContact}` : ''}${batchForm.serviceFeePerKg ? ` | Fee: PKR ${batchForm.serviceFeePerKg}/kg` : ''}${batchForm.notes ? ` | ${batchForm.notes}` : ''}`
           : batchForm.notes || null,
         ...(useBlend
           ? { source_lots: blendLots, product_id: blendProductId ? parseInt(blendProductId) : null, processing_type: blendRecipe.processingType }
@@ -1061,8 +1061,8 @@ export default function MillingDashboard() {
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Milling Fee (PKR/MT)</label>
-                <input type="number" value={batchForm.millingFeePerMT} onChange={e => setBF('millingFeePerMT', e.target.value)} placeholder="e.g. 3500" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
+                <label className="block text-xs font-medium text-gray-700 mb-1">Milling Fee (PKR/kg)</label>
+                <input type="number" step="0.01" value={batchForm.serviceFeePerKg} onChange={e => setBF('serviceFeePerKg', e.target.value)} placeholder="e.g. 3.5" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
               </div>
             </div>
           )}
@@ -1296,10 +1296,10 @@ export default function MillingDashboard() {
               {batchForm.totalBags && parseInt(batchForm.totalBags, 10) > 0 && (
                 <div className="flex justify-between"><span className="text-gray-500">Bags</span><span className="font-medium">{batchForm.totalBags} bags · {(parseFloat(batchForm.rawQtyKg) / parseInt(batchForm.totalBags, 10)).toFixed(2)} kg/bag avg</span></div>
               )}
-              {batchForm.millingType === 'service_milling' && batchForm.millingFeePerMT && (
+              {batchForm.millingType === 'service_milling' && batchForm.serviceFeePerKg && (
                 <div className="flex justify-between border-t border-gray-200 mt-1 pt-1">
                   <span className="text-gray-500">Milling Revenue</span>
-                  <span className="font-bold text-green-700">PKR {Math.round(parseFloat(batchForm.millingFeePerMT) * (parseFloat(batchForm.rawQtyKg) / 1000)).toLocaleString()}</span>
+                  <span className="font-bold text-green-700">PKR {Math.round(parseFloat(batchForm.serviceFeePerKg) * parseFloat(batchForm.rawQtyKg)).toLocaleString()}</span>
                 </div>
               )}
             </div>

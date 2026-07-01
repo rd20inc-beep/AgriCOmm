@@ -185,7 +185,7 @@ export default function MillingBatchDetail() {
     // Per-truck quality (optional) — full Pakistani grade sheet
     moisture: '', broken: '', foreignMatter: '', chalky: '', purity: '',
     b1: '', b2: '', b3: '', csr: '', shortGrain: '', cobba: '', nb: '', ov: '',
-    pricePerMT: '',
+    pricePerKg: '',
   });
   const [showVehicleQuality, setShowVehicleQuality] = useState(false);
 
@@ -361,9 +361,9 @@ export default function MillingBatchDetail() {
           }
         }
         // Auto-populate raw rice cost from agreed price
-        if (formValues.pricePerMT && batch.rawQtyMT > 0) {
-          const rawRiceCost = Math.round(formValues.pricePerMT * batch.rawQtyMT);
-          addToast(`Raw rice cost auto-updated: Rs ${rawRiceCost.toLocaleString()} (${batch.rawQtyMT} MT × Rs ${Math.round(formValues.pricePerMT).toLocaleString()}/MT)`, 'info');
+        if (formValues.pricePerKg && batch.rawQtyKg > 0) {
+          const rawRiceCost = Math.round(formValues.pricePerKg * batch.rawQtyKg);
+          addToast(`Raw rice cost auto-updated: Rs ${rawRiceCost.toLocaleString()} (${Math.round(batch.rawQtyKg).toLocaleString()} kg × Rs ${formValues.pricePerKg.toFixed(2)}/kg)`, 'info');
         }
       }
       invalidateBatch();
@@ -415,7 +415,7 @@ export default function MillingBatchDetail() {
       }
       const hasArrivalPrice = batch.arrivalAnalysis?.pricePerMT || batch.arrivalAnalysis?.pricePerKg;
       if (!hasArrivalPrice) {
-        addToast('Please record the arrival analysis with the agreed price per MT/KG before recording yield. This sets the raw material cost.', 'error');
+        addToast('Please record the arrival analysis with the agreed price per kg before recording yield. This sets the raw material cost.', 'error');
         return;
       }
     }
@@ -518,13 +518,18 @@ export default function MillingBatchDetail() {
         chalky: 'chalky', purity: 'purity',
         b1: 'b1', b2: 'b2', b3: 'b3', csr: 'csr', shortGrain: 'short_grain',
         cobba: 'cobba', nb: 'nb', ov: 'ov',
-        pricePerMT: 'price_per_mt',
       };
       for (const [src, dst] of Object.entries(QMAP)) {
         const v = vehicleForm[src];
         if (v !== '' && v != null && !Number.isNaN(parseFloat(v))) {
           quality[dst] = parseFloat(v);
         }
+      }
+      // Price captured per-kg; also store per-MT so existing readers keep working.
+      const vpkg = parseFloat(vehicleForm.pricePerKg);
+      if (!Number.isNaN(vpkg)) {
+        quality.price_per_kg = vpkg;
+        quality.price_per_mt = Math.round(vpkg * 1000);
       }
       await addVehicleMut.mutateAsync({
         id: batchId,
@@ -549,7 +554,7 @@ export default function MillingBatchDetail() {
       arrivalDate: new Date().toISOString().split('T')[0], notes: '',
       moisture: '', broken: '', foreignMatter: '', chalky: '', purity: '',
       b1: '', b2: '', b3: '', csr: '', shortGrain: '', cobba: '', nb: '', ov: '',
-      pricePerMT: '',
+      pricePerKg: '',
     });
     setShowVehicleQuality(false);
     setShowVehicleModal(false);
@@ -1365,7 +1370,7 @@ export default function MillingBatchDetail() {
                     <AlertTriangle className="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" />
                     <div>
                       <p className="text-sm font-semibold text-amber-800">Arrival Price Required</p>
-                      <p className="text-xs text-amber-600 mt-0.5">Record the arrival quality analysis with the agreed price per MT in the Quality tab. This sets the raw material cost for the costing sheet.</p>
+                      <p className="text-xs text-amber-600 mt-0.5">Record the arrival quality analysis with the agreed price per kg in the Quality tab. This sets the raw material cost for the costing sheet.</p>
                     </div>
                   </div>
                 )}
@@ -1515,7 +1520,7 @@ export default function MillingBatchDetail() {
                 <AlertTriangle className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
                 <div>
                   <p className="text-sm font-semibold text-red-800">Raw Material Cost Missing</p>
-                  <p className="text-xs text-red-600 mt-0.5">Go to the Quality tab and record the arrival analysis with the agreed price per MT. Without this, the costing sheet cannot calculate raw material cost.</p>
+                  <p className="text-xs text-red-600 mt-0.5">Go to the Quality tab and record the arrival analysis with the agreed price per kg. Without this, the costing sheet cannot calculate raw material cost.</p>
                   <button onClick={() => setActiveTab('quality')} className="mt-2 px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-medium hover:bg-red-700">Go to Quality Tab</button>
                 </div>
               </div>
@@ -1804,49 +1809,28 @@ export default function MillingBatchDetail() {
             <h4 className="text-sm font-semibold text-gray-700 mb-3">
               {analysisModalType === 'sample' ? 'Offered Price' : 'Agreed Price'} (PKR)
             </h4>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Price per KG</label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">Rs</span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={analysisForm.pricePerKg}
-                    onChange={(e) => {
-                      const pkg = e.target.value;
-                      const pmt = pkg ? (parseFloat(pkg) * 1000).toFixed(2) : '';
-                      setAnalysisForm(prev => ({ ...prev, pricePerKg: pkg, pricePerMT: pmt }));
-                    }}
-                    className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="e.g. 85"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Price per MT</label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">Rs</span>
-                  <input
-                    type="number"
-                    step="1"
-                    min="0"
-                    value={analysisForm.pricePerMT}
-                    onChange={(e) => {
-                      const pmt = e.target.value;
-                      const pkg = pmt ? (parseFloat(pmt) / 1000).toFixed(2) : '';
-                      setAnalysisForm(prev => ({ ...prev, pricePerMT: pmt, pricePerKg: pkg }));
-                    }}
-                    className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="e.g. 85000"
-                  />
-                </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Price per KG</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">Rs</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={analysisForm.pricePerKg}
+                  onChange={(e) => {
+                    const pkg = e.target.value;
+                    const pmt = pkg ? (parseFloat(pkg) * 1000).toFixed(2) : '';
+                    setAnalysisForm(prev => ({ ...prev, pricePerKg: pkg, pricePerMT: pmt }));
+                  }}
+                  className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="e.g. 85"
+                />
               </div>
             </div>
-            {analysisForm.pricePerMT && batch.rawQtyMT > 0 && (
+            {analysisForm.pricePerKg && batch.rawQtyKg > 0 && (
               <div className="mt-2 text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
-                Estimated total cost for {Math.round(batch.rawQtyKg).toLocaleString()} kg raw: <span className="font-semibold text-gray-800">Rs {Math.round(parseFloat(analysisForm.pricePerMT) * batch.rawQtyMT).toLocaleString()}</span>
+                Estimated total cost for {Math.round(batch.rawQtyKg).toLocaleString()} kg raw: <span className="font-semibold text-gray-800">Rs {Math.round(parseFloat(analysisForm.pricePerKg) * batch.rawQtyKg).toLocaleString()}</span>
               </div>
             )}
           </div>
@@ -2327,12 +2311,12 @@ export default function MillingBatchDetail() {
                   </div>
                   <div className="grid grid-cols-2 gap-2 pt-1 border-t border-gray-200">
                     <div>
-                      <label className="block text-[11px] font-medium text-gray-600 mb-0.5">Price / MT (PKR)</label>
+                      <label className="block text-[11px] font-medium text-gray-600 mb-0.5">Price / kg (PKR)</label>
                       <input
-                        type="number" step="1" min="0"
-                        value={vehicleForm.pricePerMT}
-                        onChange={setQ('pricePerMT')}
-                        placeholder="e.g. 95000"
+                        type="number" step="0.01" min="0"
+                        value={vehicleForm.pricePerKg}
+                        onChange={setQ('pricePerKg')}
+                        placeholder="e.g. 95"
                         className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                       />
                     </div>

@@ -86,20 +86,21 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
   const otherLots = availableLots.filter(l => !matchingLots.includes(l));
 
   async function handleQuickAllocate(lot) {
-    const availMT = parseFloat(lot.available_qty) || 0;
-    const enteredQty = parseFloat(customQty[lot.id]);
-    const qtyToAllocate = enteredQty > 0 ? Math.min(enteredQty, availMT, remainingNeeded) : Math.min(availMT, remainingNeeded);
-    if (qtyToAllocate <= 0) return;
+    const availableKg = parseFloat(lot.available_qty) || 0; // available_qty is KG (post-5c)
+    const remainingNeededKg = remainingNeeded * 1000;        // order qty is MT
+    const enteredKg = parseFloat(customQty[lot.id]);
+    const qtyToAllocateKg = enteredKg > 0 ? Math.min(enteredKg, availableKg, remainingNeededKg) : Math.min(availableKg, remainingNeededKg);
+    if (qtyToAllocateKg <= 0) return;
 
     setAllocatingLotId(lot.id);
     try {
       await exportOrdersApi.allocateStock(order.dbId || order.id, {
         lot_id: lot.id,
-        qty_mt: qtyToAllocate,
+        qty_mt: qtyToAllocateKg / 1000, // KG → MT for the export doc boundary
         item_id: lineId || undefined,
-        notes: `Allocated ${Math.round(qtyToAllocate * 1000).toLocaleString()} kg from ${lot.lot_no}`,
+        notes: `Allocated ${Math.round(qtyToAllocateKg).toLocaleString()} kg from ${lot.lot_no}`,
       });
-      addToast(`${Math.round(qtyToAllocate * 1000).toLocaleString()} kg allocated from ${lot.lot_no}`, 'success');
+      addToast(`${Math.round(qtyToAllocateKg).toLocaleString()} kg allocated from ${lot.lot_no}`, 'success');
       setCustomQty(prev => ({ ...prev, [lot.id]: '' }));
       setFetchTrigger(t => t + 1); // refresh available lots
       if (onStockAllocated) onStockAllocated();
@@ -307,10 +308,11 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
 
           <div className="space-y-3">
             {[...matchingLots, ...(showAllLots ? otherLots : [])].map(lot => {
-              const availMT = parseFloat(lot.available_qty) || 0;
-              const defaultQty = Math.min(availMT, remainingNeeded);
+              const availableKg = parseFloat(lot.available_qty) || 0; // KG (post-5c)
+              const remainingNeededKg = remainingNeeded * 1000;
+              const defaultKg = Math.min(availableKg, remainingNeededKg);
               const enteredQty = customQty[lot.id];
-              const willAllocate = enteredQty ? Math.min(parseFloat(enteredQty) || 0, availMT, remainingNeeded) : defaultQty;
+              const willAllocateKg = enteredQty ? Math.min(parseFloat(enteredQty) || 0, availableKg, remainingNeededKg) : defaultKg;
               const isAllocating = allocatingLotId === lot.id;
               const isMatch = matchingLots.includes(lot);
 
@@ -329,7 +331,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
                       </div>
                       <p className="text-xs text-gray-600 mb-2">{lot.item_name || lot.product_name || 'Finished Rice'}</p>
                       <div className="grid grid-cols-4 gap-2 text-xs">
-                        <div><span className="text-gray-400">Available</span><br/><span className="font-bold text-emerald-700">{Math.round(availMT * 1000).toLocaleString()} kg</span></div>
+                        <div><span className="text-gray-400">Available</span><br/><span className="font-bold text-emerald-700">{Math.round(availableKg).toLocaleString()} kg</span></div>
                         <div><span className="text-gray-400">Entity</span><br/><span className="font-semibold text-gray-900">{lot.entity || '—'}</span></div>
                         <div><span className="text-gray-400">Supplier</span><br/><span className="font-semibold text-gray-900">{lot.supplier_name || '—'}</span></div>
                         <div><span className="text-gray-400">Warehouse</span><br/><span className="font-semibold text-gray-900">{lot.warehouse_name || '—'}</span></div>
@@ -341,24 +343,24 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
                           type="number"
                           value={enteredQty ?? ''}
                           onChange={e => setCustomQty(prev => ({ ...prev, [lot.id]: e.target.value }))}
-                          placeholder={defaultQty.toFixed(2)}
+                          placeholder={Math.round(defaultKg).toString()}
                           className="w-24 border border-gray-300 rounded-lg px-2 py-1.5 text-sm text-right focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
-                          min="0.01"
-                          max={Math.min(availMT, remainingNeeded)}
-                          step="0.01"
+                          min="1"
+                          max={Math.min(availableKg, remainingNeededKg)}
+                          step="1"
                           onClick={e => e.stopPropagation()}
                         />
-                        <span className="text-xs text-gray-400">MT</span>
+                        <span className="text-xs text-gray-400">kg</span>
                       </div>
                       <button
                         onClick={() => handleQuickAllocate(lot)}
-                        disabled={isAllocating || remainingNeeded <= 0 || willAllocate <= 0}
+                        disabled={isAllocating || remainingNeeded <= 0 || willAllocateKg <= 0}
                         className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         {isAllocating ? (
                           <><span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Allocating...</>
                         ) : (
-                          <><Plus className="w-3 h-3" /> Allocate {Math.round(willAllocate * 1000).toLocaleString()} kg</>
+                          <><Plus className="w-3 h-3" /> Allocate {Math.round(willAllocateKg).toLocaleString()} kg</>
                         )}
                       </button>
                     </div>
@@ -527,29 +529,29 @@ function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
   const batchId = linkedBatch.dbId || linkedBatch.id;
   const orderId = order.dbId || order.id;
 
-  // Auto-calculate transfer price from batch cost: (raw cost + milling cost) per KG × 1000 = per MT
+  // Auto-calculate transfer price from batch cost: (raw cost + milling cost) per KG.
   const autoPrice = linkedBatch.totalCostPerKgFinished
-    ? Math.round(linkedBatch.totalCostPerKgFinished * 1000)
+    ? Math.round(linkedBatch.totalCostPerKgFinished * 100) / 100
     : '';
   const [transferPrice, setTransferPrice] = useState(autoPrice || '');
 
   async function handleTransfer() {
-    const price = parseFloat(transferPrice);
+    const price = parseFloat(transferPrice); // PKR per kg
     if (!price || price <= 0) {
-      addToast('Please enter the transfer price (PKR/MT)', 'error');
+      addToast('Please enter the transfer price (PKR/kg)', 'error');
       return;
     }
 
     setTransferring(true);
     try {
-      const totalPKR = Math.round(price * finishedMT);
+      const totalPKR = Math.round(price * finishedMT * 1000); // per-kg × finished kg
       const pkrRate = 280;
       await financeApi.createTransfer({
         batch_id: batchId,
         export_order_id: orderId,
         product_name: linkedBatch.productName || order.productName || 'Finished Rice',
         qty_mt: finishedMT,
-        transfer_price_pkr: price,
+        transfer_price_pkr: price * 1000, // per-kg → per-MT for the doc boundary
         total_value_pkr: totalPKR,
         usd_equivalent: Math.round(totalPKR / pkrRate),
         pkr_rate: pkrRate,
@@ -625,17 +627,18 @@ function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
 
           <div className="flex flex-col sm:flex-row items-end gap-3">
             <div className="flex-1">
-              <label className="block text-xs font-medium text-amber-800 mb-1">Transfer Price (PKR/MT) *</label>
+              <label className="block text-xs font-medium text-amber-800 mb-1">Transfer Price (PKR/kg) *</label>
               <input
                 type="number"
+                step="0.01"
                 value={transferPrice}
                 onChange={e => setTransferPrice(e.target.value)}
-                placeholder="e.g. 72800"
+                placeholder="e.g. 72.8"
                 className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none bg-white"
               />
               {transferPrice && finishedMT > 0 && (
                 <p className="text-xs text-amber-600 mt-1">
-                  Total: PKR {Math.round(parseFloat(transferPrice) * finishedMT).toLocaleString()} (~${Math.round((parseFloat(transferPrice) * finishedMT) / 280).toLocaleString()})
+                  Total: PKR {Math.round(parseFloat(transferPrice) * finishedMT * 1000).toLocaleString()} (~${Math.round((parseFloat(transferPrice) * finishedMT * 1000) / 280).toLocaleString()})
                 </p>
               )}
             </div>

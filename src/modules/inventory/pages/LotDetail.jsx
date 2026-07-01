@@ -2297,7 +2297,7 @@ function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
 function TransferToExportDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
   const { exportOrders } = useApp();
   const availableKg = parseFloat(lot?.availableQty) || 0;
-  const defaultPrice = Math.round((parseFloat(lot?.costPerUnit) || 0) * 1000); // per MT (cost is per-KG)
+  const defaultPrice = Math.round((parseFloat(lot?.costPerUnit) || 0) * 100) / 100; // per KG
   const [qty, setQty] = useState('');
   const [price, setPrice] = useState('');
   const [orderId, setOrderId] = useState('');
@@ -2314,7 +2314,7 @@ function TransferToExportDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
 
   const q = parseFloat(qty) || 0;
   const exceeds = q > availableKg + 0.0001;
-  const totalVal = (q / 1000) * (parseFloat(price) || 0);
+  const totalVal = q * (parseFloat(price) || 0); // qty (kg) × price (per-kg)
   const activeOrders = (Array.isArray(exportOrders) ? exportOrders : [])
     .filter(o => !['Closed', 'Cancelled', 'Draft'].includes(o.status));
 
@@ -2326,7 +2326,8 @@ function TransferToExportDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
     try {
       const res = await lotInventoryApi.transferLotToExport(lot.id, {
         qty_kg: q,
-        transfer_price_pkr: price === '' ? null : parseFloat(price),
+        // Input is per-kg; the export/transfer doc boundary is per-MT.
+        transfer_price_pkr: price === '' ? null : parseFloat(price) * 1000,
         export_order_id: orderId ? Number(orderId) : null,
       });
       addToast(res?.message || 'Transferred to export', 'success');
@@ -2364,7 +2365,7 @@ function TransferToExportDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
           {exceeds && <p className="text-xs text-red-600 mt-1">Only {availableKg} KG available.</p>}
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Transfer price (Rs / MT)</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Transfer price (Rs / kg)</label>
           <input type="number" min="0" step="any" value={price} onChange={e => setPrice(e.target.value)}
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
           <p className="text-xs text-gray-400 mt-1">Defaults to the lot's cost. Sets the export lot's cost and the inter-entity transfer value.</p>
@@ -2390,7 +2391,7 @@ function TransferToExportDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
 function TransferToMillDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
   const availableKg = parseFloat(lot?.availableQty) || 0;
   const reservedKg = parseFloat(lot?.reservedQty) || 0;
-  const defaultPrice = Math.round((parseFloat(lot?.costPerUnit) || 0) * 1000); // per MT (cost is per-KG)
+  const defaultPrice = Math.round((parseFloat(lot?.costPerUnit) || 0) * 100) / 100; // per KG
   const [qty, setQty] = useState('');
   const [price, setPrice] = useState('');
   const [saving, setSaving] = useState(false);
@@ -2405,7 +2406,7 @@ function TransferToMillDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
 
   const q = parseFloat(qty) || 0;
   const exceeds = q > availableKg + 0.0001;
-  const totalVal = (q / 1000) * (parseFloat(price) || 0);
+  const totalVal = q * (parseFloat(price) || 0); // qty (kg) × price (per-kg)
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -2415,7 +2416,8 @@ function TransferToMillDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
     try {
       const res = await lotInventoryApi.transferLotToMill(lot.id, {
         qty_kg: q,
-        transfer_price_pkr: price === '' ? null : parseFloat(price),
+        // Input is per-kg; the transfer doc boundary is per-MT.
+        transfer_price_pkr: price === '' ? null : parseFloat(price) * 1000,
       });
       addToast(res?.message || 'Transferred back to mill', 'success');
       onSuccess?.();
@@ -2452,7 +2454,7 @@ function TransferToMillDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
           {exceeds && <p className="text-xs text-red-600 mt-1">Only {availableKg} KG available.</p>}
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Transfer price (Rs / MT)</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Transfer price (Rs / kg)</label>
           <input type="number" min="0" step="any" value={price} onChange={e => setPrice(e.target.value)}
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
           <p className="text-xs text-gray-400 mt-1">Defaults to the lot's cost. Sets the new mill lot's cost basis.</p>
