@@ -131,6 +131,25 @@ export default function MillingBatchDetail() {
   };
 
   const [activeTab, setActiveTab] = useState('overview');
+
+  // Custom name + tags — inline edit.
+  const [editingMeta, setEditingMeta] = useState(false);
+  const [metaForm, setMetaForm] = useState({ name: '', tags: '' });
+  function openMetaEditor() {
+    setMetaForm({ name: batch.batchName || '', tags: (batch.customTags || []).join(', ') });
+    setEditingMeta(true);
+  }
+  async function saveMeta() {
+    try {
+      await updateBatchMut.mutateAsync({ id: batchId, data: {
+        batch_name: metaForm.name.trim() || null,
+        custom_tags: metaForm.tags,
+      } });
+      addToast('Batch name & tags saved');
+      setEditingMeta(false);
+      invalidateBatch();
+    } catch (err) { addToast(err.message || 'Failed to save', 'error'); }
+  }
   const [showAnalysisModal, setShowAnalysisModal] = useState(false);
   const [analysisModalType, setAnalysisModalType] = useState('arrival');
   // Initial state seeded from qualityParams keys so adding/removing a
@@ -659,6 +678,31 @@ export default function MillingBatchDetail() {
               <h1 className="text-2xl font-bold text-gray-900">{batch.id}</h1>
               <StatusBadge status={batch.status} />
             </div>
+            {/* Custom name + tags */}
+            {editingMeta ? (
+              <div className="mt-2 space-y-2 max-w-md">
+                <input type="text" value={metaForm.name} maxLength={200} onChange={e => setMetaForm(f => ({ ...f, name: e.target.value }))}
+                  placeholder="Batch name — e.g. Super Kernel Export Blend - June 2026"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                <input type="text" value={metaForm.tags} onChange={e => setMetaForm(f => ({ ...f, tags: e.target.value }))}
+                  placeholder="Tags (comma-separated) — e.g. Export, June Production"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                <div className="flex gap-2">
+                  <button onClick={saveMeta} disabled={updateBatchMut.isPending} className="px-3 py-1 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">Save</button>
+                  <button onClick={() => setEditingMeta(false)} className="px-3 py-1 text-xs text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-1 flex items-center gap-2 flex-wrap">
+                {batch.batchName
+                  ? <span className="text-sm font-semibold text-gray-800">{batch.batchName}</span>
+                  : <span className="text-sm text-gray-400 italic">No custom name</span>}
+                {(batch.customTags || []).map((t, i) => (
+                  <span key={i} className="text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100">{t}</span>
+                ))}
+                <button onClick={openMetaEditor} className="text-xs text-blue-600 hover:text-blue-800 inline-flex items-center gap-0.5"><Edit3 size={12} /> {batch.batchName ? 'Edit' : 'Add name'}</button>
+              </div>
+            )}
             {batch.approvedByName && (
               <p className="text-xs text-green-600 mt-0.5">Approved by: {batch.approvedByName}</p>
             )}

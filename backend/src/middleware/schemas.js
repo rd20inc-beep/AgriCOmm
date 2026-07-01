@@ -432,6 +432,12 @@ const createBatch = Joi.object({
   machine_line: Joi.string().allow('', null),
   shift: Joi.string().valid('Day', 'Night', 'Full').default('Day'),
   notes: Joi.string().allow('', null),
+  // Human label + free-form tags for easy referencing (esp. blends).
+  batch_name: Joi.string().max(200).allow('', null),
+  custom_tags: Joi.alternatives().try(
+    Joi.array().items(Joi.string().max(60)),
+    Joi.string().allow('', null),
+  ),
 }).or('raw_qty_kg', 'source_lots');
 
 const recordYield = Joi.object({
