@@ -1455,10 +1455,12 @@ const financeController = {
         // if total on-hand is short — we must never post the GL journals / raw_rice
         // cost below without a matching inventory movement (that would decouple the
         // books from physical stock, the exact invariant the 5c harness protects).
+        // Prefer this transfer's OWN batch output lots (batch_ref = 'batch-<id>'),
+        // then fall back to other mill finished stock oldest-first.
         const candidateLots = await trx('inventory_lots')
           .where({ entity: 'mill', type: 'finished' })
           .where('available_qty', '>', 0)
-          .orderBy('created_at', 'asc');
+          .orderByRaw('(batch_ref = ?) DESC, created_at ASC', [`batch-${batch_id}`]);
 
         const totalAvailableKg = candidateLots.reduce((s, l) => s + (parseFloat(l.available_qty) || 0), 0);
         if (totalAvailableKg + 1e-6 < t.qty_kg) {

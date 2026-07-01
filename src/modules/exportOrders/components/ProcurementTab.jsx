@@ -98,9 +98,9 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
         lot_id: lot.id,
         qty_mt: qtyToAllocateKg / 1000, // KG → MT for the export doc boundary
         item_id: lineId || undefined,
-        notes: `Allocated ${Math.round(qtyToAllocateKg).toLocaleString()} kg from ${lot.lot_no}`,
+        notes: `Reserved ${Math.round(qtyToAllocateKg).toLocaleString()} kg from ${lot.lot_no}`,
       });
-      addToast(`${Math.round(qtyToAllocateKg).toLocaleString()} kg allocated from ${lot.lot_no}`, 'success');
+      addToast(`${Math.round(qtyToAllocateKg).toLocaleString()} kg reserved from ${lot.lot_no}`, 'success');
       setCustomQty(prev => ({ ...prev, [lot.id]: '' }));
       setFetchTrigger(t => t + 1); // refresh available lots
       if (onStockAllocated) onStockAllocated();
@@ -132,12 +132,12 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
           {finishedLots.length > 0 && (
             <>
               <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Allocated from Lots</span>
+                <span className="text-gray-500">Reserved from Lots</span>
                 <span className="font-medium text-gray-900">{Math.round(totalAllocatedMT * 1000).toLocaleString()} kg</span>
               </div>
               {remainingNeeded > 0 && (
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Remaining to Allocate</span>
+                  <span className="text-gray-500">Remaining to Reserve</span>
                   <span className="font-medium text-amber-600">{Math.round(remainingNeeded * 1000).toLocaleString()} kg</span>
                 </div>
               )}
@@ -282,19 +282,20 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
       {remainingNeeded > 0 && !lotsLoading && availableLots.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm border border-emerald-200 p-6">
           <div className="flex items-center justify-between mb-1">
-            <h3 className="text-sm font-semibold text-emerald-700 uppercase tracking-wide">Available Finished Stock</h3>
+            <h3 className="text-sm font-semibold text-emerald-700 uppercase tracking-wide">Reserve Finished Stock</h3>
             <button onClick={() => setFetchTrigger(t => t + 1)} className="text-xs text-gray-400 hover:text-gray-600">Refresh</button>
           </div>
+          <p className="text-[11px] text-gray-400 mb-1">Reserving holds this stock for the order (it stays in the mill and is deducted when the order ships). To physically move a lot to the export entity, use “Transfer to Export” on the lot.</p>
           <p className="text-xs text-gray-400 mb-4">
             {remainingNeeded > 0
-              ? <>Need <span className="font-semibold text-emerald-700">{Math.round(remainingNeeded * 1000).toLocaleString()} kg</span> more. Enter qty or click Allocate for full amount.</>
-              : <span className="text-green-600 font-medium">Fully allocated!</span>
+              ? <>Need <span className="font-semibold text-emerald-700">{Math.round(remainingNeeded * 1000).toLocaleString()} kg</span> more. Enter qty or click Reserve for the full amount.</>
+              : <span className="text-green-600 font-medium">Fully reserved!</span>
             }
           </p>
 
           {orderItems.length > 1 && (
             <div className="mb-4">
-              <label className="block text-xs font-medium text-gray-500 mb-1">Allocate to product line</label>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Reserve to product line</label>
               <select value={lineId} onChange={e => setLineId(e.target.value)}
                 className="w-full sm:w-auto border border-gray-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 outline-none">
                 <option value="">Order-wide (no specific line)</option>
@@ -302,7 +303,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
                   <option key={it.id} value={it.id}>Line {it.lineNo}: {it.productName || 'Product'} ({Math.round(it.qtyMt * 1000).toLocaleString()} kg)</option>
                 ))}
               </select>
-              <p className="text-[11px] text-gray-400 mt-1">Multi-product order — the lots you allocate below are reserved against this line.</p>
+              <p className="text-[11px] text-gray-400 mt-1">Multi-product order — the lots you reserve below are held against this line.</p>
             </div>
           )}
 
@@ -360,7 +361,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
                         {isAllocating ? (
                           <><span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Allocating...</>
                         ) : (
-                          <><Plus className="w-3 h-3" /> Allocate {Math.round(willAllocateKg).toLocaleString()} kg</>
+                          <><Plus className="w-3 h-3" /> Reserve {Math.round(willAllocateKg).toLocaleString()} kg</>
                         )}
                       </button>
                     </div>
