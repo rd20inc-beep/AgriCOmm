@@ -45,6 +45,9 @@ export default function InternalTransfer() {
   const qty = parseFloat(form.qtyKg) || 0;       // KG
   const price = parseFloat(form.transferPrice) || 0; // PKR per KG
   const totalAmount = qty * price;
+  // Cap the transfer to the selected batch's finished output (KG).
+  const batchFinishedKg = selectedBatch ? (parseFloat(selectedBatch.actualFinishedKg) || 0) : 0;
+  const exceedsStock = batchFinishedKg > 0 && qty > batchFinishedKg + 1e-6;
 
   const handleChange = (field, value) => {
     setForm(prev => ({ ...prev, [field]: value }));
@@ -54,6 +57,10 @@ export default function InternalTransfer() {
     e.preventDefault();
     if (!form.batchNo || !form.exportOrder || !form.qtyKg || !form.transferPrice || !form.dispatchDate) {
       addToast('Please fill in all required fields', 'error');
+      return;
+    }
+    if (exceedsStock) {
+      addToast(`Cannot transfer more than the batch's ${Math.round(batchFinishedKg).toLocaleString()} kg finished output`, 'error');
       return;
     }
 
@@ -161,11 +168,17 @@ export default function InternalTransfer() {
                   type="number"
                   step="1"
                   min="0"
+                  max={batchFinishedKg > 0 ? batchFinishedKg : undefined}
                   value={form.qtyKg}
                   onChange={(e) => handleChange('qtyKg', e.target.value)}
                   placeholder="e.g. 50000"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  className={`w-full border rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none ${exceedsStock ? 'border-red-400' : 'border-gray-300'}`}
                 />
+                {selectedBatch && (
+                  exceedsStock
+                    ? <p className="text-xs text-red-600 mt-1">Only {Math.round(batchFinishedKg).toLocaleString()} kg finished in this batch.</p>
+                    : <button type="button" onClick={() => handleChange('qtyKg', String(Math.round(batchFinishedKg)))} className="text-xs text-blue-600 hover:text-blue-800 mt-1">Available: {Math.round(batchFinishedKg).toLocaleString()} kg — use all</button>
+                )}
               </div>
 
               <div>
@@ -215,7 +228,7 @@ export default function InternalTransfer() {
             <div className="flex justify-end">
               <button
                 type="submit"
-                disabled={submitting}
+                disabled={submitting || exceedsStock}
                 className="inline-flex items-center gap-2 bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm disabled:opacity-50"
               >
                 <ArrowRightLeft className="w-4 h-4" />

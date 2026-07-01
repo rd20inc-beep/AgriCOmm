@@ -1441,7 +1441,7 @@ const inventoryService = {
     const millingReserved = parseFloat(lot.milling_reserved_qty) || 0;
     const newReserved = parseFloat(lot.reserved_qty) + parsedQty;
     if (newReserved + millingReserved > parseFloat(lot.qty) + 1e-6) {
-      throw new Error(`Cannot reserve ${parsedQty} MT — would exceed available on lot ${lot.lot_no} (qty ${lot.qty}, already reserved ${lot.reserved_qty} + ${millingReserved} in milling)`);
+      throw new Error(`Cannot reserve ${parsedQty} kg — would exceed available on lot ${lot.lot_no} (qty ${lot.qty}, already reserved ${lot.reserved_qty} + ${millingReserved} in milling)`);
     }
     const newAvailable = parseFloat(lot.qty) - newReserved - millingReserved;
 

@@ -1449,27 +1449,44 @@ const financeController = {
           })
           .returning('*');
 
-        // Post inventory movements. Use available_qty (not qty) so a lot
-        // that has already been partially transferred or reserved isn't
-        // double-counted. Pick the smallest lot that can satisfy the
-        // requested MT to keep stock fragmented as little as possible.
-        const millingLot = await trx('inventory_lots')
+        // Move the stock, drawing from one OR MORE mill finished lots (FIFO by
+        // oldest) so fragmented stock still transfers. Use available_qty (not qty)
+        // so already-transferred/reserved stock isn't double-counted. Fail LOUDLY
+        // if total on-hand is short — we must never post the GL journals / raw_rice
+        // cost below without a matching inventory movement (that would decouple the
+        // books from physical stock, the exact invariant the 5c harness protects).
+        const candidateLots = await trx('inventory_lots')
           .where({ entity: 'mill', type: 'finished' })
-          .where('available_qty', '>=', t.qty_kg)
-          .orderBy('available_qty', 'asc')
-          .first();
+          .where('available_qty', '>', 0)
+          .orderBy('created_at', 'asc');
 
-        if (millingLot) {
+        const totalAvailableKg = candidateLots.reduce((s, l) => s + (parseFloat(l.available_qty) || 0), 0);
+        if (totalAvailableKg + 1e-6 < t.qty_kg) {
+          const err = new Error(
+            `Insufficient mill finished stock to transfer: need ${Math.round(t.qty_kg).toLocaleString()} kg, `
+            + `only ${Math.round(totalAvailableKg).toLocaleString()} kg available across ${candidateLots.length} lot(s).`
+          );
+          err.status = 422;
+          throw err;
+        }
+
+        let remainingKg = t.qty_kg;
+        for (const lot of candidateLots) {
+          if (remainingKg <= 1e-6) break;
+          const takeKg = Math.min(parseFloat(lot.available_qty) || 0, remainingKg);
+          if (takeKg <= 0) continue;
           await inventoryService.transferToExport(trx, {
             transferId: t.id,
-            lotId: millingLot.id,
-            qtyKg: t.qty_kg,
+            lotId: lot.id,
+            qtyKg: takeKg,
             productName: t.product_name,
             orderId: t.export_order_id,
             transferPricePerMT: parseFloat(t.transfer_price_pkr) || 0,
-            totalValuePkr: parseFloat(t.total_value_pkr) || 0,
+            // Split the transfer value proportionally across the source lots.
+            totalValuePkr: (parseFloat(t.total_value_pkr) || 0) * (takeKg / t.qty_kg),
             userId: req.user?.id,
           });
+          remainingKg -= takeKg;
         }
 
         // Auto-post accounting journals for both entities
@@ -1544,7 +1561,11 @@ const financeController = {
       });
     } catch (err) {
       console.error('Create internal transfer error:', err);
-      return res.status(500).json({ success: false, message: 'Internal server error.' });
+      const status = err.status || 500;
+      return res.status(status).json({
+        success: false,
+        message: status === 500 ? 'Internal server error.' : err.message,
+      });
     }
   },
 
