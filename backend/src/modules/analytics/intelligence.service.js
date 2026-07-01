@@ -1705,10 +1705,12 @@ const intelligenceService = {
           .whereIn('r.status', ['Pending', 'Partially Paid', 'Overdue'])
           .select(
             'r.id', 'r.recv_no', 'r.type', 'r.expected_amount', 'r.received_amount',
-            'r.outstanding', 'r.due_date', 'r.aging', 'r.currency', 'r.status',
-            'c.name as customer_name', 'eo.order_no'
+            'r.outstanding', 'r.due_date',
+            // Real aging = days overdue (the stored r.aging column is always 0).
+            db.raw('GREATEST(0, (CURRENT_DATE - r.due_date::date)) as aging'),
+            'r.currency', 'r.status', 'c.name as customer_name', 'eo.order_no'
           )
-          .orderBy('r.aging', 'desc');
+          .orderByRaw('r.due_date ASC NULLS LAST'); // oldest-due (most overdue) first
         break;
 
       case 'totalPayables':
@@ -1717,10 +1719,12 @@ const intelligenceService = {
           .whereIn('p.status', ['Pending', 'Partially Paid', 'Overdue'])
           .select(
             'p.id', 'p.pay_no', 'p.category', 'p.original_amount', 'p.paid_amount',
-            'p.outstanding', 'p.due_date', 'p.aging', 'p.currency', 'p.status',
-            's.name as supplier_name', 'p.linked_ref'
+            'p.outstanding', 'p.due_date',
+            // Real aging = days overdue (the stored p.aging column is always 0).
+            db.raw('GREATEST(0, (CURRENT_DATE - p.due_date::date)) as aging'),
+            'p.currency', 'p.status', 's.name as supplier_name', 'p.linked_ref'
           )
-          .orderBy('p.aging', 'desc');
+          .orderByRaw('p.due_date ASC NULLS LAST'); // oldest-due (most overdue) first
         break;
 
       default:
