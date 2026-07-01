@@ -232,7 +232,7 @@ export default function QualityComparison() {
                   <tr><td colSpan={9} className="text-center py-12 text-gray-400">No batches match the selected filter</td></tr>
                 ) : filteredBatches.map(batch => (
                   <tr key={batch.id} className={`cursor-pointer hover:bg-gray-50 ${batch.qualityVariance > 1.0 ? 'bg-red-50/50' : ''}`} onClick={() => openDetail(batch)}>
-                    <td className="font-semibold text-gray-900">{batch.id}</td>
+                    <td className="font-semibold text-gray-900">{batch.id}{batch.batchName ? <span className="font-normal text-gray-400"> · {batch.batchName}</span> : ''}</td>
                     <td className="text-gray-600"><PartyLink type="supplier" id={batch.supplierId} name={batch.supplierName} /></td>
                     <td className="text-gray-600">{batch.linkedExportOrder || '—'}</td>
                     <td className="text-right text-gray-600">{batch.rawQtyMT} MT</td>

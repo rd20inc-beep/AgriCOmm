@@ -568,7 +568,7 @@ export function PurchaseLedgerView({ data, companyName, range }) {
             kids.push(['Remaining on hand', '', '', '', '', fmtMt(r.remainingKg / 1000), fmtKg(r.remainingKg), '', '', '', (r.remainingKg || 0) > 0 ? 'In stock' : 'None left']);
             // Milled into batch(es)
             for (const m of (r.milledInto || [])) {
-              kids.push(['Milled into', m.batchId ? <RefLink to={`/milling/${m.batchId}`}>{m.batchNo}</RefLink> : (m.batchNo || '—'), '', '', '', fmtMt(m.kg / 1000), fmtKg(m.kg), '', '', '', '']);
+              kids.push(['Milled into', <>{m.batchId ? <RefLink to={`/milling/${m.batchId}`}>{m.batchNo}</RefLink> : (m.batchNo || '—')}{m.batchName ? ` · ${m.batchName}` : ''}</>, '', '', '', fmtMt(m.kg / 1000), fmtKg(m.kg), '', '', '', '']);
             }
             // Trace through milling — who bought the finished / by-product output.
             for (const d of (r.downstreamSales || [])) {

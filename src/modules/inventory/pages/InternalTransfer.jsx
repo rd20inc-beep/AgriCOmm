@@ -129,7 +129,7 @@ export default function InternalTransfer() {
                   <option value="">Select completed batch...</option>
                   {completedBatches.map(b => (
                     <option key={b.id} value={b.id}>
-                      {b.id} - {Math.round(b.actualFinishedKg).toLocaleString()} kg ({b.supplierName})
+                      {b.id} - {Math.round(b.actualFinishedKg).toLocaleString()} kg ({b.supplierName}){b.batchName ? ` · ${b.batchName}` : ''}
                     </option>
                   ))}
                 </select>

@@ -455,7 +455,7 @@ export default function MillingDashboard() {
               {productionBatches.map((batch) => (
                 <tr key={batch.id} className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer">
                   <td className="py-2.5 px-2">
-                    <Link to={`/milling/${batch.id}`} className="font-medium text-blue-600 hover:text-blue-800">{batch.id}</Link>
+                    <Link to={`/milling/${batch.id}`} className="font-medium text-blue-600 hover:text-blue-800">{batch.id}</Link>{batch.batchName && <span className="text-gray-400"> · {batch.batchName}</span>}
                     {batch.linkedExportOrder && <p className="text-[10px] text-gray-400">→ {batch.linkedExportOrder}</p>}
                   </td>
                   <td className="py-2.5 px-2 text-gray-600"><PartyLink type="supplier" id={batch.supplierId} name={batch.supplierName} /></td>
@@ -598,7 +598,7 @@ export default function MillingDashboard() {
                           const bProfit = bRevenue - bCost;
                           return (
                             <tr key={b.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => navigate(`/milling/${b.id}`)}>
-                              <td className="py-2 px-2 font-medium text-blue-600">{b.id}</td>
+                              <td className="py-2 px-2 font-medium text-blue-600">{b.id}{b.batchName && <span className="text-gray-400"> · {b.batchName}</span>}</td>
                               <td className="py-2 px-2 text-right">{Math.round(b.rawQtyKg).toLocaleString()}</td>
                               <td className="py-2 px-2 text-right">{Math.round(b.actualFinishedKg).toLocaleString()}</td>
                               <td className="py-2 px-2 text-right">{b.yieldPct}%</td>
@@ -722,7 +722,7 @@ export default function MillingDashboard() {
                 className="flex-shrink-0 w-56 rounded-lg border border-gray-200 p-4 hover:shadow-md transition-shadow bg-white"
               >
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-bold text-gray-900">{batch.id}</span>
+                  <span className="text-sm font-bold text-gray-900">{batch.id}{batch.batchName && <span className="font-normal text-gray-400"> · {batch.batchName}</span>}</span>
                   <StatusBadge status={batch.status} />
                 </div>
                 {batch.linkedExportOrder && (
@@ -834,7 +834,7 @@ export default function MillingDashboard() {
                     <td className="py-2.5 px-2">
                       <Link to={`/milling/${batch.id}`} className="font-medium text-blue-600 hover:text-blue-800">
                         {batch.id}
-                      </Link>
+                      </Link>{batch.batchName && <span className="text-gray-400"> · {batch.batchName}</span>}
                     </td>
                     <td className="py-2.5 px-2 text-right text-gray-600">{Math.round(batch.rawQtyKg).toLocaleString()}</td>
                     <td className="py-2.5 px-2 text-right text-gray-600">{Math.round(batch.actualFinishedKg).toLocaleString()}</td>

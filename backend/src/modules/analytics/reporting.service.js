@@ -1,5 +1,14 @@
 const db = require('../../config/database');
 
+// Parse a milling_batches.custom_tags jsonb value into a plain array. The pg
+// driver usually returns jsonb already parsed (array/object), but a string may
+// arrive from raw selects — JSON.parse with a [] fallback.
+function parseCustomTags(v) {
+  if (v == null) return [];
+  if (typeof v === 'string') { try { return JSON.parse(v); } catch { return []; } }
+  return v;
+}
+
 /**
  * Reporting & BI Engine — Phase 9
  * Every method queries LIVE data from the real database tables.
@@ -314,6 +323,8 @@ const reportingService = {
       .select(
         'mb.id',
         'mb.batch_no',
+        'mb.batch_name',
+        'mb.custom_tags',
         's.name as supplier_name',
         'mb.raw_qty_kg',
         'mb.actual_finished_kg',
@@ -364,6 +375,8 @@ const reportingService = {
       return {
         id: b.id,
         batchNo: b.batch_no,
+        batchName: b.batch_name || null,
+        customTags: parseCustomTags(b.custom_tags),
         supplierName: b.supplier_name,
         rawQtyMT: (parseFloat(b.raw_qty_kg) || 0) / 1000,
         finishedMT: (parseFloat(b.actual_finished_kg) || 0) / 1000,
@@ -393,7 +406,7 @@ const reportingService = {
     const num = (v) => parseFloat(v) || 0;
     let bq = db('milling_batches as mb')
       .leftJoin('suppliers as s', 'mb.supplier_id', 's.id')
-      .select('mb.id', 'mb.batch_no', 's.name as supplier_name', 'mb.raw_qty_kg',
+      .select('mb.id', 'mb.batch_no', 'mb.batch_name', 'mb.custom_tags', 's.name as supplier_name', 'mb.raw_qty_kg',
         'mb.actual_finished_kg', 'mb.yield_pct', 'mb.status', 'mb.created_at',
         'mb.manual_milling_cost_pkr', 'mb.manual_other_expenses_pkr');
     if (from_date) bq = bq.where('mb.created_at', '>=', from_date);
@@ -488,7 +501,7 @@ const reportingService = {
       const realizedMarginPct = soldValue > 0 ? (realizedMargin / soldValue) * 100 : 0;
       const byproducts = (bpByBatch[b.id] || []).sort((x, y) => y.valuationValue - x.valuationValue);
       return {
-        id: b.id, batchNo: b.batch_no, supplierName: b.supplier_name, status: b.status, createdAt: b.created_at,
+        id: b.id, batchNo: b.batch_no, batchName: b.batch_name || null, customTags: parseCustomTags(b.custom_tags), supplierName: b.supplier_name, status: b.status, createdAt: b.created_at,
         rawQtyMT: num(b.raw_qty_kg)/1000, finishedMT: num(b.actual_finished_kg)/1000, yieldPct: num(b.yield_pct),
         inputCost, soldValue, costOfSold, realizedMargin, realizedMarginPct,
         soldKg: soldKg[b.id] || 0, onHandValue: onHand[b.id] || 0,
@@ -895,6 +908,8 @@ const reportingService = {
       .select(
         'mb.id',
         'mb.batch_no',
+        'mb.batch_name',
+        'mb.custom_tags',
         's.name as supplier_name',
         'eo.product_name',
         'mb.raw_qty_kg',
@@ -921,6 +936,8 @@ const reportingService = {
       return {
         id: b.id,
         batchNo: b.batch_no,
+        batchName: b.batch_name || null,
+        customTags: parseCustomTags(b.custom_tags),
         supplierName: b.supplier_name,
         productName: b.product_name,
         rawQtyMT: rawQty,
@@ -1078,7 +1095,7 @@ const reportingService = {
     const whIds = [...new Set(txns.flatMap(t => [t.warehouse_from_id, t.warehouse_to_id]).filter(Boolean))];
 
     const [batches, orders, sales, warehouses] = await Promise.all([
-      batchIds.length ? db('milling_batches').whereIn('id', batchIds).select('id', 'batch_no') : [],
+      batchIds.length ? db('milling_batches').whereIn('id', batchIds).select('id', 'batch_no', 'batch_name', 'custom_tags') : [],
       orderIds.length ? db('export_orders as eo').leftJoin('customers as c', 'eo.customer_id', 'c.id').whereIn('eo.id', orderIds).select('eo.id', 'eo.order_no', db.raw("COALESCE(c.name,'—') as customer")) : [],
       saleNos.length ? db('local_sales as ls').leftJoin('customers as c', 'ls.customer_id', 'c.id').whereIn('ls.sale_no', saleNos).select('ls.id', 'ls.sale_no', db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer")) : [],
       whIds.length ? db('warehouses').whereIn('id', whIds).select('id', 'name') : [],
@@ -1099,9 +1116,9 @@ const reportingService = {
 
     const events = txns.map((t) => {
       const tt = String(t.transaction_type || '');
-      let counterparty = null, href = null;
+      let counterparty = null, href = null, batchNo = null, batchName = null, customTags = null;
       if (tt === 'purchase_in') { counterparty = lot.supplier_name || null; href = lot.supplier_id ? `/finance/statements?type=supplier&id=${lot.supplier_id}` : null; }
-      else if (t.reference_module === 'milling_batch' && t.reference_id) { const b = batchById[t.reference_id]; counterparty = b ? `Batch ${b.batch_no}` : (t.reference_no || null); href = `/milling/${t.reference_id}`; }
+      else if (t.reference_module === 'milling_batch' && t.reference_id) { const b = batchById[t.reference_id]; counterparty = b ? `Batch ${b.batch_no}` : (t.reference_no || null); href = `/milling/${t.reference_id}`; if (b) { batchNo = b.batch_no; batchName = b.batch_name || null; customTags = parseCustomTags(b.custom_tags); } }
       else if (t.reference_module === 'export_order' && t.reference_id) { const o = orderById[t.reference_id]; counterparty = o ? o.customer : (t.reference_no || null); href = `/export/${t.reference_id}`; }
       else if (tt.startsWith('local_sale') && t.reference_no) { const s = saleByNo[t.reference_no]; counterparty = s ? s.customer : null; href = s ? `/local-sales/${s.id}` : null; }
       else if (t.warehouse_from_id || t.warehouse_to_id) { counterparty = [whById[t.warehouse_from_id], whById[t.warehouse_to_id]].filter(Boolean).join(' → ') || null; }
@@ -1111,7 +1128,7 @@ const reportingService = {
         type: tt, label: TYPE_LABELS[tt] || tt.replace(/_/g, ' '),
         inKg: qtyKg > 0 ? qtyKg : 0, outKg: qtyKg < 0 ? -qtyKg : 0,
         balanceKg: num(t.balance_kg), ratePerKg: num(t.rate_per_kg), costImpact: num(t.cost_impact),
-        reference: t.reference_no || null, counterparty, href, remarks: t.remarks || null,
+        reference: t.reference_no || null, counterparty, href, batchNo, batchName, customTags, remarks: t.remarks || null,
       };
     });
 
@@ -1130,7 +1147,7 @@ const reportingService = {
     // Batches this lot fed (+ each batch's total raw input for blend share).
     const srcRows = await db('batch_source_lots as bsl').leftJoin('milling_batches as mb', 'mb.id', 'bsl.batch_id')
       .where('bsl.lot_id', id)
-      .select('bsl.batch_id', 'bsl.qty_kg', 'mb.batch_no', 'mb.created_at', 'mb.actual_finished_kg', 'mb.raw_qty_kg');
+      .select('bsl.batch_id', 'bsl.qty_kg', 'mb.batch_no', 'mb.batch_name', 'mb.custom_tags', 'mb.created_at', 'mb.actual_finished_kg', 'mb.raw_qty_kg');
     const myBatchIds = [...new Set(srcRows.map(r => r.batch_id).filter(Boolean))];
     const batchTotalQty = {};
     if (myBatchIds.length) {
@@ -1190,7 +1207,7 @@ const reportingService = {
       const inputKg = num(r.qty_kg);
       const outputKg = (batchOutputKg[r.batch_id] || num(r.actual_finished_kg)) * share;
       return {
-        date: r.created_at, batchNo: r.batch_no, batchId: r.batch_id, href: `/milling/${r.batch_id}`,
+        date: r.created_at, batchNo: r.batch_no, batchName: r.batch_name || null, customTags: parseCustomTags(r.custom_tags), batchId: r.batch_id, href: `/milling/${r.batch_id}`,
         inputKg, outputKg, lossKg: Math.max(0, inputKg - outputKg), sharePct: share * 100,
       };
     }).sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
@@ -1200,8 +1217,9 @@ const reportingService = {
       const qtyKg = meta.produced * share;
       const salePerKg = priceForLotOutput(o, meta.batchId);
       const costPerKg = num(o.landed_cost_per_kg);
+      const srcMatch = srcRows.find(s => s.batch_id === meta.batchId) || {};
       return {
-        batchNo: (srcRows.find(s => s.batch_id === meta.batchId) || {}).batch_no, batchId: meta.batchId, batchHref: `/milling/${meta.batchId}`,
+        batchNo: srcMatch.batch_no, batchName: srcMatch.batch_name || null, customTags: parseCustomTags(srcMatch.custom_tags), batchId: meta.batchId, batchHref: `/milling/${meta.batchId}`,
         productGrade: o.grade || o.item_name || '—', riceType: o.variety || o.item_name || '—',
         type: o.type, qtyKg, fullQtyKg: meta.produced, sharePct: share * 100,
         costPerKg, salePricePerKg: salePerKg, recoveryValue: qtyKg * salePerKg,
@@ -1722,7 +1740,7 @@ const reportingService = {
     let q = db('milling_batches as mb')
       .leftJoin('products as p', 'mb.product_id', 'p.id')
       .leftJoin('suppliers as s', 'mb.supplier_id', 's.id')
-      .select('mb.id', 'mb.batch_no', 'mb.processing_type', 'mb.raw_qty_kg', 'mb.yield_pct',
+      .select('mb.id', 'mb.batch_no', 'mb.batch_name', 'mb.custom_tags', 'mb.processing_type', 'mb.raw_qty_kg', 'mb.yield_pct',
         'mb.operator_name', 'mb.machine_line', 'mb.created_at', 'mb.completed_at',
         'p.name as product_name', 's.name as supplier_name');
     if (from) q = q.where('mb.created_at', '>=', from);
@@ -1751,7 +1769,7 @@ const reportingService = {
       const inputKg = num(b.raw_qty_kg);
       const lossKg = Math.max(0, inputKg - outputKg);
       rows.push({
-        batchId: b.id, batchNo: b.batch_no, href: `/reports/batch-ledger/${b.id}`,
+        batchId: b.id, batchNo: b.batch_no, batchName: b.batch_name || null, customTags: parseCustomTags(b.custom_tags), href: `/reports/batch-ledger/${b.id}`,
         isBlend: b.processing_type === 'blended',
         date: b.completed_at || b.created_at, riceType: b.product_name || '—',
         supplier: b.supplier_name || '—', operator: b.operator_name || '—', machine: b.machine_line || '—',
@@ -1803,7 +1821,7 @@ const reportingService = {
       .leftJoin('products as p', 'mb.product_id', 'p.id')
       .leftJoin('export_orders as eo', 'mb.linked_export_order_id', 'eo.id')
       .where(isNumeric ? { 'mb.id': parseInt(batchId, 10) } : { 'mb.batch_no': batchId })
-      .select('mb.id', 'mb.batch_no', 'mb.status', 'mb.processing_type', 'mb.raw_qty_kg',
+      .select('mb.id', 'mb.batch_no', 'mb.batch_name', 'mb.custom_tags', 'mb.status', 'mb.processing_type', 'mb.raw_qty_kg',
         'mb.actual_finished_kg', 'mb.yield_pct', 'mb.operator_name', 'mb.machine_line', 'mb.shift',
         'mb.processing_hours', 'mb.created_at', 'mb.completed_at', 'mb.manual_milling_cost_pkr',
         'mb.manual_other_expenses_pkr', 'mb.raw_cost_total', 'mb.total_cost_per_kg_finished',
@@ -1920,7 +1938,7 @@ const reportingService = {
 
     return {
       batch: {
-        id: batch.id, batchNo: batch.batch_no, status: batch.status, processingType: batch.processing_type,
+        id: batch.id, batchNo: batch.batch_no, batchName: batch.batch_name || null, customTags: parseCustomTags(batch.custom_tags), status: batch.status, processingType: batch.processing_type,
         isBlend: batch.processing_type === 'blended',
         product: batch.product_name || batch.order_product, supplier: batch.supplier_name, supplierId: batch.supplier_id,
         suppliers,
@@ -1973,7 +1991,10 @@ const reportingService = {
     // Resolve batch numbers matching the search term → their lot batch_ref tags.
     let batchRefs = [];
     if (term) {
-      const bms = await db('milling_batches').where('batch_no', 'ilike', `%${term}%`).select('id');
+      const bms = await db('milling_batches')
+        .where('batch_no', 'ilike', `%${term}%`)
+        .orWhere('batch_name', 'ilike', `%${term}%`)
+        .select('id');
       batchRefs = bms.map(b => `batch-${b.id}`);
     }
 
@@ -2030,11 +2051,12 @@ const reportingService = {
     }
 
     const batchIds = [...allRefs].map(ref => parseInt(String(ref).replace(/^batch-/, ''), 10)).filter(Boolean);
-    const batchNoByRef = {};
+    const batchNoByRef = {}; const batchNameByRef = {};
     if (batchIds.length) {
-      const bs = await db('milling_batches').whereIn('id', batchIds).select('id', 'batch_no');
+      const bs = await db('milling_batches').whereIn('id', batchIds).select('id', 'batch_no', 'batch_name');
       const byId = Object.fromEntries(bs.map(b => [b.id, b.batch_no]));
-      for (const ref of allRefs) { const id = parseInt(String(ref).replace(/^batch-/, ''), 10); if (byId[id]) batchNoByRef[ref] = byId[id]; }
+      const nameById = Object.fromEntries(bs.map(b => [b.id, b.batch_name]));
+      for (const ref of allRefs) { const id = parseInt(String(ref).replace(/^batch-/, ''), 10); if (byId[id]) batchNoByRef[ref] = byId[id]; if (nameById[id]) batchNameByRef[ref] = nameById[id]; }
     }
 
     saleInvoices = Object.values(groups).map(g => ({
@@ -2042,6 +2064,7 @@ const reportingService = {
       date: g.date, party: g.customer, partyType: 'Customer', customer: g.customer, customerId: g.customerId,
       items: [...g.items], lots: [...g.lots],
       batches: [...g.refs].map(ref => batchNoByRef[ref]).filter(Boolean),
+      batchNames: [...g.refs].map(ref => batchNameByRef[ref]).filter(Boolean),
       warehouses: [...g.warehouses], vehicle: g.vehicle, dispatched: g.dispatched,
       qtyKg: g.qtyKg, total: g.total, received: g.received, outstanding: g.outstanding,
       paymentStatus: g.outstanding > 0.01 ? (g.received > 0.01 ? 'Partial' : 'Unpaid') : 'Paid',
@@ -2262,8 +2285,8 @@ const reportingService = {
     const batchIds = [...new Set(rows.filter((r) => r.reference_module === 'milling_batch' && r.reference_id).map((r) => r.reference_id))];
     const batchById = {};
     if (batchIds.length) {
-      const bs = await db('milling_batches').whereIn('id', batchIds).select('id', 'batch_no');
-      for (const b of bs) batchById[b.id] = b.batch_no;
+      const bs = await db('milling_batches').whereIn('id', batchIds).select('id', 'batch_no', 'batch_name', 'custom_tags');
+      for (const b of bs) batchById[b.id] = b;
     }
 
     const out = rows.map((r) => {
@@ -2279,7 +2302,10 @@ const reportingService = {
       return {
         id: r.id, date: r.transaction_date || r.created_at, type: mt, label: LABELS[mt] || mt.replace(/_/g, ' '),
         lotId: r.lot_id, lotNo: r.lot_no, item: r.item_name, lotType: r.lot_type,
-        batchNo: isBatch ? (batchById[r.reference_id] || null) : null, reference: r.reference_no || null,
+        batchNo: isBatch ? ((batchById[r.reference_id] || {}).batch_no || null) : null,
+        batchName: isBatch ? ((batchById[r.reference_id] || {}).batch_name || null) : null,
+        customTags: isBatch ? parseCustomTags((batchById[r.reference_id] || {}).custom_tags) : null,
+        reference: r.reference_no || null,
         qtyKg: Math.abs(qkg), direction: qkg < 0 ? 'out' : 'in', costPkr: num(r.cost_impact) || num(r.total_cost),
         fromWh: r.from_wh, toWh: r.to_wh, entity: r.entity_to || r.entity_from || null, href,
       };
@@ -2466,8 +2492,8 @@ const reportingService = {
         .orderBy('l.id', 'desc').limit(cap),
       db('milling_batches as mb')
         .leftJoin('export_orders as eo', 'mb.linked_export_order_id', 'eo.id')
-        .where('mb.batch_no', 'ilike', like)
-        .select('mb.id', 'mb.batch_no', 'mb.status', 'eo.product_name')
+        .where(function () { this.where('mb.batch_no', 'ilike', like).orWhere('mb.batch_name', 'ilike', like); })
+        .select('mb.id', 'mb.batch_no', 'mb.batch_name', 'mb.custom_tags', 'mb.status', 'eo.product_name')
         .orderBy('mb.id', 'desc').limit(cap),
       db('local_sales as ls')
         .where(function () { this.where('ls.sale_no', 'ilike', like).orWhere('ls.item_name', 'ilike', like).orWhere('ls.buyer_name', 'ilike', like); })
@@ -2491,7 +2517,7 @@ const reportingService = {
 
     const groups = [];
     if (lots.length) groups.push({ key: 'lots', label: 'Lots', items: lots.map(l => ({ id: l.id, title: l.lot_no, subtitle: `${l.item_name || '—'}${l.supplier && l.supplier !== '—' ? ' · ' + l.supplier : ''}`, href: `/lot-inventory/${l.id}` })) });
-    if (batches.length) groups.push({ key: 'batches', label: 'Milling batches', items: batches.map(b => ({ id: b.id, title: b.batch_no, subtitle: `${b.product_name || 'Batch'}${b.status ? ' · ' + b.status : ''}`, href: `/milling/${b.id}` })) });
+    if (batches.length) groups.push({ key: 'batches', label: 'Milling batches', items: batches.map(b => ({ id: b.id, title: b.batch_no, batchName: b.batch_name || null, customTags: parseCustomTags(b.custom_tags), subtitle: `${b.batch_name ? b.batch_name + ' · ' : ''}${b.product_name || 'Batch'}${b.status ? ' · ' + b.status : ''}`, href: `/milling/${b.id}` })) });
     if (sales.length) groups.push({ key: 'sales', label: 'Local sales', items: sales.map(s => ({ id: s.id, title: s.sale_no || `Sale #${s.id}`, subtitle: `${s.item_name || '—'}${s.buyer_name ? ' · ' + s.buyer_name : ''}`, href: `/local-sales/${s.id}` })) });
     if (orders.length) groups.push({ key: 'orders', label: 'Export orders', items: orders.map(o => ({ id: o.id, title: o.order_no || `Order #${o.id}`, subtitle: `${o.product_name || '—'}${o.customer && o.customer !== '—' ? ' · ' + o.customer : ''}`, href: `/export/${o.id}` })) });
     if (containers.length) groups.push({ key: 'containers', label: 'Containers', items: containers.map(c => ({ id: c.id, title: c.container_no, subtitle: `Export order ${c.order_no || `#${c.order_id}`}`, href: `/export/${c.order_id}` })) });
