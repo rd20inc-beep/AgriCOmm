@@ -166,7 +166,7 @@ async function buildLotDetail(lot) {
     .join('milling_batches as mb', 'bsl.batch_id', 'mb.id')
     .where('bsl.lot_id', lot.id)
     .select(
-      'mb.id', 'mb.batch_no', 'mb.status', 'mb.pass_number',
+      'mb.id', 'mb.batch_no', 'mb.batch_name', 'mb.status', 'mb.pass_number',
       'mb.parent_batch_id', 'mb.raw_qty_kg', 'mb.actual_finished_kg',
       'mb.yield_pct', 'mb.created_at', 'mb.completed_at',
       'bsl.qty_kg as source_qty_kg'
@@ -447,13 +447,13 @@ module.exports = {
       let producedByproducts = [];
       if (ADMIN_ROLES.includes(roleName)) {
         const srcRows = await db('batch_source_lots as bsl').leftJoin('milling_batches as mb', 'mb.id', 'bsl.batch_id')
-          .where('bsl.lot_id', lot.id).select('bsl.batch_id', 'bsl.qty_kg', 'mb.batch_no');
+          .where('bsl.lot_id', lot.id).select('bsl.batch_id', 'bsl.qty_kg', 'mb.batch_no', 'mb.batch_name');
         const myBatchIds = [...new Set(srcRows.map(r => r.batch_id).filter(Boolean))];
         if (myBatchIds.length) {
           const allSrc = await db('batch_source_lots').whereIn('batch_id', myBatchIds).select('batch_id', 'qty_kg');
           const batchTotalQty = {}; for (const x of allSrc) batchTotalQty[x.batch_id] = (batchTotalQty[x.batch_id] || 0) + num(x.qty_kg);
-          const myQtyByBatch = {}; const batchNoById = {};
-          for (const r of srcRows) { myQtyByBatch[r.batch_id] = (myQtyByBatch[r.batch_id] || 0) + num(r.qty_kg); batchNoById[r.batch_id] = r.batch_no; }
+          const myQtyByBatch = {}; const batchNoById = {}; const batchNameById = {};
+          for (const r of srcRows) { myQtyByBatch[r.batch_id] = (myQtyByBatch[r.batch_id] || 0) + num(r.qty_kg); batchNoById[r.batch_id] = r.batch_no; batchNameById[r.batch_id] = r.batch_name || null; }
           const priceBatches = await db('milling_batches').whereIn('id', myBatchIds)
             .select('id', 'batch_no', 'finished_price_per_kg', 'b1_price_per_kg', 'b2_price_per_kg', 'b3_price_per_kg',
               'csr_price_per_kg', 'short_grain_price_per_kg', 'broken_price_per_kg', 'powder_price_per_kg',
@@ -499,7 +499,7 @@ module.exports = {
           producedByproducts = myBatchIds.map(bid => {
             const tot = batchTotalQty[bid] || myQtyByBatch[bid] || 0;
             return {
-              batchId: bid, batchNo: batchNoById[bid] || `#${bid}`, batchHref: `/milling/${bid}`,
+              batchId: bid, batchNo: batchNoById[bid] || `#${bid}`, batchName: batchNameById[bid] || null, batchHref: `/milling/${bid}`,
               sharePct: tot > 0 ? (myQtyByBatch[bid] / tot) * 100 : 100,
               outputs: (byBatch[bid] || []).sort((a, c) => (a.type === 'byproduct' ? 0 : 1) - (c.type === 'byproduct' ? 0 : 1)),
               byproductRecovery: (byBatch[bid] || []).filter(o => o.type === 'byproduct').reduce((s, o) => s + o.recoveryValue, 0),

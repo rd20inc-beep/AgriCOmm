@@ -1908,7 +1908,7 @@ function LotTrackerPanel({ lot, statementHref }) {
           <div className="text-sm mb-2">
             <span className="text-gray-500">Milled into: </span>
             {lot.milledInto.map((m, i) => (
-              <span key={i}>{i > 0 ? ', ' : ''}{m.batchId ? <Link to={`/milling/${m.batchId}`} className="text-blue-600 hover:underline">{m.batchNo}</Link> : m.batchNo} ({mt2(m.kg)})</span>
+              <span key={i}>{i > 0 ? ', ' : ''}{m.batchId ? <Link to={`/milling/${m.batchId}`} className="text-blue-600 hover:underline">{m.batchNo}</Link> : m.batchNo}{m.batchName ? ` · ${m.batchName}` : ''} ({mt2(m.kg)})</span>
             ))}
           </div>
         )}

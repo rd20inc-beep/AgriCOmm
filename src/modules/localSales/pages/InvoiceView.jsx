@@ -219,7 +219,9 @@ export default function InvoiceView() {
           {adminData.batchByproducts.map((bp) => (
             <div key={bp.batchId} className="border-b border-gray-100 last:border-0">
               <div className="px-4 pt-3 flex items-center justify-between flex-wrap gap-2">
-                <Link to={bp.batchHref} className="text-sm font-medium text-blue-600 hover:underline inline-flex items-center gap-1.5">Batch {bp.batchNo}</Link>
+                {/* TODO(backend): localSales.controller batchByproducts does not yet include batchName;
+                    add batch_name so the ` (name)` suffix below renders. */}
+                <Link to={bp.batchHref} className="text-sm font-medium text-blue-600 hover:underline inline-flex items-center gap-1.5">Batch {bp.batchNo}{bp.batchName ? ` (${bp.batchName})` : ''}</Link>
                 {bp.byproductRecovery > 0 && <span className="text-xs text-emerald-700">By-product recovery {pkr(bp.byproductRecovery)}</span>}
               </div>
               <div className="overflow-x-auto">
@@ -385,7 +387,8 @@ function ItemRow({ it }) {
             <div className="flex flex-wrap gap-x-6 gap-y-1 text-gray-600">
               {it.lotNo && <span>Source lot: {it.finishedGoodsHref ? <Link to={it.finishedGoodsHref} className="font-mono text-blue-600 hover:underline">{it.lotNo}</Link> : <span className="font-mono">{it.lotNo}</span>}</span>}
               {it.warehouse && <span>Warehouse: <span className="text-gray-800">{it.warehouse}</span></span>}
-              {it.batchNo && <span>Source batch: <Link to={it.batchHref} className="text-blue-600 hover:underline">{it.batchNo}</Link></span>}
+              {/* TODO(backend): item.batchNo comes from a select of batch_no only; add batch_name for the ` (name)` suffix. */}
+              {it.batchNo && <span>Source batch: <Link to={it.batchHref} className="text-blue-600 hover:underline">{it.batchNo}{it.batchName ? ` (${it.batchName})` : ''}</Link></span>}
               {it.finishedGoodsHref && <span>Finished goods: <Link to={it.finishedGoodsHref} className="text-blue-600 hover:underline">open lot</Link></span>}
             </div>
             {(it.sourceLots || []).length > 0 && (

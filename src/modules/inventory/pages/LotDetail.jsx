@@ -106,6 +106,7 @@ export default function LotDetail() {
         const arrival = quality.arrival?.[0];
         setLinkedBatch({
           batchNo: d.batch.batch_no,
+          batchName: d.batch.batch_name || null,
           batchId: d.batch.id,
           status: d.batch.status,
           supplierName: d.batch.supplier_name,
@@ -702,7 +703,7 @@ export default function LotDetail() {
                 <Truck className="w-4 h-4 text-indigo-600" /> Linked Milling Batch
               </h3>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
-                <div><p className="text-xs text-gray-500">Batch No</p><Link to={`/milling/${linkedBatch.batchNo}`} className="text-sm font-bold text-blue-600 hover:text-blue-800">{linkedBatch.batchNo}</Link></div>
+                <div><p className="text-xs text-gray-500">Batch No</p><Link to={`/milling/${linkedBatch.batchNo}`} className="text-sm font-bold text-blue-600 hover:text-blue-800">{linkedBatch.batchNo}</Link>{linkedBatch.batchName && <p className="text-xs text-gray-500 mt-0.5">{linkedBatch.batchName}</p>}</div>
                 <div><p className="text-xs text-gray-500">Status</p><StatusBadge status={linkedBatch.status} /></div>
                 <div><p className="text-xs text-gray-500">Supplier</p><p className="text-sm font-medium"><PartyLink type="supplier" id={linkedBatch.supplierId} name={linkedBatch.supplierName} /></p></div>
                 {linkedBatch.arrivalAnalysis?.pricePerMT && (
@@ -1888,7 +1889,7 @@ function AllocateToBatchModal({ isOpen, onClose, lot, addToast, refetch }) {
             <option value="">Select an open batch…</option>
             {openBatches.map(b => (
               <option key={b.id} value={b.id}>
-                {b.batchNo} — {b.supplierName || '—'} · {b.status} ({Math.round((parseFloat(b.rawQtyMT) || 0) * 1000).toLocaleString()} kg raw)
+                {b.batchNo} — {b.supplierName || '—'} · {b.status} ({Math.round((parseFloat(b.rawQtyMT) || 0) * 1000).toLocaleString()} kg raw){b.batchName ? ` · ${b.batchName}` : ''}
               </option>
             ))}
           </select>

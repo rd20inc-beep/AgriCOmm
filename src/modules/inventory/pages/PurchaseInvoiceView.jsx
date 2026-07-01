@@ -134,7 +134,9 @@ export default function PurchaseInvoiceView() {
           {producedByproducts.map((bp) => (
             <div key={bp.batchId} className="border-b border-gray-100 last:border-0">
               <div className="px-4 pt-3 flex items-center justify-between flex-wrap gap-2">
-                <Link to={bp.batchHref} className="text-sm font-medium text-blue-600 hover:underline">Batch {bp.batchNo}{bp.sharePct < 99.5 ? ` · ${bp.sharePct.toFixed(0)}% of this lot` : ''}</Link>
+                {/* TODO(backend): lotInventory.controller producedByproducts does not yet include batchName;
+                  add batch_name so the ` (name)` suffix renders. */}
+              <Link to={bp.batchHref} className="text-sm font-medium text-blue-600 hover:underline">Batch {bp.batchNo}{bp.batchName ? ` (${bp.batchName})` : ''}{bp.sharePct < 99.5 ? ` · ${bp.sharePct.toFixed(0)}% of this lot` : ''}</Link>
                 {bp.byproductRecovery > 0 && <span className="text-xs text-emerald-700">By-product recovery {pkr(bp.byproductRecovery)}</span>}
               </div>
               <div className="overflow-x-auto">

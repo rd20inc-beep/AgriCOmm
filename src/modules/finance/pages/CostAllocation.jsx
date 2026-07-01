@@ -179,7 +179,7 @@ export default function CostAllocation() {
     if (allocForm.targetType === 'Export Order') {
       return exportOrders.map(o => ({ id: o.id, label: `${o.id} - ${o.customerName} (${o.qtyMT} MT)` }));
     }
-    return millingBatches.map(b => ({ id: b.id, label: `${b.id} - ${b.supplierName} (${b.plannedFinishedMT} MT)` }));
+    return millingBatches.map(b => ({ id: b.id, label: `${b.id} - ${b.supplierName} (${b.plannedFinishedMT} MT)${b.batchName ? ' · ' + b.batchName : ''}` }));
   }
 
   async function handleAllocate(costId) {

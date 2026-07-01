@@ -72,6 +72,16 @@ export default function BatchLedger() {
             <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-600">{b.status}</span>
             {b.isBlend && <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-violet-100 text-violet-700">Blend</span>}
           </h1>
+          {/* NOTE: batchName/customTags render only when the backend batch-ledger endpoint
+              provides them; getBatchLedger does not yet select batch_name/custom_tags — wire those in. */}
+          {b.batchName && <p className="text-sm font-medium text-gray-700">{b.batchName}</p>}
+          {Array.isArray(b.customTags) && b.customTags.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1">
+              {b.customTags.map((tag) => (
+                <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-blue-50 text-blue-700">{tag}</span>
+              ))}
+            </div>
+          )}
           <p className="text-xs text-gray-400">{b.product || '—'} · Complete batch ledger</p>
         </div>
         <div className="flex flex-wrap gap-2">

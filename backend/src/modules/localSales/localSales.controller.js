@@ -82,7 +82,7 @@ async function assembleInvoice(id, includeAdmin = false) {
     .filter(Boolean))];
   const batchById = {}; const srcByBatch = {};
   if (batchIds.length) {
-    const batches = await db('milling_batches').whereIn('id', batchIds).select('id', 'batch_no');
+    const batches = await db('milling_batches').whereIn('id', batchIds).select('id', 'batch_no', 'batch_name');
     for (const b of batches) batchById[b.id] = b;
     const srcs = await db('batch_source_lots as bsl')
       .leftJoin('inventory_lots as src', 'bsl.lot_id', 'src.id')
@@ -112,7 +112,7 @@ async function assembleInvoice(id, includeAdmin = false) {
       lotId: r.lot_id, lotNo: r.lot_no || r.lot_ref || null,
       lotType: r.lot_type || null, warehouse: r.warehouse_name || null,
       isBlend: r.processing_type === 'blended',
-      batchId: b ? b.id : null, batchNo: b ? b.batch_no : null,
+      batchId: b ? b.id : null, batchNo: b ? b.batch_no : null, batchName: b ? (b.batch_name || null) : null,
       batchHref: b ? `/milling/${b.id}` : null,
       finishedGoodsHref: r.lot_id ? `/lot-inventory/${r.lot_id}` : null,
       sourceLots: batchId ? (srcByBatch[batchId] || []) : [],
@@ -289,7 +289,7 @@ async function assembleInvoice(id, includeAdmin = false) {
         });
       }
       data.batchByproducts = batchIds.map(bid => ({
-        batchId: bid, batchNo: (batchById[bid] || {}).batch_no || `#${bid}`, batchHref: `/milling/${bid}`,
+        batchId: bid, batchNo: (batchById[bid] || {}).batch_no || `#${bid}`, batchName: (batchById[bid] || {}).batch_name || null, batchHref: `/milling/${bid}`,
         outputs: (byBatch[bid] || []).sort((a, c) => (a.type === 'byproduct' ? 0 : 1) - (c.type === 'byproduct' ? 0 : 1)),
         byproductRecovery: (byBatch[bid] || []).filter(o => o.type === 'byproduct').reduce((s, o) => s + o.recoveryValue, 0),
       })).filter(x => x.outputs.length);
