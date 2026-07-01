@@ -1193,8 +1193,14 @@ const accountingService = {
         currency: t.currency, fx_rate: t.fx_rate, orig_fx_rate: t.orig_fx_rate, orig_currency: t.orig_currency,
       })),
       ...localRaw.filter((t) => {
-        if (dateFrom && t.date && new Date(t.date) < new Date(dateFrom)) return false;
-        if (dateTo && t.date && new Date(t.date) > new Date(dateTo)) return false;
+        if (!t.date) return true;
+        // t.date is a local-sale created_at / payment_date — a TIMESTAMP with a
+        // time component — while dateFrom/dateTo are date-only (midnight). Compare
+        // on the calendar day (as the sort below does) so a same-day sale on the
+        // `dateTo` boundary isn't dropped and its closing balance stays correct.
+        const day = new Date(t.date).setHours(0, 0, 0, 0);
+        if (dateFrom && day < new Date(dateFrom).setHours(0, 0, 0, 0)) return false;
+        if (dateTo && day > new Date(dateTo).setHours(0, 0, 0, 0)) return false;
         return true;
       }).map((t) => ({
         date: t.date, journal_no: null, ref_no: t.ref_no, description: t.description,

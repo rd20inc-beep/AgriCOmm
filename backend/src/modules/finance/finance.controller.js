@@ -65,7 +65,11 @@ const financeController = {
           'r.created_at',
           db.raw(`'receivable'::text as kind`),
           'c.name as customer_name'
-        );
+        )
+        // Local-sale receivables (RCV-LS-, carry local_sale_id) are ALSO surfaced
+        // from local_sales below — excluding them here prevents the same balance
+        // being counted twice in the Money-In list, its total, and pagination.
+        .whereNull('r.local_sale_id');
       if (status)        exportQ = exportQ.where('r.status', status);
       if (customer_id)   exportQ = exportQ.where('r.customer_id', customer_id);
       if (overdue === 'true') exportQ = exportQ.where('r.due_date', '<', db.fn.now()).where('r.status', '!=', 'Paid');
@@ -1021,9 +1025,15 @@ const financeController = {
         // (this is how EX-001 got two receipts on 2026-06-26). Skipped for
         // post-dated cheques only insofar as they still can't target a settled
         // receivable — the check below applies to both.
+        // A receivable derived from a local sale carries local_sale_id — settling
+        // it must also draw down the parent local_sales row (else the sale stays
+        // "unpaid" and keeps surfacing in Money-In). Captured here so it's stamped
+        // on the payment (for clearCheque + receipt history) and mirrored below.
+        let localSaleId = null;
         if (type === 'receipt' && linked_receivable_id) {
           const rec = await trx('receivables').where({ id: linked_receivable_id }).first();
           if (rec) {
+            localSaleId = rec.local_sale_id || null;
             const outstanding = Math.max(0, (parseFloat(rec.expected_amount) || 0) - (parseFloat(rec.received_amount) || 0));
             if (outstanding <= 0.01) {
               const e = new Error('This receivable is already fully settled — no payment is due.');
@@ -1077,6 +1087,7 @@ const financeController = {
             cleared: !isPostDated,
             payment_date: payment_date || trx.fn.now(),
             notes: notes || null,
+            local_sale_id: localSaleId,
             created_by: req.user.id,
           })
           .returning('*');
@@ -1097,6 +1108,21 @@ const financeController = {
               status: fullyPaid ? 'Paid' : 'Partial',
               updated_at: trx.fn.now(),
             });
+            // Mirror the receipt onto the parent local sale so it stops showing
+            // as due in Money-In / Local Sales (matches clearCheque's behaviour).
+            if (receivable.local_sale_id) {
+              const sale = await trx('local_sales').where({ id: receivable.local_sale_id }).first();
+              if (sale) {
+                const salePaid = (parseFloat(sale.paid_amount) || 0) + parseFloat(amount);
+                const saleDue = Math.max(0, (parseFloat(sale.total_amount) || 0) - salePaid);
+                await trx('local_sales').where({ id: sale.id }).update({
+                  paid_amount: salePaid,
+                  due_amount: saleDue,
+                  payment_status: saleDue <= 0.01 ? 'Paid' : 'Partial',
+                  updated_at: trx.fn.now(),
+                });
+              }
+            }
           }
           if (bank_account_id) {
             await trx('bank_accounts')
