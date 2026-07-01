@@ -15,6 +15,7 @@ import {
   Plus,
   ShoppingCart,
   Check,
+  Search,
 } from 'lucide-react';
 import {
   LineChart,
@@ -384,8 +385,33 @@ export default function MillingDashboard() {
     return millingBatches.filter((b) => b.arrivalAnalysis);
   }, [millingBatches]);
 
-  // All batches for production table
-  const productionBatches = millingBatches;
+  // All batches for production table — filterable by name/no/supplier/tags.
+  const [batchSearch, setBatchSearch] = useState('');
+  const [batchTagFilter, setBatchTagFilter] = useState('All');
+  const [batchStatusFilter, setBatchStatusFilter] = useState('All');
+  const allBatchTags = useMemo(() => {
+    const s = new Set();
+    for (const b of millingBatches) for (const t of (b.customTags || [])) s.add(t);
+    return [...s].sort();
+  }, [millingBatches]);
+  const allBatchStatuses = useMemo(
+    () => [...new Set(millingBatches.map(b => b.status).filter(Boolean))].sort(),
+    [millingBatches]
+  );
+  const productionBatches = useMemo(() => {
+    const q = batchSearch.trim().toLowerCase();
+    return millingBatches.filter(b => {
+      if (batchStatusFilter !== 'All' && b.status !== batchStatusFilter) return false;
+      if (batchTagFilter !== 'All' && !(b.customTags || []).includes(batchTagFilter)) return false;
+      if (q) {
+        const hay = [b.id, b.batchName, b.supplierName, ...(b.customTags || [])]
+          .filter(Boolean).join(' ').toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [millingBatches, batchSearch, batchTagFilter, batchStatusFilter]);
+  const batchFiltersActive = batchSearch.trim() || batchTagFilter !== 'All' || batchStatusFilter !== 'All';
 
   return (
     <div className="space-y-6">
@@ -438,7 +464,35 @@ export default function MillingDashboard() {
 
       {/* All Batches Table */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
-        <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4">All Batches</h2>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
+            All Batches {batchFiltersActive && <span className="text-gray-400 normal-case font-normal">· {productionBatches.length} of {millingBatches.length}</span>}
+          </h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input value={batchSearch} onChange={e => setBatchSearch(e.target.value)}
+                placeholder="Search name, no, supplier, tag…"
+                className="pl-8 pr-3 py-1.5 text-xs border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 w-56" />
+            </div>
+            {allBatchTags.length > 0 && (
+              <select value={batchTagFilter} onChange={e => setBatchTagFilter(e.target.value)}
+                className="py-1.5 px-2 text-xs border border-gray-200 rounded-lg bg-white outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="All">All tags</option>
+                {allBatchTags.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            )}
+            <select value={batchStatusFilter} onChange={e => setBatchStatusFilter(e.target.value)}
+              className="py-1.5 px-2 text-xs border border-gray-200 rounded-lg bg-white outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="All">All statuses</option>
+              {allBatchStatuses.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            {batchFiltersActive && (
+              <button onClick={() => { setBatchSearch(''); setBatchTagFilter('All'); setBatchStatusFilter('All'); }}
+                className="text-xs text-gray-400 hover:text-gray-600 px-1">Clear</button>
+            )}
+          </div>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -468,7 +522,7 @@ export default function MillingDashboard() {
                 </tr>
               ))}
               {productionBatches.length === 0 && (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No batches yet</td></tr>
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">{batchFiltersActive ? 'No batches match the filters' : 'No batches yet'}</td></tr>
               )}
             </tbody>
           </table>
