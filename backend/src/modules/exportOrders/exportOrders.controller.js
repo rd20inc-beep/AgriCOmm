@@ -993,11 +993,34 @@ const exportOrderController = {
         if (summary.hs_code) safeUpdates.hs_code = summary.hs_code;
       }
 
+      let resyncReceivables = false;
       if (safeUpdates.qty_mt != null || safeUpdates.price_per_mt != null || safeUpdates.advance_pct != null) {
         const existing = await db('export_orders').where({ id }).first();
         if (!existing) {
           return res.status(404).json({ success: false, message: 'Export order not found.' });
         }
+
+        // Guard: once money has been received against this order, revenue has
+        // been posted, or it has shipped/closed, the contract value is locked.
+        // Editing qty/price/advance% now would desync the receivables, the
+        // locked-PKR revenue basis, and any posted GL — with no reversal. Only
+        // block when the value actually changes so pure metadata edits still work.
+        const changesContract =
+          (safeUpdates.qty_mt != null && parseFloat(safeUpdates.qty_mt) !== parseFloat(existing.qty_mt)) ||
+          (safeUpdates.price_per_mt != null && parseFloat(safeUpdates.price_per_mt) !== parseFloat(existing.price_per_mt)) ||
+          (safeUpdates.advance_pct != null && parseFloat(safeUpdates.advance_pct) !== (parseFloat(existing.advance_pct) || 0));
+        const committed =
+          settledAmount(existing.advance_received) > MONEY_EPSILON ||
+          settledAmount(existing.balance_received) > MONEY_EPSILON ||
+          existing.revenue_posted === true ||
+          ['Shipped', 'Closed', 'Cancelled'].includes(existing.status);
+        if (changesContract && committed) {
+          return res.status(400).json({
+            success: false,
+            message: 'Cannot change quantity, price, or advance % after a payment has been received or the order has shipped/closed. Reverse the receipts first.',
+          });
+        }
+
         const qty = parseFloat(safeUpdates.qty_mt != null ? safeUpdates.qty_mt : existing.qty_mt);
         const price = parseFloat(safeUpdates.price_per_mt != null ? safeUpdates.price_per_mt : existing.price_per_mt);
         const advPct = parseFloat(safeUpdates.advance_pct != null ? safeUpdates.advance_pct : existing.advance_pct) || 0;
@@ -1005,6 +1028,18 @@ const exportOrderController = {
         safeUpdates.contract_value = contractValue;
         safeUpdates.advance_expected = contractValue * (advPct / 100);
         safeUpdates.balance_expected = contractValue - safeUpdates.advance_expected;
+
+        // Keep the locked PKR revenue basis in step with the new contract value,
+        // valued at the order's booked FX rate (fall back to the prior locked
+        // ratio, then to a bare conversion for PKR orders).
+        const bookedRate = parseFloat(existing.booked_fx_rate)
+          || (parseFloat(existing.contract_value) > 0
+              ? (parseFloat(existing.contract_value_pkr_locked) || 0) / parseFloat(existing.contract_value)
+              : 0);
+        if (bookedRate > 0) {
+          safeUpdates.contract_value_pkr_locked = contractValue * bookedRate;
+        }
+        resyncReceivables = true;
       }
 
       // Extract packing_lines before DB update (it's a separate table, not a column)
@@ -1029,6 +1064,35 @@ const exportOrderController = {
               itemRowsForUpdate.map((r) => ({ ...r, order_id: parseInt(id) }))
             );
           }
+        }
+
+        // Resync the advance/balance receivables to the new contract value.
+        // The committed-guard above guarantees nothing has been received yet,
+        // so outstanding == expected and base_amount_pkr can be rebased cleanly.
+        if (resyncReceivables) {
+          const bookedRate = parseFloat(order.booked_fx_rate)
+            || (parseFloat(order.contract_value) > 0
+                ? (parseFloat(order.contract_value_pkr_locked) || 0) / parseFloat(order.contract_value)
+                : 0)
+            || 280;
+          await trx('receivables')
+            .where({ order_id: id, type: 'Advance' })
+            .update({
+              expected_amount: order.advance_expected,
+              outstanding: order.advance_expected,
+              base_amount_pkr: order.advance_expected * bookedRate,
+              fx_rate: order.booked_fx_rate,
+              updated_at: trx.fn.now(),
+            });
+          await trx('receivables')
+            .where({ order_id: id, type: 'Balance' })
+            .update({
+              expected_amount: order.balance_expected,
+              outstanding: order.balance_expected,
+              base_amount_pkr: order.balance_expected * bookedRate,
+              fx_rate: order.booked_fx_rate,
+              updated_at: trx.fn.now(),
+            });
         }
 
         // Handle packing_lines update: delete old, insert new
@@ -1403,10 +1467,31 @@ const exportOrderController = {
         return res.status(404).json({ success: false, message: 'Export order not found.' });
       }
 
-      // Export-order outflows are always paid in PKR — keep base_amount_pkr
-      // in lock-step with amount so the unified finance/purchases query and
-      // any PKR-based reporting see the same number.
-      const amtPkr = parseFloat(amount);
+      // Export-order costs are stored and reported in PKR — every downstream
+      // consumer (finance/purchases roll-ups, analytics) sums `amount` as PKR.
+      // Costs are usually paid in PKR, but a foreign-currency cost must be
+      // converted first (booking it 1:1 understates it badly). Accept an
+      // optional currency + fx_rate; when the currency isn't PKR, require a
+      // rate (explicit, else the order's booked/advance rate) and convert.
+      const rawAmt = parseFloat(amount);
+      const costCurrency = String(req.body.currency || 'PKR').toUpperCase();
+      let costFxRate = 1;
+      if (costCurrency !== 'PKR') {
+        const reqRate = parseFloat(req.body.fx_rate);
+        costFxRate = Number.isFinite(reqRate) && reqRate > 0
+          ? reqRate
+          : (parseFloat(order.booked_fx_rate) || parseFloat(order.advance_fx_rate) || 0);
+        if (!(costFxRate > 0)) {
+          return res.status(400).json({
+            success: false,
+            message: `An FX rate is required to record a ${costCurrency} cost (no booked rate on the order).`,
+          });
+        }
+      }
+      const amtPkr = rawAmt * costFxRate;
+      const costNote = costCurrency !== 'PKR'
+        ? `${notes ? notes + ' — ' : ''}${costCurrency} ${rawAmt.toLocaleString()} @ ${costFxRate}`
+        : (notes || null);
 
       const cost = await db.transaction(async (trx) => {
         const existing = await trx('export_order_costs')
@@ -1423,7 +1508,7 @@ const exportOrderController = {
               amount: amtPkr,
               base_amount_pkr: amtPkr,
               fx_rate: 1,
-              notes: notes || null,
+              notes: costNote,
               updated_at: trx.fn.now(),
             })
             .returning('*');
@@ -1436,7 +1521,7 @@ const exportOrderController = {
               currency: 'PKR',
               base_amount_pkr: amtPkr,
               fx_rate: 1,
-              notes: notes || null,
+              notes: costNote,
               created_by: req.user?.id || null,
             })
             .returning('*');
@@ -1928,6 +2013,26 @@ const exportOrderController = {
         const balReceivable = await trx('receivables')
           .where({ order_id: order.id, type: 'Balance' })
           .first();
+
+        // Guard against a double receipt: the balance may already have been
+        // settled through the Money-In "Record Payment" drawer, which updates
+        // the RECEIVABLE but NOT order.balance_received — so the order-level
+        // check above can be blind to it. Mirror the confirmAdvance re-check.
+        if (balReceivable) {
+          const recvOutstanding = Math.max(0, settledAmount(
+            parseFloat(balReceivable.expected_amount || 0) - parseFloat(balReceivable.received_amount || 0),
+          ));
+          if (recvOutstanding <= MONEY_EPSILON) {
+            const err = new Error('This balance has already been received (the receivable is settled). It may have been recorded via Money-In → Record Payment.');
+            err.statusCode = 400;
+            throw err;
+          }
+          if (confirmedAmount - recvOutstanding > MONEY_EPSILON) {
+            const err = new Error(`Balance confirmation exceeds the receivable's outstanding amount of ${recvOutstanding.toFixed(2)}.`);
+            err.statusCode = 400;
+            throw err;
+          }
+        }
 
         const balPayNo = await generatePaymentNo(trx, 'PAY');
         await trx('payments').insert({
