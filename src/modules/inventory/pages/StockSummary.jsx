@@ -44,10 +44,10 @@ export default function StockSummary() {
     () => (Array.isArray(data) ? data : [])
       .filter((r) => n(r.total_kg) > 0.5)
       .map((r) => {
-        const onHandMT = toMT(r.total_kg);
-        const reorder = n(r.reorder_level);
+        const onHandKg = n(r.total_kg);
+        const reorder = n(r.reorder_level); // KG
         const bags = Math.round(n(r.total_bags));
-        return { ...r, onHandMT, reorder, bags, isLow: reorder > 0 && onHandMT < reorder };
+        return { ...r, onHandKg, reorder, bags, isLow: reorder > 0 && onHandKg < reorder };
       })
       .sort((a, b) => Number(b.isLow) - Number(a.isLow) || n(b.total_value) - n(a.total_value)),
     [data],
@@ -137,7 +137,7 @@ export default function StockSummary() {
                       </td>
                       <td className="px-4 py-2.5 text-right text-gray-500 tabular-nums">{n(r.lot_count)}</td>
                       <td className={`px-4 py-2.5 text-right font-medium tabular-nums ${r.isLow ? 'text-red-600' : 'text-gray-900'}`}>
-                        {fmtMTnum(r.onHandMT)}
+                        {fmtMT(r.total_kg)}
                         {r.bags > 0 && <div className="text-[11px] font-normal text-gray-400">{r.bags.toLocaleString()} bags</div>}
                       </td>
                       <td className="px-4 py-2.5 text-right text-emerald-700 tabular-nums">{fmtMT(r.available_kg)}</td>
@@ -145,16 +145,18 @@ export default function StockSummary() {
                       <td className="px-4 py-2.5 text-right tabular-nums">
                         {editing ? (
                           <span className="inline-flex items-center gap-1">
-                            <input autoFocus type="number" step="0.001" value={editVal} onChange={(e) => setEditVal(e.target.value)}
+                            <input autoFocus type="number" step="1" min="0" value={editVal} onChange={(e) => setEditVal(e.target.value)}
                               onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(r); if (e.key === 'Escape') setEditId(null); }}
-                              className="w-20 border border-blue-400 rounded px-1.5 py-0.5 text-right text-xs" />
+                              placeholder="kg"
+                              className="w-24 border border-blue-400 rounded px-1.5 py-0.5 text-right text-xs" />
+                            <span className="text-[11px] text-gray-400">kg</span>
                             <button onClick={() => commitEdit(r)} className="text-emerald-600 hover:text-emerald-800"><Check size={14} /></button>
                             <button onClick={() => setEditId(null)} className="text-gray-400 hover:text-gray-600"><X size={14} /></button>
                           </span>
                         ) : (
                           <button onClick={() => beginEdit(r)} title="Set a minimum — you'll be warned when on-hand drops below it"
                             className="inline-flex items-center gap-1 text-gray-500 hover:text-blue-600 group">
-                            {r.reorder > 0 ? fmtMTnum(r.reorder) : <span className="text-blue-500/70">Set min</span>}
+                            {r.reorder > 0 ? fmtMT(r.reorder) : <span className="text-blue-500/70">Set min</span>}
                             <Pencil size={11} className="opacity-0 group-hover:opacity-100" />
                           </button>
                         )}
@@ -237,7 +239,7 @@ function ProductStockDrawer({ row, entity, status, onClose, onOpenLot }) {
               <Boxes size={17} className="text-blue-600" /> {row.group_name || 'Unspecified'}
             </h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              {fmtMTnum(row.onHandMT)} on hand · {fmtMT(row.available_kg)} free to sell · {fmtPKR(row.total_value)}
+              {fmtMT(row.total_kg)} on hand · {fmtMT(row.available_kg)} free to sell · {fmtPKR(row.total_value)}
             </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
