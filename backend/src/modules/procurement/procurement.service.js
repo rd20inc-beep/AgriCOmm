@@ -461,6 +461,25 @@ const procurementService = {
       ? parseFloat(data.net_amount)
       : parseFloat((grossAmount - deductionsAmt).toFixed(2));
 
+    // 3-way match: an invoice tied to a GRN must not double-bill it, and its gross
+    // must reconcile with the GRN's received value (within a small tolerance).
+    // Previously any amount could be invoiced, repeatedly, with no check.
+    if (data.grn_id) {
+      const dup = await trx('supplier_invoices')
+        .where('grn_id', data.grn_id).whereNot('status', 'Cancelled').first();
+      if (dup) {
+        throw new Error(`GRN already invoiced on ${dup.invoice_no}. A GRN cannot be invoiced twice.`);
+      }
+      const matchGrn = await trx('goods_receipt_notes').where('id', data.grn_id).first();
+      const grnValue = parseFloat(matchGrn?.total_value) || 0;
+      if (grnValue > 0 && Math.abs(grossAmount - grnValue) / grnValue > 0.02) {
+        throw new Error(
+          `Invoice gross (${grossAmount.toLocaleString()}) differs from GRN ${matchGrn.grn_no} `
+          + `value (${grnValue.toLocaleString()}) by more than 2%. Review before invoicing.`,
+        );
+      }
+    }
+
     const [invoice] = await trx('supplier_invoices')
       .insert({
         invoice_no: data.invoice_no,
@@ -667,8 +686,11 @@ const procurementService = {
         .where({ batch_ref: `batch-${grn.batch_id}`, type: 'raw', entity: 'mill' })
         .first();
 
-      if (lot) {
-        const lotQty = parseFloat(lot.qty) || 1;
+      // Only capitalize into the lot while it still holds stock — dividing a landed
+      // cost over a consumed lot (qty 0) produced an absurd per-kg cost (the old
+      // `qty || 1` fallback). The GL/payable below still book the cost either way.
+      const lotQty = lot ? (parseFloat(lot.qty) || 0) : 0;
+      if (lot && lotQty > 0) {
         const currentCost = parseFloat(lot.cost_per_unit) || 0;
         const additionalPerUnit = costAmount / lotQty;
         const newCostPerUnit = parseFloat((currentCost + additionalPerUnit).toFixed(2));
@@ -682,6 +704,41 @@ const procurementService = {
             updated_at: trx.fn.now(),
           });
       }
+    }
+
+    // Book the landed cost to the ledger: capitalize into inventory (Dr) and accrue
+    // a payable (Cr AP), attributed to the GRN's supplier as the best available
+    // party. Previously allocateLandedCost posted NOTHING — the cost raised stock
+    // value with no offsetting liability, so TB + payables under-reported.
+    if (costAmount > 0) {
+      const lastPay = await trx('payables').orderBy('id', 'desc').select('pay_no').first();
+      const paySeq = lastPay?.pay_no ? (parseInt(String(lastPay.pay_no).replace('PAY-', ''), 10) || 0) + 1 : 1;
+      await trx('payables').insert({
+        pay_no: `PAY-${String(paySeq).padStart(3, '0')}`,
+        entity: 'mill',
+        category: costType || 'Landed Cost',
+        supplier_id: grn.supplier_id || null,
+        linked_ref: costNo,
+        original_amount: costAmount,
+        paid_amount: 0,
+        outstanding: costAmount,
+        due_date: null,
+        status: 'Pending',
+        currency: currency || grn.currency || 'PKR',
+        notes: `Landed cost (${costType || 'Transport'}) on GRN ${grn.grn_no}`,
+      });
+      await accountingService.autoPost(trx, {
+        triggerEvent: 'purchase_invoice',
+        entity: 'mill',
+        amount: costAmount,
+        currency: currency || grn.currency || 'PKR',
+        refType: 'Landed Cost',
+        refNo: costNo,
+        description: `Landed cost (${costType || 'Transport'}) on GRN ${grn.grn_no}`,
+        userId: null,
+        partyType: grn.supplier_id ? 'supplier' : null,
+        partyId: grn.supplier_id || null,
+      });
     }
 
     return allocation;
