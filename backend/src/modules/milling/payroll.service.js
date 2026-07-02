@@ -339,18 +339,20 @@ async function computeLeaveBalances(workerId, year, asOf = null) {
   // the wall-clock month (which would over-accrue a mid-year or prior-year leaver).
   const asOfDate = asOf ? new Date(asOf) : new Date();
   const asOfY = asOfDate.getUTCFullYear();
-  // Last month of year `y` that accrual has reached (0 = none, 12 = full year).
-  const endMonth = y < asOfY ? 12 : (y > asOfY ? 0 : asOfDate.getUTCMonth() + 1);
-  // First month of `y` the worker was employed — clamps accrual for a joiner who
-  // started mid-year (previously they accrued as if employed the whole year).
-  let startMonth = 1;
-  if (worker?.joined_date) {
-    const jd = new Date(worker.joined_date);
-    const jy = jd.getUTCFullYear();
-    if (jy > y) startMonth = 13;            // joined after this year → no accrual
-    else if (jy === y) startMonth = jd.getUTCMonth() + 1;
-  }
-  const monthsElapsed = endMonth >= startMonth ? (endMonth - startMonth + 1) : 0;
+  const jd = worker?.joined_date ? new Date(worker.joined_date) : null;
+  const jy = jd ? jd.getUTCFullYear() : null;
+  const jm = jd ? jd.getUTCMonth() + 1 : 1;
+  // Months of a given year the worker actually accrued: from the join month (or
+  // Jan) to the as-of month (12 for a fully-elapsed prior year). Clamps a mid-year
+  // joiner so they don't accrue as if employed the whole year.
+  const monthsInYear = (yr) => {
+    const end = yr < asOfY ? 12 : (yr > asOfY ? 0 : asOfDate.getUTCMonth() + 1);
+    let start = 1;
+    if (jy != null) { if (jy > yr) start = 13; else if (jy === yr) start = jm; }
+    return end >= start ? (end - start + 1) : 0;
+  };
+  const monthsElapsed = monthsInYear(y);
+  const priorMonths = monthsInYear(y - 1);
   return types.map((t) => {
     const quota = t.annual_quota != null ? parseFloat(t.annual_quota) : null;
     const taken = tMap.get(t.id) || 0;
@@ -359,7 +361,11 @@ async function computeLeaveBalances(workerId, year, asOf = null) {
     if (t.accrues) {
       accrued = Math.round((quota * monthsElapsed / 12) * 100) / 100;
       if (t.carry_forward) {
-        const priorUnused = Math.max(0, quota - (pMap.get(t.id) || 0));
+        // Carry the PRIOR YEAR's unused ACCRUAL (quota × prior months ÷ 12 − taken),
+        // not the full annual quota — otherwise a mid-hire prior year over-grants
+        // carry-forward. (Prior carry-in isn't compounded — a deliberate simplification.)
+        const priorAccrued = Math.round((quota * priorMonths / 12) * 100) / 100;
+        const priorUnused = Math.max(0, priorAccrued - (pMap.get(t.id) || 0));
         carriedIn = t.max_carry != null ? Math.min(parseFloat(t.max_carry), priorUnused) : priorUnused;
       }
     } else {
