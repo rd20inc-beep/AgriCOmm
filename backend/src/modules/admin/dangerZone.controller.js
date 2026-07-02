@@ -336,11 +336,14 @@ async function deleteLocalSale(trx, req, id) {
   if (sale.lot_id) {
     const lot = await trx('inventory_lots').where('id', sale.lot_id).first();
     if (lot) {
+      // Post-5c the engine is KG end-to-end: the sale deducted `kg` from qty /
+      // available_qty via postMovement, so the reversal must add back `kg` too.
+      // (This was ÷1000, restocking MT → a 1000× under-restock that silently
+      // destroyed the sold stock and left available_qty ≠ net_weight_kg.)
       const kg = num(sale.quantity_kg);
-      const mt = kg / 1000;
       await trx('inventory_lots').where('id', lot.id).update({
-        qty: num(lot.qty) + mt,
-        available_qty: num(lot.available_qty) + mt,
+        qty: num(lot.qty) + kg,
+        available_qty: num(lot.available_qty) + kg,
         sold_weight_kg: Math.max(0, num(lot.sold_weight_kg) - kg),
         net_weight_kg: num(lot.net_weight_kg) + kg,
         updated_at: trx.fn.now(),
