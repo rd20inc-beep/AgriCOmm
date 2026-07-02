@@ -164,7 +164,10 @@ const millingService = {
   async recordUtility(trx, { batchId, millId, utilityType, readingStart, readingEnd, ratePerUnit, unit, periodStart, periodEnd, userId }) {
     const start = parseFloat(readingStart) || 0;
     const end = parseFloat(readingEnd) || 0;
-    const consumption = end - start;
+    // Guard a meter reset/rollover (end < start): a negative consumption would
+    // fold a NEGATIVE cost into the batch's milling_costs, silently reducing its
+    // finished-goods cost. Clamp to 0 rather than trust a bad reading.
+    const consumption = Math.max(0, end - start);
     const rate = parseFloat(ratePerUnit) || 0;
     const totalCost = consumption * rate;
 
@@ -549,7 +552,8 @@ const millingService = {
       .where('mill_id', millId)
       .where('resolved', true);
     if (dateFrom) dtQuery = dtQuery.where('start_time', '>=', dateFrom);
-    if (dateTo) dtQuery = dtQuery.where('start_time', '<=', dateTo);
+    // start_time is a timestamp — next-day exclusive bound so same-day rows count.
+    if (dateTo) dtQuery = dtQuery.where('start_time', '<', db.raw("(?::date + interval '1 day')", [dateTo]));
 
     const downtimeRecords = await dtQuery.select('duration_minutes');
     const totalDowntimeHours = downtimeRecords.reduce(
@@ -583,7 +587,9 @@ const millingService = {
     if (supplierId) query = query.where('mb.supplier_id', supplierId);
     if (productId) query = query.where('mb.product_id', productId);
     if (dateFrom) query = query.where('mb.completed_at', '>=', dateFrom);
-    if (dateTo) query = query.where('mb.completed_at', '<=', dateTo);
+    // completed_at is a timestamp — use a next-day exclusive bound so same-day
+    // `to` rows aren't dropped by a midnight-truncated `<=`.
+    if (dateTo) query = query.where('mb.completed_at', '<', db.raw("(?::date + interval '1 day')", [dateTo]));
 
     const batches = await query
       .select(
@@ -651,9 +657,10 @@ const millingService = {
       supplier_id: r.supplier_id,
       supplier_name: r.supplier_name,
       batch_count: parseInt(r.batch_count),
-      total_raw_mt: parseFloat(parseFloat(r.total_raw_mt).toFixed(2)),
-      total_finished_mt: parseFloat(parseFloat(r.total_finished_mt).toFixed(2)),
-      total_broken_mt: parseFloat(parseFloat(r.total_broken_mt).toFixed(2)),
+      // Columns are KG (Phase 5c); the `_mt` keys must carry MT → ÷1000.
+      total_raw_mt: parseFloat((parseFloat(r.total_raw_mt) / 1000).toFixed(2)),
+      total_finished_mt: parseFloat((parseFloat(r.total_finished_mt) / 1000).toFixed(2)),
+      total_broken_mt: parseFloat((parseFloat(r.total_broken_mt) / 1000).toFixed(2)),
       avg_yield_pct: parseFloat(parseFloat(r.avg_yield_pct).toFixed(2)),
     }));
 
