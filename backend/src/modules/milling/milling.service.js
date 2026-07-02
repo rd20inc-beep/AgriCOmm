@@ -5,17 +5,15 @@ const inventoryService = require('../inventory/inventory.service');
  * Generate sequential number with a given prefix: PP-001, RP-001, etc.
  */
 async function generateSeqNo(trx, table, column, prefix) {
-  const last = await (trx || db)(table)
-    .select(column)
-    .orderBy('created_at', 'desc')
+  // Collision-safe: MAX trailing-digit suffix + 1 (not latest-row-by-created_at,
+  // which regenerates an existing number after a delete — the doc-numbering
+  // hazard). Mirrors utils/docNumber.js nextDocNo() for these PP-/RP- sequences.
+  const row = await (trx || db)(table)
+    .where(column, 'like', `${prefix}-%`)
+    .max({ n: (trx || db).raw("CAST(NULLIF(regexp_replace(??, '^.*[^0-9]', ''), '') AS INTEGER)", [column]) })
     .first();
-
-  if (!last || !last[column]) {
-    return `${prefix}-001`;
-  }
-
-  const num = parseInt(last[column].replace(`${prefix}-`, ''), 10) || 0;
-  return `${prefix}-${String(num + 1).padStart(3, '0')}`;
+  const next = (parseInt(row?.n, 10) || 0) + 1;
+  return `${prefix}-${String(next).padStart(3, '0')}`;
 }
 
 const millingService = {
@@ -247,7 +245,12 @@ const millingService = {
       return { batch, benchmark: null, comparison: null, message: 'No benchmark found for this batch' };
     }
 
-    const rawQty = parseFloat(batch.raw_qty_kg) || 1;
+    // No raw qty → recovery %s are undefined. Return "no data" rather than divide
+    // by a fake `|| 1`, which would report absurd multi-thousand-percent yields.
+    const rawQty = parseFloat(batch.raw_qty_kg) || 0;
+    if (rawQty <= 0) {
+      return { batch, benchmark, comparison: null, message: 'Batch has no raw quantity — recovery cannot be computed.' };
+    }
     const actualFinished = parseFloat(batch.actual_finished_kg) || 0;
     const actualBroken = parseFloat(batch.broken_kg) || 0;
     const actualBran = parseFloat(batch.bran_kg) || 0;
@@ -561,9 +564,11 @@ const millingService = {
       0
     );
 
-    const effectiveHours = totalActualHours - totalDowntimeHours;
+    // Floor effective hours at 0 (downtime can exceed run time on a bad day) and
+    // clamp the KPI to 0–100 so it reads as a sane percentage.
+    const effectiveHours = Math.max(0, totalActualHours - totalDowntimeHours);
     const utilizationPct = totalPlannedHours > 0
-      ? parseFloat(((effectiveHours / totalPlannedHours) * 100).toFixed(2))
+      ? parseFloat(Math.min(100, (effectiveHours / totalPlannedHours) * 100).toFixed(2))
       : 0;
 
     return {

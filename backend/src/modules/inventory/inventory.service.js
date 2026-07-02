@@ -2727,7 +2727,10 @@ const inventoryService = {
     for (const [size, bags] of bySize) {
       const { it, st } = await itemForSize(size);
       const consume = size === predSize ? packed : 0;
-      await trx('mill_stock').where({ id: st.id }).update({ quantity_available: trx.raw('quantity_available + ?', [bags - consume]), updated_at: trx.fn.now() });
+      // Clamp at 0: on a mixed-size intake the predominant size can pack MORE
+      // output bags than it freed (bags − consume < 0), which would drive its
+      // stock negative. Never let mill_stock go below zero.
+      await trx('mill_stock').where({ id: st.id }).update({ quantity_available: trx.raw('GREATEST(quantity_available + ?, 0)', [bags - consume]), updated_at: trx.fn.now() });
       movements.push({ item_id: it.id, warehouse_id: null, movement_type: 'return', quantity: bags, reference_type: 'batch_katta', reference_id: batchId, reason: `Empty ${size}kg katta freed from milled raw (batch ${batchId})`, performed_by: userId || null });
       if (consume > 0) movements.push({ item_id: it.id, warehouse_id: null, movement_type: 'consumption', quantity: -consume, reference_type: 'batch_katta', reference_id: batchId, reason: `${size}kg katta used to pack outputs (batch ${batchId})`, performed_by: userId || null });
     }

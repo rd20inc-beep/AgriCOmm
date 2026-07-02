@@ -1279,7 +1279,10 @@ const millingController = {
   // used to pack the outputs (read-only — the figures are stamped at yield).
   async getBatchKatta(req, res) {
     try {
-      const { id } = req.params;
+      // Accept a batch_no ("M-226") as well as a numeric id — id/reference_id are
+      // integer columns, so a raw batch_no would throw an invalid-integer 500.
+      const id = await resolveBatchId(req.params.id);
+      if (!id) return res.status(404).json({ success: false, message: 'Milling batch not found.' });
       const veh = await db('milling_vehicle_arrivals').where('batch_id', id).sum({ bags: 'total_bags' }).first();
       const vehFreed = Math.round(parseFloat(veh && veh.bags) || 0);
       if (vehFreed <= 0) return res.json({ success: true, data: null }); // no katta intake (blend / lot-started)
