@@ -17,7 +17,9 @@ const fxRateService = {
       .orderBy('effective_date', 'desc')
       .first();
 
-    if (row) return { rate: parseFloat(row.rate), source: 'fx_rates', effectiveDate: row.effective_date, id: row.id };
+    // A stored rate of 0 (bad data) would silently zero out every conversion —
+    // treat non-positive as "no rate" and fall through to the system default.
+    if (row && parseFloat(row.rate) > 0) return { rate: parseFloat(row.rate), source: 'fx_rates', effectiveDate: row.effective_date, id: row.id };
 
     // Fallback to system_settings
     const setting = await db('system_settings').where('key', 'pkr_rate').first();
@@ -36,7 +38,9 @@ const fxRateService = {
       .orderBy('effective_date', 'desc')
       .first();
 
-    if (row) return { rate: parseFloat(row.rate), source: 'fx_rates', effectiveDate: row.effective_date, id: row.id };
+    // Treat a non-positive stored rate as "no rate" so a bad 0 row doesn't zero
+    // out conversions — fall through to the system default instead.
+    if (row && parseFloat(row.rate) > 0) return { rate: parseFloat(row.rate), source: 'fx_rates', effectiveDate: row.effective_date, id: row.id };
 
     const setting = await db('system_settings').where('key', 'pkr_rate').first();
     const fallbackRate = parseFloat(setting?.value) || 280;

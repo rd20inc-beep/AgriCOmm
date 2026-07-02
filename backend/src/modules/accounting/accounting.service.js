@@ -933,12 +933,20 @@ const accountingService = {
     for (const entry of entries) {
       const net = parseFloat(entry.net_amount);
       const refType = (entry.ref_type || '').toLowerCase();
+      // Also read the offsetting account name — a generic ref_type (e.g. a manual
+      // journal) still classifies correctly when the account is clearly a fixed
+      // asset or a financing account. Specific terms only, to avoid pulling an
+      // operating account in by a loose keyword. (Simplified statement — the
+      // net_change total is correct regardless of how a line is bucketed.)
+      const acct = (entry.account_name || '').toLowerCase();
+      const investingAcct = /fixed asset|equipment|machinery|vehicle|property|plant|\bland\b|building/.test(acct);
+      const financingAcct = /loan payable|loan receivable|owner.?s equity|share capital|drawings|dividend|retained earnings/.test(acct);
 
       // Classify: investing = asset purchases, financing = equity/loans, everything else = operating
-      if (refType.includes('invest') || refType.includes('asset')) {
+      if (refType.includes('invest') || refType.includes('asset') || investingAcct) {
         investing.push(entry);
         totalInvesting += net;
-      } else if (refType.includes('equity') || refType.includes('loan') || refType.includes('capital')) {
+      } else if (refType.includes('equity') || refType.includes('loan') || refType.includes('capital') || financingAcct) {
         financing.push(entry);
         totalFinancing += net;
       } else {
