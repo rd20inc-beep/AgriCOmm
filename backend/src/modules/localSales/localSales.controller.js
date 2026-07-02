@@ -467,6 +467,12 @@ module.exports = {
       const totalPaid = (paid_amount != null && paid_amount !== '')
         ? (parseFloat(paid_amount) || 0)
         : (payment_mode === 'credit' ? 0 : grandTotal);
+      // A bank_transfer receipt MUST name the account it landed in — otherwise the
+      // sale would be marked paid but no bank balance moves and no bank_transactions
+      // row is written (the money is "collected" nowhere). Reject up front.
+      if (payment_mode === 'bank_transfer' && totalPaid > 0 && !bank_account_id) {
+        return res.status(400).json({ success: false, message: 'A bank account is required for a bank-transfer receipt.' });
+      }
       // Allocate the single tendered amount across lines proportionally; the last
       // line absorbs the rounding remainder so Σ(line paid) === totalPaid exactly.
       let allocated = 0;
@@ -610,14 +616,17 @@ module.exports = {
 
           if (sale.id && l.lot_id) await inventoryService.lockSaleCOGS(trx, sale.id);
 
-          try {
-            await accountingService.autoPost(trx, {
-              triggerEvent: 'local_sale_recorded', entity: 'mill', amount: l.total, currency: 'PKR',
-              refType: 'Local Sale', refNo: saleNo,
-              description: `Local sale ${saleNo} — ${buyer_name || 'walk-in'} — ${l.item_name}`.slice(0, 240),
-              userId: req.user?.id,
-            });
-          } catch (e) { console.warn('Local sale journal post failed:', e.message); }
+          // Revenue/AR journal — NOT swallowed (a dropped journal here left revenue
+          // un-booked in the GL while stock + cash committed — a phantom-revenue
+          // hole). autoPost returns null harmlessly when no posting rule exists, so
+          // this only throws on a genuine posting failure, which must roll the whole
+          // sale back (consistent with the atomic stock deduction).
+          await accountingService.autoPost(trx, {
+            triggerEvent: 'local_sale_recorded', entity: 'mill', amount: l.total, currency: 'PKR',
+            refType: 'Local Sale', refNo: saleNo,
+            description: `Local sale ${saleNo} — ${buyer_name || 'walk-in'} — ${l.item_name}`.slice(0, 240),
+            userId: req.user?.id,
+          });
 
           created.push(sale);
         }
@@ -644,6 +653,11 @@ module.exports = {
 
       if (!amount || parseFloat(amount) <= 0) {
         return res.status(400).json({ success: false, message: 'A positive amount is required.' });
+      }
+      // Same guard as create: a bank-transfer receipt must name its account, else
+      // the payment records but no bank balance moves.
+      if (payment_method === 'bank_transfer' && !bank_account_id) {
+        return res.status(400).json({ success: false, message: 'A bank account is required for a bank-transfer receipt.' });
       }
 
       const sale = await db('local_sales').where({ id }).first();
