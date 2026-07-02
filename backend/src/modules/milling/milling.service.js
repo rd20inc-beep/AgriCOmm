@@ -759,19 +759,35 @@ const millingService = {
       expectedBroken = rawQty * ((parseFloat(benchmark.expected_broken_pct) || 0) / 100);
     }
 
-    // Estimated revenue (use average market rates — these would come from config in production)
-    // For now, use cost data to derive
-    const rawRiceCost = costs.find((c) => c.category === 'rawRice' || c.category === 'raw_rice');
-    const rawPricePerMT = rawRiceCost && rawQty > 0
-      ? parseFloat(rawRiceCost.amount) / rawQty
-      : 0;
-
-    // Typical rice processing: finished rice sells at 1.5-2x raw cost, broken at 0.6x
-    const finishedPricePerMT = rawPricePerMT * 1.6;
-    const brokenPricePerMT = rawPricePerMT * 0.6;
-
-    const expectedRevenue = (expectedFinished * finishedPricePerMT) + (expectedBroken * brokenPricePerMT);
-    const actualRevenue = (finishedQty * finishedPricePerMT) + (brokenQty * brokenPricePerMT);
+    // Value outputs at their RECORDED per-KG prices (set at yield / price-confirm),
+    // NOT a fabricated multiple of raw cost. Actual revenue = each output lot's
+    // produced qty × its grade's recorded price; expected uses the benchmark
+    // quantities at the recorded finished/broken prices. (finished_price_per_kg is
+    // the residual finished valuation — the same basis local-sale drawers use.)
+    const num = (v) => parseFloat(v) || 0;
+    const priceForOutput = (o) => {
+      const g = String(o.grade || '').toUpperCase();
+      const n = String(o.item_name || '').toLowerCase();
+      if (o.type === 'finished') return num(batch.finished_price_per_kg);
+      if (g === 'B1') return num(batch.b1_price_per_kg);
+      if (g === 'B2') return num(batch.b2_price_per_kg);
+      if (g === 'B3') return num(batch.b3_price_per_kg);
+      if (g === 'CSR') return num(batch.csr_price_per_kg);
+      if (g === 'SHORT GRAIN') return num(batch.short_grain_price_per_kg);
+      if (n.includes('powder')) return num(batch.powder_price_per_kg);
+      if (n.includes('sweep')) return num(batch.sweeping_price_per_kg);
+      if (n.includes('choba')) return num(batch.choba_price_per_kg);
+      if (n.includes('sortex')) return num(batch.sortex_rejects_price_per_kg);
+      if (n.includes('broken')) return num(batch.broken_price_per_kg);
+      return 0;
+    };
+    const outputLots = await db('inventory_lots')
+      .where('batch_ref', `batch-${batchId}`).whereIn('type', ['finished', 'byproduct'])
+      .select('type', 'grade', 'item_name', 'net_weight_kg', 'received_net_weight_kg');
+    const actualRevenue = outputLots.reduce((s, o) => s + (num(o.received_net_weight_kg) || num(o.net_weight_kg)) * priceForOutput(o), 0);
+    const finishedPrice = num(batch.finished_price_per_kg);
+    const brokenPrice = num(batch.broken_price_per_kg);
+    const expectedRevenue = (expectedFinished * finishedPrice) + (expectedBroken * brokenPrice);
 
     const costBreakdown = {};
     for (const c of costs) {
