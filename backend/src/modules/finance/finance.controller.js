@@ -1,6 +1,7 @@
 const db = require('../../config/database');
 const inventoryService = require('../../services/inventoryService');
 const accountingService = require('../../services/accountingService');
+const fxRateService = require('./fxRate.service');
 const { nextDocNo } = require('../../utils/docNumber');
 
 // Resolve a payment row to its PKR equivalent using the strongest
@@ -231,7 +232,10 @@ const financeController = {
       });
       const seen = new Set();
       let payments = norm.filter((x) => {
-        const k = `${Math.round(x.amount)}|${x.payment_date ? String(x.payment_date).slice(0, 10) : ''}|${x.account_name || ''}`;
+        // Include the reference so two GENUINE same-amount/day/account partials
+        // aren't collapsed into one — while a payment and its own bank_transaction
+        // (which share the reference) still dedup to a single line.
+        const k = `${Math.round(x.amount)}|${x.payment_date ? String(x.payment_date).slice(0, 10) : ''}|${x.account_name || ''}|${x.bank_reference || ''}`;
         if (seen.has(k)) return false; seen.add(k); return true;
       });
 
@@ -277,7 +281,11 @@ const financeController = {
         .select('pa.outstanding as amount', 'pa.currency', 'pa.due_date', 'pa.supplier_id', 'pa.linked_ref as ref', db.raw("COALESCE(s.name, 'Supplier') as party"));
 
       // Each row carries its native currency + a PKR equivalent (for totals).
-      const toPkr = (amt, cur, fx) => ((cur || 'PKR').toUpperCase() === 'PKR' ? amt : amt * (parseFloat(fx) || 280));
+      // Payables have no stored fx_rate column, so a foreign payable converts at
+      // the LIVE USD rate (not a stale flat 280) — receivables/cheques still use
+      // their own stored rate.
+      const liveUsd = (await fxRateService.getLatestRate('USD')).rate || 280;
+      const toPkr = (amt, cur, fx) => ((cur || 'PKR').toUpperCase() === 'PKR' ? amt : amt * (parseFloat(fx) || liveUsd));
 
       // A cheque receipt is against a customer, a cheque payment against a supplier.
       const chq = (t) => cheques.filter((x) => x.type === t).map((x) => {
@@ -298,7 +306,7 @@ const financeController = {
       ].sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
       const giving = [
         ...chq('payment'),
-        ...pay.map((x) => { const amount = parseFloat(x.amount) || 0; const currency = (x.currency || 'PKR').toUpperCase(); return { kind: 'credit', label: 'Payable', dueDate: x.due_date, amount, currency, amountPkr: toPkr(amount, currency, null), party: x.party, reference: x.ref, partyType: 'supplier', partyId: x.supplier_id || null }; }),
+        ...pay.map((x) => { const amount = parseFloat(x.amount) || 0; const currency = (x.currency || 'PKR').toUpperCase(); return { kind: 'credit', label: 'Payable', dueDate: x.due_date, amount, currency, amountPkr: toPkr(amount, currency, liveUsd), party: x.party, reference: x.ref, partyType: 'supplier', partyId: x.supplier_id || null }; }),
       ].sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
 
       return res.json({ success: true, data: {
@@ -474,7 +482,9 @@ const financeController = {
 
       const seen = new Set();
       let payments = norm.filter((x) => {
-        const k = `${Math.round(x.amount)}|${x.date ? String(x.date).slice(0, 10) : ''}|${x.account_name || ''}`;
+        // Include the reference so genuine distinct partials aren't merged (a
+        // payment and its own bank_transaction share the reference → still dedup).
+        const k = `${Math.round(x.amount)}|${x.date ? String(x.date).slice(0, 10) : ''}|${x.account_name || ''}|${x.reference || ''}`;
         if (seen.has(k)) return false; seen.add(k); return true;
       });
 
