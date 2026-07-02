@@ -74,7 +74,9 @@ const financeController = {
       if (customer_id)   exportQ = exportQ.where('r.customer_id', customer_id);
       if (overdue === 'true') exportQ = exportQ.where('r.due_date', '<', db.fn.now()).where('r.status', '!=', 'Paid');
       if (from_date)     exportQ = exportQ.where('r.created_at', '>=', from_date);
-      if (to_date)       exportQ = exportQ.where('r.created_at', '<=', to_date);
+      // Exclusive next-day bound: r.created_at is timestamptz, so `<= to_date`
+      // (midnight) would drop receivables created later on the to_date day.
+      if (to_date)       exportQ = exportQ.where('r.created_at', '<', db.raw("(?::date + interval '1 day')", [to_date]));
 
       // ── Local sales with outstanding balance (UNIONed in) ─────────
       // Surfaces credit / partial / pending local sales in Money In so
@@ -711,7 +713,12 @@ const financeController = {
       if (supplier_id) filtered = filtered.filter(p => String(p.supplier_id) === String(supplier_id));
       if (overdue === 'true') filtered = filtered.filter(p => p.due_date && new Date(p.due_date) < new Date() && p.status !== 'Paid');
       if (from_date) filtered = filtered.filter(p => p.created_at && new Date(p.created_at) >= new Date(from_date));
-      if (to_date) filtered = filtered.filter(p => p.created_at && new Date(p.created_at) <= new Date(to_date));
+      // Exclusive next-day bound: created_at carries a time, so comparing against
+      // midnight of to_date would drop payables created later that day.
+      if (to_date) {
+        const toBound = new Date(to_date); toBound.setDate(toBound.getDate() + 1);
+        filtered = filtered.filter(p => p.created_at && new Date(p.created_at) < toBound);
+      }
 
       // Newest first; tie-break on id (stored numeric > synthetic string sort).
       filtered.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
@@ -1125,9 +1132,17 @@ const financeController = {
             }
           }
           if (bank_account_id) {
+            // Move the balance in the ACCOUNT's own currency: a PKR account
+            // banks the PKR equivalent, a foreign account matching the payment
+            // currency banks the native amount. Writing the SAME figure to
+            // bank_transactions keeps the Cash tab's balance = Σ(transactions)
+            // (previously the balance moved by the raw amount while the txn row
+            // stored PKR — they never reconciled for a foreign receipt).
+            const acct = await trx('bank_accounts').where({ id: bank_account_id }).first();
+            const bankMove = acct && acct.currency === cur ? amtNum : stampedPkr;
             await trx('bank_accounts')
               .where({ id: bank_account_id })
-              .increment('current_balance', parseFloat(amount));
+              .increment('current_balance', bankMove);
             // Audit-trail row in the Cash & Bank sub-ledger so the Cash
             // tab can attribute the inflow. Pattern mirrors payPurchase.
             const tableExists = await trx.schema.hasTable('bank_transactions');
@@ -1142,7 +1157,8 @@ const financeController = {
                 transaction_no: `BT-${String(seq).padStart(4, '0')}`,
                 bank_account_id,
                 type: 'credit',
-                amount: stampedPkr,
+                amount: bankMove,
+                currency: acct?.currency || 'PKR',
                 transaction_date: payment_date || new Date(),
                 reference: bank_reference || paymentNo,
                 counterparty: null,
@@ -1168,13 +1184,18 @@ const financeController = {
               updated_at: trx.fn.now(),
             });
 
-            // Mirror the status back to the source row so the Expenses
-            // / Mill Purchases tabs reflect the same payment state
-            // instead of forever showing Unpaid.
+            // Mirror BOTH the status AND paid_amount back to the source row so
+            // the Expenses / Mill Purchases tabs (which compute outstanding off
+            // the source's own paid_amount) reflect the same payment state —
+            // previously only the status moved, so a partial payment still showed
+            // the full amount outstanding on those tabs.
             if (payable.source_table === 'business_expenses' && payable.source_id) {
+              const src = await trx('business_expenses').where({ id: payable.source_id }).first();
+              const srcPaid = (parseFloat(src?.paid_amount) || 0) + stampedPkr;
               await trx('business_expenses')
                 .where({ id: payable.source_id })
                 .update({
+                  paid_amount: srcPaid,
                   payment_status: fullyPaid ? 'Paid' : 'Partial',
                   paid_date: fullyPaid ? new Date() : null,
                   bank_account_id: bank_account_id || null,
@@ -1183,18 +1204,26 @@ const financeController = {
                   updated_at: trx.fn.now(),
                 });
             } else if (payable.source_table === 'mill_purchases' && payable.source_id) {
+              const src = await trx('mill_purchases').where({ id: payable.source_id }).first();
+              const srcPaid = (parseFloat(src?.paid_amount) || 0) + stampedPkr;
               await trx('mill_purchases')
                 .where({ id: payable.source_id })
                 .update({
+                  paid_amount: srcPaid,
                   payment_status: fullyPaid ? 'Paid' : 'Partial',
                   updated_at: trx.fn.now(),
                 });
             }
           }
           if (bank_account_id) {
+            // Currency-aware bank move (see the receipt block): a foreign account
+            // matching the payment currency moves natively, else PKR — and the
+            // bank_transactions row carries the same figure so it reconciles.
+            const acct = await trx('bank_accounts').where({ id: bank_account_id }).first();
+            const bankMove = acct && acct.currency === cur ? amtNum : stampedPkr;
             await trx('bank_accounts')
               .where({ id: bank_account_id })
-              .increment('current_balance', parseFloat(amount) * -1);
+              .increment('current_balance', bankMove * -1);
             const tableExists = await trx.schema.hasTable('bank_transactions');
             if (tableExists) {
               const lastBt = await trx('bank_transactions')
@@ -1207,7 +1236,8 @@ const financeController = {
                 transaction_no: `BT-${String(seq).padStart(4, '0')}`,
                 bank_account_id,
                 type: 'debit',
-                amount: stampedPkr,
+                amount: bankMove,
+                currency: acct?.currency || 'PKR',
                 transaction_date: payment_date || new Date(),
                 reference: bank_reference || paymentNo,
                 counterparty: null,
@@ -1811,7 +1841,10 @@ financeController.listPurchases = async (req, res) => {
     const { from_date, to_date, source, entity, limit = 500 } = req.query;
     const dateFilter = (q, col) => {
       if (from_date) q = q.where(col, '>=', from_date);
-      if (to_date) q = q.where(col, '<=', to_date);
+      // Exclusive upper bound at the NEXT day so a timestamptz column (e.g.
+      // eoc.created_at) still includes rows recorded later on the to_date day —
+      // `<= to_date` truncates to midnight and drops them. Works for DATE cols too.
+      if (to_date) q = q.where(col, '<', db.raw("(?::date + interval '1 day')", [to_date]));
       return q;
     };
 
