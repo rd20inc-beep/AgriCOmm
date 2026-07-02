@@ -1797,6 +1797,24 @@ const millingController = {
 
         await trx('milling_vehicle_arrivals').where({ batch_id: batchId }).del();
         await trx('milling_quality_samples').where({ batch_id: batchId }).del();
+
+        // Reverse any mill-store consumption logged against this batch and drop
+        // the logs — mill_consumption_logs.batch_id is an onDelete('RESTRICT') FK,
+        // so leaving the rows makes the batch undeletable (opaque 500). Return the
+        // consumed quantity to mill_stock and remove the consumption movements.
+        const consumptionLogs = await trx('mill_consumption_logs').where({ batch_id: batchId });
+        for (const cl of consumptionLogs) {
+          const stockQ = trx('mill_stock').where('item_id', cl.item_id);
+          if (cl.warehouse_id == null) stockQ.whereNull('warehouse_id'); else stockQ.where('warehouse_id', cl.warehouse_id);
+          const stockRow = await stockQ.first();
+          if (stockRow) {
+            await trx('mill_stock').where({ id: stockRow.id })
+              .update({ quantity_available: trx.raw('quantity_available + ?', [cl.quantity_used]), updated_at: trx.fn.now() });
+          }
+        }
+        await trx('mill_stock_movements').where({ reference_type: 'batch', reference_id: batchId }).del();
+        await trx('mill_consumption_logs').where({ batch_id: batchId }).del();
+
         try { await trx('milling_costs').where({ batch_id: batchId }).del(); } catch (_) { /* table may differ */ }
         await trx('milling_batches').where({ id: batchId }).del();
       });

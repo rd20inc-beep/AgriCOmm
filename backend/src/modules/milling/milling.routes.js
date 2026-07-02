@@ -5,7 +5,11 @@ const { nextDocNo } = require('../../utils/docNumber');
 const controller = require('../../controllers/millingController');
 const advancedController = require('../../controllers/millingAdvancedController');
 const authorize = require('../../middleware/rbac');
-const { authorizeRole } = require('../../middleware/rbac');
+const { authorizeRole, denyRoles } = require('../../middleware/rbac');
+// Mill Operator is a production-only role with no finance visibility. A couple of
+// milling endpoints expose cost/profit/cash, so they carry this guard (the same
+// one the reporting + ai modules use) even though the rest of milling is fine.
+const noFinanceForOperator = denyRoles('Mill Operator');
 // Payroll routes are gated by the dedicated `payroll.*` permission module
 // (migration 203). Mill Operator holds no payroll permissions, so the old
 // denyRoles('Mill Operator') guard is no longer needed.
@@ -252,7 +256,7 @@ router.put(
 // Source Lots (Batch-level)
 // =============================================================================
 
-router.get('/cash-flow', authorize('milling', 'view'), advancedController.cashFlow);
+router.get('/cash-flow', authorize('milling', 'view'), noFinanceForOperator, advancedController.cashFlow);
 router.get('/batches/:id/source-lots', authorize('milling', 'view'), advancedController.listSourceLots);
 router.post(
   '/batches/:id/source-lots',
@@ -378,7 +382,7 @@ router.get('/analytics/recovery-trends', authorize('milling', 'view'), advancedC
 router.get('/analytics/supplier-comparison', authorize('milling', 'view'), advancedController.analyticsSupplierComparison);
 router.get('/analytics/operator-productivity', authorize('milling', 'view'), advancedController.analyticsOperatorProductivity);
 router.get('/analytics/moisture-analysis', authorize('milling', 'view'), advancedController.analyticsMoistureAnalysis);
-router.get('/analytics/batch-profitability/:id', authorize('milling', 'view'), advancedController.analyticsBatchProfitability);
+router.get('/analytics/batch-profitability/:id', authorize('milling', 'view'), noFinanceForOperator, advancedController.analyticsBatchProfitability);
 
 // =============================================================================
 // Product Pricing — confirm byproduct prices per batch
@@ -482,7 +486,11 @@ router.put('/batches/:id/prices', authorize('milling', 'edit'),
           .update({ ...priceUpdate, updated_at: trx.fn.now() }).returning('*');
         const realloc = await inventoryService.recomputeBatchOutputsAfterPriceChange(trx, id, { userId: req.user?.id });
         if (realloc && realloc.finishedCostPerKg != null) {
-          await trx('milling_batches').where({ id }).update({ finished_price_per_kg: realloc.finishedCostPerKg * 1000 });
+          // Store PER-KG (not ×1000): every reader treats finished_price_per_kg
+          // like its per-KG siblings (b1_price_per_kg, broken_price_per_kg, …) and
+          // the yield-edit resync path writes it per-KG too. The ×1000 here made
+          // confirmed-price finished outputs 1000× overvalued downstream.
+          await trx('milling_batches').where({ id }).update({ finished_price_per_kg: realloc.finishedCostPerKg });
         }
         return { updated, realloc };
       });
