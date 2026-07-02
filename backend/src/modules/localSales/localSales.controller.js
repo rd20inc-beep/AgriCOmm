@@ -67,7 +67,7 @@ async function assembleInvoice(id, includeAdmin = false) {
   const rows = await itemQuery.select(
     'ls.id', 'ls.sale_no', 'ls.item_name', 'ls.item_type', 'ls.quantity_kg', 'ls.quantity_bags',
     'ls.bag_weight_kg', 'ls.rate_per_kg', 'ls.rate_input', 'ls.rate_unit', 'ls.quantity_unit',
-    'ls.total_amount', 'ls.lot_id', 'ls.lot_no',
+    'ls.total_amount', 'ls.paid_amount', 'ls.due_amount', 'ls.lot_id', 'ls.lot_no',
     // admin-only financial columns (selected always, exposed only when includeAdmin)
     'ls.cost_per_kg', 'ls.landed_cost_total', 'ls.cogs_total_pkr', 'ls.gross_profit', 'ls.margin_pct',
     'il.lot_no as lot_ref', 'il.type as lot_type', 'il.variety as lot_variety',
@@ -171,6 +171,11 @@ async function assembleInvoice(id, includeAdmin = false) {
   }
 
   const grandTotal = items.reduce((s, i) => s + i.amount, 0);
+  // Received / outstanding must sum across ALL group lines — `base` is only the
+  // first line, so a multi-item invoice was showing the group total against just
+  // the first line's paid/due (customer-facing wrong money). rows is group-scoped.
+  const groupReceived = rows.reduce((s, r) => s + num(r.paid_amount), 0);
+  const groupOutstanding = rows.reduce((s, r) => s + num(r.due_amount), 0);
   const timeline = [{ kind: 'created', date: base.sale_date || base.created_at, label: 'Invoice created', amount: grandTotal, balance: grandTotal }];
   let bal = grandTotal;
   for (const p of pays) {
@@ -182,7 +187,7 @@ async function assembleInvoice(id, includeAdmin = false) {
     });
   }
 
-  const outstanding = num(base.due_amount);
+  const outstanding = groupOutstanding;
   const today = new Date().toISOString().slice(0, 10);
   const dueIso = base.due_date ? new Date(base.due_date).toISOString().slice(0, 10) : null;
   const overdue = outstanding > 0.01 && !!dueIso && dueIso < today;
@@ -198,7 +203,7 @@ async function assembleInvoice(id, includeAdmin = false) {
       customerContact: base.customer_contact || null,
       date: base.sale_date || base.created_at,
       paymentStatus: base.payment_status, paymentMode: base.payment_mode,
-      total: grandTotal, received: num(base.paid_amount), outstanding,
+      total: grandTotal, received: groupReceived, outstanding,
       dueDate: base.due_date || null, overdue,
       createdByName: base.created_by_name || null, notes: base.notes || null,
     },
@@ -215,7 +220,7 @@ async function assembleInvoice(id, includeAdmin = false) {
     totals: {
       quantityKg: items.reduce((s, i) => s + i.quantityKg, 0),
       bags: items.reduce((s, i) => s + (i.bags || 0), 0),
-      total: grandTotal, received: num(base.paid_amount), outstanding,
+      total: grandTotal, received: groupReceived, outstanding,
     },
   };
 
