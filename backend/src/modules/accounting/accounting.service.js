@@ -1029,14 +1029,26 @@ const accountingService = {
       return usdRate ? pkr / usdRate : 0;
     };
 
-    // Opening balance (before dateFrom), in PKR with a USD approximation.
+    // Opening balance (before dateFrom), in PKR with a USD equivalent.
     let openingBalance = 0;
+    let openingBalanceUsd = 0;
     if (dateFrom) {
       const openingResult = await lineBase()
         .where('je.date', '<', dateFrom)
         .select(db.raw(`COALESCE(SUM((jl.debit - jl.credit) * (${factorSql})), 0)::numeric as balance`))
         .first();
       openingBalance = parseFloat(openingResult.balance);
+      // Sum USD per pre-period line via usdOf (each line's own booked rate)
+      // instead of dividing the mixed-rate PKR opening by today's flat rate —
+      // otherwise the opening (and every running USD after it) is wrong for an
+      // export party that had activity before dateFrom.
+      const openingLines = await lineBase()
+        .where('je.date', '<', dateFrom)
+        .select('jl.debit', 'jl.credit', 'je.currency', 'je.fx_rate', 'je.orig_fx_rate', 'je.orig_currency');
+      for (const l of openingLines) {
+        openingBalanceUsd += usdOf(parseFloat(l.debit) || 0, l.currency, l.fx_rate, l.orig_fx_rate, l.orig_currency)
+          - usdOf(parseFloat(l.credit) || 0, l.currency, l.fx_rate, l.orig_fx_rate, l.orig_currency);
+      }
     }
     // Local-sales (mill) transactions — credit/cash local sales create
     // receivables but NOT party-stamped AR journals, so the journal scan above
@@ -1100,11 +1112,14 @@ const accountingService = {
         return { date: p.payment_date, ref_no: p.payment_no, description: `Receipt${bits ? ` — ${bits}` : ''}`, d: 0, c: parseFloat(p.amount) || 0 };
       }),
     ];
-    // Local rows before the window add to the opening balance.
+    // Local rows before the window add to the opening balance (PKR → usdOf gives
+    // the USD equivalent at the current rate, same as their in-period treatment).
     for (const t of localRaw) {
-      if (dateFrom && t.date && new Date(t.date) < new Date(dateFrom)) openingBalance += (t.d - t.c);
+      if (dateFrom && t.date && new Date(t.date) < new Date(dateFrom)) {
+        openingBalance += (t.d - t.c);
+        openingBalanceUsd += usdOf(t.d, 'PKR', 1, null, null) - usdOf(t.c, 'PKR', 1, null, null);
+      }
     }
-    const openingBalanceUsd = usdRate ? openingBalance / usdRate : 0;
 
     // Transactions within period (journal lines)
     let txnQuery = lineBase()
@@ -1514,19 +1529,32 @@ const accountingService = {
       };
     };
 
-    // Opening balance (before dateFrom): GL + synthetic, PKR with USD approx.
+    // Opening balance (before dateFrom): GL + synthetic, PKR with USD equivalent.
     let openingBalance = 0;
+    let openingBalanceUsd = 0;
     if (dateFrom) {
       const openingResult = await lineBase()
         .where('je.date', '<', dateFrom)
         .select(db.raw(`COALESCE(SUM((jl.credit - jl.debit) * (${factorSql})), 0)::numeric as balance`))
         .first();
       openingBalance = parseFloat(openingResult.balance);
+      // Per-line USD (each line's own booked rate) rather than dividing the
+      // mixed-rate PKR opening by today's flat rate.
+      const openingLines = await lineBase()
+        .where('je.date', '<', dateFrom)
+        .select('jl.debit', 'jl.credit', 'je.currency', 'je.fx_rate', 'je.orig_fx_rate', 'je.orig_currency');
+      for (const l of openingLines) {
+        openingBalanceUsd += usdOf(parseFloat(l.credit) || 0, l.currency, l.fx_rate, l.orig_fx_rate, l.orig_currency)
+          - usdOf(parseFloat(l.debit) || 0, l.currency, l.fx_rate, l.orig_fx_rate, l.orig_currency);
+      }
       for (const s of synthetic) {
-        if (s.date && s.date < dateFrom) { const n = normalize(s); openingBalance += (n.credit - n.debit); }
+        if (s.date && s.date < dateFrom) {
+          const n = normalize(s);
+          openingBalance += (n.credit - n.debit);
+          openingBalanceUsd += usdOf(n.credit, 'PKR', 1, null, null) - usdOf(n.debit, 'PKR', 1, null, null);
+        }
       }
     }
-    const openingBalanceUsd = usdRate ? openingBalance / usdRate : 0;
 
     // In-period GL lines
     let txnQuery = lineBase()

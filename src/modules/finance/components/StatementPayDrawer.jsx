@@ -46,7 +46,12 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
     const idKey = isCustomer ? 'customerId' : 'supplierId';
     return src
       .filter((r) => String(r[idKey]) === String(party.id))
-      .filter((r) => !eqStatus(r.status, 'Paid') && (parseFloat(r.outstanding) || 0) > 0);
+      .filter((r) => !eqStatus(r.status, 'Paid') && (parseFloat(r.outstanding) || 0) > 0)
+      // Payables include DERIVED rows (mill costs / export costs) with string ids
+      // like "MC-123" — those aren't real, settleable `payables` rows and the
+      // backend's linked_payable_id is a numeric Joi field, so submitting them
+      // always 400s. Only offer real stored payables (numeric id) as pay targets.
+      .filter((r) => isCustomer || /^\d+$/.test(String(r.dbId || r.id)));
   }, [isCustomer, receivables, payables, party.id]);
 
   // A party is almost always single-currency (export = USD, local/mill = PKR),
