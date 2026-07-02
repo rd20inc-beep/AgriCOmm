@@ -961,17 +961,21 @@ async function postRunStatutoryJournal(trx, run, userId, lines, refNo) {
 // or 'partially_paid' (some still unpaid). Shared by full and partial pay.
 async function payLineBatch(run, lineRows, userId) {
   const net = lineRows.reduce((s, l) => s + (parseFloat(l.net_pay) || 0), 0);
-  let expense = null;
-  if (net > 0) {
-    expense = await expensesService.create({
-      expense_type: 'mill', category: 'salaries', amount: net, currency: 'PKR',
-      expense_date: run.pay_date,
-      description: `Salaries — payroll run ${run.period}`,
-      notes: `Payroll ${run.period}: ${lineRows.length} employee(s) · net ${net}`,
-      pay_now: true, bank_account_id: run.bank_account_id, payment_method: run.pay_method || 'cash',
-    }, userId);
-  }
   return db.transaction(async (trx) => {
+    // Create the salaries expense (cash-out + 6135 GL) INSIDE this transaction so
+    // it commits atomically with marking the lines paid + recovering advances. If
+    // any step below fails the expense rolls back too — otherwise a committed
+    // expense with unmarked lines would be re-paid (double cash-out) on retry.
+    let expense = null;
+    if (net > 0) {
+      expense = await expensesService.create({
+        expense_type: 'mill', category: 'salaries', amount: net, currency: 'PKR',
+        expense_date: run.pay_date,
+        description: `Salaries — payroll run ${run.period}`,
+        notes: `Payroll ${run.period}: ${lineRows.length} employee(s) · net ${net}`,
+        pay_now: true, bank_account_id: run.bank_account_id, payment_method: run.pay_method || 'cash',
+      }, userId, trx);
+    }
     for (const l of lineRows) {
       const ded = parseFloat(l.advance_deducted) || 0;
       if (ded > 0 && l.worker_id) await recoverAdvancesForWorker(trx, l.worker_id, ded, { period: run.period, runId: run.id, lineId: l.id });
@@ -1232,7 +1236,7 @@ async function computeFinalSettlement(workerId) {
     const empDays = Math.max(0, Math.round((Date.parse(left) - Date.parse(empStart)) / 86400000) + 1);
     finalSalary = Math.round(monthly * Math.min(1, empDays / daysInMonth));
   }
-  const balances = await computeLeaveBalances(workerId, new Date(`${left}T00:00:00Z`).getUTCFullYear());
+  const balances = await computeLeaveBalances(workerId, new Date(`${left}T00:00:00Z`).getUTCFullYear(), `${left}T00:00:00Z`);
   const leaveLines = balances.filter((b) => b.paid && b.remaining > 0).map((b) => ({ name: b.name, days: b.remaining, amount: Math.round(b.remaining * dailyRate) }));
   const leaveEncashment = leaveLines.reduce((s, l) => s + l.amount, 0);
   const completedYears = Math.floor(serviceYears);

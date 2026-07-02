@@ -324,17 +324,33 @@ function nextPrepareDate(dayOfMonth) {
 // available immediately) or ACCRUAL (accrues=true → quota × months-elapsed/12,
 // + carried-forward prior-year unused capped at max_carry). Unlimited types
 // (quota null) just report `taken`.
-async function computeLeaveBalances(workerId, year) {
+async function computeLeaveBalances(workerId, year, asOf = null) {
   const y = parseInt(year, 10) || new Date().getUTCFullYear();
   const types = await db('mill_leave_types').where('is_active', true).orderBy('sort_order').orderBy('id');
   const sumTaken = (yr) => db('mill_leave_requests').where('worker_id', workerId).where('status', 'approved')
     .whereRaw("TO_CHAR(from_date, 'YYYY') = ?", [String(yr)]).groupBy('leave_type_id')
     .select('leave_type_id', db.raw('COALESCE(SUM(days),0) as d'));
+  const worker = await db('mill_workers').where('id', workerId).first();
   const [takenThis, takenPrior] = await Promise.all([sumTaken(y), sumTaken(y - 1)]);
   const tMap = new Map(takenThis.map((t) => [t.leave_type_id, parseFloat(t.d) || 0]));
   const pMap = new Map(takenPrior.map((t) => [t.leave_type_id, parseFloat(t.d) || 0]));
-  const now = new Date();
-  const monthsElapsed = y < now.getUTCFullYear() ? 12 : (y > now.getUTCFullYear() ? 0 : now.getUTCMonth() + 1);
+  // Accrual is bounded by an AS-OF date (default today). A final settlement passes
+  // the worker's leaving date, so accrual stops when they actually left — not at
+  // the wall-clock month (which would over-accrue a mid-year or prior-year leaver).
+  const asOfDate = asOf ? new Date(asOf) : new Date();
+  const asOfY = asOfDate.getUTCFullYear();
+  // Last month of year `y` that accrual has reached (0 = none, 12 = full year).
+  const endMonth = y < asOfY ? 12 : (y > asOfY ? 0 : asOfDate.getUTCMonth() + 1);
+  // First month of `y` the worker was employed — clamps accrual for a joiner who
+  // started mid-year (previously they accrued as if employed the whole year).
+  let startMonth = 1;
+  if (worker?.joined_date) {
+    const jd = new Date(worker.joined_date);
+    const jy = jd.getUTCFullYear();
+    if (jy > y) startMonth = 13;            // joined after this year → no accrual
+    else if (jy === y) startMonth = jd.getUTCMonth() + 1;
+  }
+  const monthsElapsed = endMonth >= startMonth ? (endMonth - startMonth + 1) : 0;
   return types.map((t) => {
     const quota = t.annual_quota != null ? parseFloat(t.annual_quota) : null;
     const taken = tMap.get(t.id) || 0;
