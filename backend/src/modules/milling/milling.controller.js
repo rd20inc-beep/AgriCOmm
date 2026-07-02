@@ -1345,28 +1345,60 @@ const millingController = {
         return res.status(404).json({ success: false, message: 'Milling batch not found.' });
       }
 
-      // Upsert by batch_id + category
-      const existing = await db('milling_costs')
-        .where({ batch_id: id, category })
-        .first();
+      const cost = await db.transaction(async (trx) => {
+        // Upsert by batch_id + category
+        const existing = await trx('milling_costs')
+          .where({ batch_id: id, category })
+          .first();
+        const oldAmt = existing ? (parseFloat(existing.amount) || 0) : 0;
+        const newAmt = parseFloat(amount);
 
-      let cost;
-      if (existing) {
-        [cost] = await db('milling_costs')
-          .where({ id: existing.id })
-          .update({ amount: parseFloat(amount), notes: notes || null, updated_at: db.fn.now() })
-          .returning('*');
-      } else {
-        [cost] = await db('milling_costs')
-          .insert({
-            batch_id: id,
-            category,
-            amount: parseFloat(amount),
-            notes: notes || null,
-            created_by: req.user?.id || null,
-          })
-          .returning('*');
-      }
+        let row;
+        if (existing) {
+          [row] = await trx('milling_costs')
+            .where({ id: existing.id })
+            .update({ amount: newAmt, notes: notes || null, updated_at: trx.fn.now() })
+            .returning('*');
+        } else {
+          [row] = await trx('milling_costs')
+            .insert({ batch_id: id, category, amount: newAmt, notes: notes || null, created_by: req.user?.id || null })
+            .returning('*');
+        }
+
+        // If this batch already capitalized its costs into finished inventory at
+        // yield (a milling_completion journal was posted), keep the GL in step with
+        // the cost sheet by posting a SIGNED-DELTA journal for the change — same
+        // accounts as milling_completion (DR 1220 Finished / CR 1210 Raw), reversed
+        // for a reduction. Never reverse+repost. Pre-yield changes need no journal
+        // (recordYield posts the whole sum). Skipped silently if the chart isn't seeded.
+        const delta = newAmt - oldAmt;
+        if (Math.abs(delta) > 0.01) {
+          const posted = await trx('journal_entries')
+            .where({ ref_type: 'Milling Batch', ref_no: batch.batch_no, status: 'Posted' }).first();
+          if (posted) {
+            const fin = await trx('chart_of_accounts').where({ code: '1220' }).first();
+            const raw = await trx('chart_of_accounts').where({ code: '1210' }).first();
+            if (fin && raw) {
+              const absDelta = Math.abs(delta);
+              const drAcc = delta > 0 ? fin : raw;
+              const crAcc = delta > 0 ? raw : fin;
+              const label = `${batch.batch_no} ${category}`;
+              const journal = await accountingService.createJournal(trx, {
+                date: new Date().toISOString().slice(0, 10), entity: 'mill',
+                refType: 'Milling Batch', refNo: batch.batch_no,
+                description: `Cost adjustment Rs ${Math.round(absDelta).toLocaleString()} for ${label}${delta < 0 ? ' (reduced)' : ''}`,
+                currency: 'PKR', fxRate: 1, isAuto: true, userId: req.user?.id || null,
+                lines: [
+                  { account_id: drAcc.id, account: drAcc.name, debit: absDelta, credit: 0, narration: `DR ${drAcc.code} ${drAcc.name} — cost adj ${label}` },
+                  { account_id: crAcc.id, account: crAcc.name, debit: 0, credit: absDelta, narration: `CR ${crAcc.code} ${crAcc.name} — cost adj ${label}` },
+                ],
+              });
+              if (journal?.id) await accountingService.postJournal(trx, journal.id);
+            }
+          }
+        }
+        return row;
+      });
 
       return res.json({
         success: true,
@@ -1814,6 +1846,22 @@ const millingController = {
         }
         await trx('mill_stock_movements').where({ reference_type: 'batch', reference_id: batchId }).del();
         await trx('mill_consumption_logs').where({ batch_id: batchId }).del();
+
+        // Unlink the advanced-milling child rows that reference this batch with a
+        // NO-ACTION FK (they'd otherwise block the delete with an opaque 500, same
+        // class as the consumption RESTRICT above). All these batch_id columns are
+        // nullable — null them so the independent plan/downtime/utility/reprocess
+        // records survive but no longer point at the deleted batch.
+        for (const [table, col] of [
+          ['production_plans', 'batch_id'],
+          ['machine_downtime', 'batch_id'],
+          ['utility_consumption', 'batch_id'],
+          ['reprocessing_batches', 'original_batch_id'],
+        ]) {
+          if (await trx.schema.hasTable(table)) {
+            await trx(table).where(col, batchId).update({ [col]: null }).catch(() => {});
+          }
+        }
 
         try { await trx('milling_costs').where({ batch_id: batchId }).del(); } catch (_) { /* table may differ */ }
         await trx('milling_batches').where({ id: batchId }).del();
