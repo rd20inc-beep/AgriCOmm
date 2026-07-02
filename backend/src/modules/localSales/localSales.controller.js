@@ -31,10 +31,12 @@ async function resolveReceiptAccountId(trx, { paymentMode, bankAccountId, amount
 async function postReceiptToAccount(trx, { accountId, amount, paymentId, reference, notes, date, userId }) {
   if (!accountId || !(amount > 0)) return;
   await trx('bank_accounts').where({ id: accountId }).increment('current_balance', amount);
-  const lastBt = await trx('bank_transactions').where('transaction_no', 'like', 'BT-%').orderBy('id', 'desc').first('transaction_no');
-  const seq = lastBt ? (parseInt(String(lastBt.transaction_no).replace(/^BT-/, ''), 10) || 0) + 1 : 1;
+  // Collision-safe BT- number (MAX trailing-digit + 1) — the hand-rolled
+  // orderBy-id-desc + parse could regenerate an existing number under concurrent
+  // receipts and collide on the unique transaction_no.
+  const btNo = await nextDocNo(trx, { table: 'bank_transactions', column: 'transaction_no', prefix: 'BT-', pad: 4 });
   await trx('bank_transactions').insert({
-    transaction_no: `BT-${String(seq).padStart(4, '0')}`, bank_account_id: accountId,
+    transaction_no: btNo, bank_account_id: accountId,
     type: 'credit', amount, currency: 'PKR', status: 'posted',
     transaction_date: date || new Date(), reference: reference || null,
     notes: notes || null, source: 'local_sale', linked_payment_id: paymentId, created_by: userId || null,
@@ -438,6 +440,12 @@ module.exports = {
         if (!it.item_name || !it.quantity_input || !it.rate_input) {
           const e = new Error(`Item ${i + 1}: item_name, quantity and rate are required.`); e.status = 400; throw e;
         }
+        // Reject non-positive qty/rate: a negative slips past the truthy check above
+        // and (on the mill-item path) GREATEST(stock − (−x),0) would INCREASE stock
+        // while booking a negative sale.
+        if (parseFloat(it.quantity_input) <= 0 || parseFloat(it.rate_input) < 0) {
+          const e = new Error(`Item ${i + 1}: quantity must be positive and rate cannot be negative.`); e.status = 400; throw e;
+        }
         // A mill-store packaging line (e.g. empty katta) is COUNT-based: pieces ×
         // rate, deducting mill_stock — no weight/unit conversion.
         if (it.mill_item_id) {
@@ -608,7 +616,10 @@ module.exports = {
               recv_no: await nextDocNo(trx, { table: 'receivables', column: 'recv_no', prefix: 'RCV-LS-', pad: 0 }), entity: 'mill',
               customer_id: resolvedCustomerId, local_sale_id: sale.id, type: 'Local Sale',
               expected_amount: l.total, received_amount: l.paid, outstanding: dueAmt,
-              due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+              // Honor the user-supplied due date (the sale row already stores it);
+              // fall back to +30 days only when none was given, so the receivable's
+              // aging matches the sale instead of always assuming net-30.
+              due_date: due_date || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
               status: l.paid > 0 ? 'Partial' : 'Pending', currency: 'PKR', aging: 0,
               notes: `Local sale ${saleNo} — ${buyer_name || 'walk-in'} — ${l.item_name}`,
             });
@@ -829,11 +840,14 @@ module.exports = {
       const today = new Date().toISOString().split('T')[0];
       const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
 
+      // Mill-item (packaging) lines store a piece COUNT in quantity_kg, not kilos —
+      // exclude them from the KG totals so a katta sale doesn't inflate "kg sold".
+      const kgSum = "COALESCE(SUM(CASE WHEN mill_item_id IS NULL THEN quantity_kg ELSE 0 END),0) as qty_kg";
       const [todayStats, monthStats, totalStats, profitStats] = await Promise.all([
         db('local_sales').where('sale_date', today).where('status', 'Completed')
-          .select(db.raw('COUNT(*) as count, COALESCE(SUM(total_amount),0) as total, COALESCE(SUM(quantity_kg),0) as qty_kg')).first(),
+          .select(db.raw(`COUNT(*) as count, COALESCE(SUM(total_amount),0) as total, ${kgSum}`)).first(),
         db('local_sales').where('sale_date', '>=', monthStart).where('status', 'Completed')
-          .select(db.raw('COUNT(*) as count, COALESCE(SUM(total_amount),0) as total, COALESCE(SUM(quantity_kg),0) as qty_kg')).first(),
+          .select(db.raw(`COUNT(*) as count, COALESCE(SUM(total_amount),0) as total, ${kgSum}`)).first(),
         db('local_sales').where('status', 'Completed')
           .select(db.raw('COUNT(*) as count, COALESCE(SUM(total_amount),0) as total, COALESCE(SUM(due_amount),0) as due')).first(),
         db('local_sales').where('status', 'Completed')
