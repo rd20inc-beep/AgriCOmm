@@ -81,7 +81,7 @@ async function generateExpenseNo(trx) {
 }
 
 const expensesService = {
-  async create(data, userId) {
+  async create(data, userId, existingTrx = null) {
     const {
       expense_type, category, subcategory, amount, currency, fx_rate,
       supplier_id, vendor_name, expense_date, due_date, invoice_reference,
@@ -97,7 +97,10 @@ const expensesService = {
     const rate = Number(fx_rate) || (currency === 'PKR' ? 1 : 280);
     const amountPkr = currency === 'PKR' ? amountNum : Number((amountNum * rate).toFixed(2));
 
-    return db.transaction(async (trx) => {
+    // Run inside a caller-supplied transaction when given, so the expense +
+    // cash-out + GL commit atomically with the caller's own work (e.g. payroll
+    // pay marking lines paid). Otherwise open our own.
+    const run = async (trx) => {
       const expenseNo = await generateExpenseNo(trx);
 
       // For a cash payment with no explicit account, draw from the paying entity's
@@ -302,7 +305,9 @@ const expensesService = {
       }
 
       return expense;
-    });
+    };
+
+    return existingTrx ? run(existingTrx) : db.transaction(run);
   },
 
   async list({ expense_type, category, payment_status, from_date, to_date, limit = 50, offset = 0 } = {}) {
