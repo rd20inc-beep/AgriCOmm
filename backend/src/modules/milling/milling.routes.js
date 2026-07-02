@@ -888,6 +888,12 @@ router.post('/workers/:id/salary-revision', authorize('payroll', 'edit'), async 
     if (pay.pay_type === 'monthly' && !(pay.monthly_salary > 0)) return res.status(400).json({ success: false, message: 'monthly_salary required for salaried workers.' });
     if (pay.pay_type === 'daily' && !(pay.daily_wage > 0)) return res.status(400).json({ success: false, message: 'daily_wage required for daily-wage workers.' });
     if (!payChanged(worker, pay)) return res.status(400).json({ success: false, message: 'No pay change — the new figure matches the current salary.' });
+    // The new salary takes effect IMMEDIATELY (there's no scheduler to apply a
+    // future-dated raise later), so reject a future effective_date rather than
+    // record one that would never actually take effect (M7).
+    if (req.body.effective_date && String(req.body.effective_date).slice(0, 10) > new Date().toISOString().slice(0, 10)) {
+      return res.status(400).json({ success: false, message: 'Effective date cannot be in the future — the new salary takes effect immediately. Use today or an earlier date.' });
+    }
     const otRate = req.body.ot_rate_per_hour !== undefined ? (req.body.ot_rate_per_hour !== '' ? parseFloat(req.body.ot_rate_per_hour) : null) : worker.ot_rate_per_hour;
     const updated = await db.transaction(async (trx) => {
       await recordSalaryRevision(trx, worker, pay, { effective_date: req.body.effective_date, reason: req.body.reason, ot_rate: otRate, userId: req.user?.id });
@@ -960,8 +966,17 @@ async function postRunStatutoryJournal(trx, run, userId, lines, refNo) {
 // journal, mark those lines paid, and roll the run to 'paid' (all lines paid)
 // or 'partially_paid' (some still unpaid). Shared by full and partial pay.
 async function payLineBatch(run, lineRows, userId) {
-  const net = lineRows.reduce((s, l) => s + (parseFloat(l.net_pay) || 0), 0);
   return db.transaction(async (trx) => {
+    // Serialize against a concurrent pay/accrue on the same run (M1): lock the run
+    // row, then re-assert it's still payable and the target lines are still unpaid
+    // — otherwise two racing /pay calls could both post 6135 (double cash-out).
+    const locked = await trx('mill_payroll_runs').where('id', run.id).forUpdate().first();
+    if (!locked || !['approved', 'partially_paid'].includes(locked.status)) {
+      const e = new Error(`This run is no longer payable (status ${locked?.status || 'missing'}).`); e.statusCode = 409; throw e;
+    }
+    const rows = await trx('mill_payroll_lines').whereIn('id', lineRows.map((l) => l.id)).whereNull('paid_at');
+    if (!rows.length) { const e = new Error('These lines were already paid.'); e.statusCode = 409; throw e; }
+    const net = rows.reduce((s, l) => s + (parseFloat(l.net_pay) || 0), 0);
     // Create the salaries expense (cash-out + 6135 GL) INSIDE this transaction so
     // it commits atomically with marking the lines paid + recovering advances. If
     // any step below fails the expense rolls back too — otherwise a committed
@@ -970,28 +985,29 @@ async function payLineBatch(run, lineRows, userId) {
     if (net > 0) {
       expense = await expensesService.create({
         expense_type: 'mill', category: 'salaries', amount: net, currency: 'PKR',
-        expense_date: run.pay_date,
-        description: `Salaries — payroll run ${run.period}`,
-        notes: `Payroll ${run.period}: ${lineRows.length} employee(s) · net ${net}`,
-        pay_now: true, bank_account_id: run.bank_account_id, payment_method: run.pay_method || 'cash',
+        expense_date: locked.pay_date,
+        description: `Salaries — payroll run ${locked.period}`,
+        notes: `Payroll ${locked.period}: ${rows.length} employee(s) · net ${net}`,
+        pay_now: true, bank_account_id: locked.bank_account_id, payment_method: locked.pay_method || 'cash',
       }, userId, trx);
     }
-    for (const l of lineRows) {
+    for (const l of rows) {
       const ded = parseFloat(l.advance_deducted) || 0;
-      if (ded > 0 && l.worker_id) await recoverAdvancesForWorker(trx, l.worker_id, ded, { period: run.period, runId: run.id, lineId: l.id });
-      if (l.skip_reason && l.worker_id) await markPeriodSkipped(trx, l.worker_id, run.period, l.skip_reason);
+      if (ded > 0 && l.worker_id) await recoverAdvancesForWorker(trx, l.worker_id, ded, { period: locked.period, runId: locked.id, lineId: l.id });
+      if (l.skip_reason && l.worker_id) await markPeriodSkipped(trx, l.worker_id, locked.period, l.skip_reason);
       await trx('mill_payroll_lines').where('id', l.id).update({ paid_at: trx.fn.now(), paid_by: userId || null, expense_id: expense?.id || null, updated_at: trx.fn.now() });
     }
     // Statutory journal scoped to THIS batch (ref tied to the expense so reversal
-    // is precise even when a run pays in several batches). Best-effort.
-    try { await postRunStatutoryJournal(trx, run, userId, lineRows, expense ? `STAT-EXP-${expense.id}` : `STAT-RUN-${run.id}`); } catch (e) { console.warn('Statutory journal (pay batch) failed:', e.message); }
-    const remaining = await trx('mill_payroll_lines').where('run_id', run.id).whereNull('paid_at').count('id as c').first();
+    // is precise even when a run pays in several batches). NOT swallowed (M2): a
+    // posting failure must roll the whole batch back, not silently drop the leg.
+    await postRunStatutoryJournal(trx, locked, userId, rows, expense ? `STAT-EXP-${expense.id}` : `STAT-RUN-${locked.id}`);
+    const remaining = await trx('mill_payroll_lines').where('run_id', locked.id).whereNull('paid_at').count('id as c').first();
     const allPaid = (parseInt(remaining?.c, 10) || 0) === 0;
     const patch = allPaid
       ? { status: 'paid', paid_by: userId || null, paid_at: trx.fn.now(), updated_at: trx.fn.now() }
       : { status: 'partially_paid', updated_at: trx.fn.now() };
-    if (!run.expense_id && expense?.id) patch.expense_id = expense.id; // keep first expense on the run row
-    const [r] = await trx('mill_payroll_runs').where('id', run.id).update(patch).returning('*');
+    if (!locked.expense_id && expense?.id) patch.expense_id = expense.id; // keep first expense on the run row
+    const [r] = await trx('mill_payroll_runs').where('id', locked.id).update(patch).returning('*');
     return r;
   });
 }
@@ -1086,7 +1102,7 @@ const inclusiveDays = (from, to) => {
 // Reflect approved leave on the attendance grid: upsert status='leave' for each
 // date in the range (so it shows + prevents a present/leave double-pay), or
 // remove those 'leave' rows when an approval is undone. Capped to a sane range.
-async function markLeaveAttendance(workerId, fromDate, toDate, { remove = false } = {}) {
+async function markLeaveAttendance(workerId, fromDate, toDate, { remove = false, excludeRequestId = null } = {}) {
   // node-pg returns date columns as Date objects — String(Date) is not YYYY-MM-DD.
   const toYmd = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10));
   const from = toYmd(fromDate); const to = toYmd(toDate);
@@ -1095,7 +1111,20 @@ async function markLeaveAttendance(workerId, fromDate, toDate, { remove = false 
   const dates = [];
   for (let d = a; d <= b; d += 86400000) dates.push(new Date(d).toISOString().slice(0, 10));
   if (remove) {
-    await db('mill_attendance').where('worker_id', workerId).whereIn('date', dates).where('status', 'leave').del();
+    // Only clear leave-days NOT still covered by ANOTHER approved leave request for
+    // this worker — otherwise rejecting/deleting one leave wipes an overlapping
+    // approved one's attendance (M6).
+    const others = await db('mill_leave_requests').where('worker_id', workerId).where('status', 'approved')
+      .modify((q) => { if (excludeRequestId) q.whereNot('id', excludeRequestId); })
+      .select('from_date', 'to_date');
+    const covered = new Set();
+    for (const o of others) {
+      const oa = Date.parse(toYmd(o.from_date)); const ob = Date.parse(toYmd(o.to_date));
+      if (Number.isNaN(oa) || Number.isNaN(ob)) continue;
+      for (let d = oa; d <= ob; d += 86400000) covered.add(new Date(d).toISOString().slice(0, 10));
+    }
+    const toClear = dates.filter((d) => !covered.has(d));
+    if (toClear.length) await db('mill_attendance').where('worker_id', workerId).whereIn('date', toClear).where('status', 'leave').del();
     return;
   }
   for (const date of dates) {
@@ -1180,7 +1209,7 @@ router.post('/payroll/leave-requests', authorize('payroll', 'create'), async (re
     if (days <= 0) return res.status(400).json({ success: false, message: 'Invalid date range.' });
     const [row] = await db('mill_leave_requests').insert({
       worker_id: b.worker_id, leave_type_id: b.leave_type_id || null, from_date: b.from_date, to_date: b.to_date,
-      days, paid: type ? !!type.paid : true, reason: b.reason || null,
+      days, paid: type ? !!type.paid : false, reason: b.reason || null,
       status: b.status === 'approved' ? 'approved' : 'pending', approved_by: b.status === 'approved' ? (req.user?.id || null) : null, approved_at: b.status === 'approved' ? db.fn.now() : null,
     }).returning('*');
     if (row.status === 'approved') await markLeaveAttendance(row.worker_id, row.from_date, row.to_date);
@@ -1201,7 +1230,7 @@ router.post('/payroll/leave-requests/:id/reject', authorize('payroll', 'approve'
     const r = await db('mill_leave_requests').where('id', req.params.id).first();
     if (!r) return res.status(404).json({ success: false, message: 'Leave request not found.' });
     const [row] = await db('mill_leave_requests').where('id', r.id).update({ status: 'rejected', approved_by: req.user?.id || null, approved_at: db.fn.now(), updated_at: db.fn.now() }).returning('*');
-    if (r.status === 'approved') await markLeaveAttendance(r.worker_id, r.from_date, r.to_date, { remove: true });
+    if (r.status === 'approved') await markLeaveAttendance(r.worker_id, r.from_date, r.to_date, { remove: true, excludeRequestId: r.id });
     return res.json({ success: true, data: row });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
@@ -1209,7 +1238,7 @@ router.delete('/payroll/leave-requests/:id', authorize('payroll', 'delete'), asy
   try {
     const r = await db('mill_leave_requests').where('id', req.params.id).first();
     if (!r) return res.status(404).json({ success: false, message: 'Leave request not found.' });
-    if (r.status === 'approved') await markLeaveAttendance(r.worker_id, r.from_date, r.to_date, { remove: true });
+    if (r.status === 'approved') await markLeaveAttendance(r.worker_id, r.from_date, r.to_date, { remove: true, excludeRequestId: r.id });
     await db('mill_leave_requests').where('id', r.id).del();
     return res.json({ success: true, data: { deleted: r.id } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
@@ -1697,10 +1726,20 @@ router.post('/payroll/statutory-remittances', authorize('payroll', 'pay'),
     const remitDate = b.remit_date || new Date().toISOString().slice(0, 10);
 
     const row = await db.transaction(async (trx) => {
+      // Don't let a remittance exceed the outstanding liability (M4) — that would
+      // drive 2050/2055 net-debit (the authority "owing" us). Compute Σcredit −
+      // Σdebit over Posted entries for this account inside the trx.
+      const bal = await trx('journal_lines as jl').join('journal_entries as je', 'jl.journal_id', 'je.id')
+        .where('jl.account_id', acc.id).where('je.status', 'Posted')
+        .select(db.raw('COALESCE(SUM(jl.credit),0)::numeric as cr'), db.raw('COALESCE(SUM(jl.debit),0)::numeric as dr')).first();
+      const outstanding = Math.round(((parseFloat(bal.cr) || 0) - (parseFloat(bal.dr) || 0)) * 100) / 100;
+      if (amount - outstanding > 0.01) {
+        const e = new Error(`Amount ${amount} exceeds the outstanding ${acc.name} liability of ${outstanding}.`); e.statusCode = 400; throw e;
+      }
       const acctId = method === 'bank' ? (b.bank_account_id || null) : await resolveCashAccountId(trx, { entity: 'mill' });
-      const last = await trx('mill_statutory_remittances').orderBy('id', 'desc').first();
-      const seq = (last ? (parseInt(String(last.remittance_no).replace(/^STR-/, ''), 10) || 0) : 0) + 1;
-      const remitNo = `STR-${String(seq).padStart(4, '0')}`;
+      // Collision-safe STR number (M3): MAX trailing-digit + 1, not MAX(id)+1 —
+      // the latter regenerates an existing number after a delete (see nextDocNo).
+      const remitNo = await nextDocNo(trx, { table: 'mill_statutory_remittances', column: 'remittance_no', prefix: 'STR-', pad: 4 });
       const [r] = await trx('mill_statutory_remittances').insert({
         remittance_no: remitNo, liability_account_code: code, account_id: acc.id, amount,
         pay_method: method, bank_account_id: acctId, remit_date: remitDate,
@@ -1738,7 +1777,7 @@ router.post('/payroll/statutory-remittances', authorize('payroll', 'pay'),
       return { ...r, journal_id: journal?.id || null };
     });
     return res.status(201).json({ success: true, data: row });
-  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+  } catch (err) { return res.status(err.statusCode || 500).json({ success: false, message: err.message }); }
 });
 
 // Reverse a remittance — undo the GL, restore the bank balance, drop the bank
@@ -2301,7 +2340,7 @@ router.post('/payroll/runs/:id/pay', authorize('payroll', 'pay'),
 
     const updated = await payLineBatch(run, target, req.user?.id);
     return res.json({ success: true, data: { run: updated, paidCount: target.length } });
-  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+  } catch (err) { return res.status(err.statusCode || 500).json({ success: false, message: err.message }); }
 });
 
 // ACCRUE an approved run (alternative to immediate Pay) — books the salary
@@ -2312,39 +2351,45 @@ router.post('/payroll/runs/:id/accrue', authorize('payroll', 'approve'),
   auditAction('accrue', 'mill_payroll_run', (req) => req.params.id),
   async (req, res) => {
   try {
-    const run = await db('mill_payroll_runs').where('id', req.params.id).first();
-    if (!run) return res.status(404).json({ success: false, message: 'Payroll run not found.' });
-    if (run.status !== 'approved') return res.status(409).json({ success: false, message: `Only an Approved run can be accrued (this run is ${run.status}).` });
-    const lines = await db('mill_payroll_lines').where('run_id', run.id);
-    const netTotal = parseFloat(run.net_total) || 0;
+    const pre = await db('mill_payroll_runs').where('id', req.params.id).first();
+    if (!pre) return res.status(404).json({ success: false, message: 'Payroll run not found.' });
+    if (pre.status !== 'approved') return res.status(409).json({ success: false, message: `Only an Approved run can be accrued (this run is ${pre.status}).` });
 
-    // 1) Book the salaries expense as a PENDING payable (pay_now:false → no cash).
-    let expense = null;
-    if (netTotal > 0) {
-      expense = await expensesService.create({
-        expense_type: 'mill', category: 'salaries', amount: netTotal, currency: 'PKR',
-        expense_date: run.pay_date,
-        description: `Salaries (accrued) — payroll run ${run.period}`,
-        notes: run.notes || `Payroll ${run.period}: ${run.employee_count} employee(s) · net ${netTotal} (accrued)`,
-        pay_now: false,
-      }, req.user?.id);
-    }
-
-    // 2) Recover advances + mark the run accrued (advance recovery is non-cash,
-    //    so it belongs with recognising the net liability).
+    // Do everything in ONE locked transaction so the accrued expense + advance
+    // recovery + statutory journal + run flip commit atomically, and a concurrent
+    // accrue/pay can't double-book (M1). The expense is created inside the trx (so
+    // a later failure rolls it back too), and statutory is not swallowed (M2).
     const updated = await db.transaction(async (trx) => {
+      const run = await trx('mill_payroll_runs').where('id', req.params.id).forUpdate().first();
+      if (!run || run.status !== 'approved') {
+        const e = new Error(`Only an Approved run can be accrued (status ${run?.status || 'missing'}).`); e.statusCode = 409; throw e;
+      }
+      const lines = await trx('mill_payroll_lines').where('run_id', run.id);
+      const netTotal = parseFloat(run.net_total) || 0;
+
+      let expense = null;
+      if (netTotal > 0) {
+        expense = await expensesService.create({
+          expense_type: 'mill', category: 'salaries', amount: netTotal, currency: 'PKR',
+          expense_date: run.pay_date,
+          description: `Salaries (accrued) — payroll run ${run.period}`,
+          notes: run.notes || `Payroll ${run.period}: ${run.employee_count} employee(s) · net ${netTotal} (accrued)`,
+          pay_now: false,
+        }, req.user?.id, trx);
+      }
+
       for (const l of lines) {
         const ded = parseFloat(l.advance_deducted) || 0;
         if (ded > 0 && l.worker_id) await recoverAdvancesForWorker(trx, l.worker_id, ded, { period: run.period, runId: run.id, lineId: l.id });
         if (l.skip_reason && l.worker_id) await markPeriodSkipped(trx, l.worker_id, run.period, l.skip_reason);
       }
-      try { await postRunStatutoryJournal(trx, run, req.user?.id); } catch (e) { console.warn('Statutory journal (accrue) failed:', e.message); }
+      await postRunStatutoryJournal(trx, run, req.user?.id, lines, expense ? `STAT-EXP-${expense.id}` : `STAT-RUN-${run.id}`);
       const [r] = await trx('mill_payroll_runs').where('id', run.id)
         .update({ status: 'accrued', expense_id: expense?.id || null, accrued_by: req.user?.id || null, accrued_at: trx.fn.now(), updated_at: trx.fn.now() }).returning('*');
       return r;
     });
     return res.json({ success: true, data: { run: updated } });
-  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+  } catch (err) { return res.status(err.statusCode || 500).json({ success: false, message: err.message }); }
 });
 
 // SETTLE an accrued run — NOW the cash moves: pay the pending salaries payable
@@ -2427,7 +2472,12 @@ router.delete('/payroll/runs/:id', authorize('payroll', 'delete'), async (req, r
       } else {
         const lines = await trx('mill_payroll_lines').where('run_id', run.id);
         for (const l of lines) {
-          if (parseFloat(l.advance_deducted) > 0 && l.worker_id) {
+          // Only un-recover lines whose advance was actually recovered: a paid line
+          // (recovery happens at pay), or any line on an accrued/settled run
+          // (recovery happens at accrue). An unpaid line on a partially-paid run
+          // never recovered, so don't reverse it (L1).
+          const wasRecovered = l.paid_at || ['accrued', 'settled', 'posted'].includes(run.status);
+          if (parseFloat(l.advance_deducted) > 0 && l.worker_id && wasRecovered) {
             await unrecoverAdvancesForWorker(trx, l.worker_id, l.advance_deducted);
           }
         }
