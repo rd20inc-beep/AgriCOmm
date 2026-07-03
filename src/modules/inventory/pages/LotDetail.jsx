@@ -1238,6 +1238,7 @@ export default function LotDetail() {
       <QualityEditModal
         isOpen={showQualityModal}
         lot={lot}
+        canEditRiceType={lot.type === 'raw' && !millingStarted}
         addToast={addToast}
         onClose={() => setShowQualityModal(false)}
         onSuccess={() => refetch()}

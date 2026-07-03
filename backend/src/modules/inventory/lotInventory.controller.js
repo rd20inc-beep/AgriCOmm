@@ -1918,6 +1918,27 @@ module.exports = {
 
       const b = req.body;
       const update = {};
+
+      // Rice type (product) change — a Mill Operator/Manager can correct a raw
+      // lot's rice type BEFORE it starts milling (they may have received it under
+      // the wrong product). Only on a raw lot, only pre-milling (guards ALL roles,
+      // not just the operator that assertLotEditableByOperator already covers), and
+      // sync item_name to the new product so the displayed rice type matches.
+      if ('product_id' in b && b.product_id != null && String(b.product_id) !== String(lot.product_id ?? '')) {
+        if (lot.type !== 'raw') {
+          return res.status(400).json({ success: false, message: 'Rice type can only be changed on a raw purchase lot.' });
+        }
+        if (await lotMillingStarted(lot, db)) {
+          return res.status(409).json({ success: false, message: 'Rice type cannot be changed after milling has started.' });
+        }
+        const prod = await db('products').where({ id: b.product_id }).first();
+        if (!prod) {
+          return res.status(400).json({ success: false, message: 'Selected rice type not found.' });
+        }
+        update.product_id = prod.id;
+        update.item_name = prod.name;
+      }
+
       for (const f of ['variety', 'grade', 'sortex_status', 'quality_notes', 'bag_quality']) {
         if (f in b) update[f] = (b[f] === '' || b[f] == null) ? null : String(b[f]);
       }
