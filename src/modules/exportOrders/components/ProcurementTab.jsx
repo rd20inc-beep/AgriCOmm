@@ -21,7 +21,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
   // Calculate totals — only count explicitly allocated/reserved quantities
   const totalAllocatedMT = finishedLots.reduce((sum, lot) => {
     // Use allocated_qty_kg from transaction, or reserved_qty for reservation-only lots
-    const kg = parseFloat(lot.allocated_qty_kg) || (lot.source === 'reservation' ? (parseFloat(lot.reserved_qty) || 0) * 1000 : 0);
+    const kg = parseFloat(lot.allocated_qty_kg) || (lot.source === 'reservation' ? (parseFloat(lot.reserved_qty) || 0) : 0);
     return sum + kg / 1000;
   }, 0);
   const fulfillmentPct = order.qtyMT > 0 ? Math.min(100, (totalAllocatedMT / order.qtyMT) * 100) : 0;
@@ -506,7 +506,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
                       </Link>
                     </td>
                     <td className="py-2 text-gray-700">{lot.product_name || lot.item_name}</td>
-                    <td className="py-2 text-right text-gray-900">{Math.round((parseFloat(lot.qty) || 0) * 1000).toLocaleString()}</td>
+                    <td className="py-2 text-right text-gray-900">{Math.round(parseFloat(lot.qty) || 0).toLocaleString()}</td>
                     <td className="py-2 text-gray-700">{lot.warehouse_name || '\u2014'}</td>
                     <td className="py-2 text-center"><StatusBadge status={lot.status} /></td>
                   </tr>
