@@ -2679,6 +2679,38 @@ const inventoryService = {
       if (size <= 0) continue;
       bySize.set(size, (bySize.get(size) || 0) + bags);
     }
+
+    // Fallback: batches built from pre-existing raw lots — blends, or lots
+    // entered via New Purchase Lot rather than the vehicle-arrival flow — have
+    // no batch-scoped truck records, so the loop above finds nothing. Derive the
+    // freed katta from each source lot's own bag count, proportioned to how much
+    // of that lot this batch actually consumed (a blend may take only part of a
+    // lot; the rest stays bagged in stock).
+    if (bySize.size === 0) {
+      const srcLots = await trx('batch_source_lots as bsl')
+        .leftJoin('inventory_lots as il', 'il.id', 'bsl.lot_id')
+        .where('bsl.batch_id', batchId)
+        .andWhere('il.type', 'raw')
+        .select('bsl.qty_kg', 'il.total_bags', 'il.bag_size_kg', 'il.received_net_weight_kg');
+      for (const r of srcLots) {
+        const totalBags = Math.round(num(r.total_bags));
+        if (totalBags <= 0) continue;
+        // Bag size: the explicit column, else received intake weight ÷ bag count.
+        const received = num(r.received_net_weight_kg);
+        let size = Math.round(num(r.bag_size_kg));
+        if (size <= 0) size = received > 0 ? Math.round(received / totalBags) : 0;
+        if (size <= 0) continue;
+        // Bags freed = bags for the KG consumed into this batch, capped at the
+        // lot's total. Fully-consumed lots free all their bags.
+        const consumed = num(r.qty_kg);
+        const bags = consumed > 0
+          ? Math.min(totalBags, Math.round(consumed / size))
+          : totalBags;
+        if (bags <= 0) continue;
+        bySize.set(size, (bySize.get(size) || 0) + bags);
+      }
+    }
+
     let freed = 0; bySize.forEach((b) => { freed += b; });
     if (freed <= 0) return null; // no katta intake
 
