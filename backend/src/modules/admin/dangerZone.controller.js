@@ -39,6 +39,9 @@ const KEEP_TABLES = new Set([
   // core masters
   'products', 'suppliers', 'customers', 'warehouses', 'bag_types', 'mills', 'mill_workers',
   'mill_items', 'mill_consumption_ratios', 'product_categories', 'expense_vendors',
+  // payroll config (leave types + FBR/EOBI statutory rules) — config, not per-run
+  // data; seeded once by migration so a reset would leave them empty permanently.
+  'mill_leave_types', 'mill_statutory_deductions',
   // finance config / reference
   'chart_of_accounts', 'posting_rules', 'accounting_periods', 'fx_rates',
   'commodity_rate_master', 'bank_accounts', 'kpi_benchmarks', 'recovery_benchmarks',
@@ -61,6 +64,7 @@ async function lotImpactCounts(q, lotId) {
     stock_count_items: 'lot_id',
     local_sales: 'lot_id',
     milling_vehicle_arrivals: 'lot_id',
+    container_lots: 'lot_id',
   };
   const counts = {};
   for (const [t, col] of Object.entries(tables)) {
@@ -79,6 +83,7 @@ const dangerZone = {
       const blockers = [];
       if (counts.local_sales > 0) blockers.push(`${counts.local_sales} local sale(s) reference this lot`);
       if (counts.batch_source_lots > 0) blockers.push(`fed ${counts.batch_source_lots} milling batch(es)`);
+      if (counts.container_lots > 0) blockers.push(`packed into ${counts.container_lots} shipment container(s)`);
       if (num(lot.reserved_qty) > 0) blockers.push(`${lot.reserved_qty} ${lot.unit || 'MT'} reserved for export`);
       return res.json({ success: true, data: { lot, counts, blockers } });
     } catch (err) {
@@ -98,6 +103,7 @@ const dangerZone = {
         const blockers = [];
         if (counts.local_sales > 0) blockers.push(`${counts.local_sales} local sale(s) reference this lot`);
         if (counts.batch_source_lots > 0) blockers.push(`fed ${counts.batch_source_lots} milling batch(es)`);
+        if (counts.container_lots > 0) blockers.push(`packed into ${counts.container_lots} shipment container(s)`);
         if (num(lot.reserved_qty) > 0) blockers.push(`${lot.reserved_qty} reserved for export`);
         if (blockers.length && !force) {
           const e = new Error(`Lot ${lot.lot_no} is in use (${blockers.join('; ')}). Re-run with force to delete anyway.`);
@@ -110,6 +116,9 @@ const dangerZone = {
         await trx('batch_source_lots').where('lot_id', lot.id).del();
         await trx('lot_source_mapping').where('parent_lot_id', lot.id).orWhere('child_lot_id', lot.id).del();
         await trx('inventory_movements').where('lot_id', lot.id).del();
+        // container_lots.lot_id is a NO-ACTION FK (a lot packed into a shipment
+        // container) — clean it, else the lot delete 500s with an opaque 23503.
+        await delIfExists(trx, 'container_lots', (q) => q.where('lot_id', lot.id));
         // lot_transactions + inventory_reservations cascade on the lot delete.
         // local_sales / milling_vehicle_arrivals / historical_cost_repair_log SET NULL.
         await trx('inventory_lots').where('id', lot.id).del();
@@ -160,8 +169,9 @@ const dangerZone = {
       });
       return res.json({ success: true, message: result.message, data: result });
     } catch (err) {
-      if (err.status === 404) return res.status(404).json({ success: false, message: err.message });
-      if (err.status === 400) return res.status(400).json({ success: false, message: err.message });
+      // Surface any status-carrying error (404 not-found, 400 bad-type, 409
+      // still-referenced) as itself rather than collapsing it to a 500.
+      if ([400, 404, 409].includes(err.status)) return res.status(err.status).json({ success: false, message: err.message });
       console.error('hardDeleteTransaction error:', err);
       return res.status(500).json({ success: false, message: err.message });
     }
@@ -412,12 +422,26 @@ async function reversePaymentCash(trx, p) {
     .del();
 }
 
+// Draw a local sale's paid/due state back by `amt` when a receipt against it is
+// deleted (the inverse of recordPayment/create's forward mirror).
+async function unmirrorLocalSale(trx, saleId, amt) {
+  const sale = await trx('local_sales').where('id', saleId).first();
+  if (!sale) return;
+  const paid = Math.max(0, num(sale.paid_amount) - amt);
+  const due = Math.max(0, num(sale.total_amount) - paid);
+  const status = paid > 0.01 ? 'Partial' : (sale.payment_mode === 'credit' ? 'Credit' : 'Unpaid');
+  await trx('local_sales').where('id', sale.id).update({ paid_amount: paid, due_amount: due, payment_status: status, updated_at: trx.fn.now() });
+}
+
 async function deletePayment(trx, req, id) {
   const p = await trx('payments').where('id', id).first();
   if (!p) { const e = new Error('Payment not found.'); e.status = 404; throw e; }
   const amt = num(p.amount);
+  // An uncleared post-dated cheque never settled the payable/receivable or moved
+  // the source row — so only un-apply the settlement when the payment cleared (M2).
+  const settled = p.cleared !== false;
 
-  if (p.linked_payable_id) {
+  if (settled && p.linked_payable_id) {
     const pay = await trx('payables').where('id', p.linked_payable_id).first();
     if (pay) {
       const paid = Math.max(0, num(pay.paid_amount) - amt);
@@ -426,9 +450,23 @@ async function deletePayment(trx, req, id) {
         paid_amount: paid, outstanding,
         status: paid <= 0 ? 'Pending' : 'Partial', updated_at: trx.fn.now(),
       });
+      // Un-mirror the source row's paid state (recordPayment mirrors it forward,
+      // so a deleted payment must un-mirror it or the source reads paid while the
+      // payable reads unpaid — the two ledgers drift) (M1).
+      for (const st of ['business_expenses', 'mill_purchases']) {
+        if (pay.source_table === st && pay.source_id) {
+          const src = await trx(st).where('id', pay.source_id).first();
+          if (src) {
+            const sp = Math.max(0, num(src.paid_amount) - amt);
+            await trx(st).where('id', src.id).update({
+              paid_amount: sp, payment_status: sp <= 0 ? 'Pending' : 'Partial', updated_at: trx.fn.now(),
+            });
+          }
+        }
+      }
     }
   }
-  if (p.linked_receivable_id) {
+  if (settled && p.linked_receivable_id) {
     const rec = await trx('receivables').where('id', p.linked_receivable_id).first();
     if (rec) {
       const received = Math.max(0, num(rec.received_amount) - amt);
@@ -437,8 +475,12 @@ async function deletePayment(trx, req, id) {
         received_amount: received, outstanding,
         status: received <= 0 ? 'Pending' : 'Partial', updated_at: trx.fn.now(),
       });
+      // Un-mirror the parent local sale (M1) — recordPayment draws it down forward.
+      if (rec.local_sale_id) await unmirrorLocalSale(trx, rec.local_sale_id, amt);
     }
   }
+  // A receipt linked ONLY to a local sale (no receivable) — draw the sale back too.
+  if (settled && p.local_sale_id && !p.linked_receivable_id) await unmirrorLocalSale(trx, p.local_sale_id, amt);
   await reversePaymentCash(trx, p); // restore bank balance + drop the bank trail
   await trx('journal_entries').where('ref_no', p.payment_no).del();
   await trx('payments').where('id', id).del();
@@ -468,10 +510,14 @@ async function deleteLotTransaction(trx, req, id) {
 async function deleteMillPurchase(trx, req, id) {
   const mp = await trx('mill_purchases').where('id', id).first();
   if (!mp) { const e = new Error('Mill purchase not found.'); e.status = 404; throw e; }
-  // Reverse stock added by this purchase.
+  // Reverse stock added by this purchase — keyed on (item_id, warehouse_id), the
+  // same bucket createPurchase upserted into (a plain item_id match could hit the
+  // wrong warehouse row).
   const items = await trx('mill_purchase_items').where('purchase_id', id);
   for (const it of items) {
-    const stock = await trx('mill_stock').where({ item_id: it.item_id }).first();
+    const stockQ = trx('mill_stock').where('item_id', it.item_id);
+    if (it.warehouse_id == null) stockQ.whereNull('warehouse_id'); else stockQ.where('warehouse_id', it.warehouse_id);
+    const stock = await stockQ.first();
     if (stock) {
       await trx('mill_stock').where('id', stock.id).update({
         quantity_available: Math.max(0, num(stock.quantity_available) - num(it.quantity)), updated_at: trx.fn.now(),
@@ -655,7 +701,20 @@ async function deleteMaster(trx, req, type, id) {
       e.status = 409; throw e;
     }
   }
-  await trx(table).where('id', id).del();
+  // The enumerated guard above covers the common references with a friendly count,
+  // but many other NO-ACTION FKs point at these masters. Catch a Postgres FK
+  // violation (23503) from the delete and surface it as the same 409 instead of an
+  // opaque 500, naming the referencing table so the user knows what still points here.
+  try {
+    await trx(table).where('id', id).del();
+  } catch (err) {
+    if (err.code === '23503') {
+      const refTable = err.table || 'another record';
+      const e = new Error(`Cannot delete this ${type}: still referenced by ${refTable}. Delete those first or reset the system.`);
+      e.status = 409; throw e;
+    }
+    throw err;
+  }
   await auditDanger(trx, req, 'hard_delete', type, id, { name: row.name, snapshot: row });
   return { message: `${type} "${row.name || id}" deleted.`, id };
 }
