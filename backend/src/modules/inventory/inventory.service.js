@@ -1203,7 +1203,6 @@ const inventoryService = {
 
     // Create a new lot in Export Dispatch warehouse
     const lotNo = await inventoryService.generateLotNo(trx);
-    const costPerUnit = parseFloat(sourceLot.cost_per_unit) || 0;
 
     const [exportLot] = await trx('inventory_lots')
       .insert({
@@ -1249,7 +1248,11 @@ const inventoryService = {
       destEntity: 'export',
       linkedRef: transferId ? `transfer-${transferId}` : null,
       notes: `Received from mill${orderId ? ` for order ${orderId}` : ''}`,
-      costPerUnit,
+      // Value the dest lot's movement at the TRANSFER price (ratePerKg) — the same
+      // basis its cost_per_unit / landed_cost_* were inserted with. Passing the
+      // source cost here made postMovement overwrite cost_per_unit/total_value with
+      // source cost while landed_cost_* kept the transfer price → two per-KG costs.
+      costPerUnit: ratePerKg,
       currency: sourceLot.cost_currency || 'PKR',
       orderId: orderId || null,
       transferId: transferId || null,
@@ -1368,7 +1371,10 @@ const inventoryService = {
       destEntity: 'mill',
       linkedRef: transferId ? `transfer-${transferId}` : null,
       notes: 'Received back from export',
-      costPerUnit: parseFloat(sourceLot.cost_per_unit) || 0,
+      // Value the dest lot's movement at the transfer price (ratePerKg), same as
+      // its inserted cost fields — otherwise cost_per_unit/total_value diverge from
+      // landed_cost_* (see transferToExport).
+      costPerUnit: ratePerKg,
       currency: sourceLot.cost_currency || 'PKR',
       transferId: transferId || null,
       userId,
@@ -2180,46 +2186,27 @@ const inventoryService = {
 
     const oldValues = { rate_per_kg: lot.rate_per_kg, landed_cost_per_kg: lot.landed_cost_per_kg, cost_incomplete: lot.cost_incomplete };
 
+    // Repair via the canonical RESIDUAL-COSTING model, not the old market-value
+    // joint-cost split. reallocateBatchCosts recomputes ALL the batch's output
+    // lots through computeResidualAllocation (finished = Net Purchase − by-product
+    // sale value ÷ finished; by-products at NRV) — the same basis used everywhere
+    // else. The previous market-value math inflated finished cost (no by-product
+    // credit), double-counted across outputs, and posted no offsetting GL.
     let newCostPerKg = 0;
-
     if (lot.batch_ref) {
-      const batchId = lot.batch_ref.replace('batch-', '');
-      const batch = await conn('milling_batches').where('id', parseInt(batchId)).first();
-      if (batch) {
-        const costs = await conn('milling_costs').where('batch_id', batch.id);
-        const totalCost = costs.reduce((s, c) => s + (parseFloat(c.amount) || 0), 0);
-        const finishedKg = parseFloat(batch.actual_finished_kg) || 0;
-
-        if (lot.type === 'finished' && finishedKg > 0) {
-          newCostPerKg = totalCost / finishedKg;
-        } else if (lot.type === 'byproduct') {
-          const prices = await conn('milling_output_market_prices').where('batch_id', batch.id).first();
-          const fp = parseFloat(prices?.finished_price_per_kg || batch.finished_price_per_kg) || 72.8;
-          const bp = parseFloat(prices?.broken_price_per_kg || batch.broken_price_per_kg) || 38;
-          const np = parseFloat(prices?.bran_price_per_kg || batch.bran_price_per_kg) || 28;
-          const hp = parseFloat(prices?.husk_price_per_kg || batch.husk_price_per_kg) || 8.4;
-          const name = (lot.item_name || '').toLowerCase();
-          const myPrice = name.includes('broken') ? bp : name.includes('bran') ? np : hp;
-          const myQty = parseFloat(lot.qty) || 0; // KG
-          const totalMV = (parseFloat(batch.actual_finished_kg) || 0) * fp + (parseFloat(batch.broken_kg) || 0) * bp + (parseFloat(batch.bran_kg) || 0) * np + (parseFloat(batch.husk_kg) || 0) * hp;
-          if (totalMV > 0 && myQty > 0) {
-            newCostPerKg = totalCost * (myQty * myPrice / totalMV) / myQty;
-          }
+      const batchId = parseInt(lot.batch_ref.replace('batch-', ''), 10);
+      if (batchId) {
+        await inventoryService.reallocateBatchCosts(conn, batchId);
+        // Re-read the repaired lot for the log (reallocate rewrote its cost).
+        const fresh = await conn('inventory_lots').where('id', lotId).first();
+        newCostPerKg = parseFloat(fresh?.landed_cost_per_kg) || 0;
+        if (newCostPerKg > 0 && lot.cost_incomplete) {
+          await conn('inventory_lots').where('id', lotId).update({ cost_incomplete: false });
         }
       }
     }
 
     if (newCostPerKg > 0) {
-      const qtyKg = parseFloat(lot.qty) || 0; // KG
-      await conn('inventory_lots').where('id', lotId).update({
-        rate_per_kg: newCostPerKg,
-        landed_cost_per_kg: newCostPerKg,
-        landed_cost_total: newCostPerKg * qtyKg,
-        cost_per_unit: newCostPerKg,
-        total_value: newCostPerKg * qtyKg,
-        cost_incomplete: false,
-      });
-
       await conn('historical_cost_repair_log').insert({
         lot_id: lotId,
         batch_id: lot.batch_ref ? parseInt(lot.batch_ref.replace('batch-', '')) : null,

@@ -1833,11 +1833,16 @@ module.exports = {
           ? Math.max(0, parseFloat(orderedInput))
           : (parseFloat(lot.ordered_net_weight_kg) || oldReceived);
 
+        // available_qty = qty − reserved − milling-reserved (the engine's invariant);
+        // writing the full newNet here would re-expose already-reserved stock as
+        // available and allow it to be over-allocated.
+        const millingReservedKg = parseFloat(lot.milling_reserved_qty) || 0;
+        const newAvailable = Math.max(0, uc.round2(newNet - reservedKg - millingReservedKg));
         await trx('inventory_lots').where({ id }).update({
           received_net_weight_kg: newReceivedKg,
           ordered_net_weight_kg: orderedKg,
           net_weight_kg: newNet, gross_weight_kg: newNet,
-          qty: newNet, available_qty: newNet,
+          qty: newNet, available_qty: newAvailable,
           purchase_amount: newPurchaseAmount,
           landed_cost_total: landedTotal, landed_cost_per_kg: landedPerKg,
           total_value: landedTotal, cost_per_unit: landedPerKg,
