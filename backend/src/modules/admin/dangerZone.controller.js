@@ -1,4 +1,5 @@
 const db = require('../../config/database');
+const { nextDocNo } = require('../../utils/docNumber');
 
 /**
  * Super-Admin "Danger Zone" — permanent, cascading hard-deletes and manual
@@ -34,6 +35,9 @@ const num = (v) => parseFloat(v) || 0;
 const KEEP_TABLES = new Set([
   // system / migrations
   'knex_migrations', 'knex_migrations_lock',
+  // forensic trail — keep the audit history (incl. who ran the reset) across a
+  // reset; the backup schema has a copy anyway, but the live log stays continuous.
+  'audit_logs',
   // auth & user prefs
   'users', 'roles', 'permissions', 'role_permissions', 'user_preferences',
   // core masters
@@ -94,6 +98,9 @@ const dangerZone = {
 
   async hardDeleteLot(req, res) {
     const force = req.body?.force === true || req.query?.force === 'true';
+    if ((req.query?.confirm || req.body?.confirm) !== 'DELETE') {
+      return res.status(400).json({ success: false, message: 'Confirmation required — pass confirm=DELETE to hard-delete.' });
+    }
     try {
       const result = await db.transaction(async (trx) => {
         const lot = await trx('inventory_lots').where('id', req.params.id).first();
@@ -150,6 +157,9 @@ const dangerZone = {
   },
 
   async hardDeleteTransaction(req, res) {
+    if ((req.query?.confirm || req.body?.confirm) !== 'DELETE') {
+      return res.status(400).json({ success: false, message: 'Confirmation required — pass confirm=DELETE to hard-delete.' });
+    }
     try {
       const { type, id } = req.params;
       const result = await db.transaction(async (trx) => {
@@ -198,10 +208,9 @@ const dangerZone = {
         // type is constrained to credit/debit and status to posted/pending/reversed.
         const delta = mode === 'set' ? (after - before) : amt;
         if (await trx.schema.hasTable('bank_transactions')) {
-          const last = await trx('bank_transactions').where('transaction_no', 'like', 'BT-%').orderBy('id', 'desc').first('transaction_no');
-          const seq = last ? (parseInt(String(last.transaction_no).replace(/^BT-/, ''), 10) || 0) + 1 : 1;
+          const btNo = await nextDocNo(trx, { table: 'bank_transactions', column: 'transaction_no', prefix: 'BT-', pad: 4 });
           await trx('bank_transactions').insert({
-            transaction_no: `BT-${String(seq).padStart(4, '0')}`,
+            transaction_no: btNo,
             bank_account_id: acct.id,
             type: delta >= 0 ? 'credit' : 'debit',
             amount: Math.abs(delta),
