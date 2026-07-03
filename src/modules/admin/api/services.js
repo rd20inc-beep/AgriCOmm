@@ -48,9 +48,9 @@ export const adminApi = {
   approvalReject:  (type, id, data) => api.post(`/api/admin/approvals/${type}/${id}/reject`, data),
   // Super-Admin Danger Zone (permanent hard-deletes + balance correction)
   dangerLotImpact:  (id) => api.get(`/api/admin/danger/lots/${id}/impact`),
-  dangerDeleteLot:  (id, force) => api.delete(`/api/admin/danger/lots/${id}${force ? '?force=true' : ''}`),
+  dangerDeleteLot:  (id, force) => api.delete(`/api/admin/danger/lots/${id}?confirm=DELETE${force ? '&force=true' : ''}`),
   dangerTxnImpact:  (type, id) => api.get(`/api/admin/danger/transactions/${type}/${id}/impact`),
-  dangerDeleteTxn:  (type, id) => api.delete(`/api/admin/danger/transactions/${type}/${id}`),
+  dangerDeleteTxn:  (type, id) => api.delete(`/api/admin/danger/transactions/${type}/${id}?confirm=DELETE`),
   dangerAdjustBalance: (id, data) => api.post(`/api/admin/danger/bank-accounts/${id}/balance`, data),
   dangerReset: (data) => api.post('/api/admin/danger/reset', data),
 };
