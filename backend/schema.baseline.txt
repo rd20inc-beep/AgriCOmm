@@ -1314,6 +1314,7 @@ COL mill_statutory_remittances.authority:character varying:NULL
 COL mill_statutory_remittances.bank_account_id:integer:NULL
 COL mill_statutory_remittances.created_at:timestamp with time zone:NOT NULL
 COL mill_statutory_remittances.created_by:integer:NULL
+COL mill_statutory_remittances.entity:character varying:NOT NULL
 COL mill_statutory_remittances.id:integer:NOT NULL
 COL mill_statutory_remittances.journal_id:integer:NULL
 COL mill_statutory_remittances.liability_account_code:character varying:NOT NULL

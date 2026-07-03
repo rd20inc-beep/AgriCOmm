@@ -1629,7 +1629,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
               addToast={addToast}
             />
           ) : payrollView === 'reports' ? (
-            <PayrollReport companyProfile={companyProfileData} onOpenRun={(id) => setPayslipsRunId(id)} />
+            <PayrollReport companyProfile={companyProfileData} entity={payrollEntity} onOpenRun={(id) => setPayslipsRunId(id)} />
           ) : (<>
           {pendingRuns.length > 0 && (
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 space-y-2">
@@ -2410,7 +2410,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
 
       {/* ─── STATUTORY DEDUCTIONS DRAWER ───────────────────────────── */}
       {showStatutoryDrawer && (
-        <StatutoryDeductionsDrawer canPay={canPayPayroll} bankAccounts={bankAccountsList} company={companyProfileData} onClose={() => setShowStatutoryDrawer(false)} addToast={addToast} />
+        <StatutoryDeductionsDrawer canPay={canPayPayroll} entity={payrollEntity} bankAccounts={bankAccountsList} company={companyProfileData} onClose={() => setShowStatutoryDrawer(false)} addToast={addToast} />
       )}
 
       {/* ─── YEAR-END TAX STATEMENTS DRAWER ────────────────────────── */}
@@ -3930,7 +3930,7 @@ function PayrollRunDrawer({ month, entity = 'mill', employees, preselectId, bank
 // chosen day each month into the approval queue — it never auto-approves/pays.
 // Manage org-level statutory deduction RULES (income tax, EOBI, …) that apply
 // automatically to every eligible employee at payroll time.
-function StatutoryDeductionsDrawer({ canPay, bankAccounts = [], company, onClose, addToast }) {
+function StatutoryDeductionsDrawer({ canPay, entity = 'mill', bankAccounts = [], company, onClose, addToast }) {
   const [tab, setTab] = useState('rules');
   const { data: rules = [], isLoading } = useStatutoryDeductions();
   const createMut = useCreateStatutoryDeduction();
@@ -3986,7 +3986,7 @@ function StatutoryDeductionsDrawer({ canPay, bankAccounts = [], company, onClose
         <button onClick={() => setTab('remit')} className={`px-3 py-2 text-xs font-medium border-b-2 -mb-px ${tab === 'remit' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>Remit liabilities</button>
       </div>
       {tab === 'remit' ? (
-        <StatutoryRemittancePanel canPay={canPay} bankAccounts={bankAccounts} company={company} addToast={addToast} />
+        <StatutoryRemittancePanel canPay={canPay} entity={entity} bankAccounts={bankAccounts} company={company} addToast={addToast} />
       ) : (
       <div className="space-y-4">
         <div className="rounded-lg border border-gray-200 p-3 space-y-3">
@@ -4577,9 +4577,9 @@ function TaxStatementDrawer({ company, onClose, addToast }) {
 // Remit accrued statutory liabilities (2050 Tax Payable / 2055 EOBI Payable) to
 // the authority — shows each account's outstanding GL balance, records a payment
 // (DR liability / CR Cash & Bank), and lists remittance history.
-function StatutoryRemittancePanel({ canPay, bankAccounts = [], company, addToast }) {
-  const { data: liabilities = [], isLoading: loadingLiab } = useStatutoryLiabilities();
-  const { data: history = [], isLoading: loadingHist } = useStatutoryRemittances();
+function StatutoryRemittancePanel({ canPay, entity = 'mill', bankAccounts = [], company, addToast }) {
+  const { data: liabilities = [], isLoading: loadingLiab } = useStatutoryLiabilities({ entity });
+  const { data: history = [], isLoading: loadingHist } = useStatutoryRemittances({ entity });
   const createMut = useCreateStatutoryRemittance();
   const deleteMut = useDeleteStatutoryRemittance();
   const payBanks = (bankAccounts || []).filter((a) => a.type !== 'cash');
@@ -4599,7 +4599,7 @@ function StatutoryRemittancePanel({ canPay, bankAccounts = [], company, addToast
     if (!(parseFloat(form.amount) > 0)) { addToast('Enter an amount', 'error'); return; }
     if (form.pay_method === 'bank' && !form.bank_account_id) { addToast('Select a bank account', 'error'); return; }
     try {
-      await createMut.mutateAsync({ ...form, amount: parseFloat(form.amount), bank_account_id: form.pay_method === 'bank' ? Number(form.bank_account_id) : null });
+      await createMut.mutateAsync({ ...form, entity, amount: parseFloat(form.amount), bank_account_id: form.pay_method === 'bank' ? Number(form.bank_account_id) : null });
       addToast(`Remitted ${PKR(form.amount)}`, 'success');
       setForm(blank);
     } catch (e) { addToast(e.message, 'error'); }
@@ -4938,9 +4938,9 @@ function printPayrollReport(runs, totals, company, range) {
 
 // Payroll Reports view — all runs with their payslips, totals, period filter,
 // per-payslip print and a printable whole-report.
-function PayrollReport({ companyProfile, onOpenRun }) {
+function PayrollReport({ companyProfile, entity = 'mill', onOpenRun }) {
   const [range, setRange] = useState({ from: '', to: '' });
-  const { data, isLoading } = usePayrollReport(range.from || range.to ? range : {});
+  const { data, isLoading } = usePayrollReport({ ...(range.from || range.to ? range : {}), entity });
   const runs = data?.runs || [];
   const totals = data?.totals || { runs: 0, grossTotal: 0, advanceTotal: 0, netTotal: 0 };
   const [expanded, setExpanded] = useState(null);
