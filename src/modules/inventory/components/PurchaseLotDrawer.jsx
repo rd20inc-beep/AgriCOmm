@@ -49,7 +49,7 @@ const defaultForm = () => ({
   weight_kg: '',
   ordered_weight_kg: '',
   total_bags: '',
-  price_per_mt: '',
+  price_per_kg: '',
   purchase_date: new Date().toISOString().slice(0, 10),
   warehouse_id: '',
   notes: '',
@@ -188,11 +188,13 @@ export default function PurchaseLotDrawer({
   // ─────────── Derived totals (live preview) ───────────
   const weightKg = parseFloat(form.weight_kg) || 0;
   const weightMT = weightKg / 1000;
-  const pricePerMT = parseFloat(form.price_per_mt) || 0;
+  // Purchase price is entered PER KG (matches the KG-first engine + the rest of
+  // the UI); the per-MT figure is derived for the reference preview only.
+  const ratePerKg = parseFloat(form.price_per_kg) || 0;
+  const pricePerMT = ratePerKg * 1000;
   const bags = parseInt(form.total_bags, 10) || 0;
   const avgBagKg = bags > 0 && weightKg > 0 ? weightKg / bags : 0;
-  const totalValue = weightMT * pricePerMT;
-  const ratePerKg = pricePerMT / 1000;
+  const totalValue = weightKg * ratePerKg;
   // Ordered vs received (optional). Bill follows RECEIVED (weightKg).
   const orderedKg = parseFloat(form.ordered_weight_kg) || 0;
   const orderedVariance = orderedKg > 0 ? weightKg - orderedKg : 0; // <0 short, >0 over
@@ -211,8 +213,8 @@ export default function PurchaseLotDrawer({
       addToast?.('Please enter a weight greater than zero', 'error');
       return;
     }
-    if (!pricePerMT || pricePerMT <= 0) {
-      addToast?.('Please enter a price per MT', 'error');
+    if (!ratePerKg || ratePerKg <= 0) {
+      addToast?.('Please enter a price per KG', 'error');
       return;
     }
     try {
@@ -384,11 +386,11 @@ export default function PurchaseLotDrawer({
       footer={
         <div className="flex justify-between items-center gap-3">
           <div className="text-xs text-gray-500">
-            {weightMT > 0 && pricePerMT > 0 && (
+            {weightKg > 0 && ratePerKg > 0 && (
               <span>
-                <span className="font-medium text-gray-700">{weightMT.toFixed(2)} MT</span>
+                <span className="font-medium text-gray-700">{Math.round(weightKg).toLocaleString('en-PK')} kg</span>
                 {' × '}
-                <span className="font-medium text-gray-700">Rs {pricePerMT.toLocaleString('en-PK')}/MT</span>
+                <span className="font-medium text-gray-700">Rs {ratePerKg.toLocaleString('en-PK')}/kg</span>
                 {' = '}
                 <span className="font-semibold text-emerald-700">Rs {Math.round(totalValue).toLocaleString('en-PK')}</span>
               </span>
@@ -592,17 +594,17 @@ export default function PurchaseLotDrawer({
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1.5 flex items-center gap-1.5">
             <DollarSign size={14} className="text-emerald-500" />
-            Price per MT (PKR) <span className="text-red-500">*</span>
+            Price per KG (PKR) <span className="text-red-500">*</span>
           </label>
           <input
-            type="number" step="1" min="0"
-            value={form.price_per_mt}
-            onChange={(e) => setForm(prev => ({ ...prev, price_per_mt: e.target.value }))}
-            placeholder="e.g. 95000"
+            type="number" step="0.01" min="0"
+            value={form.price_per_kg}
+            onChange={(e) => setForm(prev => ({ ...prev, price_per_kg: e.target.value }))}
+            placeholder="e.g. 95"
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
-          {ratePerKg > 0 && (
-            <p className="text-[11px] text-gray-500 mt-1">≈ Rs {ratePerKg.toFixed(2)}/kg</p>
+          {pricePerMT > 0 && (
+            <p className="text-[11px] text-gray-500 mt-1">≈ Rs {pricePerMT.toLocaleString('en-PK')}/MT</p>
           )}
         </div>
 
