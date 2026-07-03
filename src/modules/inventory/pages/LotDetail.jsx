@@ -565,7 +565,8 @@ export default function LotDetail() {
               const broken = n(batchYield.brokenMt);
               const sortex = n(batchYield.sortexRejectsMt);
               const powder = n(batchYield.powderMt), sweeping = n(batchYield.sweepingMt);
-              const total = fin + broken + sortex + powder + sweeping;
+              const choba = n(batchYield.chobaMt);
+              const total = fin + broken + sortex + powder + sweeping + choba;
               if (total <= 0) return null;
               const pctOf = (v) => total > 0 ? `${(v / total * 100).toFixed(1)}%` : '—';
               const subGrades = [
@@ -576,7 +577,7 @@ export default function LotDetail() {
               // not a generic Broken Rice product.
               const tops = [
                 ['Finished', fin], ['Broken', broken], ['Sortex', sortex],
-                ['Powder', powder], ['Sweeping', sweeping],
+                ['Powder', powder], ['Sweeping', sweeping], ['Choba', choba],
               ].filter(([, v]) => v > 0);
               return (
                 <div className="mt-3 pt-3 border-t border-gray-100">

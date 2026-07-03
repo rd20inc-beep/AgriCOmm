@@ -1273,6 +1273,7 @@ const reportingController = {
           WHEN l.item_name ILIKE '%sortex%' THEN 'Sortex Rejects'
           WHEN l.item_name ILIKE '%powder%' THEN 'Powder'
           WHEN l.item_name ILIKE '%sweeping%' THEN 'Sweeping'
+          WHEN l.item_name ILIKE '%choba%' THEN 'Choba'
           WHEN l.grade IN ('B1','B2','B3','CSR','Short Grain') THEN l.grade
           WHEN l.item_name ILIKE 'broken%'  THEN 'Broken (ungraded)'
           ELSE COALESCE(p.name, l.item_name, '—')
@@ -1794,6 +1795,7 @@ const reportingController = {
         const grade = (l.grade || '').toUpperCase();
         if (name.includes('sweeping') || (l.grade || '').toLowerCase().includes('sweeping')) return 'Sweeping';
         if (name.includes('powder')) return 'Powder';
+        if (name.includes('choba')) return 'Choba';
         if (name.includes('sortex')) return 'Sortex';
         if (grade === 'SHORT GRAIN') return 'Short Grain';
         if (['B1', 'B2', 'B3', 'CSR'].includes(grade)) return grade;
