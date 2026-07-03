@@ -209,7 +209,7 @@ export default function Inventory() {
               {(groupByCategory ? (grouped || []).flatMap(g => [{ __group: g }, ...g.lots]) : filtered).map((row, idx) => {
                 if (row.__group) {
                   const g = row.__group;
-                  const groupNetKg = g.lots.reduce((s, l) => s + (parseFloat(l.netWeightKg) || parseFloat(l.qty) * 1000 || 0), 0);
+                  const groupNetKg = g.lots.reduce((s, l) => s + (parseFloat(l.netWeightKg) || parseFloat(l.qty) || 0), 0);
                   const groupValue = g.lots.reduce((s, l) => s + (parseFloat(l.landedCostTotal) || parseFloat(l.totalValue) || 0), 0);
                   return (
                     <tr key={`g-${g.key}`} className="bg-gradient-to-r from-emerald-50 to-blue-50 border-y border-emerald-100">
@@ -223,7 +223,7 @@ export default function Inventory() {
                   );
                 }
                 const lot = row;
-                const netKg = parseFloat(lot.netWeightKg) || parseFloat(lot.qty) * 1000 || 0;
+                const netKg = parseFloat(lot.netWeightKg) || parseFloat(lot.qty) || 0;
                 const availKg = (parseFloat(lot.availableQty) || 0);
                 const bw = parseFloat(lot.bagWeightKg) || 50;
                 return (

@@ -120,7 +120,7 @@ function riceTypeName(lot) {
  * children inside grouped view (with a slight indent in the latter).
  */
 function renderLotRow(lot, displayUnit, navigate, indented) {
-  const netKg = parseFloat(lot.netWeightKg) || parseFloat(lot.qty) * 1000 || 0;
+  const netKg = parseFloat(lot.netWeightKg) || parseFloat(lot.qty) || 0;
   const availKg = (parseFloat(lot.availableQty) || 0);
   const bw = parseFloat(lot.bagWeightKg) || 50;
   const variety = riceTypeName(lot);

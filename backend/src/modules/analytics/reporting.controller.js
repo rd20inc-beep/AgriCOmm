@@ -1852,7 +1852,7 @@ const reportingController = {
           batchName: b.batchName || null, customTags: b.customTags || [],
           rawSupplier: b.rawSupplier || l.supplier_name || null, rawSupplierId: b.rawSupplierId || l.supplier_id || null,
           milledProduct: b.product || null, rawMt: b.rawMt || null, date: b.date,
-          sweepingMt: kg / 1000, availableMt: parseFloat(l.available_qty) || 0, ratePerKg: cpk, valuePkr: kg * cpk,
+          sweepingMt: kg / 1000, availableMt: (parseFloat(l.available_qty) || 0) / 1000, ratePerKg: cpk, valuePkr: kg * cpk,
           bags: l.total_bags, status: l.status };
       });
       const totals = { lots: rows.length, sweepingMt: rows.reduce((s, r) => s + r.sweepingMt, 0), valuePkr: rows.reduce((s, r) => s + r.valuePkr, 0), batches: new Set(rows.map((r) => r.batchNo).filter(Boolean)).size };
