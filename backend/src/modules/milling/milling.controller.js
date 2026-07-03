@@ -1285,14 +1285,17 @@ const millingController = {
       if (!id) return res.status(404).json({ success: false, message: 'Milling batch not found.' });
       const veh = await db('milling_vehicle_arrivals').where('batch_id', id).sum({ bags: 'total_bags' }).first();
       const vehFreed = Math.round(parseFloat(veh && veh.bags) || 0);
-      if (vehFreed <= 0) return res.json({ success: true, data: null }); // no katta intake (blend / lot-started)
 
       // Actual katta movements posted for this batch (the usage history).
+      // reconcileBatchKatta also posts these for batches built from source lots
+      // (no vehicle arrivals), so drive the "any katta?" check off the movements
+      // — not just the truck records — or those batches would read back empty.
       const moves = await db('mill_stock_movements as m')
         .join('mill_items as i', 'm.item_id', 'i.id')
         .where({ 'm.reference_type': 'batch_katta', 'm.reference_id': id })
         .select('i.code', 'i.name', 'i.capacity_kg', 'm.movement_type', 'm.quantity', 'm.reason', 'm.created_at')
         .orderBy('i.capacity_kg').orderBy('m.id');
+      if (moves.length === 0 && vehFreed <= 0) return res.json({ success: true, data: null }); // no katta intake
 
       // Per-size freed (return) / packed (consumption) from the movements.
       const sizeMap = new Map();
