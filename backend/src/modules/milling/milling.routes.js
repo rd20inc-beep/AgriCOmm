@@ -1695,11 +1695,13 @@ router.delete('/payroll/statutory-deductions/:id', authorize('payroll', 'approve
 // Outstanding = the GL balance of each statutory liability account (Σcredit −
 // Σdebit on Posted journals): Phase 12 credits these at payroll; remittance
 // debits them back when the money is paid to FBR/EOBI.
-async function statutoryAccountOutstanding(code) {
+async function statutoryAccountOutstanding(code, entity = 'mill') {
   const acc = await db('chart_of_accounts').where('code', code).first();
   if (!acc) return null;
+  // Head Office ('general') vs Mill ('mill') — the liability accrues per entity
+  // (payroll statutory journals post to the run's entity), so scope by je.entity.
   const t = await db('journal_lines as jl').join('journal_entries as je', 'jl.journal_id', 'je.id')
-    .where('jl.account_id', acc.id).where('je.status', 'Posted')
+    .where('jl.account_id', acc.id).where('je.status', 'Posted').where('je.entity', entity)
     .select(db.raw('COALESCE(SUM(jl.credit),0)::numeric as cr'), db.raw('COALESCE(SUM(jl.debit),0)::numeric as dr')).first();
   const outstanding = (parseFloat(t.cr) || 0) - (parseFloat(t.dr) || 0);
   return { code, name: acc.name, accountId: acc.id, outstanding: Math.round(outstanding * 100) / 100 };
@@ -1707,22 +1709,26 @@ async function statutoryAccountOutstanding(code) {
 
 router.get('/payroll/statutory-liabilities', authorize('payroll', 'view'), async (req, res) => {
   try {
+    const entity = req.query.entity === 'general' ? 'general' : 'mill';
     const rules = await db('mill_statutory_deductions').select('liability_account_code');
     const codes = Array.from(new Set([...rules.map((r) => r.liability_account_code || '2050'), '2050', '2055']));
     const out = [];
-    for (const c of codes) { const r = await statutoryAccountOutstanding(c); if (r) out.push(r); }
+    for (const c of codes) { const r = await statutoryAccountOutstanding(c, entity); if (r) out.push(r); }
     return res.json({ success: true, data: out });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
 router.get('/payroll/statutory-remittances', authorize('payroll', 'view'), async (req, res) => {
   try {
-    const rows = await db('mill_statutory_remittances as r')
+    const entity = req.query.entity === 'general' ? 'general' : req.query.entity === 'mill' ? 'mill' : null;
+    const rq = db('mill_statutory_remittances as r')
       .leftJoin('bank_accounts as ba', 'r.bank_account_id', 'ba.id')
       .leftJoin('chart_of_accounts as coa', 'r.account_id', 'coa.id')
       .leftJoin('users as u', 'u.id', 'r.created_by')
       .select('r.*', 'ba.name as bank_name', 'coa.name as account_name', 'u.full_name as created_by_name')
       .orderBy('r.remit_date', 'desc').orderBy('r.id', 'desc');
+    if (entity) rq.where('r.entity', entity);
+    const rows = await rq;
     return res.json({ success: true, data: rows });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
@@ -1732,6 +1738,7 @@ router.post('/payroll/statutory-remittances', authorize('payroll', 'pay'),
   async (req, res) => {
   try {
     const b = req.body || {};
+    const entity = b.entity === 'general' ? 'general' : 'mill'; // Head Office vs Mill
     const code = String(b.liability_account_code || '2050');
     const amount = parseFloat(b.amount) || 0;
     if (!(amount > 0)) return res.status(400).json({ success: false, message: 'Amount must be greater than zero.' });
@@ -1747,18 +1754,18 @@ router.post('/payroll/statutory-remittances', authorize('payroll', 'pay'),
       // drive 2050/2055 net-debit (the authority "owing" us). Compute Σcredit −
       // Σdebit over Posted entries for this account inside the trx.
       const bal = await trx('journal_lines as jl').join('journal_entries as je', 'jl.journal_id', 'je.id')
-        .where('jl.account_id', acc.id).where('je.status', 'Posted')
+        .where('jl.account_id', acc.id).where('je.status', 'Posted').where('je.entity', entity)
         .select(db.raw('COALESCE(SUM(jl.credit),0)::numeric as cr'), db.raw('COALESCE(SUM(jl.debit),0)::numeric as dr')).first();
       const outstanding = Math.round(((parseFloat(bal.cr) || 0) - (parseFloat(bal.dr) || 0)) * 100) / 100;
       if (amount - outstanding > 0.01) {
         const e = new Error(`Amount ${amount} exceeds the outstanding ${acc.name} liability of ${outstanding}.`); e.statusCode = 400; throw e;
       }
-      const acctId = method === 'bank' ? (b.bank_account_id || null) : await resolveCashAccountId(trx, { entity: 'mill' });
+      const acctId = method === 'bank' ? (b.bank_account_id || null) : await resolveCashAccountId(trx, { entity });
       // Collision-safe STR number (M3): MAX trailing-digit + 1, not MAX(id)+1 —
       // the latter regenerates an existing number after a delete (see nextDocNo).
       const remitNo = await nextDocNo(trx, { table: 'mill_statutory_remittances', column: 'remittance_no', prefix: 'STR-', pad: 4 });
       const [r] = await trx('mill_statutory_remittances').insert({
-        remittance_no: remitNo, liability_account_code: code, account_id: acc.id, amount,
+        remittance_no: remitNo, liability_account_code: code, account_id: acc.id, amount, entity,
         pay_method: method, bank_account_id: acctId, remit_date: remitDate,
         reference: b.reference || null, authority: b.authority || null,
         period_from: b.period_from || null, period_to: b.period_to || null,
@@ -1767,7 +1774,7 @@ router.post('/payroll/statutory-remittances', authorize('payroll', 'pay'),
 
       // GL: DR liability / CR Cash & Bank.
       const journal = await accountingService.createJournal(trx, {
-        date: remitDate, entity: 'mill', refType: 'Statutory Remittance', refNo: remitNo,
+        date: remitDate, entity, refType: 'Statutory Remittance', refNo: remitNo,
         description: `Remit ${acc.name}${b.authority ? ` to ${b.authority}` : ''}${b.reference ? ` (${b.reference})` : ''}`,
         currency: 'PKR', fxRate: 1, isAuto: true, userId: req.user?.id || null,
         lines: [
@@ -2193,12 +2200,14 @@ router.get('/payroll/runs', authorize('payroll', 'view'), async (req, res) => {
 router.get('/payroll/report', authorize('payroll', 'view'), async (req, res) => {
   try {
     const { from, to } = req.query;
+    const entity = req.query.entity === 'general' ? 'general' : req.query.entity === 'mill' ? 'mill' : null;
     let q = db('mill_payroll_runs as r')
       .leftJoin('bank_accounts as ba', 'r.bank_account_id', 'ba.id')
       .select('r.*', 'ba.name as bank_name')
       .orderBy('r.period', 'desc').orderBy('r.id', 'desc');
     if (from) q = q.where('r.period', '>=', from);
     if (to) q = q.where('r.period', '<=', to);
+    if (entity) q = q.where('r.entity', entity);
     const runs = await q;
     const runIds = runs.map((r) => r.id);
     const lines = runIds.length

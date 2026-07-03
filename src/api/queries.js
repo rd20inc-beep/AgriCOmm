@@ -1643,16 +1643,16 @@ export function useDeleteStatutoryDeduction() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (id) => millingApi.deleteStatutoryDeduction(id), onSuccess: () => invalidateStatutory(qc) });
 }
-export function useStatutoryLiabilities() {
+export function useStatutoryLiabilities(params = {}) {
   return useQuery({
-    queryKey: ['statutory-liabilities'],
-    queryFn: async () => { const res = await millingApi.listStatutoryLiabilities(); return transformKeys(res?.data || []); },
+    queryKey: ['statutory-liabilities', params],
+    queryFn: async () => { const res = await millingApi.listStatutoryLiabilities(params); return transformKeys(res?.data || []); },
   });
 }
-export function useStatutoryRemittances() {
+export function useStatutoryRemittances(params = {}) {
   return useQuery({
-    queryKey: ['statutory-remittances'],
-    queryFn: async () => { const res = await millingApi.listStatutoryRemittances(); return transformKeys(res?.data || []); },
+    queryKey: ['statutory-remittances', params],
+    queryFn: async () => { const res = await millingApi.listStatutoryRemittances(params); return transformKeys(res?.data || []); },
   });
 }
 function invalidateRemittances(qc) {
