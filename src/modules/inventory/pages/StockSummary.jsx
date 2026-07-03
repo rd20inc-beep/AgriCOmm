@@ -227,7 +227,7 @@ function ProductStockDrawer({ row, entity, status, onClose, onOpenLot }) {
     staleTime: 10 * 1000,
   });
 
-  const onHandKg = (l) => (n(l.net_weight_kg) > 0 ? n(l.net_weight_kg) : n(l.qty) * 1000);
+  const onHandKg = (l) => (n(l.net_weight_kg) > 0 ? n(l.net_weight_kg) : n(l.qty)); // qty is KG (Phase 5c)
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -272,8 +272,8 @@ function ProductStockDrawer({ row, entity, status, onClose, onOpenLot }) {
                   </div>
                   <div className="grid grid-cols-4 gap-2 mt-2 text-xs">
                     <Stat label="On hand" value={fmtMT(onHand)} sub={bags > 0 ? `${bags.toLocaleString()} bags` : null} />
-                    <Stat label="Free" value={fmtMT(n(l.available_qty) * 1000)} tone="emerald" />
-                    <Stat label="Committed" value={n(l.reserved_qty) > 0 ? fmtMT(n(l.reserved_qty) * 1000) : '—'} tone={n(l.reserved_qty) > 0 ? 'amber' : null} />
+                    <Stat label="Free" value={fmtMT(n(l.available_qty))} tone="emerald" />
+                    <Stat label="Committed" value={n(l.reserved_qty) > 0 ? fmtMT(n(l.reserved_qty)) : '—'} tone={n(l.reserved_qty) > 0 ? 'amber' : null} />
                     <Stat label="Value" value={fmtPKR(value)} align="right" />
                   </div>
                   <div className="mt-2 pt-2 border-t border-gray-100 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-gray-500">
