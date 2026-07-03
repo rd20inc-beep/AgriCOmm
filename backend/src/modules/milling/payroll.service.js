@@ -52,7 +52,7 @@ function statutoryForWorker(rules, { gross, basicPay, payType }) {
 // Compute the month's payroll for every ACTIVE employee — the single source of
 // truth shared by GET /payroll/summary and the prepare flow (so a run can never
 // post a figure that disagrees with what the screen showed).
-async function computePayrollSummary(month) {
+async function computePayrollSummary(month, entity = 'mill') {
   const startDate = month ? `${month}-01` : new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
   // Last day of the month — `${month}-31` is an invalid date for 30-day months
   // and February. Date.UTC(year, monthNum, 0) rolls back to the month's last day.
@@ -61,7 +61,9 @@ async function computePayrollSummary(month) {
     : new Date().toISOString().split('T')[0];
 
   const period = month || startDate.slice(0, 7);
-  const workers = await db('mill_workers').where('is_active', true).orderBy('name');
+  // Head Office ('general') vs Mill ('mill') payroll scope.
+  const workers = await db('mill_workers').where('is_active', true)
+    .where('entity', entity === 'general' ? 'general' : 'mill').orderBy('name');
   const attendance = await db('mill_attendance')
     .where('date', '>=', startDate).where('date', '<=', endDate);
 
@@ -221,13 +223,14 @@ async function computePayrollSummary(month) {
 // posted run (or a salary expense), or 'committed' if already in a Prepared/
 // Approved run for the month (so they can't be added to a second run). Voided
 // runs free their workers. Returns Map(workerId → 'paid' | 'committed').
-async function committedWorkerStatus(month) {
+async function committedWorkerStatus(month, entity = 'mill') {
+  const ent = entity === 'general' ? 'general' : 'mill';
   const lineRows = await db('mill_payroll_lines as pl')
     .join('mill_payroll_runs as r', 'pl.run_id', 'r.id')
-    .where('r.period', month).whereNot('r.status', 'voided').whereNotNull('pl.worker_id')
+    .where('r.period', month).where('r.entity', ent).whereNot('r.status', 'voided').whereNotNull('pl.worker_id')
     .select('pl.worker_id', 'r.status');
   const expRows = await db('business_expenses')
-    .where('expense_type', 'mill').where('category', 'salaries').whereNotNull('employee_id')
+    .where('expense_type', ent).where('category', 'salaries').whereNotNull('employee_id')
     .whereRaw("TO_CHAR(expense_date, 'YYYY-MM') = ?", [month])
     .distinct('employee_id').select('employee_id as worker_id');
   const map = new Map();
@@ -245,12 +248,13 @@ async function committedWorkerStatus(month) {
 // `lines` for per-employee overrides; omit to prepare every not-yet-committed
 // active employee. Throws Error with `.httpStatus` (and `.code='NONE'` when
 // there is simply nobody to prepare) so callers can branch.
-async function preparePayrollRun({ month, lines, pay_method, bank_account_id, pay_date, notes }, userId) {
+async function preparePayrollRun({ month, lines, pay_method, bank_account_id, pay_date, notes, entity = 'mill' }, userId) {
   if (!/^\d{4}-\d{2}$/.test(month || '')) { const e = new Error('A valid month (YYYY-MM) is required.'); e.httpStatus = 400; throw e; }
+  const ent = entity === 'general' ? 'general' : 'mill'; // Head Office vs Mill
 
-  const { summary } = await computePayrollSummary(month);
+  const { summary } = await computePayrollSummary(month, ent);
   const byId = new Map(summary.map((w) => [w.id, w]));
-  const committed = await committedWorkerStatus(month);
+  const committed = await committedWorkerStatus(month, ent);
 
   let toPay;
   if (Array.isArray(lines) && lines.length) {
@@ -282,13 +286,13 @@ async function preparePayrollRun({ month, lines, pay_method, bank_account_id, pa
   const method = pay_method === 'bank' ? 'bank' : 'cash';
   const payDate = pay_date || new Date().toISOString().split('T')[0];
   let acctId = method === 'bank' ? (bank_account_id || null) : null;
-  if (method === 'cash' && !acctId) acctId = await resolveCashAccountId(db, { entity: 'mill' });
+  if (method === 'cash' && !acctId) acctId = await resolveCashAccountId(db, { entity: ent });
 
   return db.transaction(async (trx) => {
     const [r] = await trx('mill_payroll_runs').insert({
       period: month, pay_date: payDate, pay_method: method, bank_account_id: acctId,
       gross_total: grossTotal, advance_total: advanceTotal, net_total: netTotal,
-      employee_count: toPay.length, expense_id: null,
+      employee_count: toPay.length, expense_id: null, entity: ent,
       status: 'prepared', notes: notes || null, created_by: userId || null,
     }).returning('*');
     for (const w of toPay) {

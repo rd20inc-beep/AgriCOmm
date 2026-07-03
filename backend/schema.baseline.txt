@@ -1215,6 +1215,7 @@ COL mill_payroll_runs.bank_account_id:integer:NULL
 COL mill_payroll_runs.created_at:timestamp with time zone:NOT NULL
 COL mill_payroll_runs.created_by:integer:NULL
 COL mill_payroll_runs.employee_count:integer:NOT NULL
+COL mill_payroll_runs.entity:character varying:NOT NULL
 COL mill_payroll_runs.expense_id:integer:NULL
 COL mill_payroll_runs.gross_total:numeric:NOT NULL
 COL mill_payroll_runs.id:integer:NOT NULL
@@ -1417,6 +1418,7 @@ COL mill_workers.cnic:character varying:NULL
 COL mill_workers.created_at:timestamp with time zone:NOT NULL
 COL mill_workers.daily_wage:numeric:NOT NULL
 COL mill_workers.department:character varying:NULL
+COL mill_workers.entity:character varying:NOT NULL
 COL mill_workers.iban:character varying:NULL
 COL mill_workers.id:integer:NOT NULL
 COL mill_workers.is_active:boolean:NOT NULL
