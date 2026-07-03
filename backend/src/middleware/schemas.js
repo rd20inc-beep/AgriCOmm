@@ -47,6 +47,14 @@ const createExportOrder = Joi.object({
   bag_brand: Joi.string().max(255).allow('', null),
   units_per_bag: Joi.number().integer().positive().allow(null),
   bag_notes: Joi.string().allow('', null),
+  // Master (outer) bag spec + payment terms — read + inserted by the controller
+  // on create; must be whitelisted here or validate(stripUnknown) drops them so
+  // they only persist on a later edit. See [[project_validation_stripunknown]].
+  master_bag_size_kg: Joi.number().positive().allow(null, ''),
+  master_bag_type: Joi.string().max(100).allow('', null),
+  payment_terms: Joi.string().allow('', null),
+  // Optional manual FX rate at creation (controller sets fx_rate_source='manual').
+  booked_fx_rate: Joi.number().positive().allow(null),
   // Packing / receiving mode
   receiving_mode: Joi.string().valid('loose', 'bags', 'mixed', 'custom').allow('', null),
   quantity_unit: Joi.string().valid('kg', 'katta', 'maund', 'ton', 'mt', 'bags').allow('', null),
@@ -73,6 +81,8 @@ const createExportOrder = Joi.object({
     hs_code: Joi.string().max(20).allow('', null),
     packing: Joi.string().max(100).allow('', null),
     bag_size_kg: Joi.number().positive().allow(null, ''),
+    master_bag_size_kg: Joi.number().positive().allow(null, ''),
+    master_bag_type: Joi.string().max(100).allow('', null),
     bag_count: Joi.number().integer().min(0).allow(null, ''),
     bag_type: Joi.string().max(100).allow('', null),
     bag_quality: Joi.string().max(100).allow('', null),

@@ -574,7 +574,7 @@ const exportOrderController = {
         const isReservedForUs = lot.reserved_against === order.order_no;
         lotMap.set(lot.id, {
           ...lot,
-          allocated_qty_kg: isReservedForUs ? (parseFloat(lot.net_weight_kg) || (parseFloat(lot.qty) || 0) * 1000) : 0,
+          allocated_qty_kg: isReservedForUs ? (parseFloat(lot.net_weight_kg) || (parseFloat(lot.qty) || 0)) : 0,
           source: 'milling_output',
         });
       }
