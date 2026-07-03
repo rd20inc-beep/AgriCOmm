@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Save, Loader2 } from 'lucide-react';
 import Drawer from '../../../components/Drawer';
+import RiceTypePicker from '../../../components/RiceTypePicker';
+import { useProducts } from '../../../api/queries';
 import { lotInventoryApi } from '../api/services';
 
 // Extended quality percentages stored in inventory_lots.quality_json. Keys match
@@ -21,14 +23,18 @@ const GRADES = [
  * Correct a lot's recorded quality after creation. Quality is an analysis
  * record (not a cost input), so this never touches landed cost or stock.
  */
-export default function QualityEditModal({ isOpen, lot, onClose, onSuccess, addToast }) {
+export default function QualityEditModal({ isOpen, lot, onClose, onSuccess, addToast, canEditRiceType = false }) {
   const qj = lot?.qualityJson || {};
+  // Rice type is editable only for a raw lot that hasn't started milling (the
+  // backend enforces the same guard). Fetch products only when the picker shows.
+  const { data: products = [] } = useProducts({}, { enabled: !!canEditRiceType });
   const init = (k) => {
     const v = qj[k] ?? (k === 'moisture' ? lot?.moisturePct : k === 'broken' ? lot?.brokenPct : undefined);
     return v == null ? '' : String(v);
   };
   const grainInit = qj.grain_size ?? qj.grainSize;
   const [form, setForm] = useState({
+    product_id: lot?.productId ? String(lot.productId) : '',
     variety: lot?.variety || '',
     grade: lot?.grade || '',
     sortex_status: lot?.sortexStatus || '',
@@ -55,6 +61,9 @@ export default function QualityEditModal({ isOpen, lot, onClose, onSuccess, addT
         quality.grain_size = parseFloat(form.grain_size);
       }
       await lotInventoryApi.updateLotQuality(lot.id, {
+        // Only send the rice type when it's editable AND actually chosen — the
+        // backend skips it when unchanged.
+        ...(canEditRiceType && form.product_id ? { product_id: parseInt(form.product_id, 10) } : {}),
         variety: form.variety || null,
         grade: form.grade || null,
         sortex_status: form.sortex_status || null,
@@ -100,6 +109,19 @@ export default function QualityEditModal({ isOpen, lot, onClose, onSuccess, addT
       }
     >
       <div className="space-y-4">
+        {canEditRiceType && (
+          <div className="rounded-lg border border-violet-100 bg-violet-50/40 p-3">
+            <RiceTypePicker
+              label={<span className="text-xs font-medium text-gray-600">Rice type (product)</span>}
+              value={form.product_id}
+              onChange={(id) => set('product_id', id || '')}
+              products={products}
+              addToast={addToast}
+              placeholder="Search rice type or add a new one…"
+            />
+            <p className="text-[11px] text-gray-500 mt-1">Change the rice type before this lot starts milling. Locked once milling begins.</p>
+          </div>
+        )}
         <div className="grid grid-cols-3 gap-3">
           <div><label className={lbl}>Variety</label><input value={form.variety} onChange={(e) => set('variety', e.target.value)} className={inp} placeholder="e.g. D-98" /></div>
           <div><label className={lbl}>Grade</label><input value={form.grade} onChange={(e) => set('grade', e.target.value)} className={inp} /></div>

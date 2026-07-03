@@ -279,6 +279,9 @@ const updateLotCosts = Joi.object({
 // Edit a lot's recorded quality after creation. moisture/broken come through
 // quality_json (and are mirrored to the dedicated columns server-side).
 const updateLotQuality = Joi.object({
+  // Rice type (product) — editable on a raw lot before milling starts; the
+  // controller enforces those guards and syncs item_name.
+  product_id: Joi.number().integer().positive().allow(null),
   variety: Joi.string().allow(null, ''),
   grade: Joi.string().allow(null, ''),
   sortex_status: Joi.string().allow(null, ''),
