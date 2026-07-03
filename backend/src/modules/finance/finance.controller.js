@@ -1174,6 +1174,7 @@ const financeController = {
                 counterparty: null,
                 notes: `Receipt ${paymentNo} for receivable #${entity_id}`,
                 source: 'record_payment',
+                linked_payment_id: payment.id,
                 created_by: req.user?.id || null,
               });
             }
@@ -1253,6 +1254,7 @@ const financeController = {
                 counterparty: null,
                 notes: `Payment ${paymentNo} for payable #${entity_id}`,
                 source: 'record_payment',
+                linked_payment_id: payment.id,
                 created_by: req.user?.id || null,
               });
             }
@@ -2163,6 +2165,7 @@ financeController.payPurchase = async (req, res) => {
       const linkedPayable = await trx('payables')
         .where({ source_table: sourceTable, source_id: id })
         .first();
+      let payRowForBank = null; // the canonical PP- payment row, linked to the bank txn below
       if (linkedPayable) {
         const newPayablePaid = (parseFloat(linkedPayable.paid_amount) || 0) + amountPkr;
         const original = parseFloat(linkedPayable.original_amount) || 0;
@@ -2174,7 +2177,7 @@ financeController.payPurchase = async (req, res) => {
         });
         // Canonical payment row (so the payment-trail + dashboard cheque view
         // see it uniformly). Deduped against the bank_transaction by the trail.
-        await trx('payments').insert({
+        [payRowForBank] = await trx('payments').insert({
           payment_no: await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'PP-', pad: 0 }),
           type: 'payment', amount: amountPkr, currency: 'PKR', fx_rate: 1, base_amount_pkr: amountPkr,
           payment_method: payment_method || null, bank_account_id: bank_account_id || null,
@@ -2182,7 +2185,7 @@ financeController.payPurchase = async (req, res) => {
           linked_payable_id: linkedPayable.id, payment_date: paidAt,
           notes: `Payment for ${source} ${row.lot_no || row.purchase_no || row.expense_no || `#${id}`}`,
           created_by: req.user?.id || null,
-        });
+        }).returning('id');
       }
 
       // Decrement the bank account when the user specified one.
@@ -2208,6 +2211,7 @@ financeController.payPurchase = async (req, res) => {
             counterparty: row.supplier_id ? null : (row.vendor_name || null),
             notes: `Payment for ${source} ${row.lot_no || row.purchase_no || row.expense_no || row.category || `#${id}`}${notes ? ' — ' + notes : ''}`,
             source: 'pay_purchase',
+            linked_payment_id: payRowForBank?.id || null,
             created_by: req.user?.id || null,
           });
         }
