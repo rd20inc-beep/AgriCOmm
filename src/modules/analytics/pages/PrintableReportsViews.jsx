@@ -672,7 +672,7 @@ export function StockDetailView({ data, companyName }) {
   const [tag, setTag] = useState('all');
 
   // Build the tag chips from the lots' subtypes, ordered by a sensible priority.
-  const ORDER = ['Finished Rice', 'Unprocessed Rice', 'B1', 'B2', 'B3', 'CSR', 'Short Grain', 'Broken', 'Powder', 'Sweeping', 'Sortex', 'Other'];
+  const ORDER = ['Finished Rice', 'Unprocessed Rice', 'B1', 'B2', 'B3', 'CSR', 'Short Grain', 'Broken', 'Powder', 'Sweeping', 'Choba', 'Sortex', 'Other'];
   const byTag = {};
   for (const r of rows) {
     const t = r.subtype || 'Other';

@@ -38,6 +38,7 @@ const SUBTYPE_OPTIONS = [
   { value: 'sortex',        label: 'Sortex' },
   { value: 'powder',        label: 'Powder' },
   { value: 'sweeping',      label: 'Sweeping' },
+  { value: 'choba',         label: 'Choba' },
 ];
 
 // A blended broken lot carries a batch-scoped grade ('M-033-B1'); strip the
@@ -65,6 +66,7 @@ function lotSubtype(l) {
   if (name.includes('sortex')) return 'sortex';
   if (name.includes('powder')) return 'powder';
   if (name.includes('sweeping')) return 'sweeping';
+  if (name.includes('choba')) return 'choba';
   if (name.includes('bran')) return 'bran';
   if (name.includes('husk')) return 'husk';
   return 'other';
@@ -75,6 +77,7 @@ function subtypeBadgeClass(s) {
   if (s === 'rice-in')         return 'bg-slate-50 text-slate-700';
   if (s && s.startsWith('broken')) return 'bg-amber-50 text-amber-700';
   if (s === 'sortex')          return 'bg-orange-50 text-orange-700';
+  if (s === 'choba')           return 'bg-teal-50 text-teal-700';
   if (s === 'bran')            return 'bg-green-50 text-green-700';
   if (s === 'husk')            return 'bg-purple-50 text-purple-700';
   return 'bg-gray-50 text-gray-600';

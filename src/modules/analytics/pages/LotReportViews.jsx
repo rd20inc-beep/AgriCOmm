@@ -146,7 +146,7 @@ function LotCard({ bundle }) {
               ['Finished', fmtKg(batchYield.actual_finished_kg)], ['B1', fmtKg(batchYield.b1_kg)],
               ['B2', fmtKg(batchYield.b2_kg)], ['B3', fmtKg(batchYield.b3_kg)], ['CSR', fmtKg(batchYield.csr_kg)],
               ['Short grain', fmtKg(batchYield.short_grain_kg)], ['Broken (total)', fmtKg(batchYield.broken_kg)],
-              ['Powder', fmtKg(batchYield.powder_kg)], ['Sweepings', fmtKg(batchYield.sweeping_kg)], ['Sortex rejects', fmtKg(batchYield.sortex_rejects_kg)],
+              ['Powder', fmtKg(batchYield.powder_kg)], ['Sweepings', fmtKg(batchYield.sweeping_kg)], ['Choba', fmtKg(batchYield.choba_kg)], ['Sortex rejects', fmtKg(batchYield.sortex_rejects_kg)],
             ].filter((r) => parseFloat(String(r[1]).replace(/,/g, '')) > 0)}
             empty="No yield recorded."
           />

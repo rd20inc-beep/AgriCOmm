@@ -190,7 +190,7 @@ async function buildLotDetail(lot) {
       db('milling_batches').where({ id: ownBatchId }).first(
         'raw_qty_kg', 'actual_finished_kg', 'broken_kg', 'b1_kg', 'b2_kg', 'b3_kg', 'csr_kg',
         'short_grain_kg', 'bran_kg', 'husk_kg', 'sortex_rejects_kg',
-        'powder_kg', 'sweeping_kg', 'post_milling_grade'),
+        'powder_kg', 'sweeping_kg', 'choba_kg', 'post_milling_grade'),
       db('milling_costs').where({ batch_id: ownBatchId, category: 'raw_rice' }).sum('amount as t').first(),
     ]);
     if (arrival || post) batchQuality = { arrival: arrival || null, post: post || null };

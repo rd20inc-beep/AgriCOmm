@@ -1512,7 +1512,7 @@ function MarginBreakdown({ e, companyProfile }) {
 // Readable label for a by-product grade code.
 const GRADE_LABELS = {
   b1: 'Broken B1', b2: 'Broken B2', b3: 'Broken B3', csr: 'CSR', short_grain: 'Short Grain',
-  broken: 'Broken', sortex: 'Sortex', powder: 'Powder', sweeping: 'Sweeping',
+  broken: 'Broken', sortex: 'Sortex', powder: 'Powder', sweeping: 'Sweeping', choba: 'Choba',
 };
 function gradeLabel(g) {
   if (!g) return 'By-product';
