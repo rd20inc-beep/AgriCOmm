@@ -1987,6 +1987,19 @@ const inventoryService = {
     const validTypes = ['excess_found', 'shortage_found', 'damaged', 'spoiled', 'moisture_loss', 'bag_loss', 'manual_correction'];
     if (!validTypes.includes(adjustmentType)) throw new Error(`Invalid adjustment type: ${adjustmentType}`);
 
+    // Validate a decrease against on-hand up front (same direction logic as
+    // approveStockAdjustment) so the operator learns at ENTRY, not only at
+    // approval, that the adjustment exceeds available stock. The authoritative
+    // guard still runs in postMovement at approval.
+    const qk = parseFloat(quantityKg);
+    const isIncrease = ['excess_found', 'manual_correction'].includes(adjustmentType) && qk > 0;
+    if (!isIncrease) {
+      const available = parseFloat(lot.available_qty) || 0;
+      if (Math.abs(qk) > available + 0.0001) {
+        throw new Error(`Adjustment of ${Math.abs(qk)} kg exceeds available stock (${available} kg) in lot ${lot.lot_no}.`);
+      }
+    }
+
     const unitCost = parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.rate_per_kg) || 0;
     const totalCostImpact = unitCost * Math.abs(parseFloat(quantityKg));
 

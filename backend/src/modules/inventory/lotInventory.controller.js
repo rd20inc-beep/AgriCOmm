@@ -2274,10 +2274,10 @@ module.exports = {
         const totalValue = pricePerMT * (qty / 1000);
 
         // Traceability row (transfer_no IT-NNN). batch_id null — this is a
-        // direct lot transfer, not a batch→order one.
-        const last = await trx('internal_transfers').select('transfer_no').orderBy('created_at', 'desc').first();
-        const seq = (last && last.transfer_no) ? (parseInt(String(last.transfer_no).replace('IT-', ''), 10) || 0) + 1 : 1;
-        const transferNo = `IT-${String(seq).padStart(3, '0')}`;
+        // direct lot transfer, not a batch→order one. Collision-safe number (MAX
+        // trailing-digit + 1) — the old orderBy-created_at + parse could regenerate
+        // an existing IT- number under concurrent transfers and collide on UNIQUE.
+        const transferNo = await nextDocNo(trx, { table: 'internal_transfers', column: 'transfer_no', prefix: 'IT-', pad: 3 });
         const [t] = await trx('internal_transfers').insert({
           transfer_no: transferNo,
           batch_id: null,
@@ -2360,6 +2360,7 @@ module.exports = {
         const lot = await trx('inventory_lots').where('id', id).first();
         if (!lot) { const e = new Error('Lot not found.'); e.status = 404; throw e; }
         if (lot.entity !== 'export') { const e = new Error('Only export-entity lots can be transferred back to mill.'); e.status = 422; throw e; }
+        if (!['finished', 'byproduct'].includes(lot.type)) { const e = new Error('Only finished or by-product lots can be transferred back to mill.'); e.status = 422; throw e; }
 
         const avail = parseFloat(lot.available_qty) || 0;
         if (qty > avail + 0.0001) {
