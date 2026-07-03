@@ -113,6 +113,7 @@ const Reconciliation = lazyWithReload(() => import('./modules/finance/pages/Reco
 const Expenses = lazyWithReload(() => import('./modules/finance/pages/Expenses'));
 const Purchases = lazyWithReload(() => import('./modules/finance/pages/Purchases'));
 const LocalSalesFinance = lazyWithReload(() => import('./modules/finance/pages/LocalSalesFinance'));
+const FinancePayroll = lazyWithReload(() => import('./modules/finance/pages/FinancePayroll'));
 
 function FinanceRoutes() {
   return (
@@ -131,6 +132,7 @@ function FinanceRoutes() {
         <Route path="rates" element={<RatesCenter />} />
         <Route path="accounting" element={<Accounting />} />
         <Route path="statements" element={<PartyLedger />} />
+        <Route path="payroll" element={<ProtectedRoute module="payroll" action="view"><FinancePayroll /></ProtectedRoute>} />
         <Route path="alerts" element={<FinanceAlerts />} />
         {/* Legacy routes — redirect-compatible */}
         <Route path="receivables" element={<MoneyIn />} />

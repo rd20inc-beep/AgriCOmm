@@ -3,8 +3,9 @@ import { NavLink, useSearchParams } from 'react-router-dom';
 import { RouteErrorBoundary } from '../../../components/ErrorBoundary';
 import {
   LayoutDashboard, ArrowDownLeft, ArrowUpRight, DollarSign,
-  TrendingUp, Landmark, BookOpen, BookUser, Bell, Clock, Settings, ShoppingCart, Store, Printer, CalendarClock,
+  TrendingUp, Landmark, BookOpen, BookUser, Bell, Clock, Settings, ShoppingCart, Store, Printer, CalendarClock, Users,
 } from 'lucide-react';
+import { useAuth } from '../../../context/AuthContext';
 
 const tabs = [
   { label: 'Overview',     path: '/finance',              icon: LayoutDashboard, end: true },
@@ -19,6 +20,7 @@ const tabs = [
   { label: 'Rates',        path: '/finance/rates',        icon: Settings },
   { label: 'Accounting',   path: '/finance/accounting',   icon: BookOpen },
   { label: 'Statements',   path: '/finance/statements',   icon: BookUser },
+  { label: 'Payroll',      path: '/finance/payroll',      icon: Users, permission: { module: 'payroll', action: 'view' } },
   { label: 'Alerts',       path: '/finance/alerts',       icon: Bell },
 ];
 
@@ -33,7 +35,11 @@ const DATE_PRESETS = [
 
 export default function FinanceLayout({ children }) {
   const [params, setParams] = useSearchParams();
+  const { hasPermission } = useAuth();
   const dateRange = params.get('range') || '';
+  // Payroll tab shows only to users with the payroll permission (its route is
+  // payroll:view-gated); every other tab is ungated (parent finance:view covers it).
+  const visibleTabs = tabs.filter((t) => !t.permission || hasPermission(t.permission.module, t.permission.action));
 
   function setDateRange(val) {
     const next = new URLSearchParams(params);
@@ -90,7 +96,7 @@ export default function FinanceLayout({ children }) {
         {/* Tab navigation — money-flow structure */}
         <nav className="overflow-x-auto scrollbar-hide mt-1">
           <div className="flex min-w-max px-2 sm:px-4">
-            {tabs.map((tab) => {
+            {visibleTabs.map((tab) => {
               const Icon = tab.icon;
               return (
                 <NavLink
