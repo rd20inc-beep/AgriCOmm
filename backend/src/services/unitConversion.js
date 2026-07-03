@@ -18,6 +18,39 @@ const MAUND_KG = 40;
 const TON_KG = 1000;
 const DEFAULT_KATTA_KG = 50;
 
+// ─── Katta (empty bag) SIZE — nominal sack size, distinct from the actual rice
+// weight per bag ───
+// A katta is a physical sack of a fixed nominal size. The rice weight inside is
+// slightly under nominal (shrinkage / actual arrival), so deriving the size as
+// weight ÷ bags rounds DOWN (e.g. 10804/219 = 49.3 → 49) and would spawn a bogus
+// off-size KATTA-49 packaging item beside the real KATTA-50. `snapBagSizeKg`
+// snaps a derived size to the nearest STANDARD sack size when it's within
+// tolerance, so near-standard noise settles on the real size.
+const STANDARD_BAG_SIZES = [10, 25, 40, 50];
+const BAG_SIZE_SNAP_TOLERANCE = 0.08; // 8%
+
+// Snap a derived/entered bag size to the nearest standard sack size when within
+// tolerance (|kg − S| ≤ max(2, 8%·S)); otherwise return the plain rounded value.
+// 0 for non-positive input.
+function snapBagSizeKg(kg) {
+  const v = parseFloat(kg) || 0;
+  if (v <= 0) return 0;
+  let best = null;
+  let bestDiff = Infinity;
+  for (const s of STANDARD_BAG_SIZES) {
+    const diff = Math.abs(v - s);
+    if (diff <= Math.max(2, BAG_SIZE_SNAP_TOLERANCE * s) && diff < bestDiff) {
+      best = s;
+      bestDiff = diff;
+    }
+  }
+  return best != null ? best : Math.round(v);
+}
+
+function isStandardBagSize(kg) {
+  return STANDARD_BAG_SIZES.includes(Math.round(parseFloat(kg) || 0));
+}
+
 // ─── Quantity Conversions (to KG) ───
 
 function kattaToKg(katta, bagWeightKg = DEFAULT_KATTA_KG) {
@@ -196,6 +229,9 @@ const UNIT_LABELS = {
 module.exports = {
   // Constants
   MAUND_KG, TON_KG, DEFAULT_KATTA_KG, UNITS, UNIT_LABELS,
+  STANDARD_BAG_SIZES, BAG_SIZE_SNAP_TOLERANCE,
+  // Bag-size snapping
+  snapBagSizeKg, isStandardBagSize,
   // Specific conversions
   kattaToKg, maundToKg, tonToKg, bagsToKg,
   kgToKatta, kgToMaund, kgToTon, kgToBags,

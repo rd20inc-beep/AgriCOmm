@@ -1,4 +1,5 @@
 const db = require('../../config/database');
+const uc = require('../../services/unitConversion');
 
 // =============================================================================
 // CANONICAL MOVEMENT TAXONOMY — Single source of truth for all stock movements
@@ -2674,8 +2675,10 @@ const inventoryService = {
       const bags = Math.round(num(v.total_bags));
       if (bags <= 0) continue;
       const wKg = num(v.weight_kg);
-      let size = Math.round(num(v.bag_size_kg));
-      if (size <= 0) size = wKg > 0 ? Math.round(wKg / bags) : 0;
+      // Snap to the nearest standard sack size — the nominal bag_size_kg if set,
+      // else derived from weight ÷ bags — so shrinkage noise (49.3) settles on
+      // the real size (50) instead of spawning an off-size KATTA-49.
+      const size = uc.snapBagSizeKg(num(v.bag_size_kg) || (bags > 0 ? wKg / bags : 0));
       if (size <= 0) continue;
       bySize.set(size, (bySize.get(size) || 0) + bags);
     }
@@ -2695,17 +2698,22 @@ const inventoryService = {
       for (const r of srcLots) {
         const totalBags = Math.round(num(r.total_bags));
         if (totalBags <= 0) continue;
-        // Bag size: the explicit column, else received intake weight ÷ bag count.
+        // Bag size: the nominal bag_size_kg if set, else received intake weight ÷
+        // bag count — snapped to the nearest standard sack size so shrinkage
+        // noise (49.3) settles on the real size (50), not an off-size KATTA-49.
         const received = num(r.received_net_weight_kg);
-        let size = Math.round(num(r.bag_size_kg));
-        if (size <= 0) size = received > 0 ? Math.round(received / totalBags) : 0;
+        const size = uc.snapBagSizeKg(num(r.bag_size_kg) || (received > 0 ? received / totalBags : 0));
         if (size <= 0) continue;
-        // Bags freed = bags for the KG consumed into this batch, capped at the
-        // lot's total. Fully-consumed lots free all their bags.
+        // Bags freed = the lot's actual bag count scaled by the weight-fraction
+        // this batch consumed (a blend may take only part of a lot). Using the
+        // real total_bags — not consumed÷nominalSize — means a FULLY-milled lot
+        // frees ALL its physical sacks even though nominal 50 > the ~49 avg.
+        // Fall back to consumed÷size only when the received weight is unknown.
         const consumed = num(r.qty_kg);
-        const bags = consumed > 0
-          ? Math.min(totalBags, Math.round(consumed / size))
-          : totalBags;
+        let bags;
+        if (consumed <= 0) bags = totalBags;
+        else if (received > 0) bags = Math.min(totalBags, Math.round(totalBags * consumed / received));
+        else bags = Math.min(totalBags, Math.round(consumed / size));
         if (bags <= 0) continue;
         bySize.set(size, (bySize.get(size) || 0) + bags);
       }

@@ -1,4 +1,5 @@
 const db = require('../../config/database');
+const uc = require('../../services/unitConversion');
 const inventoryService = require('../../services/inventoryService');
 const accountingService = require('../../services/accountingService');
 const automationService = require('../../services/automationService');
@@ -1468,6 +1469,8 @@ const millingController = {
         if (!parsedBagSize && parsedWeight && parsedTotalBags && parsedTotalBags > 0) {
           parsedBagSize = parsedWeight / parsedTotalBags;
         }
+        // Snap to the nearest standard sack size (nominal, not the shrunk avg).
+        if (parsedBagSize) parsedBagSize = uc.snapBagSizeKg(parsedBagSize) || null;
         const totalBags = parsedTotalBags
           || (parsedWeight && parsedBagSize && parsedBagSize > 0
             ? Math.ceil(parsedWeight / parsedBagSize)
@@ -1626,6 +1629,8 @@ const millingController = {
         if (!parsedBagSize && parsedWeight && parsedTotalBags && parsedTotalBags > 0) {
           parsedBagSize = parsedWeight / parsedTotalBags;
         }
+        // Snap to the nearest standard sack size (nominal, not the shrunk avg).
+        if (parsedBagSize) parsedBagSize = uc.snapBagSizeKg(parsedBagSize) || null;
         const totalBagsResolved = parsedTotalBags
           || (parsedWeight && parsedBagSize && parsedBagSize > 0
             ? Math.ceil(parsedWeight / parsedBagSize)
