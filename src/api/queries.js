@@ -1292,10 +1292,10 @@ export function useRunDueRecurring() {
   });
 }
 
-export function useMillWorkers() {
+export function useMillWorkers(params = {}) {
   return useQuery({
-    queryKey: ['mill-workers'],
-    queryFn: async () => { const res = await millingApi.listWorkers(); return transformKeys(unwrap(res, 'workers') || []); },
+    queryKey: ['mill-workers', params],
+    queryFn: async () => { const res = await millingApi.listWorkers(params); return transformKeys(unwrap(res, 'workers') || []); },
   });
 }
 
@@ -1532,10 +1532,10 @@ export function useAttendanceHolidays(month) {
   });
 }
 
-export function usePayrollRuns() {
+export function usePayrollRuns(params = {}) {
   return useQuery({
-    queryKey: ['payroll-runs'],
-    queryFn: async () => { const res = await millingApi.listPayrollRuns(); return transformKeys(unwrap(res, 'runs') || []); },
+    queryKey: ['payroll-runs', params],
+    queryFn: async () => { const res = await millingApi.listPayrollRuns(params); return transformKeys(unwrap(res, 'runs') || []); },
   });
 }
 

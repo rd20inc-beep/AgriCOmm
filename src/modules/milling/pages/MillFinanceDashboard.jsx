@@ -76,6 +76,8 @@ const CAT_DETAIL = {
 };
 const RECURRENCES = ['monthly', 'weekly', 'quarterly', 'yearly'];
 const WORKER_ROLES = ['operator', 'laborer', 'supervisor', 'driver', 'guard', 'cleaner'];
+// Head Office staff carry different job titles — free-text with these suggestions.
+const HEAD_OFFICE_ROLES = ['Manager', 'Accountant', 'Officer', 'Clerk', 'Admin', 'Cashier', 'Executive'];
 // VENDOR_OPTIONS used to be a hardcoded map here. It now lives in the
 // `expense_vendors` table and is managed via Admin → Expense Vendors.
 // The component fetches it through useExpenseVendors() below.
@@ -196,7 +198,10 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
       addToast(`Posted ${r.category} ${PKR(r.amount)} for ${r.nextDue}`, 'success');
     } catch (e) { addToast(e.message, 'error'); }
   }
-  const { data: workers = [] } = useMillWorkers();
+  // Head Office ('general') vs Mill ('mill') payroll scope — the toggle. Default
+  // to Head Office on the /finance/payroll view, Mill on the mill dashboard.
+  const [payrollEntity, setPayrollEntity] = useState(payrollOnly ? 'general' : 'mill');
+  const { data: workers = [] } = useMillWorkers({ entity: payrollEntity });
   const createWorkerMut = useCreateMillWorker();
   const updateWorkerMut = useUpdateMillWorker();
   const setPinMut = useSetWorkerPortalPin();
@@ -206,9 +211,9 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   const curMonth = new Date().toISOString().slice(0, 7);
   const [payrollMonth, setPayrollMonth] = useState(curMonth);
   const [payrollView, setPayrollView] = useState('payroll'); // 'payroll' | 'attendance'
-  const { data: payrollData } = usePayrollSummary({ month: payrollMonth });
+  const { data: payrollData } = usePayrollSummary({ month: payrollMonth, entity: payrollEntity });
   const recordAttMut = useRecordAttendance();
-  const { data: payrollRuns = [] } = usePayrollRuns();
+  const { data: payrollRuns = [] } = usePayrollRuns({ entity: payrollEntity });
   const postRunMut = usePostPayrollRun();
   const deleteRunMut = useDeletePayrollRun();
   const approveRunMut = useApprovePayrollRun();
@@ -340,7 +345,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   const [showTransfer, setShowTransfer] = useState(false);
   const EMPTY_EXP = { category: 'salaries', vendor_preset: '', vendor_name: '', subcategory: '', employee_id: '', is_recurring: false, recurrence: 'monthly', description: '', amount: '', expense_date: new Date().toISOString().split('T')[0], reference: '', notes: '' };
   const [expForm, setExpForm] = useState(EMPTY_EXP);
-  const EMPTY_WORKER = { id: null, name: '', role: 'laborer', department: '', pay_type: 'daily', daily_wage: '', monthly_salary: '', ot_rate_per_hour: '', phone: '', cnic: '', bank_name: '', bank_account_number: '', iban: '', joined_date: new Date().toISOString().split('T')[0], left_date: '', notes: '', portal_enabled: false };
+  const EMPTY_WORKER = { id: null, name: '', role: '', entity: payrollEntity, department: '', pay_type: 'daily', daily_wage: '', monthly_salary: '', ot_rate_per_hour: '', phone: '', cnic: '', bank_name: '', bank_account_number: '', iban: '', joined_date: new Date().toISOString().split('T')[0], left_date: '', notes: '', portal_enabled: false };
   const [workerForm, setWorkerForm] = useState(EMPTY_WORKER);
   const [advanceTarget, setAdvanceTarget] = useState(null); // worker we're giving an advance to
   const [advanceForm, setAdvanceForm] = useState({ amount: '', advance_date: new Date().toISOString().split('T')[0], payment_method: 'cash', notes: '', recovery_method: 'full_next_salary', recovery_start_period: '', installment_amount: '', installment_count: '', deduction_percent: '' });
@@ -557,7 +562,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   function openWorkerDrawer(worker) {
     if (worker) {
       setWorkerForm({
-        id: worker.id, name: worker.name || '', role: worker.role || 'laborer', department: worker.department || '',
+        id: worker.id, name: worker.name || '', role: worker.role || '', entity: worker.entity || 'mill', department: worker.department || '',
         pay_type: worker.payType || 'daily',
         daily_wage: worker.dailyWage != null ? String(worker.dailyWage) : '',
         monthly_salary: worker.monthlySalary != null ? String(worker.monthlySalary) : '',
@@ -581,7 +586,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
     if (workerForm.pay_type === 'monthly' && !(parseFloat(workerForm.monthly_salary) > 0)) { addToast('Monthly salary is required', 'error'); return; }
     if (workerForm.pay_type === 'daily' && !(parseFloat(workerForm.daily_wage) > 0)) { addToast('Daily wage is required', 'error'); return; }
     const payload = {
-      name: workerForm.name.trim(), role: workerForm.role, department: workerForm.department || null, pay_type: workerForm.pay_type,
+      name: workerForm.name.trim(), role: workerForm.role || null, entity: workerForm.entity === 'general' ? 'general' : 'mill', department: workerForm.department || null, pay_type: workerForm.pay_type,
       daily_wage: workerForm.daily_wage || null, monthly_salary: workerForm.monthly_salary || null,
       ot_rate_per_hour: workerForm.ot_rate_per_hour || null,
       phone: workerForm.phone || null, cnic: workerForm.cnic || null,
@@ -1536,6 +1541,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
         return (
         <div className="space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
             <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5">
               {[['payroll', 'Payroll', Wallet], ['attendance', 'Attendance', CalendarDays], ['reports', 'Reports', FileText]].map(([key, label, Icon]) => (
                 <button
@@ -1546,6 +1552,16 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                   <Icon className="w-3.5 h-3.5" /> {label}
                 </button>
               ))}
+            </div>
+            {/* Head Office | Mill payroll scope toggle */}
+            <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5">
+              {[['general', 'Head Office'], ['mill', 'Mill']].map(([key, label]) => (
+                <button key={key} type="button" onClick={() => setPayrollEntity(key)}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition ${payrollEntity === key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
             </div>
             <div className="flex items-center gap-2">
               {payrollView !== 'reports' && (
@@ -1980,7 +1996,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
       <SlideDrawer
         open={showWorkerDrawer}
         onClose={() => setShowWorkerDrawer(false)}
-        title={workerForm.id ? 'Edit Mill Employee' : 'Add Mill Employee'}
+        title={`${workerForm.id ? 'Edit' : 'Add'} ${workerForm.entity === 'general' ? 'Head Office' : 'Mill'} Employee`}
         subtitle="Daily-wage or salaried — drives attendance & monthly payroll"
         icon={UserPlus}
         footer={
@@ -1997,6 +2013,18 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
         }
       >
         <div className="space-y-4">
+          {/* Head Office vs Mill payroll */}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Payroll</label>
+            <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5">
+              {[['general', 'Head Office'], ['mill', 'Mill']].map(([key, label]) => (
+                <button key={key} type="button" onClick={() => setWorkerForm(p => ({ ...p, entity: key, role: '' }))}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition ${workerForm.entity === key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Name *</label>
@@ -2009,13 +2037,18 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Role</label>
-              <select
+              <input
+                list="worker-role-options"
                 value={workerForm.role}
                 onChange={e => setWorkerForm(p => ({ ...p, role: e.target.value }))}
+                placeholder={workerForm.entity === 'general' ? 'e.g. Accountant' : 'e.g. Operator'}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900 bg-white"
-              >
-                {WORKER_ROLES.map(r => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
-              </select>
+              />
+              <datalist id="worker-role-options">
+                {(workerForm.entity === 'general' ? HEAD_OFFICE_ROLES : WORKER_ROLES).map(r => (
+                  <option key={r} value={r.charAt(0).toUpperCase() + r.slice(1)} />
+                ))}
+              </datalist>
             </div>
           </div>
           <div>
@@ -2345,6 +2378,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
       {showRunDrawer && (
         <PayrollRunDrawer
           month={payrollMonth}
+          entity={payrollEntity}
           employees={unpaidEmployees}
           preselectId={runPreselect}
           bankAccounts={bankAccountsList}
@@ -3696,7 +3730,7 @@ function downloadBankTransferFile(run, lines, addToast) {
 
 // Drawer to post a payroll run: review the per-employee breakdown, then pay it
 // out from Mill Cash. Server recomputes the figures on submit.
-function PayrollRunDrawer({ month, employees, preselectId, bankAccounts = [], onClose, onPosted, postRunMut, addToast }) {
+function PayrollRunDrawer({ month, entity = 'mill', employees, preselectId, bankAccounts = [], onClose, onPosted, postRunMut, addToast }) {
   const [form, setForm] = useState({ pay_method: 'cash', bank_account_id: '', pay_date: new Date().toISOString().split('T')[0] });
   // Banks the mill can pay salaries from (cash is the dedicated Mill Cash float).
   const payBanks = (bankAccounts || []).filter(a => a.type !== 'cash');
@@ -3742,6 +3776,7 @@ function PayrollRunDrawer({ month, employees, preselectId, bankAccounts = [], on
     try {
       const res = await postRunMut.mutateAsync({
         month,
+        entity,
         pay_method: form.pay_method,
         bank_account_id: form.pay_method === 'bank' ? Number(form.bank_account_id) : null,
         pay_date: form.pay_date,

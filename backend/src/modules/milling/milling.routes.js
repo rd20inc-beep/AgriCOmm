@@ -740,7 +740,11 @@ async function attachAdvances(workers) {
 
 router.get('/workers', authorize('payroll', 'view'), async (req, res) => {
   try {
-    const workers = await db('mill_workers').orderBy('is_active', 'desc').orderBy('name');
+    // Head Office ('general') vs Mill ('mill') payroll scope. Omitted = all.
+    const entity = req.query.entity === 'general' ? 'general' : req.query.entity === 'mill' ? 'mill' : null;
+    const q = db('mill_workers').orderBy('is_active', 'desc').orderBy('name');
+    if (entity) q.where('entity', entity);
+    const workers = await q;
     return res.json({ success: true, data: { workers: await attachAdvances(workers) } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
@@ -834,6 +838,7 @@ function plannedScheduleRows(advance) {
 router.post('/workers', authorize('payroll', 'create'), auditAction('create', 'mill_worker', (req, d) => d.data?.worker?.id), async (req, res) => {
   try {
     const { name, role, phone, cnic, joined_date, left_date, mill_id, notes, bank_name, bank_account_number, iban, department } = req.body;
+    const entity = req.body.entity === 'general' ? 'general' : 'mill'; // Head Office vs Mill
     const { pay_type, monthly_salary, daily_wage } = normalizeWorkerPay(req.body);
     if (!name) return res.status(400).json({ success: false, message: 'name is required.' });
     if (pay_type === 'monthly' && !(monthly_salary > 0)) return res.status(400).json({ success: false, message: 'monthly_salary required for salaried workers.' });
@@ -845,6 +850,7 @@ router.post('/workers', authorize('payroll', 'create'), auditAction('create', 'm
       phone: phone || null, cnic: cnic || null,
       bank_name: bank_name || null, bank_account_number: bank_account_number || null, iban: iban || null,
       department: department || null,
+      entity,
       joined_date: joined_date || new Date().toISOString().split('T')[0],
       left_date: left_date || null,
       mill_id: mill_id || null, notes: notes || null,
@@ -868,6 +874,7 @@ router.put('/workers/:id', authorize('payroll', 'edit'), auditAction('update', '
       updates.ot_rate_per_hour = v > 0 ? v : null;
     }
     if (req.body.is_active !== undefined) updates.is_active = !!req.body.is_active;
+    if (req.body.entity !== undefined) updates.entity = req.body.entity === 'general' ? 'general' : 'mill';
     let payRevision = null;
     if (req.body.pay_type !== undefined || req.body.daily_wage !== undefined || req.body.monthly_salary !== undefined) {
       const pay = normalizeWorkerPay({ ...worker, ...req.body });
@@ -958,7 +965,7 @@ async function postRunStatutoryJournal(trx, run, userId, lines, refNo) {
   // createJournal does string date math — normalise a Date to YYYY-MM-DD.
   const payDate = run.pay_date instanceof Date ? run.pay_date.toISOString().slice(0, 10) : (run.pay_date || new Date().toISOString().slice(0, 10));
   const journal = await accountingService.createJournal(trx, {
-    date: payDate, entity: 'mill', refType: 'Payroll Statutory', refNo,
+    date: payDate, entity: run.entity === 'general' ? 'general' : 'mill', refType: 'Payroll Statutory', refNo,
     description: `Statutory deductions withheld — payroll ${run.period}`,
     currency: 'PKR', fxRate: 1, isAuto: true, userId: userId || null,
     lines: [
@@ -992,7 +999,9 @@ async function payLineBatch(run, lineRows, userId) {
     let expense = null;
     if (net > 0) {
       expense = await expensesService.create({
-        expense_type: 'mill', category: 'salaries', amount: net, currency: 'PKR',
+        // Route to the run's entity: 'general' → Head Office books + Office Petty
+        // Cash, 'mill' → mill books + Mill Cash (expensesService maps type→entity+cash).
+        expense_type: locked.entity === 'general' ? 'general' : 'mill', category: 'salaries', amount: net, currency: 'PKR',
         expense_date: locked.pay_date,
         description: `Salaries — payroll run ${locked.period}`,
         notes: `Payroll ${locked.period}: ${rows.length} employee(s) · net ${net}`,
@@ -1347,7 +1356,7 @@ router.post('/payroll/final-settlement/:workerId', authorize('payroll', 'pay'),
     let expense = null;
     if (net > 0) {
       expense = await expensesService.create({
-        expense_type: 'mill', category: 'salaries', amount: net, currency: 'PKR', expense_date: settleDate,
+        expense_type: w.entity === 'general' ? 'general' : 'mill', category: 'salaries', amount: net, currency: 'PKR', expense_date: settleDate,
         description: `Final settlement — ${w.name}`, notes: b.notes || `Final settlement for ${w.name}`,
         pay_now: true, bank_account_id: method === 'bank' ? (b.bank_account_id || null) : null, payment_method: method,
       }, req.user?.id);
@@ -1503,7 +1512,7 @@ router.post('/workers/:id/advances', authorize('payroll', 'create'), auditAction
     catch (e) { return res.status(400).json({ success: false, message: e.message }); }
 
     const expense = await expensesService.create({
-      expense_type: 'mill', category: 'salaries', amount, currency: 'PKR',
+      expense_type: worker.entity === 'general' ? 'general' : 'mill', category: 'salaries', amount, currency: 'PKR',
       expense_date: advance_date,
       description: `Salary advance — ${worker.name}`,
       notes: req.body.notes || null,
@@ -2128,8 +2137,9 @@ async function unrecoverAdvancesForWorker(trx, workerId, amount) {
 
 router.get('/payroll/summary', authorize('payroll', 'view'), async (req, res) => {
   try {
-    const data = await computePayrollSummary(req.query.month);
-    const status = await committedWorkerStatus(req.query.month);
+    const entity = req.query.entity === 'general' ? 'general' : 'mill';
+    const data = await computePayrollSummary(req.query.month, entity);
+    const status = await committedWorkerStatus(req.query.month, entity);
     data.summary = data.summary.map((w) => ({ ...w, paid: status.get(w.id) === 'paid', committed: status.has(w.id), runStatus: status.get(w.id) || null }));
     // Net still owed = employees not yet in any run this period.
     data.unpaidNet = data.summary.filter((w) => !w.committed).reduce((s, w) => s + w.netPay, 0);
@@ -2163,7 +2173,8 @@ async function enrichPayslipLines(lines) {
 
 router.get('/payroll/runs', authorize('payroll', 'view'), async (req, res) => {
   try {
-    const runs = await db('mill_payroll_runs as r')
+    const entity = req.query.entity === 'general' ? 'general' : req.query.entity === 'mill' ? 'mill' : null;
+    const q = db('mill_payroll_runs as r')
       .leftJoin('bank_accounts as ba', 'r.bank_account_id', 'ba.id')
       .leftJoin('users as up', 'up.id', 'r.created_by')
       .leftJoin('users as ua', 'ua.id', 'r.approved_by')
@@ -2171,6 +2182,8 @@ router.get('/payroll/runs', authorize('payroll', 'view'), async (req, res) => {
       .leftJoin('users as uac', 'uac.id', 'r.accrued_by')
       .select('r.*', 'ba.name as bank_name', 'up.full_name as prepared_by_name', 'ua.full_name as approved_by_name', 'upd.full_name as paid_by_name', 'uac.full_name as accrued_by_name')
       .orderBy('r.period', 'desc').orderBy('r.id', 'desc');
+    if (entity) q.where('r.entity', entity);
+    const runs = await q;
     return res.json({ success: true, data: { runs } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
@@ -2239,8 +2252,8 @@ router.post('/payroll/run', authorize('payroll', 'create'),
   auditAction('prepare', 'mill_payroll_run', (req, data) => data.data?.run?.id),
   async (req, res) => {
   try {
-    const { month, pay_method, bank_account_id, pay_date, notes, lines } = req.body;
-    const run = await preparePayrollRun({ month, lines, pay_method, bank_account_id, pay_date, notes }, req.user?.id);
+    const { month, pay_method, bank_account_id, pay_date, notes, lines, entity } = req.body;
+    const run = await preparePayrollRun({ month, lines, pay_method, bank_account_id, pay_date, notes, entity }, req.user?.id);
     return res.json({ success: true, data: { run } });
   } catch (err) { return res.status(err.httpStatus || 500).json({ success: false, message: err.message }); }
 });
@@ -2378,7 +2391,7 @@ router.post('/payroll/runs/:id/accrue', authorize('payroll', 'approve'),
       let expense = null;
       if (netTotal > 0) {
         expense = await expensesService.create({
-          expense_type: 'mill', category: 'salaries', amount: netTotal, currency: 'PKR',
+          expense_type: run.entity === 'general' ? 'general' : 'mill', category: 'salaries', amount: netTotal, currency: 'PKR',
           expense_date: run.pay_date,
           description: `Salaries (accrued) — payroll run ${run.period}`,
           notes: run.notes || `Payroll ${run.period}: ${run.employee_count} employee(s) · net ${netTotal} (accrued)`,
