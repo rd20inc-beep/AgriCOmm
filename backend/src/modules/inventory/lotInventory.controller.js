@@ -773,7 +773,10 @@ module.exports = {
           // Bags
           bag_type: bag_type || null,
           bag_quality: bag_quality || null,
-          bag_size_kg: bag_size_kg || null,
+          // Nominal sack size (drives katta accounting). Snap to the nearest
+          // standard so a lot created without an explicit size — or one whose
+          // weight÷bags rounds to 49 — still records the real 50 (not NULL/49).
+          bag_size_kg: uc.snapBagSizeKg(bag_size_kg || (totalBags > 0 ? netWeightKg / totalBags : 0)) || null,
           bag_weight_gm: bag_weight_gm || null,
           bag_color: bag_color || null,
           bag_cost_per_bag: bag_cost_per_bag || 0,
@@ -900,6 +903,8 @@ module.exports = {
           const vBags = v.total_bags != null && v.total_bags !== '' ? parseInt(v.total_bags, 10) : null;
           let vBagSize = v.bag_size_kg != null && v.bag_size_kg !== '' ? parseFloat(v.bag_size_kg) : null;
           if (!vBagSize && vWeightKg && vBags && vBags > 0) vBagSize = vWeightKg / vBags;
+          // Snap to the nearest standard sack size (nominal, not the shrunk avg).
+          if (vBagSize) vBagSize = uc.snapBagSizeKg(vBagSize) || null;
           await trx('milling_vehicle_arrivals').insert({
             lot_id: lot.id,
             batch_id: null,
@@ -2492,6 +2497,8 @@ module.exports = {
       if (!parsedBagSize && weightKg && parsedTotalBags && parsedTotalBags > 0) {
         parsedBagSize = weightKg / parsedTotalBags;
       }
+      // Snap to the nearest standard sack size (nominal, not the shrunk avg).
+      if (parsedBagSize) parsedBagSize = uc.snapBagSizeKg(parsedBagSize) || null;
 
       // If the lot has already been routed into a batch, link the vehicle
       // straight to that batch so it shows up on the batch detail page too.

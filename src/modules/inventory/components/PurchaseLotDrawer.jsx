@@ -3,6 +3,7 @@ import { Search, Plus, Truck, Package, DollarSign, CheckCircle2, AlertCircle, Lo
 import Drawer from '../../../components/Drawer';
 import { lotInventoryApi } from '../api/services';
 import { useCreatePurchaseLot } from '../../../api/queries';
+import { STANDARD_BAG_SIZES, snapBagSizeKg, isStandardBagSize, DEFAULT_BAG_SIZE_KG } from '../../../utils/bagSize';
 
 /**
  * Modern slide-from-right drawer for recording a rice purchase lot.
@@ -49,6 +50,7 @@ const defaultForm = () => ({
   weight_kg: '',
   ordered_weight_kg: '',
   total_bags: '',
+  bag_size_kg: DEFAULT_BAG_SIZE_KG, // nominal sack size (drives katta accounting)
   price_per_kg: '',
   purchase_date: new Date().toISOString().slice(0, 10),
   warehouse_id: '',
@@ -194,6 +196,11 @@ export default function PurchaseLotDrawer({
   const pricePerMT = ratePerKg * 1000;
   const bags = parseInt(form.total_bags, 10) || 0;
   const avgBagKg = bags > 0 && weightKg > 0 ? weightKg / bags : 0;
+  // Nominal sack size the operator picked vs what the weight÷bags implies (snapped
+  // to the nearest standard). When they disagree, prompt an inline confirm.
+  const bagSize = parseInt(form.bag_size_kg, 10) || 0;
+  const detectedBagSize = snapBagSizeKg(avgBagKg); // 49.3 → 50, 24.5 → 25, 45 → 45
+  const bagSizeMismatch = avgBagKg > 0 && detectedBagSize > 0 && detectedBagSize !== bagSize;
   const totalValue = weightKg * ratePerKg;
   // Ordered vs received (optional). Bill follows RECEIVED (weightKg).
   const orderedKg = parseFloat(form.ordered_weight_kg) || 0;
@@ -261,6 +268,9 @@ export default function PurchaseLotDrawer({
         ordered_quantity_input: orderedKg > 0 ? orderedKg : null,
         ordered_quantity_unit: 'kg',
         bag_weight_kg: avgBagKg > 0 ? avgBagKg : (bags > 0 ? weightKg / bags : 50),
+        // Nominal sack size (snapped) — drives katta accounting; distinct from
+        // bag_weight_kg (the actual avg rice weight per bag used for conversions).
+        bag_size_kg: bagSize > 0 ? bagSize : (detectedBagSize || DEFAULT_BAG_SIZE_KG),
         total_bags: bags || null,
         // Rate per kilogram
         rate_input: ratePerKg,
@@ -282,6 +292,8 @@ export default function PurchaseLotDrawer({
               driver_phone: v.driver_phone || null,
               weight_kg: v.weight_kg !== '' ? parseFloat(v.weight_kg) : null,
               total_bags: v.total_bags !== '' ? parseInt(v.total_bags, 10) : null,
+              // Per-truck sack size = the lot's chosen nominal size (backend snaps).
+              bag_size_kg: bagSize > 0 ? bagSize : null,
               arrival_date: v.arrival_date || form.purchase_date || null,
               notes: v.notes || null,
               quality_json: Object.keys(q).length ? q : null,
@@ -576,6 +588,72 @@ export default function PurchaseLotDrawer({
             placeholder="e.g. 600"
             hint={avgBagKg > 0 ? `${avgBagKg.toFixed(2)} kg/bag avg` : null}
           />
+        </div>
+
+        {/* ─────────── Bag (katta) size ─────────── */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1.5">
+            Bag (katta) size
+            <span className="text-gray-400 font-normal ml-1.5">— nominal sack size, drives empty-bag accounting</span>
+          </label>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {STANDARD_BAG_SIZES.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setForm(prev => ({ ...prev, bag_size_kg: s }))}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                  bagSize === s
+                    ? 'bg-emerald-600 text-white border-emerald-600'
+                    : 'bg-white text-gray-700 border-gray-300 hover:border-emerald-400'
+                }`}
+              >
+                {s} kg
+              </button>
+            ))}
+            <input
+              type="number" step="1" min="0"
+              value={form.bag_size_kg}
+              onChange={(e) => setForm(prev => ({ ...prev, bag_size_kg: e.target.value }))}
+              className="w-24 px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+              placeholder="Custom"
+              aria-label="Custom bag size in kg"
+            />
+            {bagSize > 0 && !isStandardBagSize(bagSize) && (
+              <span className="text-[11px] text-amber-600">non-standard</span>
+            )}
+          </div>
+          {bagSizeMismatch && (
+            <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              {isStandardBagSize(detectedBagSize) ? (
+                <>
+                  These bags average <b>{avgBagKg.toFixed(1)} kg</b> — that looks like{' '}
+                  <b>{detectedBagSize} kg</b> sacks, not {bagSize} kg.
+                </>
+              ) : (
+                <>
+                  Average <b>{avgBagKg.toFixed(1)} kg/bag</b> isn’t a standard size (10 / 25 / 40 / 50 kg).
+                  Confirm the sack size.
+                </>
+              )}
+              <div className="mt-1.5 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setForm(prev => ({ ...prev, bag_size_kg: detectedBagSize }))}
+                  className="px-2.5 py-1 rounded-md bg-amber-600 text-white text-[11px] font-medium hover:bg-amber-700"
+                >
+                  Use {detectedBagSize} kg
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setForm(prev => ({ ...prev, bag_size_kg: DEFAULT_BAG_SIZE_KG }))}
+                  className="px-2.5 py-1 rounded-md bg-white border border-amber-300 text-amber-800 text-[11px] font-medium hover:bg-amber-100"
+                >
+                  Keep {DEFAULT_BAG_SIZE_KG} kg
+                </button>
+              </div>
+            </div>
+          )}
         </div>
         <Input
           label="Ordered Weight (KG)"
