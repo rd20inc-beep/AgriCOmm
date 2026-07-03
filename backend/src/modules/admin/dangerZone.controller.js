@@ -386,6 +386,32 @@ async function deleteLocalSale(trx, req, id) {
   return { message: `Local sale ${sale.sale_no} deleted and lot restocked.`, sale_no: sale.sale_no };
 }
 
+// Reverse the CASH effect of a payment being hard-deleted: restore the bank
+// balance it moved and drop its sub-ledger rows. A receipt incremented the
+// balance (→ decrement to reverse); a payment decremented it (→ increment). An
+// uncleared post-dated cheque never moved the balance, so skip it. Currency-aware:
+// a foreign payment into a matching account moved the native amount, else the PKR
+// equivalent — mirror what recordPayment/payPurchase banked.
+async function reversePaymentCash(trx, p) {
+  if (!p) return;
+  if (p.bank_account_id && p.cleared !== false) {
+    const acct = await trx('bank_accounts').where('id', p.bank_account_id).first();
+    const moved = acct && acct.currency === (p.currency || 'PKR')
+      ? num(p.amount)
+      : (num(p.base_amount_pkr) || num(p.amount));
+    if (moved > 0) {
+      const dir = p.type === 'receipt' ? -1 : 1;
+      await trx('bank_accounts').where('id', p.bank_account_id).increment('current_balance', dir * moved);
+    }
+  }
+  // Delete the bank_transactions trail. linked_payment_id is now set at source;
+  // the notes fallback catches legacy record_payment rows that predate that fix.
+  await trx('bank_transactions')
+    .where('linked_payment_id', p.id)
+    .orWhere((q) => q.where('notes', 'ilike', `%${p.payment_no}%`).whereIn('source', ['record_payment', 'cheque_clear', 'local_sale']))
+    .del();
+}
+
 async function deletePayment(trx, req, id) {
   const p = await trx('payments').where('id', id).first();
   if (!p) { const e = new Error('Payment not found.'); e.status = 404; throw e; }
@@ -413,7 +439,7 @@ async function deletePayment(trx, req, id) {
       });
     }
   }
-  await trx('bank_transactions').where('linked_payment_id', id).del();
+  await reversePaymentCash(trx, p); // restore bank balance + drop the bank trail
   await trx('journal_entries').where('ref_no', p.payment_no).del();
   await trx('payments').where('id', id).del();
 
@@ -453,10 +479,23 @@ async function deleteMillPurchase(trx, req, id) {
     }
   }
   await trx('mill_stock_movements').where({ reference_type: 'purchase', reference_id: id }).del();
+  // Reverse the store_purchase GL journal (posted by createPurchase, keyed on
+  // purchase_no) — otherwise the DR 1250 / CR 2010 entry survives everything it
+  // described and the trial balance is left off.
+  await trx('journal_entries').where('ref_no', mp.purchase_no).del();
+  // Reverse + drop any payments made against this purchase's payable (restore the
+  // bank balance, drop the bank trail) before deleting the payable, so a paid
+  // purchase doesn't leave orphaned payments + cash drift.
+  const payableIds = (await trx('payables').where({ source_table: 'mill_purchases', source_id: id }).select('id')).map((r) => r.id);
+  if (payableIds.length) {
+    const pays = await trx('payments').whereIn('linked_payable_id', payableIds);
+    for (const pay of pays) await reversePaymentCash(trx, pay);
+    await trx('payments').whereIn('linked_payable_id', payableIds).del();
+  }
   await trx('payables').where({ source_table: 'mill_purchases', source_id: id }).del();
   await trx('mill_purchases').where('id', id).del(); // mill_purchase_items cascade
   await auditDanger(trx, req, 'hard_delete', 'mill_purchase', id, { purchase_no: mp.purchase_no, snapshot: mp });
-  return { message: `Mill purchase ${mp.purchase_no} deleted and stock reversed.`, purchase_no: mp.purchase_no };
+  return { message: `Mill purchase ${mp.purchase_no} deleted (stock, GL & payments reversed).`, purchase_no: mp.purchase_no };
 }
 
 // Best-effort table delete that ignores "table does not exist" so the cascade
