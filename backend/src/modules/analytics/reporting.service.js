@@ -449,7 +449,7 @@ const reportingService = {
     for (const l of outLots) {
       const bid = parseInt(String(l.batch_ref).replace('batch-', ''), 10);
       lotBatch[l.id] = bid;
-      const curKg = num(l.net_weight_kg) || num(l.qty) * 1000;
+      const curKg = num(l.net_weight_kg) || num(l.qty);
       onHand[bid] = (onHand[bid] || 0) + curKg * num(l.landed_cost_per_kg);
     }
     const lotIds = outLots.map((l) => l.id);
@@ -479,10 +479,10 @@ const reportingService = {
       if (l.type !== 'byproduct') continue;
       const bid = lotBatch[l.id];
       const cpk = num(l.landed_cost_per_kg);
-      const producedKg = num(l.received_net_weight_kg) || (num(l.net_weight_kg) + (soldKgLot[l.id] || 0)) || num(l.qty) * 1000;
+      const producedKg = num(l.received_net_weight_kg) || (num(l.net_weight_kg) + (soldKgLot[l.id] || 0)) || num(l.qty);
       const sKg = soldKgLot[l.id] || 0;
       const sVal = soldValLot[l.id] || 0;
-      const curKg = num(l.net_weight_kg) || num(l.qty) * 1000;
+      const curKg = num(l.net_weight_kg) || num(l.qty);
       const entry = {
         grade: l.grade || l.item_name || String(l.lot_no || '').split('-').slice(-2, -1)[0] || 'By-product',
         lotNo: l.lot_no,
@@ -1046,7 +1046,7 @@ const reportingService = {
         reservedKg: 0, dispatchedKg: 0, containers: [],
       });
     };
-    for (const r of resv) { const o = ensure(r.order_id, r); if (o && r.resv_status === 'Active') o.reservedKg += num(r.reserved_qty) * 1000; }
+    for (const r of resv) { const o = ensure(r.order_id, r); if (o && r.resv_status === 'Active') o.reservedKg += num(r.reserved_qty); }
     for (const t of txns) { const o = ensure(t.order_id, t); if (o) o.dispatchedKg += Math.abs(num(t.quantity_kg)); }
     for (const c of cont) { const o = ensure(c.order_id, c); if (o && c.container_no && !o.containers.includes(c.container_no)) o.containers.push(c.container_no); }
 
@@ -1314,7 +1314,7 @@ const reportingService = {
         brokenPct: lot.broken_pct != null ? num(lot.broken_pct) : null,
         bags: lot.total_bags != null ? Number(lot.total_bags) : null, bagWeightKg: num(lot.bag_weight_kg) || null,
         receivedKg, currentKg: remainingKg,
-        availableKg: num(lot.available_qty) * 1000, reservedKg: num(lot.reserved_qty) * 1000,
+        availableKg: num(lot.available_qty), reservedKg: num(lot.reserved_qty),
         ratePerKg: num(lot.rate_per_kg), costPerKg: lotCostPerKg, valuePkr: num(lot.landed_cost_total) || num(lot.purchase_amount),
         paymentStatus: lot.payment_status, paidAmount: num(lot.paid_amount), dueAmount: num(lot.due_amount),
         purchaseDate: lot.purchase_date || lot.created_at,
@@ -1323,7 +1323,7 @@ const reportingService = {
       },
       quantitySummary: {
         purchasedKg: receivedKg, sentForMillingKg, soldWithoutProcessingKg, finishedProducedKg,
-        soldAfterProcessingKg, reservedKg: num(lot.reserved_qty) * 1000, adjustedKg, processingLossKg, remainingKg,
+        soldAfterProcessingKg, reservedKg: num(lot.reserved_qty), adjustedKg, processingLossKg, remainingKg,
       },
       financialSummary: {
         purchaseValue: num(lot.landed_cost_total) || num(lot.purchase_amount),
@@ -1546,7 +1546,7 @@ const reportingService = {
     let milledKg = 0;
     if (rawIds.length) {
       const ms = await db('batch_source_lots').whereIn('lot_id', rawIds).sum('qty_kg as q').first();
-      milledKg = num(ms && ms.q) * 1000;
+      milledKg = num(ms && ms.q);
     }
 
     // Sales (direct raw + finished) of this type's lots → revenue / COGS.
@@ -1573,7 +1573,7 @@ const reportingService = {
     const purchasedKg = lots.filter(l => l.type === 'raw').reduce((a, l) => a + (num(l.received_net_weight_kg) || num(l.net_weight_kg)), 0);
     const producedKg = lots.filter(l => l.type === 'finished').reduce((a, l) => a + (num(l.received_net_weight_kg) || num(l.net_weight_kg)), 0);
     const remainingKg = lots.reduce((a, l) => a + num(l.net_weight_kg), 0);
-    const reservedKg = lots.reduce((a, l) => a + num(l.reserved_qty) * 1000, 0);
+    const reservedKg = lots.reduce((a, l) => a + num(l.reserved_qty), 0);
     const stockValue = lots.reduce((a, l) => a + num(l.net_weight_kg) * cpkOf(l), 0);
     const realizedProfit = revenue - cogs;
     const avgSaleRate = soldKg > 0 ? revenue / soldKg : 0;
@@ -1601,7 +1601,7 @@ const reportingService = {
       warehouse: l.warehouse_name || null, batchRef: l.batch_ref || null,
       purchasedKg: l.type === 'raw' ? (num(l.received_net_weight_kg) || num(l.net_weight_kg)) : 0,
       producedKg: l.type === 'finished' ? (num(l.received_net_weight_kg) || num(l.net_weight_kg)) : 0,
-      remainingKg: num(l.net_weight_kg), reservedKg: num(l.reserved_qty) * 1000,
+      remainingKg: num(l.net_weight_kg), reservedKg: num(l.reserved_qty),
       costPerKg: cpkOf(l), value: num(l.net_weight_kg) * cpkOf(l),
       date: l.purchase_date || l.created_at,
     }));
@@ -1641,7 +1641,7 @@ const reportingService = {
       .select('l.warehouse_id',
         db.raw('COUNT(l.id) as lot_count'),
         db.raw('COALESCE(SUM(l.net_weight_kg), 0) as onhand_kg'),
-        db.raw('COALESCE(SUM(l.reserved_qty * 1000), 0) as reserved_kg'),
+        db.raw('COALESCE(SUM(l.reserved_qty), 0) as reserved_kg'),
         db.raw('COALESCE(SUM(l.net_weight_kg * COALESCE(NULLIF(l.landed_cost_per_kg, 0), l.rate_per_kg, 0)), 0) as stock_value'));
     const byId = Object.fromEntries(agg.map(a => [a.warehouse_id, a]));
     return {
@@ -1689,7 +1689,7 @@ const reportingService = {
     const lotRows = lots.map((l) => {
       const net = num(l.net_weight_kg);
       const recv = num(l.received_net_weight_kg) || net;
-      const res = num(l.reserved_qty) * 1000;
+      const res = num(l.reserved_qty);
       const cpk = cpkOf(l);
       const val = net * cpk;
       const outKg = Math.max(0, recv - net);
@@ -1897,7 +1897,7 @@ const reportingService = {
       const salePerKg = priceForOutput(o);
       return {
         lotId: o.id, lotNo: o.lot_no, type: o.type, item: o.grade || o.item_name, riceType: o.variety || o.item_name,
-        kg: produced, producedKg: produced, soldKg: sold, remainingKg: remaining, reservedKg: num(o.reserved_qty) * 1000,
+        kg: produced, producedKg: produced, soldKg: sold, remainingKg: remaining, reservedKg: num(o.reserved_qty),
         costPerKg: cpk, valuePkr: num(o.landed_cost_total), onHandValue: remaining * cpk,
         salePricePerKg: salePerKg, recoveryValue: produced * salePerKg,
         warehouse: o.warehouse_name || null, href: `/lot-inventory/${o.id}`,
@@ -2338,7 +2338,7 @@ const reportingService = {
       const g = groups[key] || (groups[key] = { key, type: l.type, producedKg: 0, onHandKg: 0, reservedKg: 0, soldKg: 0, valuePkr: 0, lots: [] });
       const produced = num(l.received_net_weight_kg) || num(l.net_weight_kg);
       const onHand = num(l.net_weight_kg);
-      const reserved = num(l.reserved_qty) * 1000;
+      const reserved = num(l.reserved_qty);
       const sold = num(l.sold_weight_kg) || Math.max(0, produced - onHand);
       // landed_cost_per_kg can be 0 on zero-cost intakes — fall back to rate_per_kg
       // so value matches the Warehouse / Rice Type ledgers + Lot 360.
