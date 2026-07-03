@@ -123,7 +123,10 @@ function Stat({ label, value, sub, tone = 'slate', icon: Icon }) {
   );
 }
 
-export default function MillFinanceDashboard() {
+// `payrollOnly` renders JUST the Payroll tab (no mill hero/KPIs/fund-transfers or
+// other tabs) so the SAME payroll UI can be surfaced on the Head Office finance
+// dashboard (/finance/payroll) — payroll is a single set of mill workers.
+export default function MillFinanceDashboard({ payrollOnly = false }) {
   const { millingBatches, addToast, companyProfileData, bankAccountsList } = useApp();
   const cp = useCommodityPrices();
   const DEFAULT_PRICES = { finished: cp.finished, broken: cp.broken, bran: cp.bran, husk: cp.husk };
@@ -319,11 +322,12 @@ export default function MillFinanceDashboard() {
   const unpaidEmployees = payrollSummary.filter(w => !w.committed && w.grossPay > 0);
   const anyUnpaid = unpaidEmployees.length > 0;
 
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState(payrollOnly ? 'payroll' : 'overview');
   // Deep-link from the Mill Customers/Suppliers pages: ?tab=customers&customer=ID
   // (or tab=suppliers&supplier=ID) opens the right tab with the party selected.
   const [searchParams] = useSearchParams();
   useEffect(() => {
+    if (payrollOnly) return; // locked to the payroll tab
     const tab = searchParams.get('tab');
     if (tab && tabs.some(t => t.key === tab)) setActiveTab(tab);
     const cid = searchParams.get('customer');
@@ -652,6 +656,14 @@ export default function MillFinanceDashboard() {
 
   return (
     <div className="space-y-5 pb-4 print-report">
+      {payrollOnly && (
+        <div className="rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-900 to-blue-700 p-5 sm:p-6 text-white shadow-sm">
+          <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider opacity-80 mb-1"><Users size={13} /> Head Office · Payroll</div>
+          <div className="text-2xl sm:text-3xl font-bold">Payroll Management</div>
+          <div className="text-xs opacity-90 mt-1">Workers, runs, attendance, advances &amp; settlements — the same mill payroll, managed here.</div>
+        </div>
+      )}
+      {!payrollOnly && (<>
       {/* ─── HERO BAND ─────────────────────────────────────────────── */}
       <div className="rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-900 to-blue-700 p-5 sm:p-6 text-white shadow-sm relative overflow-hidden">
         <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 30% 20%, white 0%, transparent 60%)' }} />
@@ -781,6 +793,8 @@ export default function MillFinanceDashboard() {
           </button>
         ))}
       </div>
+
+      </>)}
 
       {/* ─── OVERVIEW ──────────────────────────────────────────────── */}
       {activeTab === 'overview' && (
