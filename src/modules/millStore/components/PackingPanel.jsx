@@ -56,19 +56,30 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
   const polyCost = polyQty * num(polySel?.avg_cost_per_unit);
 
   const mpActive = needsMP && addMP;
-  const masterOk = !mpActive || !masterId || (masterQty > 0 && masterQty <= masterAvail);
-  const polyOk = !mpActive || !polyId || (polyQty > 0 && polyQty <= polyAvail);
+  // Packing-material shortages are allowed (non-blocking) — consume what's in
+  // stock, flag the shortfall + purchase alert. So the gate no longer blocks on
+  // available stock; it only requires a valid bag + count on an open batch.
+  const bagShort = bagsN > available;
+  const masterShort = mpActive && masterId && masterQty > masterAvail;
+  const polyShort = mpActive && polyId && polyQty > polyAvail;
+  const hasShortage = bagShort || masterShort || polyShort;
 
   const canPack =
-    !!selected && capacity > 0 && bagsN > 0 && bagsN <= available && batchStatus !== 'Closed' && masterOk && polyOk;
+    !!selected && capacity > 0 && bagsN > 0 && batchStatus !== 'Closed'
+    && (!mpActive || !masterId || masterQty > 0) && (!mpActive || !polyId || polyQty > 0);
 
   async function submit() {
     try {
       const payload = { bag_item_id: Number(bagItemId), bags_count: bagsN };
       if (mpActive && masterId && masterQty > 0) { payload.master_bag_item_id = Number(masterId); payload.master_bags_count = masterQty; }
       if (mpActive && polyId && polyQty > 0) { payload.poly_item_id = Number(polyId); payload.poly_count = polyQty; }
-      await pack.mutateAsync({ batchId, data: payload });
-      addToast?.('Packed — stock deducted, weight & cost recorded', 'success');
+      const res = await pack.mutateAsync({ batchId, data: payload });
+      const shortages = res?.data?.shortages || res?.shortages || [];
+      if (shortages.length) {
+        addToast?.(`Packed with material shortage — purchase required: ${shortages.map((s) => `${s.short} ${s.unit} ${s.item}`).join(', ')}`, 'warning');
+      } else {
+        addToast?.('Packed — stock deducted, weight & cost recorded', 'success');
+      }
       setBags(''); setMasterQtyManual(''); setPolyQtyManual('');
     } catch (err) {
       addToast?.(err?.data?.errors?.[0]?.message || err?.data?.message || err.message || 'Failed to pack', 'error');
@@ -241,7 +252,7 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
                 <span className="text-gray-900">→ packs <b>{fmtKg(projPacked)}</b> net{tare > 0 ? `, ${fmtKg(projTare)} tare, ${fmtKg(projPacked + projTare)} gross` : ''}</span>
               )}
               {selected && capacity <= 0 && <span className="text-amber-600">Set this bag's capacity in Mill Store first.</span>}
-              {bagsN > available && <span className="text-red-600">Not enough bags in stock.</span>}
+              {bagShort && <span className="text-amber-600">Short {bagsN - available} {selected.unit} — packing allowed, purchase required.</span>}
             </div>
           )}
 
@@ -281,7 +292,7 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
                           <span>In stock: <b className={masterQty > masterAvail ? 'text-red-600' : ''}>{masterAvail}</b></span>
                           {num(masterSel?.avg_cost_per_unit) > 0 && <span>Cost: <b>Rs {Math.round(masterCost).toLocaleString()}</b></span>}
                         </div>
-                        {masterQty > masterAvail && <p className="text-xs text-red-600 mt-1">Not enough master bags in stock.</p>}
+                        {masterShort && <p className="text-xs text-amber-600 mt-1">Short {masterQty - masterAvail} — packing allowed, purchase required.</p>}
                       </>
                     )}
                   </div>
@@ -309,7 +320,7 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
                           <span>In stock: <b className={polyQty > polyAvail ? 'text-red-600' : ''}>{polyAvail}</b></span>
                           {num(polySel?.avg_cost_per_unit) > 0 && <span>Cost: <b>Rs {Math.round(polyCost).toLocaleString()}</b></span>}
                         </div>
-                        {polyQty > polyAvail && <p className="text-xs text-red-600 mt-1">Not enough polythene in stock.</p>}
+                        {polyShort && <p className="text-xs text-amber-600 mt-1">Short {polyQty - polyAvail} — packing allowed, purchase required.</p>}
                       </>
                     )}
                   </div>
