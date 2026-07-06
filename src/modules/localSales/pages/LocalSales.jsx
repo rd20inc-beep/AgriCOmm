@@ -4,10 +4,12 @@ import PartyLink from '../../../shared/components/PartyLink';
 import {
   ShoppingCart, Plus, Search, DollarSign, Package, Truck,
   CreditCard, X, Clock, CheckCircle, RefreshCw, Download,
-  Check, ChevronLeft, ChevronRight, UserPlus, Eye, User,
+  Check, ChevronLeft, ChevronRight, UserPlus, Eye, User, Inbox,
 } from 'lucide-react';
-import { useLocalSales, useLocalSalesSummary, useCreateLocalSale, useAcceptLocalSalePayment, useLotInventory } from '../../../api/queries';
+import { useLocalSales, useLocalSalesSummary, useCreateLocalSale, useAcceptLocalSalePayment, useLotInventory,
+  usePendingLocalSales, useConfirmLocalSale, useRejectLocalSale } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
+import { useAuth } from '../../../context/AuthContext';
 import TransactionDocument from '../../../components/TransactionDocument';
 import { useMillStoreItems } from '../../millStore/api/queries';
 import { LoadingSpinner, ErrorState, EmptyState } from '../../../components/LoadingState';
@@ -42,6 +44,23 @@ export default function LocalSales() {
   const { data: sales = [], isLoading, error, refetch } = useLocalSales();
   const { data: summary = {} } = useLocalSalesSummary();
   const payMutation = useAcceptLocalSalePayment();
+  // Sale confirmation (Batch 6 · item 9): only a Mill Manager/Owner releases a
+  // pending sale's stock + revenue.
+  const { user } = useAuth();
+  const canConfirm = ['Super Admin', 'Owner', 'Mill Manager'].includes(user?.role);
+  const { data: pendingSales = [] } = usePendingLocalSales(canConfirm);
+  const confirmSaleMut = useConfirmLocalSale();
+  const rejectSaleMut = useRejectLocalSale();
+  async function handleConfirmSale(g) {
+    try { await confirmSaleMut.mutateAsync({ id: g.id }); addToast(`Sale ${g.saleGroupNo || ''} confirmed — stock & revenue posted`, 'success'); refetch(); }
+    catch (e) { addToast(e?.response?.data?.message || e?.message || 'Could not confirm the sale.', 'error'); }
+  }
+  async function handleRejectSale(g) {
+    const reason = window.prompt(`Reject sale ${g.saleGroupNo || ''}? Optional reason:`);
+    if (reason === null) return;
+    try { await rejectSaleMut.mutateAsync({ id: g.id, data: { reason } }); addToast('Sale rejected', 'success'); refetch(); }
+    catch (e) { addToast(e?.response?.data?.message || e?.message || 'Could not reject the sale.', 'error'); }
+  }
   const [expandedGroups, setExpandedGroups] = useState(() => new Set());
   const toggleGroup = (key) => setExpandedGroups(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
 
@@ -174,6 +193,35 @@ export default function LocalSales() {
         </div>
       </div>
 
+      {/* Pending-confirmation inbox (Batch 6 · item 9) */}
+      {canConfirm && pendingSales.length > 0 && (
+        <div className="bg-white rounded-xl border border-amber-200 overflow-hidden">
+          <div className="px-4 py-3 bg-amber-50 border-b border-amber-100 flex items-center gap-2">
+            <Inbox size={15} className="text-amber-600" />
+            <span className="text-sm font-semibold text-amber-900">Sales awaiting confirmation</span>
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-200 text-amber-800">{pendingSales.length}</span>
+            <span className="text-xs text-amber-700 ml-auto">Confirm to release stock &amp; post revenue.</span>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {pendingSales.map(g => (
+              <div key={g.saleGroupNo || g.id} className="px-4 py-3 flex items-center gap-3 flex-wrap">
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-gray-900">{g.saleGroupNo || g.items?.[0]?.saleNo} · {g.buyerName || g.customerName || 'Walk-in'}</div>
+                  <div className="text-xs text-gray-400">{(g.items || []).length} item{(g.items || []).length > 1 ? 's' : ''} · {g.createdByName ? `by ${g.createdByName}` : ''}</div>
+                </div>
+                <div className="tabular-nums font-semibold text-gray-900">{fmtPKR(g.totalAmount)}</div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => handleConfirmSale(g)} disabled={confirmSaleMut.isPending}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-60"><Check size={14} /> Confirm</button>
+                  <button onClick={() => handleRejectSale(g)} disabled={rejectSaleMut.isPending}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-rose-600 bg-rose-50 rounded-lg hover:bg-rose-100 disabled:opacity-60"><X size={14} /> Reject</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Sales Table */}
       {filtered.length === 0 ? (
         <EmptyState icon={ShoppingCart} title="No sales found" description={searchTerm || statusFilter ? "Try adjusting your filters." : "Click 'New Sale' to record your first local sale."} />
@@ -205,7 +253,10 @@ export default function LocalSales() {
                   const s = g.items[0];
                   return (
                     <tr key={s.id} onClick={() => openSaleDetail(s)} className="hover:bg-gray-50 cursor-pointer">
-                      <td className="py-2.5 px-4 font-medium text-blue-600">{s.saleNo}</td>
+                      <td className="py-2.5 px-4 font-medium text-blue-600">
+                        {s.saleNo}
+                        {s.status === 'Pending' && <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700 align-middle">Pending</span>}
+                      </td>
                       <td className="py-2.5 px-4 text-gray-600 text-xs">{s.saleDate ? new Date(s.saleDate).toLocaleDateString('en-GB', { day:'2-digit', month:'short' }) : '—'}</td>
                       <td className="py-2.5 px-4 text-gray-900"><PartyLink type="customer" id={s.customerId} name={s.customerName || s.buyerName} /></td>
                       <td className="py-2.5 px-4 text-gray-700">{s.itemName}</td>
@@ -238,6 +289,7 @@ export default function LocalSales() {
                           <ChevronRight size={14} className={`text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`} />
                           {g.key}
                           <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-700">{g.items.length} items</span>
+                          {head.status === 'Pending' && <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700">Pending</span>}
                         </span>
                       </td>
                       <td className="py-2.5 px-4 text-gray-600 text-xs">{head.saleDate ? new Date(head.saleDate).toLocaleDateString('en-GB', { day:'2-digit', month:'short' }) : '—'}</td>
@@ -565,7 +617,10 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
       };
       const res = await createMutation.mutateAsync(payload);
       const cnt = res?.data?.item_count || cart.length;
-      addToast(`Sale ${res?.data?.group_no || ''} created — ${cnt} item${cnt > 1 ? 's' : ''}, ${fmtPKR(grandTotal)}`, 'success');
+      const pending = !!res?.data?.pending;
+      addToast(pending
+        ? `Sale ${res?.data?.group_no || ''} recorded — pending Mill Manager/Owner confirmation before stock & revenue post`
+        : `Sale ${res?.data?.group_no || ''} created — ${cnt} item${cnt > 1 ? 's' : ''}, ${fmtPKR(grandTotal)}`, 'success');
       if (isWalkIn && registerCustomer && form.buyer_name.trim()) {
         try {
           const r = await adminApi.customersQuickAdd({ name: form.buyer_name.trim(), phone: form.buyer_phone || null });
@@ -574,10 +629,11 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
       }
       refreshFromApi('local-sales');
       // Hand the freshly-created sale back so the parent can offer a printable /
-      // downloadable invoice immediately.
+      // downloadable invoice immediately — but only once it's confirmed (a Pending
+      // sale hasn't posted revenue, so there's no invoice to issue yet).
       const paid = form.paid_amount === '' ? (isCashy && effectiveMode !== 'credit' ? grandTotal : 0) : (parseFloat(form.paid_amount) || 0);
       const due = Math.max(0, grandTotal - paid);
-      onCreated && onCreated({
+      !pending && onCreated && onCreated({
         saleNo: res?.data?.group_no || res?.data?.sale_no || '',
         customerName: (customers.find((c) => String(c.id) === String(form.customer_id)) || {}).name,
         buyerName: form.buyer_name, createdAt: new Date().toISOString(),

@@ -351,8 +351,13 @@ async function deleteLocalSale(trx, req, id) {
   const sale = await trx('local_sales').where('id', id).first();
   if (!sale) { const e = new Error('Local sale not found.'); e.status = 404; throw e; }
 
+  // A Pending (unconfirmed) or Cancelled (rejected) sale never moved stock/money
+  // — deleting it must NOT restock (that would mint phantom inventory) or reverse
+  // receipts/GL that were never posted. Only a confirmed sale gets unwound.
+  const posted = !['Pending', 'Cancelled'].includes(sale.status);
+
   // Reverse the inventory deduction back onto the lot (if still present).
-  if (sale.lot_id) {
+  if (posted && sale.lot_id) {
     const lot = await trx('inventory_lots').where('id', sale.lot_id).first();
     if (lot) {
       // Post-5c the engine is KG end-to-end: the sale deducted `kg` from qty /
@@ -370,7 +375,7 @@ async function deleteLocalSale(trx, req, id) {
     }
   }
   // Packaging (e.g. katta) sale → restock mill_stock by the count sold.
-  if (sale.mill_item_id) {
+  if (posted && sale.mill_item_id) {
     const count = num(sale.quantity_kg); // count stored in quantity_kg for mill-item lines
     const ms = await trx('mill_stock').where({ item_id: sale.mill_item_id, warehouse_id: null }).first();
     if (ms) await trx('mill_stock').where('id', ms.id).update({ quantity_available: num(ms.quantity_available) + count, updated_at: trx.fn.now() });
@@ -402,7 +407,7 @@ async function deleteLocalSale(trx, req, id) {
   await trx('local_sales').where('id', id).del();
 
   await auditDanger(trx, req, 'hard_delete', 'local_sale', id, { sale_no: sale.sale_no, snapshot: sale });
-  return { message: `Local sale ${sale.sale_no} deleted and lot restocked.`, sale_no: sale.sale_no };
+  return { message: `Local sale ${sale.sale_no} deleted${posted ? ' and lot restocked' : ''}.`, sale_no: sale.sale_no };
 }
 
 // Reverse the CASH effect of a payment being hard-deleted: restore the bank

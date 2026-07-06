@@ -1441,7 +1441,9 @@ router.get('/workers/:id/ledger', authorize('payroll', 'view'), async (req, res)
     const worker = await db('mill_workers').where('id', workerId).first();
     if (!worker) return res.status(404).json({ success: false, message: 'Worker not found.' });
 
-    const advances = await db('mill_worker_advances').where('worker_id', workerId)
+    // Only disbursed advances are real money — pending/approved/rejected requests
+    // (Batch 6 · item 8) must not inflate the employee ledger.
+    const advances = await db('mill_worker_advances').where({ worker_id: workerId, approval_status: 'paid' })
       .select('id', 'advance_date', 'amount', 'recovered_amount', 'status', 'expense_id', 'notes');
     const advanceExpenseIds = advances.map((a) => a.expense_id).filter(Boolean);
 
@@ -1498,9 +1500,14 @@ router.get('/workers/:id/ledger', authorize('payroll', 'view'), async (req, res)
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
-// Record a salary advance: real cash-out (business_expense, category 'salaries',
-// paid now → Money Out / GL) PLUS a tracked advance row that nets off payroll.
-router.post('/workers/:id/advances', authorize('payroll', 'create'), auditAction('advance_given', 'mill_worker_advance', (req) => req.params.id), async (req, res) => {
+// Request a salary advance (Batch 6 · item 8). No cash moves here — an advance
+// now needs Owner approval (POST /advances/:id/approve) before Finance disburses
+// it (POST /advances/:id/pay). The recovery plan is captured up-front but the
+// expense + schedule are created only at pay-time. `status` (the recovery
+// lifecycle) stays 'pending' until paid, so recoverAdvancesForWorker and the
+// settlement/suggested-deduction reads (which filter status='outstanding') never
+// deduct an advance that hasn't been disbursed.
+router.post('/workers/:id/advances', authorize('payroll', 'create'), auditAction('advance_requested', 'mill_worker_advance', (req) => req.params.id), async (req, res) => {
   try {
     const worker = await db('mill_workers').where('id', req.params.id).first();
     if (!worker) return res.status(404).json({ success: false, message: 'Worker not found.' });
@@ -1511,11 +1518,67 @@ router.post('/workers/:id/advances', authorize('payroll', 'create'), auditAction
     try { plan = buildRecoveryPlan(req.body, amount, advance_date); }
     catch (e) { return res.status(400).json({ success: false, message: e.message }); }
 
-    const expense = await expensesService.create({
-      expense_type: worker.entity === 'general' ? 'general' : 'mill', category: 'salaries', amount, currency: 'PKR',
-      expense_date: advance_date,
-      description: `Salary advance — ${worker.name}`,
+    const [advance] = await db('mill_worker_advances').insert({
+      worker_id: worker.id, advance_date, amount,
+      recovered_amount: 0, status: 'pending', approval_status: 'pending',
+      expense_id: null,
       notes: req.body.notes || null,
+      created_by: req.user?.id || null,
+      ...plan,
+    }).returning('*');
+    return res.json({ success: true, data: { advance } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Approve a pending advance — Owner only (ownerApproval gate: the Owner
+// self-approves, anyone else must name the authorizing owner). No cash yet.
+router.post('/advances/:id/approve', authorize('payroll', 'view'), ownerApproval('salary_advance'),
+  auditAction('advance_approved', 'mill_worker_advance', (req) => req.params.id), async (req, res) => {
+  try {
+    const advance = await db('mill_worker_advances').where('id', req.params.id).first();
+    if (!advance) return res.status(404).json({ success: false, message: 'Advance not found.' });
+    if (advance.approval_status !== 'pending') return res.status(409).json({ success: false, message: `Advance is already ${advance.approval_status}.` });
+    const [updated] = await db('mill_worker_advances').where('id', advance.id).update({
+      approval_status: 'approved', approved_by: req.ownerAuth?.ownerId || req.user?.id || null,
+      approved_at: db.fn.now(), reject_reason: null, updated_at: db.fn.now(),
+    }).returning('*');
+    return res.json({ success: true, data: { advance: updated } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Reject a pending advance (keeps the row for the audit trail; no cash).
+router.post('/advances/:id/reject', authorize('payroll', 'approve'),
+  auditAction('advance_rejected', 'mill_worker_advance', (req) => req.params.id), async (req, res) => {
+  try {
+    const advance = await db('mill_worker_advances').where('id', req.params.id).first();
+    if (!advance) return res.status(404).json({ success: false, message: 'Advance not found.' });
+    if (advance.approval_status !== 'pending') return res.status(409).json({ success: false, message: `Only a pending advance can be rejected (this one is ${advance.approval_status}).` });
+    const [updated] = await db('mill_worker_advances').where('id', advance.id).update({
+      approval_status: 'rejected', reject_reason: req.body.reason || null, updated_at: db.fn.now(),
+    }).returning('*');
+    return res.json({ success: true, data: { advance: updated } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Pay (disburse) an approved advance — Finance (payroll.pay). This is where the
+// real cash-out happens: business_expense (category 'salaries', paid now → Money
+// Out / GL) + the recovery schedule + flip the advance into the outstanding
+// recovery lifecycle so payroll nets it off going forward.
+router.post('/advances/:id/pay', authorize('payroll', 'pay'),
+  auditAction('advance_paid', 'mill_worker_advance', (req) => req.params.id), async (req, res) => {
+  try {
+    const advance = await db('mill_worker_advances').where('id', req.params.id).first();
+    if (!advance) return res.status(404).json({ success: false, message: 'Advance not found.' });
+    if (advance.approval_status === 'paid') return res.status(409).json({ success: false, message: 'Advance is already paid.' });
+    if (advance.approval_status !== 'approved') return res.status(409).json({ success: false, message: 'Advance must be approved before it can be paid.' });
+    const worker = await db('mill_workers').where('id', advance.worker_id).first();
+    if (!worker) return res.status(404).json({ success: false, message: 'Worker not found.' });
+
+    const expense = await expensesService.create({
+      expense_type: worker.entity === 'general' ? 'general' : 'mill', category: 'salaries', amount: parseFloat(advance.amount), currency: 'PKR',
+      expense_date: req.body.pay_date || advance.advance_date,
+      description: `Salary advance — ${worker.name}`,
+      notes: advance.notes || null,
       vendor_name: worker.name,
       pay_now: true,
       bank_account_id: req.body.bank_account_id || null,
@@ -1523,20 +1586,27 @@ router.post('/workers/:id/advances', authorize('payroll', 'create'), auditAction
       payment_reference: req.body.payment_reference || null,
     }, req.user?.id);
 
-    const advance = await db.transaction(async (trx) => {
-      const [a] = await trx('mill_worker_advances').insert({
-        worker_id: worker.id, advance_date, amount,
-        recovered_amount: 0, status: 'outstanding',
-        expense_id: expense?.id || null,
-        notes: req.body.notes || null,
-        created_by: req.user?.id || null,
-        ...plan,
+    const updated = await db.transaction(async (trx) => {
+      const [a] = await trx('mill_worker_advances').where('id', advance.id).update({
+        approval_status: 'paid', status: 'outstanding', expense_id: expense?.id || null, updated_at: trx.fn.now(),
       }).returning('*');
       const rows = plannedScheduleRows(a);
       if (rows.length) await trx('mill_worker_advance_recovery_schedule').insert(rows);
       return a;
     });
-    return res.json({ success: true, data: { advance } });
+    return res.json({ success: true, data: { advance: updated } });
+  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Advance approvals inbox — pending + approved-not-yet-paid across all workers.
+router.get('/advances/pending', authorize('payroll', 'view'), async (req, res) => {
+  try {
+    const rows = await db('mill_worker_advances as a')
+      .leftJoin('mill_workers as w', 'w.id', 'a.worker_id')
+      .whereIn('a.approval_status', ['pending', 'approved'])
+      .orderBy('a.advance_date', 'desc').orderBy('a.id', 'desc')
+      .select('a.*', 'w.name as worker_name', 'w.role as worker_role', 'w.entity as worker_entity');
+    return res.json({ success: true, data: { advances: rows } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 

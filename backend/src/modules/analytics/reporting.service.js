@@ -457,7 +457,7 @@ const reportingService = {
 
     // Realised sales of those output lots (aggregated per batch AND per lot).
     const sales = lotIds.length
-      ? await db('local_sales').whereIn('lot_id', lotIds).select('lot_id', 'quantity_kg', 'total_amount')
+      ? await db('local_sales').whereIn('lot_id', lotIds).whereNotIn('status', ['Pending', 'Cancelled']).select('lot_id', 'quantity_kg', 'total_amount')
       : [];
     const soldVal = {}; const soldCost = {}; const soldKg = {};
     const soldValLot = {}; const soldKgLot = {};
@@ -1229,7 +1229,7 @@ const reportingService = {
 
     // Direct sales (sold without processing — this raw lot sold directly).
     const directSaleRows = await db('local_sales as ls').leftJoin('customers as c', 'ls.customer_id', 'c.id')
-      .where('ls.lot_id', id)
+      .where('ls.lot_id', id).whereNotIn('ls.status', ['Pending', 'Cancelled'])
       .select('ls.id', 'ls.sale_no', 'ls.sale_date', 'ls.item_name', 'ls.quantity_kg', 'ls.rate_per_kg',
         'ls.total_amount', 'ls.paid_amount', 'ls.due_amount', 'ls.payment_status', 'ls.customer_id',
         db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer"))
@@ -1246,7 +1246,7 @@ const reportingService = {
     let processedSales = [];
     if (outIds.length) {
       const outSaleRows = await db('local_sales as ls').leftJoin('customers as c', 'ls.customer_id', 'c.id')
-        .whereIn('ls.lot_id', outIds)
+        .whereIn('ls.lot_id', outIds).whereNotIn('ls.status', ['Pending', 'Cancelled'])
         .select('ls.id', 'ls.sale_no', 'ls.sale_date', 'ls.item_name', 'ls.lot_id', 'ls.quantity_kg', 'ls.rate_per_kg',
           'ls.total_amount', 'ls.paid_amount', 'ls.due_amount', 'ls.payment_status', 'ls.customer_id',
           db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer"))
@@ -1553,7 +1553,7 @@ const reportingService = {
     let soldKg = 0, revenue = 0, paid = 0, due = 0, cogs = 0;
     if (lotIds.length) {
       const cpkById = Object.fromEntries(lots.map(l => [l.id, cpkOf(l)]));
-      const saleRows = await db('local_sales').whereIn('lot_id', lotIds)
+      const saleRows = await db('local_sales').whereIn('lot_id', lotIds).whereNotIn('status', ['Pending', 'Cancelled'])
         .select('lot_id', 'quantity_kg', 'total_amount', 'paid_amount', 'due_amount');
       for (const sl of saleRows) {
         const q = num(sl.quantity_kg);
@@ -1852,7 +1852,7 @@ const reportingService = {
     let outSales = [];
     if (outIds.length) {
       outSales = await db('local_sales as ls').leftJoin('customers as c', 'ls.customer_id', 'c.id')
-        .whereIn('ls.lot_id', outIds)
+        .whereIn('ls.lot_id', outIds).whereNotIn('ls.status', ['Pending', 'Cancelled'])
         .select('ls.id', 'ls.sale_no', 'ls.sale_date', 'ls.lot_id', 'ls.item_name', 'ls.quantity_kg',
           'ls.total_amount', 'ls.paid_amount', 'ls.due_amount', 'ls.payment_status', 'ls.customer_id',
           db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer"))
@@ -2002,6 +2002,8 @@ const reportingService = {
       .leftJoin('customers as c', 'ls.customer_id', 'c.id')
       .leftJoin('inventory_lots as il', 'ls.lot_id', 'il.id')
       .leftJoin('warehouses as w', 'il.warehouse_id', 'w.id');
+    // Unconfirmed (Pending) and rejected (Cancelled) sales aren't realized revenue.
+    qb = qb.whereNotIn('ls.status', ['Pending', 'Cancelled']);
     if (entity) qb = qb.where('ls.entity', entity);
     if (from) qb = qb.where('ls.sale_date', '>=', from);
     if (to) qb = qb.where('ls.sale_date', '<=', to);

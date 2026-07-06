@@ -132,7 +132,7 @@ const financeService = {
     // ── Local sales metrics ──
     // All amounts are PKR (local sales are domestic). cogs_total_pkr and
     // gross_profit_pkr are stamped at sale time / lockSaleCOGS.
-    let localQuery = db('local_sales').whereNotIn('status', ['Cancelled', 'Voided', 'Returned']);
+    let localQuery = db('local_sales').whereNotIn('status', ['Cancelled', 'Voided', 'Returned', 'Pending']);
     if (startDate || endDate) localQuery = dateFilter(localQuery, 'sale_date');
     const localStats = await localQuery.clone().select(
       db.raw("COUNT(*) AS sale_count"),

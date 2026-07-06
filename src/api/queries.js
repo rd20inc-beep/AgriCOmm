@@ -1514,6 +1514,32 @@ export function useDeleteWorkerAdvance() {
   });
 }
 
+// Salary-advance approval workflow (Batch 6 · item 8): request → approve (Owner)
+// → pay (Finance). The pending inbox lists pending + approved-not-yet-paid.
+export function usePendingAdvances(enabled = true) {
+  return useQuery({ queryKey: ['pending-advances'], enabled, queryFn: async () => { const res = await millingApi.pendingAdvances(); return transformKeys(unwrap(res, 'advances') || []); } });
+}
+function invalidateAdvanceQueries(qc) {
+  qc.invalidateQueries({ queryKey: ['mill-workers'] });
+  qc.invalidateQueries({ queryKey: ['payroll-summary'] });
+  qc.invalidateQueries({ queryKey: ['worker-advances'] });
+  qc.invalidateQueries({ queryKey: ['pending-advances'] });
+  qc.invalidateQueries({ queryKey: ['mill-expenses'] });
+  qc.invalidateQueries({ queryKey: ['payables'] });
+}
+export function useApproveAdvance() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: ({ id, data }) => millingApi.approveAdvance(id, data), onSuccess: () => invalidateAdvanceQueries(qc) });
+}
+export function useRejectAdvance() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: ({ id, data }) => millingApi.rejectAdvance(id, data), onSuccess: () => invalidateAdvanceQueries(qc) });
+}
+export function usePayAdvance() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: ({ id, data }) => millingApi.payAdvance(id, data), onSuccess: () => invalidateAdvanceQueries(qc) });
+}
+
 export function usePayrollSummary(params = {}) {
   return useQuery({
     queryKey: ['payroll-summary', params],
@@ -2582,6 +2608,31 @@ export function useCreateLocalSale() {
       qc.invalidateQueries({ queryKey: queryKeys.financeOverview });
     },
   });
+}
+
+// Local-sale confirmation (Batch 6 · item 9): a sale recorded by a non-mill role
+// waits Pending until a Mill Manager/Owner confirms (posts stock/revenue) or rejects.
+export function usePendingLocalSales(enabled = true) {
+  return useQuery({
+    queryKey: ['local-sales', 'pending'],
+    enabled,
+    queryFn: async () => { const res = await localSalesApi.pending(); return transformKeys(unwrap(res, 'pending') || []); },
+  });
+}
+function invalidateLocalSaleConfirm(qc) {
+  qc.invalidateQueries({ queryKey: ['local-sales'] });
+  qc.invalidateQueries({ queryKey: queryKeys.inventory.all });
+  qc.invalidateQueries({ queryKey: ['lot-inventory'] });
+  qc.invalidateQueries({ queryKey: queryKeys.receivables.all });
+  qc.invalidateQueries({ queryKey: queryKeys.financeOverview });
+}
+export function useConfirmLocalSale() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: ({ id, data }) => localSalesApi.confirm(id, data), onSuccess: () => invalidateLocalSaleConfirm(qc) });
+}
+export function useRejectLocalSale() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: ({ id, data }) => localSalesApi.reject(id, data), onSuccess: () => invalidateLocalSaleConfirm(qc) });
 }
 
 export function useLocalSalesByLot(lotId) {

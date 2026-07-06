@@ -43,6 +43,99 @@ async function postReceiptToAccount(trx, { accountId, amount, paymentId, referen
   });
 }
 
+// Batch 6 · item 9 — only a Mill Manager or Owner (or Super Admin) may release a
+// sale's stock/money. A sale RECORDED by one of them auto-confirms; anyone else's
+// sits Pending until confirmed.
+const CONFIRM_ROLES = ['Super Admin', 'Owner', 'Mill Manager'];
+async function recorderCanAutoConfirm(trx, roleId) {
+  if (!roleId) return false;
+  const r = await trx('roles').where('id', roleId).first('name');
+  return !!r && CONFIRM_ROLES.includes(r.name);
+}
+
+// The money/stock side of a local sale, run on already-inserted sale rows. Shared
+// by create() (auto-confirm path) and confirmSale() (deferred path) so the two
+// stay byte-identical: draw the lot/mill-stock down, record the receipt (moving
+// the cash/bank balance), open a receivable for any balance owed, lock COGS and
+// post the revenue/AR journal. Re-checks availability — a Pending sale can't
+// oversell if the stock moved while it waited for confirmation.
+async function postSaleSideEffects(trx, saleRows, { userId } = {}) {
+  const groupPaid = uc.round2(saleRows.reduce((s, r) => s + (parseFloat(r.paid_amount) || 0), 0));
+  const first = saleRows[0] || {};
+  const receiptAccountId = await resolveReceiptAccountId(trx, {
+    paymentMode: first.payment_mode, bankAccountId: first.bank_account_id, amount: groupPaid, collectionLocation: first.collection_location,
+  });
+
+  for (const sale of saleRows) {
+    const qtyKg = parseFloat(sale.quantity_kg) || 0;
+    const paid = parseFloat(sale.paid_amount) || 0;
+    const dueAmt = parseFloat(sale.due_amount) || 0;
+
+    if (sale.mill_item_id) {
+      const count = parseFloat(sale.quantity_bags) || qtyKg;
+      const mi = await trx('mill_items').where({ id: sale.mill_item_id }).first();
+      if (!mi) throw new Error('Packaging item not found');
+      const ms = await trx('mill_stock').where({ item_id: sale.mill_item_id, warehouse_id: null }).first();
+      const avail = parseFloat(ms && ms.quantity_available) || 0;
+      if (count > avail + 0.01) { const e = new Error(`Insufficient ${mi.name}: ${Math.round(avail)} in stock, ${count} needed.`); e.status = 400; throw e; }
+      await trx('mill_stock').where({ id: ms.id }).update({ quantity_available: trx.raw('GREATEST(quantity_available - ?, 0)', [count]), updated_at: trx.fn.now() });
+      await trx('mill_stock_movements').insert({
+        item_id: sale.mill_item_id, warehouse_id: null, movement_type: 'consumption', quantity: -count,
+        reference_type: 'local_sale', reference_id: sale.id, reason: `Sold ${count} ${mi.unit || 'pcs'} — ${sale.sale_no}`, performed_by: userId || null,
+      });
+    } else if (sale.lot_id) {
+      const lot = await trx('inventory_lots').where({ id: sale.lot_id }).first();
+      if (!lot) throw new Error('Inventory lot not found');
+      const availKg = parseFloat(lot.available_qty) || 0;
+      if (qtyKg > availKg + 0.01) { const e = new Error(`Insufficient stock: ${sale.item_name} needs ${Math.round(qtyKg)} kg but only ${availKg.toFixed(0)} kg available in ${lot.lot_no}`); e.status = 400; throw e; }
+      await inventoryService.postMovement(trx, {
+        movementType: 'local_sale', lotId: lot.id, qty: qtyKg,
+        fromWarehouseId: lot.warehouse_id, sourceEntity: lot.entity, linkedRef: sale.sale_no,
+        notes: `Local sale ${sale.sale_no} to ${sale.buyer_name || 'customer'}`,
+        costPerUnit: parseFloat(lot.cost_per_unit) || 0, currency: 'PKR', userId,
+      });
+      await trx('inventory_lots').where({ id: sale.lot_id }).update({ sold_weight_kg: (parseFloat(lot.sold_weight_kg) || 0) + qtyKg });
+    }
+
+    if (paid > 0) {
+      const payMethod = (sale.payment_mode && sale.payment_mode !== 'credit') ? sale.payment_mode : 'cash';
+      const [payRow] = await trx('payments').insert({
+        payment_no: await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'PL-', pad: 0 }), type: 'receipt',
+        amount: paid, currency: 'PKR', fx_rate: 1, base_amount_pkr: paid,
+        payment_method: payMethod, bank_reference: sale.payment_reference || null,
+        bank_account_id: receiptAccountId || sale.bank_account_id || null, due_date: sale.due_date || null,
+        payment_date: sale.sale_date || trx.fn.now(), notes: `Local sale ${sale.sale_no} — ${sale.item_name}`,
+        local_sale_id: sale.id, created_by: userId || null,
+      }).returning('id');
+      await postReceiptToAccount(trx, {
+        accountId: receiptAccountId, amount: paid, paymentId: payRow.id,
+        reference: sale.payment_reference || sale.sale_no, notes: `Local sale ${sale.sale_no} receipt — ${sale.item_name}`,
+        date: sale.sale_date, userId,
+      });
+    }
+
+    if (dueAmt > 0) {
+      await trx('receivables').insert({
+        recv_no: await nextDocNo(trx, { table: 'receivables', column: 'recv_no', prefix: 'RCV-LS-', pad: 0 }), entity: 'mill',
+        customer_id: sale.customer_id, local_sale_id: sale.id, type: 'Local Sale',
+        expected_amount: sale.total_amount, received_amount: paid, outstanding: dueAmt,
+        due_date: sale.due_date || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        status: paid > 0 ? 'Partial' : 'Pending', currency: 'PKR', aging: 0,
+        notes: `Local sale ${sale.sale_no} — ${sale.buyer_name || 'walk-in'} — ${sale.item_name}`,
+      });
+    }
+
+    if (sale.id && sale.lot_id) await inventoryService.lockSaleCOGS(trx, sale.id);
+
+    await accountingService.autoPost(trx, {
+      triggerEvent: 'local_sale_recorded', entity: 'mill', amount: sale.total_amount, currency: 'PKR',
+      refType: 'Local Sale', refNo: sale.sale_no,
+      description: `Local sale ${sale.sale_no} — ${sale.buyer_name || 'walk-in'} — ${sale.item_name}`.slice(0, 240),
+      userId,
+    });
+  }
+}
+
 // Assemble the Invoice 360 payload for one local sale (the sale row IS the
 // invoice). `includeAdmin` adds internal financials (COGS/margin/remaining
 // stock) + linked records — callers MUST gate that on role. Returns null if
@@ -492,6 +585,10 @@ module.exports = {
       // a customer to chase. (receivables.customer_id is NOT NULL.)
       const hasDue = totalPaid < grandTotal - 0.01;
 
+      // A sale RECORDED by a Mill Manager/Owner auto-confirms (posts immediately);
+      // anyone else's sits Pending until a Mill Manager/Owner confirms it.
+      const autoConfirm = await recorderCanAutoConfirm(db, req.user?.role_id);
+
       const result = await db.transaction(async (trx) => {
         // Resolve the customer for any owed balance: use the selected one, else
         // auto-register the walk-in buyer (dedupe by name) so credit sales work
@@ -511,9 +608,6 @@ module.exports = {
           resolvedCustomerId = cust.id;
         }
 
-        // Cash / bank receipts move the receiving account's balance with the money.
-        const receiptAccountId = await resolveReceiptAccountId(trx, { paymentMode: payment_mode, bankAccountId: bank_account_id, amount: totalPaid, collectionLocation: collection_location });
-
         let groupNo = null;
         const created = [];
 
@@ -521,23 +615,12 @@ module.exports = {
           const saleNo = await generateSaleNo(trx);
           if (!groupNo) groupNo = saleNo; // first line's number identifies the group
 
+          // Cost basis is a READ here — availability is enforced and stock is
+          // drawn down only when the sale is confirmed (postSaleSideEffects).
           let costPerKg = 0, landedCostTotal = 0, lotNo = null;
           if (l.isMillItem) {
-            // Sell a mill-store packaging item (empty katta) — deduct mill_stock.
             const mi = await trx('mill_items').where({ id: l.mill_item_id }).first();
             if (!mi) throw new Error('Packaging item not found');
-            const ms = await trx('mill_stock').where({ item_id: l.mill_item_id, warehouse_id: null }).first();
-            const avail = parseFloat(ms && ms.quantity_available) || 0;
-            if (l.count > avail + 0.01) {
-              const e = new Error(`Insufficient ${mi.name}: ${Math.round(avail)} in stock, ${l.count} needed.`); e.status = 400; throw e;
-            }
-            await trx('mill_stock').where({ id: ms.id }).update({
-              quantity_available: trx.raw('GREATEST(quantity_available - ?, 0)', [l.count]), updated_at: trx.fn.now(),
-            });
-            await trx('mill_stock_movements').insert({
-              item_id: l.mill_item_id, warehouse_id: null, movement_type: 'consumption', quantity: -l.count,
-              reference_type: 'local_sale', reference_id: null, reason: `Sold ${l.count} ${mi.unit || 'pcs'} — ${saleNo}`, performed_by: req.user?.id || null,
-            });
             costPerKg = parseFloat(mi.avg_cost_per_unit) || 0; // per piece
             landedCostTotal = uc.round2(l.count * costPerKg);
           } else if (l.lot_id) {
@@ -548,17 +631,6 @@ module.exports = {
               const e = new Error(`Insufficient stock: ${l.item_name} needs ${Math.round(l.qtyKg)} kg but only ${availKg.toFixed(0)} kg available in ${lot.lot_no}`);
               e.status = 400; throw e;
             }
-            // Atomic outbound movement — draws the lot down + writes the ledger;
-            // no try/catch so a failed deduction rolls the whole sale back.
-            await inventoryService.postMovement(trx, {
-              movementType: 'local_sale', lotId: lot.id, qty: l.qtyKg,
-              fromWarehouseId: lot.warehouse_id, sourceEntity: lot.entity, linkedRef: saleNo,
-              notes: `Local sale ${saleNo} to ${buyer_name || 'customer'}`,
-              costPerUnit: parseFloat(lot.cost_per_unit) || 0, currency: 'PKR', userId: req.user?.id,
-            });
-            await trx('inventory_lots').where({ id: l.lot_id }).update({
-              sold_weight_kg: (parseFloat(lot.sold_weight_kg) || 0) + l.qtyKg,
-            });
             costPerKg = parseFloat(lot.landed_cost_per_kg) || (parseFloat(lot.cost_per_unit) || 0) || (parseFloat(lot.rate_per_kg) || 0);
             landedCostTotal = uc.round2(l.qtyKg * costPerKg);
             lotNo = lot.lot_no;
@@ -582,77 +654,119 @@ module.exports = {
             payment_mode: payment_mode || 'cash', payment_status: paymentStatus,
             paid_amount: l.paid, due_amount: dueAmt, payment_reference: payment_reference || null,
             collection_location: collection_location || null, due_date: due_date || null,
+            bank_account_id: bank_account_id || null,
             vehicle_no: vehicle_no || null, driver_name: driver_name || null,
             dispatched: !!dispatched, dispatch_date: dispatched ? (sale_date || new Date().toISOString().split('T')[0]) : null,
-            notes: notes || null, status: 'Completed', created_by: req.user?.id || null,
+            notes: notes || null,
+            status: autoConfirm ? 'Completed' : 'Pending',
+            confirmed_by: autoConfirm ? (req.user?.id || null) : null,
+            confirmed_at: autoConfirm ? trx.fn.now() : null,
+            created_by: req.user?.id || null,
             cost_per_kg: costPerKg, landed_cost_total: landedCostTotal, gross_profit: grossProfit,
             profit_per_kg: l.qtyKg > 0 ? uc.round4(grossProfit / l.qtyKg) : 0,
             margin_pct: l.total > 0 ? uc.round2((grossProfit / l.total) * 100) : 0,
           }).returning('*');
 
-          if (l.paid > 0) {
-            // 'credit' is a sale MODE, not a tender method — an actual receipt
-            // (partial payment on a credit sale) is recorded as cash so it passes
-            // the payments.payment_method check constraint.
-            const payMethod = (payment_mode && payment_mode !== 'credit') ? payment_mode : 'cash';
-            const [payRow] = await trx('payments').insert({
-              payment_no: await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'PL-', pad: 0 }), type: 'receipt',
-              amount: l.paid, currency: 'PKR', fx_rate: 1, base_amount_pkr: l.paid,
-              payment_method: payMethod, bank_reference: payment_reference || null,
-              bank_account_id: receiptAccountId || bank_account_id || null, due_date: due_date || null,
-              payment_date: sale_date || trx.fn.now(), notes: `Local sale ${saleNo} — ${l.item_name}`,
-              local_sale_id: sale.id, created_by: req.user?.id || null,
-            }).returning('id');
-
-            await postReceiptToAccount(trx, {
-              accountId: receiptAccountId, amount: l.paid, paymentId: payRow.id,
-              reference: payment_reference || saleNo, notes: `Local sale ${saleNo} receipt — ${l.item_name}`,
-              date: sale_date, userId: req.user?.id,
-            });
-          }
-
-          if (dueAmt > 0) {
-            await trx('receivables').insert({
-              recv_no: await nextDocNo(trx, { table: 'receivables', column: 'recv_no', prefix: 'RCV-LS-', pad: 0 }), entity: 'mill',
-              customer_id: resolvedCustomerId, local_sale_id: sale.id, type: 'Local Sale',
-              expected_amount: l.total, received_amount: l.paid, outstanding: dueAmt,
-              // Honor the user-supplied due date (the sale row already stores it);
-              // fall back to +30 days only when none was given, so the receivable's
-              // aging matches the sale instead of always assuming net-30.
-              due_date: due_date || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-              status: l.paid > 0 ? 'Partial' : 'Pending', currency: 'PKR', aging: 0,
-              notes: `Local sale ${saleNo} — ${buyer_name || 'walk-in'} — ${l.item_name}`,
-            });
-          }
-
-          if (sale.id && l.lot_id) await inventoryService.lockSaleCOGS(trx, sale.id);
-
-          // Revenue/AR journal — NOT swallowed (a dropped journal here left revenue
-          // un-booked in the GL while stock + cash committed — a phantom-revenue
-          // hole). autoPost returns null harmlessly when no posting rule exists, so
-          // this only throws on a genuine posting failure, which must roll the whole
-          // sale back (consistent with the atomic stock deduction).
-          await accountingService.autoPost(trx, {
-            triggerEvent: 'local_sale_recorded', entity: 'mill', amount: l.total, currency: 'PKR',
-            refType: 'Local Sale', refNo: saleNo,
-            description: `Local sale ${saleNo} — ${buyer_name || 'walk-in'} — ${l.item_name}`.slice(0, 240),
-            userId: req.user?.id,
-          });
-
           created.push(sale);
         }
 
-        return { groupNo, sales: created };
+        // Only a confirmed sale moves stock/money. Pending sits inert until a Mill
+        // Manager/Owner confirms it (POST /:id/confirm) — nothing to unwind on reject.
+        if (autoConfirm) await postSaleSideEffects(trx, created, { userId: req.user?.id });
+
+        return { groupNo, sales: created, autoConfirm };
       });
 
       return res.status(201).json({
         success: true,
-        data: { sale: result.sales[0], sales: result.sales, group_no: result.groupNo, item_count: result.sales.length },
+        data: {
+          sale: result.sales[0], sales: result.sales, group_no: result.groupNo, item_count: result.sales.length,
+          status: result.autoConfirm ? 'Completed' : 'Pending', pending: !result.autoConfirm,
+        },
       });
     } catch (err) {
       console.error('Local sale create error:', err);
       const status = err.status || (String(err.message).includes('Insufficient') ? 400 : 500);
       return res.status(status).json({ success: false, message: err.message });
+    }
+  },
+
+  // Pending-confirmation inbox (Batch 6 · item 9) — sales awaiting a Mill
+  // Manager/Owner, grouped by sale_group_no.
+  async listPending(req, res) {
+    try {
+      const rows = await db('local_sales as ls')
+        .leftJoin('customers as c', 'ls.customer_id', 'c.id')
+        .leftJoin('users as u', 'u.id', 'ls.created_by')
+        .where('ls.status', 'Pending')
+        .orderBy('ls.sale_date', 'desc').orderBy('ls.sale_group_no', 'desc').orderBy('ls.id', 'asc')
+        .select('ls.*', 'c.name as customer_name', 'u.full_name as created_by_name');
+      const groups = [];
+      const byGroup = new Map();
+      for (const r of rows) {
+        const key = r.sale_group_no || r.sale_no;
+        if (!byGroup.has(key)) { const g = { sale_group_no: key, id: r.id, sale_date: r.sale_date, buyer_name: r.buyer_name, customer_name: r.customer_name, created_by_name: r.created_by_name, total_amount: 0, items: [] }; byGroup.set(key, g); groups.push(g); }
+        const g = byGroup.get(key);
+        g.total_amount = uc.round2((parseFloat(g.total_amount) || 0) + (parseFloat(r.total_amount) || 0));
+        g.items.push(r);
+      }
+      return res.json({ success: true, data: { pending: groups, count: groups.length } });
+    } catch (err) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
+  // Confirm a pending sale — Mill Manager/Owner only (route-gated). Runs the
+  // deferred stock/money side-effects (re-checking availability) and marks the
+  // whole sale group Completed. Idempotent-safe: only Pending rows are posted.
+  async confirmSale(req, res) {
+    try {
+      const { id } = req.params;
+      const head = await db('local_sales').where(/^\d+$/.test(String(id)) ? { id: parseInt(id, 10) } : { sale_no: id }).first();
+      if (!head) return res.status(404).json({ success: false, message: 'Sale not found.' });
+      const groupKey = head.sale_group_no || head.sale_no;
+
+      const result = await db.transaction(async (trx) => {
+        const rows = await trx('local_sales').where({ sale_group_no: groupKey, status: 'Pending' }).forUpdate().orderBy('id', 'asc');
+        if (!rows.length) { const e = new Error('This sale is not awaiting confirmation.'); e.status = 409; throw e; }
+        await postSaleSideEffects(trx, rows, { userId: req.user?.id });
+        const ids = rows.map((r) => r.id);
+        await trx('local_sales').whereIn('id', ids).update({
+          status: 'Completed', confirmed_by: req.user?.id || null, confirmed_at: trx.fn.now(), updated_at: trx.fn.now(),
+        });
+        return { count: ids.length, group_no: groupKey };
+      });
+      return res.json({ success: true, data: result });
+    } catch (err) {
+      console.error('Local sale confirm error:', err);
+      const status = err.status || (String(err.message).includes('Insufficient') ? 400 : 500);
+      return res.status(status).json({ success: false, message: err.message });
+    }
+  },
+
+  // Reject a pending sale — Mill Manager/Owner only. Nothing was posted, so this
+  // just marks the group Cancelled (no stock/GL reversal).
+  async rejectSale(req, res) {
+    try {
+      const { id } = req.params;
+      const reason = req.body?.reason || null;
+      const head = await db('local_sales').where(/^\d+$/.test(String(id)) ? { id: parseInt(id, 10) } : { sale_no: id }).first();
+      if (!head) return res.status(404).json({ success: false, message: 'Sale not found.' });
+      const groupKey = head.sale_group_no || head.sale_no;
+      const rows = await db('local_sales').where({ sale_group_no: groupKey, status: 'Pending' }).select('id', 'notes');
+      if (!rows.length) return res.status(409).json({ success: false, message: 'Only a pending sale can be rejected.' });
+      await db.transaction(async (trx) => {
+        for (const r of rows) {
+          await trx('local_sales').where('id', r.id).update({
+            status: 'Cancelled',
+            notes: reason ? `${r.notes ? `${r.notes} · ` : ''}Rejected: ${reason}` : r.notes,
+            updated_at: trx.fn.now(),
+          });
+        }
+      });
+      return res.json({ success: true, data: { count: rows.length, group_no: groupKey } });
+    } catch (err) {
+      return res.status(500).json({ success: false, message: err.message });
     }
   },
 
