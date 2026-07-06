@@ -1659,6 +1659,8 @@ COL payments.bank_account_id:integer:NULL
 COL payments.bank_reference:character varying:NULL
 COL payments.base_amount_pkr:numeric:NOT NULL
 COL payments.cleared:boolean:NOT NULL
+COL payments.confirmed_at:timestamp with time zone:NULL
+COL payments.confirmed_by:integer:NULL
 COL payments.created_at:timestamp with time zone:NOT NULL
 COL payments.created_by:integer:NULL
 COL payments.currency:character varying:NOT NULL
@@ -1672,8 +1674,10 @@ COL payments.notes:text:NULL
 COL payments.payment_date:date:NOT NULL
 COL payments.payment_method:character varying:NULL
 COL payments.payment_no:character varying:NOT NULL
+COL payments.reject_reason:text:NULL
 COL payments.source_id:integer:NULL
 COL payments.source_table:character varying:NULL
+COL payments.status:character varying:NOT NULL
 COL payments.type:character varying:NOT NULL
 COL permissions.action:character varying:NOT NULL
 COL permissions.created_at:timestamp with time zone:NULL
@@ -2845,6 +2849,7 @@ CON payments.chk_payments_base_amount_pkr_nonneg(c)
 CON payments.chk_payments_currency_valid(c)
 CON payments.chk_payments_payment_method_valid(c)
 CON payments.payments_bank_account_id_foreign(f)
+CON payments.payments_confirmed_by_foreign(f)
 CON payments.payments_created_by_foreign(f)
 CON payments.payments_linked_payable_id_foreign(f)
 CON payments.payments_linked_receivable_id_foreign(f)

@@ -149,6 +149,8 @@ const financeController = {
 
       const base = () => db('payments as p')
         .leftJoin('bank_accounts as ba', 'ba.id', 'p.bank_account_id')
+        // Exclude pending/rejected export receipts — not banked money yet (item 14).
+        .whereNotIn('p.status', ['Pending Finance Confirmation', 'Rejected'])
         .select(
           'p.id', 'p.payment_no', 'p.amount', 'p.currency', 'p.payment_method',
           'p.payment_date', 'p.bank_reference', 'p.notes', 'p.bank_account_id', 'p.type',
@@ -917,6 +919,10 @@ const financeController = {
     try {
       const { type, from_date, to_date, entity, limit = 500 } = req.query;
       let q = db('payments as p')
+        // Pending/Rejected export receipts (item 14) aren't banked money yet —
+        // exclude them from Money-In/Out until Finance confirms (then a real
+        // confirmed row exists).
+        .whereNotIn('p.status', ['Pending Finance Confirmation', 'Rejected'])
         .leftJoin('receivables as r', 'p.linked_receivable_id', 'r.id')
         .leftJoin('payables as pa',   'p.linked_payable_id',    'pa.id')
         .leftJoin('customers as c',   'r.customer_id',          'c.id')

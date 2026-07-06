@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useOwnerAuth } from '../../../context/OwnerAuthContext';
-import { useConfirmAdvance, useConfirmBalance, useUpdateOrderStatus } from '../../../api/queries';
+import { useUpdateOrderStatus, useRecordExportReceipt, usePendingExportReceipts, useConfirmExportReceipt, useRejectExportReceipt } from '../../../api/queries';
 import Modal from '../../../components/Modal';
 import StatusBadge from '../../../components/StatusBadge';
 import EmailComposer from '../../../components/EmailComposer';
@@ -36,9 +36,13 @@ export default function FinanceConfirmations() {
   const { exportOrders, addToast, settings, bankAccountsList } = useApp();
   const { requestOwnerApproval } = useOwnerAuth();
 
-  const confirmAdvanceMut = useConfirmAdvance();
-  const confirmBalanceMut = useConfirmBalance();
+  const recordReceiptMut = useRecordExportReceipt();
   const updateStatusMut = useUpdateOrderStatus();
+  // Item 14 — pending export receipts inbox (Finance verifies FX + confirms).
+  const { data: pendingReceipts = [] } = usePendingExportReceipts();
+  const confirmReceiptMut = useConfirmExportReceipt();
+  const rejectReceiptMut = useRejectExportReceipt();
+  const [fxByPayment, setFxByPayment] = useState({});
 
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
@@ -143,64 +147,56 @@ export default function FinanceConfirmations() {
     }, ...prev]);
   }
 
-  async function handleConfirmReceipt() {
+  // Recording a receipt (full or partial) now SUBMITS a pending receipt; Finance
+  // confirms it below with the actual FX rate (item 14).
+  async function submitPendingReceipt(amount) {
     if (!selectedOrder) return;
-    const amount = parseFloat(formData.receivedAmount);
-    if (isNaN(amount) || amount <= 0) {
-      addToast('Please enter a valid amount', 'error');
-      return;
-    }
-
+    if (isNaN(amount) || amount <= 0) { addToast('Please enter a valid amount', 'error'); return; }
     const orderId = selectedOrder.dbId || selectedOrder.id;
-    const payload = {
-      amount,
-      payment_date: formData.date,
-      payment_method: formData.paymentMethod,
-      bank_account_id: formData.bankAccountId || null,
-      bank_reference: formData.bankReference,
-      notes: formData.notes,
-    };
-
     try {
-      const mut = milestoneType === 'advance' ? confirmAdvanceMut : confirmBalanceMut;
-      await requestOwnerApproval((ownerId) => mut.mutateAsync({ id: orderId, data: { ...payload, authorized_by_owner_id: ownerId } }));
-      const label = milestoneType === 'advance' ? 'Advance' : 'Balance';
-      addToast(`${label} payment of ${formatCurrency(amount)} confirmed for ${selectedOrder.id}`);
-      recordPayment(selectedOrder.id, milestoneType, amount, formData.paymentMethod, formData.bankReference, formData.bankAccount);
+      await recordReceiptMut.mutateAsync({
+        id: orderId,
+        data: {
+          kind: milestoneType,
+          amount,
+          payment_date: formData.date,
+          payment_method: formData.paymentMethod,
+          bank_account_id: formData.bankAccountId || null,
+          notes: formData.notes,
+        },
+      });
+      addToast(`${milestoneType === 'advance' ? 'Advance' : 'Balance'} of ${formatCurrency(amount)} submitted — pending confirmation`);
     } catch (err) {
-      if (err?.message !== 'Owner authorization cancelled') addToast(`Payment confirmation failed: ${err.message || 'Server error'}`, 'error');
+      addToast(err?.data?.message || err?.message || 'Failed to submit receipt', 'error');
     }
     closeModal();
   }
+  function handleConfirmReceipt() { return submitPendingReceipt(parseFloat(formData.receivedAmount)); }
+  function handleMarkPartial() { return submitPendingReceipt(parseFloat(formData.receivedAmount)); }
 
-  async function handleMarkPartial() {
-    if (!selectedOrder) return;
-    const amount = parseFloat(formData.receivedAmount);
-    if (isNaN(amount) || amount <= 0) {
-      addToast('Please enter a valid amount', 'error');
-      return;
-    }
-
-    const orderId = selectedOrder.dbId || selectedOrder.id;
-    const payload = {
-      amount,
-      payment_date: formData.date,
-      payment_method: formData.paymentMethod,
-      bank_account_id: formData.bankAccountId || null,
-      bank_reference: formData.bankReference,
-      notes: formData.notes,
-    };
-
+  // Finance confirms a PENDING receipt with the actual FX rate → posts it.
+  async function confirmPending(p) {
+    const isForeign = (p.currency || 'USD') !== 'PKR';
+    const fx = parseFloat(fxByPayment[p.id]) || parseFloat(p.fxRate) || 0;
+    if (isForeign && fx <= 0) { addToast('Enter the FX rate the bank applied', 'error'); return; }
     try {
-      const mut = milestoneType === 'advance' ? confirmAdvanceMut : confirmBalanceMut;
-      await requestOwnerApproval((ownerId) => mut.mutateAsync({ id: orderId, data: { ...payload, authorized_by_owner_id: ownerId } }));
-      const label = milestoneType === 'advance' ? 'advance' : 'balance';
-      addToast(`Partial ${label} of ${formatCurrency(amount)} recorded for ${selectedOrder.id}`, 'warning');
-      recordPayment(selectedOrder.id, milestoneType + ' (partial)', amount, formData.paymentMethod, formData.bankReference, formData.bankAccount);
+      await requestOwnerApproval((ownerId) => confirmReceiptMut.mutateAsync({
+        paymentId: p.id, data: { fx_rate: isForeign ? fx : 1, authorized_by_owner_id: ownerId },
+      }));
+      addToast(`${p.receiptType} receipt for ${p.orderNo} confirmed & posted`);
     } catch (err) {
-      addToast(`Partial payment failed: ${err.message || 'Server error'}`, 'error');
+      if (err?.message !== 'Owner authorization cancelled') addToast(err?.data?.message || err?.message || 'Confirmation failed', 'error');
     }
-    closeModal();
+  }
+  async function rejectPending(p) {
+    const reason = window.prompt(`Reject the ${p.receiptType} receipt for ${p.orderNo}? Enter a reason:`);
+    if (reason === null) return;
+    try {
+      await rejectReceiptMut.mutateAsync({ paymentId: p.id, data: { reason } });
+      addToast('Receipt marked as not received', 'warning');
+    } catch (err) {
+      addToast(err?.data?.message || err?.message || 'Reject failed', 'error');
+    }
   }
 
   async function handlePutOnHold() {
@@ -334,6 +330,63 @@ export default function FinanceConfirmations() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Pending export receipts — Finance verifies FX + confirms (item 14) */}
+      <div className="bg-white rounded-xl shadow-sm p-5 border border-amber-200">
+        <div className="flex items-center gap-2 mb-4">
+          <Clock size={16} className="text-amber-500" />
+          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">Pending Finance Confirmation</h2>
+          <span className="ml-auto text-xs text-gray-400">{pendingReceipts.length} receipt{pendingReceipts.length !== 1 ? 's' : ''}</span>
+        </div>
+        {pendingReceipts.length === 0 ? (
+          <div className="text-center py-6 text-gray-400 text-sm">No receipts awaiting confirmation.</div>
+        ) : (
+          <div className="space-y-2">
+            {pendingReceipts.map((p) => {
+              const isForeign = (p.currency || 'USD') !== 'PKR';
+              const fx = parseFloat(fxByPayment[p.id]) || parseFloat(p.fxRate) || 0;
+              const pkr = (parseFloat(p.amount) || 0) * (isForeign ? fx : 1);
+              return (
+                <div key={p.id} className="flex flex-wrap items-center justify-between gap-3 border border-gray-100 rounded-lg p-3 bg-amber-50/40">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 text-sm">
+                      <Link to={`/export/${p.orderId}`} className="font-semibold text-blue-600 hover:text-blue-800">{p.orderNo}</Link>
+                      <span className="text-gray-400">|</span>
+                      <span className="text-gray-700"><PartyLink type="customer" id={p.customerId} name={p.customerName} /></span>
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 capitalize">{p.receiptType}</span>
+                    </div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      {p.currency} {Number(p.amount).toLocaleString()} · recorded by {p.recordedByName || '—'} · {p.paymentDate ? String(p.paymentDate).slice(0, 10) : ''}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {isForeign && (
+                      <div className="text-right">
+                        <label className="block text-[10px] text-gray-400 uppercase">FX rate</label>
+                        <input type="number" step="0.0001" value={fxByPayment[p.id] ?? (p.fxRate || '')}
+                          onChange={(e) => setFxByPayment((s) => ({ ...s, [p.id]: e.target.value }))}
+                          placeholder="rate" className="w-24 px-2 py-1 border border-gray-300 rounded text-sm text-right" />
+                      </div>
+                    )}
+                    <div className="text-right text-xs text-gray-500 w-28">
+                      <span className="block text-[10px] uppercase text-gray-400">PKR</span>
+                      Rs {pkr.toLocaleString('en-PK', { maximumFractionDigits: 0 })}
+                    </div>
+                    <button onClick={() => confirmPending(p)} disabled={confirmReceiptMut.isPending}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50">
+                      <CheckCircle size={14} /> Confirm
+                    </button>
+                    <button onClick={() => rejectPending(p)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-600 text-xs font-medium rounded-lg hover:bg-gray-50">
+                      Reject
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Financial Summary KPIs */}
@@ -738,14 +791,7 @@ export default function FinanceConfirmations() {
                 className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
               >
                 <CheckCircle size={16} />
-                Confirm Full
-              </button>
-              <button
-                onClick={handleMarkPartial}
-                className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-500 text-white text-sm font-medium rounded-lg hover:bg-amber-600 transition-colors"
-              >
-                <FileText size={16} />
-                Mark Partial
+                Submit for confirmation
               </button>
               <button
                 onClick={handlePutOnHold}

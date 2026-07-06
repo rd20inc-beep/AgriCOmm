@@ -2253,6 +2253,165 @@ const exportOrderController = {
     }
   },
 
+  // ── Export receipt: record (pending) → Finance confirms (FX + post) ──────────
+  // Item 14: an export receipt (advance/balance) recorded here does NOT post to
+  // bank/GL. It's a PENDING payment row that Finance verifies, sets the actual FX
+  // rate on, and confirms — only then does it post (via confirmAdvance/Balance).
+
+  // RECORD a pending export receipt. No bank move / GL / receivable settle.
+  async recordExportReceipt(req, res) {
+    try {
+      const rawId = req.params.id;
+      const isNumeric = /^\d+$/.test(rawId);
+      const whereClause = isNumeric ? { id: parseInt(rawId) } : { order_no: rawId };
+      const { kind, amount, bank_account_id, fx_rate, payment_date, payment_method, notes } = req.body || {};
+      const isAdvance = kind !== 'balance';
+      const amt = settledAmount(amount);
+      if (!(amt > 0)) return res.status(400).json({ success: false, message: 'A positive amount is required.' });
+
+      const out = await db.transaction(async (trx) => {
+        const order = await trx('export_orders').where(whereClause).first();
+        if (!order) { const e = new Error('Export order not found.'); e.statusCode = 404; throw e; }
+        if (['Closed', 'Cancelled'].includes(order.status)) { const e = new Error(`Cannot record a receipt for an order in '${order.status}' status.`); e.statusCode = 400; throw e; }
+
+        const expected = settledAmount(isAdvance ? order.advance_expected : order.balance_expected);
+        const received = settledAmount(isAdvance ? order.advance_received : order.balance_received);
+        // Already-pending receipts of this kind reduce what can still be recorded.
+        const recv = await trx('receivables').where({ order_id: order.id, type: isAdvance ? 'Advance' : 'Balance' }).first();
+        const pendingRow = await trx('payments')
+          .where({ status: 'Pending Finance Confirmation', type: 'receipt' })
+          .modify((q) => { if (recv) q.where('linked_receivable_id', recv.id); else q.whereRaw('1=0'); })
+          .sum('amount as s').first();
+        const pending = settledAmount(pendingRow && pendingRow.s);
+        const room = Math.max(0, settledAmount(expected - received - pending));
+        if (expected > 0 && amt - room > MONEY_EPSILON) {
+          const e = new Error(`Amount exceeds what's still outstanding for this ${isAdvance ? 'advance' : 'balance'} (${room.toFixed(2)}${pending > 0 ? `, ${pending.toFixed(2)} already pending` : ''}).`);
+          e.statusCode = 400; throw e;
+        }
+
+        const orderCurrency = order.currency || 'USD';
+        // FX at record time is only an ESTIMATE; Finance sets the real rate at
+        // confirm. base_amount_pkr is NOT NULL, so store the estimate (this row
+        // is excluded from Money-In until confirmed, so it books no real money).
+        const fxEst = orderCurrency === 'PKR' ? 1 : (parseFloat(fx_rate) > 0 ? parseFloat(fx_rate) : (parseFloat(order.booked_fx_rate) || 0));
+        const payNo = await generatePaymentNo(trx, 'PAY');
+        const [row] = await trx('payments').insert({
+          payment_no: payNo,
+          type: 'receipt',
+          status: 'Pending Finance Confirmation',
+          linked_receivable_id: recv ? recv.id : null,
+          amount: amt,
+          currency: orderCurrency,
+          fx_rate: fxEst || null,
+          base_amount_pkr: settledAmount(amt * fxEst),
+          payment_method: payment_method ? String(payment_method).toLowerCase().replace(/\s+/g, '_') : null,
+          bank_account_id: bank_account_id || null,
+          payment_date: payment_date || trx.fn.now(),
+          notes: notes || `${isAdvance ? 'Advance' : 'Balance'} receipt for ${order.order_no} — pending Finance confirmation`,
+          created_by: req.user?.id || null,
+        }).returning('*');
+        return { order, row };
+      });
+
+      emitExportOrderUpdate(out.order.id, 'receipt_recorded', { pending: true });
+      return res.status(201).json({ success: true, data: { payment: out.row, message: 'Recorded — pending Finance confirmation.' } });
+    } catch (err) {
+      if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
+      console.error('recordExportReceipt error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  // Finance CONFIRMS a pending receipt: enter the actual FX rate → post it. Reuses
+  // the audited confirmAdvance/confirmBalance posting verbatim (internal call),
+  // then removes the pending placeholder (replaced by the real confirmed PAY row).
+  async confirmExportReceipt(req, res) {
+    try {
+      const paymentId = parseInt(req.params.paymentId, 10);
+      const { fx_rate, bank_account_id, payment_method } = req.body || {};
+      const pending = await db('payments').where({ id: paymentId }).first();
+      if (!pending) return res.status(404).json({ success: false, message: 'Payment not found.' });
+      if (pending.status !== 'Pending Finance Confirmation') {
+        return res.status(409).json({ success: false, message: `This receipt is already ${pending.status}.` });
+      }
+      const recv = pending.linked_receivable_id ? await db('receivables').where({ id: pending.linked_receivable_id }).first() : null;
+      if (!recv || !recv.order_id) return res.status(400).json({ success: false, message: 'Cannot resolve the export order for this receipt.' });
+      const isAdvance = recv.type !== 'Balance';
+
+      // Internal call into the posting workhorse with the finance-entered FX rate.
+      const innerReq = {
+        params: { id: recv.order_id },
+        user: req.user,
+        body: {
+          amount: pending.amount,
+          fx_rate: (fx_rate != null && fx_rate !== '') ? parseFloat(fx_rate) : pending.fx_rate,
+          bank_account_id: bank_account_id || pending.bank_account_id || null,
+          payment_method: payment_method || pending.payment_method || null,
+          payment_date: pending.payment_date,
+          notes: pending.notes,
+        },
+      };
+      const cap = { _status: 200, status(c) { this._status = c; return this; }, json(b) { this._body = b; return this; } };
+      await (isAdvance ? exportOrderController.confirmAdvance : exportOrderController.confirmBalance)(innerReq, cap);
+
+      if (cap._status >= 400) {
+        return res.status(cap._status).json(cap._body || { success: false, message: 'Confirmation failed.' });
+      }
+      // Posted successfully → the real confirmed PAY row now exists; drop the
+      // pending placeholder so it isn't double-counted.
+      await db('payments').where({ id: paymentId }).del();
+      return res.json({ success: true, data: cap._body?.data || {}, message: 'Receipt confirmed and posted.' });
+    } catch (err) {
+      console.error('confirmExportReceipt error:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
+  // Finance REJECTS a pending receipt (not actually received). Keeps the row.
+  async rejectExportReceipt(req, res) {
+    try {
+      const paymentId = parseInt(req.params.paymentId, 10);
+      const pending = await db('payments').where({ id: paymentId }).first();
+      if (!pending) return res.status(404).json({ success: false, message: 'Payment not found.' });
+      if (pending.status !== 'Pending Finance Confirmation') {
+        return res.status(409).json({ success: false, message: `This receipt is already ${pending.status}.` });
+      }
+      await db('payments').where({ id: paymentId }).update({
+        status: 'Rejected',
+        reject_reason: req.body?.reason || null,
+        confirmed_by: req.user?.id || null,
+        confirmed_at: db.fn.now(),
+      });
+      return res.json({ success: true, message: 'Receipt marked as not received.' });
+    } catch (err) {
+      console.error('rejectExportReceipt error:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
+  // Finance inbox: pending export receipts awaiting confirmation.
+  async listPendingExportReceipts(req, res) {
+    try {
+      const rows = await db('payments as p')
+        .join('receivables as r', 'p.linked_receivable_id', 'r.id')
+        .join('export_orders as eo', 'r.order_id', 'eo.id')
+        .leftJoin('customers as c', 'eo.customer_id', 'c.id')
+        .leftJoin('users as u', 'p.created_by', 'u.id')
+        .where('p.status', 'Pending Finance Confirmation')
+        .select(
+          'p.id', 'p.payment_no', 'p.amount', 'p.currency', 'p.fx_rate', 'p.payment_date',
+          'p.bank_account_id', 'p.notes', 'p.created_at', 'u.full_name as recorded_by_name',
+          'r.type as receipt_type', 'eo.id as order_id', 'eo.order_no', 'eo.booked_fx_rate',
+          'c.name as customer_name',
+        )
+        .orderBy('p.created_at', 'desc');
+      return res.json({ success: true, data: rows });
+    } catch (err) {
+      console.error('listPendingExportReceipts error:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
   async allocateStock(req, res) {
     try {
       const rawId = req.params.id;
