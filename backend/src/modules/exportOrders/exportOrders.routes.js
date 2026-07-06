@@ -166,7 +166,9 @@ router.post(
 );
 router.post(
   '/:id/allocate-stock',
-  authorize('export_orders', 'edit'),
+  // Export can allocate; the mill can also fulfil an order from its own finished
+  // stock (then the export manager is notified).
+  authorizeAny(['export_orders', 'edit'], ['milling', 'edit']),
   validate(schemas.allocateExportStock),
   auditAction('allocate_stock', 'export_order', (req) => req.params.id),
   controller.allocateStock
