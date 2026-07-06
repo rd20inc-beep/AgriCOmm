@@ -45,6 +45,10 @@ export default function FinancialsTab({ order, formatCurrency, formatPKR, totalC
           const g = (k) => parseFloat(costs[k]) || 0;
           const perKg = (v) => (orderKg > 0 ? v / orderKg : 0);
           const rawRice = g('rice') + g('raw_rice');
+          const commission = g('commission');
+          const transport = g('transport');
+          // Korra Ready Rice Cost = the landed raw-rice cost = rice + commission + transport.
+          const korra = rawRice + commission + transport;
           const packing = g('packing') + g('bags');
           const pallet = g('pallet');
           // Extra populated categories not named in the fixed order — shown so the
@@ -68,16 +72,16 @@ export default function FinancialsTab({ order, formatCurrency, formatPKR, totalC
                 <span className="flex gap-4"><span className="w-24 text-right">Per KG</span><span className="w-28 text-right">Total</span></span>
               </div>
               <Row label="Raw Rice" value={rawRice} />
-              <Row label="Commission" value={g('commission')} />
-              <Row label="Transport" value={g('transport')} />
+              <Row label="Commission" value={commission} />
+              <Row label="Transport" value={transport} />
+              <Row label="Korra Ready Rice Cost" value={korra} bold top />
               <Row label="Milling" value={g('milling')} />
               <Row label="Drying / Processing" value={g('drying') + g('processing')} />
-              <Row label="Korra Ready Rice Cost" value={rawRice} bold top />
               <Row label="Packing" value={packing} />
               <Row label="Pallet" value={pallet} />
               {otherKeys.map((k) => <Row key={k} label={OTHER_LABEL[k] || k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())} value={g(k)} />)}
               <Row label="Final Export Cost" value={totalCosts} bold top />
-              <p className="text-xs text-gray-400 italic pt-1">Korra Ready Rice Cost = rice cost before packing. All outflows paid to local vendors in PKR.</p>
+              <p className="text-xs text-gray-400 italic pt-1">Korra Ready Rice Cost = rice + commission + transport (landed raw-rice cost). All outflows paid to local vendors in PKR.</p>
             </div>
           );
         })()}
