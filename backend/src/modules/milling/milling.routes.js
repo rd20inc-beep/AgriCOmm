@@ -1837,6 +1837,7 @@ router.get('/payroll/tax-statement', authorize('payroll', 'view'), async (req, r
     const periodTo = `${startYear + 1}-06`;
     const taxYear = `${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`;
 
+    const entity = req.query.entity === 'general' ? 'general' : 'mill'; // Head Office vs Mill
     const lines = await db('mill_payroll_lines as pl')
       .join('mill_payroll_runs as r', 'pl.run_id', 'r.id')
       .leftJoin('mill_workers as w', 'pl.worker_id', 'w.id')
@@ -1844,6 +1845,7 @@ router.get('/payroll/tax-statement', authorize('payroll', 'view'), async (req, r
       // the paid portion of a partially_paid run.
       .where(function () { this.whereNotNull('pl.paid_at').orWhereIn('r.status', ['paid', 'posted']); })
       .whereNotNull('pl.worker_id')
+      .where('r.entity', entity)
       .where('r.period', '>=', periodFrom).where('r.period', '<=', periodTo)
       .select('pl.*', 'r.period', 'r.pay_date',
         'w.cnic', 'w.phone', 'w.joined_date', 'w.pay_type as w_pay_type', 'w.name as w_name', 'w.role as w_role');

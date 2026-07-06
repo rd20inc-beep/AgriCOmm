@@ -2415,7 +2415,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
 
       {/* ─── YEAR-END TAX STATEMENTS DRAWER ────────────────────────── */}
       {showTaxDrawer && (
-        <TaxStatementDrawer company={companyProfileData} onClose={() => setShowTaxDrawer(false)} addToast={addToast} />
+        <TaxStatementDrawer company={companyProfileData} entity={payrollEntity} onClose={() => setShowTaxDrawer(false)} addToast={addToast} />
       )}
 
       {/* ─── EMPLOYEE REQUESTS DRAWER ──────────────────────────────── */}
@@ -4517,13 +4517,13 @@ function WorkerRequestsDrawer({ canResolve, onClose, addToast }) {
 
 // Year-end tax statements — per-employee annual salary + tax-withheld summary
 // for a Pakistani tax year, with printable salary/tax certificates (u/s 149).
-function TaxStatementDrawer({ company, onClose, addToast }) {
+function TaxStatementDrawer({ company, entity = 'mill', onClose, addToast }) {
   // Build a few recent tax-year options (current FY first).
   const now = new Date();
   const curStart = (now.getUTCMonth() + 1) >= 7 ? now.getUTCFullYear() : now.getUTCFullYear() - 1;
   const years = [0, 1, 2].map((d) => { const y = curStart - d; return `${y}-${String((y + 1) % 100).padStart(2, '0')}`; });
   const [taxYear, setTaxYear] = useState(years[0]);
-  const { data, isLoading } = useTaxStatement({ tax_year: taxYear });
+  const { data, isLoading } = useTaxStatement({ tax_year: taxYear, entity });
   const meta = { taxYear: data?.taxYear || taxYear, periodFrom: data?.periodFrom, periodTo: data?.periodTo };
   const employees = data?.employees || [];
   const grand = data?.grand || { gross: 0, statutory: 0, net: 0 };
