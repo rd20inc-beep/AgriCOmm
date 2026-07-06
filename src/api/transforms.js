@@ -186,6 +186,10 @@ export function transformOrder(dbOrder) {
     masterBagType: dbOrder.master_bag_type || '',
     unitsPerBag: dbOrder.units_per_bag ? parseInt(dbOrder.units_per_bag) : null,
     bagNotes: dbOrder.bag_notes || '',
+    // Batch 7 — structured packing spec
+    packingType: dbOrder.packing_type || 'retail',
+    bagMaterial: dbOrder.bag_material || '',
+    palletized: !!dbOrder.palletized,
     // Packing / receiving mode
     receivingMode: dbOrder.receiving_mode || '',
     quantityUnit: dbOrder.quantity_unit || '',

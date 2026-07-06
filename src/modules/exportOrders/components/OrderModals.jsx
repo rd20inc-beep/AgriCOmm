@@ -305,6 +305,17 @@ export function MillingDemandModal({
           <p className="text-xs text-gray-400 mt-1">From this export order — the batch and its output lots inherit this variety.</p>
         </div>
         <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Required Packing</label>
+          <div className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-900">
+            {order.packingType === 'container'
+              ? 'Bulk container — no bags'
+              : order.packingType === 'jumbo'
+                ? `1,200 kg jumbo FIBC${order.bagMaterial ? ` · ${order.bagMaterial}` : ''}${order.palletized ? ' · palletized' : ''}`
+                : `${order.bagSizeKg ? `${order.bagSizeKg} kg` : 'Retail'} bags${order.bagMaterial ? ` · ${order.bagMaterial}` : ''}${order.masterBagSizeKg ? ` · ${order.masterBagSizeKg} kg master` : ''}${order.palletized ? ' · palletized' : ''}`}
+          </div>
+          <p className="text-xs text-gray-400 mt-1">What the export customer requires — the mill packs the finished rice to this spec.</p>
+        </div>
+        <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Raw Qty Required (MT)</label>
           <input
             type="number"
