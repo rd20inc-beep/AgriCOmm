@@ -6,6 +6,7 @@ const automationService = require('../../services/automationService');
 const emailService = require('../../services/emailService');
 const { publishExportOrderUpdate } = require('../../services/exportOrderEventBus');
 const workflowService = require('../../services/exportOrderWorkflowService');
+const notificationService = require('../../services/notificationService');
 const { MONEY_EPSILON, settledAmount, getStepForStatus, getAllowedActions } = workflowService;
 
 /**
@@ -2523,6 +2524,16 @@ const exportOrderController = {
           to_status: order.status,
           changed_by: req.user?.id,
           reason: `${qtyMT} MT allocated from ${lot.lot_no}`,
+        });
+
+        // Let the export manager know the mill has fulfilled (part of) this order
+        // from existing finished stock rather than milling fresh.
+        await notificationService.createForRole(trx, {
+          roleName: 'Export Manager',
+          title: 'Stock allocated from existing mill stock',
+          message: `${qtyMT} MT allocated to order ${order.order_no} from finished stock (${lot.lot_no}).`,
+          type: 'info',
+          linkedRef: order.order_no,
         });
 
         return {
