@@ -2098,6 +2098,7 @@ COL suppliers.reviewed_at:timestamp with time zone:NULL
 COL suppliers.reviewed_by:integer:NULL
 COL suppliers.submitted_at:timestamp with time zone:NULL
 COL suppliers.submitted_by:integer:NULL
+COL suppliers.supplier_code:character varying:NULL
 COL suppliers.type:character varying:NOT NULL
 COL suppliers.uid:character varying:NULL
 COL suppliers.updated_at:timestamp with time zone:NOT NULL
@@ -3038,6 +3039,7 @@ CON suppliers.chk_suppliers_approval_status(c)
 CON suppliers.suppliers_pkey(p)
 CON suppliers.suppliers_reviewed_by_foreign(f)
 CON suppliers.suppliers_submitted_by_foreign(f)
+CON suppliers.suppliers_supplier_code_unique(u)
 CON suppliers.suppliers_uid_unique(u)
 CON system_health.chk_system_health_status_valid(c)
 CON system_health.system_health_pkey(p)

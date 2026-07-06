@@ -11,6 +11,7 @@
  */
 
 const db = require('../../config/database');
+const { nextDocNo } = require('../../utils/docNumber');
 
 const ALLOWED_TABLES = {
   products: { table: 'products', label: 'product' },
@@ -69,7 +70,11 @@ const approvalsController = {
         reviewed_by: autoApprove ? (req.user?.id || null) : null,
         reviewed_at: autoApprove ? now : null,
       };
-      const [supplier] = await db('suppliers').insert(payload).returning('*');
+      const [supplier] = await db.transaction(async (trx) => {
+        // Stable privacy code (SUP-001…) shown on export orders instead of the name.
+        payload.supplier_code = await nextDocNo(trx, { table: 'suppliers', column: 'supplier_code', prefix: 'SUP-', pad: 3 });
+        return trx('suppliers').insert(payload).returning('*');
+      });
       return res.status(201).json({ success: true, data: { supplier } });
     } catch (err) {
       console.error('quickAddSupplier error:', err);

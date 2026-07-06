@@ -486,6 +486,7 @@ const exportOrderController = {
         'l.variety', 'l.grade', 'l.moisture_pct', 'l.broken_pct',
         'l.total_bags', 'l.bag_size_kg', 'l.purchase_date',
         's.name as supplier_name',
+        's.supplier_code as supplier_code',
         'w.name as warehouse_name',
         'p.name as product_name',
       ];
@@ -591,6 +592,16 @@ const exportOrderController = {
         const rr = await db('roles').where({ id: req.user.role_id }).select('name').first();
         roleName = rr && rr.name;
       }
+
+      // Supplier privacy: Export users see the Supplier Code (SUP-NNN), never the
+      // name. Owner/Admin/Finance/Mill keep names. Redact supplier_name on the
+      // purchase lots (FE falls back to supplier_code) for anyone not in the set.
+      const SUPPLIER_NAME_ROLES = ['Super Admin', 'Owner', 'Finance Manager', 'Mill Manager', 'Mill Operator'];
+      const canSeeSupplierName = SUPPLIER_NAME_ROLES.includes(roleName);
+      if (!canSeeSupplierName) {
+        for (const lot of purchaseLots) { lot.supplier_name = null; }
+      }
+
       let batchByproducts = [];
       if (ADMIN_PRICING_ROLES.includes(roleName)) {
         const refSet = new Set();
@@ -661,6 +672,7 @@ const exportOrderController = {
           packingLines: packingLines || [],
           shipmentContainers: withLots,
           purchaseLots,
+          canSeeSupplierName, // FE gates the linked-batch supplier link on this
           batchByproducts, // INTERNAL/ADMIN ONLY — empty for non-admin viewers
         },
       });
