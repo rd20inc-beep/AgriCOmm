@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Search, Plus, Truck, Package, DollarSign, CheckCircle2, AlertCircle, Loader2, Star } from 'lucide-react';
 import Drawer from '../../../components/Drawer';
+import SupplierPicker from '../../../components/SupplierPicker';
 import { lotInventoryApi } from '../api/services';
 import { useCreatePurchaseLot } from '../../../api/queries';
 import { STANDARD_BAG_SIZES, snapBagSizeKg, isStandardBagSize, DEFAULT_BAG_SIZE_KG } from '../../../utils/bagSize';
@@ -764,12 +765,16 @@ export default function PurchaseLotDrawer({
               {totalCommission > 0 && <p className="text-[11px] text-gray-500 mt-1">Total commission: Rs {totalCommission.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({bags} bags)</p>}
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Broker (paid the commission)</label>
-              <select value={form.broker_id} onChange={(e) => setForm(prev => ({ ...prev, broker_id: e.target.value }))}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-blue-500">
-                <option value="">— None —</option>
-                {mergedSuppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
+              <SupplierPicker
+                label={<span className="text-xs font-medium text-gray-600">Broker (paid the commission)</span>}
+                value={form.broker_id}
+                onChange={(id) => setForm(prev => ({ ...prev, broker_id: id }))}
+                suppliers={mergedSuppliers}
+                onCreated={(s) => setLocalSuppliers(prev => [s, ...prev])}
+                addToast={addToast}
+                clearable
+                placeholder="Search broker…"
+              />
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Transport cost (PKR)</label>
@@ -778,12 +783,16 @@ export default function PurchaseLotDrawer({
                 placeholder="0" className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Transporter / hauler</label>
-              <select value={form.transport_vendor_id} onChange={(e) => setForm(prev => ({ ...prev, transport_vendor_id: e.target.value }))}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-blue-500">
-                <option value="">— None —</option>
-                {mergedSuppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
+              <SupplierPicker
+                label={<span className="text-xs font-medium text-gray-600">Transporter / hauler</span>}
+                value={form.transport_vendor_id}
+                onChange={(id) => setForm(prev => ({ ...prev, transport_vendor_id: id }))}
+                suppliers={mergedSuppliers}
+                onCreated={(s) => setLocalSuppliers(prev => [s, ...prev])}
+                addToast={addToast}
+                clearable
+                placeholder="Search transporter…"
+              />
             </div>
           </div>
           {finalCostPerKg > 0 && (

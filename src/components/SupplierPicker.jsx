@@ -18,7 +18,7 @@ function PendingBadge() {
   );
 }
 
-export default function SupplierPicker({ label, value, onChange, suppliers = [], placeholder = 'Search supplier…', addToast, clearable = false }) {
+export default function SupplierPicker({ label, value, onChange, suppliers = [], placeholder = 'Search supplier…', addToast, clearable = false, onCreated }) {
   const [localSuppliers, setLocalSuppliers] = useState([]);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
@@ -62,7 +62,9 @@ export default function SupplierPicker({ label, value, onChange, suppliers = [],
       });
       const supplier = res?.data?.supplier || res?.supplier || res?.data;
       if (!supplier?.id) throw new Error('Server did not return the new supplier');
-      setLocalSuppliers(prev => [{ id: supplier.id, name: supplier.name, is_active: true, approval_status: supplier.approval_status }, ...prev]);
+      const normalized = { id: supplier.id, name: supplier.name, is_active: true, approval_status: supplier.approval_status };
+      setLocalSuppliers(prev => [normalized, ...prev]);
+      onCreated?.(normalized); // let the parent share the new supplier across sibling fields
       onChange(String(supplier.id));
       setAdding(false);
       setSearch('');
