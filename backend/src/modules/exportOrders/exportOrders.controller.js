@@ -315,15 +315,16 @@ const ALLOWED_UPDATE_FIELDS = [
   'payment_terms',
 ];
 
-// Batch 7 — container-capacity rule. Returns an error string or null.
-// Palletized: 20 pallets × 1,000 KG = 20,000 KG. Bulk/loose container: 25,000 KG.
-function packingCapacityError(qtyMt, palletized) {
+// Batch 7 — container-capacity rule. The 25,000 KG (loose) / 20,000 KG (palletized)
+// caps are PER CONTAINER; a bagged order can span several containers, so only an
+// explicit single "container" bulk load is hard-capped here. (A bagged order's
+// container count is surfaced as guidance in the UI, not blocked.)
+function packingCapacityError(qtyMt, palletized, packingType) {
+  if (packingType !== 'container') return null;
   const totalKg = (parseFloat(qtyMt) || 0) * 1000;
-  if (palletized && totalKg > 20000) {
-    return 'Palletized load capped at 20,000 KG (20 pallets × 1,000 KG). Reduce the quantity or ship without pallets.';
-  }
-  if (totalKg > 25000) {
-    return 'Container load capped at 25,000 KG. Split into multiple orders/containers.';
+  const cap = palletized ? 20000 : 25000;
+  if (totalKg > cap) {
+    return `Container bulk load capped at ${cap.toLocaleString()} KG${palletized ? ' (palletized)' : ''}. Use a bagged packing type or split into multiple orders for a larger quantity.`;
   }
   return null;
 }
@@ -765,9 +766,8 @@ const exportOrderController = {
         });
       }
 
-      // Batch 7 — container-capacity rule: a palletized load caps at 20 pallets ×
-      // 1,000 KG = 20,000 KG; a bulk/loose container caps at 25,000 KG.
-      const capacityError = packingCapacityError(effectiveQtyMt, palletized);
+      // Batch 7 — container-capacity rule (only an explicit single bulk container).
+      const capacityError = packingCapacityError(effectiveQtyMt, palletized, packing_type);
       if (capacityError) return res.status(400).json({ success: false, message: capacityError });
 
       const contractValue = parseFloat(effectiveQtyMt) * parseFloat(effectivePricePerMt);
@@ -1081,12 +1081,13 @@ const exportOrderController = {
         resyncReceivables = true;
       }
 
-      // Batch 7 — re-check the container-capacity rule if qty or palletization changed.
-      if (safeUpdates.qty_mt !== undefined || safeUpdates.palletized !== undefined) {
+      // Batch 7 — re-check the container-capacity rule if qty/palletization/type changed.
+      if (safeUpdates.qty_mt !== undefined || safeUpdates.palletized !== undefined || safeUpdates.packing_type !== undefined) {
         const cur = await db('export_orders').where({ id }).first();
         const effQty = safeUpdates.qty_mt != null ? safeUpdates.qty_mt : cur?.qty_mt;
         const effPal = safeUpdates.palletized !== undefined ? safeUpdates.palletized : cur?.palletized;
-        const capErr = packingCapacityError(effQty, effPal);
+        const effType = safeUpdates.packing_type !== undefined ? safeUpdates.packing_type : cur?.packing_type;
+        const capErr = packingCapacityError(effQty, effPal, effType);
         if (capErr) return res.status(400).json({ success: false, message: capErr });
       }
 

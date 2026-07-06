@@ -158,13 +158,16 @@ export default function CreateExportOrder() {
   const isMultiItem = items.length > 1;
   const needsBagWidget = form.receivingMode === 'bags' || form.receivingMode === 'mixed' || form.receivingMode === 'custom';
   const isMixed = form.receivingMode === 'mixed';
-  // Batch 7 — container-capacity rule (mirrors the backend guard). Palletized load
-  // caps at 20 pallets × 1,000 = 20,000 KG; a bulk/loose container caps at 25,000 KG.
-  const capacityWarning = form.palletized && totalKg > 20000
-    ? 'Palletized load capped at 20,000 KG (20 pallets × 1,000 KG). Reduce the quantity or ship without pallets.'
-    : totalKg > 25000
-      ? 'Container load capped at 25,000 KG. Split into multiple orders/containers.'
-      : '';
+  // Batch 7 — per-container capacity: 25,000 KG loose / 20,000 KG palletized. A
+  // bagged order can span several containers, so only an explicit single "container"
+  // bulk load is hard-blocked; bagged orders just get a containers-needed hint.
+  const perContainerCap = form.palletized ? 20000 : 25000;
+  const capacityWarning = form.packingType === 'container' && totalKg > perContainerCap
+    ? `Container bulk load capped at ${perContainerCap.toLocaleString()} KG${form.palletized ? ' (palletized)' : ''}. Use a bagged packing type or split into multiple orders.`
+    : '';
+  const containersNote = totalKg > 0 && form.packingType !== 'container'
+    ? `≈ ${Math.ceil(totalKg / perContainerCap).toLocaleString()} container(s) at ${perContainerCap.toLocaleString()} KG each${form.palletized ? ' (palletized)' : ''}.`
+    : '';
 
   // Mixed packing totals
   const mixedTotals = useMemo(() => {
@@ -794,12 +797,14 @@ export default function CreateExportOrder() {
             </div>
           )}
 
-          {/* Container-capacity guard */}
-          {capacityWarning && (
+          {/* Container-capacity guard (hard block) + containers-needed hint */}
+          {capacityWarning ? (
             <div className="mt-3 bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
               {capacityWarning}
             </div>
-          )}
+          ) : containersNote ? (
+            <div className="mt-3 text-xs text-gray-500">{containersNote}</div>
+          ) : null}
 
           {/* Bag count preview */}
           {singleBagCount > 0 && (
