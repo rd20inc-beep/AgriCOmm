@@ -2313,6 +2313,130 @@ const reportingService = {
     return { rows: out, totals: { count: out.length, inKg: out.filter(r => r.direction === 'in').reduce((s, r) => s + r.qtyKg, 0), outKg: out.filter(r => r.direction === 'out').reduce((s, r) => s + r.qtyKg, 0) } };
   },
 
+  // Movement ledger for a stock DIMENSION (variety | grade | byproduct | product),
+  // aggregating lot_transactions across every lot that matches the key, with the
+  // Opening/Inward/Outward/Packing/Transfer/Sales columns + running Balance +
+  // Source Lot / Date / User / Reference (Batch 5, item 5). Packing is derived
+  // from mill_packing_logs (no rice-lot packing movement exists).
+  async getStockLedger({ dimension = 'variety', key, variety, dateFrom, dateTo, limit = 2000 } = {}) {
+    const num = (v) => parseFloat(v) || 0;
+    const cap = Math.min(parseInt(limit, 10) || 2000, 5000);
+    if (!key && dimension !== 'variety') { /* allow empty variety */ }
+
+    const TXN_TO_MT = {
+      purchase_in: 'purchase_receipt', warehouse_transfer_in: 'transfer_in', transfer_to_mill: 'transfer_in',
+      milling_issue: 'production_issue', milling_receipt: 'production_output', byproduct_receipt: 'byproduct_output',
+      warehouse_transfer_out: 'transfer_out', transfer_to_export: 'transfer_out',
+      export_dispatch_out: 'export_dispatch', local_sale_out: 'local_sale',
+      stock_adjustment_plus: 'adjustment_plus', stock_adjustment_minus: 'adjustment_minus',
+      damage_out: 'damage_writeoff', shortage_out: 'shortage_writeoff', return_in: 'return',
+      opening_balance: 'opening_balance', lot_split: 'adjustment_minus', lot_merge: 'adjustment_plus',
+    };
+    const LABELS = {
+      purchase_receipt: 'Purchase received', production_issue: 'Issued to milling', production_output: 'Milling output',
+      byproduct_output: 'By-product output', transfer_out: 'Transfer out', transfer_in: 'Transfer in',
+      export_dispatch: 'Export dispatch', local_sale: 'Local sale', adjustment_plus: 'Adjustment (+)',
+      adjustment_minus: 'Adjustment (−)', damage_writeoff: 'Damage write-off', shortage_writeoff: 'Shortage write-off',
+      return: 'Return', opening_balance: 'Opening balance',
+    };
+    // movement_type → the ledger column bucket
+    const BUCKET = {
+      opening_balance: 'opening',
+      purchase_receipt: 'inward', production_output: 'inward', byproduct_output: 'inward', return: 'inward', adjustment_plus: 'inward',
+      production_issue: 'outward', adjustment_minus: 'outward', damage_writeoff: 'outward', shortage_writeoff: 'outward',
+      transfer_in: 'transfer', transfer_out: 'transfer',
+      local_sale: 'sales', export_dispatch: 'sales',
+    };
+
+    const TAG_CASE = `CASE
+      WHEN l.grade IN ('B1','B2','B3','CSR','Short Grain') THEN l.grade
+      WHEN l.item_name ILIKE '%sweeping%' THEN 'Sweeping'
+      WHEN l.item_name ILIKE '%powder%'   THEN 'Powder'
+      WHEN l.item_name ILIKE '%sortex%'   THEN 'Sortex'
+      WHEN l.item_name ILIKE '%choba%'    THEN 'Choba'
+      WHEN l.item_name ILIKE '%bran%'     THEN 'Bran'
+      WHEN l.item_name ILIKE '%husk%'     THEN 'Husk'
+      ELSE COALESCE(l.grade, 'Broken') END`;
+    const applyDim = (qb) => {
+      if (dimension === 'variety') qb.where('l.variety', key || null);
+      else if (dimension === 'grade') qb.where('l.grade', key);
+      else if (dimension === 'product') qb.where('l.product_id', parseInt(key, 10) || -1);
+      else if (dimension === 'byproduct') { qb.where('l.type', 'byproduct').whereRaw(`(${TAG_CASE}) = ?`, [key]); if (variety) qb.where('l.variety', variety); }
+      return qb;
+    };
+    const label = dimension === 'byproduct'
+      ? `${variety ? variety + ' — ' : ''}${key}`
+      : (key || '(unset)');
+
+    // Movement rows (oldest → newest for the running balance).
+    let q = db('lot_transactions as t')
+      .join('inventory_lots as l', 't.lot_id', 'l.id')
+      .leftJoin('users as u', 't.created_by', 'u.id');
+    applyDim(q);
+    if (dateFrom) q = q.where('t.transaction_date', '>=', dateFrom);
+    if (dateTo) q = q.where('t.transaction_date', '<=', dateTo);
+    const txns = await q.select(
+      't.id', 't.transaction_date', 't.transaction_type', 't.quantity_kg', 't.reference_no',
+      't.reference_module', 't.reference_id', 'l.lot_no', 'l.id as lot_id', 'l.item_name', 'l.type as lot_type',
+      'u.full_name as user_name',
+    ).orderBy('t.transaction_date', 'asc').orderBy('t.id', 'asc').limit(cap);
+
+    // Packing rows (mill_packing_logs whose batch produced a matching lot).
+    const packLogs = await db('mill_packing_logs as pl')
+      .leftJoin('milling_batches as mb', 'mb.id', 'pl.batch_id')
+      .leftJoin('users as u', 'pl.packed_by', 'u.id')
+      .whereExists(function () {
+        this.select(db.raw('1')).from('inventory_lots as l')
+          .whereRaw("l.batch_ref = 'batch-' || pl.batch_id");
+        applyDim(this);
+      })
+      .select('pl.id', 'pl.packed_weight_kg', 'pl.bags_count', 'pl.created_at', 'mb.batch_no', 'mb.id as batch_id', 'u.full_name as user_name')
+      .orderBy('pl.created_at', 'asc').limit(cap);
+
+    // Merge into one timeline. Packing does NOT change rice qty → balance untouched.
+    const events = [];
+    for (const t of txns) {
+      const mt = TXN_TO_MT[String(t.transaction_type || '')] || String(t.transaction_type || '');
+      const qkg = num(t.quantity_kg);
+      const isBatch = t.reference_module === 'milling_batch' && t.reference_id;
+      const isOrder = t.reference_module === 'export_order' && t.reference_id;
+      events.push({
+        sort: [t.transaction_date, t.id], date: t.transaction_date, lotNo: t.lot_no,
+        type: mt, label: LABELS[mt] || mt.replace(/_/g, ' '), bucket: BUCKET[mt] || 'other',
+        deltaKg: qkg, inKg: qkg > 0 ? qkg : 0, outKg: qkg < 0 ? -qkg : 0, packedKg: 0,
+        user: t.user_name || null, reference: t.reference_no || null,
+        href: isBatch ? `/milling/${t.reference_id}` : isOrder ? `/export/${t.reference_id}` : (t.lot_id ? `/lot-inventory/${t.lot_id}` : null),
+      });
+    }
+    for (const pl of packLogs) {
+      events.push({
+        sort: [pl.created_at, 100000 + pl.id], date: pl.created_at, lotNo: pl.batch_no || null,
+        type: 'packing', label: 'Packed', bucket: 'packing', deltaKg: 0, inKg: 0, outKg: 0,
+        packedKg: num(pl.packed_weight_kg), user: pl.user_name || null,
+        reference: `PACK-${pl.id}`, href: pl.batch_id ? `/milling/${pl.batch_id}` : null,
+      });
+    }
+    events.sort((a, b) => (String(a.sort[0]) < String(b.sort[0]) ? -1 : String(a.sort[0]) > String(b.sort[0]) ? 1 : a.sort[1] - b.sort[1]));
+
+    let bal = 0;
+    const rows = events.map((e) => { bal += e.deltaKg; return {
+      date: e.date, lotNo: e.lotNo, type: e.type, label: e.label, bucket: e.bucket,
+      inKg: e.inKg, outKg: e.outKg, packedKg: e.packedKg, balanceKg: Math.round(bal * 1000) / 1000,
+      user: e.user, reference: e.reference, href: e.href,
+    }; });
+
+    const totals = rows.reduce((a, r) => ({
+      inward: a.inward + (r.bucket === 'inward' ? r.inKg : 0),
+      outward: a.outward + (r.bucket === 'outward' ? r.outKg : 0),
+      transfer: a.transfer + (r.bucket === 'transfer' ? (r.inKg - r.outKg) : 0),
+      sales: a.sales + (r.bucket === 'sales' ? r.outKg : 0),
+      packing: a.packing + r.packedKg,
+    }), { inward: 0, outward: 0, transfer: 0, sales: 0, packing: 0 });
+    const opening = rows.filter((r) => r.bucket === 'opening').reduce((s, r) => s + r.inKg - r.outKg, 0);
+
+    return { meta: { dimension, key: key || null, variety: variety || null, label }, rows, opening, balance: Math.round(bal * 1000) / 1000, totals };
+  },
+
   /**
    * Finished Goods Ledger — the finished + by-product stock register grouped
    * by grade/output, with produced (original intake), sold, on-hand,

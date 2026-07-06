@@ -26,6 +26,8 @@ router.get('/payroll-pending', authorize('reports', 'view'), noFinanceForOperato
 router.get('/payroll-analytics', authorize('reports', 'view'), noFinanceForOperator, controller.payrollAnalytics);
 router.get('/sale-detail/:id', authorize('reports', 'view'), noFinanceForOperator, controller.saleDetail);
 router.get('/inventory-ledger', authorize('reports', 'view'), controller.inventoryLedger);
+// Stock movement ledger by dimension (variety|grade|byproduct|product) — Batch 5.
+router.get('/stock-ledger', authorize('reports', 'view'), controller.stockLedger);
 router.get('/finished-goods-ledger', authorize('reports', 'view'), controller.finishedGoodsLedger);
 router.get('/executive/summary', authorize('reports', 'view'), noFinanceForOperator, controller.executiveSummary);
 router.get('/executive/pipeline', authorize('reports', 'view'), noFinanceForOperator, controller.orderPipeline);

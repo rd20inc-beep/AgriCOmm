@@ -207,6 +207,16 @@ const reportingController = {
     }
   },
 
+  async stockLedger(req, res) {
+    try {
+      const data = redactReport(req, await reportingService.getStockLedger(req.query || {}));
+      return res.json({ success: true, data });
+    } catch (err) {
+      console.error('Stock ledger error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
   async finishedGoodsLedger(req, res) {
     try {
       const data = redactReport(req, await reportingService.getFinishedGoodsLedger(req.query || {}));
@@ -1279,6 +1289,22 @@ const reportingController = {
           ELSE COALESCE(p.name, l.item_name, '—')
         END
       `;
+      // By-product MERGE key = rice type (variety/product) + by-product type, so
+      // Sweeping-from-1121 is a separate line from Sweeping-from-Super-Kernel
+      // (item 4). Restricted to by-product lots below.
+      const BYPRODUCT_EXPR = `
+        COALESCE(NULLIF(l.variety, ''), p.name, 'Rice') || ' — ' ||
+        CASE
+          WHEN l.grade IN ('B1','B2','B3','CSR','Short Grain') THEN l.grade
+          WHEN l.item_name ILIKE '%sweeping%' THEN 'Sweeping'
+          WHEN l.item_name ILIKE '%powder%'   THEN 'Powder'
+          WHEN l.item_name ILIKE '%sortex%'   THEN 'Sortex'
+          WHEN l.item_name ILIKE '%choba%'    THEN 'Choba'
+          WHEN l.item_name ILIKE '%bran%'     THEN 'Bran'
+          WHEN l.item_name ILIKE '%husk%'     THEN 'Husk'
+          ELSE COALESCE(l.grade, 'Broken')
+        END
+      `;
       if (group_by === 'supplier')   { groupCol = 'l.supplier_id';  nameCol = 's.name'; }
       else if (group_by === 'warehouse') { groupCol = 'l.warehouse_id'; nameCol = 'w.name'; }
       else if (group_by === 'variety') { groupCol = 'l.variety';      nameCol = 'l.variety'; }
@@ -1286,13 +1312,16 @@ const reportingController = {
       else if (group_by === 'grade')   { groupCol = 'l.grade';        nameCol = 'l.grade'; }
       else if (group_by === 'processing_type') { groupCol = 'l.processing_type'; nameCol = 'l.processing_type'; }
       else if (group_by === 'subtype') { groupCol = db.raw(SUBTYPE_EXPR); nameCol = SUBTYPE_EXPR; }
+      else if (group_by === 'byproduct') { groupCol = db.raw(BYPRODUCT_EXPR); nameCol = BYPRODUCT_EXPR; }
       else                              { groupCol = 'l.product_id';  nameCol = 'p.name'; }
+      const isRawExpr = group_by === 'subtype' || group_by === 'byproduct';
 
       let q = db('inventory_lots as l')
         .leftJoin('suppliers as s',  'l.supplier_id',  's.id')
         .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
         .leftJoin('products as p',   'l.product_id',   'p.id');
       if (status && status !== 'all') q = q.where('l.status', status);
+      if (group_by === 'byproduct') q = q.where('l.type', 'byproduct');
 
       const rows = await q
         .select(
@@ -1317,7 +1346,7 @@ const reportingController = {
         // SQL string as a second groupBy arg makes Knex quote it as a column
         // identifier and produces invalid SQL (HTTP 500). Every other dimension
         // must group by both the id column and its joined name.
-        .groupBy(...(group_by === 'subtype' ? [db.raw(SUBTYPE_EXPR)] : [groupCol, nameCol]))
+        .groupBy(...(isRawExpr ? [db.raw(group_by === 'byproduct' ? BYPRODUCT_EXPR : SUBTYPE_EXPR)] : [groupCol, nameCol]))
         .orderBy('total_kg', 'desc');
 
       // Per-group lot detail so the report can expand a group inline (no extra
@@ -1328,6 +1357,7 @@ const reportingController = {
         .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
         .leftJoin('products as p',   'l.product_id',   'p.id');
       if (status && status !== 'all') lotsQ = lotsQ.where('l.status', status);
+      if (group_by === 'byproduct') lotsQ = lotsQ.where('l.type', 'byproduct');
       const lotRows = await lotsQ.select(
         db.raw(`COALESCE(${nameCol}, '—') as group_name`),
         'l.id as lot_id', 'l.lot_no',

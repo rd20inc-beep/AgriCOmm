@@ -96,7 +96,8 @@ function ReportSummaryCard({ reportType, data, range }) {
 }
 
 const STOCK_GROUP_OPTIONS = [
-  { key: 'subtype',   label: 'By Byproduct (B1/B2/Sortex/...)' },
+  { key: 'byproduct', label: 'By By-Product + Rice Type (merged)' },
+  { key: 'subtype',   label: 'By By-Product (all varieties merged)' },
   { key: 'product',   label: 'Products' },
   { key: 'supplier',  label: 'By Supplier' },
   { key: 'warehouse', label: 'By Warehouse' },
