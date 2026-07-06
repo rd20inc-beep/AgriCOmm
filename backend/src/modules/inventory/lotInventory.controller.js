@@ -595,11 +595,36 @@ module.exports = {
   },
 
   // ─── Create Lot from Purchase ───
+  // Preview the next auto-generated lot number for the New Purchase form so the
+  // operator sees it pre-filled + editable. Read-only (no insert); the real
+  // number is (re)generated or taken from the edited value at create time.
+  async previewLotNo(req, res) {
+    try {
+      const { supplier_id, product_id, date } = req.query;
+      let lotNo;
+      if (supplier_id && product_id) {
+        lotNo = await inventoryService.generateRiceLotNo(db, {
+          supplierId: parseInt(supplier_id, 10),
+          productId: parseInt(product_id, 10),
+          date: date || undefined,
+        });
+      } else {
+        lotNo = await inventoryService.generateLotNo(db);
+      }
+      return res.json({ success: true, data: { lot_no: lotNo } });
+    } catch (err) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
   async createPurchaseLot(req, res) {
     try {
       const {
         item_name, type = 'raw', entity = 'mill', warehouse_id, product_id,
-        supplier_id, broker_id, purchase_date, crop_year,
+        lot_no: customLotNo,
+        supplier_id, broker_id, transport_vendor_id, purchase_date, crop_year,
+        // Commission (per bag/katta) → broker payable; folds into landed cost.
+        commission_per_bag = 0, commission_total: commissionTotalInput = 0,
         variety, grade, moisture_pct, broken_pct, sortex_status, whiteness, quality_notes,
         // Extended quality (B1/B2/B3/Cobba/CSR/NB/OV percentages, etc.).
         // Stored as jsonb so we can add fields without further migrations.
@@ -649,15 +674,29 @@ module.exports = {
       const totalBags = inputTotalBags || (quantity_unit === 'katta' || quantity_unit === 'bag' ? Math.round(parseFloat(quantity_input)) : Math.round(netWeightKg / bagWt));
       const purchaseAmount = uc.round2(netWeightKg * ratePerKg);
 
-      // Landed cost calculation
-      const directCosts = [transport_cost, labor_cost, unloading_cost, packing_cost, other_cost].reduce((s, c) => s + (parseFloat(c) || 0), 0);
+      // Landed cost calculation. Commission (per bag/katta) is owed to the BROKER
+      // and transport to the HAULER — SEPARATE payables (below) — but both still
+      // fold into landed_cost_per_kg so the finished cost sheet reflects them.
+      const commissionPerBag = parseFloat(commission_per_bag) || 0;
+      const commissionTotal = commissionPerBag > 0
+        ? uc.round2(commissionPerBag * totalBags)
+        : (parseFloat(commissionTotalInput) || 0);
+      const transportCost = parseFloat(transport_cost) || 0;
+      const haulerId = (transport_vendor_id != null && transport_vendor_id !== '') ? parseInt(transport_vendor_id, 10) : null;
+      const brokerIdNum = (broker_id != null && broker_id !== '') ? parseInt(broker_id, 10) : null;
+      // Supplier-owed direct costs (transport + commission are NOT here — they go
+      // to the hauler/broker payables).
+      const supplierDirect = [labor_cost, unloading_cost, packing_cost, other_cost].reduce((s, c) => s + (parseFloat(c) || 0), 0);
       const totalBagCost = (bag_cost_included ? 0 : (parseFloat(bag_cost_per_bag) || 0) * totalBags);
-      const landedCostTotal = uc.round2(purchaseAmount + directCosts + totalBagCost);
+      // Full landed cost (all parties) → drives landed_cost_per_kg + costing sheet.
+      const landedCostTotal = uc.round2(purchaseAmount + supplierDirect + totalBagCost + transportCost + commissionTotal);
       const landedCostPerKg = netWeightKg > 0 ? uc.round4(landedCostTotal / netWeightKg) : 0;
+      // The SUPPLIER payable covers only the supplier-owed portion.
+      const supplierPortion = uc.round2(purchaseAmount + supplierDirect + totalBagCost);
       // Post round 35 (migration 120) every payment_status column uses
       // title case — drop the previous lowercase normalisation.
       const normalizedPaymentStatus = String(payment_status || 'Pending');
-      const landedPayableAmount = landedCostTotal;
+      const landedPayableAmount = supplierPortion;
       const paidAmount = normalizedPaymentStatus === 'Paid'
         ? landedPayableAmount
         : normalizedPaymentStatus === 'Partial'
@@ -674,15 +713,19 @@ module.exports = {
         // SUP-VARIETY-YYMMDD-SEQ format (matches receiveRice); everything
         // else falls back to the legacy LOT-YYYYMMDD-XXXX so old
         // workflows (finished goods, byproducts) stay consistent.
-        let lotNo;
-        if (type === 'raw' && entity === 'mill' && supplier_id && product_id) {
-          lotNo = await inventoryService.generateRiceLotNo(trx, {
-            supplierId: parseInt(supplier_id, 10),
-            productId: parseInt(product_id, 10),
-            date: purchase_date,
-          });
-        } else {
-          lotNo = await inventoryService.generateLotNo(trx);
+        // Custom lot number wins when the operator typed one (unique index +
+        // 23505 handling below enforce uniqueness); else auto-generate.
+        let lotNo = (customLotNo && String(customLotNo).trim()) ? String(customLotNo).trim() : null;
+        if (!lotNo) {
+          if (type === 'raw' && entity === 'mill' && supplier_id && product_id) {
+            lotNo = await inventoryService.generateRiceLotNo(trx, {
+              supplierId: parseInt(supplier_id, 10),
+              productId: parseInt(product_id, 10),
+              date: purchase_date,
+            });
+          } else {
+            lotNo = await inventoryService.generateLotNo(trx);
+          }
         }
 
         // warehouse_id is NOT NULL on inventory_lots — resolve a sensible
@@ -795,7 +838,10 @@ module.exports = {
           rate_per_kg: ratePerKg,
           purchase_amount: purchaseAmount,
           // Costs
-          transport_cost: parseFloat(transport_cost) || 0,
+          transport_cost: transportCost,
+          transport_vendor_id: haulerId,
+          commission_per_bag: commissionPerBag || 0,
+          commission_total: commissionTotal || 0,
           labor_cost: parseFloat(labor_cost) || 0,
           unloading_cost: parseFloat(unloading_cost) || 0,
           packing_cost: parseFloat(packing_cost) || 0,
@@ -890,6 +936,31 @@ module.exports = {
           });
         }
 
+        // Transport (hauler) + Commission (broker) are separate payables that are
+        // CAPITALISED into the rice's landed cost (already in landedCostTotal). So
+        // each uses the purchase_invoice rule (Dr Raw Inventory / Cr party AP) —
+        // NOT the expense rule — keeping the books balanced (Dr 1210 = supplier +
+        // hauler + broker) and the cost inside inventory, not double-expensed.
+        const postPartyCost = async ({ amount, partyId, category, sourceTable, refType, label }) => {
+          if (!(amount > 0) || !partyId) return;
+          const payNo = await generatePayNo(trx);
+          await trx('payables').insert({
+            pay_no: payNo, entity: 'mill', payable_type: 'vendor', category,
+            supplier_id: partyId, linked_ref: lotNo,
+            source_table: sourceTable, source_id: lot.id,
+            original_amount: amount, paid_amount: 0, outstanding: amount, status: 'Pending',
+            due_date: addDays(purchase_date, 30), currency: 'PKR',
+            notes: `${label} for purchase lot ${lotNo}`,
+          });
+          await accountingService.autoPost(trx, {
+            triggerEvent: 'purchase_invoice', entity: 'mill', amount, currency: 'PKR',
+            refType, refNo: lotNo, description: `${label} — lot ${lotNo}`,
+            userId: req.user?.id || null, partyType: 'supplier', partyId,
+          });
+        };
+        await postPartyCost({ amount: transportCost, partyId: haulerId, category: 'Transport', sourceTable: 'lot_transport', refType: 'Lot Transport', label: 'Transport (hauler)' });
+        await postPartyCost({ amount: commissionTotal, partyId: brokerIdNum, category: 'Commission', sourceTable: 'lot_commission', refType: 'Lot Commission', label: 'Commission (broker)' });
+
         // Optional vehicle arrival(s) captured on the New Purchase Lot form —
         // each delivering truck, linked straight to this (pre-batch) lot. Rows
         // without a vehicle number are skipped. Weight is canonicalised to MT.
@@ -930,6 +1001,10 @@ module.exports = {
         data: { lot: enrichLot(result) },
       });
     } catch (err) {
+      // Duplicate custom lot number (unique index on inventory_lots.lot_no).
+      if (err && (err.code === '23505' || /unique/i.test(err.message || '')) && /lot_no/i.test(err.message || err.constraint || '')) {
+        return res.status(409).json({ success: false, message: `Lot number "${String(req.body?.lot_no || '').trim()}" already exists — choose another.` });
+      }
       console.error('createPurchaseLot error:', err);
       return res.status(500).json({ success: false, message: err.message });
     }
