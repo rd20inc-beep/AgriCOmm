@@ -323,6 +323,22 @@ export default function CreateExportOrder() {
         ? Math.floor(parseFloat(form.masterBagSizeKg) / (parseFloat(form.bagSizeKg) || 1)) : null;
     }
 
+    // Packing-type cascade: null the retail "kg-bag" info that jumbo/container
+    // don't use, regardless of receiving mode, so the stored row stays clean.
+    if (form.packingType === 'container') {
+      Object.assign(payload, {
+        bag_type: null, bag_quality: null, bag_size_kg: null, bag_weight_gm: null,
+        bag_printing: null, bag_color: null, bag_brand: null,
+        master_bag_size_kg: null, units_per_bag: null, total_bags: null,
+        bag_material: null, palletized: false,
+      });
+    } else if (form.packingType === 'jumbo') {
+      Object.assign(payload, {
+        bag_quality: null, bag_printing: null, bag_color: null,
+        master_bag_size_kg: null, units_per_bag: null, bag_size_kg: 1200,
+      });
+    }
+
     // Mixed packing lines
     if (isMixed && packingLines.length > 0) {
       payload.packing_lines = packingLines
@@ -663,10 +679,19 @@ export default function CreateExportOrder() {
               return (
                 <button key={pt.value} type="button"
                   onClick={() => {
-                    set('packingType', pt.value);
-                    if (pt.value === 'jumbo') { set('bagSizeKg', '1200'); set('masterBagSizeKg', ''); }
-                    else if (pt.value === 'container') { set('bagSizeKg', ''); set('masterBagSizeKg', ''); set('palletized', false); }
-                    else if (!form.bagSizeKg || form.bagSizeKg === '1200') { set('bagSizeKg', '25'); }
+                    // Cascade: jumbo/container don't use retail "kg-bag" info, so clear it.
+                    if (pt.value === 'jumbo') {
+                      setForm(prev => ({ ...prev, packingType: 'jumbo', bagSizeKg: '1200',
+                        masterBagSizeKg: '', bagQuality: '', bagPrinting: '', bagColor: '' }));
+                    } else if (pt.value === 'container') {
+                      // Bulk load — no bag at all, no pallet.
+                      setForm(prev => ({ ...prev, packingType: 'container', bagType: '', bagMaterial: '',
+                        bagQuality: '', bagSizeKg: '', bagWeightGm: '', bagPrinting: '', bagColor: '', bagBrand: '',
+                        masterBagSizeKg: '', palletized: false, palletCost: '' }));
+                    } else {
+                      setForm(prev => ({ ...prev, packingType: 'retail',
+                        bagSizeKg: (!prev.bagSizeKg || prev.bagSizeKg === '1200') ? '25' : prev.bagSizeKg }));
+                    }
                   }}
                   className={`text-left rounded-lg border p-3 transition ${active ? 'border-amber-500 bg-amber-50 ring-1 ring-amber-400' : 'border-gray-200 hover:border-amber-300'}`}>
                   <div className="text-sm font-semibold text-gray-800">{pt.label}</div>
@@ -677,16 +702,18 @@ export default function CreateExportOrder() {
           </div>
 
           <div className="form-grid">
-            <div className="form-group">
-              <BagTypePicker
-                label="Bag Type"
-                value={form.bagType}
-                bagTypes={bagTypesList}
-                addToast={addToast}
-                onCreated={() => qc.invalidateQueries({ queryKey: ['bag-types'] })}
-                onChange={(name, bt) => { set('bagType', name); if (bt?.sizeKg || bt?.size_kg) set('bagSizeKg', String(bt.sizeKg ?? bt.size_kg)); }}
-              />
-            </div>
+            {form.packingType !== 'container' && (
+              <div className="form-group">
+                <BagTypePicker
+                  label="Bag Type"
+                  value={form.bagType}
+                  bagTypes={bagTypesList}
+                  addToast={addToast}
+                  onCreated={() => qc.invalidateQueries({ queryKey: ['bag-types'] })}
+                  onChange={(name, bt) => { set('bagType', name); if (bt?.sizeKg || bt?.size_kg) set('bagSizeKg', String(bt.sizeKg ?? bt.size_kg)); }}
+                />
+              </div>
+            )}
             {form.packingType !== 'container' && (
               <div className="form-group">
                 <label className="form-label">Material</label>
@@ -696,13 +723,15 @@ export default function CreateExportOrder() {
                 </select>
               </div>
             )}
-            <div className="form-group">
-              <label className="form-label">Bag Quality</label>
-              <select value={form.bagQuality} onChange={e => set('bagQuality', e.target.value)} className="form-input">
-                <option value="">Select...</option>
-                <option>New</option><option>A-Grade</option><option>Standard</option><option>Premium</option><option>Economy</option>
-              </select>
-            </div>
+            {form.packingType === 'retail' && (
+              <div className="form-group">
+                <label className="form-label">Bag Quality</label>
+                <select value={form.bagQuality} onChange={e => set('bagQuality', e.target.value)} className="form-input">
+                  <option value="">Select...</option>
+                  <option>New</option><option>A-Grade</option><option>Standard</option><option>Premium</option><option>Economy</option>
+                </select>
+              </div>
+            )}
             {form.packingType === 'retail' && (
             <div className="form-group">
               <label className="form-label">Bag Size (KG)</label>
@@ -761,21 +790,27 @@ export default function CreateExportOrder() {
                 </p>
               </div>
             )}
-            <div className="form-group">
-              <label className="form-label">Bag Printing</label>
-              <select value={form.bagPrinting} onChange={e => set('bagPrinting', e.target.value)} className="form-input">
-                <option value="">Select...</option>
-                <option>Plain</option><option>Buyer Logo</option><option>Buyer Logo + Text</option><option>Custom Design</option>
-              </select>
-            </div>
-            <div className="form-group">
-              <label className="form-label">Bag Color</label>
-              <input value={form.bagColor} onChange={e => set('bagColor', e.target.value)} className="form-input" placeholder="e.g. White" />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Brand / Marking</label>
-              <input value={form.bagBrand} onChange={e => set('bagBrand', e.target.value)} className="form-input" placeholder="Brand on bag" />
-            </div>
+            {form.packingType === 'retail' && (
+              <div className="form-group">
+                <label className="form-label">Bag Printing</label>
+                <select value={form.bagPrinting} onChange={e => set('bagPrinting', e.target.value)} className="form-input">
+                  <option value="">Select...</option>
+                  <option>Plain</option><option>Buyer Logo</option><option>Buyer Logo + Text</option><option>Custom Design</option>
+                </select>
+              </div>
+            )}
+            {form.packingType === 'retail' && (
+              <div className="form-group">
+                <label className="form-label">Bag Color</label>
+                <input value={form.bagColor} onChange={e => set('bagColor', e.target.value)} className="form-input" placeholder="e.g. White" />
+              </div>
+            )}
+            {form.packingType !== 'container' && (
+              <div className="form-group">
+                <label className="form-label">Brand / Marking</label>
+                <input value={form.bagBrand} onChange={e => set('bagBrand', e.target.value)} className="form-input" placeholder="Brand on bag" />
+              </div>
+            )}
           </div>
 
           {/* Batch 7: palletization + pallet cost (not applicable to a bulk container) */}
