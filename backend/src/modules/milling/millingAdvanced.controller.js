@@ -894,7 +894,7 @@ const millingAdvancedController = {
 
       // Money-in summary: local-sale collected vs outstanding.
       const inSummary = await db('local_sales')
-        .where('entity', 'mill').whereNotIn('status', ['Cancelled', 'Voided'])
+        .where('entity', 'mill').whereNotIn('status', ['Cancelled', 'Voided', 'Pending'])
         .select(
           db.raw('COALESCE(SUM(total_amount), 0) as billed'),
           db.raw('COALESCE(SUM(paid_amount), 0) as collected'),

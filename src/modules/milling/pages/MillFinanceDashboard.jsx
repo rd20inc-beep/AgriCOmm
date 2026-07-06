@@ -13,6 +13,7 @@ import {
   useMillExpenses, useCreateMillExpense, useRecurringExpenses, useMaterializeRecurring, useRunDueRecurring, useCategorizeExpense, useMillWorkers, useCreateMillWorker,
   useUpdateMillWorker, useDeleteMillWorker, useSetWorkerPortalPin, useCreateWorkerAdvance, useWorkerAdvances, useWorkerLedger,
   useDeleteWorkerAdvance, useAdvanceLedger,
+  usePendingAdvances, useApproveAdvance, useRejectAdvance, usePayAdvance,
   useWorkerAdjustments, useCreateWorkerAdjustment, useDeleteWorkerAdjustment,
   usePayrollSummary, useRecordAttendance, useAttendance, useBulkAttendance, useImportAttendance, useAttendanceHolidays, useInventory, useExpenseVendors,
   usePayrollRuns, usePostPayrollRun, useDeletePayrollRun, usePayrollRun, usePayrollReport,
@@ -208,6 +209,9 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   const [portalPin, setPortalPin] = useState('');
   const deleteWorkerMut = useDeleteMillWorker();
   const createAdvanceMut = useCreateWorkerAdvance();
+  const approveAdvanceMut = useApproveAdvance();
+  const rejectAdvanceMut = useRejectAdvance();
+  const payAdvanceMut = usePayAdvance();
   const curMonth = new Date().toISOString().slice(0, 7);
   const [payrollMonth, setPayrollMonth] = useState(curMonth);
   const [payrollView, setPayrollView] = useState('payroll'); // 'payroll' | 'attendance'
@@ -305,6 +309,26 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   async function handleAcceptTransfer(t) {
     try { await requestOwnerApproval((ownerId) => acceptTransferMut.mutateAsync({ id: t.id, ownerId })); }
     catch (e) { if (e?.message !== 'Owner authorization cancelled') window.alert(e?.response?.data?.message || e?.message || 'Could not accept the transfer.'); }
+  }
+
+  // Salary-advance approval inbox (Batch 6 · item 8): request → Owner approves →
+  // Finance pays. Shown across both entities so nothing is hidden by the toggle.
+  const { data: pendingAdvances = [] } = usePendingAdvances(canViewPayroll);
+  async function handleApproveAdvance(a) {
+    try {
+      await requestOwnerApproval((ownerId) => approveAdvanceMut.mutateAsync({ id: a.id, data: { authorized_by_owner_id: ownerId } }));
+      addToast(`Advance for ${a.workerName} approved — ready for Finance to pay`, 'success');
+    } catch (e) { if (e?.message !== 'Owner authorization cancelled') addToast(e?.response?.data?.message || e?.message || 'Could not approve the advance.', 'error'); }
+  }
+  async function handleRejectAdvance(a) {
+    const reason = window.prompt(`Reject the advance request for ${a.workerName}? Optional reason:`);
+    if (reason === null) return;
+    try { await rejectAdvanceMut.mutateAsync({ id: a.id, data: { reason } }); addToast('Advance request rejected', 'success'); }
+    catch (e) { addToast(e?.response?.data?.message || e?.message || 'Could not reject the advance.', 'error'); }
+  }
+  async function handlePayAdvance(a) {
+    try { await payAdvanceMut.mutateAsync({ id: a.id, data: {} }); addToast(`Advance of ${PKR(a.amount)} paid to ${a.workerName}`, 'success'); }
+    catch (e) { addToast(e?.response?.data?.message || e?.message || 'Could not pay the advance.', 'error'); }
   }
 
   const expenses = expData?.expenses || [];
@@ -633,7 +657,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
     if (!(parseFloat(advanceForm.amount) > 0)) { addToast('Enter an advance amount', 'error'); return; }
     try {
       await createAdvanceMut.mutateAsync({ id: advanceTarget.id, data: advanceForm });
-      addToast(`Advance of ${PKR(parseFloat(advanceForm.amount))} recorded for ${advanceTarget.name}`, 'success');
+      addToast(`Advance request of ${PKR(parseFloat(advanceForm.amount))} submitted for ${advanceTarget.name} — awaiting Owner approval`, 'success');
       setAdvanceTarget(null);
     } catch (e) { addToast(e.message, 'error'); }
   }
@@ -1672,6 +1696,49 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
             <Stat tone="amber" icon={HandCoins}  label="Advances Outstanding" value={PKR(advancesOutstandingTotal)} sub="To recover" />
             <Stat tone={anyUnpaid ? 'red' : 'green'} icon={Wallet} label={anyUnpaid ? 'Net Remaining' : 'Net Paid'} value={PKR(anyUnpaid ? unpaidNet : paidThisMonth)} sub={anyUnpaid ? `${unpaidEmployees.length} unpaid` : 'All paid'} />
           </div>
+
+          {/* Advance approvals inbox (Batch 6 · item 8): Owner approves → Finance pays. */}
+          {canViewPayroll && pendingAdvances.length > 0 && (
+            <div className="bg-white rounded-xl border border-amber-200 overflow-hidden">
+              <div className="px-4 py-3 bg-amber-50 border-b border-amber-100 flex items-center gap-2">
+                <Inbox className="w-4 h-4 text-amber-600" />
+                <span className="text-sm font-semibold text-amber-900">Advance approvals</span>
+                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-200 text-amber-800">{pendingAdvances.length}</span>
+                <span className="text-xs text-amber-700 ml-auto">Owner approves, then Finance pays.</span>
+              </div>
+              <div className="divide-y divide-gray-100">
+                {pendingAdvances.map(a => (
+                  <div key={a.id} className="px-4 py-3 flex items-center gap-3 flex-wrap">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium text-gray-900 flex items-center gap-2">
+                        {a.workerName || 'Worker'}
+                        <span className="px-1.5 py-0.5 rounded text-[10px] uppercase bg-gray-100 text-gray-500">{a.workerEntity === 'general' ? 'Head Office' : 'Mill'}</span>
+                        {a.approvalStatus === 'approved'
+                          ? <span className="px-1.5 py-0.5 rounded text-[10px] uppercase bg-blue-100 text-blue-700">Approved</span>
+                          : <span className="px-1.5 py-0.5 rounded text-[10px] uppercase bg-amber-100 text-amber-700">Pending approval</span>}
+                      </div>
+                      <div className="text-xs text-gray-400">{fmtDate(a.advanceDate)}{a.notes ? ` · ${a.notes}` : ''}</div>
+                    </div>
+                    <div className="tabular-nums font-semibold text-gray-900">{PKR(a.amount)}</div>
+                    <div className="flex items-center gap-2">
+                      {a.approvalStatus === 'pending' && canApprovePayroll && (
+                        <>
+                          <button onClick={() => handleApproveAdvance(a)} disabled={approveAdvanceMut.isPending}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-60"><Check className="w-3.5 h-3.5" /> Approve</button>
+                          <button onClick={() => handleRejectAdvance(a)} disabled={rejectAdvanceMut.isPending}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-rose-600 bg-rose-50 rounded-lg hover:bg-rose-100 disabled:opacity-60"><X className="w-3.5 h-3.5" /> Reject</button>
+                        </>
+                      )}
+                      {a.approvalStatus === 'approved' && canPayPayroll && (
+                        <button onClick={() => handlePayAdvance(a)} disabled={payAdvanceMut.isPending}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-60"><Banknote className="w-3.5 h-3.5" /> Pay now</button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
             <table className="w-full text-sm">
               <thead>
@@ -2226,8 +2293,8 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
       <SlideDrawer
         open={!!advanceTarget}
         onClose={() => setAdvanceTarget(null)}
-        title="Give Salary Advance"
-        subtitle={advanceTarget ? `Advance to ${advanceTarget.name}` : ''}
+        title="Request Salary Advance"
+        subtitle={advanceTarget ? `Advance for ${advanceTarget.name}` : ''}
         icon={HandCoins}
         footer={
           <div className="flex justify-end gap-2">
@@ -2237,7 +2304,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
               disabled={createAdvanceMut.isPending}
               className="px-4 py-2 text-sm text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-60"
             >
-              {createAdvanceMut.isPending ? 'Recording…' : 'Record Advance'}
+              {createAdvanceMut.isPending ? 'Submitting…' : 'Submit Request'}
             </button>
           </div>
         }
@@ -2246,7 +2313,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
           <div className="space-y-4">
             <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800 flex items-start gap-2">
               <HandCoins className="w-4 h-4 flex-shrink-0 mt-0.5" />
-              <span>This pays <span className="font-medium">{advanceTarget.name}</span> now — it posts to Money Out / GL as a salary advance and is auto-deducted from their next payroll. Current outstanding: <span className="font-medium">{PKR(advanceTarget.advanceOutstanding || 0)}</span>.</span>
+              <span>This <span className="font-medium">requests</span> an advance for <span className="font-medium">{advanceTarget.name}</span>. No cash moves yet — an Owner must approve it, then Finance pays it out (posting to Money Out / GL) and it auto-deducts from their next payroll. Current outstanding: <span className="font-medium">{PKR(advanceTarget.advanceOutstanding || 0)}</span>.</span>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -2267,17 +2334,6 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
                 />
               </div>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Paid via</label>
-              <select
-                value={advanceForm.payment_method}
-                onChange={e => setAdvanceForm(p => ({ ...p, payment_method: e.target.value }))}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900 bg-white"
-              >
-                <option value="cash">Cash</option>
-                <option value="bank">Bank Transfer</option>
-              </select>
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Reason / Notes</label>
@@ -3235,9 +3291,17 @@ function WorkerAdvancesPanel({ worker, onClose, onGiveAdvance, addToast }) {
                   <div className="text-xs text-gray-400 flex items-center gap-1"><CalendarDays className="w-3 h-3" /> {fmtDate(a.advanceDate)}</div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className={`px-2 py-0.5 rounded text-[11px] font-medium ${a.status === 'outstanding' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                    {a.status === 'outstanding' ? `${PKR(out)} due` : 'Recovered'}
-                  </span>
+                  {a.approvalStatus === 'pending' ? (
+                    <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-amber-100 text-amber-700">Pending approval</span>
+                  ) : a.approvalStatus === 'approved' ? (
+                    <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-blue-100 text-blue-700">Approved · unpaid</span>
+                  ) : a.approvalStatus === 'rejected' ? (
+                    <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-gray-100 text-gray-500">Rejected</span>
+                  ) : (
+                    <span className={`px-2 py-0.5 rounded text-[11px] font-medium ${a.status === 'outstanding' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                      {a.status === 'outstanding' ? `${PKR(out)} due` : 'Recovered'}
+                    </span>
+                  )}
                   {confirmId === a.id ? (
                     <span className="flex items-center gap-1">
                       <button onClick={() => handleDelete(a.id)} disabled={deleteAdvanceMut.isPending} className="px-2 py-1 text-[11px] text-white bg-rose-600 rounded hover:bg-rose-700">Confirm</button>

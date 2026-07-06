@@ -1447,7 +1447,7 @@ const reportingController = {
       if (lotIds.length) {
         const sales = await db('local_sales as ls')
           .leftJoin('customers as c', 'ls.customer_id', 'c.id')
-          .whereIn('ls.lot_id', lotIds)
+          .whereIn('ls.lot_id', lotIds).whereNotIn('ls.status', ['Pending', 'Cancelled'])
           .select('ls.lot_id', 'ls.sale_no', 'ls.sale_date', 'ls.quantity_kg', 'ls.total_amount',
             'ls.rate_per_kg', 'ls.payment_status', 'ls.customer_id',
             db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer"))
@@ -1482,7 +1482,7 @@ const reportingController = {
           const outIds = outLots.map((o) => o.id);
           const outSales = outIds.length
             ? await db('local_sales as ls').leftJoin('customers as c', 'ls.customer_id', 'c.id')
-              .whereIn('ls.lot_id', outIds)
+              .whereIn('ls.lot_id', outIds).whereNotIn('ls.status', ['Pending', 'Cancelled'])
               .select('ls.id as sale_id', 'ls.lot_id', 'ls.sale_no', 'ls.sale_date', 'ls.quantity_kg', 'ls.rate_per_kg',
                 'ls.total_amount', 'ls.payment_status', 'ls.customer_id',
                 db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer"))
@@ -1580,7 +1580,7 @@ const reportingController = {
 
         // Direct sales (sold as raw) + buyers
         const sales = await db('local_sales as ls').leftJoin('customers as c', 'ls.customer_id', 'c.id')
-          .whereIn('ls.lot_id', lotIds)
+          .whereIn('ls.lot_id', lotIds).whereNotIn('ls.status', ['Pending', 'Cancelled'])
           .select('ls.id as sale_id', 'ls.lot_id', 'ls.sale_no', 'ls.sale_date', 'ls.quantity_kg', 'ls.rate_per_kg',
             'ls.total_amount', 'ls.payment_status', 'ls.customer_id', db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer"))
           .orderBy('ls.sale_date', 'asc');
@@ -1607,7 +1607,7 @@ const reportingController = {
           for (const o of outLots) { outMeta[o.id] = o; batchOfOut[o.id] = parseInt(String(o.batch_ref).replace(/^batch-/, ''), 10); }
           const outIds = outLots.map((o) => o.id);
           const outSales = outIds.length ? await db('local_sales as ls').leftJoin('customers as c', 'ls.customer_id', 'c.id')
-            .whereIn('ls.lot_id', outIds)
+            .whereIn('ls.lot_id', outIds).whereNotIn('ls.status', ['Pending', 'Cancelled'])
             .select('ls.id as sale_id', 'ls.lot_id', 'ls.sale_no', 'ls.sale_date', 'ls.quantity_kg', 'ls.rate_per_kg', 'ls.total_amount', 'ls.payment_status', 'ls.customer_id', db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer"))
             .orderBy('ls.sale_date', 'asc') : [];
           const batchNoById = {}; const batchNameById = {}; for (const m of milled) { batchNoById[m.batch_id] = m.batch_no; batchNameById[m.batch_id] = m.batch_name; }
@@ -1690,6 +1690,7 @@ const reportingController = {
         .leftJoin('inventory_lots as il', 'ls.lot_id', 'il.id')
         .leftJoin('warehouses as wh', 'il.warehouse_id', 'wh.id')
         .leftJoin('suppliers as sup', 'il.supplier_id', 'sup.id');
+      q = q.whereNotIn('ls.status', ['Pending', 'Cancelled']); // realized sales only
       if (entity) q = q.where('ls.entity', entity);
       if (from) q = q.where('ls.sale_date', '>=', from);
       if (to) q = q.where('ls.sale_date', '<=', to);
@@ -1767,6 +1768,7 @@ const reportingController = {
         .leftJoin('inventory_lots as il', 'ls.lot_id', 'il.id')
         .leftJoin('warehouses as w', 'il.warehouse_id', 'w.id')
         .select('ls.id', 'ls.sale_no', 'ls.sale_date', 'ls.item_name', 'ls.item_type', 'ls.quantity_kg', 'ls.quantity_bags', 'ls.rate_per_kg', 'ls.total_amount', 'ls.lot_no', 'ls.lot_id', 'ls.payment_status', 'ls.customer_id', db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer"), 'il.batch_ref', 'w.name as warehouse_name');
+      ls = ls.whereNotIn('ls.status', ['Pending', 'Cancelled']); // realized sales only
       if (from) ls = ls.where('ls.sale_date', '>=', from);
       if (to) ls = ls.where('ls.sale_date', '<=', to);
       const localRows = await ls.orderBy('ls.sale_date', 'desc');

@@ -940,12 +940,15 @@ COL kpi_benchmarks.target_value:numeric:NULL
 COL kpi_benchmarks.unit:character varying:NULL
 COL kpi_benchmarks.updated_at:timestamp with time zone:NOT NULL
 COL local_sales.bag_weight_kg:numeric:NULL
+COL local_sales.bank_account_id:integer:NULL
 COL local_sales.buyer_address:character varying:NULL
 COL local_sales.buyer_name:character varying:NULL
 COL local_sales.buyer_phone:character varying:NULL
 COL local_sales.cogs_per_kg:numeric:NULL
 COL local_sales.cogs_total_pkr:numeric:NULL
 COL local_sales.collection_location:character varying:NULL
+COL local_sales.confirmed_at:timestamp with time zone:NULL
+COL local_sales.confirmed_by:integer:NULL
 COL local_sales.cost_locked_at_dispatch:boolean:NOT NULL
 COL local_sales.cost_per_kg:numeric:NULL
 COL local_sales.created_at:timestamp with time zone:NOT NULL
@@ -1389,6 +1392,9 @@ COL mill_worker_advance_recovery_schedule.updated_at:timestamp with time zone:NO
 COL mill_worker_advance_recovery_schedule.worker_id:integer:NULL
 COL mill_worker_advances.advance_date:date:NOT NULL
 COL mill_worker_advances.amount:numeric:NOT NULL
+COL mill_worker_advances.approval_status:character varying:NOT NULL
+COL mill_worker_advances.approved_at:timestamp with time zone:NULL
+COL mill_worker_advances.approved_by:integer:NULL
 COL mill_worker_advances.auto_deduct:boolean:NOT NULL
 COL mill_worker_advances.created_at:timestamp with time zone:NOT NULL
 COL mill_worker_advances.created_by:integer:NULL
@@ -1401,6 +1407,7 @@ COL mill_worker_advances.notes:text:NULL
 COL mill_worker_advances.recovered_amount:numeric:NOT NULL
 COL mill_worker_advances.recovery_method:character varying:NOT NULL
 COL mill_worker_advances.recovery_start_period:character varying:NULL
+COL mill_worker_advances.reject_reason:text:NULL
 COL mill_worker_advances.status:character varying:NOT NULL
 COL mill_worker_advances.updated_at:timestamp with time zone:NOT NULL
 COL mill_worker_advances.worker_id:integer:NOT NULL

@@ -85,6 +85,7 @@ const financeController = {
       // advances + balances.
       let localQ = db('local_sales as ls')
         .leftJoin('customers as c', 'ls.customer_id', 'c.id')
+        .whereNotIn('ls.status', ['Pending', 'Cancelled'])
         .whereIn('ls.payment_status', ['Pending', 'Partial', 'Credit'])
         .where('ls.due_amount', '>', 0)
         .select(
@@ -276,7 +277,7 @@ const financeController = {
         .whereNot('r.status', 'Paid').whereNotNull('r.due_date').where('r.outstanding', '>', 0)
         .select('r.outstanding as amount', 'r.currency', 'r.fx_rate', 'r.due_date', 'r.customer_id', db.raw("COALESCE(c.name, 'Customer') as party"), 'r.recv_no as ref');
       const lsCredit = await db('local_sales as ls').leftJoin('customers as c', 'c.id', 'ls.customer_id')
-        .where('ls.due_amount', '>', 0).whereNotNull('ls.due_date')
+        .where('ls.due_amount', '>', 0).whereNotNull('ls.due_date').whereNotIn('ls.status', ['Pending', 'Cancelled'])
         .select('ls.due_amount as amount', 'ls.due_date', 'ls.customer_id', 'ls.sale_no as ref', db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as party"));
       const pay = await db('payables as pa').leftJoin('suppliers as s', 's.id', 'pa.supplier_id')
         .whereNot('pa.status', 'Paid').whereNotNull('pa.due_date').where('pa.outstanding', '>', 0)

@@ -1067,6 +1067,7 @@ const accountingService = {
     // the customer record that was registered later.
     const custRow = await db('customers').where({ id: cid }).first();
     const localSalesRows = await db('local_sales')
+      .whereNotIn('status', ['Pending', 'Cancelled'])
       .where(function () {
         this.where('customer_id', cid);
         if (custRow && custRow.name) {
@@ -1723,6 +1724,7 @@ const accountingService = {
       const cust = await db('customers').where({ id }).first();
       partyName = cust ? cust.name : '';
       const sales = await db('local_sales')
+        .whereNotIn('status', ['Pending', 'Cancelled'])
         .where(function () {
           this.where('customer_id', id);
           if (cust && cust.name) this.orWhere(function () { this.whereNull('customer_id').whereRaw('LOWER(buyer_name) = LOWER(?)', [cust.name]); });
