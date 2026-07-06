@@ -8,6 +8,8 @@ export const exportOrdersApi = {
   cancel: (id, data) => api.post(`/api/export-orders/${id}/cancel`, data),
   confirmAdvance: (id, data) => api.post(`/api/export-orders/${id}/confirm-advance`, data),
   confirmBalance: (id, data) => api.post(`/api/export-orders/${id}/confirm-balance`, data),
+  // Batch 4: export-ready stock pool (redacted for export users).
+  listExportReadyStock: () => api.get('/api/export-orders/available-stock'),
   // Item 14: record a PENDING export receipt → Finance confirms with FX.
   recordExportReceipt: (id, data) => api.post(`/api/export-orders/${id}/record-receipt`, data),
   listPendingExportReceipts: () => api.get('/api/export-orders/pending-receipts'),

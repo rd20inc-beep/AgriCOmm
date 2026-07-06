@@ -807,6 +807,8 @@ COL inventory_lots.damaged_weight_kg:numeric:NOT NULL
 COL inventory_lots.due_amount:numeric:NOT NULL
 COL inventory_lots.entity:character varying:NOT NULL
 COL inventory_lots.expiry_date:date:NULL
+COL inventory_lots.export_display_name:character varying:NULL
+COL inventory_lots.export_ready:boolean:NOT NULL
 COL inventory_lots.grade:character varying:NULL
 COL inventory_lots.gross_weight_kg:numeric:NOT NULL
 COL inventory_lots.id:integer:NOT NULL

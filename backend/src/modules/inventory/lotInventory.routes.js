@@ -113,6 +113,16 @@ router.post(
   controller.allocateLotToBatch
 );
 
+// Mark a finished/by-product lot Ready for Export (Batch 4). Gated milling.edit
+// so Mill Operator/Manager can mark ready; Export users cannot.
+router.put(
+  '/lots/:id/export-ready',
+  authorize('milling', 'edit'),
+  validate(schemas.setExportReady),
+  auditAction('set_export_ready', 'inventory_lot', (req) => req.params.id),
+  controller.setLotExportReady
+);
+
 // Transfer a finished mill lot's stock to the export entity
 router.post(
   '/lots/:id/transfer-to-export',
