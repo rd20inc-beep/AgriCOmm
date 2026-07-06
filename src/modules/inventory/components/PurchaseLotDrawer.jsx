@@ -47,11 +47,16 @@ const emptyQuality = () => QUALITY_FIELDS.reduce((acc, f) => ({ ...acc, [f.key]:
 const defaultForm = () => ({
   supplier_id: '',
   product_id: '',
+  lot_no: '',            // custom/editable lot number (auto-previewed)
   weight_kg: '',
   ordered_weight_kg: '',
   total_bags: '',
   bag_size_kg: DEFAULT_BAG_SIZE_KG, // nominal sack size (drives katta accounting)
   price_per_kg: '',
+  commission_per_bag: '', // broker commission per bag/katta → broker payable + cost
+  broker_id: '',
+  transport_cost: '',     // freight → hauler payable + cost
+  transport_vendor_id: '',
   purchase_date: new Date().toISOString().slice(0, 10),
   warehouse_id: '',
   notes: '',
@@ -101,10 +106,12 @@ export default function PurchaseLotDrawer({
   // refetches.
   const [localSuppliers, setLocalSuppliers] = useState([]);
   const [localProducts, setLocalProducts] = useState([]);
+  const [lotNoTouched, setLotNoTouched] = useState(false); // user edited the lot no
 
   useEffect(() => {
     if (isOpen) {
       setForm(defaultForm());
+      setLotNoTouched(false);
       setShowMore(false);
       setShowVehicles(false);
       setVehQualityOpen({});
@@ -118,6 +125,31 @@ export default function PurchaseLotDrawer({
       setLocalProducts([]);
     }
   }, [isOpen]);
+
+  // Preview the auto lot number once supplier + rice type are chosen (unless the
+  // operator already typed a custom one). They can still edit or regenerate it.
+  useEffect(() => {
+    if (!isOpen || lotNoTouched) return;
+    if (!form.supplier_id || !form.product_id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await lotInventoryApi.previewLotNo({ supplier_id: form.supplier_id, product_id: form.product_id, date: form.purchase_date });
+        const next = res?.data?.lot_no || res?.lot_no;
+        if (!cancelled && next) setForm(prev => (prev.lot_no ? prev : { ...prev, lot_no: next }));
+      } catch { /* preview is best-effort; backend still auto-generates if left blank */ }
+    })();
+    return () => { cancelled = true; };
+  }, [isOpen, lotNoTouched, form.supplier_id, form.product_id, form.purchase_date]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function regenerateLotNo() {
+    if (!form.supplier_id || !form.product_id) return;
+    try {
+      const res = await lotInventoryApi.previewLotNo({ supplier_id: form.supplier_id, product_id: form.product_id, date: form.purchase_date });
+      const next = res?.data?.lot_no || res?.lot_no;
+      if (next) { setForm(prev => ({ ...prev, lot_no: next })); setLotNoTouched(false); }
+    } catch { /* ignore */ }
+  }
 
   const mergedSuppliers = useMemo(() => {
     const seen = new Set();
@@ -202,6 +234,12 @@ export default function PurchaseLotDrawer({
   const detectedBagSize = snapBagSizeKg(avgBagKg); // 49.3 → 50, 24.5 → 25, 45 → 45
   const bagSizeMismatch = avgBagKg > 0 && detectedBagSize > 0 && detectedBagSize !== bagSize;
   const totalValue = weightKg * ratePerKg;
+  // Commission (per bag/katta) + transport fold into the Final Cost per KG (and
+  // become separate broker/hauler payables server-side).
+  const commissionPerBag = parseFloat(form.commission_per_bag) || 0;
+  const totalCommission = commissionPerBag > 0 ? commissionPerBag * bags : 0;
+  const transportCost = parseFloat(form.transport_cost) || 0;
+  const finalCostPerKg = weightKg > 0 ? (totalValue + totalCommission + transportCost) / weightKg : 0;
   // Ordered vs received (optional). Bill follows RECEIVED (weightKg).
   const orderedKg = parseFloat(form.ordered_weight_kg) || 0;
   const orderedVariance = orderedKg > 0 ? weightKg - orderedKg : 0; // <0 short, >0 over
@@ -253,6 +291,15 @@ export default function PurchaseLotDrawer({
         warehouse_id: form.warehouse_id ? parseInt(form.warehouse_id, 10) : null,
         product_id: parseInt(form.product_id, 10),
         supplier_id: parseInt(form.supplier_id, 10),
+        // Custom lot number (blank → backend auto-generates).
+        lot_no: form.lot_no?.trim() || null,
+        // Commission (broker payable) + transport (hauler payable) — both fold
+        // into the landed cost per KG server-side.
+        commission_per_bag: commissionPerBag > 0 ? commissionPerBag : null,
+        commission_total: totalCommission > 0 ? totalCommission : null,
+        broker_id: form.broker_id ? parseInt(form.broker_id, 10) : null,
+        transport_cost: transportCost > 0 ? transportCost : null,
+        transport_vendor_id: form.transport_vendor_id ? parseInt(form.transport_vendor_id, 10) : null,
         purchase_date: form.purchase_date,
         variety,
         grade: product?.grade || null,
@@ -683,6 +730,65 @@ export default function PurchaseLotDrawer({
           />
           {pricePerMT > 0 && (
             <p className="text-[11px] text-gray-500 mt-1">≈ Rs {pricePerMT.toLocaleString('en-PK')}/MT</p>
+          )}
+        </div>
+
+        {/* ─────────── Lot number (editable) ─────────── */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Lot Number</label>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={form.lot_no}
+              onChange={(e) => { setForm(prev => ({ ...prev, lot_no: e.target.value })); setLotNoTouched(true); }}
+              placeholder="Auto-generated — edit if needed"
+              className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+            <button type="button" onClick={regenerateLotNo} disabled={!form.supplier_id || !form.product_id}
+              className="px-3 py-2 text-xs font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50" title="Regenerate the auto number">
+              Auto
+            </button>
+          </div>
+          <p className="text-[11px] text-gray-400 mt-1">Must be unique. Leave as-is to use the auto number, or type your own.</p>
+        </div>
+
+        {/* ─────────── Purchase costs: commission + transport ─────────── */}
+        <div className="rounded-lg border border-gray-200 p-3 space-y-3">
+          <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Purchase Costs (fold into cost/kg)</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Commission per bag/katta (PKR)</label>
+              <input type="number" step="0.01" min="0" value={form.commission_per_bag}
+                onChange={(e) => setForm(prev => ({ ...prev, commission_per_bag: e.target.value }))}
+                placeholder="0" className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
+              {totalCommission > 0 && <p className="text-[11px] text-gray-500 mt-1">Total commission: Rs {totalCommission.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({bags} bags)</p>}
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Broker (paid the commission)</label>
+              <select value={form.broker_id} onChange={(e) => setForm(prev => ({ ...prev, broker_id: e.target.value }))}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-blue-500">
+                <option value="">— None —</option>
+                {mergedSuppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Transport cost (PKR)</label>
+              <input type="number" step="0.01" min="0" value={form.transport_cost}
+                onChange={(e) => setForm(prev => ({ ...prev, transport_cost: e.target.value }))}
+                placeholder="0" className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Transporter / hauler</label>
+              <select value={form.transport_vendor_id} onChange={(e) => setForm(prev => ({ ...prev, transport_vendor_id: e.target.value }))}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-blue-500">
+                <option value="">— None —</option>
+                {mergedSuppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+          </div>
+          {finalCostPerKg > 0 && (
+            <p className="text-xs text-gray-700">Final Cost per KG: <b>Rs {finalCostPerKg.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
+              <span className="text-gray-400"> (raw {ratePerKg.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{totalCommission > 0 ? ' + commission' : ''}{transportCost > 0 ? ' + transport' : ''})</span></p>
           )}
         </div>
 

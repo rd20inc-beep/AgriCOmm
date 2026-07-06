@@ -38,6 +38,8 @@ router.get('/lots', authorize('inventory', 'view'), controller.listLots);
 // Multi-lot printable report — registered before /lots/:id so the literal
 // path wins over the param route.
 router.get('/lots-report', authorize('inventory', 'view'), controller.getLotsReport);
+// Preview next lot number — literal path before /lots/:id so it isn't captured.
+router.get('/lots/next-lot-no', authorize('inventory', 'view'), controller.previewLotNo);
 router.get('/lots/:id', authorize('inventory', 'view'), controller.getLotDetail);
 router.get('/lots/:id/transactions', authorize('inventory', 'view'), controller.getLotTransactions);
 router.get('/lots/:id/purchase-invoice', authorize('inventory', 'view'), controller.getPurchaseInvoice);

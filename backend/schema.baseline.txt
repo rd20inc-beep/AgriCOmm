@@ -795,6 +795,8 @@ COL inventory_lots.batch_ref:character varying:NULL
 COL inventory_lots.blend_batch_no:character varying:NULL
 COL inventory_lots.broken_pct:numeric:NULL
 COL inventory_lots.broker_id:integer:NULL
+COL inventory_lots.commission_per_bag:numeric:NULL
+COL inventory_lots.commission_total:numeric:NULL
 COL inventory_lots.cost_currency:character varying:NOT NULL
 COL inventory_lots.cost_incomplete:boolean:NOT NULL
 COL inventory_lots.cost_per_unit:numeric:NOT NULL
