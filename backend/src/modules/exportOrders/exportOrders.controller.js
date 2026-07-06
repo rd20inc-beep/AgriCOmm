@@ -2443,6 +2443,14 @@ const exportOrderController = {
           throw err;
         }
 
+        // Only export-ready stock can be allocated to an export order (Batch 4).
+        // Mill marks finished rice ready first; export then selects from the pool.
+        if (!lot.export_ready) {
+          const err = new Error('Only export-ready stock can be allocated. Ask the mill to mark this lot Ready for Export first.');
+          err.statusCode = 400;
+          throw err;
+        }
+
         const available = parseFloat(lot.available_qty) || 0; // KG (Phase 5c)
         const qtyKg = qtyMT * 1000; // FE sends MT; engine reserves in KG
         if (qtyKg > available) {
@@ -2507,6 +2515,59 @@ const exportOrderController = {
       }
       console.error('Export order allocateStock error:', err);
       return res.status(500).json({ success: false, message: err.message || 'Internal server error.' });
+    }
+  },
+
+  // Export-ready stock pool (Batch 4). Finished/by-product lots the mill marked
+  // Ready for Export, with available stock. Export users see ONLY the export
+  // display name + qty + packing/transfer status — never supplier/lot no/cost.
+  async listExportReadyStock(req, res) {
+    try {
+      let roleName = req.user && req.user._roleName;
+      if (!roleName && req.user && req.user.role_id) {
+        const rr = await db('roles').where({ id: req.user.role_id }).select('name').first();
+        roleName = rr && rr.name;
+      }
+      const SUPPLIER_NAME_ROLES = ['Super Admin', 'Owner', 'Finance Manager', 'Mill Manager', 'Mill Operator'];
+      const full = SUPPLIER_NAME_ROLES.includes(roleName); // export role → redacted
+
+      const lots = await db('inventory_lots as l')
+        .leftJoin('products as p', 'l.product_id', 'p.id')
+        .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
+        .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
+        .where('l.export_ready', true)
+        .whereIn('l.type', ['finished', 'byproduct'])
+        .whereRaw('COALESCE(l.available_qty, 0) > 0')
+        .select('l.id', 'l.lot_no', 'l.item_name', 'l.type', 'l.entity', 'l.variety', 'l.grade',
+          'l.available_qty', 'l.net_weight_kg', 'l.total_bags', 'l.bag_size_kg', 'l.export_display_name',
+          'l.landed_cost_per_kg', 'l.supplier_id', 's.name as supplier_name', 's.supplier_code as supplier_code',
+          'p.name as product_name', 'w.name as warehouse_name')
+        .orderBy('l.id', 'desc');
+
+      const rows = lots.map((l) => {
+        const availKg = parseFloat(l.available_qty) || 0;
+        const base = {
+          id: l.id,
+          export_display_name: l.export_display_name || l.variety || l.product_name || l.item_name || 'Export Rice',
+          available_qty: availKg,          // KG
+          available_mt: availKg / 1000,
+          packing_status: (parseFloat(l.total_bags) || 0) > 0 ? 'Packed' : 'Loose',
+          transfer_status: l.entity === 'export' ? 'Transferred' : 'At mill',
+        };
+        if (!full) return base; // Export users: redacted view only
+        return {
+          ...base,
+          lot_no: l.lot_no, item_name: l.item_name, type: l.type, entity: l.entity,
+          variety: l.variety, grade: l.grade, product_name: l.product_name,
+          supplier_id: l.supplier_id, supplier_name: l.supplier_name, supplier_code: l.supplier_code,
+          warehouse_name: l.warehouse_name, landed_cost_per_kg: l.landed_cost_per_kg,
+          net_weight_kg: l.net_weight_kg, total_bags: l.total_bags,
+        };
+      });
+      return res.json({ success: true, data: { lots: rows, canSeeDetail: full } });
+    } catch (err) {
+      console.error('listExportReadyStock error:', err);
+      return res.status(500).json({ success: false, message: err.message });
     }
   },
 };

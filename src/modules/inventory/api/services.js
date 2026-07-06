@@ -28,6 +28,7 @@ export const lotInventoryApi = {
   setReceivedQty: (id, body) => api.put(`/api/lot-inventory/lots/${id}/received-qty`, body),
   updateLotQuality: (id, data) => api.put(`/api/lot-inventory/lots/${id}/quality`, data),
   allocateLotToBatch: (id, data) => api.post(`/api/lot-inventory/lots/${id}/allocate-to-batch`, data),
+  setExportReady: (id, data) => api.put(`/api/lot-inventory/lots/${id}/export-ready`, data),
   transferLotToExport: (id, data) => api.post(`/api/lot-inventory/lots/${id}/transfer-to-export`, data),
   transferLotToMill: (id, data) => api.post(`/api/lot-inventory/lots/${id}/transfer-to-mill`, data),
   stockReport: (params) => api.get('/api/lot-inventory/reports/stock', params),

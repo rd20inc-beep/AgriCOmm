@@ -44,8 +44,10 @@ function authorizeAny(...permPairs) {
 }
 
 router.get('/', authorize('export_orders', 'view'), controller.list);
-// Literal path before /:id so it isn't captured as an order id.
+// Literal paths before /:id so they aren't captured as an order id.
 router.get('/pending-receipts', authorize('finance', 'view'), controller.listPendingExportReceipts);
+// Export-ready stock pool (redacted for export users). Batch 4.
+router.get('/available-stock', authorizeAny(['export_orders', 'view'], ['inventory', 'view']), controller.listExportReadyStock);
 router.get('/:id', authorize('export_orders', 'view'), controller.getById);
 router.post(
   '/',

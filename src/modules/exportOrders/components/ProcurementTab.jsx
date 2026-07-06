@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import StatusBadge from '../../../components/StatusBadge';
 import PartyLink from '../../../shared/components/PartyLink';
-import api from '../../../api/client';
 import { exportOrdersApi, financeApi } from '../../../api/services';
 import { useApp } from '../../../context/AppContext';
 import { Package, Plus, ExternalLink, Warehouse, Scale, FileText, Truck, ArrowRight } from 'lucide-react';
@@ -52,14 +51,15 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
 
   const remainingNeeded = Math.max(0, order.qtyMT - totalAllocatedMT);
 
-  // Fetch available finished lots only when order needs more stock
+  // Batch 4: only EXPORT-READY stock is selectable, and export users see a
+  // redacted view (display name + qty + status). Mill marks stock ready first.
   useEffect(() => {
     if (remainingNeeded <= 0) { setAvailableLots([]); return; }
     setLotsLoading(true);
-    api.get('/api/inventory', { type: 'finished', status: 'Available', entity: 'mill', limit: 200 })
+    exportOrdersApi.listExportReadyStock()
       .then(res => {
-        const lots = res?.data?.lots || res?.data?.inventory || res?.lots || [];
-        setAvailableLots(lots.filter(l => parseFloat(l.available_qty) > 0 && !l.reserved_against));
+        const lots = res?.data?.lots || res?.lots || [];
+        setAvailableLots(lots.filter(l => parseFloat(l.available_qty) > 0));
       })
       .catch(() => setAvailableLots([]))
       .finally(() => setLotsLoading(false));
@@ -73,8 +73,8 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
     // Strategy 1: product_id FK match
     if (orderProductId && l.product_id && String(l.product_id) === String(orderProductId)) return true;
 
-    // Strategy 2: name word matching
-    const lotName = (l.item_name || l.product_name || '').toLowerCase();
+    // Strategy 2: name word matching (export users only have export_display_name)
+    const lotName = (l.item_name || l.product_name || l.export_display_name || '').toLowerCase();
     if (!orderProduct || !lotName) return false;
 
     // "Finished Rice" is a generic name from milling — match it if the lot came from this order's batch
@@ -100,9 +100,9 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
         lot_id: lot.id,
         qty_mt: qtyToAllocateKg / 1000, // KG → MT for the export doc boundary
         item_id: lineId || undefined,
-        notes: `Reserved ${Math.round(qtyToAllocateKg).toLocaleString()} kg from ${lot.lot_no}`,
+        notes: `Reserved ${Math.round(qtyToAllocateKg).toLocaleString()} kg from ${lot.lot_no || lot.export_display_name || `lot ${lot.id}`}`,
       });
-      addToast(`${Math.round(qtyToAllocateKg).toLocaleString()} kg reserved from ${lot.lot_no}`, 'success');
+      addToast(`${Math.round(qtyToAllocateKg).toLocaleString()} kg reserved from ${lot.export_display_name || lot.lot_no || `lot ${lot.id}`}`, 'success');
       setCustomQty(prev => ({ ...prev, [lot.id]: '' }));
       setFetchTrigger(t => t + 1); // refresh available lots
       if (onStockAllocated) onStockAllocated();
@@ -329,15 +329,16 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
-                        <p className="text-sm font-bold text-gray-900">{lot.lot_no}</p>
-                        {lot.batch_ref && <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">{lot.batch_ref}</span>}
+                        <p className="text-sm font-bold text-gray-900">{lot.export_display_name || lot.item_name || lot.product_name || 'Export Rice'}</p>
+                        {lot.lot_no && <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">{lot.lot_no}</span>}
                       </div>
-                      <p className="text-xs text-gray-600 mb-2">{lot.item_name || lot.product_name || 'Finished Rice'}</p>
                       <div className="grid grid-cols-4 gap-2 text-xs">
                         <div><span className="text-gray-400">Available</span><br/><span className="font-bold text-emerald-700">{Math.round(availableKg).toLocaleString()} kg</span></div>
-                        <div><span className="text-gray-400">Entity</span><br/><span className="font-semibold text-gray-900">{lot.entity || '—'}</span></div>
-                        <div><span className="text-gray-400">Supplier</span><br/><span className="font-semibold text-gray-900">{lot.supplier_name || lot.supplier_code || '—'}</span></div>
-                        <div><span className="text-gray-400">Warehouse</span><br/><span className="font-semibold text-gray-900">{lot.warehouse_name || '—'}</span></div>
+                        <div><span className="text-gray-400">Packing</span><br/><span className="font-semibold text-gray-900">{lot.packing_status || '—'}</span></div>
+                        <div><span className="text-gray-400">Transfer</span><br/><span className="font-semibold text-gray-900">{lot.transfer_status || '—'}</span></div>
+                        {lot.supplier_name || lot.supplier_code
+                          ? <div><span className="text-gray-400">Supplier</span><br/><span className="font-semibold text-gray-900">{lot.supplier_name || lot.supplier_code}</span></div>
+                          : <div><span className="text-gray-400">Warehouse</span><br/><span className="font-semibold text-gray-900">{lot.warehouse_name || '—'}</span></div>}
                       </div>
                     </div>
                     <div className="flex flex-col items-end gap-2 flex-shrink-0">

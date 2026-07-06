@@ -2341,6 +2341,31 @@ module.exports = {
 
   // ═══════════════════════════════════════════════════════════════════
   // Transfer a finished mill lot's stock to the export entity
+  // Mark a finished/by-product lot "Ready for Export" (Batch 4, item 7). A flag
+  // (no physical move) — Export users then see + allocate ONLY export-ready stock
+  // (redacted). The optional export_display_name is the customer-facing label.
+  // Gated milling.edit at the route (Mill Operator/Manager; Export lacks it).
+  async setLotExportReady(req, res) {
+    try {
+      const lot = await db('inventory_lots').where('id', req.params.id).first();
+      if (!lot) return res.status(404).json({ success: false, message: 'Lot not found.' });
+      if (!['finished', 'byproduct'].includes(lot.type)) {
+        return res.status(400).json({ success: false, message: 'Only finished or by-product lots can be marked ready for export.' });
+      }
+      const update = { updated_at: db.fn.now() };
+      if (req.body.export_ready !== undefined) update.export_ready = !!req.body.export_ready;
+      if (req.body.export_display_name !== undefined) {
+        const n = req.body.export_display_name;
+        update.export_display_name = (n && String(n).trim()) ? String(n).trim() : null;
+      }
+      const [updated] = await db('inventory_lots').where('id', lot.id).update(update).returning('*');
+      return res.json({ success: true, data: { lot: enrichLot(updated) } });
+    } catch (err) {
+      console.error('setLotExportReady error:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
   // ═══════════════════════════════════════════════════════════════════
   // Deducts qty from THIS specific mill lot and creates a matching
   // export-entity lot (inventoryService.transferToExport). Unlike the

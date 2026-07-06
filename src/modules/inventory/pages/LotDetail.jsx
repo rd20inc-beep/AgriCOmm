@@ -5,7 +5,7 @@ import {
   ArrowLeft, Package, Truck, DollarSign, FileText, BarChart3,
   Plus, Save, Edit3, AlertTriangle, Warehouse, ShoppingBag, Scale,
   Activity, ChevronRight, TrendingUp, Clock, Factory, Play, Trash2, Loader2, Printer,
-  ArrowDownLeft, ArrowUpRight, Calendar, Hash, Wrench, Boxes, ArrowRightLeft, Lock,
+  ArrowDownLeft, ArrowUpRight, Calendar, Hash, Wrench, Boxes, ArrowRightLeft, Lock, CheckCircle2,
 } from 'lucide-react';
 import {
   useLotDetail, useRecordLotTransaction, useLocalSalesByLot,
@@ -73,6 +73,7 @@ export default function LotDetail() {
   const [showQualityModal, setShowQualityModal] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
   const [showTransferMill, setShowTransferMill] = useState(false);
+  const [showExportReady, setShowExportReady] = useState(false);
   const [linkedBatch, setLinkedBatch] = useState(null);
   const [lotVehicles, setLotVehicles] = useState([]);
   // lotSales provided by hook below
@@ -329,6 +330,14 @@ export default function LotDetail() {
         <Link to={`/reports/lot-ledger/${lot.id}`} className="btn btn-sm btn-secondary">
           <BarChart3 className="w-4 h-4" /> Lot 360 / Ledger
         </Link>
+        {/* Mark finished/by-product rice Ready for Export (mill roles). */}
+        {(lot.type === 'finished' || lot.type === 'byproduct')
+          && hasPermission('milling', 'edit') && (
+          <button onClick={() => setShowExportReady(true)}
+            className={`btn btn-sm ${lot.exportReady ? 'btn-success' : 'btn-secondary'}`}>
+            <CheckCircle2 className="w-4 h-4" /> {lot.exportReady ? 'Export-Ready' : 'Mark Ready for Export'}
+          </button>
+        )}
         {/* Move finished/by-product stock from the mill entity to export. */}
         {(lot.type === 'finished' || lot.type === 'byproduct')
           && lot.entity === 'mill'
@@ -1255,6 +1264,13 @@ export default function LotDetail() {
         lot={lot}
         addToast={addToast}
         onClose={() => setShowTransferMill(false)}
+        onSuccess={() => refetch()}
+      />
+      <MarkExportReadyDrawer
+        isOpen={showExportReady}
+        lot={lot}
+        addToast={addToast}
+        onClose={() => setShowExportReady(false)}
         onSuccess={() => refetch()}
       />
 
@@ -2291,6 +2307,63 @@ function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
 
         <p className="text-[11px] text-gray-400">Milling fee &amp; processing costs are added later in the batch's Costing tab.</p>
       </form>
+    </SlideDrawer>
+  );
+}
+
+// Mark a finished/by-product lot Ready for Export (Batch 4). A flag + a
+// customer-facing export display name; Export users then see + allocate only
+// export-ready stock (redacted). No physical move here.
+function MarkExportReadyDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
+  const [ready, setReady] = useState(false);
+  const [name, setName] = useState('');
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (!isOpen) return;
+    setReady(!!lot?.exportReady);
+    setName(lot?.exportDisplayName || '');
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!lot) return null;
+
+  async function save() {
+    setSaving(true);
+    try {
+      await lotInventoryApi.setExportReady(lot.id, { export_ready: ready, export_display_name: name.trim() || null });
+      addToast(ready ? 'Marked ready for export' : 'Removed from export-ready pool', 'success');
+      onSuccess?.();
+      onClose?.();
+    } catch (err) {
+      addToast(err?.data?.message || err?.message || 'Failed to update', 'error');
+    } finally { setSaving(false); }
+  }
+
+  const footer = (
+    <div className="flex justify-end gap-2">
+      <button onClick={onClose} className="btn btn-sm btn-secondary">Cancel</button>
+      <button onClick={save} disabled={saving} className="btn btn-sm btn-primary">
+        <CheckCircle2 className="w-4 h-4" /> {saving ? 'Saving…' : 'Save'}
+      </button>
+    </div>
+  );
+
+  return (
+    <SlideDrawer open={isOpen} onClose={onClose} title="Ready for Export" subtitle={lot.lotNo} icon={CheckCircle2} size="md" footer={footer}>
+      <div className="space-y-4">
+        <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3 text-sm text-emerald-900">
+          Export users see only export-ready stock — and only the <b>export display name</b>, quantity and status (never the supplier, internal lot number, or cost).
+        </div>
+        <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+          <input type="checkbox" checked={ready} onChange={(e) => setReady(e.target.checked)} className="w-4 h-4" />
+          Ready for export
+        </label>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Export display name</label>
+          <input type="text" value={name} onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. 1121 White Rice Premium Export"
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500" />
+          <p className="text-xs text-gray-400 mt-1">The customer-facing name Export sees. Leave blank to use the rice type.</p>
+        </div>
+      </div>
     </SlideDrawer>
   );
 }

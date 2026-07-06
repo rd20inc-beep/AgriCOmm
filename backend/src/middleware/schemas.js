@@ -166,6 +166,12 @@ const confirmBalance = Joi.object({
   notes: Joi.string().max(1000).allow(null, ''),
 });
 
+// Mark a finished/by-product lot ready for export + set its export display name.
+const setExportReady = Joi.object({
+  export_ready: Joi.boolean(),
+  export_display_name: Joi.string().max(255).allow('', null),
+}).min(1);
+
 // Record a pending export receipt (Export/any) — no posting.
 const recordExportReceipt = Joi.object({
   kind: Joi.string().valid('advance', 'balance').default('advance'),
@@ -492,6 +498,7 @@ module.exports = {
   confirmBalance,
   recordExportReceipt,
   confirmExportReceipt,
+  setExportReady,
   allocateExportStock,
   createPurchaseLot,
   addPurchaseToLot,
