@@ -2726,6 +2726,22 @@ const inventoryService = {
     let predSize = 0, predBags = -1;
     for (const [s, b] of bySize) if (b > predBags) { predBags = b; predSize = s; }
 
+    // Export-aware packing: a batch linked to an export order packs its FINISHED
+    // rice into the customer's spec instead of the predominant raw katta —
+    // retail → the order's bag_size_kg, jumbo → 1,200kg FIBC, container → bulk
+    // (no bags). Byproducts + non-export batches keep the predominant-size logic.
+    let exportPack = null; // { packSize:number|null }
+    const batchRow = await trx('milling_batches').where('id', batchId).first('linked_export_order_id');
+    if (batchRow && batchRow.linked_export_order_id) {
+      const eo = await trx('export_orders').where('id', batchRow.linked_export_order_id).first('packing_type', 'bag_size_kg', 'order_no');
+      if (eo) {
+        const pt = eo.packing_type || 'retail';
+        const packSize = pt === 'container' ? null : (pt === 'jumbo' ? 1200 : (num(eo.bag_size_kg) || null));
+        // Only override when we actually have a distinct target size (or container bulk).
+        if (pt === 'container' || packSize) exportPack = { packSize, orderNo: eo.order_no, packingType: pt };
+      }
+    }
+
     // find/create a Katta packaging item + stock row for a given size.
     const itemForSize = async (size) => {
       const code = `KATTA-${size}`;
@@ -2752,31 +2768,80 @@ const inventoryService = {
     }
     await trx('mill_stock_movements').where({ reference_type: 'batch_katta', reference_id: batchId }).del();
 
-    // Output katta = Σ ceil(output kg ÷ predominant size); stamp count + size on lots.
     const outLots = await trx('inventory_lots').where({ batch_ref: `batch-${batchId}` }).whereIn('type', ['finished', 'byproduct']);
+
+    if (!exportPack) {
+      // ── Standard path (unchanged): pack all outputs into the predominant size. ──
+      // Output katta = Σ ceil(output kg ÷ predominant size); stamp count + size on lots.
+      let packed = 0;
+      for (const l of outLots) {
+        const kg = num(l.net_weight_kg) > 0 ? num(l.net_weight_kg) : num(l.qty);
+        const bags = Math.ceil(kg / predSize);
+        packed += bags;
+        await trx('inventory_lots').where('id', l.id).update({ total_bags: bags, bag_size_kg: predSize, updated_at: trx.fn.now() });
+      }
+
+      // Apply per size: +freed (return); the predominant size also -packed (consumption).
+      const movements = [];
+      for (const [size, bags] of bySize) {
+        const { it, st } = await itemForSize(size);
+        const consume = size === predSize ? packed : 0;
+        // Clamp at 0: on a mixed-size intake the predominant size can pack MORE
+        // output bags than it freed (bags − consume < 0), which would drive its
+        // stock negative. Never let mill_stock go below zero.
+        await trx('mill_stock').where({ id: st.id }).update({ quantity_available: trx.raw('GREATEST(quantity_available + ?, 0)', [bags - consume]), updated_at: trx.fn.now() });
+        movements.push({ item_id: it.id, warehouse_id: null, movement_type: 'return', quantity: bags, reference_type: 'batch_katta', reference_id: batchId, reason: `Empty ${size}kg katta freed from milled raw (batch ${batchId})`, performed_by: userId || null });
+        if (consume > 0) movements.push({ item_id: it.id, warehouse_id: null, movement_type: 'consumption', quantity: -consume, reference_type: 'batch_katta', reference_id: batchId, reason: `${size}kg katta used to pack outputs (batch ${batchId})`, performed_by: userId || null });
+      }
+      await trx('mill_stock_movements').insert(movements);
+
+      return { capacityKg: predSize, rawBags: freed, freed, outputBags: packed, packed, net: freed - packed, sizes: [...bySize.keys()], shortages: [] };
+    }
+
+    // ── Export path: FINISHED rice packs into the customer's spec; byproducts keep
+    //    the predominant raw size. Freed raw katta returns to its own size (below);
+    //    the export packing consumes a possibly-different item, so it can run short
+    //    (the mill must purchase those bags) — pack anyway + flag + notify.
+    const consumeBySize = new Map(); // pack size → bags needed
     let packed = 0;
     for (const l of outLots) {
       const kg = num(l.net_weight_kg) > 0 ? num(l.net_weight_kg) : num(l.qty);
-      const bags = Math.ceil(kg / predSize);
+      if (l.type === 'finished' && exportPack.packSize == null) {
+        // Container / bulk — finished rice ships loose, no bagging.
+        await trx('inventory_lots').where('id', l.id).update({ total_bags: 0, bag_size_kg: null, updated_at: trx.fn.now() });
+        continue;
+      }
+      const size = l.type === 'finished' ? exportPack.packSize : predSize;
+      const bags = Math.ceil(kg / size);
       packed += bags;
-      await trx('inventory_lots').where('id', l.id).update({ total_bags: bags, bag_size_kg: predSize, updated_at: trx.fn.now() });
+      consumeBySize.set(size, (consumeBySize.get(size) || 0) + bags);
+      await trx('inventory_lots').where('id', l.id).update({ total_bags: bags, bag_size_kg: size, updated_at: trx.fn.now() });
     }
 
-    // Apply per size: +freed (return); the predominant size also -packed (consumption).
     const movements = [];
+    // 1) Return freed raw katta to its own size's stock.
     for (const [size, bags] of bySize) {
       const { it, st } = await itemForSize(size);
-      const consume = size === predSize ? packed : 0;
-      // Clamp at 0: on a mixed-size intake the predominant size can pack MORE
-      // output bags than it freed (bags − consume < 0), which would drive its
-      // stock negative. Never let mill_stock go below zero.
-      await trx('mill_stock').where({ id: st.id }).update({ quantity_available: trx.raw('GREATEST(quantity_available + ?, 0)', [bags - consume]), updated_at: trx.fn.now() });
+      await trx('mill_stock').where({ id: st.id }).update({ quantity_available: trx.raw('quantity_available + ?', [bags]), updated_at: trx.fn.now() });
       movements.push({ item_id: it.id, warehouse_id: null, movement_type: 'return', quantity: bags, reference_type: 'batch_katta', reference_id: batchId, reason: `Empty ${size}kg katta freed from milled raw (batch ${batchId})`, performed_by: userId || null });
-      if (consume > 0) movements.push({ item_id: it.id, warehouse_id: null, movement_type: 'consumption', quantity: -consume, reference_type: 'batch_katta', reference_id: batchId, reason: `${size}kg katta used to pack outputs (batch ${batchId})`, performed_by: userId || null });
+    }
+    // 2) Consume the packing item for each output size; short-tolerant + flag.
+    const shortages = [];
+    for (const [size, need] of consumeBySize) {
+      const { it, st } = await itemForSize(size);
+      const cur = await trx('mill_stock').where({ id: st.id }).first('quantity_available');
+      const avail = num(cur && cur.quantity_available);
+      const consumed = Math.min(need, avail);
+      if (consumed > 0) {
+        await trx('mill_stock').where({ id: st.id }).update({ quantity_available: trx.raw('GREATEST(quantity_available - ?, 0)', [consumed]), updated_at: trx.fn.now() });
+        movements.push({ item_id: it.id, warehouse_id: null, movement_type: 'consumption', quantity: -consumed, reference_type: 'batch_katta', reference_id: batchId, reason: `${size}kg bags used to pack export outputs (batch ${batchId})`, performed_by: userId || null });
+      }
+      const short = Math.max(0, need - avail);
+      if (short > 0) shortages.push({ size, item: it.name, needed: need, available: avail, short });
     }
     await trx('mill_stock_movements').insert(movements);
 
-    return { capacityKg: predSize, rawBags: freed, freed, outputBags: packed, packed, net: freed - packed, sizes: [...bySize.keys()] };
+    return { capacityKg: exportPack.packSize || predSize, rawBags: freed, freed, outputBags: packed, packed, net: freed - packed, sizes: [...bySize.keys()], shortages, exportPacked: true, orderNo: exportPack.orderNo };
   },
 
   /**

@@ -4,6 +4,7 @@ const inventoryService = require('../../services/inventoryService');
 const accountingService = require('../../services/accountingService');
 const automationService = require('../../services/automationService');
 const workflowService = require('../../services/exportOrderWorkflowService');
+const notificationService = require('../../services/notificationService');
 const { publishExportOrderUpdate } = require('../../services/exportOrderEventBus');
 
 // Can this inventory lot be fed into a milling/blend batch? Mirrors the
@@ -546,6 +547,15 @@ const millingController = {
             err.statusCode = 400;
             throw err;
           }
+
+          // Tell the export manager the mill has started on their order.
+          await notificationService.createForRole(trx, {
+            roleName: 'Export Manager',
+            title: 'Milling started',
+            message: `Batch ${batch.batch_no} created for order ${linkedOrder.order_no} — rice type ${linkedOrder.product_name || 'n/a'}.`,
+            type: 'info',
+            linkedRef: linkedOrder.order_no,
+          });
         }
 
         return { batch, order: updatedOrder };
@@ -1122,6 +1132,20 @@ const millingController = {
         // bags into packaging stock, and the outputs are packed into katta,
         // consuming them back. Stamps each output lot's bag count too.
         kattaInfo = await inventoryService.reconcileBatchKatta(trx, batch.id, req.user?.id);
+
+        // Export batch packed to the customer's spec but the bags weren't all in
+        // stock → the finished rice is packed anyway; alert the export manager that
+        // packing material must be purchased.
+        if (batch.linked_export_order_id && kattaInfo && kattaInfo.shortages && kattaInfo.shortages.length) {
+          const summary = kattaInfo.shortages.map((s) => `${s.short} × ${s.size}kg`).join(', ');
+          await notificationService.createForRole(trx, {
+            roleName: 'Export Manager',
+            title: 'Packing material shortage',
+            message: `Order ${kattaInfo.orderNo || ''} / batch ${batch.batch_no}: need ${summary} bags to pack the finished rice — purchase required.`,
+            type: 'alert',
+            linkedRef: kattaInfo.orderNo || batch.batch_no,
+          });
+        }
 
         // Recognize the supplier payable for the raw rice purchase so the
         // supplier's GL party ledger / statement reflects what we owe. Only for
