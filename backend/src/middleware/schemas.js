@@ -52,6 +52,10 @@ const createExportOrder = Joi.object({
   // they only persist on a later edit. See [[project_validation_stripunknown]].
   master_bag_size_kg: Joi.number().positive().allow(null, ''),
   master_bag_type: Joi.string().max(100).allow('', null),
+  // Batch 7 — structured packing spec (material + packing type + palletized).
+  bag_material: Joi.string().valid('Polythene', 'Woven', 'Non-Woven', 'Cotton').allow('', null),
+  packing_type: Joi.string().valid('retail', 'jumbo', 'container').default('retail'),
+  palletized: Joi.boolean().default(false),
   payment_terms: Joi.string().allow('', null),
   // Optional manual FX rate at creation (controller sets fx_rate_source='manual').
   booked_fx_rate: Joi.number().positive().allow(null),

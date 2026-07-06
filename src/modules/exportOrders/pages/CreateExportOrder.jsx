@@ -15,7 +15,7 @@ import RiceTypePicker from '../../../components/RiceTypePicker';
 import BagTypePicker from '../../../components/BagTypePicker';
 import SupplierPicker from '../../../components/SupplierPicker';
 import SlideDrawer from '../../../components/SlideDrawer';
-import { printedBagsApi } from '../api/services';
+import { printedBagsApi, exportOrdersApi } from '../api/services';
 import { INCOTERMS, incotermHint, advancePctForIncoterm } from '../../../shared/constants/incoterms';
 import { PAYMENT_TERMS } from '../../../shared/constants/paymentTerms';
 import { COUNTRY_OPTIONS } from '../../../shared/constants/countries';
@@ -41,6 +41,14 @@ const EMPTY_ITEM = {
   masterBagSizeKg: '',
   bagBrand: '',
 };
+
+// Batch 7 — packing type + material options.
+const PACKING_TYPES = [
+  { value: 'retail', label: 'Retail Bag', desc: '0.5–50 KG bags' },
+  { value: 'jumbo', label: 'Jumbo FIBC', desc: '1,200 KG bulk bag' },
+  { value: 'container', label: 'Container Bulk', desc: 'Loose, max 25,000 KG' },
+];
+const BAG_MATERIALS = ['Polythene', 'Woven', 'Non-Woven', 'Cotton'];
 
 // Retail bag sizes that need to be packed inside an outer "master bag"
 // (carton / sack) for shipping. Larger bags ship as-is.
@@ -93,6 +101,8 @@ export default function CreateExportOrder() {
     // Section 6: Bag spec (shown only when receiving mode needs it)
     bagType: '', bagQuality: '', bagSizeKg: '25', bagWeightGm: '', bagPrinting: '', bagColor: '', bagBrand: '',
     masterBagSizeKg: '', masterBagType: '',
+    // Batch 7: structured packing spec + palletization
+    packingType: 'retail', bagMaterial: '', palletized: false, palletCost: '',
     // Section 7: Contract & Product Specs (for document generation)
     // HS Code is per-item now (in the Line Items section); no order-level field.
     contractNumber: '', consigneeType: 'to_order_of_bank', brokenPctTarget: '',
@@ -148,6 +158,13 @@ export default function CreateExportOrder() {
   const isMultiItem = items.length > 1;
   const needsBagWidget = form.receivingMode === 'bags' || form.receivingMode === 'mixed' || form.receivingMode === 'custom';
   const isMixed = form.receivingMode === 'mixed';
+  // Batch 7 — container-capacity rule (mirrors the backend guard). Palletized load
+  // caps at 20 pallets × 1,000 = 20,000 KG; a bulk/loose container caps at 25,000 KG.
+  const capacityWarning = form.palletized && totalKg > 20000
+    ? 'Palletized load capped at 20,000 KG (20 pallets × 1,000 KG). Reduce the quantity or ship without pallets.'
+    : totalKg > 25000
+      ? 'Container load capped at 25,000 KG. Split into multiple orders/containers.'
+      : '';
 
   // Mixed packing totals
   const mixedTotals = useMemo(() => {
@@ -207,8 +224,13 @@ export default function CreateExportOrder() {
         addToast(`Line ${items.indexOf(missingMaster) + 1}: select a master bag size for retail bags`, 'error');
         return false;
       }
-      if (needsBagWidget && requiresMasterBag(form.bagSizeKg) && !form.masterBagSizeKg) {
+      if (needsBagWidget && form.packingType === 'retail' && requiresMasterBag(form.bagSizeKg) && !form.masterBagSizeKg) {
         addToast('Select a master bag size for retail bags', 'error');
+        return false;
+      }
+      // Batch 7 — enforce the container-capacity rule (mirrors the backend guard).
+      if (capacityWarning) {
+        addToast(capacityWarning, 'error');
         return false;
       }
     }
@@ -276,6 +298,10 @@ export default function CreateExportOrder() {
       quantity_unit: form.quantityUnit || null,
       quantity_input_value: qtyMT,
       packing_notes: form.packingNotes || null,
+      // Batch 7 — structured packing spec
+      packing_type: form.packingType || 'retail',
+      bag_material: form.packingType === 'container' ? null : (form.bagMaterial || null),
+      palletized: form.packingType === 'container' ? false : !!form.palletized,
     };
 
     // Bag fields — only when receiving mode requires them
@@ -343,6 +369,15 @@ export default function CreateExportOrder() {
           addToast(`${validBags.length} printed-bag order(s) arranged`, 'success');
         } catch (bagErr) {
           addToast(`Order created, but a printed-bag order failed: ${bagErr.message}`, 'error');
+        }
+      }
+      // Batch 7 — record the pallet cost as a 'pallet' cost line (GL + payable via addCost).
+      const palletCost = parseFloat(form.palletCost) || 0;
+      if (newOrderId && form.palletized && palletCost > 0) {
+        try {
+          await exportOrdersApi.addCost(newOrderId, { category: 'pallet', amount: palletCost, notes: 'Pallet cost' });
+        } catch (pErr) {
+          addToast(`Order created, but the pallet cost failed to post: ${pErr.message}`, 'error');
         }
       }
       addToast(`Order ${res.data?.order?.order_no || ''} ${status === 'Draft' ? 'saved as draft' : 'created'}`, 'success');
@@ -617,6 +652,27 @@ export default function CreateExportOrder() {
       {needsBagWidget && !isMixed && !isMultiItem && (
         <div className="bg-white rounded-xl border border-amber-200 p-6">
           <h2 className="text-sm font-semibold text-amber-700 uppercase tracking-wider mb-4 flex items-center gap-2"><ShoppingBag className="w-4 h-4" /> Bag Specification</h2>
+
+          {/* Batch 7: Packing type — drives sizes, material and pallet rules */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+            {PACKING_TYPES.map(pt => {
+              const active = form.packingType === pt.value;
+              return (
+                <button key={pt.value} type="button"
+                  onClick={() => {
+                    set('packingType', pt.value);
+                    if (pt.value === 'jumbo') { set('bagSizeKg', '1200'); set('masterBagSizeKg', ''); }
+                    else if (pt.value === 'container') { set('bagSizeKg', ''); set('masterBagSizeKg', ''); set('palletized', false); }
+                    else if (!form.bagSizeKg || form.bagSizeKg === '1200') { set('bagSizeKg', '25'); }
+                  }}
+                  className={`text-left rounded-lg border p-3 transition ${active ? 'border-amber-500 bg-amber-50 ring-1 ring-amber-400' : 'border-gray-200 hover:border-amber-300'}`}>
+                  <div className="text-sm font-semibold text-gray-800">{pt.label}</div>
+                  <div className="text-[11px] text-gray-500 mt-0.5">{pt.desc}</div>
+                </button>
+              );
+            })}
+          </div>
+
           <div className="form-grid">
             <div className="form-group">
               <BagTypePicker
@@ -628,6 +684,15 @@ export default function CreateExportOrder() {
                 onChange={(name, bt) => { set('bagType', name); if (bt?.sizeKg || bt?.size_kg) set('bagSizeKg', String(bt.sizeKg ?? bt.size_kg)); }}
               />
             </div>
+            {form.packingType !== 'container' && (
+              <div className="form-group">
+                <label className="form-label">Material</label>
+                <select value={form.bagMaterial} onChange={e => set('bagMaterial', e.target.value)} className="form-input">
+                  <option value="">Select...</option>
+                  {BAG_MATERIALS.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+            )}
             <div className="form-group">
               <label className="form-label">Bag Quality</label>
               <select value={form.bagQuality} onChange={e => set('bagQuality', e.target.value)} className="form-input">
@@ -635,6 +700,7 @@ export default function CreateExportOrder() {
                 <option>New</option><option>A-Grade</option><option>Standard</option><option>Premium</option><option>Economy</option>
               </select>
             </div>
+            {form.packingType === 'retail' && (
             <div className="form-group">
               <label className="form-label">Bag Size (KG)</label>
               <select
@@ -656,12 +722,26 @@ export default function CreateExportOrder() {
                 <option value="2">2 KG (retail)</option>
                 <option value="5">5 KG (retail)</option>
                 <option value="10">10 KG (retail)</option>
+                <option value="15">15 KG</option>
+                <option value="20">20 KG</option>
                 <option value="25">25 KG</option>
                 <option value="50">50 KG</option>
-                <option value="100">100 KG</option>
               </select>
             </div>
-            {requiresMasterBag(form.bagSizeKg) && (
+            )}
+            {form.packingType === 'jumbo' && (
+              <div className="form-group">
+                <label className="form-label">Bag Size (KG)</label>
+                <input value="1,200 (Jumbo FIBC)" disabled className="form-input bg-gray-50 text-gray-500" />
+              </div>
+            )}
+            {form.packingType === 'container' && (
+              <div className="form-group">
+                <label className="form-label">Load</label>
+                <input value="Container / bulk (max 25,000 KG)" disabled className="form-input bg-gray-50 text-gray-500" />
+              </div>
+            )}
+            {form.packingType === 'retail' && requiresMasterBag(form.bagSizeKg) && (
               <div className="form-group">
                 <label className="form-label">Master Bag (KG) <span className="text-red-500">*</span></label>
                 <select
@@ -694,6 +774,32 @@ export default function CreateExportOrder() {
               <input value={form.bagBrand} onChange={e => set('bagBrand', e.target.value)} className="form-input" placeholder="Brand on bag" />
             </div>
           </div>
+
+          {/* Batch 7: palletization + pallet cost (not applicable to a bulk container) */}
+          {form.packingType !== 'container' && (
+            <div className="mt-4 flex flex-wrap items-center gap-4">
+              <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                <input type="checkbox" checked={!!form.palletized}
+                  onChange={e => set('palletized', e.target.checked)} className="rounded border-gray-300" />
+                Palletized load
+              </label>
+              {form.palletized && (
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-gray-600">Pallet Cost (PKR)</label>
+                  <input type="number" min="0" value={form.palletCost}
+                    onChange={e => set('palletCost', e.target.value)}
+                    className="form-input w-40" placeholder="0.00" />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Container-capacity guard */}
+          {capacityWarning && (
+            <div className="mt-3 bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+              {capacityWarning}
+            </div>
+          )}
 
           {/* Bag count preview */}
           {singleBagCount > 0 && (

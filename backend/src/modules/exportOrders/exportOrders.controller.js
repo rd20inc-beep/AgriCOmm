@@ -301,6 +301,7 @@ const ALLOWED_UPDATE_FIELDS = [
   'bag_type', 'bag_quality', 'bag_size_kg', 'bag_weight_gm',
   'bag_printing', 'bag_color', 'bag_brand', 'bag_notes',
   'master_bag_size_kg', 'master_bag_type',
+  'bag_material', 'packing_type', 'palletized',
   'receiving_mode', 'quantity_unit', 'packing_notes',
   'packing_lines', 'doc_address_mode',
   // Document generation fields
@@ -313,6 +314,19 @@ const ALLOWED_UPDATE_FIELDS = [
   'shipment_remarks',
   'payment_terms',
 ];
+
+// Batch 7 — container-capacity rule. Returns an error string or null.
+// Palletized: 20 pallets × 1,000 KG = 20,000 KG. Bulk/loose container: 25,000 KG.
+function packingCapacityError(qtyMt, palletized) {
+  const totalKg = (parseFloat(qtyMt) || 0) * 1000;
+  if (palletized && totalKg > 20000) {
+    return 'Palletized load capped at 20,000 KG (20 pallets × 1,000 KG). Reduce the quantity or ship without pallets.';
+  }
+  if (totalKg > 25000) {
+    return 'Container load capped at 25,000 KG. Split into multiple orders/containers.';
+  }
+  return null;
+}
 
 // Columns where Postgres rejects '' — coerce empty strings to null on update.
 const NUMERIC_UPDATE_FIELDS = new Set([
@@ -711,6 +725,10 @@ const exportOrderController = {
         bag_notes,
         master_bag_size_kg,
         master_bag_type,
+        // Batch 7 — structured packing spec
+        bag_material,
+        packing_type,
+        palletized,
         payment_terms,
         // Packing / receiving mode
         receiving_mode,
@@ -746,6 +764,11 @@ const exportOrderController = {
           message: 'customer_id, product_id, qty_mt, and price_per_mt are required (or provide items[]).',
         });
       }
+
+      // Batch 7 — container-capacity rule: a palletized load caps at 20 pallets ×
+      // 1,000 KG = 20,000 KG; a bulk/loose container caps at 25,000 KG.
+      const capacityError = packingCapacityError(effectiveQtyMt, palletized);
+      if (capacityError) return res.status(400).json({ success: false, message: capacityError });
 
       const contractValue = parseFloat(effectiveQtyMt) * parseFloat(effectivePricePerMt);
       const advancePct = parseFloat(advance_pct) || 0;
@@ -804,6 +827,10 @@ const exportOrderController = {
             bag_notes: bag_notes || null,
             master_bag_size_kg: master_bag_size_kg ? parseFloat(master_bag_size_kg) : null,
             master_bag_type: master_bag_type || null,
+            // Batch 7 — structured packing spec
+            bag_material: bag_material || null,
+            packing_type: ['retail', 'jumbo', 'container'].includes(packing_type) ? packing_type : 'retail',
+            palletized: !!palletized,
             payment_terms: payment_terms || null,
             // Which buyer location lines print on documents
             doc_address_mode: ['country', 'port', 'full', 'country_port'].includes(req.body.doc_address_mode)
@@ -1052,6 +1079,15 @@ const exportOrderController = {
           safeUpdates.contract_value_pkr_locked = contractValue * bookedRate;
         }
         resyncReceivables = true;
+      }
+
+      // Batch 7 — re-check the container-capacity rule if qty or palletization changed.
+      if (safeUpdates.qty_mt !== undefined || safeUpdates.palletized !== undefined) {
+        const cur = await db('export_orders').where({ id }).first();
+        const effQty = safeUpdates.qty_mt != null ? safeUpdates.qty_mt : cur?.qty_mt;
+        const effPal = safeUpdates.palletized !== undefined ? safeUpdates.palletized : cur?.palletized;
+        const capErr = packingCapacityError(effQty, effPal);
+        if (capErr) return res.status(400).json({ success: false, message: capErr });
       }
 
       // Extract packing_lines before DB update (it's a separate table, not a column)
