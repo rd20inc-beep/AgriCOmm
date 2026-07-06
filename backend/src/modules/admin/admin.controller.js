@@ -1,4 +1,5 @@
 const db = require('../../config/database');
+const { nextDocNo } = require('../../utils/docNumber');
 
 // Generic CRUD factory
 function createCrud(tableName, entityName) {
@@ -58,7 +59,14 @@ function createCrud(tableName, entityName) {
 
     async create(req, res) {
       try {
-        const [row] = await db(tableName).insert(req.body).returning('*');
+        const [row] = await db.transaction(async (trx) => {
+          const body = { ...req.body };
+          // Suppliers get a stable privacy code (SUP-001…) used on export orders.
+          if (tableName === 'suppliers' && !body.supplier_code) {
+            body.supplier_code = await nextDocNo(trx, { table: 'suppliers', column: 'supplier_code', prefix: 'SUP-', pad: 3 });
+          }
+          return trx(tableName).insert(body).returning('*');
+        });
         return res.status(201).json({ success: true, data: { [entityName]: row } });
       } catch (err) {
         console.error(`Create ${entityName} error:`, err);

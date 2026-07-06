@@ -8,6 +8,8 @@ import { useApp } from '../../../context/AppContext';
 import { Package, Plus, ExternalLink, Warehouse, Scale, FileText, Truck, ArrowRight } from 'lucide-react';
 
 export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], onCreateMilling, onStartDocsPreparation, onLinkExternalPurchase, canCreateMilling, canStartDocs, onStockAllocated }) {
+  // Supplier privacy: Export users see the Supplier Code, not the name/ledger link.
+  const canSeeSupplierName = order?.canSeeSupplierName !== false;
   const { addToast } = useApp();
   const estimatedRawQty = Math.round(order.qtyMT / 0.75);
 
@@ -334,7 +336,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
                       <div className="grid grid-cols-4 gap-2 text-xs">
                         <div><span className="text-gray-400">Available</span><br/><span className="font-bold text-emerald-700">{Math.round(availableKg).toLocaleString()} kg</span></div>
                         <div><span className="text-gray-400">Entity</span><br/><span className="font-semibold text-gray-900">{lot.entity || '—'}</span></div>
-                        <div><span className="text-gray-400">Supplier</span><br/><span className="font-semibold text-gray-900">{lot.supplier_name || '—'}</span></div>
+                        <div><span className="text-gray-400">Supplier</span><br/><span className="font-semibold text-gray-900">{lot.supplier_name || lot.supplier_code || '—'}</span></div>
                         <div><span className="text-gray-400">Warehouse</span><br/><span className="font-semibold text-gray-900">{lot.warehouse_name || '—'}</span></div>
                       </div>
                     </div>
@@ -442,7 +444,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
                         )}
                       </td>
                       <td className="py-2.5 text-gray-700">{lot.product_name || lot.item_name || '\u2014'}</td>
-                      <td className="py-2.5 text-gray-700">{lot.supplier_name || '\u2014'}</td>
+                      <td className="py-2.5 text-gray-700">{lot.supplier_name || lot.supplier_code || '\u2014'}</td>
                       <td className="py-2.5 text-right font-medium text-gray-900">{Math.round(allocKg).toLocaleString()} kg</td>
                       <td className="py-2.5 text-right text-gray-700">
                         {ratePerKg > 0 ? `PKR ${ratePerKgDisplay}` : '\u2014'}
@@ -606,7 +608,9 @@ function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
               </div>
               <div>
                 <span className="text-xs text-gray-500">Supplier</span>
-                <p className="font-bold"><PartyLink type="supplier" id={linkedBatch.supplierId} name={linkedBatch.supplierName} className="font-bold" /></p>
+                {canSeeSupplierName
+                  ? <p className="font-bold"><PartyLink type="supplier" id={linkedBatch.supplierId} name={linkedBatch.supplierName} className="font-bold" /></p>
+                  : <p className="font-bold text-gray-900">{linkedBatch.supplierCode || '—'}</p>}
               </div>
             </div>
             {linkedBatch.totalCostPerKgFinished > 0 && (

@@ -63,6 +63,7 @@ export function useExportOrder(id) {
         packingLines: res?.data?.packingLines || [],
         purchaseLots: res?.data?.purchaseLots || [],
         batchByproducts: res?.data?.batchByproducts || [],
+        canSeeSupplierName: res?.data?.canSeeSupplierName !== false, // supplier privacy
       };
       return transformOrder(raw);
     },
