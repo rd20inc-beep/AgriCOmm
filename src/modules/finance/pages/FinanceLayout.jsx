@@ -3,9 +3,10 @@ import { NavLink, useSearchParams } from 'react-router-dom';
 import { RouteErrorBoundary } from '../../../components/ErrorBoundary';
 import {
   LayoutDashboard, ArrowDownLeft, ArrowUpRight, DollarSign,
-  TrendingUp, Landmark, BookOpen, BookUser, Bell, Clock, Settings, ShoppingCart, Store, Printer, CalendarClock, Users,
+  TrendingUp, Landmark, BookOpen, BookUser, Bell, Clock, Settings, ShoppingCart, Store, Printer, CalendarClock, Users, CheckCircle,
 } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
+import { usePendingExportReceipts } from '../../../api/queries';
 
 const tabs = [
   { label: 'Overview',     path: '/finance',              icon: LayoutDashboard, end: true },
@@ -20,6 +21,7 @@ const tabs = [
   { label: 'Rates',        path: '/finance/rates',        icon: Settings },
   { label: 'Accounting',   path: '/finance/accounting',   icon: BookOpen },
   { label: 'Statements',   path: '/finance/statements',   icon: BookUser },
+  { label: 'Confirmations', path: '/finance/confirmations', icon: CheckCircle, badge: true },
   { label: 'Payroll',      path: '/finance/payroll',      icon: Users, permission: { module: 'payroll', action: 'view' } },
   { label: 'Alerts',       path: '/finance/alerts',       icon: Bell },
 ];
@@ -36,6 +38,8 @@ const DATE_PRESETS = [
 export default function FinanceLayout({ children }) {
   const [params, setParams] = useSearchParams();
   const { hasPermission } = useAuth();
+  const { data: pendingReceipts = [] } = usePendingExportReceipts();
+  const pendingCount = pendingReceipts.length;
   const dateRange = params.get('range') || '';
   // Payroll tab shows only to users with the payroll permission (its route is
   // payroll:view-gated); every other tab is ungated (parent finance:view covers it).
@@ -113,6 +117,9 @@ export default function FinanceLayout({ children }) {
                 >
                   <Icon size={15} className="flex-shrink-0" />
                   {tab.label}
+                  {tab.badge && pendingCount > 0 && (
+                    <span className="ml-1 inline-flex items-center justify-center min-w-[16px] h-4 px-1 text-[10px] font-bold text-white bg-amber-500 rounded-full">{pendingCount}</span>
+                  )}
                 </NavLink>
               );
             })}

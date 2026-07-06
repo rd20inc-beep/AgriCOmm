@@ -44,6 +44,8 @@ function authorizeAny(...permPairs) {
 }
 
 router.get('/', authorize('export_orders', 'view'), controller.list);
+// Literal path before /:id so it isn't captured as an order id.
+router.get('/pending-receipts', authorize('finance', 'view'), controller.listPendingExportReceipts);
 router.get('/:id', authorize('export_orders', 'view'), controller.getById);
 router.post(
   '/',
@@ -134,6 +136,31 @@ router.post(
   validate(schemas.confirmBalance),
   auditAction('confirm_balance', 'export_order', (req) => req.params.id),
   controller.confirmBalance
+);
+
+// ── Export receipt: record (pending) → Finance confirms with FX (item 14) ──
+// Export/any records a PENDING receipt (no posting). Finance confirms → posts.
+// (GET /pending-receipts is registered above, before /:id.)
+router.post(
+  '/:id/record-receipt',
+  authorizeAny(['export_orders', 'confirm_advance'], ['finance', 'confirm_payment']),
+  validate(schemas.recordExportReceipt),
+  auditAction('record_export_receipt', 'export_order', (req) => req.params.id),
+  controller.recordExportReceipt
+);
+router.post(
+  '/receipts/:paymentId/confirm',
+  authorize('finance', 'confirm_payment'),
+  ownerApproval('export_advance'),
+  validate(schemas.confirmExportReceipt),
+  auditAction('confirm_export_receipt', 'payment', (req) => req.params.paymentId),
+  controller.confirmExportReceipt
+);
+router.post(
+  '/receipts/:paymentId/reject',
+  authorize('finance', 'confirm_payment'),
+  auditAction('reject_export_receipt', 'payment', (req) => req.params.paymentId),
+  controller.rejectExportReceipt
 );
 router.post(
   '/:id/allocate-stock',

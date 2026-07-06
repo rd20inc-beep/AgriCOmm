@@ -119,6 +119,43 @@ export function useConfirmBalance() {
   });
 }
 
+// Item 14 — export receipt: record pending / Finance confirm / reject / inbox.
+export function useRecordExportReceipt() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => exportOrdersApi.recordExportReceipt(id, data),
+    onSuccess: (_, { id }) => {
+      qc.invalidateQueries({ queryKey: queryKeys.orders.detail(id) });
+      qc.invalidateQueries({ queryKey: ['export', 'pending-receipts'] });
+    },
+  });
+}
+export function usePendingExportReceipts(opts = {}) {
+  return useQuery({
+    queryKey: ['export', 'pending-receipts'],
+    queryFn: async () => { const res = await exportOrdersApi.listPendingExportReceipts(); return transformKeys(res?.data || []); },
+    ...opts,
+  });
+}
+export function useConfirmExportReceipt() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ paymentId, data }) => exportOrdersApi.confirmExportReceipt(paymentId, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.orders.all });
+      qc.invalidateQueries({ queryKey: queryKeys.receivables.all });
+      qc.invalidateQueries({ queryKey: ['export', 'pending-receipts'] });
+    },
+  });
+}
+export function useRejectExportReceipt() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ paymentId, data }) => exportOrdersApi.rejectExportReceipt(paymentId, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['export', 'pending-receipts'] }),
+  });
+}
+
 export function useAddOrderCost() {
   const qc = useQueryClient();
   return useMutation({

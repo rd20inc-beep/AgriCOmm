@@ -8,7 +8,7 @@ import { API_BASE } from '../../../api/client';
 import api from '../../../api/client';
 import { queryKeys } from '../../../api/queryClient';
 import {
-  useExportOrder, useConfirmAdvance, useConfirmBalance,
+  useExportOrder, useConfirmAdvance, useConfirmBalance, useRecordExportReceipt,
   useUpdateOrderStatus, useAddOrderCost, useUpdateShipment, useCancelOrder,
   useStartDocs, useUploadDocument, useApproveDocument,
 } from '../../../api/queries';
@@ -52,6 +52,7 @@ export default function ExportOrderDetail() {
   // Mutations
   const confirmAdvanceMut = useConfirmAdvance();
   const confirmBalanceMut = useConfirmBalance();
+  const recordReceiptMut = useRecordExportReceipt();
   const updateStatusMut = useUpdateOrderStatus();
   const cancelOrderMut = useCancelOrder();
   const addCostMut = useAddOrderCost();
@@ -305,40 +306,32 @@ export default function ExportOrderDetail() {
 
   const orderId = order?.dbId || order?.id;
 
+  // Item 14: recording an advance/balance no longer posts — it submits a PENDING
+  // receipt for Finance to verify + set the actual FX rate + confirm.
   const handleConfirmAdvance = async () => {
     const amount = parseFloat(advanceAmount) || 0;
     if (!amount || amount <= 0) {
       addToast('Please enter a valid amount', 'error');
       return;
     }
-    const isForeign = (order?.currency || 'USD') !== 'PKR';
-    const fxRate = parseFloat(advanceFxRate) || 0;
-    if (isForeign && fxRate <= 0) {
-      addToast('Please enter the FX rate the bank applied', 'error');
-      return;
-    }
     setShowAdvanceModal(false);
     try {
-      const res = await requestOwnerApproval((ownerId) => confirmAdvanceMut.mutateAsync({
+      await recordReceiptMut.mutateAsync({
         id: orderId,
         data: {
+          kind: 'advance',
           amount,
-          fx_rate: isForeign ? fxRate : 1,
+          fx_rate: parseFloat(advanceFxRate) || null, // estimate; Finance sets the real one
           payment_date: advanceDate,
           payment_method: advanceMethod,
           bank_account_id: advanceBankAccountId || null,
-          bank_reference: advanceBankRef,
           notes: advanceNotes,
-          authorized_by_owner_id: ownerId,
         },
-      }));
-      const updated = res?.data?.order;
-      addToast(updated
-        ? `Advance of $${amount.toLocaleString()} confirmed — status: ${updated.status}`
-        : 'Advance payment confirmed successfully');
+      });
+      addToast(`Advance of ${amount.toLocaleString()} submitted — pending Finance confirmation`);
       invalidateFinance();
     } catch (err) {
-      addToast(err?.message || 'Failed to confirm advance payment', 'error');
+      addToast(err?.data?.message || err?.message || 'Failed to submit advance', 'error');
     }
   };
 
@@ -348,34 +341,24 @@ export default function ExportOrderDetail() {
       addToast('Please enter a valid amount', 'error');
       return;
     }
-    const isForeign = (order?.currency || 'USD') !== 'PKR';
-    const fxRate = parseFloat(balanceFxRate) || 0;
-    if (isForeign && fxRate <= 0) {
-      addToast('Please enter the FX rate the bank applied for the balance', 'error');
-      return;
-    }
     setShowBalanceModal(false);
     try {
-      const res = await requestOwnerApproval((ownerId) => confirmBalanceMut.mutateAsync({
+      await recordReceiptMut.mutateAsync({
         id: orderId,
         data: {
+          kind: 'balance',
           amount,
-          fx_rate: isForeign ? fxRate : 1,
+          fx_rate: parseFloat(balanceFxRate) || null,
           payment_date: balanceDate,
           payment_method: balanceMethod,
           bank_account_id: balanceBankAccountId || null,
-          bank_reference: balanceBankRef,
           notes: balanceNotes,
-          authorized_by_owner_id: ownerId,
         },
-      }));
-      const updated = res?.data?.order;
-      addToast(updated
-        ? `Balance of $${amount.toLocaleString()} confirmed — status: ${updated.status}`
-        : 'Balance payment confirmed');
+      });
+      addToast(`Balance of ${amount.toLocaleString()} submitted — pending Finance confirmation`);
       invalidateFinance();
     } catch (err) {
-      addToast(err.message || 'Failed to confirm balance', 'error');
+      addToast(err?.data?.message || err?.message || 'Failed to submit balance', 'error');
     }
   };
 

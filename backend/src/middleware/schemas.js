@@ -166,6 +166,24 @@ const confirmBalance = Joi.object({
   notes: Joi.string().max(1000).allow(null, ''),
 });
 
+// Record a pending export receipt (Export/any) — no posting.
+const recordExportReceipt = Joi.object({
+  kind: Joi.string().valid('advance', 'balance').default('advance'),
+  amount: Joi.number().positive().required(),
+  fx_rate: Joi.number().positive().allow(null),      // estimate; Finance sets the real one
+  payment_date: Joi.date().iso().allow(null, ''),
+  payment_method: Joi.string().max(50).allow(null, ''),
+  bank_account_id: Joi.number().integer().positive().allow(null),
+  notes: Joi.string().max(1000).allow(null, ''),
+});
+
+// Finance confirms a pending export receipt with the actual FX rate → posts.
+const confirmExportReceipt = Joi.object({
+  fx_rate: Joi.number().positive().allow(null),
+  bank_account_id: Joi.number().integer().positive().allow(null),
+  payment_method: Joi.string().max(50).allow(null, ''),
+});
+
 const allocateExportStock = Joi.object({
   lot_id: Joi.number().integer().positive().required(),
   qty_mt: Joi.number().positive().required(),
@@ -472,6 +490,8 @@ module.exports = {
   exportOrderDocumentAction,
   confirmAdvance,
   confirmBalance,
+  recordExportReceipt,
+  confirmExportReceipt,
   allocateExportStock,
   createPurchaseLot,
   addPurchaseToLot,
