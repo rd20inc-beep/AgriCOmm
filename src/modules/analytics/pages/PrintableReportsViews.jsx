@@ -128,6 +128,16 @@ export function ProductionReportView({ data, companyName, range, preset }) {
 export function StockReportView({ data, companyName, groupLabel }) {
   const { rows, grand, asOf, groupBy } = data;
   const isSupplier = groupBy === 'supplier';
+  // Variety / Grade / By-product group lines link to the stock movement ledger.
+  const ledgerLink = (r) => {
+    if (groupBy === 'variety') return `/reports/stock-ledger?dimension=variety&key=${encodeURIComponent(r.name)}`;
+    if (groupBy === 'grade') return `/reports/stock-ledger?dimension=grade&key=${encodeURIComponent(r.name)}`;
+    if (groupBy === 'byproduct') {
+      const [variety, tag] = String(r.name).split(' — ');
+      return `/reports/stock-ledger?dimension=byproduct&key=${encodeURIComponent(tag || r.name)}${variety ? `&variety=${encodeURIComponent(variety)}` : ''}`;
+    }
+    return null;
+  };
   return (
     <div className="print-report space-y-6 text-sm text-gray-900">
       <Header companyName={companyName} title="Stock Report" subtitle={`As of ${new Date(asOf).toLocaleString()} · ${groupLabel || ''}`} />
@@ -150,7 +160,7 @@ export function StockReportView({ data, companyName, groupLabel }) {
             cells: [
               (isSupplier && r.supplierId)
                 ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.name}</RefLink>
-                : r.name,
+                : (ledgerLink(r) ? <RefLink to={ledgerLink(r)}>{r.name}</RefLink> : r.name),
               r.lotCount, fmtKg(r.totalKg), fmtKg(r.bags), fmtKg(r.availableKg), fmtKg(r.reservedKg), fmtPkr(r.perKg), fmtPkr(r.valuePkr),
             ],
             childRows: (r.lots || []).map(l => [
