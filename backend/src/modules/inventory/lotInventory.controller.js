@@ -2281,6 +2281,21 @@ module.exports = {
         return res.status(400).json({ success: false, message: 'A positive qty_kg is required.' });
       }
 
+      // Only users with export-order access may CONNECT the transfer to an order.
+      // Mill Operator/Supervisor transfer finished goods to the export-ready pool
+      // and never select an order — so strip the link for them (transfer to pool)
+      // rather than error. Owner/Super Admin bypass permissions, so allow by role.
+      let linkOrderId = export_order_id || null;
+      if (linkOrderId) {
+        const perms = req.user && req.user.permissions;
+        let mayLink = perms instanceof Set ? perms.has('export_orders.view') : true;
+        if (!mayLink && req.user?.role_id) {
+          const role = await db('roles').where({ id: req.user.role_id }).select('name').first();
+          mayLink = !!role && (role.name === 'Super Admin' || role.name === 'Owner');
+        }
+        if (!mayLink) linkOrderId = null;
+      }
+
       const result = await db.transaction(async (trx) => {
         const lot = await trx('inventory_lots').where('id', id).first();
         if (!lot) { const e = new Error('Lot not found.'); e.status = 404; throw e; }
@@ -2307,7 +2322,7 @@ module.exports = {
         const [t] = await trx('internal_transfers').insert({
           transfer_no: transferNo,
           batch_id: null,
-          export_order_id: export_order_id || null,
+          export_order_id: linkOrderId,
           product_name: lot.item_name,
           qty_kg: qty,
           transfer_price_pkr: pricePerMT,
@@ -2324,7 +2339,7 @@ module.exports = {
           lotId: lot.id,
           qtyKg: qty,
           productName: lot.item_name,
-          orderId: export_order_id || null,
+          orderId: linkOrderId,
           transferPricePerMT: pricePerMT,
           totalValuePkr: totalValue,
           userId: req.user?.id,

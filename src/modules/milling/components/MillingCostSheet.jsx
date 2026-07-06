@@ -72,7 +72,9 @@ ${headHtml}
   else win.addEventListener('load', trigger);
 }
 
-function fmtPKR(v) { return 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString('en-PK'); }
+// Costing figures show 2 decimals — especially the per-kg costs, where rounding
+// to whole rupees hid real cost (e.g. 145.37/kg displayed as 145).
+function fmtPKR(v) { return 'Rs ' + (parseFloat(v) || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function fmtDate(d) { return d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'; }
 function pf(v) { return parseFloat(v) || 0; }
 

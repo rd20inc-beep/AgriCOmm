@@ -1404,6 +1404,18 @@ const millingController = {
             }
           }
         }
+
+        // Re-run the residual cost engine so this cost actually flows into the
+        // finished cost sheet (total_cost_per_kg_finished), the output lots'
+        // landed cost, and any non-locked order/sale COGS — mirroring the
+        // /prices route. Without this, a Costs-tab addition wrote the milling_costs
+        // row but the stored per-kg cost stayed stale, so the View Costing Sheet
+        // never reflected it. No-op pre-yield (reallocateBatchCosts skips no-yield).
+        const inventoryService = require('../inventory/inventory.service');
+        const realloc = await inventoryService.recomputeBatchOutputsAfterPriceChange(trx, id, { userId: req.user?.id });
+        if (realloc && realloc.finishedCostPerKg != null) {
+          await trx('milling_batches').where({ id }).update({ finished_price_per_kg: realloc.finishedCostPerKg });
+        }
         return row;
       });
 

@@ -77,6 +77,11 @@ const tabs = [
 function formatPKR(value) {
   return 'Rs ' + Math.round(value).toLocaleString('en-PK');
 }
+// Costing figures show 2 decimals (per-kg costs especially — whole-rupee
+// rounding hid real cost, e.g. 145.37/kg shown as 145).
+function fmtPKR2(value) {
+  return 'Rs ' + (parseFloat(value) || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 
 export default function MillingBatchDetail() {
   const { id } = useParams();
@@ -1111,7 +1116,7 @@ export default function MillingBatchDetail() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500">Total Costs</span>
-                    <span className="font-medium text-gray-900">{formatPKR(totalCosts)}</span>
+                    <span className="font-medium text-gray-900">{fmtPKR2(totalCosts)}</span>
                   </div>
                 </div>
               </div>
@@ -1581,17 +1586,17 @@ export default function MillingBatchDetail() {
               </div>
               <div className="bg-white rounded-xl border border-gray-100 p-4">
                 <p className="text-xs font-medium text-gray-500 uppercase">By-Product Value</p>
-                <p className="text-xl font-bold text-green-700 mt-1">{formatPKR(bpValue)}</p>
+                <p className="text-xl font-bold text-green-700 mt-1">{fmtPKR2(bpValue)}</p>
               </div>
               <div className="bg-white rounded-xl border border-gray-100 p-4">
                 <p className="text-xs font-medium text-gray-500 uppercase">Net Purchase</p>
-                <p className="text-xl font-bold text-gray-900 mt-1">{formatPKR(netPurchase)}</p>
+                <p className="text-xl font-bold text-gray-900 mt-1">{fmtPKR2(netPurchase)}</p>
                 <p className="text-[10px] text-gray-400 mt-0.5">Raw + Milling + Other{packingCostVal > 0 ? ' + Packing' : ''}</p>
               </div>
               <div className="bg-amber-50 rounded-xl border border-amber-100 p-4">
                 <p className="text-xs font-medium text-amber-600 uppercase">Finished Cost/KG</p>
-                <p className="text-xl font-bold text-amber-900 mt-1">{formatPKR(netCostPerKG)}</p>
-                <p className="text-[10px] text-amber-500 mt-0.5">{formatPKR(netCostPerKG)}/kg</p>
+                <p className="text-xl font-bold text-amber-900 mt-1">{fmtPKR2(netCostPerKG)}</p>
+                <p className="text-[10px] text-amber-500 mt-0.5">{fmtPKR2(netCostPerKG)}/kg</p>
               </div>
               <div className="bg-white rounded-xl border border-gray-100 p-4">
                 <p className="text-xs font-medium text-gray-500 uppercase">Yield</p>
@@ -1625,8 +1630,8 @@ export default function MillingBatchDetail() {
                               {l.supplier_name && <span className="text-[10px] text-gray-500 ml-1.5">{l.supplier_name}</span>}
                             </td>
                             <td className="text-right tabular-nums">{Math.round(parseFloat(l.qty_kg) || 0).toLocaleString()} kg</td>
-                            <td className="text-right tabular-nums font-medium">{formatPKR(perKg)}</td>
-                            <td className="text-right tabular-nums">{formatPKR(parseFloat(l.cost_total_pkr) || 0)}</td>
+                            <td className="text-right tabular-nums font-medium">{fmtPKR2(perKg)}</td>
+                            <td className="text-right tabular-nums">{fmtPKR2(parseFloat(l.cost_total_pkr) || 0)}</td>
                           </tr>
                         );
                       })}

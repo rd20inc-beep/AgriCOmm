@@ -63,16 +63,17 @@ const packingService = {
       const tare = Number(item.tare_weight_kg) || 0;
       const warehouseId = warehouse_id || null;
 
-      // Bag stock must cover the count (no over-consume).
+      // Packing material shortages are ALLOWED (non-blocking): consume what's in
+      // stock, record the shortfall, and flag it so a purchase alert follows. The
+      // depleted item also auto-surfaces in the low-stock alerts (reorder level).
+      const shortages = [];
       const stockRow = await trx('mill_stock')
         .where({ item_id: bag_item_id, warehouse_id: warehouseId })
         .first();
       const available = Number(stockRow?.quantity_available || 0);
-      if (available < bagsCount) {
-        throw new ValidationError(
-          `Insufficient bags for "${item.name}": ${available} ${item.unit} in stock, ${bagsCount} needed.`
-        );
-      }
+      const bagsConsumed = Math.min(available, bagsCount);
+      const bagsShort = bagsCount - bagsConsumed;
+      if (bagsShort > 0) shortages.push({ item: item.name, unit: item.unit, needed: bagsCount, available, short: bagsShort });
 
       const packedKg = Number((bagsCount * capacity).toFixed(3));   // net rice
       const tareKg = Number((bagsCount * tare).toFixed(4));         // packaging
@@ -93,11 +94,13 @@ const packingService = {
       const costPerBag = Number(item.avg_cost_per_unit) || 0;
       const totalCost = Number((bagsCount * costPerBag).toFixed(2));
 
-      // Deduct bags from stock.
-      await trx('mill_stock').where('id', stockRow.id).update({
-        quantity_available: trx.raw('GREATEST(quantity_available - ?, 0)', [bagsCount]),
-        updated_at: trx.fn.now(),
-      });
+      // Deduct only what's in stock (never below zero); the shortfall is flagged.
+      if (stockRow && bagsConsumed > 0) {
+        await trx('mill_stock').where('id', stockRow.id).update({
+          quantity_available: trx.raw('GREATEST(quantity_available - ?, 0)', [bagsConsumed]),
+          updated_at: trx.fn.now(),
+        });
+      }
 
       const [log] = await trx('mill_packing_logs').insert({
         batch_id: batchId,
@@ -115,24 +118,29 @@ const packingService = {
         packed_by: userId,
       }).returning('*');
 
-      // Packing consumes bags; movement_type is constrained to a fixed set, so
-      // record it as 'consumption' and distinguish it via reference_type='packing'.
-      await trx('mill_stock_movements').insert({
-        item_id: bag_item_id,
-        warehouse_id: warehouseId,
-        movement_type: 'consumption',
-        quantity: -bagsCount,
-        cost_per_unit: costPerBag,
-        total_cost: totalCost,
-        reference_type: 'packing',
-        reference_id: log.id,
-        reason: `Packed ${bagsCount} bag(s) for ${batch.batch_no || `batch ${batchId}`}`,
-        performed_by: userId,
-      });
+      // Record the consumption of what was actually drawn from stock (keeps the
+      // stock ledger honest; the shortfall is not a stock movement, it's a flag).
+      if (bagsConsumed > 0) {
+        await trx('mill_stock_movements').insert({
+          item_id: bag_item_id,
+          warehouse_id: warehouseId,
+          movement_type: 'consumption',
+          quantity: -bagsConsumed,
+          cost_per_unit: costPerBag,
+          total_cost: Number((bagsConsumed * costPerBag).toFixed(2)),
+          reference_type: 'packing',
+          reference_id: log.id,
+          reason: `Packed ${bagsCount} bag(s) for ${batch.batch_no || `batch ${batchId}`}${bagsShort > 0 ? ` (${bagsShort} short)` : ''}`,
+          performed_by: userId,
+        });
+      }
 
       // ── Optional outer master bag + polythene sheet ──────────────────────────
       // Each is a stocked packaging item: validate, draw down stock, record a
       // 'packing' consumption movement against this log, and return its cost.
+      // Shortage-tolerant: consume what's in stock, flag any shortfall (same
+      // policy as the main bag). `qty` on the return stays the INTENDED count so
+      // the log records what was packed; `consumed` is what stock was drawn.
       const consumePackaging = async (itemId, count, label) => {
         const qty = Number(count);
         if (!itemId || !qty || qty <= 0) return { cost: 0, item: null, qty: 0 };
@@ -140,22 +148,24 @@ const packingService = {
         if (!pkg) throw new NotFoundError(`${label} item not found.`);
         const stk = await trx('mill_stock').where({ item_id: itemId, warehouse_id: warehouseId }).first();
         const avail = Number(stk?.quantity_available || 0);
-        if (avail < qty) {
-          throw new ValidationError(`Insufficient ${label}: ${avail} ${pkg.unit} in stock, ${qty} needed for "${pkg.name}".`);
-        }
+        const consumed = Math.min(avail, qty);
+        const short = qty - consumed;
+        if (short > 0) shortages.push({ item: pkg.name, unit: pkg.unit, needed: qty, available: avail, short });
         const unitCost = Number(pkg.avg_cost_per_unit) || 0;
-        const cost = Number((qty * unitCost).toFixed(2));
-        await trx('mill_stock').where('id', stk.id).update({
-          quantity_available: trx.raw('GREATEST(quantity_available - ?, 0)', [qty]),
-          updated_at: trx.fn.now(),
-        });
-        await trx('mill_stock_movements').insert({
-          item_id: itemId, warehouse_id: warehouseId, movement_type: 'consumption',
-          quantity: -qty, cost_per_unit: unitCost, total_cost: cost,
-          reference_type: 'packing', reference_id: log.id,
-          reason: `${label} (${qty} × ${pkg.name}) for ${batch.batch_no || `batch ${batchId}`}`,
-          performed_by: userId,
-        });
+        const cost = Number((qty * unitCost).toFixed(2)); // packing cost for the full intended count
+        if (stk && consumed > 0) {
+          await trx('mill_stock').where('id', stk.id).update({
+            quantity_available: trx.raw('GREATEST(quantity_available - ?, 0)', [consumed]),
+            updated_at: trx.fn.now(),
+          });
+          await trx('mill_stock_movements').insert({
+            item_id: itemId, warehouse_id: warehouseId, movement_type: 'consumption',
+            quantity: -consumed, cost_per_unit: unitCost, total_cost: Number((consumed * unitCost).toFixed(2)),
+            reference_type: 'packing', reference_id: log.id,
+            reason: `${label} (${qty} × ${pkg.name}) for ${batch.batch_no || `batch ${batchId}`}${short > 0 ? ` (${short} short)` : ''}`,
+            performed_by: userId,
+          });
+        }
         return { cost, item: pkg, qty };
       };
 
@@ -231,7 +241,18 @@ const packingService = {
         }
       }
 
-      return log;
+      // Flag any packing-material shortage on the log (Purchase Required) so the UI
+      // and reports surface it; the depleted items also auto-appear in low-stock
+      // alerts. Non-blocking — packing still completed above.
+      if (shortages.length) {
+        const summary = 'Packing material shortage (purchase required): '
+          + shortages.map((s) => `${s.short} ${s.unit} ${s.item}`).join(', ') + '.';
+        await trx('mill_packing_logs').where('id', log.id)
+          .update({ notes: [log.notes, summary].filter(Boolean).join(' ') });
+        log.notes = [log.notes, summary].filter(Boolean).join(' ');
+      }
+
+      return { ...log, shortages };
     });
   },
 };
