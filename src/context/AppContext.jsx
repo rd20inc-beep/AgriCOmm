@@ -79,15 +79,19 @@ export function AppProvider({ children }) {
   // Dynamic cost categories (user can add more — local state for now)
   const [exportCostCategories, setExportCostCategories] = useState([
     { key: 'rice', label: 'Rice Procurement' },
-    { key: 'bags', label: 'Bags / Packaging' },
+    { key: 'commission', label: 'Commission / Brokerage' },
     { key: 'transport', label: 'Transport' },
+    { key: 'milling', label: 'Milling' },
+    { key: 'drying', label: 'Drying / Processing' },
+    { key: 'packing', label: 'Packing' },
+    { key: 'pallet', label: 'Pallet' },
+    { key: 'bags', label: 'Bags / Packaging' },
     { key: 'loading', label: 'Loading' },
     { key: 'clearing', label: 'Clearing Agent' },
     { key: 'freight', label: 'Freight / Shipping' },
     { key: 'inspection', label: 'Inspection / SGS' },
     { key: 'fumigation', label: 'Fumigation' },
     { key: 'insurance', label: 'Insurance' },
-    { key: 'commission', label: 'Commission / Brokerage' },
     { key: 'documentation', label: 'Documentation' },
     { key: 'misc', label: 'Miscellaneous' },
   ]);

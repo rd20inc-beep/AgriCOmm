@@ -587,6 +587,7 @@ COL export_orders.ata:date:NULL
 COL export_orders.atd:date:NULL
 COL export_orders.bag_brand:character varying:NULL
 COL export_orders.bag_color:character varying:NULL
+COL export_orders.bag_material:character varying:NULL
 COL export_orders.bag_notes:text:NULL
 COL export_orders.bag_printing:character varying:NULL
 COL export_orders.bag_quality:character varying:NULL
@@ -651,6 +652,8 @@ COL export_orders.notify_party_name:character varying:NULL
 COL export_orders.notify_party_phone:character varying:NULL
 COL export_orders.order_no:character varying:NOT NULL
 COL export_orders.packing_notes:text:NULL
+COL export_orders.packing_type:character varying:NOT NULL
+COL export_orders.palletized:boolean:NOT NULL
 COL export_orders.payment_terms:text:NULL
 COL export_orders.price_per_mt:numeric:NOT NULL
 COL export_orders.product_id:integer:NOT NULL

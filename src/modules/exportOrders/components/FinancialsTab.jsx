@@ -36,45 +36,51 @@ export default function FinancialsTab({ order, formatCurrency, formatPKR, totalC
         </div>
       </div>
 
-      {/* Outflows */}
+      {/* Outflows — mill→export costing order with a Korra Ready Rice subtotal (Batch 7) */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Outflows (Costs, PKR)</h3>
-        <div className="space-y-3">
-          {(() => {
-            // Merge known categories with any extra categories from actual costs
-            const costs = order.costs || {};
-            const knownKeys = new Set(exportCostCategories.map(c => c.key));
-            const extraKeys = Object.keys(costs).filter(k => !knownKeys.has(k) && costs[k] > 0);
-            const LABEL_MAP = {
-              transport: 'Transport',
-              documentation: 'Documentation',
-              customs: 'Customs',
-              raw_rice: 'Raw Rice',
-              milling: 'Milling',
-              other: 'Other',
-              miscellaneous: 'Miscellaneous',
-            };
-            const allCategories = [
-              ...exportCostCategories,
-              ...extraKeys.map(k => ({ key: k, label: LABEL_MAP[k] || k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) })),
-            ];
-            return allCategories.map(cat => {
-              const val = costs[cat.key] || 0;
-              if (val === 0 && !knownKeys.has(cat.key)) return null;
-              return (
-                <div key={cat.key} className="flex justify-between text-sm">
-                  <span className="text-gray-600">{cat.label}</span>
-                  <span className={`font-medium ${val > 0 ? 'text-gray-900' : 'text-gray-400'}`}>{formatCost(val)}</span>
-                </div>
-              );
-            });
-          })()}
-          <div className="border-t border-gray-200 pt-2 flex justify-between text-sm font-semibold">
-            <span className="text-gray-700">Total Costs</span>
-            <span className="text-gray-900">{formatCost(totalCosts)}</span>
-          </div>
-          <p className="text-xs text-gray-400 italic pt-1">All outflows paid to local vendors in PKR.</p>
-        </div>
+        {(() => {
+          const costs = order.costs || {};
+          const orderKg = (order.qtyMT || 0) * 1000;
+          const g = (k) => parseFloat(costs[k]) || 0;
+          const perKg = (v) => (orderKg > 0 ? v / orderKg : 0);
+          const rawRice = g('rice') + g('raw_rice');
+          const packing = g('packing') + g('bags');
+          const pallet = g('pallet');
+          // Extra populated categories not named in the fixed order — shown so the
+          // Final Export Cost still reconciles to the grand total.
+          const namedKeys = new Set(['rice', 'raw_rice', 'commission', 'transport', 'milling', 'drying', 'processing', 'packing', 'bags', 'pallet']);
+          const OTHER_LABEL = { loading: 'Loading', clearing: 'Clearing Agent', freight: 'Freight / Shipping', inspection: 'Inspection / SGS', fumigation: 'Fumigation', insurance: 'Insurance', documentation: 'Documentation', misc: 'Miscellaneous', customs: 'Customs', other: 'Other' };
+          const otherKeys = Object.keys(costs).filter((k) => !namedKeys.has(k) && g(k) !== 0);
+          const Row = ({ label, value, bold, top }) => (
+            <div className={`flex justify-between items-center text-sm ${top ? 'border-t border-gray-200 pt-2 mt-1' : ''}`}>
+              <span className={bold ? 'font-semibold text-gray-800' : 'text-gray-600'}>{label}</span>
+              <span className="flex gap-4">
+                <span className="w-24 text-right tabular-nums text-gray-400">{orderKg > 0 ? `${formatCost(perKg(value))}/kg` : '—'}</span>
+                <span className={`w-28 text-right tabular-nums ${bold ? 'font-semibold text-gray-900' : (value > 0 ? 'text-gray-900' : 'text-gray-400')}`}>{formatCost(value)}</span>
+              </span>
+            </div>
+          );
+          return (
+            <div className="space-y-3">
+              <div className="flex justify-between text-[11px] uppercase tracking-wide text-gray-400">
+                <span>Line</span>
+                <span className="flex gap-4"><span className="w-24 text-right">Per KG</span><span className="w-28 text-right">Total</span></span>
+              </div>
+              <Row label="Raw Rice" value={rawRice} />
+              <Row label="Commission" value={g('commission')} />
+              <Row label="Transport" value={g('transport')} />
+              <Row label="Milling" value={g('milling')} />
+              <Row label="Drying / Processing" value={g('drying') + g('processing')} />
+              <Row label="Korra Ready Rice Cost" value={rawRice} bold top />
+              <Row label="Packing" value={packing} />
+              <Row label="Pallet" value={pallet} />
+              {otherKeys.map((k) => <Row key={k} label={OTHER_LABEL[k] || k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())} value={g(k)} />)}
+              <Row label="Final Export Cost" value={totalCosts} bold top />
+              <p className="text-xs text-gray-400 italic pt-1">Korra Ready Rice Cost = rice cost before packing. All outflows paid to local vendors in PKR.</p>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Summary */}
