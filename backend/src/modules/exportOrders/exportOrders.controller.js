@@ -2419,6 +2419,7 @@ const exportOrderController = {
         reject_reason: req.body?.reason || null,
         confirmed_by: req.user?.id || null,
         confirmed_at: db.fn.now(),
+        updated_at: db.fn.now(),
       });
       return res.json({ success: true, message: 'Receipt marked as not received.' });
     } catch (err) {
