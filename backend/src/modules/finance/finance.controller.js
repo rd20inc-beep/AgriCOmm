@@ -337,7 +337,7 @@ const financeController = {
         if (p.cleared) return { alreadyCleared: true };
         const amount = parseFloat(p.amount) || 0;
         const acctId = bank_account_id || p.bank_account_id || null;
-        await trx('payments').where({ id }).update({ cleared: true, bank_account_id: acctId });
+        await trx('payments').where({ id }).update({ cleared: true, bank_account_id: acctId, updated_at: trx.fn.now() });
 
         if (p.local_sale_id) {
           const s = await trx('local_sales').where({ id: p.local_sale_id }).first();

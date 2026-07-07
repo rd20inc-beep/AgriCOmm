@@ -1693,6 +1693,7 @@ COL payments.source_id:integer:NULL
 COL payments.source_table:character varying:NULL
 COL payments.status:character varying:NOT NULL
 COL payments.type:character varying:NOT NULL
+COL payments.updated_at:timestamp with time zone:NULL
 COL permissions.action:character varying:NOT NULL
 COL permissions.created_at:timestamp with time zone:NULL
 COL permissions.description:text:NULL
@@ -2445,6 +2446,7 @@ CON export_order_items.export_order_items_order_id_foreign(f)
 CON export_order_items.export_order_items_order_id_line_no_unique(u)
 CON export_order_items.export_order_items_pkey(p)
 CON export_order_items.export_order_items_product_id_foreign(f)
+CON export_order_status_history.chk_export_order_status_history_status_valid(c)
 CON export_order_status_history.export_order_status_history_changed_by_foreign(f)
 CON export_order_status_history.export_order_status_history_order_id_foreign(f)
 CON export_order_status_history.export_order_status_history_pkey(p)
