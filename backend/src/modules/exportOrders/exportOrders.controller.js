@@ -602,7 +602,7 @@ const exportOrderController = {
       // milling batch(es) that produced the exported rice (same basis as Batch
       // 360). Gated to admin roles; omitted entirely for everyone else.
       const num = (v) => parseFloat(v) || 0;
-      const ADMIN_PRICING_ROLES = ['Super Admin', 'Owner', 'Finance Manager', 'Mill Manager'];
+      const ADMIN_PRICING_ROLES = ['Super Admin', 'Owner', 'Mill Manager'];
       let roleName = req.user && req.user._roleName;
       if (!roleName && req.user && req.user.role_id) {
         const rr = await db('roles').where({ id: req.user.role_id }).select('name').first();
@@ -610,9 +610,10 @@ const exportOrderController = {
       }
 
       // Supplier privacy: Export users see the Supplier Code (SUP-NNN), never the
-      // name. Owner/Admin/Finance/Mill keep names. Redact supplier_name on the
-      // purchase lots (FE falls back to supplier_code) for anyone not in the set.
-      const SUPPLIER_NAME_ROLES = ['Super Admin', 'Owner', 'Finance Manager', 'Mill Manager', 'Mill Operator'];
+      // name. Owner/Admin/Mill keep names (Finance is payments-only — no export
+      // detail access at all). Redact supplier_name on the purchase lots (FE falls
+      // back to supplier_code) for anyone not in the set.
+      const SUPPLIER_NAME_ROLES = ['Super Admin', 'Owner', 'Mill Manager', 'Mill Operator'];
       const canSeeSupplierName = SUPPLIER_NAME_ROLES.includes(roleName);
       if (!canSeeSupplierName) {
         for (const lot of purchaseLots) { lot.supplier_name = null; }
@@ -2848,7 +2849,7 @@ const exportOrderController = {
         const rr = await db('roles').where({ id: req.user.role_id }).select('name').first();
         roleName = rr && rr.name;
       }
-      const SUPPLIER_NAME_ROLES = ['Super Admin', 'Owner', 'Finance Manager', 'Mill Manager', 'Mill Operator'];
+      const SUPPLIER_NAME_ROLES = ['Super Admin', 'Owner', 'Mill Manager', 'Mill Operator'];
       const full = SUPPLIER_NAME_ROLES.includes(roleName); // export role → redacted
 
       const lots = await db('inventory_lots as l')

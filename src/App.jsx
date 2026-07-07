@@ -254,7 +254,7 @@ function StandardRoutes() {
         <Route path="/stock-adjustments" element={<ProtectedRoute module="inventory" action="view"><StockAdjustments /></ProtectedRoute>} />
         <Route path="/milling/:id" element={<ProtectedRoute module="milling" action="view"><MillingBatchDetail /></ProtectedRoute>} />
         <Route path="/quality" element={<ProtectedRoute module="milling" action="view"><QualityComparison /></ProtectedRoute>} />
-        <Route path="/transfer" element={<ProtectedRoute module="finance" action="view"><InternalTransfer /></ProtectedRoute>} />
+        <Route path="/transfer" element={<ProtectedRoute module="inventory" action="view"><InternalTransfer /></ProtectedRoute>} />
         <Route path="/inventory" element={<ProtectedRoute module="inventory" action="view"><Inventory /></ProtectedRoute>} />
         <Route path="/lot-inventory" element={<ProtectedRoute module="inventory" action="view"><LotInventory /></ProtectedRoute>} />
         <Route path="/stock-summary" element={<ProtectedRoute module="inventory" action="view"><StockSummary /></ProtectedRoute>} />
