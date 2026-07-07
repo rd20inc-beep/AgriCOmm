@@ -2577,8 +2577,11 @@ router.delete('/payroll/runs/:id', authorize('payroll', 'delete'), async (req, r
           // Only un-recover lines whose advance was actually recovered: a paid line
           // (recovery happens at pay), or any line on an accrued/settled run
           // (recovery happens at accrue). An unpaid line on a partially-paid run
-          // never recovered, so don't reverse it (L1).
-          const wasRecovered = l.paid_at || ['accrued', 'settled', 'posted'].includes(run.status);
+          // never recovered, so don't reverse it (L1). NOTE: settle writes run
+          // status 'paid' (stamping paid_at on the RUN, not the lines), so an
+          // accrued→settled run reads as 'paid' with line.paid_at NULL — include
+          // 'paid' here so voiding it still un-recovers (was the dead 'settled').
+          const wasRecovered = l.paid_at || ['accrued', 'paid', 'posted'].includes(run.status);
           if (parseFloat(l.advance_deducted) > 0 && l.worker_id && wasRecovered) {
             await unrecoverAdvancesForWorker(trx, l.worker_id, l.advance_deducted);
           }
