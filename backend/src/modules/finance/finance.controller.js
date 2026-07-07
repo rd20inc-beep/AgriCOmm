@@ -119,7 +119,23 @@ const financeController = {
         .sort((a, b) => (a.due_date ? new Date(a.due_date).getTime() : 0) - (b.due_date ? new Date(b.due_date).getTime() : 0));
 
       const total = combined.length;
-      const sliced = combined.slice(offset, offset + parseInt(limit));
+      let sliced = combined.slice(offset, offset + parseInt(limit));
+
+      // Domain separation: the Finance Manager collects export advances/balances
+      // but must NOT see the export customer or which order/goods it was for —
+      // only that a payment is expected. Mask the export-side rows (customer name,
+      // customer link, and order id — the last also removes the FE's export-detail
+      // link, which Finance can't open). Local-sale rows are left intact.
+      let _roleName = req.user && req.user._roleName;
+      if (!_roleName && req.user && req.user.role_id) {
+        const rr = await db('roles').where({ id: req.user.role_id }).first('name');
+        _roleName = rr && rr.name;
+      }
+      if (_roleName === 'Finance Manager') {
+        sliced = sliced.map((r) => (r.kind === 'receivable'
+          ? { ...r, customer_name: 'Export customer', customer_id: null, order_id: null }
+          : r));
+      }
 
       return res.json({
         success: true,
@@ -971,6 +987,16 @@ const financeController = {
         .orderBy('p.id', 'desc')
         .limit(parseInt(limit));
 
+      // Domain separation: the Finance Manager records export receipts but must not
+      // see the export customer — only that a payment was received. Mask the
+      // export-side receipt counterparty (local-sale receipts stay intact).
+      let _roleName = req.user && req.user._roleName;
+      if (!_roleName && req.user && req.user.role_id) {
+        const rr = await db('roles').where({ id: req.user.role_id }).first('name');
+        _roleName = rr && rr.name;
+      }
+      const maskExport = _roleName === 'Finance Manager';
+
       // Compose a single counterparty + source label per row so the FE
       // doesn't have to do the joining gymnastics.
       const enriched = rows.map(r => {
@@ -981,14 +1007,20 @@ const financeController = {
         let counterparty_type = null;
         let counterparty_id = null;
         if (r.type === 'receipt') {
-          counterparty = r.customer_name || r.sale_buyer || 'Walk-in customer';
+          const isLocalSale = (r.recv_no && r.recv_no.startsWith('RCV-LS')) || !!r.local_sale_id;
+          if (maskExport && !isLocalSale) {
+            counterparty = 'Export customer';
+            counterparty_id = null;
+          } else {
+            counterparty = r.customer_name || r.sale_buyer || 'Walk-in customer';
+            counterparty_id = r.recv_customer_id || r.sale_customer_id || null;
+          }
           sourceRef = r.recv_no || r.sale_no || null;
           counterparty_type = 'customer';
-          counterparty_id = r.recv_customer_id || r.sale_customer_id || null;
           // Link to the local-sales screen for any sale-linked receipt — both
           // the RCV-LS receivables and the party-ledger receipts that carry a
           // local_sale_id (their recv_no is null, so the prefix check missed them).
-          if ((r.recv_no && r.recv_no.startsWith('RCV-LS')) || r.local_sale_id) sourceHref = '/local-sales';
+          if (isLocalSale) sourceHref = '/local-sales';
         } else {
           counterparty = r.supplier_name || r.pay_linked_ref || 'Vendor';
           sourceRef = r.pay_no || null;
