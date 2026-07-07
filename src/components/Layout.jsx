@@ -18,7 +18,8 @@ const sidebarNav = [
   { section: 'Main' },
   { label: 'Dashboard', icon: LayoutDashboard, to: '/' },
   { label: 'Finance Dashboard', icon: DollarSign, to: '/finance', permission: { module: 'finance', action: 'view' } },
-  { label: 'Purchase Requests', icon: ShoppingCart, to: '/purchase-requirements', permission: { module: 'finance', action: 'view' } },
+  // Purchase Requests are embedded as a section on the Finance Dashboard (see
+  // FinanceOverview). The standalone page remains for the Mill/inventory nav below.
   { section: 'Operations' },
   {
     label: 'Export Orders',
