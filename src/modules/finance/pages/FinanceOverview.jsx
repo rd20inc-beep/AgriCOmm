@@ -21,6 +21,7 @@ import {
 } from '../utils/aging';
 import { useFxRate } from '../utils/fx';
 import AnomalyWatchCard from '../../ai/components/AnomalyWatchCard';
+import PurchaseRequirementsPanel from '../../purchaseRequirements/components/PurchaseRequirementsPanel';
 
 // ─── Formatting helpers ───────────────────────────────────────────────
 function fmtPKR(n) {
@@ -256,6 +257,9 @@ export default function FinanceOverview() {
           onClick={() => navigate('/finance/local-sales')}
         />
       </div>
+
+      {/* ─── PURCHASE REQUESTS (approved material buys awaiting payment) ── */}
+      <PurchaseRequirementsPanel embedded />
 
       {/* ─── AGING STRIPS ─────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
