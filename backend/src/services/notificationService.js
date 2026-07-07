@@ -39,6 +39,15 @@ const notificationService = {
     return notifications;
   },
 
+  // Domain-separation guardrail (Phase 4). The ONLY sanctioned way to alert the
+  // Finance Manager: always a 'payment'-type alert, and the caller MUST pass a
+  // pre-masked message — no customer name, export order number, rice type, or
+  // internal stock/production context. Inventory/production/order alerts must go
+  // to Mill Manager / Owner / Export Manager instead, never here.
+  async notifyFinance(conn, { title, message, linkedRef }) {
+    return this.createForRole(conn, { roleName: 'Finance Manager', title, message, type: 'payment', linkedRef: linkedRef || null });
+  },
+
   async markRead(notificationId) {
     const [notification] = await db('notifications')
       .where({ id: notificationId })

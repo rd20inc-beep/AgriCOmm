@@ -729,17 +729,23 @@ const automationService = {
     emailService.sendShipmentNotification({ orderId, userId })
       .catch((err) => console.error('Shipment notification email failed:', err.message));
 
-    // Create notification for finance: "Balance collection pending"
-    const financeManagers = await trx('users').where({ role_id: 3, is_active: true });
-    for (const manager of financeManagers) {
-      await trx('notifications').insert({
-        user_id: manager.id,
-        title: 'Shipment Departed — Balance Collection Pending',
-        message: `Order ${order.order_no} has been shipped. Balance payment collection is now pending.`,
-        type: 'shipment',
-        linked_ref: order.order_no,
-      });
-    }
+    // Domain separation (Phase 4): the actionable "chase the customer for the
+    // balance" task belongs to the Export desk (it has the order/customer context).
+    // Finance only gets a MASKED heads-up that an export balance is due for
+    // confirmation — no order number or customer.
+    const notificationService = require('../../services/notificationService');
+    await notificationService.createForRole(trx, {
+      roleName: 'Export Manager',
+      title: 'Shipment departed — collect the balance',
+      message: `Order ${order.order_no} has shipped. Collect the outstanding balance from the customer.`,
+      type: 'shipment',
+      linkedRef: order.order_no,
+    });
+    await notificationService.notifyFinance(trx, {
+      title: 'Export balance pending confirmation',
+      message: 'An export shipment has departed — a balance payment is now due for confirmation.',
+      linkedRef: null,
+    });
   },
 
   // ============================================================
