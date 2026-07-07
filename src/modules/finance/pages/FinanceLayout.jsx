@@ -12,13 +12,9 @@ import { usePendingExportReceipts } from '../../../api/queries';
 // dropdowns, so the finance nav is short and each group is self-explanatory.
 // Standalone item = { label, path, icon }. Group = { label, icon, children:[…] }.
 const NAV = [
-  { label: 'Overview', path: '/finance', icon: LayoutDashboard, end: true },
-  { label: 'Money', icon: ArrowDownLeft, children: [
-    { label: 'Money In',   path: '/finance/money-in',   icon: ArrowDownLeft },
-    { label: 'Money Out',  path: '/finance/money-out',  icon: ArrowUpRight },
-    { label: 'Cash',       path: '/finance/cash',       icon: Landmark },
-    { label: 'Due Dates',  path: '/finance/due-dates',  icon: CalendarClock },
-  ] },
+  { label: 'Overview',  path: '/finance',          icon: LayoutDashboard, end: true },
+  { label: 'Money In',  path: '/finance/money-in',  icon: ArrowDownLeft },
+  { label: 'Money Out', path: '/finance/money-out', icon: ArrowUpRight },
   { label: 'Records', icon: ShoppingCart, children: [
     { label: 'Purchases',   path: '/finance/purchases',   icon: ShoppingCart },
     { label: 'Expenses',    path: '/finance/expenses',    icon: DollarSign },
@@ -32,8 +28,10 @@ const NAV = [
   { label: 'Confirmations', path: '/finance/confirmations', icon: CheckCircle, badge: true },
   { label: 'Payroll', path: '/finance/payroll', icon: Users, permission: { module: 'payroll', action: 'view' } },
   { label: 'More', icon: Settings, children: [
-    { label: 'Rates',  path: '/finance/rates',  icon: Settings },
-    { label: 'Alerts', path: '/finance/alerts', icon: Bell },
+    { label: 'Cash',      path: '/finance/cash',      icon: Landmark },
+    { label: 'Due Dates', path: '/finance/due-dates', icon: CalendarClock },
+    { label: 'Rates',     path: '/finance/rates',     icon: Settings },
+    { label: 'Alerts',    path: '/finance/alerts',    icon: Bell },
   ] },
 ];
 
