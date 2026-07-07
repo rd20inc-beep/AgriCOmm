@@ -203,6 +203,14 @@ const allocateExportStock = Joi.object({
   notes: Joi.string().allow('', null),
 });
 
+// Packed-weight variance entry (Phase 1). The mill enters net rice + material kg.
+const exportPackingWeight = Joi.object({
+  packed_net_rice_kg: Joi.number().min(0).required(),
+  packing_material_kg: Joi.number().min(0).default(0),
+  tolerance_pct: Joi.number().min(0).max(100).default(0.5),
+  variance_reason: Joi.string().allow('', null),
+});
+
 const createPurchaseLot = Joi.object({
   item_name: Joi.string().max(255).required(),
   type: Joi.string().valid('raw', 'finished', 'byproduct').default('raw'),
@@ -496,6 +504,7 @@ const recordYield = Joi.object({
 module.exports = {
   createExportOrder,
   updateExportShipment,
+  exportPackingWeight,
   exportOrderAction,
   exportOrderDocumentAction,
   confirmAdvance,

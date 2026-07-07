@@ -174,6 +174,24 @@ router.post(
   controller.allocateStock
 );
 
+// Packed-weight variance (Phase 1). The mill records the actual packed net rice +
+// packing-material weight; the system computes gross + variance vs the order qty.
+router.get('/:id/packing-weight', authorizeAny(['export_orders', 'view'], ['milling', 'view']), controller.getPackingWeight);
+router.put(
+  '/:id/packing-weight',
+  authorize('milling', 'edit'),
+  validate(schemas.exportPackingWeight),
+  auditAction('packing_weight', 'export_order', (req) => req.params.id),
+  controller.upsertPackingWeight
+);
+router.post(
+  '/:id/packing-weight/approve',
+  authorize('export_orders', 'edit'),
+  ownerApproval('packing_variance'),
+  auditAction('packing_weight_approve', 'export_order', (req) => req.params.id),
+  controller.approvePackingWeight
+);
+
 // Document generation
 const docController = require('../../controllers/exportDocumentController');
 router.get('/:id/documents/available', authorize('export_orders', 'view'), docController.available);

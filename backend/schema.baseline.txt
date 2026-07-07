@@ -679,6 +679,23 @@ COL export_orders.units_per_bag:integer:NULL
 COL export_orders.updated_at:timestamp with time zone:NOT NULL
 COL export_orders.vessel_name:character varying:NULL
 COL export_orders.voyage_number:character varying:NULL
+COL export_packing_weights.approval_status:character varying:NOT NULL
+COL export_packing_weights.approved_at:timestamp with time zone:NULL
+COL export_packing_weights.approved_by:integer:NULL
+COL export_packing_weights.created_at:timestamp with time zone:NOT NULL
+COL export_packing_weights.gross_weight_kg:numeric:NOT NULL
+COL export_packing_weights.id:integer:NOT NULL
+COL export_packing_weights.order_id:integer:NOT NULL
+COL export_packing_weights.packed_net_rice_kg:numeric:NOT NULL
+COL export_packing_weights.packing_material_kg:numeric:NOT NULL
+COL export_packing_weights.recorded_by:integer:NULL
+COL export_packing_weights.required_net_kg:numeric:NOT NULL
+COL export_packing_weights.tolerance_pct:numeric:NOT NULL
+COL export_packing_weights.updated_at:timestamp with time zone:NOT NULL
+COL export_packing_weights.variance_kg:numeric:NOT NULL
+COL export_packing_weights.variance_pct:numeric:NOT NULL
+COL export_packing_weights.variance_reason:text:NULL
+COL export_packing_weights.variance_status:character varying:NOT NULL
 COL follow_ups.created_at:timestamp with time zone:NULL
 COL follow_ups.follow_up_date:date:NOT NULL
 COL follow_ups.id:integer:NOT NULL
@@ -2448,6 +2465,9 @@ CON export_orders.export_orders_milling_order_id_foreign(f)
 CON export_orders.export_orders_order_no_unique(u)
 CON export_orders.export_orders_pkey(p)
 CON export_orders.export_orders_product_id_foreign(f)
+CON export_packing_weights.export_packing_weights_order_id_foreign(f)
+CON export_packing_weights.export_packing_weights_order_id_unique(u)
+CON export_packing_weights.export_packing_weights_pkey(p)
 CON follow_ups.chk_follow_ups_status_valid(c)
 CON follow_ups.follow_ups_pkey(p)
 CON follow_ups.follow_ups_user_id_foreign(f)

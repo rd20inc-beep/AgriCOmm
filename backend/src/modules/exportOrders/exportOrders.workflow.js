@@ -93,6 +93,21 @@ async function ensureTransitionAllowed(trx, order, toStatus) {
       throw err;
     }
   }
+
+  // Packed-weight variance gate: if the packed net rice is over/under tolerance and
+  // hasn't been signed off, the order can't move to completion until Owner/Admin
+  // approves. Only blocks when a variance record exists AND is pending.
+  if (toStatus === 'Ready to Ship' || toStatus === 'Shipped') {
+    const pw = await trx('export_packing_weights').where({ order_id: order.id }).first();
+    if (pw && pw.approval_status === 'pending') {
+      const err = new Error(
+        `Packed weight is ${pw.variance_status === 'under' ? 'under' : 'over'} tolerance ` +
+        `(${parseFloat(pw.variance_pct).toFixed(2)}%). Owner/Admin approval is required before export completion.`
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+  }
 }
 
 async function runTransitionSideEffects(trx, order, toStatus, userId) {
