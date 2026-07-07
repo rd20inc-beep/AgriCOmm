@@ -37,8 +37,7 @@ router.get('/status', (req, res) => {
 const CURATED = {
   // Inventory & lots
   inventory_lots: 'Current stock lots. qty/available_qty/reserved_qty in KG; rate_per_kg & landed_cost_per_kg in PKR/kg; type=raw|finished|byproduct; entity=mill|export; variety=rice type; supplier_id→suppliers.',
-  lot_transactions: 'Per-lot stock ledger (purchases, milling issues/receipts, sales). quantity_kg, rate_per_kg, total_cost (PKR); transaction_type.',
-  inventory_movements: 'Stock movement log; qty in KG.',
+  lot_transactions: 'Per-lot stock ledger — the canonical movement log (purchases, milling issues/receipts, sales, adjustments, transfers). quantity_kg is signed (negative=outward), rate_per_kg, total_cost (PKR); transaction_type.',
   inventory_reservations: 'Soft reservations against lots; reserved_qty in KG.',
   batch_source_lots: 'Raw lots consumed by a milling batch; qty_kg.',
   // Milling
@@ -79,7 +78,7 @@ const CURATED = {
 
 const CONVENTIONS = [
   'CONVENTIONS (read carefully):',
-  '- Quantities are in KILOGRAMS: every column ending _kg, plus inventory_lots.qty/available_qty/reserved_qty and inventory_movements.qty. EXCEPTION: export_orders/purchase_orders/goods_receipt_notes use *_mt in metric TONNES (×1000 for kg).',
+  '- Quantities are in KILOGRAMS: every column ending _kg, plus inventory_lots.qty/available_qty/reserved_qty and lot_transactions.quantity_kg (signed). EXCEPTION: export_orders/purchase_orders/goods_receipt_notes use *_mt in metric TONNES (×1000 for kg).',
   '- Money is PKR unless a currency column says otherwise; export_orders.contract_value/price_per_mt are usually USD.',
   '- Per-kg prices are columns ending _price_per_kg or rate_per_kg.',
   "- Financials/trial balance: join journal_lines.journal_id = journal_entries.id and filter journal_entries.status = 'Posted'; net = SUM(debit) - SUM(credit).",

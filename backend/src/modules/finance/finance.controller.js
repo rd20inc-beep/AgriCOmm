@@ -1682,13 +1682,15 @@ const financeController = {
       if (!t) return res.status(404).json({ success: false, message: 'Transfer not found.' });
 
       // Stock movements this transfer produced (TRANSFER_OUT from mill, TRANSFER_IN
-      // to export) — linked by linked_ref 'transfer-<id>'.
-      const movements = await db('inventory_movements as im')
-        .leftJoin('inventory_lots as l', 'im.lot_id', 'l.id')
-        .where('im.linked_ref', `transfer-${id}`)
-        .select('im.id', 'im.movement_type', 'im.qty', 'im.source_entity', 'im.dest_entity',
-          'im.created_at', 'l.lot_no', 'l.entity as lot_entity')
-        .orderBy('im.id', 'asc');
+      // to export) — the canonical lot_transactions ledger, keyed by
+      // reference_no 'transfer-<id>' (qty is absolute KG; sign is in quantity_kg).
+      const movements = await db('lot_transactions as lt')
+        .leftJoin('inventory_lots as l', 'lt.lot_id', 'l.id')
+        .where('lt.reference_no', `transfer-${id}`)
+        .select('lt.id', 'lt.transaction_type as movement_type', db.raw('ABS(lt.quantity_kg) as qty'),
+          'lt.entity_from as source_entity', 'lt.entity_to as dest_entity',
+          db.raw('COALESCE(lt.performed_at, lt.created_at) as created_at'), 'l.lot_no', 'l.entity as lot_entity')
+        .orderBy('lt.id', 'asc');
 
       // Lifecycle timeline.
       const timeline = [

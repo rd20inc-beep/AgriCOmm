@@ -1,5 +1,6 @@
 const db = require('../../config/database');
 const auditService = require('../admin/audit.service');
+const inventoryService = require('../inventory/inventory.service');
 
 const controlService = {
   // ═══════════════════════════════════════════════════════════════════
@@ -1201,30 +1202,25 @@ const controlService = {
       const varianceQty = parseFloat(item.variance_qty);
 
       if (item.lot_id) {
-        // Get lot details
         const lot = await knex('inventory_lots').where({ id: item.lot_id }).first();
-
-        // Update lot qty AND available_qty so a count correction actually moves
-        // sellable stock (clamp available so it never goes negative on a shortage).
-        await knex('inventory_lots')
-          .where({ id: item.lot_id })
-          .increment('qty', varianceQty);
-        await knex('inventory_lots')
-          .where({ id: item.lot_id })
-          .update({ available_qty: knex.raw('GREATEST(COALESCE(available_qty, 0) + ?, 0)', [varianceQty]) });
-
-        // Create inventory movement
-        const movementType = varianceQty > 0 ? 'adjustment_plus' : 'adjustment_minus';
-        await knex('inventory_movements').insert({
-          lot_id: item.lot_id,
-          movement_type: movementType,
+        // Apply the count correction as a canonical stock adjustment. postMovement
+        // updates qty / available_qty / net_weight_kg and writes the lot_transactions
+        // ledger row — replacing the retired inventory_movements mirror (P6c-B) and
+        // also fixing a prior gap where net_weight_kg wasn't moved by a count.
+        const movementType = varianceQty > 0
+          ? inventoryService.MOVEMENT_TYPES.ADJUSTMENT_PLUS
+          : inventoryService.MOVEMENT_TYPES.ADJUSTMENT_MINUS;
+        await inventoryService.postMovement(knex, {
+          movementType,
+          lotId: item.lot_id,
           qty: Math.abs(varianceQty),
-          to_warehouse_id: varianceQty > 0 ? stockCount.warehouse_id : null,
-          from_warehouse_id: varianceQty < 0 ? stockCount.warehouse_id : null,
-          source_entity: lot.entity || 'mill',
-          linked_ref: stockCount.count_no,
-          notes: `Stock count ${stockCount.count_no}: ${item.item_name} variance ${varianceQty > 0 ? '+' : ''}${varianceQty} MT`,
-          created_by: userId,
+          toWarehouseId: varianceQty > 0 ? stockCount.warehouse_id : null,
+          fromWarehouseId: varianceQty < 0 ? stockCount.warehouse_id : null,
+          sourceEntity: lot ? (lot.entity || 'mill') : 'mill',
+          linkedRef: stockCount.count_no,
+          notes: `Stock count ${stockCount.count_no}: ${item.item_name} variance ${varianceQty > 0 ? '+' : ''}${varianceQty} kg`,
+          currency: 'PKR',
+          userId,
         });
       }
 

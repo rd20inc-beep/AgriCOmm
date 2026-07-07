@@ -190,7 +190,6 @@ export function printAdminInvoice(data, company) {
       <div class="kv">
         <span><b>Receivable:</b> ${recv}</span>
         <span><b>Payments:</b> ${(payments || []).filter(p => p.kind === 'payment').length}</span>
-        <span><b>Inventory movements:</b> ${(linked.inventoryMovements || []).length}</span>
         <span><b>Lot transactions:</b> ${(linked.lotTransactions || []).length}</span>
         <span><b>Outbound vehicle (sold):</b> ${esc(dispatch.deliveryStatus || '—')}${dispatch.vehicleNo ? ` · ${esc(dispatch.vehicleNo)}` : ''}${dispatch.driverName ? ` · ${esc(dispatch.driverName)}` : ''}</span>
         <span><b>Inbound vehicle (purchased):</b> ${esc(inVehNos(dispatch) || '—')}</span>

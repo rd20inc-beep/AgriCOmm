@@ -349,27 +349,28 @@ const inventoryService = {
       }
     }
 
-    // 3. Insert movement record
-    const [movement] = await trx('inventory_movements')
-      .insert({
-        lot_id: lotId,
-        movement_type: movementType,
-        qty: parsedQty,
-        from_warehouse_id: fromWarehouseId || null,
-        to_warehouse_id: toWarehouseId || null,
-        source_entity: sourceEntity || null,
-        dest_entity: destEntity || null,
-        linked_ref: linkedRef || null,
-        notes: notes || null,
-        cost_per_unit: parsedCost,
-        total_cost: totalCost,
-        currency: currency || 'PKR',
-        batch_id: batchId || null,
-        order_id: orderId || null,
-        transfer_id: transferId || null,
-        created_by: userId || null,
-      })
-      .returning('*');
+    // 3. Movement record shape. The canonical ledger row is lot_transactions
+    //    (written in step 7); inventory_movements was a redundant KG mirror,
+    //    retired in P6c-B. Return the same shape callers expect — it is opaque
+    //    to them (no field is read off it, it is only bubbled up in responses).
+    const movement = {
+      lot_id: lotId,
+      movement_type: movementType,
+      qty: parsedQty,
+      from_warehouse_id: fromWarehouseId || null,
+      to_warehouse_id: toWarehouseId || null,
+      source_entity: sourceEntity || null,
+      dest_entity: destEntity || null,
+      linked_ref: linkedRef || null,
+      notes: notes || null,
+      cost_per_unit: parsedCost,
+      total_cost: totalCost,
+      currency: currency || 'PKR',
+      batch_id: batchId || null,
+      order_id: orderId || null,
+      transfer_id: transferId || null,
+      created_by: userId || null,
+    };
 
     // 4. Update lot qty
     const currentQty = parseFloat(lot.qty) || 0;
@@ -1588,21 +1589,29 @@ const inventoryService = {
       .orderBy('il.created_at', 'desc');
   },
 
+  // Reads the canonical lot_transactions (KG), aliased to the legacy movement
+  // shape callers/FE expect (movement_type, qty, created_at…). qty is the
+  // absolute KG magnitude; the ledger's signed quantity_kg encodes direction.
   async getMovementsByLot(lotId) {
-    return db('inventory_movements')
+    return db('lot_transactions')
       .where('lot_id', lotId)
-      .orderBy('created_at', 'desc');
-  },
-
-  async getMovementsByBatch(batchId) {
-    return db('inventory_movements')
-      .where('batch_id', batchId)
-      .orderBy('created_at', 'desc');
-  },
-
-  async getMovementsByOrder(orderId) {
-    return db('inventory_movements')
-      .where('order_id', orderId)
+      .select(
+        'id',
+        'lot_id',
+        'transaction_type as movement_type',
+        db.raw('ABS(quantity_kg) as qty'),
+        'reference_no as linked_ref',
+        'warehouse_from_id as from_warehouse_id',
+        'warehouse_to_id as to_warehouse_id',
+        'entity_from as source_entity',
+        'entity_to as dest_entity',
+        'unit_cost as cost_per_unit',
+        'total_cost',
+        'currency',
+        'remarks as notes',
+        'reference_id',
+        db.raw('COALESCE(performed_at, created_at) as created_at')
+      )
       .orderBy('created_at', 'desc');
   },
 
@@ -2883,7 +2892,6 @@ const inventoryService = {
       }
       // 2. Delete output lots + their ledger/lineage (raw lots stay consumed).
       await trx('lot_source_mapping').where((q) => q.whereIn('parent_lot_id', outIds).orWhereIn('child_lot_id', outIds)).del();
-      await trx('inventory_movements').whereIn('lot_id', outIds).del();
       await trx('lot_transactions').whereIn('lot_id', outIds).del();
       await trx('stock_adjustments').whereIn('lot_id', outIds).del();
       await trx('stock_count_items').whereIn('lot_id', outIds).del();

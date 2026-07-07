@@ -60,7 +60,6 @@ const KEEP_TABLES = new Set([
 
 async function lotImpactCounts(q, lotId) {
   const tables = {
-    inventory_movements: 'lot_id',
     lot_transactions: 'lot_id',
     inventory_reservations: 'lot_id',
     batch_source_lots: 'lot_id',
@@ -122,7 +121,6 @@ const dangerZone = {
         await trx('stock_adjustments').where('lot_id', lot.id).del();
         await trx('batch_source_lots').where('lot_id', lot.id).del();
         await trx('lot_source_mapping').where('parent_lot_id', lot.id).orWhere('child_lot_id', lot.id).del();
-        await trx('inventory_movements').where('lot_id', lot.id).del();
         // container_lots.lot_id is a NO-ACTION FK (a lot packed into a shipment
         // container) — clean it, else the lot delete 500s with an opaque 23503.
         await delIfExists(trx, 'container_lots', (q) => q.where('lot_id', lot.id));
@@ -384,8 +382,7 @@ async function deleteLocalSale(trx, req, id) {
       reference_type: 'local_sale_reversal', reference_id: id, reason: `Reversed sale ${sale.sale_no}`, performed_by: req.user?.id || null,
     });
   }
-  // Delete the sale's stock movement + ledger rows.
-  await trx('inventory_movements').where('linked_ref', sale.sale_no).whereIn('movement_type', ['local_sale', 'export_dispatch']).del();
+  // Delete the sale's stock ledger rows.
   await trx('lot_transactions').where('reference_no', sale.sale_no).whereIn('transaction_type', ['local_sale_out', 'export_dispatch_out']).del();
   // Payments (+ their bank_transactions) and receivables tied to the sale.
   const payIds = (await trx('payments').where('local_sale_id', id).select('id')).map(r => r.id);
@@ -588,12 +585,15 @@ async function deleteExportOrder(trx, req, id) {
     }
   }
   await trx('inventory_reservations').where('order_id', id).del();
-  const dispatched = await trx('inventory_movements').where({ order_id: id, movement_type: 'export_dispatch' });
+  // Restock what was dispatched, from the canonical ledger (signed KG). Each
+  // export_dispatch_out row's quantity_kg is negative; add its magnitude back to
+  // qty / available_qty / net_weight_kg (postMovement moved all three on dispatch).
+  const dispatched = await trx('lot_transactions').where({ reference_no: orderNo, transaction_type: 'export_dispatch_out' });
   for (const m of dispatched) {
+    const restoreKg = Math.abs(num(m.quantity_kg));
     const lot = await trx('inventory_lots').where('id', m.lot_id).first();
-    if (lot) await trx('inventory_lots').where('id', lot.id).update({ qty: num(lot.qty) + num(m.qty), available_qty: num(lot.available_qty) + num(m.qty), updated_at: trx.fn.now() });
+    if (lot) await trx('inventory_lots').where('id', lot.id).update({ qty: num(lot.qty) + restoreKg, available_qty: num(lot.available_qty) + restoreKg, net_weight_kg: num(lot.net_weight_kg) + restoreKg, updated_at: trx.fn.now() });
   }
-  await trx('inventory_movements').where({ order_id: id }).del();
   await trx('lot_transactions').where('reference_no', orderNo).whereIn('transaction_type', ['export_dispatch_out', 'export_allocation', 'export_release']).del();
 
   // Payments tied to this order's receivables (+ their bank trail), then the rest.
@@ -631,7 +631,6 @@ async function deleteMillingBatch(trx, req, id) {
   const lots = await trx('inventory_lots').where('batch_ref', batchRef).select('id');
   const lotIds = lots.map((l) => l.id);
   if (lotIds.length) {
-    await delIfExists(trx, 'inventory_movements', (q) => q.whereIn('lot_id', lotIds));
     await delIfExists(trx, 'lot_transactions', (q) => q.whereIn('lot_id', lotIds));
     await delIfExists(trx, 'inventory_reservations', (q) => q.whereIn('lot_id', lotIds));
     await delIfExists(trx, 'batch_source_lots', (q) => q.whereIn('lot_id', lotIds));
@@ -641,28 +640,29 @@ async function deleteMillingBatch(trx, req, id) {
   }
 
   // Hand consumed source-lot stock back. A Completed blend issued each source
-  // lot via a production_issue movement (lot_id = source, linked_ref = batchRef)
-  // that decremented qty / available_qty / net_weight_kg — reverse that exactly,
-  // then drop the consumption ledger. A pre-yield batch has no such movement
-  // (its lots were only flagged 'In Milling'), so we just release the flag.
-  // Without this the source lots stay Consumed/'In Milling' with their stock
-  // written off and invisible to the New-Batch picker.
+  // lot via a milling_issue ledger row (lot_id = source, reference_no = batchRef,
+  // signed quantity_kg) that decremented qty / available_qty / net_weight_kg —
+  // reverse that exactly by adding the consumed magnitude back to all three, then
+  // drop the consumption ledger. A pre-yield batch has no such row (its lots were
+  // only flagged 'In Milling'), so we just release the flag. Without this the
+  // source lots stay Consumed/'In Milling' with their stock written off and
+  // invisible to the New-Batch picker.
   for (const s of sources) {
     const srcLot = await trx('inventory_lots').where('id', s.lot_id).first();
-    const consumed = await trx('inventory_movements')
-      .where({ linked_ref: batchRef, lot_id: s.lot_id, movement_type: 'production_issue' })
-      .sum('qty as q').first();
-    const consumedQty = num(consumed?.q);
+    const consumed = await trx('lot_transactions')
+      .where({ lot_id: s.lot_id, reference_no: batchRef })
+      .where('quantity_kg', '<', 0)
+      .sum('quantity_kg as q').first();
+    const consumedKg = Math.abs(num(consumed?.q)); // signed ledger → KG magnitude
     if (srcLot) {
       const restore = { status: 'Available', milling_status: null, updated_at: trx.fn.now() };
-      if (consumedQty > 0) {
-        restore.qty = num(srcLot.qty) + consumedQty;
-        restore.available_qty = num(srcLot.available_qty) + consumedQty;
-        restore.net_weight_kg = num(srcLot.net_weight_kg) + consumedQty * 1000;
+      if (consumedKg > 0) {
+        restore.qty = num(srcLot.qty) + consumedKg;
+        restore.available_qty = num(srcLot.available_qty) + consumedKg;
+        restore.net_weight_kg = num(srcLot.net_weight_kg) + consumedKg;
       }
       await trx('inventory_lots').where('id', s.lot_id).update(restore);
     }
-    await delIfExists(trx, 'inventory_movements', (q) => q.where({ linked_ref: batchRef, lot_id: s.lot_id }));
     await delIfExists(trx, 'lot_transactions', (q) => q.where({ lot_id: s.lot_id, reference_no: batchRef }));
   }
 
