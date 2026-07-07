@@ -185,11 +185,11 @@ router.put(
   controller.upsertPackingWeight
 );
 router.post(
-  '/:id/packing-weight/approve',
+  '/:id/packing-weight/resolve',
   authorize('export_orders', 'edit'),
   ownerApproval('packing_variance'),
-  auditAction('packing_weight_approve', 'export_order', (req) => req.params.id),
-  controller.approvePackingWeight
+  auditAction('packing_weight_resolve', 'export_order', (req) => req.params.id),
+  controller.resolvePackingWeight
 );
 
 // Document generation

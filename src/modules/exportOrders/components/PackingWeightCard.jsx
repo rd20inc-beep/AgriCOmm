@@ -75,13 +75,16 @@ export default function PackingWeightCard({ order, onUpdated }) {
     finally { setSaving(false); }
   }
 
-  async function approve() {
+  const [resolution, setResolution] = useState('approve_extra');
+  const [resolveNotes, setResolveNotes] = useState('');
+  async function resolve() {
     try {
-      await requestOwnerApproval((ownerId) => api.post(`/api/export-orders/${orderId}/packing-weight/approve`, { authorized_by_owner_id: ownerId }));
-      addToast?.('Packed-weight variance approved');
+      const res = await requestOwnerApproval((ownerId) => api.post(`/api/export-orders/${orderId}/packing-weight/resolve`, { resolution, notes: resolveNotes || null, authorized_by_owner_id: ownerId }));
+      const d = res?.data || res;
+      addToast?.(d?.stockNote || 'Packed-weight variance resolved');
       await load();
       onUpdated?.();
-    } catch (e) { if (e?.message !== 'Owner authorization cancelled') addToast?.(e?.response?.data?.message || e.message || 'Approval failed', 'error'); }
+    } catch (e) { if (e?.message !== 'Owner authorization cancelled') addToast?.(e?.response?.data?.message || e.message || 'Resolve failed', 'error'); }
   }
 
   const Row = ({ label, value, strong }) => (
@@ -169,15 +172,36 @@ export default function PackingWeightCard({ order, onUpdated }) {
         )}
       </div>
 
-      {/* Owner/Admin approval */}
+      {/* Owner/Admin resolution */}
       {canApprove && rec && rec.approval_status === 'pending' && (
-        <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
-          <span className="text-sm text-amber-700">This variance is over tolerance and needs sign-off.</span>
-          <button onClick={approve}
+        <div className="mt-4 pt-4 border-t border-gray-100 space-y-3">
+          <p className="text-sm font-medium text-amber-700">
+            {rec.variance_status === 'under' ? 'Short' : 'Over'}-packed by {kg(Math.abs(rec.variance_kg))} — choose how to resolve:
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {[
+              ['approve_extra', 'Approve extra (free)', 'Ship it; customer not charged; deduct actual from stock.'],
+              ['update_invoice', 'Update invoice qty', 'Re-price the order to the actual packed qty; customer charged.'],
+              ['remove_extra', 'Remove extra', 'Pull the extra from the shipment; it returns to export-ready stock.'],
+              ['adjustment', 'Adjustment / loss', 'Book the extra as a packing adjustment; deduct from stock.'],
+            ].map(([val, label, desc]) => (
+              <button key={val} type="button" onClick={() => setResolution(val)}
+                className={`text-left rounded-lg border p-2.5 transition ${resolution === val ? 'border-emerald-500 bg-emerald-50 ring-1 ring-emerald-400' : 'border-gray-200 hover:border-emerald-300'}`}>
+                <div className="text-sm font-semibold text-gray-800">{label}</div>
+                <div className="text-[11px] text-gray-500 mt-0.5">{desc}</div>
+              </button>
+            ))}
+          </div>
+          <input value={resolveNotes} onChange={(e) => setResolveNotes(e.target.value)} placeholder="Resolution notes (optional)"
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none" />
+          <button onClick={resolve}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700">
-            <CheckCircle2 size={15} /> Approve Variance
+            <CheckCircle2 size={15} /> Resolve Variance
           </button>
         </div>
+      )}
+      {rec && rec.resolution && rec.approval_status === 'approved' && (
+        <p className="mt-3 pt-3 border-t border-gray-100 text-xs text-gray-500">Resolved as <span className="font-medium text-gray-700">{rec.resolution.replace('_', ' ')}</span>{rec.resolution_notes ? ` — ${rec.resolution_notes}` : ''}.</p>
       )}
     </div>
   );

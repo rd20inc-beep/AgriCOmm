@@ -2651,32 +2651,105 @@ const exportOrderController = {
     }
   },
 
-  async approvePackingWeight(req, res) {
+  // Resolve an over/under-packed variance (Phase 2). Owner/Admin picks how to
+  // settle it; the choice drives the stock + invoice impact. Reject just marks it.
+  async resolvePackingWeight(req, res) {
+    const RESOLUTIONS = ['approve_extra', 'update_invoice', 'remove_extra', 'adjustment'];
     try {
       const id = await resolveExportOrderId(req.params.id);
       if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
       const row = await db('export_packing_weights').where({ order_id: id }).first();
-      if (!row) return res.status(404).json({ success: false, message: 'No packing-weight record to approve.' });
+      if (!row) return res.status(404).json({ success: false, message: 'No packing-weight record to resolve.' });
       if (row.approval_status !== 'pending') {
         return res.status(409).json({ success: false, message: `Packing variance is already ${row.approval_status}.` });
       }
-      const [updated] = await db('export_packing_weights').where({ order_id: id }).update({
-        approval_status: req.body.reject ? 'rejected' : 'approved',
-        approved_by: req.ownerAuth?.ownerId || req.user?.id || null,
-        approved_at: db.fn.now(),
-        updated_at: db.fn.now(),
-      }).returning('*');
-      const order = await db('export_orders').where({ id }).first('order_no');
+      if (req.body.reject) {
+        const [rej] = await db('export_packing_weights').where({ order_id: id }).update({
+          approval_status: 'rejected', approved_by: req.ownerAuth?.ownerId || req.user?.id || null,
+          approved_at: db.fn.now(), resolution_notes: req.body.notes || null, updated_at: db.fn.now(),
+        }).returning('*');
+        return res.json({ success: true, data: { record: rej } });
+      }
+      const resolution = RESOLUTIONS.includes(req.body.resolution) ? req.body.resolution : 'approve_extra';
+      const varianceKg = parseFloat(row.variance_kg) || 0; // + over, − under
+      const userId = req.user?.id || null;
+
+      const out = await db.transaction(async (trx) => {
+        const order = await lockRow(trx('export_orders').where({ id })).first();
+        // Find a lot allocated to this order to carry the stock impact.
+        const resv = await trx('inventory_reservations as r')
+          .join('inventory_lots as l', 'l.id', 'r.lot_id')
+          .where({ 'r.order_id': id, 'r.status': 'Active' })
+          .orderBy('r.reserved_qty', 'desc')
+          .first('l.id as lot_id', 'l.lot_no', 'l.warehouse_id', 'l.entity', 'l.cost_per_unit', 'l.landed_cost_per_kg', 'l.available_qty');
+        const costPerKg = parseFloat(resv && (resv.landed_cost_per_kg || resv.cost_per_unit)) || 0;
+        let stockNote = null;
+
+        // Stock impact: settle the physical over/under-draw against the order's lot.
+        // remove_extra pulls the extra back out of the shipment → no stock change.
+        if (resolution !== 'remove_extra' && Math.abs(varianceKg) > 0.01) {
+          if (!resv) {
+            stockNote = 'No lot is allocated to this order — stock not adjusted; allocate stock, then re-resolve.';
+          } else if (varianceKg > 0 && parseFloat(resv.available_qty) + 1e-6 < varianceKg) {
+            stockNote = `Lot ${resv.lot_no} has only ${Math.round(parseFloat(resv.available_qty))} kg free — over-pack not deducted from stock.`;
+          } else {
+            await inventoryService.postMovement(trx, {
+              movementType: varianceKg > 0 ? 'adjustment_minus' : 'adjustment_plus',
+              lotId: resv.lot_id, qty: Math.abs(varianceKg),
+              fromWarehouseId: resv.warehouse_id, sourceEntity: resv.entity, linkedRef: order.order_no,
+              notes: `Packing variance (${resolution}) on order ${order.order_no}`,
+              costPerUnit: costPerKg, currency: 'PKR', orderId: id, userId,
+            });
+          }
+        }
+
+        // update_invoice re-prices the order to the actual packed qty (customer charged).
+        if (resolution === 'update_invoice') {
+          const committed = settledAmount(order.advance_received) > MONEY_EPSILON
+            || settledAmount(order.balance_received) > MONEY_EPSILON
+            || order.revenue_posted === true
+            || ['Shipped', 'Closed', 'Cancelled'].includes(order.status);
+          if (committed) {
+            const e = new Error('Cannot re-price the order after money has been received or it has shipped/closed.'); e.statusCode = 400; throw e;
+          }
+          const newQtyMt = (parseFloat(row.packed_net_rice_kg) || 0) / 1000;
+          const price = parseFloat(order.price_per_mt) || 0;
+          const advPct = parseFloat(order.advance_pct) || 0;
+          const contractValue = newQtyMt * price;
+          const advanceExpected = contractValue * (advPct / 100);
+          const balanceExpected = contractValue - advanceExpected;
+          const bookedRate = parseFloat(order.booked_fx_rate)
+            || (parseFloat(order.contract_value) > 0 ? (parseFloat(order.contract_value_pkr_locked) || 0) / parseFloat(order.contract_value) : 0) || 280;
+          await trx('export_orders').where({ id }).update({
+            qty_mt: newQtyMt, contract_value: contractValue, advance_expected: advanceExpected,
+            balance_expected: balanceExpected, contract_value_pkr_locked: contractValue * bookedRate, updated_at: trx.fn.now(),
+          });
+          await trx('receivables').where({ order_id: id, type: 'Advance' })
+            .update({ expected_amount: advanceExpected, outstanding: advanceExpected, base_amount_pkr: advanceExpected * bookedRate, updated_at: trx.fn.now() });
+          await trx('receivables').where({ order_id: id, type: 'Balance' })
+            .update({ expected_amount: balanceExpected, outstanding: balanceExpected, base_amount_pkr: balanceExpected * bookedRate, updated_at: trx.fn.now() });
+        }
+
+        const [updated] = await trx('export_packing_weights').where({ order_id: id }).update({
+          approval_status: 'approved', resolution,
+          resolution_notes: [req.body.notes, stockNote].filter(Boolean).join(' ') || null,
+          approved_by: req.ownerAuth?.ownerId || userId, approved_at: trx.fn.now(),
+          resolved_at: trx.fn.now(), updated_at: trx.fn.now(),
+        }).returning('*');
+        return { updated, order, costPerKg, stockNote };
+      });
+
       await notificationService.createForRole(null, {
         roleName: 'Export Manager',
-        title: `Packed-weight variance ${updated.approval_status}`,
-        message: `Order ${order?.order_no}: ${updated.variance_status} variance ${parseFloat(updated.variance_pct).toFixed(2)}% ${updated.approval_status}.`,
-        type: 'info',
-        linkedRef: order?.order_no,
+        title: 'Packed-weight variance resolved',
+        message: `Order ${out.order.order_no}: ${out.updated.variance_status} variance ${parseFloat(out.updated.variance_pct).toFixed(2)}% resolved as "${resolution.replace('_', ' ')}".`,
+        type: 'info', linkedRef: out.order.order_no,
       });
-      emitExportOrderUpdate(id, 'packing_weight_approved', { approvalStatus: updated.approval_status });
-      return res.json({ success: true, data: { record: updated } });
+      emitExportOrderUpdate(id, 'packing_weight_resolved', { resolution });
+      return res.json({ success: true, data: { record: out.updated, extraCostPkr: Math.round(Math.abs(varianceKg) * out.costPerKg), resolution, stockNote: out.stockNote } });
     } catch (err) {
+      if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
+      console.error('resolvePackingWeight error:', err);
       return res.status(500).json({ success: false, message: err.message });
     }
   },
