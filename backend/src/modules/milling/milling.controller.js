@@ -1142,9 +1142,22 @@ const millingController = {
             roleName: 'Export Manager',
             title: 'Packing material shortage',
             message: `Order ${kattaInfo.orderNo || ''} / batch ${batch.batch_no}: need ${summary} bags to pack the finished rice — purchase required.`,
-            type: 'alert',
+            type: 'milling',
             linkedRef: kattaInfo.orderNo || batch.batch_no,
           });
+          // Raise a Purchase Requirement per short bag size (Phase 3), deduped by
+          // item + batch. Mill/Owner approves → Finance gets a masked request.
+          const prService = require('../purchaseRequirements/purchaseRequirements.service');
+          for (const s of kattaInfo.shortages) {
+            const item = await trx('mill_items').where('code', `KATTA-${s.size}`).first('id', 'name', 'unit', 'avg_cost_per_unit');
+            await prService.raise(trx, {
+              itemId: item?.id || null, itemName: item?.name || `Katta ${s.size}kg`, unit: item?.unit || 'pcs',
+              qtyNeeded: s.needed, availableQty: s.available, shortageQty: s.short,
+              estUnitCost: item?.avg_cost_per_unit != null ? parseFloat(item.avg_cost_per_unit) : null,
+              department: 'Packing', linkedRef: batch.batch_no, reason: `Packing shortage on batch ${batch.batch_no}`,
+              raisedBy: req.user?.id || null,
+            });
+          }
         }
 
         // Recognize the supplier payable for the raw rice purchase so the

@@ -18,6 +18,7 @@ const sidebarNav = [
   { section: 'Main' },
   { label: 'Dashboard', icon: LayoutDashboard, to: '/' },
   { label: 'Finance Dashboard', icon: DollarSign, to: '/finance', permission: { module: 'finance', action: 'view' } },
+  { label: 'Purchase Requests', icon: ShoppingCart, to: '/purchase-requirements', permission: { module: 'finance', action: 'view' } },
   { section: 'Operations' },
   {
     label: 'Export Orders',
@@ -38,6 +39,7 @@ const sidebarNav = [
       { label: 'Stock Take', to: '/stock-count', icon: ClipboardCheck, permission: { module: 'inventory', action: 'view' } },
       { label: 'Inventory', to: '/lot-inventory', icon: Package, permission: { module: 'inventory', action: 'view' } },
       { label: 'Quality', to: '/quality', icon: FlaskConical, permission: { module: 'milling', action: 'view' } },
+      { label: 'Purchase Requirements', to: '/purchase-requirements', icon: ShoppingCart, permission: { module: 'inventory', action: 'view' } },
       { label: 'Adjustments', to: '/stock-adjustments', icon: AlertTriangle, permission: { module: 'inventory', action: 'view' } },
       { label: 'Transfers', to: '/transfer', icon: ArrowRightLeft, permission: { module: 'finance', action: 'view' } },
       { label: 'Local Sales', to: '/local-sales', permission: { module: 'inventory', action: 'view' } },

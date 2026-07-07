@@ -46,6 +46,7 @@ const CreateExportOrder = lazyWithReload(() => import('./modules/exportOrders/pa
 const ExportOrderDetail = lazyWithReload(() => import('./modules/exportOrders/pages/ExportOrderDetail'));
 const ExportHomeDashboard = lazyWithReload(() => import('./modules/exportOrders/pages/ExportHomeDashboard'));
 const MillingDashboard = lazyWithReload(() => import('./modules/milling/pages/MillingDashboard'));
+const PurchaseRequirements = lazyWithReload(() => import('./modules/purchaseRequirements/pages/PurchaseRequirements'));
 const MillHomeDashboard = lazyWithReload(() => import('./modules/milling/pages/MillHomeDashboard'));
 const StoreOverview = lazyWithReload(() => import('./modules/millStore/pages/StoreOverview'));
 const NewPurchase = lazyWithReload(() => import('./modules/millStore/pages/NewPurchase'));
@@ -205,6 +206,7 @@ function MillRoutes() {
         <Route path="/transfer" element={<InternalTransfer />} />
         <Route path="/lot-inventory" element={<LotInventory />} />
         <Route path="/stock-summary" element={<StockSummary />} />
+        <Route path="/purchase-requirements" element={<PurchaseRequirements />} />
         <Route path="/stock-count" element={<StockCount />} />
         <Route path="/lot-inventory/:id/purchase-invoice" element={<PurchaseInvoiceView />} />
         <Route path="/lot-inventory/:id" element={<LotDetail />} />
