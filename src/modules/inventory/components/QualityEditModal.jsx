@@ -125,7 +125,7 @@ export default function QualityEditModal({ isOpen, lot, onClose, onSuccess, addT
         <div className="grid grid-cols-3 gap-3">
           <div><label className={lbl}>Variety</label><input value={form.variety} onChange={(e) => set('variety', e.target.value)} className={inp} placeholder="e.g. D-98" /></div>
           <div><label className={lbl}>Grade</label><input value={form.grade} onChange={(e) => set('grade', e.target.value)} className={inp} /></div>
-          <div><label className={lbl}>Sortex status</label><input value={form.sortex_status} onChange={(e) => set('sortex_status', e.target.value)} className={inp} /></div>
+          <div><label className={lbl}>Sortex status</label><select value={form.sortex_status || ''} onChange={(e) => set('sortex_status', e.target.value)} className={inp}><option value="">—</option><option>Done</option><option>Pending</option><option>N/A</option></select></div>
           <div><label className={lbl}>Whiteness</label><input type="number" min="0" step="0.1" value={form.whiteness} onChange={(e) => set('whiteness', e.target.value)} className={inp} placeholder="index" /></div>
           <div><label className={lbl}>Grain length (mm)</label><input type="number" min="0" step="0.01" value={form.grain_size} onChange={(e) => set('grain_size', e.target.value)} className={inp} placeholder="mm" /></div>
           <div><label className={lbl}>Bag quality</label><input value={form.bag_quality} onChange={(e) => set('bag_quality', e.target.value)} className={inp} /></div>

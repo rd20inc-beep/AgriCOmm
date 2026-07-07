@@ -229,7 +229,7 @@ const createPurchaseLot = Joi.object({
   grade: Joi.string().allow(null, ''),
   moisture_pct: Joi.number().min(0).max(100).allow(null),
   broken_pct: Joi.number().min(0).max(100).allow(null),
-  sortex_status: Joi.string().allow(null, ''),
+  sortex_status: Joi.string().valid('Done', 'Pending', 'N/A').allow(null, ''),
   whiteness: Joi.string().allow(null, ''),
   quality_notes: Joi.string().allow(null, ''),
   // Extended quality (B1/B2/B3/Cobba/CSR/NB/OV/chalky/purity/etc.).
@@ -334,7 +334,7 @@ const updateLotQuality = Joi.object({
   product_id: Joi.number().integer().positive().allow(null),
   variety: Joi.string().allow(null, ''),
   grade: Joi.string().allow(null, ''),
-  sortex_status: Joi.string().allow(null, ''),
+  sortex_status: Joi.string().valid('Done', 'Pending', 'N/A').allow(null, ''),
   whiteness: Joi.number().min(0).allow(null, ''),
   bag_quality: Joi.string().allow(null, ''),
   quality_notes: Joi.string().allow(null, ''),
