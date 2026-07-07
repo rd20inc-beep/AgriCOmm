@@ -14,6 +14,7 @@ import {
   ArrowRight,
   Receipt,
   Mail,
+  Landmark,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useOwnerAuth } from '../../../context/OwnerAuthContext';
@@ -360,6 +361,12 @@ export default function FinanceConfirmations() {
                     </div>
                     <div className="text-xs text-gray-500 mt-0.5">
                       {p.currency} {Number(p.amount).toLocaleString()} · recorded by {p.recordedByName || '—'} · {p.paymentDate ? String(p.paymentDate).slice(0, 10) : ''}
+                    </div>
+                    <div className="text-xs mt-0.5 inline-flex items-center gap-1 text-emerald-700">
+                      <Landmark size={12} className="flex-shrink-0" />
+                      {p.bankAccountName
+                        ? <>Receiving in <span className="font-medium">{p.bankAccountName}</span>{p.bankName ? ` (${p.bankName})` : ''}</>
+                        : <span className="text-amber-600">Receiving account not set</span>}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
