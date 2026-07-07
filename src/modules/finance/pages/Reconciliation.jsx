@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import OrderRefLink from '../../../shared/components/OrderRefLink';
 import { CheckCircle, AlertTriangle, Clock, DollarSign, ArrowRight, XCircle } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useReceivables, usePayables } from '../../../api/queries';
@@ -203,7 +203,7 @@ export default function Reconciliation() {
               {reconciliation.map(r => (
                 <tr key={r.orderId} className={`hover:bg-gray-50 ${r.matchStatus === 'pending' ? 'bg-red-50/30' : ''}`}>
                   <td className="px-4 py-3">
-                    <Link to={`/export/${r.orderId}`} className="font-medium text-blue-600 hover:text-blue-800">{r.orderId}</Link>
+                    <OrderRefLink to={`/export/${r.orderId}`} module="export_orders" className="font-medium text-blue-600 hover:text-blue-800">{r.orderId}</OrderRefLink>
                   </td>
                   <td className="px-4 py-3 text-gray-700">{r.customer}</td>
                   <td className="px-4 py-3 text-right font-medium text-gray-900">{formatCurrency(r.contractValue)}</td>

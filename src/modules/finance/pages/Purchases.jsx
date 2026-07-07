@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import OrderRefLink from '../../../shared/components/OrderRefLink';
 import {
   ShoppingCart, Package, Factory, Ship, Receipt,
   Search, Download, RefreshCw, CheckCircle, Clock, X, Plus, ChevronDown, Printer, Eye, User, DollarSign,
@@ -732,10 +733,10 @@ function PayPurchaseDrawer({ purchase, bankAccounts, isPending, onClose, onSubmi
 function RefLink({ p }) {
   const short = shortenRef(p.ref) || p.ref || '—';
   if (p.source === 'lot') {
-    return <Link to={`/lot-inventory/${p.ref}`} title={p.ref || ''} className="text-blue-600 hover:underline whitespace-nowrap">{short}</Link>;
+    return <OrderRefLink to={`/lot-inventory/${p.ref}`} module="inventory" className="text-blue-600 hover:underline whitespace-nowrap">{short}</OrderRefLink>;
   }
   if (p.source === 'export_cost') {
-    return <Link to={`/export/${p.ref}`} title={p.ref || ''} className="text-blue-600 hover:underline whitespace-nowrap">{short}</Link>;
+    return <OrderRefLink to={`/export/${p.ref}`} module="export_orders" className="text-blue-600 hover:underline whitespace-nowrap">{short}</OrderRefLink>;
   }
   return <span title={p.ref || ''} className="whitespace-nowrap">{short}</span>;
 }
