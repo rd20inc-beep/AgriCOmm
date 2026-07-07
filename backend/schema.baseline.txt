@@ -690,6 +690,9 @@ COL export_packing_weights.packed_net_rice_kg:numeric:NOT NULL
 COL export_packing_weights.packing_material_kg:numeric:NOT NULL
 COL export_packing_weights.recorded_by:integer:NULL
 COL export_packing_weights.required_net_kg:numeric:NOT NULL
+COL export_packing_weights.resolution:character varying:NULL
+COL export_packing_weights.resolution_notes:text:NULL
+COL export_packing_weights.resolved_at:timestamp with time zone:NULL
 COL export_packing_weights.tolerance_pct:numeric:NOT NULL
 COL export_packing_weights.updated_at:timestamp with time zone:NOT NULL
 COL export_packing_weights.variance_kg:numeric:NOT NULL
