@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useOwnerAuth } from '../../../context/OwnerAuthContext';
+import { useAuth } from '../../../context/AuthContext';
 import { useUpdateOrderStatus, useRecordExportReceipt, usePendingExportReceipts, useConfirmExportReceipt, useRejectExportReceipt } from '../../../api/queries';
 import Modal from '../../../components/Modal';
 import StatusBadge from '../../../components/StatusBadge';
@@ -36,6 +37,14 @@ function daysSince(dateStr) {
 export default function FinanceConfirmations() {
   const { exportOrders, addToast, settings, bankAccountsList } = useApp();
   const { requestOwnerApproval } = useOwnerAuth();
+  const { hasPermission } = useAuth();
+  // Finance (payments-only) can't open export order pages — render order numbers
+  // as plain text for them instead of an /export link that lands on Access Denied.
+  const canViewExport = hasPermission('export_orders', 'view');
+  const orderRef = (id, cls = 'font-semibold text-blue-600 hover:text-blue-800') =>
+    (canViewExport
+      ? <Link to={`/export/${id}`} className={cls}>{id}</Link>
+      : <span className="font-semibold text-gray-700">{id}</span>);
 
   const recordReceiptMut = useRecordExportReceipt();
   const updateStatusMut = useUpdateOrderStatus();
@@ -242,7 +251,7 @@ export default function FinanceConfirmations() {
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <Link to={`/export/${order.id}`} className="text-sm font-semibold text-blue-600 hover:text-blue-800">{order.id}</Link>
+              {orderRef(order.id, 'text-sm font-semibold text-blue-600 hover:text-blue-800')}
               <span className="text-xs text-gray-400">|</span>
               <span className="text-sm text-gray-600 truncate"><PartyLink type="customer" id={order.customerId} name={order.customerName} /></span>
               <span className="text-xs text-gray-400">|</span>
@@ -352,7 +361,7 @@ export default function FinanceConfirmations() {
                 <div key={p.id} className="flex flex-wrap items-center justify-between gap-3 border border-gray-100 rounded-lg p-3 bg-amber-50/40">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 text-sm">
-                      {p.orderId
+                      {p.orderId && canViewExport
                         ? <Link to={`/export/${p.orderId}`} className="font-semibold text-blue-600 hover:text-blue-800">{p.orderNo}</Link>
                         : <span className="font-semibold text-gray-700">{p.orderNo}</span>}
                       <span className="text-gray-400">|</span>
@@ -534,7 +543,7 @@ export default function FinanceConfirmations() {
                   return (
                     <tr key={o.id} className="border-b border-gray-50 hover:bg-gray-50">
                       <td className="py-2.5 px-3">
-                        <Link to={`/export/${o.id}`} className="font-semibold text-blue-600 hover:text-blue-800">{o.id}</Link>
+                        {orderRef(o.id)}
                       </td>
                       <td className="py-2.5 px-3 text-gray-600 truncate max-w-[150px]"><PartyLink type="customer" id={o.customerId} name={o.customerName} /></td>
                       <td className="py-2.5 px-3 text-right text-gray-700">{formatCurrency(o.advanceExpected)}</td>
@@ -599,7 +608,7 @@ export default function FinanceConfirmations() {
                   return (
                     <tr key={o.id} className={`border-b border-gray-50 hover:bg-gray-50 ${outstanding > 0 ? '' : 'opacity-60'}`}>
                       <td className="py-2 px-3">
-                        <Link to={`/export/${o.id}`} className="font-semibold text-blue-600 hover:text-blue-800">{o.id}</Link>
+                        {orderRef(o.id)}
                       </td>
                       <td className="py-2 px-3 text-gray-600 truncate max-w-[150px]"><PartyLink type="customer" id={o.customerId} name={o.customerName} /></td>
                       <td className="py-2 px-3 text-right text-gray-700">{formatCurrency(o.contractValue)}</td>

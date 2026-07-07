@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import OrderRefLink from '../../../shared/components/OrderRefLink';
 import { TrendingUp, TrendingDown, DollarSign, Factory, Store, AlertTriangle, CheckCircle, RefreshCw, Activity, Printer } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart } from '../../../components/finance';
 import { useProfitabilitySummary, useLocalSales, useLocalSalesSummary } from '../../../api/queries';
@@ -62,7 +62,7 @@ export default function Profit() {
 
   const exportColumns = [
     { key: 'orderNo', label: 'Order', sortable: true, render: (v, row) => (
-      <Link to={`/export/${row.id}`} className="text-blue-600 hover:text-blue-800 font-medium hover:underline" onClick={e => e.stopPropagation()}>{v}</Link>
+      <OrderRefLink to={`/export/${row.id}`} module="export_orders" onClick={e => e.stopPropagation()}>{v}</OrderRefLink>
     )},
     { key: 'status', label: 'Status', sortable: true },
     { key: 'currency', label: 'Cur.', render: (v) => <span className="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{v}</span> },
@@ -82,7 +82,7 @@ export default function Profit() {
 
   const millColumns = [
     { key: 'batchNo', label: 'Batch', sortable: true, render: (v, row) => (
-      <Link to={`/milling/${row.id}`} className="text-blue-600 hover:text-blue-800 font-medium hover:underline" onClick={e => e.stopPropagation()}>{v}</Link>
+      <OrderRefLink to={`/milling/${row.id}`} module="milling" onClick={e => e.stopPropagation()}>{v}</OrderRefLink>
     )},
     { key: 'status', label: 'Status', sortable: true },
     { key: 'rawQtyMT', label: 'Raw (MT)', sortable: true, align: 'right' },
@@ -146,7 +146,7 @@ export default function Profit() {
 
   const localColumns = [
     { key: 'saleNo', label: 'Sale', sortable: true, render: (v, row) => (
-      <Link to={`/local-sales/${row.id}`} className="text-blue-600 hover:underline font-medium">{v}</Link>
+      <OrderRefLink to={`/local-sales/${row.id}`} module="inventory" className="text-blue-600 hover:underline font-medium">{v}</OrderRefLink>
     )},
     { key: 'saleDate', label: 'Date', sortable: true, render: (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '—' },
     { key: 'buyerName', label: 'Buyer', sortable: true, render: (v) => v || '—' },

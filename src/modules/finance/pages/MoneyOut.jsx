@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import OrderRefLink from '../../../shared/components/OrderRefLink';
 import { ArrowUpRight, AlertTriangle, CheckCircle, Clock, Eye, X, DollarSign, Landmark, Printer } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceFilterBar } from '../../../components/finance';
 import { usePayables, useRecordPayment, useBankAccounts, useReceivables, usePayablePayments } from '../../../api/queries';
@@ -143,8 +143,9 @@ export default function MoneyOut() {
     { key: 'supplierName', label: 'Supplier', sortable: true, render: (v, row) => <PartyLink type="supplier" id={row.supplierId} name={v} /> },
     { key: 'linkedRef', label: 'Linked To', sortable: true, render: (v) => {
       if (!v) return '—';
-      const href = v.startsWith('EX-') ? `/export/${v}` : v.startsWith('M-') ? `/milling/${v}` : null;
-      if (href) return <Link to={href} className="text-blue-600 hover:text-blue-800 font-medium hover:underline" onClick={e => e.stopPropagation()}>{v}</Link>;
+      const isEx = v.startsWith('EX-'), isMill = v.startsWith('M-');
+      const href = isEx ? `/export/${v}` : isMill ? `/milling/${v}` : null;
+      if (href) return <OrderRefLink to={href} module={isEx ? 'export_orders' : 'milling'} onClick={e => e.stopPropagation()}>{v}</OrderRefLink>;
       return <span className="text-gray-700 font-medium">{v}</span>;
     }},
     { key: 'originalAmount', label: 'Amount', sortable: true, align: 'right', render: (v, row) => (
@@ -311,8 +312,10 @@ export default function MoneyOut() {
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div><p className="text-xs text-gray-500">Supplier</p><p><PartyLink type="supplier" id={drawer.supplierId} name={drawer.supplierName} /></p></div>
                 <div><p className="text-xs text-gray-500">Linked To</p>{drawer.linkedRef ? (
-                  <Link to={drawer.linkedRef.startsWith('EX-') ? `/export/${drawer.linkedRef}` : drawer.linkedRef.startsWith('M-') ? `/milling/${drawer.linkedRef}` : '#'}
-                    className="text-blue-600 hover:underline font-medium">{drawer.linkedRef} →</Link>
+                  <OrderRefLink
+                    to={drawer.linkedRef.startsWith('EX-') ? `/export/${drawer.linkedRef}` : drawer.linkedRef.startsWith('M-') ? `/milling/${drawer.linkedRef}` : null}
+                    module={drawer.linkedRef.startsWith('M-') ? 'milling' : 'export_orders'}
+                    className="text-blue-600 hover:underline font-medium">{drawer.linkedRef} →</OrderRefLink>
                 ) : <p>—</p>}</div>
                 <div><p className="text-xs text-gray-500">Currency</p><p>{drawer.currency || 'PKR'}</p></div>
                 <div><p className="text-xs text-gray-500">Status</p><StatusBadge status={drawer.status} /></div>
