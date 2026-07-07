@@ -2437,12 +2437,14 @@ const exportOrderController = {
         .join('export_orders as eo', 'r.order_id', 'eo.id')
         .leftJoin('customers as c', 'eo.customer_id', 'c.id')
         .leftJoin('users as u', 'p.created_by', 'u.id')
+        .leftJoin('bank_accounts as ba', 'p.bank_account_id', 'ba.id')
         .where('p.status', 'Pending Finance Confirmation')
         .select(
           'p.id', 'p.payment_no', 'p.amount', 'p.currency', 'p.fx_rate', 'p.payment_date',
           'p.bank_account_id', 'p.notes', 'p.created_at', 'u.full_name as recorded_by_name',
           'r.type as receipt_type', 'eo.id as order_id', 'eo.order_no', 'eo.booked_fx_rate',
           'c.name as customer_name',
+          'ba.name as bank_account_name', 'ba.bank_name', 'ba.currency as bank_currency',
         )
         .orderBy('p.created_at', 'desc');
 
