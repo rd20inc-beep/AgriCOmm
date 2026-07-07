@@ -41,7 +41,7 @@ const sidebarNav = [
       { label: 'Quality', to: '/quality', icon: FlaskConical, permission: { module: 'milling', action: 'view' } },
       { label: 'Purchase Requirements', to: '/purchase-requirements', icon: ShoppingCart, permission: { module: 'inventory', action: 'view' } },
       { label: 'Adjustments', to: '/stock-adjustments', icon: AlertTriangle, permission: { module: 'inventory', action: 'view' } },
-      { label: 'Transfers', to: '/transfer', icon: ArrowRightLeft, permission: { module: 'finance', action: 'view' } },
+      { label: 'Transfers', to: '/transfer', icon: ArrowRightLeft, permission: { module: 'inventory', action: 'view' } },
       { label: 'Local Sales', to: '/local-sales', permission: { module: 'inventory', action: 'view' } },
     ],
   },
