@@ -19,13 +19,17 @@ import {
 import { useApp } from '../../../context/AppContext';
 import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import { useAuth } from '../../../context/AuthContext';
-import { useUpdateOrderStatus, useRecordExportReceipt, usePendingExportReceipts, useConfirmExportReceipt, useRejectExportReceipt } from '../../../api/queries';
+import { useUpdateOrderStatus, useRecordExportReceipt, usePendingExportReceipts, useConfirmExportReceipt, useRejectExportReceipt, useReceivables } from '../../../api/queries';
 import Modal from '../../../components/Modal';
 import StatusBadge from '../../../components/StatusBadge';
 import EmailComposer from '../../../components/EmailComposer';
 
 function formatCurrency(value) {
   return '$' + value.toLocaleString('en-US');
+}
+
+function fmtPKR(value) {
+  return 'Rs ' + Math.round(parseFloat(value) || 0).toLocaleString('en-PK');
 }
 
 function daysSince(dateStr) {
@@ -45,6 +49,23 @@ export default function FinanceConfirmations() {
     (canViewExport
       ? <Link to={`/export/${id}`} className={cls}>{id}</Link>
       : <span className="font-semibold text-gray-700">{id}</span>);
+
+  // Receivables are finance-accessible (masked) — the export orders list is not.
+  // Use them to drive the KPI cards so Finance sees real, current figures (in PKR)
+  // that reflect a just-confirmed receipt, instead of the export-order summary
+  // (which is empty/zero for payments-only Finance).
+  const { data: receivables = [] } = useReceivables();
+  const financeSummary = useMemo(() => {
+    let expected = 0, received = 0;
+    receivables.forEach((r) => {
+      const expPkr = parseFloat(r.baseAmountPkr) || 0; // expected, in PKR
+      const expCur = parseFloat(r.expectedAmount) || 0;
+      const frac = expCur > 0 ? Math.min(1, (parseFloat(r.receivedAmount) || 0) / expCur) : 0;
+      expected += expPkr;
+      received += expPkr * frac;
+    });
+    return { expected, received, outstanding: Math.max(0, expected - received) };
+  }, [receivables]);
 
   const recordReceiptMut = useRecordExportReceipt();
   const updateStatusMut = useUpdateOrderStatus();
@@ -308,6 +329,13 @@ export default function FinanceConfirmations() {
     );
   }
 
+  // Card figures: Owner/Export get the order-level summary ($); payments-only
+  // Finance gets the receivables-based summary (Rs), which is populated for them.
+  const cards = canViewExport
+    ? { fmt: formatCurrency, receivables: summary.totalReceivables, received: summary.totalReceived, outstanding: summary.totalOutstanding, subCount: exportOrders.filter((o) => o.status !== 'Cancelled').length }
+    : { fmt: fmtPKR, receivables: financeSummary.expected, received: financeSummary.received, outstanding: financeSummary.outstanding, subCount: receivables.length };
+  const cardRate = cards.receivables > 0 ? (cards.received / cards.receivables) * 100 : 0;
+
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -319,19 +347,23 @@ export default function FinanceConfirmations() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          {canViewExport && (
           <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 rounded-lg border border-amber-200">
             <Clock size={14} className="text-amber-600" />
             <span className="text-xs font-medium text-amber-700">
               {pendingAdvance.length} advances
             </span>
           </div>
+          )}
+          {canViewExport && (
           <div className="flex items-center gap-2 px-3 py-1.5 bg-orange-50 rounded-lg border border-orange-200">
             <DollarSign size={14} className="text-orange-600" />
             <span className="text-xs font-medium text-orange-700">
               {pendingBalance.length} balances
             </span>
           </div>
-          {overdueCollections.length > 0 && (
+          )}
+          {canViewExport && overdueCollections.length > 0 && (
             <div className="flex items-center gap-2 px-3 py-1.5 bg-red-50 rounded-lg border border-red-200">
               <AlertTriangle size={14} className="text-red-600" />
               <span className="text-xs font-medium text-red-700">
@@ -414,19 +446,19 @@ export default function FinanceConfirmations() {
             <DollarSign size={16} className="text-blue-500" />
             <span className="text-xs font-medium text-gray-500 uppercase">Total Receivables</span>
           </div>
-          <p className="text-xl font-bold text-gray-900">{formatCurrency(summary.totalReceivables)}</p>
-          <p className="text-xs text-gray-400 mt-0.5">across {exportOrders.filter(o => o.status !== 'Cancelled').length} orders</p>
+          <p className="text-xl font-bold text-gray-900">{cards.fmt(cards.receivables)}</p>
+          <p className="text-xs text-gray-400 mt-0.5">across {cards.subCount} {canViewExport ? 'orders' : 'receivables'}</p>
         </div>
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
           <div className="flex items-center gap-2 mb-1">
             <CheckCircle size={16} className="text-green-500" />
             <span className="text-xs font-medium text-gray-500 uppercase">Total Received</span>
           </div>
-          <p className="text-xl font-bold text-green-700">{formatCurrency(summary.totalReceived)}</p>
+          <p className="text-xl font-bold text-green-700">{cards.fmt(cards.received)}</p>
           <div className="w-full bg-gray-200 rounded-full h-1.5 mt-2">
             <div
               className="h-1.5 rounded-full bg-green-500"
-              style={{ width: `${summary.totalReceivables > 0 ? Math.min((summary.totalReceived / summary.totalReceivables) * 100, 100) : 0}%` }}
+              style={{ width: `${cards.receivables > 0 ? Math.min((cards.received / cards.receivables) * 100, 100) : 0}%` }}
             />
           </div>
         </div>
@@ -435,9 +467,9 @@ export default function FinanceConfirmations() {
             <Clock size={16} className="text-amber-500" />
             <span className="text-xs font-medium text-gray-500 uppercase">Outstanding</span>
           </div>
-          <p className="text-xl font-bold text-amber-700">{formatCurrency(summary.totalOutstanding)}</p>
+          <p className="text-xl font-bold text-amber-700">{cards.fmt(cards.outstanding)}</p>
           <p className="text-xs text-gray-400 mt-0.5">
-            {summary.totalReceivables > 0 ? ((summary.totalOutstanding / summary.totalReceivables) * 100).toFixed(1) : 0}% of receivables
+            {cards.receivables > 0 ? ((cards.outstanding / cards.receivables) * 100).toFixed(1) : 0}% of receivables
           </p>
         </div>
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
@@ -445,13 +477,14 @@ export default function FinanceConfirmations() {
             <TrendingUp size={16} className="text-purple-500" />
             <span className="text-xs font-medium text-gray-500 uppercase">Collection Rate</span>
           </div>
-          <p className="text-xl font-bold text-purple-700">
-            {summary.totalReceivables > 0 ? ((summary.totalReceived / summary.totalReceivables) * 100).toFixed(1) : 0}%
-          </p>
-          <p className="text-xs text-gray-400 mt-0.5">{formatCurrency(summary.totalReceived)} of {formatCurrency(summary.totalReceivables)}</p>
+          <p className="text-xl font-bold text-purple-700">{cardRate.toFixed(1)}%</p>
+          <p className="text-xs text-gray-400 mt-0.5">{cards.fmt(cards.received)} of {cards.fmt(cards.receivables)}</p>
         </div>
       </div>
 
+      {/* Order-level collections tracking — needs the export orders list, which
+          payments-only Finance can't load, so it's shown only to export/owner. */}
+      {canViewExport && (<>
       {/* Overdue Collections */}
       {overdueCollections.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm p-5">
@@ -661,6 +694,7 @@ export default function FinanceConfirmations() {
           </div>
         </div>
       )}
+      </>)}
 
       {/* Confirm Receipt Modal */}
       <Modal
