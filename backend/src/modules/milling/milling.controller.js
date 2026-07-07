@@ -1852,16 +1852,16 @@ const millingController = {
           .where({ batch_ref: `batch-${batchId}`, type: 'raw', entity: 'mill' })
           .first();
         if (lot) {
-          const consumed = await trx('inventory_movements')
+          // Canonical ledger equivalents of production_issue / adjustment_minus.
+          const consumed = await trx('lot_transactions')
             .where('lot_id', lot.id)
-            .whereIn('movement_type', ['production_issue', 'adjustment_minus'])
+            .whereIn('transaction_type', ['milling_issue', 'stock_adjustment_minus'])
             .count('* as n').first();
           if (parseInt(consumed.n, 10) > 0) {
             const err = new Error('Raw rice from this batch has already been consumed/adjusted; cannot delete.');
             err.statusCode = 400;
             throw err;
           }
-          await trx('inventory_movements').where('lot_id', lot.id).del();
           await trx('lot_transactions').where('lot_id', lot.id).del();
           await trx('inventory_lots').where('id', lot.id).del();
         }

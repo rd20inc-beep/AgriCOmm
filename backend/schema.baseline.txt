@@ -883,24 +883,6 @@ COL inventory_lots.updated_at:timestamp with time zone:NOT NULL
 COL inventory_lots.variety:character varying:NULL
 COL inventory_lots.warehouse_id:integer:NOT NULL
 COL inventory_lots.whiteness:numeric:NULL
-COL inventory_movements.batch_id:integer:NULL
-COL inventory_movements.cost_per_unit:numeric:NOT NULL
-COL inventory_movements.created_at:timestamp with time zone:NULL
-COL inventory_movements.created_by:integer:NULL
-COL inventory_movements.currency:character varying:NOT NULL
-COL inventory_movements.dest_entity:character varying:NULL
-COL inventory_movements.from_warehouse_id:integer:NULL
-COL inventory_movements.id:integer:NOT NULL
-COL inventory_movements.linked_ref:character varying:NULL
-COL inventory_movements.lot_id:integer:NOT NULL
-COL inventory_movements.movement_type:character varying:NOT NULL
-COL inventory_movements.notes:text:NULL
-COL inventory_movements.order_id:integer:NULL
-COL inventory_movements.qty:numeric:NOT NULL
-COL inventory_movements.source_entity:character varying:NULL
-COL inventory_movements.to_warehouse_id:integer:NULL
-COL inventory_movements.total_cost:numeric:NOT NULL
-COL inventory_movements.transfer_id:integer:NULL
 COL inventory_reservations.created_at:timestamp with time zone:NOT NULL
 COL inventory_reservations.created_by:integer:NULL
 COL inventory_reservations.id:integer:NOT NULL
@@ -2589,16 +2571,6 @@ CON inventory_lots.inventory_lots_supplier_id_foreign(f)
 CON inventory_lots.inventory_lots_transport_vendor_id_foreign(f)
 CON inventory_lots.inventory_lots_type_check(c)
 CON inventory_lots.inventory_lots_warehouse_id_foreign(f)
-CON inventory_movements.chk_inventory_movements_type_valid(c)
-CON inventory_movements.inventory_movements_batch_id_foreign(f)
-CON inventory_movements.inventory_movements_created_by_foreign(f)
-CON inventory_movements.inventory_movements_from_warehouse_id_foreign(f)
-CON inventory_movements.inventory_movements_lot_id_foreign(f)
-CON inventory_movements.inventory_movements_order_id_foreign(f)
-CON inventory_movements.inventory_movements_pkey(p)
-CON inventory_movements.inventory_movements_qty_pos_chk(c)
-CON inventory_movements.inventory_movements_to_warehouse_id_foreign(f)
-CON inventory_movements.inventory_movements_transfer_id_foreign(f)
 CON inventory_reservations.chk_inventory_reservations_reserved_qty_nn(c)
 CON inventory_reservations.chk_inventory_reservations_status_valid(c)
 CON inventory_reservations.inventory_reservations_created_by_foreign(f)

@@ -322,12 +322,9 @@ async function assembleInvoice(id, includeAdmin = false) {
   if (includeAdmin) {
     const saleNos = [...new Set(rows.map(r => r.sale_no).filter(Boolean))];
     const cogsTotal = items.reduce((s, i) => s + (i.cogs || 0), 0);
-    const [receivables, movements, lotTxns] = await Promise.all([
+    const [receivables, lotTxns] = await Promise.all([
       db('receivables').whereIn('local_sale_id', itemIds.length ? itemIds : [base.id])
         .select('recv_no', 'type', 'expected_amount', 'received_amount', 'outstanding', 'status', 'due_date'),
-      saleNos.length ? db('inventory_movements').whereIn('linked_ref', saleNos)
-        .select('id', 'movement_type', 'qty', 'total_cost', 'lot_id', 'created_at')
-        .orderBy('created_at', 'asc') : [],
       saleNos.length ? db('lot_transactions').whereIn('reference_no', saleNos)
         .select('transaction_no', 'transaction_type', 'quantity_kg', 'balance_kg', 'transaction_date')
         .orderBy('transaction_date', 'asc') : [],
@@ -339,7 +336,6 @@ async function assembleInvoice(id, includeAdmin = false) {
     };
     data.linked = {
       receivables: receivables.map(r => ({ recvNo: r.recv_no, type: r.type, expected: num(r.expected_amount), received: num(r.received_amount), outstanding: num(r.outstanding), status: r.status, dueDate: r.due_date })),
-      inventoryMovements: movements.map(m => ({ id: m.id, type: m.movement_type, qtyKg: num(m.qty), costPkr: num(m.total_cost), lotId: m.lot_id, date: m.created_at })),
       lotTransactions: lotTxns.map(t => ({ txnNo: t.transaction_no, type: t.transaction_type, qtyKg: num(t.quantity_kg), balanceKg: num(t.balance_kg), date: t.transaction_date })),
     };
 

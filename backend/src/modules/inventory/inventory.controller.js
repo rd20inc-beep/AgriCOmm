@@ -166,29 +166,42 @@ const inventoryController = {
 
       const offset = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
 
-      let query = db('inventory_movements as im')
-        .leftJoin('inventory_lots as il', 'im.lot_id', 'il.id')
+      // Canonical lot_transactions ledger (KG), aliased to the legacy movement
+      // shape. qty is the absolute KG magnitude; direction lives in quantity_kg.
+      let query = db('lot_transactions as lt')
+        .leftJoin('inventory_lots as il', 'lt.lot_id', 'il.id')
         .select(
-          'im.*',
+          'lt.id',
+          'lt.lot_id',
+          'lt.transaction_type as movement_type',
+          db.raw('ABS(lt.quantity_kg) as qty'),
+          'lt.reference_no as linked_ref',
+          'lt.reference_module',
+          'lt.reference_id',
+          'lt.unit_cost as cost_per_unit',
+          'lt.total_cost',
+          'lt.currency',
+          'lt.remarks as notes',
+          db.raw('COALESCE(lt.performed_at, lt.created_at) as created_at'),
           'il.lot_no',
           'il.item_name'
         );
 
-      if (movement_type) query = query.where('im.movement_type', movement_type);
-      if (batch_id) query = query.where('im.batch_id', batch_id);
-      if (order_id) query = query.where('im.order_id', order_id);
-      if (date_from) query = query.where('im.created_at', '>=', date_from);
-      if (date_to) query = query.where('im.created_at', '<=', date_to);
+      if (movement_type) query = query.where('lt.transaction_type', movement_type);
+      if (batch_id) query = query.where('lt.reference_id', batch_id);
+      if (order_id) query = query.where('lt.reference_id', order_id);
+      if (date_from) query = query.where('lt.transaction_date', '>=', date_from);
+      if (date_to) query = query.where('lt.transaction_date', '<=', date_to);
 
       const countQuery = query
         .clone()
         .clearSelect()
         .clearOrder()
-        .count('im.id as total')
+        .count('lt.id as total')
         .first();
 
       const [movements, countResult] = await Promise.all([
-        query.orderBy('im.created_at', 'desc').limit(parseInt(limit)).offset(offset),
+        query.orderBy('created_at', 'desc').limit(parseInt(limit)).offset(offset),
         countQuery,
       ]);
 

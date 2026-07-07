@@ -890,20 +890,6 @@ module.exports = {
           performed_at: new Date(),
         });
 
-        // Also create legacy inventory_movements entry
-        await trx('inventory_movements').insert({
-          lot_id: lot.id,
-          movement_type: 'purchase_receipt',
-          qty: netWeightKg,
-          to_warehouse_id: resolvedWarehouseId,
-          dest_entity: entity,
-          notes: `Purchase lot ${lotNo}`,
-          cost_per_unit: landedCostPerKg,
-          total_cost: landedCostTotal,
-          currency: 'PKR',
-          created_by: req.user?.id || null,
-        });
-
         if (landedPayableAmount > 0 && supplier_id) {
           const payNo = await generatePayNo(trx);
 
@@ -1233,13 +1219,6 @@ module.exports = {
             remarks: `Added purchase: ${parseFloat(quantity_input)} ${quantity_unit} @ ${parseFloat(rate_input)}/${rate_unit}`,
             created_by: req.user?.id || null, performed_by: req.user?.id || null, performed_at: new Date(),
           });
-          await trx('inventory_movements').insert({
-            lot_id: newLot.id, movement_type: 'purchase_receipt', qty: addNetKg,
-            to_warehouse_id: newLot.warehouse_id, dest_entity: newLot.entity,
-            notes: `Added purchase (split from ${lot.lot_no})`,
-            cost_per_unit: (addNetKg > 0 ? uc.round4(addLandedTotal / addNetKg) : 0),
-            total_cost: addLandedTotal, currency: 'PKR', created_by: req.user?.id || null,
-          });
           if (addLandedTotal > 0) {
             const payNo = await generatePayNo(trx);
             await trx('payables').insert({
@@ -1328,19 +1307,6 @@ module.exports = {
           created_by: req.user?.id || null,
           performed_by: req.user?.id || null,
           performed_at: new Date(),
-        });
-
-        await trx('inventory_movements').insert({
-          lot_id: lotId,
-          movement_type: 'purchase_receipt',
-          qty: addNetKg,
-          to_warehouse_id: lot.warehouse_id,
-          dest_entity: lot.entity,
-          notes: `Added purchase to lot ${lot.lot_no}`,
-          cost_per_unit: (addNetKg > 0 ? uc.round4(addLandedTotal / addNetKg) : 0),
-          total_cost: addLandedTotal,
-          currency: 'PKR',
-          created_by: req.user?.id || null,
         });
 
         if (addLandedTotal > 0) {
