@@ -675,14 +675,25 @@ const financeController = {
         });
       });
 
+      // Domain separation: the Finance Manager settles export costs but must NOT
+      // see the customer name or export order number. Owner/Admin (and mill roles)
+      // keep the full context. Resolve the caller's role once.
+      let _roleName = req.user && req.user._roleName;
+      if (!_roleName && req.user && req.user.role_id) {
+        const rr = await db('roles').where({ id: req.user.role_id }).first('name');
+        _roleName = rr && rr.name;
+      }
+      const maskExport = _roleName === 'Finance Manager';
+
       exportCosts.forEach(ec => {
         derived.push({
           id: `EC-${ec.id}`,
           pay_no: `EC-${ec.id}`,
           entity: 'export',
           category: categoryLabel(ec.category),
-          supplier_name: ec.customer_name || null,
-          linked_ref: ec.order_no,
+          // Masked for Finance: no customer name, no order number.
+          supplier_name: maskExport ? null : (ec.customer_name || null),
+          linked_ref: maskExport ? null : ec.order_no,
           original_amount: parseFloat(ec.amount),
           paid_amount: 0,
           outstanding: parseFloat(ec.amount),
@@ -690,7 +701,7 @@ const financeController = {
           status: 'Pending',
           currency: 'USD',
           aging: 0,
-          notes: `${categoryLabel(ec.category)} cost for order ${ec.order_no}`,
+          notes: maskExport ? `${categoryLabel(ec.category)} (export)` : `${categoryLabel(ec.category)} cost for order ${ec.order_no}`,
           created_at: ec.created_at,
           source: 'export_order_costs',
         });

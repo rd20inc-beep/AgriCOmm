@@ -1862,6 +1862,27 @@ COL purchase_orders.supplier_id:integer:NOT NULL
 COL purchase_orders.total_amount:numeric:NULL
 COL purchase_orders.transport_terms:character varying:NULL
 COL purchase_orders.updated_at:timestamp with time zone:NOT NULL
+COL purchase_requirements.approved_at:timestamp with time zone:NULL
+COL purchase_requirements.approved_by:integer:NULL
+COL purchase_requirements.available_qty:numeric:NOT NULL
+COL purchase_requirements.created_at:timestamp with time zone:NOT NULL
+COL purchase_requirements.currency:character varying:NOT NULL
+COL purchase_requirements.department:character varying:NOT NULL
+COL purchase_requirements.est_amount:numeric:NULL
+COL purchase_requirements.est_unit_cost:numeric:NULL
+COL purchase_requirements.id:integer:NOT NULL
+COL purchase_requirements.item_id:integer:NULL
+COL purchase_requirements.item_name:character varying:NOT NULL
+COL purchase_requirements.linked_ref:character varying:NULL
+COL purchase_requirements.notes:text:NULL
+COL purchase_requirements.pr_no:character varying:NOT NULL
+COL purchase_requirements.qty_needed:numeric:NOT NULL
+COL purchase_requirements.raised_by:integer:NULL
+COL purchase_requirements.reason:text:NULL
+COL purchase_requirements.shortage_qty:numeric:NOT NULL
+COL purchase_requirements.status:character varying:NOT NULL
+COL purchase_requirements.unit:character varying:NOT NULL
+COL purchase_requirements.updated_at:timestamp with time zone:NOT NULL
 COL purchase_requisitions.approved_at:timestamp with time zone:NULL
 COL purchase_requisitions.approved_by:integer:NULL
 COL purchase_requisitions.created_at:timestamp with time zone:NOT NULL
@@ -2971,6 +2992,9 @@ CON purchase_orders.purchase_orders_product_id_foreign(f)
 CON purchase_orders.purchase_orders_requisition_id_foreign(f)
 CON purchase_orders.purchase_orders_status_check(c)
 CON purchase_orders.purchase_orders_supplier_id_foreign(f)
+CON purchase_requirements.purchase_requirements_item_id_foreign(f)
+CON purchase_requirements.purchase_requirements_pkey(p)
+CON purchase_requirements.purchase_requirements_pr_no_unique(u)
 CON purchase_requisitions.chk_purchase_requisitions_qty_mt_nn(c)
 CON purchase_requisitions.purchase_requisitions_approved_by_foreign(f)
 CON purchase_requisitions.purchase_requisitions_entity_check(c)
