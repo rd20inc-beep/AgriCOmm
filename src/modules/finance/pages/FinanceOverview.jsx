@@ -43,6 +43,12 @@ function fmtUSD(n) {
 // ─── Page ─────────────────────────────────────────────────────────────
 export default function FinanceOverview() {
   const navigate = useNavigate();
+  const { hasPermission } = useAuth();
+  // Finance (payments-only) can't open Export/Mill pages — only navigate there if
+  // the role actually has access, else keep the click on a finance destination so
+  // it never lands on an "Access Denied" route.
+  const goExport = () => navigate(hasPermission('export_orders', 'view') ? '/export' : '/finance/money-in');
+  const goMill = () => navigate(hasPermission('milling', 'view') ? '/milling' : '/finance/money-in');
   const { data: upcoming } = useUpcoming();
   const { queryParams: rangeParams } = useFinanceDateRange();
   const { data: summary = {}, isLoading, refetch } = useFinanceOverviewSummary();
@@ -223,7 +229,7 @@ export default function FinanceOverview() {
           profitLabel="Booked Profit"
           profit={fmtPKR(exp.bookedProfitPkr || 0)}
           marginPct={exp.marginPct}
-          onClick={() => navigate('/export')}
+          onClick={goExport}
         />
         <SegmentCard
           tone="amber"
@@ -235,7 +241,7 @@ export default function FinanceOverview() {
           profitLabel="Gross Profit"
           profit={fmtPKR(mill.grossProfit || 0)}
           marginPct={mill.marginPct}
-          onClick={() => navigate('/milling')}
+          onClick={goMill}
         />
         <SegmentCard
           tone="emerald"
