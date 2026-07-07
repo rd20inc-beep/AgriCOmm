@@ -64,11 +64,10 @@ module.exports = {
       }).returning('*');
       // Masked message — item, qty, est amount, PR no only. No customer/order/rice.
       const amt = row.est_amount != null ? ` (est ${row.currency} ${Math.round(row.est_amount).toLocaleString()})` : '';
-      await notificationService.createForRole(null, {
-        roleName: 'Finance Manager',
+      await notificationService.notifyFinance(null, {
         title: 'Purchase request approved',
         message: `${row.pr_no}: ${Math.round(row.shortage_qty)} ${row.unit} ${row.item_name}${amt} — pending purchase/payment.`,
-        type: 'payment', linkedRef: row.pr_no,
+        linkedRef: row.pr_no,
       });
       return res.json({ success: true, data: { requirement: row } });
     } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
