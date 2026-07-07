@@ -184,6 +184,16 @@ router.put(
   auditAction('packing_weight', 'export_order', (req) => req.params.id),
   controller.upsertPackingWeight
 );
+// Proactive material requirements — compute needed bags/masters/poly/pallets vs
+// stock; raise Purchase Requirements for the shortages.
+router.get('/:id/material-requirements', authorizeAny(['export_orders', 'view'], ['milling', 'view'], ['inventory', 'view']), controller.getMaterialRequirements);
+router.post(
+  '/:id/material-requirements/raise',
+  authorizeAny(['milling', 'edit'], ['inventory', 'create'], ['mill_store', 'create_purchase']),
+  auditAction('raise_material_requirements', 'export_order', (req) => req.params.id),
+  controller.raiseMaterialRequirements
+);
+
 router.post(
   '/:id/packing-weight/resolve',
   authorize('export_orders', 'edit'),

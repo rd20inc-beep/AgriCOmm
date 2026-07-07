@@ -2754,6 +2754,89 @@ const exportOrderController = {
     }
   },
 
+  // ── Proactive material requirements (calculate BEFORE packing) ─────────────
+  // From an order's packing spec + qty, compute the bags / master bags / polythene
+  // / pallets needed, match them to mill_stock, and surface the shortage per item.
+  async _materialLines(order) {
+    const orderKg = (parseFloat(order.qty_mt) || 0) * 1000;
+    const pt = order.packing_type || 'retail';
+    if (pt === 'container' || orderKg <= 0) return [];
+    const lines = [];
+    const matchStock = async ({ capacityKg = null, code = null, materialHint = null }) => {
+      const base = () => db('mill_items as i')
+        .leftJoin('mill_stock as s', function () { this.on('s.item_id', 'i.id').andOnNull('s.warehouse_id'); })
+        .where('i.category', 'packaging')
+        .select('i.id', 'i.name', 'i.unit', 'i.avg_cost_per_unit', db.raw('COALESCE(s.quantity_available, 0) as avail'));
+      let rows = [];
+      if (code) rows = await base().where('i.code', code);
+      if (!rows.length && capacityKg) {
+        if (materialHint) rows = await base().where('i.capacity_kg', capacityKg).andWhere('i.name', 'ilike', `%${materialHint}%`);
+        if (!rows.length) rows = await base().where('i.capacity_kg', capacityKg);
+      }
+      if (!rows.length) return { itemId: null, itemName: null, unit: 'pcs', cost: null, available: 0 };
+      const r = rows[0];
+      return { itemId: r.id, itemName: r.name, unit: r.unit || 'pcs', cost: r.avg_cost_per_unit != null ? parseFloat(r.avg_cost_per_unit) : null, available: parseFloat(r.avail) || 0 };
+    };
+    const mk = (label, required, m) => ({
+      item_id: m.itemId, item_name: m.itemName || label, label, unit: m.unit,
+      required, available: m.available, shortage: Math.max(0, required - m.available),
+      est_unit_cost: m.cost, est_amount: m.cost != null ? Math.round(Math.max(0, required - m.available) * m.cost) : null,
+    });
+
+    const bagSize = pt === 'jumbo' ? 1200 : (parseFloat(order.bag_size_kg) || 0);
+    if (bagSize > 0) {
+      const req = Math.ceil(orderKg / bagSize);
+      const m = await matchStock({ capacityKg: bagSize, materialHint: order.bag_material || order.bag_type || null });
+      lines.push(mk(`${bagSize} kg ${order.bag_material || 'bag'}`, req, m));
+    }
+    if (pt === 'retail' && parseFloat(order.master_bag_size_kg) > 0) {
+      const ms = parseFloat(order.master_bag_size_kg);
+      const req = Math.ceil(orderKg / ms);
+      lines.push(mk(`${ms} kg master bag`, req, await matchStock({ code: `MASTER-${ms}`, capacityKg: ms })));
+      if (parseFloat(order.bag_size_kg) <= 15) {
+        lines.push(mk('Polythene sheet', req, await matchStock({ code: 'POLY-SHEET' })));
+      }
+    }
+    if (order.palletized) {
+      const req = Math.min(20, Math.ceil(orderKg / 1000)); // 20 pallets × 1,000 kg cap
+      lines.push(mk('Pallet', req, { itemId: null, itemName: 'Pallet', unit: 'pcs', cost: null, available: 0 }));
+    }
+    return lines;
+  },
+
+  async getMaterialRequirements(req, res) {
+    try {
+      const id = await resolveExportOrderId(req.params.id);
+      if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
+      const order = await db('export_orders').where({ id }).first();
+      const lines = await exportOrderController._materialLines(order);
+      return res.json({ success: true, data: { lines, orderKg: (parseFloat(order.qty_mt) || 0) * 1000, packingType: order.packing_type } });
+    } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+  },
+
+  // Raise a Purchase Requirement for each short material (deduped per item + order).
+  async raiseMaterialRequirements(req, res) {
+    try {
+      const id = await resolveExportOrderId(req.params.id);
+      if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
+      const order = await db('export_orders').where({ id }).first();
+      const lines = await exportOrderController._materialLines(order);
+      const prService = require('../purchaseRequirements/purchaseRequirements.service');
+      const raised = [];
+      for (const l of lines) {
+        if (!(l.shortage > 0)) continue;
+        const pr = await prService.raise(db, {
+          itemId: l.item_id, itemName: l.item_name, unit: l.unit,
+          qtyNeeded: l.required, availableQty: l.available, shortageQty: l.shortage,
+          estUnitCost: l.est_unit_cost, department: 'Packing', linkedRef: order.order_no,
+          reason: `Proactive material requirement for order ${order.order_no}`, raisedBy: req.user?.id || null,
+        });
+        if (pr) raised.push(pr.pr_no);
+      }
+      return res.json({ success: true, data: { raised, count: raised.length } });
+    } catch (err) { console.error('raiseMaterialRequirements error:', err); return res.status(500).json({ success: false, message: err.message }); }
+  },
+
   // Export-ready stock pool (Batch 4). Finished/by-product lots the mill marked
   // Ready for Export, with available stock. Export users see ONLY the export
   // display name + qty + packing/transfer status — never supplier/lot no/cost.
