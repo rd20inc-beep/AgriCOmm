@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Package, Edit3, Save, X, Plus, Trash2 } from 'lucide-react';
 import api from '../../../api/client';
+import PackingWeightCard from './PackingWeightCard';
 
 const BAG_TYPE_OPTIONS = ['PP Bag', 'BOPP Bag', 'Jute Bag', 'Non-Woven', 'Paper Bag', 'Custom'];
 
@@ -121,6 +122,9 @@ export default function PackingTab({ order, onUpdated }) {
 
   return (
     <div className="space-y-6">
+      {/* Packed-weight variance (Phase 1) */}
+      <PackingWeightCard order={order} onUpdated={onUpdated} />
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">

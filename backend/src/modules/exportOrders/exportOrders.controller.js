@@ -2566,6 +2566,121 @@ const exportOrderController = {
     }
   },
 
+  // ── Packed-weight variance (Phase 1) ──────────────────────────────────────
+  // Recompute the variance fields from the entered net + material weights.
+  _computePackingVariance({ required_net_kg, packed_net_rice_kg, packing_material_kg, tolerance_pct }) {
+    const req = parseFloat(required_net_kg) || 0;
+    const net = parseFloat(packed_net_rice_kg) || 0;
+    const mat = parseFloat(packing_material_kg) || 0;
+    const tol = parseFloat(tolerance_pct);
+    const tolerance = Number.isFinite(tol) ? tol : 0.5;
+    const gross = Math.round((net + mat) * 100) / 100;
+    const variance_kg = Math.round((net - req) * 100) / 100;
+    const variance_pct = req > 0 ? Math.round((variance_kg / req) * 10000) / 100 : 0;
+    const withinTol = Math.abs(variance_pct) <= tolerance;
+    const variance_status = withinTol ? 'within' : (variance_kg > 0 ? 'over' : 'under');
+    const approval_status = withinTol ? 'not_required' : 'pending';
+    return { gross_weight_kg: gross, variance_kg, variance_pct, tolerance_pct: tolerance, variance_status, approval_status };
+  },
+
+  async getPackingWeight(req, res) {
+    try {
+      const id = await resolveExportOrderId(req.params.id);
+      if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
+      const order = await db('export_orders').where({ id }).first('id', 'qty_mt');
+      const requiredNet = (parseFloat(order.qty_mt) || 0) * 1000;
+      let row = await db('export_packing_weights').where({ order_id: id }).first();
+      // Suggested packed net = the net weight of finished lots reserved to this order.
+      const resv = await db('inventory_reservations as r')
+        .join('inventory_lots as l', 'l.id', 'r.lot_id')
+        .where({ 'r.order_id': id, 'r.status': 'Active' })
+        .sum({ kg: 'l.net_weight_kg' }).first();
+      const suggestedPackedNet = parseFloat(resv && resv.kg) || 0;
+      return res.json({ success: true, data: { record: row || null, requiredNetKg: requiredNet, suggestedPackedNetKg: suggestedPackedNet } });
+    } catch (err) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
+  async upsertPackingWeight(req, res) {
+    try {
+      const id = await resolveExportOrderId(req.params.id);
+      if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
+      const order = await db('export_orders').where({ id }).first('id', 'qty_mt');
+      if (!order) return res.status(404).json({ success: false, message: 'Export order not found.' });
+      const required_net_kg = (parseFloat(order.qty_mt) || 0) * 1000;
+      const c = exportOrderController._computePackingVariance({
+        required_net_kg,
+        packed_net_rice_kg: req.body.packed_net_rice_kg,
+        packing_material_kg: req.body.packing_material_kg,
+        tolerance_pct: req.body.tolerance_pct,
+      });
+      const existing = await db('export_packing_weights').where({ order_id: id }).first();
+      const base = {
+        required_net_kg,
+        packed_net_rice_kg: parseFloat(req.body.packed_net_rice_kg) || 0,
+        packing_material_kg: parseFloat(req.body.packing_material_kg) || 0,
+        gross_weight_kg: c.gross_weight_kg,
+        variance_kg: c.variance_kg,
+        variance_pct: c.variance_pct,
+        tolerance_pct: c.tolerance_pct,
+        variance_status: c.variance_status,
+        variance_reason: req.body.variance_reason || null,
+        recorded_by: req.user?.id || null,
+        updated_at: db.fn.now(),
+      };
+      // Re-entering the numbers resets an approval only if it's no longer within
+      // tolerance; a previously-approved-and-still-over variance keeps its approval.
+      let approval_status = c.approval_status;
+      if (existing && existing.approval_status === 'approved' && c.approval_status === 'pending') {
+        approval_status = 'approved'; // keep the sign-off; user can re-approve if they change it materially
+      }
+      let row;
+      if (existing) {
+        [row] = await db('export_packing_weights').where({ order_id: id })
+          .update({ ...base, approval_status }).returning('*');
+      } else {
+        [row] = await db('export_packing_weights')
+          .insert({ order_id: id, ...base, approval_status }).returning('*');
+      }
+      emitExportOrderUpdate(id, 'packing_weight_updated', { varianceStatus: row.variance_status });
+      return res.json({ success: true, data: { record: row } });
+    } catch (err) {
+      console.error('upsertPackingWeight error:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
+  async approvePackingWeight(req, res) {
+    try {
+      const id = await resolveExportOrderId(req.params.id);
+      if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
+      const row = await db('export_packing_weights').where({ order_id: id }).first();
+      if (!row) return res.status(404).json({ success: false, message: 'No packing-weight record to approve.' });
+      if (row.approval_status !== 'pending') {
+        return res.status(409).json({ success: false, message: `Packing variance is already ${row.approval_status}.` });
+      }
+      const [updated] = await db('export_packing_weights').where({ order_id: id }).update({
+        approval_status: req.body.reject ? 'rejected' : 'approved',
+        approved_by: req.ownerAuth?.ownerId || req.user?.id || null,
+        approved_at: db.fn.now(),
+        updated_at: db.fn.now(),
+      }).returning('*');
+      const order = await db('export_orders').where({ id }).first('order_no');
+      await notificationService.createForRole(null, {
+        roleName: 'Export Manager',
+        title: `Packed-weight variance ${updated.approval_status}`,
+        message: `Order ${order?.order_no}: ${updated.variance_status} variance ${parseFloat(updated.variance_pct).toFixed(2)}% ${updated.approval_status}.`,
+        type: 'info',
+        linkedRef: order?.order_no,
+      });
+      emitExportOrderUpdate(id, 'packing_weight_approved', { approvalStatus: updated.approval_status });
+      return res.json({ success: true, data: { record: updated } });
+    } catch (err) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
   // Export-ready stock pool (Batch 4). Finished/by-product lots the mill marked
   // Ready for Export, with available stock. Export users see ONLY the export
   // display name + qty + packing/transfer status — never supplier/lot no/cost.
