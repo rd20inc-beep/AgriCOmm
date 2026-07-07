@@ -2445,7 +2445,20 @@ const exportOrderController = {
           'c.name as customer_name',
         )
         .orderBy('p.created_at', 'desc');
-      return res.json({ success: true, data: rows });
+
+      // Domain separation: the Finance Manager confirms the receipt + enters the FX
+      // rate, but must not see the export customer or open the order. Mask the name
+      // and drop the order id (which removes the FE's export-detail link); the
+      // order_no stays as a neutral reference + amount/type/date identify the payment.
+      let _roleName = req.user && req.user._roleName;
+      if (!_roleName && req.user && req.user.role_id) {
+        const rr = await db('roles').where({ id: req.user.role_id }).first('name');
+        _roleName = rr && rr.name;
+      }
+      const data = _roleName === 'Finance Manager'
+        ? rows.map((r) => ({ ...r, customer_name: 'Export customer', order_id: null }))
+        : rows;
+      return res.json({ success: true, data });
     } catch (err) {
       console.error('listPendingExportReceipts error:', err);
       return res.status(500).json({ success: false, message: err.message });

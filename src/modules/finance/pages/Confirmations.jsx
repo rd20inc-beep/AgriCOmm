@@ -351,7 +351,9 @@ export default function FinanceConfirmations() {
                 <div key={p.id} className="flex flex-wrap items-center justify-between gap-3 border border-gray-100 rounded-lg p-3 bg-amber-50/40">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 text-sm">
-                      <Link to={`/export/${p.orderId}`} className="font-semibold text-blue-600 hover:text-blue-800">{p.orderNo}</Link>
+                      {p.orderId
+                        ? <Link to={`/export/${p.orderId}`} className="font-semibold text-blue-600 hover:text-blue-800">{p.orderNo}</Link>
+                        : <span className="font-semibold text-gray-700">{p.orderNo}</span>}
                       <span className="text-gray-400">|</span>
                       <span className="text-gray-700"><PartyLink type="customer" id={p.customerId} name={p.customerName} /></span>
                       <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 capitalize">{p.receiptType}</span>
