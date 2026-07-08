@@ -16,7 +16,14 @@ import ChatWidget from './ChatWidget';
 
 const sidebarNav = [
   { section: 'Main' },
-  { label: 'Dashboard', icon: LayoutDashboard, to: '/' },
+  // The "/" Operations Overview is an export/mill dashboard. Hide it from
+  // payments-only Finance (they land on the Finance Dashboard instead).
+  { label: 'Dashboard', icon: LayoutDashboard, to: '/', anyOf: [
+    { module: 'export_orders', action: 'view' },
+    { module: 'milling', action: 'view' },
+    { module: 'inventory', action: 'view' },
+    { module: 'admin', action: 'view' },
+  ] },
   { label: 'Finance Dashboard', icon: DollarSign, to: '/finance', permission: { module: 'finance', action: 'view' } },
   // Purchase Requests are embedded as a section on the Finance Dashboard (see
   // FinanceOverview). The standalone page remains for the Mill/inventory nav below.
