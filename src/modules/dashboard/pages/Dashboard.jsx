@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, Navigate } from 'react-router-dom';
 import PartyLink from '../../../shared/components/PartyLink';
 import { chatApi } from '../../chat/api';
 import {
@@ -40,8 +40,17 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const { requestOwnerApproval } = useOwnerAuth();
   const { exportOrders, millingBatches, dataLoading, refreshFromApi, addToast } = useApp();
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const isOwnerOrAdmin = user?.role === 'Owner' || user?.role === 'Super Admin';
+  // This "Operations Overview" is an export/mill operations dashboard (order
+  // pipeline, shipments, export customers…). A payments-only role (Finance) can't
+  // open any of it and shouldn't see the customer/order detail — send them to
+  // their own Finance Dashboard. Computed here (before any early return) so it can
+  // gate the render without changing hook order.
+  const financeOnly = hasPermission('finance', 'view')
+    && !hasPermission('export_orders', 'view')
+    && !hasPermission('milling', 'view')
+    && !hasPermission('inventory', 'view');
   // Pending master-data quick-add approvals (Admin → Approvals). Hook must run
   // before the early return below to keep hook order stable.
   const { data: pendingMasterApprovals = 0 } = useMasterDataApprovalsCount();
@@ -55,9 +64,9 @@ export default function Dashboard() {
   });
   const dashApprovals = (chatApprovalsData?.items || []).filter(a => !['batch', 'masterdata'].includes(a.kind)).length;
 
-  if (dataLoading && (exportOrders || []).length === 0) {
-    return <DashboardSkeleton />;
-  }
+  // NOTE: the loading / redirect guards live AFTER all hooks (just before the
+  // main return) — an early return here would skip the useMemo hooks below and
+  // trip React error #310 ("more hooks than the previous render") once data loads.
 
   const safeBatches = Array.isArray(millingBatches) ? millingBatches : [];
   const safeOrders = Array.isArray(exportOrders) ? exportOrders : [];
@@ -168,6 +177,12 @@ export default function Dashboard() {
   }, [safeOrders]);
 
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+
+  // All hooks are above this point — these guards are safe to early-return on.
+  // Payments-only Finance has no business on the export/mill Operations Overview
+  // (and can't open its links) — send them to their own Finance Dashboard.
+  if (financeOnly) return <Navigate to="/finance" replace />;
+  if (dataLoading && (exportOrders || []).length === 0) return <DashboardSkeleton />;
 
   return (
     <div className="space-y-5 pb-4">
