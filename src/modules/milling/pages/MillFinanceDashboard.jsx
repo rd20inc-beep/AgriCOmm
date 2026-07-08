@@ -4,7 +4,7 @@ import {
   DollarSign, Users, Zap, Shield, TrendingUp, TrendingDown, AlertTriangle,
   Plus, UserPlus, Package, Factory, Wallet, ArrowUpRight, ArrowDownRight, Printer,
   Building2, Banknote, Receipt, Layers, Truck, ExternalLink,
-  Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X, FileText, RefreshCw, Sparkles, ArrowLeftRight, Inbox, Check, ShoppingCart, Clock, Landmark, LogOut, History,
+  Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X, FileText, RefreshCw, Sparkles, ArrowLeftRight, Inbox, Check, ShoppingCart, Clock, Landmark, LogOut, History, ChevronDown,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
@@ -95,6 +95,19 @@ const tabs = [
   { key: 'loss',       label: 'Loss & Theft', icon: Shield },
   { key: 'payroll',    label: 'Payroll',      icon: Users },
   { key: 'utilities',  label: 'Utilities',    icon: Zap },
+];
+
+const tabByKey = Object.fromEntries(tabs.map((t) => [t.key, t]));
+
+// Grouped tab bar: primary tabs stay top-level; related detail is tucked into
+// dropdowns so the bar is short. Standalone = { key }; group = { label, icon, keys }.
+const NAV = [
+  { key: 'overview' },
+  { key: 'moneyflow' },
+  { label: 'Parties',     icon: Building2,     keys: ['suppliers', 'customers'] },
+  { label: 'Costs',       icon: TrendingDown,  keys: ['expenses', 'recurring', 'addcosts', 'utilities'] },
+  { label: 'Performance', icon: TrendingUp,    keys: ['efficiency', 'loss'] },
+  { key: 'payroll' },
 ];
 
 function Stat({ label, value, sub, tone = 'slate', icon: Icon }) {
@@ -352,6 +365,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   const anyUnpaid = unpaidEmployees.length > 0;
 
   const [activeTab, setActiveTab] = useState(payrollOnly ? 'payroll' : 'overview');
+  const [openGroup, setOpenGroup] = useState(null);
   // Deep-link from the Mill Customers/Suppliers pages: ?tab=customers&customer=ID
   // (or tab=suppliers&supplier=ID) opens the right tab with the party selected.
   const [searchParams] = useSearchParams();
@@ -806,21 +820,56 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
         </div>
       )}
 
-      {/* ─── TABS ──────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-1 border-b border-gray-200 overflow-x-auto">
-        {tabs.filter(t => t.key !== 'payroll' || canViewPayroll).map(t => (
-          <button
-            key={t.key}
-            onClick={() => setActiveTab(t.key)}
-            className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors flex items-center gap-1.5 ${
-              activeTab === t.key
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            <t.icon className="w-4 h-4" /> {t.label}
-          </button>
-        ))}
+      {/* ─── TABS — grouped into dropdowns to keep the bar short ──────── */}
+      <div className="relative border-b border-gray-200">
+        <div className="flex flex-wrap items-center gap-1">
+          {NAV.map((item) => {
+            const cls = (active) =>
+              `px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors flex items-center gap-1.5 ${
+                active ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`;
+
+            // Standalone tab (payroll is permission-gated)
+            if (item.key) {
+              if (item.key === 'payroll' && !canViewPayroll) return null;
+              const t = tabByKey[item.key];
+              const Icon = t.icon;
+              return (
+                <button key={item.key} onClick={() => { setActiveTab(item.key); setOpenGroup(null); }} className={cls(activeTab === item.key)}>
+                  <Icon className="w-4 h-4" /> {t.label}
+                </button>
+              );
+            }
+
+            // Dropdown group
+            const GIcon = item.icon;
+            const open = openGroup === item.label;
+            const active = item.keys.includes(activeTab);
+            return (
+              <div key={item.label} className="relative">
+                <button type="button" onClick={() => setOpenGroup(open ? null : item.label)} className={cls(active)}>
+                  <GIcon className="w-4 h-4" /> {item.label}
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${open ? 'rotate-180' : ''}`} />
+                </button>
+                {open && (
+                  <div className="absolute left-0 top-full z-30 min-w-[190px] bg-white border border-gray-200 rounded-b-lg shadow-lg py-1">
+                    {item.keys.map((k) => {
+                      const ct = tabByKey[k];
+                      const CIcon = ct.icon;
+                      return (
+                        <button key={k} onClick={() => { setActiveTab(k); setOpenGroup(null); }}
+                          className={`w-full flex items-center gap-2 px-4 py-2 text-sm text-left ${activeTab === k ? 'text-blue-600 bg-blue-50 font-medium' : 'text-gray-600 hover:bg-gray-50'}`}>
+                          <CIcon className="w-4 h-4 flex-shrink-0" /> {ct.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        {openGroup && <div className="fixed inset-0 z-20" onClick={() => setOpenGroup(null)} />}
       </div>
 
       </>)}
