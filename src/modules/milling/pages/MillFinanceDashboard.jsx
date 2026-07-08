@@ -841,10 +841,23 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
               );
             }
 
-            // Dropdown group
+            // Dropdown group. Only render children that exist; if a group ends up
+            // with a single visible child, show it as a plain tab (not a one-item
+            // dropdown) — same behaviour as the Export order detail bar.
+            const children = item.keys.filter((k) => tabByKey[k]);
+            if (!children.length) return null;
+            if (children.length === 1) {
+              const t = tabByKey[children[0]];
+              const Icon = t.icon;
+              return (
+                <button key={t.key} onClick={() => { setActiveTab(t.key); setOpenGroup(null); }} className={cls(activeTab === t.key)}>
+                  <Icon className="w-4 h-4" /> {t.label}
+                </button>
+              );
+            }
             const GIcon = item.icon;
             const open = openGroup === item.label;
-            const active = item.keys.includes(activeTab);
+            const active = children.includes(activeTab);
             return (
               <div key={item.label} className="relative">
                 <button type="button" onClick={() => setOpenGroup(open ? null : item.label)} className={cls(active)}>
@@ -853,7 +866,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                 </button>
                 {open && (
                   <div className="absolute left-0 top-full z-30 min-w-[190px] bg-white border border-gray-200 rounded-b-lg shadow-lg py-1">
-                    {item.keys.map((k) => {
+                    {children.map((k) => {
                       const ct = tabByKey[k];
                       const CIcon = ct.icon;
                       return (
