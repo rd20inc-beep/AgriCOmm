@@ -770,6 +770,16 @@ export default function ExportOrderDetail() {
               // Dropdown group — only the currently-visible children
               const children = item.keys.map(k => byKey[k]).filter(Boolean);
               if (!children.length) return null;
+              // If only one child is visible for this status, show it as a plain
+              // tab (its own label) rather than a single-item dropdown.
+              if (children.length === 1) {
+                const t = children[0];
+                return (
+                  <button key={t.key} onClick={() => { setActiveTab(t.key); setOpenGroup(null); }} className={cls(activeTab === t.key)}>
+                    {t.label}
+                  </button>
+                );
+              }
               const open = openGroup === item.label;
               const active = children.some(c => c.key === activeTab);
               return (
