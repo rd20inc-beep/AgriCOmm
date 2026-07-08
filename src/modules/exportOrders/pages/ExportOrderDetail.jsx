@@ -1,5 +1,18 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { ChevronDown } from 'lucide-react';
 import { useParams, useNavigate } from 'react-router-dom';
+
+// Grouped tab bar: primary stages stay top-level; Packing/Printed Bags and
+// Shipment/Timeline fold into dropdowns. Keys reference tabList; only tabs
+// visible for the current order status render (see getVisibleTabs).
+const DETAIL_NAV = [
+  { key: 'overview' },
+  { key: 'financials' },
+  { key: 'procurement' },
+  { label: 'Packing', keys: ['packing', 'printedBags'] },
+  { key: 'documents' },
+  { label: 'Shipment', keys: ['shipment', 'timeline'] },
+];
 import { useQueryClient } from '@tanstack/react-query';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
@@ -63,6 +76,7 @@ export default function ExportOrderDetail() {
   const createMillingMut = useCreateMillingBatch();
 
   const [activeTab, setActiveTab] = useState('overview');
+  const [openGroup, setOpenGroup] = useState(null);
   const [showActions, setShowActions] = useState(false);
   const [showInvoicePreview, setShowInvoicePreview] = useState(false);
 
@@ -732,21 +746,53 @@ export default function ExportOrderDetail() {
         </div>
       )}
 
-      {/* Tabs — only show tabs relevant to the current workflow stage */}
-      <div className="flex items-center gap-1 border-b border-gray-200 overflow-x-auto">
-        {visibleTabs.map(tab => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
-              activeTab === tab.key
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
+      {/* Tabs — grouped into dropdowns; only tabs relevant to the current
+          workflow stage render (getVisibleTabs). */}
+      <div className="relative border-b border-gray-200">
+        <div className="flex flex-wrap items-center gap-1">
+          {(() => {
+            const byKey = Object.fromEntries(visibleTabs.map(t => [t.key, t]));
+            const cls = (active) =>
+              `px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors flex items-center gap-1.5 ${
+                active ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`;
+            return DETAIL_NAV.map(item => {
+              // Standalone tab (skip if hidden for this status)
+              if (item.key) {
+                const t = byKey[item.key];
+                if (!t) return null;
+                return (
+                  <button key={item.key} onClick={() => { setActiveTab(item.key); setOpenGroup(null); }} className={cls(activeTab === item.key)}>
+                    {t.label}
+                  </button>
+                );
+              }
+              // Dropdown group — only the currently-visible children
+              const children = item.keys.map(k => byKey[k]).filter(Boolean);
+              if (!children.length) return null;
+              const open = openGroup === item.label;
+              const active = children.some(c => c.key === activeTab);
+              return (
+                <div key={item.label} className="relative">
+                  <button type="button" onClick={() => setOpenGroup(open ? null : item.label)} className={cls(active)}>
+                    {item.label} <ChevronDown className={`w-3.5 h-3.5 transition-transform ${open ? 'rotate-180' : ''}`} />
+                  </button>
+                  {open && (
+                    <div className="absolute left-0 top-full z-30 min-w-[180px] bg-white border border-gray-200 rounded-b-lg shadow-lg py-1">
+                      {children.map(c => (
+                        <button key={c.key} onClick={() => { setActiveTab(c.key); setOpenGroup(null); }}
+                          className={`w-full text-left px-4 py-2 text-sm ${activeTab === c.key ? 'text-blue-600 bg-blue-50 font-medium' : 'text-gray-600 hover:bg-gray-50'}`}>
+                          {c.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            });
+          })()}
+        </div>
+        {openGroup && <div className="fixed inset-0 z-20" onClick={() => setOpenGroup(null)} />}
       </div>
 
       {/* Tab Content */}
