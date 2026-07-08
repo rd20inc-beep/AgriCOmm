@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Users, Truck, Package, Warehouse, Settings, ShoppingBag, Landmark, Tags, Factory, Files, UsersRound, MessageSquare, Shield, Building2, Inbox, ShieldAlert } from 'lucide-react';
+import { Users, Truck, Package, Warehouse, Settings, ShoppingBag, Landmark, Tags, Factory, Files, UsersRound, MessageSquare, Shield, Building2, Inbox, ShieldAlert, Database, ChevronDown } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 
 import CustomersTab from './admin/CustomersTab';
@@ -61,11 +61,27 @@ const tabComponents = {
   danger: DangerZoneTab,
 };
 
+const tabByKey = Object.fromEntries(tabs.map((t) => [t.key, t]));
+
+// Grouped tab bar: a few top-level items with related config tucked into
+// dropdowns, so the admin nav is short and scannable. Standalone item = { key };
+// group = { label, icon, keys:[…] } (keys reference the flat tabs above).
+const NAV = [
+  { key: 'approvals' },
+  { label: 'Master Data', icon: Database,  keys: ['customers', 'suppliers', 'products', 'categories', 'bagTypes', 'costCategories', 'expenseVendors', 'bankAccounts'] },
+  { label: 'Facilities',  icon: Warehouse, keys: ['warehouses', 'mills'] },
+  { label: 'Documents',   icon: Files,     keys: ['docTemplates', 'whatsapp'] },
+  { label: 'Access',      icon: Shield,    keys: ['users', 'permissions'] },
+  { key: 'settings' },
+  { key: 'danger' },
+];
+
 export default function Admin() {
   const { user } = useAuth();
   const isSuperAdmin = user?.role === 'Super Admin';
-  const visibleTabs = tabs.filter(t => !t.superAdminOnly || isSuperAdmin);
   const [activeTab, setActiveTab] = useState('approvals');
+  const [openGroup, setOpenGroup] = useState(null);
+  const canSee = (key) => !tabByKey[key]?.superAdminOnly || isSuperAdmin;
   const [pendingCount, setPendingCount] = useState(0);
 
   // Poll the approvals count so the badge stays fresh while admins are
@@ -93,33 +109,69 @@ export default function Admin() {
         <p className="text-sm text-gray-500 mt-0.5">Manage master data and system configuration</p>
       </div>
 
-      {/* Tabs */}
-      <div className="flex items-center gap-1 border-b border-gray-200 overflow-x-auto whitespace-nowrap">
-        {visibleTabs.map(tab => {
-          const TabIcon = tab.icon;
-          const showBadge = tab.key === 'approvals' && pendingCount > 0;
-          const danger = tab.key === 'danger';
-          return (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={`inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
-                activeTab === tab.key
+      {/* Tabs — grouped into dropdowns to keep the bar short */}
+      <div className="relative border-b border-gray-200">
+        <div className="flex flex-wrap items-center gap-1">
+          {NAV.map((item) => {
+            const tabCls = (active, danger) =>
+              `inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+                active
                   ? (danger ? 'border-rose-600 text-rose-600' : 'border-blue-600 text-blue-600')
                   : (danger ? 'border-transparent text-rose-500 hover:text-rose-700 hover:border-rose-300'
                             : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300')
-              }`}
-            >
-              <TabIcon className="w-4 h-4" />
-              {tab.label}
-              {showBadge && (
-                <span className="ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-amber-500 text-white text-[10px] font-bold">
-                  {pendingCount > 99 ? '99+' : pendingCount}
-                </span>
-              )}
-            </button>
-          );
-        })}
+              }`;
+
+            // Standalone tab
+            if (item.key) {
+              if (!canSee(item.key)) return null;
+              const t = tabByKey[item.key];
+              const TabIcon = t.icon;
+              const danger = item.key === 'danger';
+              const showBadge = item.key === 'approvals' && pendingCount > 0;
+              return (
+                <button key={item.key} onClick={() => { setActiveTab(item.key); setOpenGroup(null); }}
+                  className={tabCls(activeTab === item.key, danger)}>
+                  <TabIcon className="w-4 h-4" /> {t.label}
+                  {showBadge && (
+                    <span className="ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-amber-500 text-white text-[10px] font-bold">
+                      {pendingCount > 99 ? '99+' : pendingCount}
+                    </span>
+                  )}
+                </button>
+              );
+            }
+
+            // Dropdown group
+            const keys = item.keys.filter(canSee);
+            if (!keys.length) return null;
+            const GIcon = item.icon;
+            const open = openGroup === item.label;
+            const active = keys.includes(activeTab);
+            return (
+              <div key={item.label} className="relative">
+                <button type="button" onClick={() => setOpenGroup(open ? null : item.label)} className={tabCls(active, false)}>
+                  <GIcon className="w-4 h-4" /> {item.label}
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${open ? 'rotate-180' : ''}`} />
+                </button>
+                {open && (
+                  <div className="absolute left-0 top-full z-30 min-w-[200px] bg-white border border-gray-200 rounded-b-lg shadow-lg py-1">
+                    {keys.map((k) => {
+                      const ct = tabByKey[k];
+                      const CIcon = ct.icon;
+                      return (
+                        <button key={k} onClick={() => { setActiveTab(k); setOpenGroup(null); }}
+                          className={`w-full flex items-center gap-2 px-4 py-2 text-sm text-left ${activeTab === k ? 'text-blue-600 bg-blue-50 font-medium' : 'text-gray-600 hover:bg-gray-50'}`}>
+                          <CIcon className="w-4 h-4 flex-shrink-0" /> {ct.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        {openGroup && <div className="fixed inset-0 z-20" onClick={() => setOpenGroup(null)} />}
       </div>
 
       {/* Active Tab Content */}
