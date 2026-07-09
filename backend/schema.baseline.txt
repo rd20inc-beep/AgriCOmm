@@ -2040,6 +2040,20 @@ COL scheduled_tasks.name:character varying:NOT NULL
 COL scheduled_tasks.next_run:timestamp with time zone:NULL
 COL scheduled_tasks.task_type:character varying:NOT NULL
 COL scheduled_tasks.updated_at:timestamp with time zone:NOT NULL
+COL service_milling_dispatches.bag_count:integer:NULL
+COL service_milling_dispatches.client_customer_id:integer:NULL
+COL service_milling_dispatches.created_at:timestamp with time zone:NOT NULL
+COL service_milling_dispatches.created_by:integer:NULL
+COL service_milling_dispatches.dispatch_date:date:NOT NULL
+COL service_milling_dispatches.dispatch_no:character varying:NOT NULL
+COL service_milling_dispatches.driver_name:character varying:NULL
+COL service_milling_dispatches.id:integer:NOT NULL
+COL service_milling_dispatches.lot_id:integer:NOT NULL
+COL service_milling_dispatches.notes:text:NULL
+COL service_milling_dispatches.qty_kg:numeric:NOT NULL
+COL service_milling_dispatches.service_batch_id:integer:NOT NULL
+COL service_milling_dispatches.updated_at:timestamp with time zone:NOT NULL
+COL service_milling_dispatches.vehicle_no:character varying:NULL
 COL service_milling_invoices.balance_amount:numeric:NOT NULL
 COL service_milling_invoices.client_customer_id:integer:NULL
 COL service_milling_invoices.created_at:timestamp with time zone:NOT NULL
@@ -3094,6 +3108,11 @@ CON scheduled_reports.scheduled_reports_pkey(p)
 CON scheduled_reports.scheduled_reports_saved_report_id_foreign(f)
 CON scheduled_tasks.scheduled_tasks_last_status_check(c)
 CON scheduled_tasks.scheduled_tasks_pkey(p)
+CON service_milling_dispatches.service_milling_dispatches_client_customer_id_foreign(f)
+CON service_milling_dispatches.service_milling_dispatches_dispatch_no_unique(u)
+CON service_milling_dispatches.service_milling_dispatches_lot_id_foreign(f)
+CON service_milling_dispatches.service_milling_dispatches_pkey(p)
+CON service_milling_dispatches.service_milling_dispatches_service_batch_id_foreign(f)
 CON service_milling_invoices.chk_service_milling_invoices_payment_status_valid(c)
 CON service_milling_invoices.service_milling_invoices_client_customer_id_foreign(f)
 CON service_milling_invoices.service_milling_invoices_invoice_no_unique(u)

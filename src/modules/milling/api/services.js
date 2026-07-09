@@ -8,6 +8,10 @@ export const serviceMillingApi = {
   getInvoice: (id) => api.get(`/api/service-milling/invoices/${id}`),
   createInvoice: (data) => api.post('/api/service-milling/invoices', data),
   recordPayment: (id, data) => api.post(`/api/service-milling/invoices/${id}/payments`, data),
+  // Dispatch — hand client-owned finished/by-product stock back to the client.
+  getDispatchSummary: (batchId) => api.get(`/api/service-milling/batches/${batchId}/dispatch-summary`),
+  createDispatch: (batchId, data) => api.post(`/api/service-milling/batches/${batchId}/dispatches`, data),
+  deleteDispatch: (dispatchId) => api.delete(`/api/service-milling/dispatches/${dispatchId}`),
 };
 
 export const millingApi = {
