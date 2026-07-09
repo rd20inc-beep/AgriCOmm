@@ -15,30 +15,56 @@ import ChatWidget from './ChatWidget';
 const millNav = [
   { section: 'Mill' },
   { label: 'Dashboard', icon: LayoutDashboard, to: '/' },
-  { label: 'Operations', icon: Factory, to: '/milling' },
-  { label: 'Rice Purchases', icon: Truck, to: '/milling/rice-purchases' },
-  { label: 'Quality Control', icon: FlaskConical, to: '/quality' },
-  { section: 'Store' },
-  { label: 'Stock Overview', icon: ShoppingCart, to: '/mill-store' },
-  { label: 'Alerts', icon: AlertTriangle, to: '/mill-store/alerts' },
-  { label: 'Adjustments', icon: ClipboardEdit, to: '/mill-store/adjustments' },
-  { label: 'Ratios', icon: Gauge, to: '/mill-store/ratios' },
-  { section: 'Inventory' },
-  { label: 'Lot Inventory', icon: Package, to: '/lot-inventory' },
-  { label: 'Stock Adjustments', icon: AlertTriangle, to: '/stock-adjustments' },
-  { label: 'Transfers', icon: ArrowRightLeft, to: '/transfer' },
-  { section: 'Sales' },
-  { label: 'Local Sales', icon: ShoppingCart, to: '/local-sales' },
-  { label: 'Customers', icon: Users, to: '/milling/customers' },
-  { label: 'Suppliers', icon: Truck, to: '/milling/suppliers' },
-  { section: 'Finance' },
+  {
+    label: 'Production',
+    icon: Factory,
+    children: [
+      { label: 'Operations', to: '/milling', icon: Factory },
+      { label: 'Rice Purchases', to: '/milling/rice-purchases', icon: Truck },
+      { label: 'Quality Control', to: '/quality', icon: FlaskConical },
+    ],
+  },
+  {
+    label: 'Store',
+    icon: ShoppingCart,
+    children: [
+      { label: 'Stock Overview', to: '/mill-store', icon: ShoppingCart },
+      { label: 'Alerts', to: '/mill-store/alerts', icon: AlertTriangle },
+      { label: 'Adjustments', to: '/mill-store/adjustments', icon: ClipboardEdit },
+      { label: 'Ratios', to: '/mill-store/ratios', icon: Gauge },
+    ],
+  },
+  {
+    label: 'Inventory',
+    icon: Package,
+    children: [
+      { label: 'Lot Inventory', to: '/lot-inventory', icon: Package },
+      { label: 'Stock Adjustments', to: '/stock-adjustments', icon: AlertTriangle },
+      { label: 'Transfers', to: '/transfer', icon: ArrowRightLeft },
+    ],
+  },
+  {
+    label: 'Sales',
+    icon: ShoppingCart,
+    children: [
+      { label: 'Local Sales', to: '/local-sales', icon: ShoppingCart },
+      { label: 'Customers', to: '/milling/customers', icon: Users },
+      { label: 'Suppliers', to: '/milling/suppliers', icon: Truck },
+    ],
+  },
+  { section: 'Finance & Reports' },
   { label: 'Mill Finance', icon: DollarSign, to: '/milling/finance' },
-  { section: 'Reports' },
-  { label: 'Dashboards', icon: BarChart3, to: '/reports' },
-  { label: 'Print Reports', icon: Printer, to: '/reports/print' },
+  {
+    label: 'Reports',
+    icon: BarChart3,
+    children: [
+      { label: 'Dashboards', to: '/reports', icon: BarChart3 },
+      { label: 'Print Reports', to: '/reports/print', icon: Printer },
+    ],
+  },
 ];
 
-function SidebarLink({ to, icon: Icon, label, collapsed, onNavigate }) {
+function SidebarLink({ to, icon: Icon, label, nested, collapsed, onNavigate }) {
   return (
     <NavLink
       to={to}
@@ -47,15 +73,73 @@ function SidebarLink({ to, icon: Icon, label, collapsed, onNavigate }) {
       title={collapsed ? label : undefined}
       className={({ isActive }) =>
         `group flex items-center gap-3 px-3 py-2 text-[13px] font-medium rounded-lg mx-2 transition-all ${
+          nested ? 'ml-8' : ''
+        } ${
           isActive
             ? 'bg-blue-600/20 text-blue-400'
             : 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-200'
-        } ${collapsed ? 'justify-center px-0 mx-1' : ''}`
+        } ${collapsed && !nested ? 'justify-center px-0 mx-1' : ''}`
       }
     >
-      {Icon && <Icon size={collapsed ? 20 : 17} className="flex-shrink-0" />}
+      {Icon && <Icon size={collapsed && !nested ? 20 : 17} className="flex-shrink-0" />}
       {!collapsed && <span className="truncate">{label}</span>}
     </NavLink>
+  );
+}
+
+function MillSidebarSection({ item, collapsed, onNavigate }) {
+  const location = useLocation();
+  const isChildActive = item.children?.some((child) =>
+    location.pathname === child.to || location.pathname.startsWith(child.to + '/')
+  );
+  const [open, setOpen] = useState(isChildActive || false);
+
+  useEffect(() => {
+    if (isChildActive) setOpen(true);
+  }, [isChildActive]);
+
+  if (!item.children) {
+    return <SidebarLink to={item.to} icon={item.icon} label={item.label} collapsed={collapsed} onNavigate={onNavigate} />;
+  }
+
+  const Icon = item.icon;
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((prev) => !prev)}
+        title={collapsed ? item.label : undefined}
+        className={`group flex w-full items-center gap-3 px-3 py-2 text-[13px] font-medium rounded-lg mx-2 transition-all ${
+          isChildActive
+            ? 'text-blue-400 bg-white/[0.04]'
+            : 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-200'
+        } ${collapsed ? 'justify-center px-0 mx-1' : ''}`}
+        style={collapsed ? { width: 'calc(100% - 0.5rem)' } : { width: 'calc(100% - 1rem)' }}
+      >
+        <Icon size={collapsed ? 20 : 17} className="flex-shrink-0" />
+        {!collapsed && (
+          <>
+            <span className="flex-1 text-left truncate">{item.label}</span>
+            <ChevronDown size={14} className={`transition-transform flex-shrink-0 ${open ? 'rotate-180' : ''}`} />
+          </>
+        )}
+      </button>
+      {open && !collapsed && (
+        <div className="mt-0.5 space-y-0.5">
+          {item.children.map((child) => (
+            <SidebarLink
+              key={child.to}
+              to={child.to}
+              icon={child.icon || null}
+              label={child.label}
+              nested
+              collapsed={false}
+              onNavigate={onNavigate}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -176,11 +260,9 @@ export default function MillLayout({ children }) {
               );
             }
             return (
-              <SidebarLink
-                key={item.to}
-                to={item.to}
-                icon={item.icon}
-                label={item.label}
+              <MillSidebarSection
+                key={item.label}
+                item={item}
                 collapsed={sidebarCollapsed}
                 onNavigate={handleSidebarNavigate}
               />
