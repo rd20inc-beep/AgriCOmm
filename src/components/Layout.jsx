@@ -53,19 +53,35 @@ const sidebarNav = [
       { label: 'Local Sales', to: '/local-sales', permission: { module: 'inventory', action: 'view' } },
     ],
   },
-  { section: 'Reports' },
-  { label: 'Reports', icon: BarChart3, to: '/reports', permission: { module: 'reports', action: 'view' } },
-  { label: 'Print Reports', icon: Printer, to: '/reports/print', permission: { module: 'reports', action: 'view' } },
-  { section: 'Intelligence' },
-  { label: 'AI Assistant', icon: Sparkles, to: '/ai' },
-  { label: 'Exceptions', icon: Zap, to: '/exceptions', permission: { module: 'admin', action: 'view' } },
-  { label: 'Analytics', icon: Brain, to: '/intelligence' },
-  { label: 'Simulator', icon: Beaker, to: '/simulator' },
-  { section: 'Governance' },
-  { label: 'Approvals', icon: ShieldCheck, to: '/approvals', permission: { module: 'admin', action: 'view' } },
-  { label: 'Audit Trail', icon: Shield, to: '/audit', permission: { module: 'admin', action: 'view' } },
-  { label: 'Documents', icon: FileText, to: '/documents', permission: { module: 'documents', action: 'view' } },
+  { section: 'Insights' },
+  {
+    label: 'Reports',
+    icon: BarChart3,
+    children: [
+      { label: 'Business Reports', to: '/reports', icon: BarChart3, permission: { module: 'reports', action: 'view' } },
+      { label: 'Print Reports', to: '/reports/print', icon: Printer, permission: { module: 'reports', action: 'view' } },
+    ],
+  },
+  {
+    label: 'AI & Insights',
+    icon: Sparkles,
+    children: [
+      { label: 'AI Assistant', to: '/ai', icon: Sparkles },
+      { label: 'Analytics', to: '/intelligence', icon: Brain },
+      { label: 'Simulator', to: '/simulator', icon: Beaker },
+      { label: 'Exceptions', to: '/exceptions', icon: Zap, permission: { module: 'admin', action: 'view' } },
+    ],
+  },
   { section: 'System' },
+  {
+    label: 'Governance',
+    icon: ShieldCheck,
+    children: [
+      { label: 'Approvals', to: '/approvals', icon: ShieldCheck, permission: { module: 'admin', action: 'view' } },
+      { label: 'Audit Trail', to: '/audit', icon: Shield, permission: { module: 'admin', action: 'view' } },
+      { label: 'Documents', to: '/documents', icon: FileText, permission: { module: 'documents', action: 'view' } },
+    ],
+  },
   { label: 'Admin', icon: Settings, to: '/admin', permission: { module: 'admin', action: 'view' } },
 ];
 
