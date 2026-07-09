@@ -6,7 +6,7 @@
 // only (no COGS/margin). Reuses the shared ledger CSV/print helpers.
 import { useState, useEffect, useMemo, Fragment } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Search, Download, Printer, FileText, AlertTriangle, BookUser, ChevronRight, ChevronDown, Factory } from 'lucide-react';
+import { Search, Download, Printer, FileText, AlertTriangle, BookUser, ChevronRight, ChevronDown, Factory, ArrowLeft } from 'lucide-react';
 import { reportingApi } from '../api/services';
 import { localSalesApi, lotInventoryApi } from '../../../api/services';
 import { useApp } from '../../../context/AppContext';
@@ -107,6 +107,7 @@ export default function InvoiceLedger() {
     <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
+          <Link to="/reports" className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm mb-1"><ArrowLeft size={14} /> Business Reports</Link>
           <h1 className="text-2xl font-bold text-gray-900 inline-flex items-center gap-2"><FileText size={22} /> Invoice Ledger</h1>
           <p className="text-sm text-gray-500">Search and trace every sales & purchase invoice.</p>
         </div>
