@@ -239,7 +239,14 @@ export default function MillingBatchDetail() {
   // Per-truck quality entered on arrival (milling_vehicle_arrivals.quality_json).
   // Inner keys may be camelCase (transformed) or snake — read both.
   const vehQ = (v) => v.qualityJson || v.quality_json || null;
-  const qGet = (q, p) => { const raw = q?.[p.key] ?? q?.[p.backendKey]; const n = parseFloat(raw); return Number.isNaN(n) ? null : n; };
+  // Vehicle quality_json stores un-suffixed grade keys (b1, csr, short_grain),
+  // while qualityParams uses b1Pct / b1_pct — so also try the backendKey minus
+  // its _pct suffix, else the broken-grade values from trucks are dropped.
+  const qGet = (q, p) => {
+    const base = p.backendKey.replace(/_pct$/, '');
+    const raw = q?.[p.key] ?? q?.[p.backendKey] ?? q?.[base];
+    const n = parseFloat(raw); return Number.isNaN(n) ? null : n;
+  };
   const vehiclesWithQuality = safeVehicles.filter((v) => { const q = vehQ(v); return q && typeof q === 'object' && Object.keys(q).length > 0; });
   // Weight-weighted aggregate of the per-truck quality — used to prefill the
   // batch's arrival analysis so the operator doesn't re-type what the trucks gave.
@@ -250,7 +257,7 @@ export default function MillingBatchDetail() {
       let num = 0, den = 0;
       vehiclesWithQuality.forEach((v) => {
         const val = qGet(vehQ(v), p); if (val == null) return;
-        const w = parseFloat(v.weight_kg) || 1; num += val * w; den += w;
+        const w = parseFloat(v.weightKg) || 1; num += val * w; den += w;
       });
       agg[p.key] = den > 0 ? Math.round((num / den) * 100) / 100 : '';
     });
@@ -258,12 +265,17 @@ export default function MillingBatchDetail() {
     vehiclesWithQuality.forEach((v) => {
       const q = vehQ(v) || {};
       const pv = parseFloat(q.pricePerMt ?? q.price_per_mt ?? q.pricePerMT); if (Number.isNaN(pv)) return;
-      const w = parseFloat(v.weight_kg) || 1; pnum += pv * w; pden += w;
+      const w = parseFloat(v.weightKg) || 1; pnum += pv * w; pden += w;
     });
     agg.pricePerMT = pden > 0 ? Math.round(pnum / pden) : '';
     agg.pricePerKg = agg.pricePerMT ? Math.round((agg.pricePerMT / 1000) * 100) / 100 : '';
     return agg;
   })();
+  // The Sample analysis falls back to the per-truck quality aggregate when no
+  // sample was manually recorded — so entering quality on a vehicle shows up,
+  // autofilled, as the batch Sample.
+  const sampleForDisplay = safeSample || vehicleQualityAgg;
+  const sampleIsAuto = !safeSample && !!vehicleQualityAgg;
 
   // Yield breakdown for progress bars. Sortex Rejects is the new
   // byproduct; Bran/Husk only render if a legacy batch still carries them.
@@ -325,9 +337,10 @@ export default function MillingBatchDetail() {
       qualityParams.forEach(p => { next[p.key] = source[p.key] ?? ''; });
       next.pricePerKg = source.pricePerKg ?? '';
       next.pricePerMT = source.pricePerMT ?? '';
-    } else if (type === 'arrival' && vehicleQualityAgg) {
-      // No saved arrival analysis yet — seed it from the truck samples so the
-      // operator can confirm/adjust instead of re-entering.
+    } else if (vehicleQualityAgg) {
+      // No saved analysis of this type yet — seed BOTH the sample and the arrival
+      // from the per-truck quality entered on the vehicles, so the operator
+      // confirms/adjusts instead of re-typing what the trucks already gave.
       qualityParams.forEach(p => { next[p.key] = vehicleQualityAgg[p.key] ?? ''; });
       next.pricePerKg = vehicleQualityAgg.pricePerKg ?? '';
       next.pricePerMT = vehicleQualityAgg.pricePerMT ?? '';
@@ -1268,9 +1281,14 @@ export default function MillingBatchDetail() {
                   </button>
                 </div>
               </div>
-              {safeSample || safeArrival ? (
+              {sampleForDisplay || safeArrival ? (
                 <div className="overflow-x-auto">
-                  {!safeSample && safeArrival && (
+                  {sampleIsAuto && (
+                    <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+                      Sample values shown below are <strong>autofilled from the per-truck quality</strong> you entered on the vehicles. Click <strong>Enter Sample</strong> to confirm/save them as the batch Sample Analysis.
+                    </div>
+                  )}
+                  {!sampleForDisplay && safeArrival && (
                     <div className="mb-3 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
                       Arrival analysis was prefilled from the source lot. Add a separate <strong>Sample Analysis</strong> to enable side-by-side variance comparison.
                     </div>
@@ -1292,7 +1310,7 @@ export default function MillingBatchDetail() {
                     </thead>
                     <tbody>
                       {qualityParams.map((param) => {
-                        const sampleVal = safeSample?.[param.key];
+                        const sampleVal = sampleForDisplay?.[param.key];
                         const arrivalVal = safeArrival?.[param.key];
                         const hasAny = sampleVal != null || arrivalVal != null;
                         if (!hasAny) return null;
@@ -1326,16 +1344,16 @@ export default function MillingBatchDetail() {
                   </table>
 
                   {/* Price comparison */}
-                  {(safeSample?.pricePerMT || safeArrival?.pricePerMT) && (
+                  {(sampleForDisplay?.pricePerMT || safeArrival?.pricePerMT) && (
                     <div className="mt-4 border-t border-gray-200 pt-4">
                       <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Price Comparison (PKR)</h4>
                       <div className="grid grid-cols-2 gap-4">
                         <div className="bg-amber-50 rounded-lg p-3">
-                          <p className="text-xs text-amber-600 font-medium mb-1">Sample / Offered Price</p>
-                          {safeSample?.pricePerMT ? (
+                          <p className="text-xs text-amber-600 font-medium mb-1">Sample / Offered Price{sampleIsAuto ? ' (from trucks)' : ''}</p>
+                          {sampleForDisplay?.pricePerMT ? (
                             <>
-                              <p className="text-lg font-bold text-amber-900">Rs {(parseFloat(safeSample.pricePerKg) || (parseFloat(safeSample.pricePerMT) || 0) / 1000).toFixed(2)}<span className="text-xs font-normal text-amber-600"> /kg</span></p>
-                              {rawQty > 0 && <p className="text-xs text-amber-500 mt-0.5">Est. total: Rs {Math.round((parseFloat(safeSample.pricePerMT) || 0) * rawQty).toLocaleString()}</p>}
+                              <p className="text-lg font-bold text-amber-900">Rs {(parseFloat(sampleForDisplay.pricePerKg) || (parseFloat(sampleForDisplay.pricePerMT) || 0) / 1000).toFixed(2)}<span className="text-xs font-normal text-amber-600"> /kg</span></p>
+                              {rawQty > 0 && <p className="text-xs text-amber-500 mt-0.5">Est. total: Rs {Math.round((parseFloat(sampleForDisplay.pricePerMT) || 0) * rawQty).toLocaleString()}</p>}
                             </>
                           ) : <p className="text-sm text-gray-400">Not set</p>}
                         </div>
