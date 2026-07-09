@@ -418,6 +418,18 @@ export function useAddVehicle() {
   });
 }
 
+export function useUpdateVehicle() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, vehicleId, data }) => millingApi.updateVehicle(id, vehicleId, data),
+    onSuccess: (_, { id }) => {
+      qc.invalidateQueries({ queryKey: queryKeys.batches.detail(id) });
+      qc.invalidateQueries({ queryKey: queryKeys.batches.list() });
+      qc.invalidateQueries({ queryKey: queryKeys.inventory.all });
+    },
+  });
+}
+
 export function useDeleteVehicle() {
   const qc = useQueryClient();
   return useMutation({

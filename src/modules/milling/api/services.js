@@ -26,6 +26,7 @@ export const millingApi = {
   recordYield: (id, data) => api.post(`/api/milling/batches/${id}/yield`, data),
   addCost: (id, data) => api.post(`/api/milling/batches/${id}/costs`, data),
   addVehicle: (id, data) => api.post(`/api/milling/batches/${id}/vehicles`, data),
+  updateVehicle: (id, vehicleId, data) => api.put(`/api/milling/batches/${id}/vehicles/${vehicleId}`, data),
   deleteVehicle: (id, vehicleId) => api.delete(`/api/milling/batches/${id}/vehicles/${vehicleId}`),
   receiveRice: (data) => api.post('/api/milling/rice-receipts', data),
   listRicePurchases: (params) => api.get('/api/milling/rice-purchases', params),

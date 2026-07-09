@@ -1770,6 +1770,113 @@ const millingController = {
     }
   },
 
+  // Edit a recorded truck arrival (manager/owner correction of a mistake).
+  // Adjusts the linked inventory receipt by the weight difference only — a
+  // decrease reverses part of the receipt, an increase receives the extra — so
+  // the batch's raw stock and cost stay consistent. Locked once milled/yielded,
+  // same as adding a truck.
+  async updateVehicle(req, res) {
+    try {
+      const batchId = await resolveBatchId(req.params.id);
+      if (!batchId) return res.status(404).json({ success: false, message: 'Milling batch not found.' });
+      const vehicleId = parseInt(req.params.vehicleId, 10);
+      if (!vehicleId) return res.status(400).json({ success: false, message: 'Invalid vehicle id.' });
+
+      const batch = await db('milling_batches').where({ id: batchId }).first();
+      if (!batch) return res.status(404).json({ success: false, message: 'Milling batch not found.' });
+
+      const alreadyYielded = await db('inventory_lots')
+        .where({ batch_ref: `batch-${batchId}` }).whereIn('type', ['finished', 'byproduct']).first('id');
+      if (batch.status === 'Completed' || alreadyYielded) {
+        return res.status(409).json({
+          success: false,
+          message: 'This batch is already milled & yielded — its raw trucks are locked. Reverse the yield first to change the raw input.',
+        });
+      }
+
+      const {
+        vehicle_no, driver_name, driver_phone, weight_mt, weight_kg,
+        bag_size_kg, total_bags, arrival_date, notes, quality,
+      } = req.body;
+
+      const vehicle = await db.transaction(async (trx) => {
+        const existing = await trx('milling_vehicle_arrivals').where({ id: vehicleId, batch_id: batchId }).first();
+        if (!existing) { const e = new Error('Vehicle arrival not found.'); e.statusCode = 404; throw e; }
+
+        // New weight (KG canonical; accept legacy MT).
+        let newWeight = null;
+        if (weight_kg != null && weight_kg !== '') newWeight = parseFloat(weight_kg);
+        else if (weight_mt != null && weight_mt !== '') newWeight = parseFloat(weight_mt) * 1000;
+        else newWeight = parseFloat(existing.weight_kg) || 0;
+        const oldWeight = parseFloat(existing.weight_kg) || 0;
+
+        // Bag count + size (mirror addVehicle).
+        const parsedTotalBags = total_bags != null && total_bags !== '' ? parseInt(total_bags, 10) : null;
+        let parsedBagSize = bag_size_kg != null && bag_size_kg !== '' ? parseFloat(bag_size_kg) : null;
+        if (!parsedBagSize && newWeight && parsedTotalBags && parsedTotalBags > 0) parsedBagSize = newWeight / parsedTotalBags;
+        if (parsedBagSize) parsedBagSize = uc.snapBagSizeKg(parsedBagSize) || null;
+        const totalBags = parsedTotalBags
+          || (newWeight && parsedBagSize && parsedBagSize > 0 ? Math.ceil(newWeight / parsedBagSize) : null);
+
+        const cleanQuality = quality !== undefined ? sanitizeVehicleQuality(quality) : existing.quality_json;
+
+        await trx('milling_vehicle_arrivals').where({ id: vehicleId }).update({
+          vehicle_no: vehicle_no !== undefined ? (vehicle_no || null) : existing.vehicle_no,
+          driver_name: driver_name !== undefined ? (driver_name || null) : existing.driver_name,
+          driver_phone: driver_phone !== undefined ? (driver_phone || null) : existing.driver_phone,
+          weight_kg: newWeight,
+          bag_size_kg: parsedBagSize,
+          total_bags: totalBags,
+          arrival_date: arrival_date || existing.arrival_date,
+          notes: notes !== undefined ? (notes || null) : existing.notes,
+          quality_json: cleanQuality,
+          updated_at: trx.fn.now(),
+        });
+
+        // Adjust inventory by the weight delta only.
+        const delta = newWeight - oldWeight;
+        if (Math.abs(delta) > 0.0001) {
+          const lot = await trx('inventory_lots')
+            .where({ batch_ref: `batch-${batchId}`, type: 'raw', entity: 'mill' }).first();
+          if (delta < 0 && lot) {
+            await inventoryService.postMovement(trx, {
+              movementType: inventoryService.MOVEMENT_TYPES.ADJUSTMENT_MINUS,
+              lotId: lot.id, qty: Math.abs(delta), fromWarehouseId: lot.warehouse_id, sourceEntity: 'mill',
+              notes: `Vehicle ${existing.vehicle_no || vehicleId} edited: weight reduced`, currency: 'PKR', batchId, userId: req.user?.id,
+            });
+            await trx('inventory_lots').where('id', lot.id).update({
+              received_net_weight_kg: trx.raw('GREATEST(0, COALESCE(received_net_weight_kg, 0) - ?)', [Math.abs(delta)]),
+              updated_at: trx.fn.now(),
+            });
+          } else if (delta > 0) {
+            // Receive the extra (find-or-create raw lot; handles service batches).
+            let costPerKg = cleanQuality && cleanQuality.price_per_mt ? parseFloat(cleanQuality.price_per_mt) / 1000 : 0;
+            if (!costPerKg) {
+              const arrivalQuality = await trx('milling_quality_samples').where({ batch_id: batchId, analysis_type: 'arrival' }).first();
+              costPerKg = (arrivalQuality?.price_per_kg != null) ? parseFloat(arrivalQuality.price_per_kg) : (parseFloat(arrivalQuality?.price_per_mt) || 0) / 1000;
+            }
+            await inventoryService.receiveRice(trx, {
+              batchId: batch.id, weightKg: delta, costPerKg, currency: 'PKR',
+              supplierId: batch.supplier_id, productId: batch.product_id, vehicleNo: existing.vehicle_no, userId: req.user?.id,
+            });
+          }
+        }
+
+        // Recompute raw_qty_kg from the current truck total + keep cost in sync.
+        const totals = await trx('milling_vehicle_arrivals').where({ batch_id: batchId }).sum('weight_kg as total').first();
+        await trx('milling_batches').where({ id: batchId }).update({ raw_qty_kg: parseFloat(totals?.total) || 0, updated_at: trx.fn.now() });
+        await inventoryService.recomputeRawRiceCostFromVehicles(trx, batchId, req.user?.id);
+
+        return trx('milling_vehicle_arrivals').where({ id: vehicleId }).first();
+      });
+
+      return res.json({ success: true, data: { vehicle } });
+    } catch (err) {
+      console.error('Milling updateVehicle error:', err);
+      return res.status(err.statusCode || 500).json({ success: false, message: err.message || 'Internal server error.' });
+    }
+  },
+
   // Receive a rice purchase truck — auto-attaches to today's open batch
   // for (supplier, variety) or creates a fresh one. Five trucks of the
   // same D98 from the same supplier on the same day land in one batch

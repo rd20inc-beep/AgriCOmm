@@ -100,6 +100,14 @@ router.post(
   auditAction('add_vehicle', 'milling_batch', (req) => req.params.id),
   controller.addVehicle
 );
+// Edit a truck arrival — manager/owner correction. Gated by milling.edit (same
+// as delete), so mill operators see trucks read-only.
+router.put(
+  '/batches/:id/vehicles/:vehicleId',
+  authorize('milling', 'edit'),
+  auditAction('update_vehicle', 'milling_batch', (req) => req.params.id),
+  controller.updateVehicle
+);
 
 // High-level rice purchase entry: auto-finds/creates today's open batch
 // for (supplier, variety) so multiple trucks land in ONE batch + ONE lot.

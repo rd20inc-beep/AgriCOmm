@@ -9,9 +9,10 @@ import SlideDrawer from '../../../components/SlideDrawer';
 export default function VehicleArrivalDrawer({
   open, onClose, form, setForm, onSubmit,
   showQuality, setShowQuality, hidePricing = false,
+  title = 'Add Vehicle Arrival', submitLabel = 'Add Vehicle',
 }) {
   return (
-    <SlideDrawer open={open} onClose={onClose} title="Add Vehicle Arrival" icon={Truck} size="xl">
+    <SlideDrawer open={open} onClose={onClose} title={title} icon={Truck} size="xl">
       <form onSubmit={onSubmit} className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
           <div>
@@ -202,7 +203,7 @@ export default function VehicleArrivalDrawer({
             className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
           >
             <Truck size={16} />
-            Add Vehicle
+            {submitLabel}
           </button>
         </div>
       </form>

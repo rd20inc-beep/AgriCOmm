@@ -31,7 +31,7 @@ import { queryKeys } from '../../../api/queryClient';
 import {
   useMillingBatch, useSaveQuality, useRecordYield,
   useAddBatchCost, useAddVehicle, useUpdateMillingBatch,
-  useDeleteVehicle, useDeleteBatch, useBatchSourceLots,
+  useUpdateVehicle, useDeleteVehicle, useDeleteBatch, useBatchSourceLots,
 } from '../../../api/queries';
 import { millingApi } from '../../../api/services';
 import { millingApi as millingModApi } from '../api/services';
@@ -111,6 +111,7 @@ export default function MillingBatchDetail() {
   const recordYieldMut = useRecordYield();
   const addCostMut = useAddBatchCost();
   const addVehicleMut = useAddVehicle();
+  const updateVehicleMut = useUpdateVehicle();
   const updateBatchMut = useUpdateMillingBatch();
   const deleteVehicleMut = useDeleteVehicle();
   const deleteBatchMut = useDeleteBatch();
@@ -198,6 +199,7 @@ export default function MillingBatchDetail() {
     pricePerKg: '',
   });
   const [showVehicleQuality, setShowVehicleQuality] = useState(false);
+  const [editingVehicleId, setEditingVehicleId] = useState(null);
 
   if (batchLoading && !batch) {
     return (
@@ -546,23 +548,26 @@ export default function MillingBatchDetail() {
         quality.price_per_kg = vpkg;
         quality.price_per_mt = Math.round(vpkg * 1000);
       }
-      await addVehicleMut.mutateAsync({
-        id: batchId,
-        data: {
-          vehicle_no: vehicleForm.vehicleNo.trim(),
-          driver_name: vehicleForm.driverName.trim(),
-          driver_phone: vehicleForm.driverPhone.trim(),
-          weight_kg: kg,
-          total_bags: bags || null,
-          bag_size_kg: kg > 0 && bags > 0 ? kg / bags : null,
-          arrival_date: vehicleForm.arrivalDate,
-          notes: vehicleForm.notes.trim(),
-          quality: Object.keys(quality).length ? quality : undefined,
-        },
-      });
-      addToast(`Vehicle ${vehicleForm.vehicleNo} added`);
+      const data = {
+        vehicle_no: vehicleForm.vehicleNo.trim(),
+        driver_name: vehicleForm.driverName.trim(),
+        driver_phone: vehicleForm.driverPhone.trim(),
+        weight_kg: kg,
+        total_bags: bags || null,
+        bag_size_kg: kg > 0 && bags > 0 ? kg / bags : null,
+        arrival_date: vehicleForm.arrivalDate,
+        notes: vehicleForm.notes.trim(),
+        quality: Object.keys(quality).length ? quality : undefined,
+      };
+      if (editingVehicleId) {
+        await updateVehicleMut.mutateAsync({ id: batchId, vehicleId: editingVehicleId, data });
+        addToast(`Vehicle ${vehicleForm.vehicleNo} updated`);
+      } else {
+        await addVehicleMut.mutateAsync({ id: batchId, data });
+        addToast(`Vehicle ${vehicleForm.vehicleNo} added`);
+      }
     } catch (err) {
-      addToast(err.message || 'Failed to add vehicle', 'error');
+      addToast(err?.response?.data?.message || err.message || 'Failed to save vehicle', 'error');
     }
     setVehicleForm({
       vehicleNo: '', driverName: '', driverPhone: '', weightKg: '', totalBags: '',
@@ -571,8 +576,30 @@ export default function MillingBatchDetail() {
       b1: '', b2: '', b3: '', csr: '', shortGrain: '', cobba: '', nb: '', ov: '',
       pricePerKg: '',
     });
+    setEditingVehicleId(null);
     setShowVehicleQuality(false);
     setShowVehicleModal(false);
+  }
+
+  // Prefill the vehicle drawer for an EDIT (manager/owner correction).
+  function openEditVehicle(v) {
+    const q = v.qualityJson || v.quality_json || {};
+    const pkg = q.price_per_kg != null ? q.price_per_kg : (q.price_per_mt != null ? q.price_per_mt / 1000 : '');
+    setEditingVehicleId(v.id);
+    setVehicleForm({
+      vehicleNo: v.vehicleNo || '', driverName: v.driverName || '', driverPhone: v.driverPhone || '',
+      weightKg: v.weightKg ? String(Math.round(parseFloat(v.weightKg))) : '',
+      totalBags: v.totalBags != null ? String(v.totalBags) : '',
+      arrivalDate: v.arrivalDate ? new Date(v.arrivalDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      notes: v.notes || '',
+      moisture: q.moisture ?? '', broken: q.broken ?? '', foreignMatter: q.foreign_matter ?? '',
+      chalky: q.chalky ?? '', purity: q.purity ?? '',
+      b1: q.b1 ?? '', b2: q.b2 ?? '', b3: q.b3 ?? '', csr: q.csr ?? '', shortGrain: q.short_grain ?? '',
+      cobba: q.cobba ?? '', nb: q.nb ?? '', ov: q.ov ?? '',
+      pricePerKg: pkg === '' ? '' : String(pkg),
+    });
+    setShowVehicleQuality(!!(q && Object.keys(q).length));
+    setShowVehicleModal(true);
   }
 
   function openCostModal() {
@@ -988,13 +1015,20 @@ export default function MillingBatchDetail() {
                       onClick={() => {
                         // Prefill the truck's weight + bags with the amount not yet
                         // received on this batch (editable — enter less/more).
+                        setEditingVehicleId(null);
                         const expectedWeight = parseFloat(batch.rawQtyKg) || 0;
                         const expectedBags = parseInt(batch.kattaCount, 10) || parseInt(batch.bagCount, 10) || 0;
-                        const usedWeight = safeVehicles.reduce((s, v) => s + (parseFloat(v.weight_kg) || 0), 0);
-                        const usedBags = safeVehicles.reduce((s, v) => s + (parseInt(v.total_bags, 10) || 0), 0);
+                        const usedWeight = safeVehicles.reduce((s, v) => s + (parseFloat(v.weightKg) || 0), 0);
+                        const usedBags = safeVehicles.reduce((s, v) => s + (parseInt(v.totalBags, 10) || 0), 0);
                         const remW = Math.max(0, Math.round(expectedWeight - usedWeight));
                         const remB = Math.max(0, expectedBags - usedBags);
-                        setVehicleForm(prev => ({ ...prev, weightKg: remW > 0 ? String(remW) : '', totalBags: remB > 0 ? String(remB) : '' }));
+                        setVehicleForm({
+                          vehicleNo: '', driverName: '', driverPhone: '',
+                          weightKg: remW > 0 ? String(remW) : '', totalBags: remB > 0 ? String(remB) : '',
+                          arrivalDate: new Date().toISOString().split('T')[0], notes: '',
+                          moisture: '', broken: '', foreignMatter: '', chalky: '', purity: '',
+                          b1: '', b2: '', b3: '', csr: '', shortGrain: '', cobba: '', nb: '', ov: '', pricePerKg: '',
+                        });
                         setShowVehicleModal(true);
                       }}
                       className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors"
@@ -1055,21 +1089,30 @@ export default function MillingBatchDetail() {
                               <span className="text-gray-400 text-xs ml-2">{v.arrivalDate}</span>
                             </div>
                             {isOwnerOrAdmin && v.id && (
-                              <button
-                                onClick={async () => {
-                                  if (!window.confirm(`Delete vehicle ${v.vehicleNo} arrival? This will reverse the inventory receipt.`)) return;
-                                  try {
-                                    await deleteVehicleMut.mutateAsync({ id: batchId, vehicleId: v.id });
-                                    addToast('Vehicle arrival deleted', 'success');
-                                  } catch (err) {
-                                    addToast(err?.response?.data?.message || err.message || 'Failed to delete', 'error');
-                                  }
-                                }}
-                                className="p-1 rounded hover:bg-red-50 text-red-500"
-                                title="Delete arrival"
-                              >
-                                <Trash2 size={14} />
-                              </button>
+                              <>
+                                <button
+                                  onClick={() => openEditVehicle(v)}
+                                  className="p-1 rounded hover:bg-blue-50 text-blue-500"
+                                  title="Edit arrival"
+                                >
+                                  <Edit3 size={14} />
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    if (!window.confirm(`Delete vehicle ${v.vehicleNo} arrival? This will reverse the inventory receipt.`)) return;
+                                    try {
+                                      await deleteVehicleMut.mutateAsync({ id: batchId, vehicleId: v.id });
+                                      addToast('Vehicle arrival deleted', 'success');
+                                    } catch (err) {
+                                      addToast(err?.response?.data?.message || err.message || 'Failed to delete', 'error');
+                                    }
+                                  }}
+                                  className="p-1 rounded hover:bg-red-50 text-red-500"
+                                  title="Delete arrival"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </>
                             )}
                           </div>
                         </div>
@@ -1928,16 +1971,18 @@ export default function MillingBatchDetail() {
         <MillingCostSheet batch={batch} companyProfile={companyProfileData} millingCostCategories={millingCostCategories} vehicles={safeVehicles} sourceLots={sourceLots} byproductRates={{ broken: commodityPrices.broken, sortex: commodityPrices.sortex, bran: commodityPrices.bran, husk: commodityPrices.husk }} />
       </Modal>
 
-      {/* Add Vehicle — right slide-over */}
+      {/* Add / Edit Vehicle — right slide-over */}
       <VehicleArrivalDrawer
         open={showVehicleModal}
-        onClose={() => setShowVehicleModal(false)}
+        onClose={() => { setShowVehicleModal(false); setEditingVehicleId(null); }}
         form={vehicleForm}
         setForm={setVehicleForm}
         onSubmit={handleAddVehicle}
         showQuality={showVehicleQuality}
         setShowQuality={setShowVehicleQuality}
         hidePricing={batch.isServiceMilling}
+        title={editingVehicleId ? 'Edit Vehicle Arrival' : 'Add Vehicle Arrival'}
+        submitLabel={editingVehicleId ? 'Save Changes' : 'Add Vehicle'}
       />
 
       {/* Confirm Product Prices Modal */}
