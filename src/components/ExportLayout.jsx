@@ -15,18 +15,20 @@ import ChatWidget from './ChatWidget';
 const exportNav = [
   { section: 'Main' },
   { label: 'Dashboard', icon: LayoutDashboard, to: '/' },
-  { section: 'Orders' },
-  { label: 'Export Orders', icon: Ship, to: '/export' },
-  { label: 'New Order', icon: Plus, to: '/export/create' },
-  { section: 'Customers' },
+  {
+    label: 'Export Orders',
+    icon: Ship,
+    children: [
+      { label: 'All Orders', to: '/export', icon: Ship },
+      { label: 'Create Order', to: '/export/create', icon: Plus },
+    ],
+  },
   { label: 'Buyers', icon: Users, to: '/buyers' },
-  { section: 'Documents' },
   { label: 'Documents', icon: FileText, to: '/documents' },
-  { section: 'Reports' },
   { label: 'Reports', icon: BarChart3, to: '/reports' },
 ];
 
-function SidebarLink({ to, icon: Icon, label, collapsed, onNavigate }) {
+function SidebarLink({ to, icon: Icon, label, nested, collapsed, onNavigate }) {
   return (
     <NavLink
       to={to}
@@ -35,15 +37,73 @@ function SidebarLink({ to, icon: Icon, label, collapsed, onNavigate }) {
       title={collapsed ? label : undefined}
       className={({ isActive }) =>
         `group flex items-center gap-3 px-3 py-2 text-[13px] font-medium rounded-lg mx-2 transition-all ${
+          nested ? 'ml-8' : ''
+        } ${
           isActive
             ? 'bg-blue-600/20 text-blue-400'
             : 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-200'
-        } ${collapsed ? 'justify-center px-0 mx-1' : ''}`
+        } ${collapsed && !nested ? 'justify-center px-0 mx-1' : ''}`
       }
     >
-      {Icon && <Icon size={collapsed ? 20 : 17} className="flex-shrink-0" />}
+      {Icon && <Icon size={collapsed && !nested ? 20 : 17} className="flex-shrink-0" />}
       {!collapsed && <span className="truncate">{label}</span>}
     </NavLink>
+  );
+}
+
+function ExportSidebarSection({ item, collapsed, onNavigate }) {
+  const location = useLocation();
+  const isChildActive = item.children?.some((child) =>
+    location.pathname === child.to || location.pathname.startsWith(child.to + '/')
+  );
+  const [open, setOpen] = useState(isChildActive || false);
+
+  useEffect(() => {
+    if (isChildActive) setOpen(true);
+  }, [isChildActive]);
+
+  if (!item.children) {
+    return <SidebarLink to={item.to} icon={item.icon} label={item.label} collapsed={collapsed} onNavigate={onNavigate} />;
+  }
+
+  const Icon = item.icon;
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((prev) => !prev)}
+        title={collapsed ? item.label : undefined}
+        className={`group flex w-full items-center gap-3 px-3 py-2 text-[13px] font-medium rounded-lg mx-2 transition-all ${
+          isChildActive
+            ? 'text-blue-400 bg-white/[0.04]'
+            : 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-200'
+        } ${collapsed ? 'justify-center px-0 mx-1' : ''}`}
+        style={collapsed ? { width: 'calc(100% - 0.5rem)' } : { width: 'calc(100% - 1rem)' }}
+      >
+        <Icon size={collapsed ? 20 : 17} className="flex-shrink-0" />
+        {!collapsed && (
+          <>
+            <span className="flex-1 text-left truncate">{item.label}</span>
+            <ChevronDown size={14} className={`transition-transform flex-shrink-0 ${open ? 'rotate-180' : ''}`} />
+          </>
+        )}
+      </button>
+      {open && !collapsed && (
+        <div className="mt-0.5 space-y-0.5">
+          {item.children.map((child) => (
+            <SidebarLink
+              key={child.to}
+              to={child.to}
+              icon={child.icon || null}
+              label={child.label}
+              nested
+              collapsed={false}
+              onNavigate={onNavigate}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -164,11 +224,9 @@ export default function ExportLayout({ children }) {
               );
             }
             return (
-              <SidebarLink
-                key={item.to}
-                to={item.to}
-                icon={item.icon}
-                label={item.label}
+              <ExportSidebarSection
+                key={item.label}
+                item={item}
                 collapsed={sidebarCollapsed}
                 onNavigate={handleSidebarNavigate}
               />
