@@ -19,7 +19,14 @@ function PendingBadge() {
   );
 }
 
-export default function CustomerPicker({ label, value, onChange, customers = [], placeholder = 'Search client…', addToast, clearable = false, onCreated }) {
+export default function CustomerPicker({
+  label, value, onChange, customers = [], placeholder = 'Search client…', addToast, clearable = false, onCreated,
+  // Data source — defaults to the admin customer list + quick-add. Callers that
+  // need a scoped party set (e.g. Service Milling clients, never export buyers)
+  // pass their own listFn/createFn.
+  listFn = () => customersApi.list(),
+  createFn = (data) => adminApi.customersQuickAdd(data),
+}) {
   const [fetched, setFetched] = useState([]);
   const [local, setLocal] = useState([]);
   const [search, setSearch] = useState('');
@@ -32,12 +39,13 @@ export default function CustomerPicker({ label, value, onChange, customers = [],
     let alive = true;
     (async () => {
       try {
-        const res = await customersApi.list();
+        const res = await listFn();
         const rows = res?.data?.customers || res?.data || res?.customers || [];
         if (alive) setFetched(Array.isArray(rows) ? rows : []);
       } catch { /* non-fatal — parent-provided list / quick-add still work */ }
     })();
     return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const merged = useMemo(() => {
@@ -71,7 +79,7 @@ export default function CustomerPicker({ label, value, onChange, customers = [],
     if (!name) { addToast?.('Client name is required', 'error'); return; }
     setSaving(true);
     try {
-      const res = await adminApi.customersQuickAdd({
+      const res = await createFn({
         name, contact_person: draft.contact_person.trim() || null, phone: draft.phone.trim() || null,
       });
       const customer = res?.data?.customer || res?.customer || res?.data;

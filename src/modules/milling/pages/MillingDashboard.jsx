@@ -43,6 +43,7 @@ import RiceTypePicker from '../../../components/RiceTypePicker';
 import { lotCategory, CAT_ORDER, CAT_COLOR, NON_MILLABLE_CATEGORIES } from '../../../utils/lotCategory';
 import SupplierPicker from '../../../components/SupplierPicker';
 import CustomerPicker from '../../../components/CustomerPicker';
+import { serviceMillingApi } from '../api/services';
 import MillExpenseDrawer from '../../../components/MillExpenseDrawer';
 // Chart data computed from real batch data below (no mock imports)
 
@@ -205,12 +206,13 @@ export default function MillingDashboard() {
     } else if (!batchForm.productId) {
       addToast('Rice type is required so the batch can be tracked', 'error');
       return;
+    } else if (batchForm.millingType === 'service_milling') {
+      // Service milling: rice comes from the client (no company supplier). Require
+      // the client + the received quantity.
+      if (!batchForm.clientCustomerId) { addToast('Select the client we are milling for (service milling)', 'error'); return; }
+      if (!batchForm.rawQtyKg) { addToast('Quantity received is required', 'error'); return; }
     } else if (!batchForm.supplierId || !batchForm.rawQtyKg) {
       addToast('Supplier and raw quantity are required', 'error');
-      return;
-    }
-    if (batchForm.millingType === 'service_milling' && !batchForm.clientCustomerId) {
-      addToast('Select the client we are milling for (service milling)', 'error');
       return;
     }
     const isService = batchForm.millingType === 'service_milling';
@@ -242,7 +244,9 @@ export default function MillingDashboard() {
         } : {}),
         ...(useBlend
           ? { source_lots: blendLots, product_id: blendProductId ? parseInt(blendProductId) : null, processing_type: blendRecipe.processingType }
-          : { supplier_id: parseInt(batchForm.supplierId), raw_qty_kg: rawKg, product_id: parseInt(batchForm.productId) }),
+          // Service milling has no company supplier — the raw lot is stamped
+          // client-owned (owner = the selected client) on the backend.
+          : { supplier_id: isService ? null : parseInt(batchForm.supplierId), raw_qty_kg: rawKg, product_id: parseInt(batchForm.productId) }),
       };
       const res = await createBatchMut.mutateAsync(payload);
       const batchNo = res?.data?.batch?.batch_no || res?.data?.batch?.id;
@@ -1130,12 +1134,15 @@ export default function MillingDashboard() {
               </div>
 
               <CustomerPicker
-                label={<span className="text-xs font-semibold text-amber-800 uppercase">Client *</span>}
+                label={<span className="text-xs font-semibold text-amber-800 uppercase">Service Milling Client *</span>}
                 value={batchForm.clientCustomerId}
                 onChange={(id) => setBF('clientCustomerId', id)}
                 addToast={addToast}
                 placeholder="Search client we are milling for…"
                 clearable
+                // Scoped to service-milling clients / non-export parties — never export buyers.
+                listFn={() => serviceMillingApi.listClients()}
+                createFn={(data) => serviceMillingApi.createClient(data)}
               />
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -1343,7 +1350,7 @@ export default function MillingDashboard() {
           {!useBlend && (
           <div>
             <RiceTypePicker
-              label={<>Rice Type <span className="text-red-500">*</span></>}
+              label={<>{batchForm.millingType === 'service_milling' ? 'Received Rice / Paddy Type' : 'Rice Type'} <span className="text-red-500">*</span></>}
               value={batchForm.productId}
               onChange={(id) => setBF('productId', id)}
               products={products}
@@ -1355,17 +1362,25 @@ export default function MillingDashboard() {
           </div>
           )}
 
-          {/* Supplier (rice source) */}
-          {!useBlend && (
+          {/* Supplier (rice source) — OWN-STOCK ONLY. Service milling rice comes
+              from the client selected above (client-owned), never a company
+              supplier, so this field is hidden for service milling. */}
+          {!useBlend && batchForm.millingType !== 'service_milling' && (
           <div>
             <SupplierPicker
-              label={<>{batchForm.millingType === 'service_milling' ? 'Rice Source (Client / Broker)' : 'Supplier'} <span className="text-red-500">*</span></>}
+              label={<>Supplier <span className="text-red-500">*</span></>}
               value={batchForm.supplierId}
               onChange={(id) => setBF('supplierId', id)}
               suppliers={suppliersList || []}
               addToast={addToast}
-              placeholder={batchForm.millingType === 'service_milling' ? 'Search client / broker…' : 'Search supplier…'}
+              placeholder="Search supplier…"
             />
+          </div>
+          )}
+          {/* Service milling: the stock source is the client (client-owned). */}
+          {!useBlend && batchForm.millingType === 'service_milling' && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-xs text-amber-800">
+            <span className="font-semibold">Stock received from:</span> the Service Milling client selected above. This is <b>client-owned stock</b> — it enters inventory tagged “Service Milling / Client-Owned” and never comes from company purchases.
           </div>
           )}
 
@@ -1373,7 +1388,7 @@ export default function MillingDashboard() {
           {!useBlend && (
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Raw Qty (KG) *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{batchForm.millingType === 'service_milling' ? 'Quantity Received (KG)' : 'Raw Qty (KG)'} *</label>
               <input
                 type="number"
                 value={batchForm.rawQtyKg}

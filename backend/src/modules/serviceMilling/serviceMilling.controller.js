@@ -37,6 +37,47 @@ async function resolveReceiptAccountId(trx, { paymentMode, bankAccountId, collec
 }
 
 module.exports = {
+  // ── Service-milling clients ──
+  // The client is the third party whose rice we mill. It must NOT be an export
+  // customer (those are foreign sales buyers). We show non-export parties
+  // (service-milling clients + local customers/untyped) and let the mill add a
+  // new one inline. Gated by the mill-side perm, not export_orders.view.
+  async listClients(req, res) {
+    try {
+      const { search } = req.query;
+      let q = db('customers')
+        .where(function () { this.whereNot('customer_type', 'export').orWhereNull('customer_type'); })
+        .select('id', 'name', 'contact_person', 'phone', 'customer_type', 'approval_status')
+        .orderBy('name', 'asc');
+      if (search) q = q.where('name', 'ilike', `%${search}%`);
+      const rows = await q.limit(200);
+      return res.json({ success: true, data: rows });
+    } catch (err) {
+      console.error('Service client list error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  // Quick-add a Service Milling Client (its own party type; pending approval).
+  async createClient(req, res) {
+    try {
+      const name = (req.body?.name || '').trim();
+      if (!name) return res.status(400).json({ success: false, message: 'Client name is required.' });
+      const [customer] = await db('customers').insert({
+        name,
+        contact_person: req.body.contact_person || null,
+        phone: req.body.phone || null,
+        customer_type: 'service_milling',
+        is_active: true,
+        approval_status: 'pending',
+      }).returning('*');
+      return res.status(201).json({ success: true, data: { customer } });
+    } catch (err) {
+      console.error('Service client create error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
   // ── List invoices (Finance billing view + Mill) ──
   async listInvoices(req, res) {
     try {

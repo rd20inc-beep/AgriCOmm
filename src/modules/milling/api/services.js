@@ -2,6 +2,8 @@ import api from '../../../api/client';
 
 // Service Milling billing (Phase A2).
 export const serviceMillingApi = {
+  listClients: (params) => api.get('/api/service-milling/clients', params),
+  createClient: (data) => api.post('/api/service-milling/clients', data),
   listInvoices: () => api.get('/api/service-milling/invoices'),
   getInvoice: (id) => api.get(`/api/service-milling/invoices/${id}`),
   createInvoice: (data) => api.post('/api/service-milling/invoices', data),
