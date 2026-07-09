@@ -107,6 +107,19 @@ const TABS = [
   { key: 'quality',   label: 'Quality',    icon: Award },
 ];
 
+const TAB_BY_KEY = Object.fromEntries(TABS.map((t) => [t.key, t]));
+
+// Grouped tab bar: 14 report views folded into 5 category dropdowns so the bar is
+// short. keys reference TABS; only role-visible tabs render (see visibleTabs), and
+// a group with a single visible tab shows as a plain tab (not a one-item dropdown).
+const REPORT_NAV = [
+  { label: 'Money',       icon: Wallet,       keys: ['moneyIn', 'moneyOut', 'forecast'] },
+  { label: 'Sales',       icon: ShoppingCart, keys: ['sales', 'orders', 'customers', 'countries'] },
+  { label: 'Procurement', icon: Truck,        keys: ['purchases', 'lots'] },
+  { label: 'Production',  icon: Factory,      keys: ['production', 'quality', 'inventory'] },
+  { label: 'Performance', icon: Gauge,        keys: ['margin', 'kpis'] },
+];
+
 // ─── Global search box ──────────────────────────────────────────────────
 // Debounced cross-entity lookup (lots, batches, sales, orders, parties).
 // Clicking a result navigates to that record's detail/statement page.
@@ -620,6 +633,7 @@ export default function Reports() {
   const rawRange = searchParams.get('range') || '';
   const range = RANGES.some(r => r.value === rawRange) ? rawRange : '';
   const setTab = (key) => { const p = new URLSearchParams(searchParams); p.set('tab', key); setSearchParams(p); };
+  const [openGroup, setOpenGroup] = useState(null);
   const setRange = (val) => { const p = new URLSearchParams(searchParams); if (val) p.set('range', val); else p.delete('range'); setSearchParams(p); };
   // Exact-number toggle (?exact=1): show full digits instead of Cr/L/K shorthand.
   const exactMode = searchParams.get('exact') === '1';
@@ -824,20 +838,56 @@ export default function Reports() {
         </div>
       )}
 
-      {/* ─── Tabs ─────────────────────────────────────────────── */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <nav className="flex overflow-x-auto border-b border-gray-200">
-          {visibleTabs.map(t => {
-            const Icon = t.icon;
-            return (
-              <button key={t.key} onClick={() => setTab(t.key)}
-                className={`flex items-center gap-1.5 px-4 sm:px-5 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
-                  tab === t.key ? 'border-blue-600 text-blue-600 bg-blue-50/40' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
-                }`}>
-                <Icon size={15} /> {t.label}
-              </button>
-            );
-          })}
+      {/* ─── Tabs — grouped into category dropdowns ───────────── */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-visible">
+        <nav className="relative border-b border-gray-200">
+          <div className="flex flex-wrap items-center">
+            {(() => {
+              const byKey = Object.fromEntries(visibleTabs.map(t => [t.key, t]));
+              const cls = (active) =>
+                `flex items-center gap-1.5 px-4 sm:px-5 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+                  active ? 'border-blue-600 text-blue-600 bg-blue-50/40' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                }`;
+              const plainTab = (t) => {
+                const Icon = t.icon;
+                return (
+                  <button key={t.key} onClick={() => { setTab(t.key); setOpenGroup(null); }} className={cls(tab === t.key)}>
+                    <Icon size={15} /> {t.label}
+                  </button>
+                );
+              };
+              return REPORT_NAV.map(group => {
+                const children = group.keys.map(k => byKey[k]).filter(Boolean);
+                if (!children.length) return null;
+                if (children.length === 1) return plainTab(children[0]);
+                const GIcon = group.icon;
+                const open = openGroup === group.label;
+                const active = children.some(c => c.key === tab);
+                return (
+                  <div key={group.label} className="relative">
+                    <button type="button" onClick={() => setOpenGroup(open ? null : group.label)} className={cls(active)}>
+                      <GIcon size={15} /> {group.label}
+                      <ChevronDown size={13} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+                    </button>
+                    {open && (
+                      <div className="absolute left-0 top-full z-30 min-w-[190px] bg-white border border-gray-200 rounded-b-lg shadow-lg py-1">
+                        {children.map(c => {
+                          const CIcon = c.icon;
+                          return (
+                            <button key={c.key} onClick={() => { setTab(c.key); setOpenGroup(null); }}
+                              className={`w-full flex items-center gap-2 px-4 py-2 text-sm text-left ${tab === c.key ? 'text-blue-600 bg-blue-50 font-medium' : 'text-gray-600 hover:bg-gray-50'}`}>
+                              <CIcon size={14} className="flex-shrink-0" /> {c.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              });
+            })()}
+          </div>
+          {openGroup && <div className="fixed inset-0 z-20" onClick={() => setOpenGroup(null)} />}
         </nav>
 
         <div className="p-4 sm:p-6">
