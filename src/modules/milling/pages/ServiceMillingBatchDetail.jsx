@@ -19,7 +19,7 @@ import YieldOutputDrawer from '../components/YieldOutputDrawer';
 import VehicleArrivalDrawer from '../components/VehicleArrivalDrawer';
 import ServiceDispatchTab from '../components/ServiceDispatchTab';
 import ServiceBillingTab from '../components/ServiceBillingTab';
-import { qualityParams } from '../qualityParams';
+import { qualityParams, aggregateVehicleQuality } from '../qualityParams';
 
 const num = (v) => parseFloat(v) || 0;
 const kg = (v) => `${Math.round(num(v)).toLocaleString()} kg`;
@@ -136,6 +136,9 @@ export default function ServiceMillingBatchDetail() {
   const safeSample = batch.sampleAnalysis || null;
   const safeArrival = batch.arrivalAnalysis || null;
   const safeVehicles = Array.isArray(batch.vehicleArrivals) ? batch.vehicleArrivals : [];
+  // Per-truck quality entered on the vehicles → autofills the batch Sample.
+  const vehicleQualityAgg = aggregateVehicleQuality(safeVehicles);
+  const sampleForDisplay = safeSample || vehicleQualityAgg;
   const unit = num(batch.kattaCount) > 0 ? 'kattas' : num(batch.bagCount) > 0 ? 'bags' : null;
   const unitCount = num(batch.kattaCount) || num(batch.bagCount);
   const canApprove = hasPermission('service_milling', 'create_batch');
@@ -143,7 +146,7 @@ export default function ServiceMillingBatchDetail() {
   // ---- handlers ----
   function openAnalysisModal(type = 'arrival') {
     setAnalysisModalType(type);
-    const source = type === 'sample' ? safeSample : safeArrival;
+    const source = (type === 'sample' ? safeSample : safeArrival) || vehicleQualityAgg;
     const next = { pricePerKg: '', pricePerMT: '' };
     qualityParams.forEach(p => { next[p.key] = source?.[p.key] ?? ''; });
     setAnalysisForm(next);
@@ -453,7 +456,7 @@ export default function ServiceMillingBatchDetail() {
       {/* ---- Quality ---- */}
       {activeTab === 'quality' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <QualityCard title="Sample Analysis" data={safeSample} onEdit={() => openAnalysisModal('sample')} />
+          <QualityCard title="Sample Analysis" data={sampleForDisplay} auto={!safeSample && !!vehicleQualityAgg} onEdit={() => openAnalysisModal('sample')} />
           <QualityCard title="Arrival Analysis" data={safeArrival} onEdit={() => openAnalysisModal('arrival')} />
         </div>
       )}
@@ -566,18 +569,23 @@ function Row({ label, children }) {
   );
 }
 
-function QualityCard({ title, data, onEdit }) {
-  const has = data && typeof data === 'object' && Object.keys(data).length > 0;
+function QualityCard({ title, data, onEdit, auto = false }) {
+  const has = data && typeof data === 'object' && Object.keys(data).some(k => data[k] != null && data[k] !== '');
   return (
     <Card title={title} icon={FlaskConical} action={
       <button onClick={onEdit} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 text-xs font-medium rounded-lg hover:bg-blue-100">
-        <FlaskConical size={14} /> {has ? 'Edit' : 'Enter'}
+        <FlaskConical size={14} /> {has && !auto ? 'Edit' : 'Enter'}
       </button>
     }>
       {!has ? (
         <p className="text-sm text-gray-400 py-2">Not recorded yet.</p>
       ) : (
         <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+          {auto && (
+            <p className="col-span-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mb-1">
+              Autofilled from the per-truck quality. Click <strong>Enter</strong> to save as the Sample.
+            </p>
+          )}
           {qualityParams.map(p => (
             data[p.key] != null && data[p.key] !== '' ? (
               <Row key={p.key} label={p.label}>{data[p.key]}{p.unit === '%' ? '%' : ''}</Row>

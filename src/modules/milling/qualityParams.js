@@ -21,3 +21,36 @@ export const qualityParams = [
 ];
 
 export default qualityParams;
+
+// Weight-weighted aggregate of the per-truck quality (milling_vehicle_arrivals
+// .quality_json) as a { <param.key>: value, pricePerKg, pricePerMT } object —
+// used to autofill the batch's Sample analysis from what the trucks recorded.
+// Reads camelCase or snake keys, and the un-suffixed grade keys (b1 / csr /
+// short_grain) that the vehicle drawer stores.
+export function aggregateVehicleQuality(vehicles) {
+  const vq = (v) => v.qualityJson || v.quality_json || null;
+  const withQ = (vehicles || []).filter((v) => { const q = vq(v); return q && typeof q === 'object' && Object.keys(q).length > 0; });
+  if (!withQ.length) return null;
+  const wOf = (v) => parseFloat(v.weightKg ?? v.weight_kg) || 1;
+  const qGet = (q, p) => {
+    const base = p.backendKey.replace(/_pct$/, '');
+    const raw = q?.[p.key] ?? q?.[p.backendKey] ?? q?.[base];
+    const n = parseFloat(raw);
+    return Number.isNaN(n) ? null : n;
+  };
+  const agg = {};
+  qualityParams.forEach((p) => {
+    let num = 0, den = 0;
+    withQ.forEach((v) => { const val = qGet(vq(v), p); if (val == null) return; const w = wOf(v); num += val * w; den += w; });
+    if (den > 0) agg[p.key] = Math.round((num / den) * 100) / 100;
+  });
+  let pnum = 0, pden = 0;
+  withQ.forEach((v) => {
+    const q = vq(v) || {};
+    const pv = parseFloat(q.pricePerMt ?? q.price_per_mt ?? q.pricePerMT); if (Number.isNaN(pv)) return;
+    const w = wOf(v); pnum += pv * w; pden += w;
+  });
+  agg.pricePerMT = pden > 0 ? Math.round(pnum / pden) : '';
+  agg.pricePerKg = agg.pricePerMT ? Math.round((agg.pricePerMT / 1000) * 100) / 100 : '';
+  return Object.keys(agg).length ? agg : null;
+}
