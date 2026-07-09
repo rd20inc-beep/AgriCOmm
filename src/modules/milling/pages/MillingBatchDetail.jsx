@@ -1852,8 +1852,8 @@ export default function MillingBatchDetail() {
         )}
       </div>
 
-      {/* Sample / Arrival Analysis Modal */}
-      <Modal isOpen={showAnalysisModal} onClose={() => setShowAnalysisModal(false)} title={analysisModalType === 'sample' ? 'Sample Analysis' : 'Arrival Analysis'}>
+      {/* Sample / Arrival Analysis — right slide-over */}
+      <SlideDrawer open={showAnalysisModal} onClose={() => setShowAnalysisModal(false)} title={analysisModalType === 'sample' ? 'Sample Analysis' : 'Arrival Analysis'} icon={FlaskConical} size="xl">
         <form onSubmit={handleAnalysisSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             {qualityParams.map((param) => (
@@ -1918,7 +1918,7 @@ export default function MillingBatchDetail() {
             </button>
           </div>
         </form>
-      </Modal>
+      </SlideDrawer>
 
       {/* Yield Output Modal */}
       <Modal isOpen={showYieldModal} onClose={() => setShowYieldModal(false)} title="Record Yield Output" size="md">
