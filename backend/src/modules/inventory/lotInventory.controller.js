@@ -303,7 +303,7 @@ module.exports = {
   // ─── List Lots ───
   async listLots(req, res) {
     try {
-      const { page = 1, limit = 50, type, entity, warehouse_id, status, supplier_id, product_id, variety, search, sort_by = 'created_at', sort_dir = 'desc' } = req.query;
+      const { page = 1, limit = 50, type, entity, warehouse_id, status, supplier_id, product_id, variety, search, ownership, sort_by = 'created_at', sort_dir = 'desc' } = req.query;
       const offset = (page - 1) * limit;
 
       let query = db('inventory_lots as l')
@@ -317,6 +317,13 @@ module.exports = {
           'p.code as product_code',
           's.name as supplier_name'
         );
+
+      // Ownership scope: default to COMPANY-owned lots so client-owned
+      // (service-milling) stock never appears as sellable/available company
+      // inventory. The Service inventory view passes ?ownership=client; ?ownership=all
+      // is for admin/debug only.
+      if (ownership === 'client') query = query.where('l.ownership', 'client');
+      else if (ownership !== 'all') query = query.where('l.ownership', 'company');
 
       if (type) query = query.where('l.type', type);
       if (entity) query = query.where('l.entity', entity);
@@ -1506,12 +1513,17 @@ module.exports = {
     try {
       const { group_by = 'supplier', status = 'Available' } = req.query;
 
-      const { entity, type } = req.query;
+      const { entity, type, ownership } = req.query;
       let query = db('inventory_lots as l')
         .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
         .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
         .leftJoin('products as p', 'l.product_id', 'p.id');
 
+      // Company-owned only by default — client-owned service-milling stock is
+      // excluded from the stock summary / valuation (?ownership=client for the
+      // Service view; ?ownership=all for admin).
+      if (ownership === 'client') query = query.where('l.ownership', 'client');
+      else if (ownership !== 'all') query = query.where('l.ownership', 'company');
       if (status && status !== 'all') query = query.where('l.status', status);
       if (entity) query = query.where('l.entity', entity);
       if (type) query = query.where('l.type', type);

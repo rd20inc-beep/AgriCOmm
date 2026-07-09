@@ -185,6 +185,74 @@ const millingController = {
     }
   },
 
+  // Service-milling dashboard feed: client-owned toll batches with the client
+  // name, lot/billing status and a per-batch rollup of client-owned inventory
+  // (produced vs remaining) + computed service amounts. Kept separate from the
+  // normal batch list so company-owned batches never mix in.
+  async listServiceBatches(req, res) {
+    try {
+      const batches = await db('milling_batches as mb')
+        .leftJoin('customers as c', 'mb.client_customer_id', 'c.id')
+        .where('mb.is_service_milling', true)
+        .select(
+          'mb.*',
+          'c.name as client_name',
+          'c.contact_person as client_contact_person',
+          'c.phone as client_phone',
+        )
+        .orderBy('mb.created_at', 'desc');
+
+      const ids = batches.map((b) => b.id);
+      // Client-owned inventory rollup per service batch: produced (qty) and
+      // remaining (available_qty), split finished vs by-product.
+      const lotRows = ids.length
+        ? await db('inventory_lots')
+            .whereIn('service_batch_id', ids)
+            .where('ownership', 'client')
+            .select('service_batch_id', 'type')
+            .sum('qty as produced')
+            .sum('available_qty as remaining')
+            .groupBy('service_batch_id', 'type')
+        : [];
+      const rollup = {};
+      for (const r of lotRows) {
+        const b = (rollup[r.service_batch_id] = rollup[r.service_batch_id] || { finishedKg: 0, byproductKg: 0, remainingKg: 0, producedKg: 0 });
+        const produced = parseFloat(r.produced) || 0;
+        const remaining = parseFloat(r.remaining) || 0;
+        b.producedKg += produced;
+        b.remainingKg += remaining;
+        if (r.type === 'finished') b.finishedKg += produced;
+        else if (r.type === 'byproduct') b.byproductKg += produced;
+      }
+
+      // Billing status placeholder until Phase A2 (invoices) lands.
+      const num = (v) => parseFloat(v) || 0;
+      const data = batches.map((b) => {
+        const roll = rollup[b.id] || { finishedKg: 0, byproductKg: 0, remainingKg: 0, producedKg: 0 };
+        const milledKg = num(b.actual_finished_kg) || roll.finishedKg;
+        const kattas = num(b.katta_count) || num(b.bag_count);
+        const millingAmount = milledKg * num(b.service_milling_rate_per_kg);
+        const rentalAmount = kattas * num(b.service_rental_rate_per_katta);
+        const labourAmount = kattas * num(b.service_labour_rate_per_katta);
+        return {
+          ...b,
+          client_name: b.client_name || null,
+          rollup: roll,
+          milled_kg: milledKg,
+          service_milling_amount: millingAmount,
+          service_rental_amount: rentalAmount,
+          service_labour_amount: labourAmount,
+          service_total_amount: millingAmount + rentalAmount + labourAmount,
+          billing_status: 'Not Invoiced', // A2 will derive from service_milling_invoices
+        };
+      });
+      return res.json({ success: true, data });
+    } catch (err) {
+      console.error('Service milling list error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
   async getById(req, res) {
     try {
       const { id } = req.params;
@@ -295,7 +363,22 @@ const millingController = {
         // and/or leftover finished rice, mixed varieties). [{ lot_id, qty_kg }].
         // When given, raw_qty_kg + the weighted raw cost are derived from it.
         source_lots,
+        // Service milling (toll/job-work): client owns the rice; we only bill
+        // milling/rental/labour service fees. Kept out of company stock/costing.
+        is_service_milling,
+        client_customer_id,
+        service_milling_rate_per_kg,
+        service_rental_rate_per_katta,
+        service_labour_rate_per_katta,
+        date_received,
+        katta_count,
+        bag_count,
+        expected_output_kg,
+        service_remarks,
       } = req.body;
+      const isService = !!is_service_milling;
+      const numOrNull = (v) => (v != null && v !== '' ? parseFloat(v) : null);
+      const intOrNull = (v) => (v != null && v !== '' ? parseInt(v, 10) : null);
       // Normalise tags → array of trimmed non-empty strings.
       const normalizeTags = (t) => {
         const arr = Array.isArray(t) ? t : (typeof t === 'string' ? t.split(',') : []);
@@ -450,6 +533,18 @@ const millingController = {
             custom_tags: JSON.stringify(cleanTags),
             status: 'Pending Approval',
             created_by: req.user.id,
+            // Service milling
+            is_service_milling: isService,
+            client_customer_id: isService ? intOrNull(client_customer_id) : null,
+            service_milling_rate_per_kg: isService ? numOrNull(service_milling_rate_per_kg) : null,
+            service_rental_rate_per_katta: isService ? numOrNull(service_rental_rate_per_katta) : null,
+            service_labour_rate_per_katta: isService ? numOrNull(service_labour_rate_per_katta) : null,
+            date_received: isService ? (date_received || null) : null,
+            katta_count: isService ? intOrNull(katta_count) : null,
+            bag_count: isService ? intOrNull(bag_count) : null,
+            expected_output_kg: isService ? numOrNull(expected_output_kg) : null,
+            service_remarks: isService ? (service_remarks || null) : null,
+            service_lot_status: isService ? 'Received' : null,
           })
           .returning('*');
 
@@ -1022,51 +1117,62 @@ const millingController = {
         // values when set, else fee + recorded processing costs). The same
         // computeResidualAllocation runs on price-confirm, so numbers match.
         // =================================================================
-        // Lot-started batches carry no raw_rice milling_cost — derive it from the
-        // source lots so Net Purchase has its raw component.
-        await inventoryService.ensureRawCostFromSourceLots(trx, batch.id);
-        const rawCostTotal = parseFloat(
-          (await trx('milling_costs').where({ batch_id: batch.id })
-            .where('category', 'raw_rice').sum('amount as total').first())?.total
-        ) || 0;
-        const processingCosts = parseFloat(
-          (await trx('milling_costs').where({ batch_id: batch.id })
-            .whereNotIn('category', ['raw_rice', 'packaging']).sum('amount as total').first())?.total
-        ) || 0;
-        const packingCost = parseFloat(
-          (await trx('milling_costs').where({ batch_id: batch.id, category: 'packaging' }).sum('amount as total').first())?.total
-        ) || 0;
-
-        const a = inventoryService.computeResidualAllocation(batch, rawCostTotal, processingCosts, packingCost);
-        const finAlloc = { qty: finished, costPerKg: a.finishedCostPerKg };
+        // Service milling: the CLIENT owns the paddy AND the finished/by-product
+        // output, so there is NO company cost, COGS or inventory GL — only the
+        // service fee (billed via a separate Service Milling invoice) is revenue.
+        // Bypass the entire residual-costing block; output lots are recorded at
+        // zero cost and stamped client-owned inside recordMillingOutput.
+        let a, finAlloc;
         const allocations = {};
-        for (const [k, perKg] of Object.entries(a.byCostPerKg)) allocations[k] = { costPerKg: perKg };
+        if (batch.is_service_milling) {
+          a = { finishedCostPerKg: 0, byCostPerKg: {}, rawFrac: 0, millFrac: 0, netPurchase: 0, byproductValue: 0, clamped: false };
+          finAlloc = { qty: finished, costPerKg: 0 };
+        } else {
+          // Lot-started batches carry no raw_rice milling_cost — derive it from the
+          // source lots so Net Purchase has its raw component.
+          await inventoryService.ensureRawCostFromSourceLots(trx, batch.id);
+          const rawCostTotal = parseFloat(
+            (await trx('milling_costs').where({ batch_id: batch.id })
+              .where('category', 'raw_rice').sum('amount as total').first())?.total
+          ) || 0;
+          const processingCosts = parseFloat(
+            (await trx('milling_costs').where({ batch_id: batch.id })
+              .whereNotIn('category', ['raw_rice', 'packaging']).sum('amount as total').first())?.total
+          ) || 0;
+          const packingCost = parseFloat(
+            (await trx('milling_costs').where({ batch_id: batch.id, category: 'packaging' }).sum('amount as total').first())?.total
+          ) || 0;
 
-        await trx('milling_batches').where({ id }).update({
-          raw_cost_total: rawCostTotal,
-          raw_cost_per_kg_finished: a.finishedCostPerKg * a.rawFrac,
-          milling_cost_per_kg_finished: a.finishedCostPerKg * a.millFrac,
-          total_cost_per_kg_finished: a.finishedCostPerKg,
-        });
+          a = inventoryService.computeResidualAllocation(batch, rawCostTotal, processingCosts, packingCost);
+          finAlloc = { qty: finished, costPerKg: a.finishedCostPerKg };
+          for (const [k, perKg] of Object.entries(a.byCostPerKg)) allocations[k] = { costPerKg: perKg };
 
-        // Snapshot — finished is the DERIVED residual cost; by-products keep their
-        // entered sale prices.
-        await trx('milling_output_market_prices').insert({
-          batch_id: batch.id,
-          finished_price_per_kg: a.finishedCostPerKg,
-          broken_price_per_kg: parseFloat(batch.broken_price_per_kg) || 0,
-          bran_price_per_kg: parseFloat(batch.bran_price_per_kg) || 0,
-          husk_price_per_kg: parseFloat(batch.husk_price_per_kg) || 0,
-          confirmed_by: req.user?.id || null,
-          confirmed_at: trx.fn.now(),
-          notes: JSON.stringify({
-            model: 'residual',
-            netPurchase: a.netPurchase,
-            byproductValue: a.byproductValue,
-            finishedCostPerKg: a.finishedCostPerKg,
-            clamped: a.clamped,
-          }),
-        });
+          await trx('milling_batches').where({ id }).update({
+            raw_cost_total: rawCostTotal,
+            raw_cost_per_kg_finished: a.finishedCostPerKg * a.rawFrac,
+            milling_cost_per_kg_finished: a.finishedCostPerKg * a.millFrac,
+            total_cost_per_kg_finished: a.finishedCostPerKg,
+          });
+
+          // Snapshot — finished is the DERIVED residual cost; by-products keep their
+          // entered sale prices.
+          await trx('milling_output_market_prices').insert({
+            batch_id: batch.id,
+            finished_price_per_kg: a.finishedCostPerKg,
+            broken_price_per_kg: parseFloat(batch.broken_price_per_kg) || 0,
+            bran_price_per_kg: parseFloat(batch.bran_price_per_kg) || 0,
+            husk_price_per_kg: parseFloat(batch.husk_price_per_kg) || 0,
+            confirmed_by: req.user?.id || null,
+            confirmed_at: trx.fn.now(),
+            notes: JSON.stringify({
+              model: 'residual',
+              netPurchase: a.netPurchase,
+              byproductValue: a.byproductValue,
+              finishedCostPerKg: a.finishedCostPerKg,
+              clamped: a.clamped,
+            }),
+          });
+        }
 
         // 7. Mark raw lots as consumed
         await trx('inventory_lots')
@@ -1244,7 +1350,9 @@ const millingController = {
           .first();
         const millingValue = parseFloat(millingCosts?.total || 0);
 
-        if (millingValue > 0) {
+        // Service batches never touch company inventory GL (client-owned) — only
+        // the Service Milling invoice posts revenue. (millingValue is 0 anyway.)
+        if (millingValue > 0 && !batch.is_service_milling) {
           await accountingService.autoPost(trx, {
             triggerEvent: 'milling_completion',
             entity: 'mill',
