@@ -1257,7 +1257,19 @@ export default function MillingDashboard() {
                 <div className="flex items-center justify-between mb-2">
                   <h4 className="text-xs font-semibold text-amber-800 uppercase">Incoming Vehicles <span className="normal-case font-normal text-gray-400">(optional — trucks bringing the client's rice)</span></h4>
                   <button type="button"
-                    onClick={() => setBF('serviceVehicles', [...(batchForm.serviceVehicles || []), { vehicle_no: '', driver_name: '', weight_kg: '', total_bags: '' }])}
+                    onClick={() => {
+                      // Prefill the new truck with the weight + bags not yet
+                      // assigned to a vehicle (first truck carries the full load;
+                      // add more to split it). All fields stay editable.
+                      const list = batchForm.serviceVehicles || [];
+                      const totalWeight = parseFloat(batchForm.rawQtyKg) || 0;
+                      const totalBags = parseInt(batchForm.totalBags, 10) || parseInt(batchForm.kattaCount, 10) || 0;
+                      const usedWeight = list.reduce((s, v) => s + (parseFloat(v.weight_kg) || 0), 0);
+                      const usedBags = list.reduce((s, v) => s + (parseInt(v.total_bags, 10) || 0), 0);
+                      const remW = Math.max(0, Math.round(totalWeight - usedWeight));
+                      const remB = Math.max(0, totalBags - usedBags);
+                      setBF('serviceVehicles', [...list, { vehicle_no: '', driver_name: '', weight_kg: remW > 0 ? String(remW) : '', total_bags: remB > 0 ? String(remB) : '' }]);
+                    }}
                     className="text-xs text-blue-600 hover:text-blue-700 font-medium inline-flex items-center gap-1">
                     <Plus size={12} /> Add vehicle
                   </button>
