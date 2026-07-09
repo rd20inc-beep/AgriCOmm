@@ -1920,8 +1920,8 @@ export default function MillingBatchDetail() {
         </form>
       </SlideDrawer>
 
-      {/* Yield Output Modal */}
-      <Modal isOpen={showYieldModal} onClose={() => setShowYieldModal(false)} title="Record Yield Output" size="md">
+      {/* Yield Output — right slide-over */}
+      <SlideDrawer open={showYieldModal} onClose={() => setShowYieldModal(false)} title="Record Yield Output" icon={Boxes} size="xl">
         <form onSubmit={handleYieldSubmit} className="space-y-4">
           <div className="bg-blue-50 rounded-lg p-3 text-sm text-blue-800">
             <span className="font-semibold">Raw Input:</span> {Math.round(batch.rawQtyKg).toLocaleString()} kg &nbsp;|&nbsp;
@@ -2152,7 +2152,7 @@ export default function MillingBatchDetail() {
             </button>
           </div>
         </form>
-      </Modal>
+      </SlideDrawer>
 
       {/* Cost Entry Modal */}
       <Modal isOpen={showCostModal} onClose={() => setShowCostModal(false)} title="Milling Costs (PKR)" size="md">
