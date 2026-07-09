@@ -424,28 +424,28 @@ export default function MillingDashboard() {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Milling Dashboard</h1>
           <p className="text-sm text-gray-500 mt-0.5">
             Mill operations, batches, and quality overview
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {canSellLocally && (
             <Link
               to="/local-sales"
-              className="inline-flex items-center gap-2 bg-emerald-50 text-emerald-700 border border-emerald-200 px-4 py-2.5 rounded-lg hover:bg-emerald-100 transition-colors font-medium text-sm"
+              className="inline-flex items-center gap-2 whitespace-nowrap bg-emerald-50 text-emerald-700 border border-emerald-200 px-4 py-2.5 rounded-lg hover:bg-emerald-100 transition-colors font-medium text-sm"
               title="Sell finished rice or by-products to a local buyer"
             >
-              <ShoppingCart className="w-4 h-4" /> Sell Locally
+              <ShoppingCart className="w-4 h-4 shrink-0" /> Sell Locally
             </Link>
           )}
           <button
             onClick={() => { resetBatchForm(); setShowNewBatch(true); }}
-            className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
+            className="inline-flex items-center gap-2 whitespace-nowrap bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
           >
-            <Plus className="w-4 h-4" /> New Batch
+            <Plus className="w-4 h-4 shrink-0" /> New Batch
           </button>
         </div>
       </div>
