@@ -167,7 +167,7 @@ export default function FinanceOverview() {
       )}
 
       {/* ─── PRIMARY KPI ROW ──────────────────────────────────────── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
         <KpiTile
           icon={ArrowDownLeft}
           tone="emerald"
@@ -398,7 +398,7 @@ function Skeleton() {
   return (
     <div className="space-y-4 animate-pulse">
       <div className="h-32 bg-gray-100 rounded-2xl" />
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
         {[0,1,2,3].map(i => <div key={i} className="h-28 bg-gray-100 rounded-xl" />)}
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

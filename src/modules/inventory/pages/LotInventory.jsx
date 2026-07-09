@@ -380,7 +380,7 @@ export default function LotInventory() {
       </div>
 
       {/* KPI Summary */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
         <div className="bg-white rounded-xl border border-gray-100 p-4">
           <p className="text-xs font-medium text-gray-500 uppercase">Total Lots</p>
           <p className="text-2xl font-bold text-gray-900 mt-1">{kpis.totalLots}</p>

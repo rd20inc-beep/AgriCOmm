@@ -819,7 +819,7 @@ export default function Reports() {
       {/* ─── Money KPI strip (the headline numbers across the whole system).
           Hidden entirely for the production-only Mill Operator. */}
       {!operatorScoped && (
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
         <KpiTile icon={ArrowDownLeft} tone="emerald" label="Total Money In"  primary={fmtPKR(totalIn)}  secondary={`${receiptsData?.count ?? 0} receipts`} />
         <KpiTile icon={ArrowUpRight}  tone="rose"    label="Total Money Out" primary={fmtPKR(totalOut)} secondary={`${paymentsData?.count ?? 0} payments`} />
         <KpiTile icon={Activity}      tone={netFlow >= 0 ? 'violet' : 'rose'} label="Net Cashflow"
@@ -2506,7 +2506,7 @@ function InventoryTab({ millScoped, hideValue }) {
   return (
     <div className="space-y-6">
       {/* Headline numbers */}
-      <div className={`grid grid-cols-2 sm:grid-cols-3 ${hideValue ? 'lg:grid-cols-5' : 'lg:grid-cols-6'} gap-3`}>
+      <div className={`grid grid-cols-2 sm:grid-cols-3 ${hideValue ? 'xl:grid-cols-5' : 'xl:grid-cols-6'} gap-3`}>
         <SummaryCell label="Total lots" value={String(grand.lotCount ?? lotsArr.length)} />
         <SummaryCell label="Total weight" value={fmtMT(totalKg)} />
         <SummaryCell label="Available" value={availKg != null ? fmtMT(availKg) : '—'} />
