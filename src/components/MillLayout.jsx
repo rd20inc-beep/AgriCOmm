@@ -21,6 +21,7 @@ const millNav = [
     icon: Factory,
     children: [
       { label: 'Operations', to: '/milling', icon: Factory },
+      { label: 'Service Milling', to: '/milling/service', icon: Package },
       { label: 'Rice Purchases', to: '/milling/rice-purchases', icon: Truck },
       { label: 'Quality Control', to: '/quality', icon: FlaskConical },
     ],

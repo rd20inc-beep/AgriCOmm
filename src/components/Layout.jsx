@@ -42,6 +42,7 @@ const sidebarNav = [
     icon: Factory,
     children: [
       { label: 'Operations', to: '/milling', permission: { module: 'milling', action: 'view' } },
+      { label: 'Service Milling', to: '/milling/service', icon: Package, permission: { module: 'service_milling', action: 'view' } },
       { label: 'Finance', to: '/milling/finance', icon: DollarSign, permission: { module: 'milling', action: 'view' } },
       { label: 'Stock Overview', to: '/mill-store', icon: ShoppingCart, permission: { module: 'mill_store', action: 'view' } },
       { label: 'Stock Summary', to: '/stock-summary', icon: Boxes, permission: { module: 'inventory', action: 'view' } },

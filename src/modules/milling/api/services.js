@@ -1,6 +1,7 @@
 import api from '../../../api/client';
 export const millingApi = {
   listBatches: (params) => api.get('/api/milling/batches', params),
+  listServiceBatches: () => api.get('/api/milling/service-batches'),
   getBatch: (id) => api.get(`/api/milling/batches/${id}`),
   sourceLots: (id) => api.get(`/api/milling/batches/${id}/source-lots`),
   cashFlow: (params) => api.get('/api/milling/cash-flow', params),

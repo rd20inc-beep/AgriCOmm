@@ -42,6 +42,7 @@ import SlideDrawer from '../../../components/SlideDrawer';
 import RiceTypePicker from '../../../components/RiceTypePicker';
 import { lotCategory, CAT_ORDER, CAT_COLOR, NON_MILLABLE_CATEGORIES } from '../../../utils/lotCategory';
 import SupplierPicker from '../../../components/SupplierPicker';
+import CustomerPicker from '../../../components/CustomerPicker';
 import MillExpenseDrawer from '../../../components/MillExpenseDrawer';
 // Chart data computed from real batch data below (no mock imports)
 
@@ -84,8 +85,10 @@ export default function MillingDashboard() {
     millId: '', shift: 'Day', notes: '',
     // Custom label + free-form tags for easy referencing (esp. blends).
     batchName: '', customTags: '',
-    // Service milling fields
-    clientName: '', clientContact: '', serviceFeePerKg: '',
+    // Service milling (toll/job-work) — client owns the rice; we bill service fees.
+    clientCustomerId: '',
+    serviceMillingRatePerKg: '', serviceRentalRatePerKatta: '', serviceLabourRatePerKatta: '',
+    dateReceived: '', kattaCount: '', bagCount: '', expectedOutputKg: '', serviceRemarks: '',
   });
   const setBF = (k, v) => setBatchForm(p => ({ ...p, [k]: v }));
   // Blend: consume partial quantities from multiple stock lots (mixed
@@ -154,7 +157,10 @@ export default function MillingDashboard() {
     setBatchForm({
       millingType: 'own_stock', productId: '', supplierId: '', rawQtyKg: '', totalBags: '', plannedFinishedKg: '',
       millingFeePerKg: '5',
-      millId: '', shift: 'Day', notes: '', batchName: '', customTags: '', clientName: '', clientContact: '', serviceFeePerKg: '',
+      millId: '', shift: 'Day', notes: '', batchName: '', customTags: '',
+      clientCustomerId: '',
+      serviceMillingRatePerKg: '', serviceRentalRatePerKatta: '', serviceLabourRatePerKatta: '',
+      dateReceived: '', kattaCount: '', bagCount: '', expectedOutputKg: '', serviceRemarks: '',
     });
     setUseBlend(true); setBlendProductId(''); setBlendRows([]); setBlendTag('All');
   };
@@ -203,10 +209,11 @@ export default function MillingDashboard() {
       addToast('Supplier and raw quantity are required', 'error');
       return;
     }
-    if (batchForm.millingType === 'service_milling' && !batchForm.clientName) {
-      addToast('Client name is required for service milling', 'error');
+    if (batchForm.millingType === 'service_milling' && !batchForm.clientCustomerId) {
+      addToast('Select the client we are milling for (service milling)', 'error');
       return;
     }
+    const isService = batchForm.millingType === 'service_milling';
     const rawKg = parseFloat(batchForm.rawQtyKg) || 0; // backend stores KG (Phase 5c)
     const plannedKg = parseFloat(batchForm.plannedFinishedKg)
       || Math.round((useBlend ? blendTotals.kg : rawKg) * 0.65);
@@ -219,9 +226,20 @@ export default function MillingDashboard() {
         planned_finished_kg: plannedKg,
         batch_name: batchForm.batchName?.trim() || null,
         custom_tags: batchForm.customTags,  // comma string → backend normalises to array
-        notes: batchForm.millingType === 'service_milling'
-          ? `[SERVICE MILLING] Client: ${batchForm.clientName}${batchForm.clientContact ? ` | Contact: ${batchForm.clientContact}` : ''}${batchForm.serviceFeePerKg ? ` | Fee: PKR ${batchForm.serviceFeePerKg}/kg` : ''}${batchForm.notes ? ` | ${batchForm.notes}` : ''}`
-          : batchForm.notes || null,
+        notes: batchForm.notes || null,
+        // Service milling — client-owned toll batch + service rates (structured).
+        ...(isService ? {
+          is_service_milling: true,
+          client_customer_id: parseInt(batchForm.clientCustomerId),
+          service_milling_rate_per_kg: batchForm.serviceMillingRatePerKg || null,
+          service_rental_rate_per_katta: batchForm.serviceRentalRatePerKatta || null,
+          service_labour_rate_per_katta: batchForm.serviceLabourRatePerKatta || null,
+          date_received: batchForm.dateReceived || null,
+          katta_count: batchForm.kattaCount || null,
+          bag_count: batchForm.bagCount || null,
+          expected_output_kg: batchForm.expectedOutputKg || null,
+          service_remarks: batchForm.serviceRemarks || null,
+        } : {}),
         ...(useBlend
           ? { source_lots: blendLots, product_id: blendProductId ? parseInt(blendProductId) : null, processing_type: blendRecipe.processingType }
           : { supplier_id: parseInt(batchForm.supplierId), raw_qty_kg: rawKg, product_id: parseInt(batchForm.productId) }),
@@ -1103,23 +1121,81 @@ export default function MillingDashboard() {
             </div>
           </div>
 
-          {/* Service Milling — Client Details */}
+          {/* Service Milling — client-owned toll batch: client + intake + service rates */}
           {batchForm.millingType === 'service_milling' && (
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-3">
-              <h4 className="text-xs font-semibold text-amber-800 uppercase">Client Details</h4>
-              <div className="grid grid-cols-2 gap-3">
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-4">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-amber-200 text-amber-900 uppercase tracking-wide">Client-Owned</span>
+                <p className="text-xs text-amber-800">This rice belongs to the client — it is tracked as Service Milling stock, never company stock.</p>
+              </div>
+
+              <CustomerPicker
+                label={<span className="text-xs font-semibold text-amber-800 uppercase">Client *</span>}
+                value={batchForm.clientCustomerId}
+                onChange={(id) => setBF('clientCustomerId', id)}
+                addToast={addToast}
+                placeholder="Search client we are milling for…"
+                clearable
+              />
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Client Name *</label>
-                  <input type="text" value={batchForm.clientName} onChange={e => setBF('clientName', e.target.value)} placeholder="Client company name" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Date Received</label>
+                  <input type="date" value={batchForm.dateReceived} onChange={e => setBF('dateReceived', e.target.value)} className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Contact</label>
-                  <input type="text" value={batchForm.clientContact} onChange={e => setBF('clientContact', e.target.value)} placeholder="Phone / email" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Kattas Received</label>
+                  <input type="number" min="0" value={batchForm.kattaCount} onChange={e => setBF('kattaCount', e.target.value)} placeholder="e.g. 200" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Bags</label>
+                  <input type="number" min="0" value={batchForm.bagCount} onChange={e => setBF('bagCount', e.target.value)} placeholder="optional" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Expected Output (kg)</label>
+                  <input type="number" min="0" value={batchForm.expectedOutputKg} onChange={e => setBF('expectedOutputKg', e.target.value)} placeholder="optional" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
                 </div>
               </div>
+
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Milling Fee (PKR/kg)</label>
-                <input type="number" step="0.01" value={batchForm.serviceFeePerKg} onChange={e => setBF('serviceFeePerKg', e.target.value)} placeholder="e.g. 3.5" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
+                <h4 className="text-xs font-semibold text-amber-800 uppercase mb-2">Service Charges</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Milling (PKR / kg)</label>
+                    <input type="number" step="0.01" min="0" value={batchForm.serviceMillingRatePerKg} onChange={e => setBF('serviceMillingRatePerKg', e.target.value)} placeholder="e.g. 3.5" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Rental (PKR / katta)</label>
+                    <input type="number" step="0.01" min="0" value={batchForm.serviceRentalRatePerKatta} onChange={e => setBF('serviceRentalRatePerKatta', e.target.value)} placeholder="e.g. 10" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Labour (PKR / katta)</label>
+                    <input type="number" step="0.01" min="0" value={batchForm.serviceLabourRatePerKatta} onChange={e => setBF('serviceLabourRatePerKatta', e.target.value)} placeholder="e.g. 5" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
+                  </div>
+                </div>
+                {/* Live service billing preview (final amounts computed at invoicing) */}
+                {(() => {
+                  const kattas = parseFloat(batchForm.kattaCount) || parseFloat(batchForm.bagCount) || 0;
+                  const milledKg = parseFloat(batchForm.expectedOutputKg) || parseFloat(batchForm.rawQtyKg) || 0;
+                  const mill = milledKg * (parseFloat(batchForm.serviceMillingRatePerKg) || 0);
+                  const rent = kattas * (parseFloat(batchForm.serviceRentalRatePerKatta) || 0);
+                  const lab = kattas * (parseFloat(batchForm.serviceLabourRatePerKatta) || 0);
+                  const total = mill + rent + lab;
+                  if (total <= 0) return null;
+                  return (
+                    <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs bg-white rounded-lg border border-amber-200 px-3 py-2">
+                      <span className="text-gray-500">Milling <b className="text-gray-800">PKR {Math.round(mill).toLocaleString()}</b></span>
+                      <span className="text-gray-500">Rental <b className="text-gray-800">PKR {Math.round(rent).toLocaleString()}</b></span>
+                      <span className="text-gray-500">Labour <b className="text-gray-800">PKR {Math.round(lab).toLocaleString()}</b></span>
+                      <span className="ml-auto text-emerald-700 font-bold">Est. Service Total PKR {Math.round(total).toLocaleString()}</span>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Notes / Remarks</label>
+                <input type="text" value={batchForm.serviceRemarks} onChange={e => setBF('serviceRemarks', e.target.value)} placeholder="e.g. paddy variety, moisture, handling notes" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
               </div>
             </div>
           )}
@@ -1376,10 +1452,10 @@ export default function MillingDashboard() {
               {batchForm.totalBags && parseInt(batchForm.totalBags, 10) > 0 && (
                 <div className="flex justify-between"><span className="text-gray-500">Bags</span><span className="font-medium">{batchForm.totalBags} bags · {(parseFloat(batchForm.rawQtyKg) / parseInt(batchForm.totalBags, 10)).toFixed(2)} kg/bag avg</span></div>
               )}
-              {batchForm.millingType === 'service_milling' && batchForm.serviceFeePerKg && (
+              {batchForm.millingType === 'service_milling' && batchForm.serviceMillingRatePerKg && (
                 <div className="flex justify-between border-t border-gray-200 mt-1 pt-1">
-                  <span className="text-gray-500">Milling Revenue</span>
-                  <span className="font-bold text-emerald-700">PKR {Math.round(parseFloat(batchForm.serviceFeePerKg) * parseFloat(batchForm.rawQtyKg)).toLocaleString()}</span>
+                  <span className="text-gray-500">Est. Milling Service</span>
+                  <span className="font-bold text-emerald-700">PKR {Math.round(parseFloat(batchForm.serviceMillingRatePerKg) * (parseFloat(batchForm.expectedOutputKg) || parseFloat(batchForm.rawQtyKg) || 0)).toLocaleString()}</span>
                 </div>
               )}
             </div>
