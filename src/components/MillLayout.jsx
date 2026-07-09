@@ -326,14 +326,6 @@ export default function MillLayout({ children }) {
 
           <div className="flex-1" />
 
-          <button
-            onClick={() => setDarkMode(prev => !prev)}
-            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-            title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-          >
-            {darkMode ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
-
           <div className="relative" ref={notifRef}>
             <button
               onClick={() => setNotifOpen((prev) => !prev)}
@@ -395,6 +387,10 @@ export default function MillLayout({ children }) {
                 <button onClick={() => { setUserMenuOpen(false); }}
                   className="flex items-center gap-2.5 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
                   <User size={15} /> Profile
+                </button>
+                <button onClick={() => setDarkMode(prev => !prev)}
+                  className="flex items-center gap-2.5 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                  {darkMode ? <Sun size={15} /> : <Moon size={15} />} {darkMode ? 'Light mode' : 'Dark mode'}
                 </button>
                 <div className="border-t border-gray-100">
                   <button onClick={handleSignOut}

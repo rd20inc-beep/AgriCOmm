@@ -447,15 +447,6 @@ export default function Layout({ children }) {
             </select>
           </div>
 
-          {/* Theme toggle */}
-          <button
-            onClick={() => setDarkMode(prev => !prev)}
-            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-            title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-          >
-            {darkMode ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
-
           {/* Notification bell */}
           <div className="relative" ref={notifRef}>
             <button
@@ -530,6 +521,10 @@ export default function Layout({ children }) {
                 <button onClick={() => { setUserMenuOpen(false); navigate('/admin'); }}
                   className="flex items-center gap-2.5 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
                   <Settings size={15} /> Settings
+                </button>
+                <button onClick={() => setDarkMode(prev => !prev)}
+                  className="flex items-center gap-2.5 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                  {darkMode ? <Sun size={15} /> : <Moon size={15} />} {darkMode ? 'Light mode' : 'Dark mode'}
                 </button>
                 <div className="border-t border-gray-100">
                   <button onClick={handleSignOut}
