@@ -108,6 +108,29 @@ async function uploadFile(endpoint, formData) {
   return data;
 }
 
+// Authenticated file download — fetches the (token-protected) endpoint as a blob
+// and triggers a browser save. Plain <a href> can't be used because the download
+// route requires the Bearer token.
+async function downloadFile(endpoint, filename) {
+  const token = getToken();
+  const headers = {};
+  if (token && token !== 'mock-prototype-token') headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(`${API_BASE}${endpoint}`, { headers });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new ApiError(data?.message || 'Download failed', res.status, data);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename || (endpoint.split('/').pop() || 'document');
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 // Strip null/undefined params before serialisation — URLSearchParams will
 // happily stringify `undefined` as the literal "undefined", which any
 // backend `if (x && x !== 'all')` then treats as a real filter and
@@ -134,6 +157,7 @@ const api = {
   patch: (endpoint, body) => request(endpoint, { method: 'PATCH', body }),
   delete: (endpoint) => request(endpoint, { method: 'DELETE' }),
   upload: uploadFile,
+  download: downloadFile,
 };
 
 export default api;
