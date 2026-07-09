@@ -89,7 +89,7 @@ export default function MillingDashboard() {
     // Service milling (toll/job-work) — client owns the rice; we bill service fees.
     clientCustomerId: '',
     serviceMillingRatePerKg: '', serviceRentalRatePerKatta: '', serviceLabourRatePerKatta: '',
-    dateReceived: '', kattaCount: '', kattaSizeKg: '', bagCount: '', expectedOutputKg: '', serviceRemarks: '',
+    dateReceived: '', kattaCount: '', kattaSizeKg: '50', bagCount: '', expectedOutputKg: '', serviceRemarks: '',
     serviceVehicles: [], // [{ vehicle_no, driver_name, weight_kg, total_bags }]
   });
   const setBF = (k, v) => setBatchForm(p => ({ ...p, [k]: v }));
@@ -176,7 +176,7 @@ export default function MillingDashboard() {
       millId: '', shift: 'Day', notes: '', batchName: '', customTags: '',
       clientCustomerId: '',
       serviceMillingRatePerKg: '', serviceRentalRatePerKatta: '', serviceLabourRatePerKatta: '',
-      dateReceived: '', kattaCount: '', kattaSizeKg: '', bagCount: '', expectedOutputKg: '', serviceRemarks: '',
+      dateReceived: '', kattaCount: '', kattaSizeKg: '50', bagCount: '', expectedOutputKg: '', serviceRemarks: '',
       serviceVehicles: [],
     });
     setUseBlend(true); setBlendProductId(''); setBlendRows([]); setBlendTag('All');
@@ -1179,7 +1179,7 @@ export default function MillingDashboard() {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Katta Size (kg)</label>
-                  <input type="number" min="0" step="0.5" value={batchForm.kattaSizeKg} onChange={e => recomputeKattaWeight(batchForm.kattaCount, e.target.value)} placeholder="e.g. 100" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
+                  <input type="number" min="0" step="0.5" value={batchForm.kattaSizeKg} onChange={e => recomputeKattaWeight(batchForm.kattaCount, e.target.value)} placeholder="e.g. 50" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
                   {batchForm.kattaCount && batchForm.kattaSizeKg && (
                     <p className="text-[11px] text-emerald-700 mt-0.5">= {Math.round((parseFloat(batchForm.kattaCount) || 0) * (parseFloat(batchForm.kattaSizeKg) || 0)).toLocaleString()} kg</p>
                   )}
