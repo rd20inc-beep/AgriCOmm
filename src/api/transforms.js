@@ -367,6 +367,8 @@ export function transformBatch(dbBatch) {
     clientCustomerId: dbBatch.client_customer_id || null,
     clientName: dbBatch.client_name || null,
     serviceLotStatus: dbBatch.service_lot_status || null,
+    kattaCount: dbBatch.katta_count != null ? parseInt(dbBatch.katta_count, 10) : null,
+    bagCount: dbBatch.bag_count != null ? parseInt(dbBatch.bag_count, 10) : null,
   };
 }
 
