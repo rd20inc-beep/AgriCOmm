@@ -76,9 +76,9 @@ function subtypeBadgeClass(s) {
   if (s === 'finished')        return 'bg-blue-50 text-blue-700';
   if (s === 'rice-in')         return 'bg-slate-50 text-slate-700';
   if (s && s.startsWith('broken')) return 'bg-amber-50 text-amber-700';
-  if (s === 'sortex')          return 'bg-orange-50 text-orange-700';
+  if (s === 'sortex')          return 'bg-amber-50 text-amber-700';
   if (s === 'choba')           return 'bg-teal-50 text-teal-700';
-  if (s === 'bran')            return 'bg-green-50 text-green-700';
+  if (s === 'bran')            return 'bg-emerald-50 text-emerald-700';
   if (s === 'husk')            return 'bg-purple-50 text-purple-700';
   return 'bg-gray-50 text-gray-600';
 }

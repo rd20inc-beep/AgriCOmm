@@ -26,10 +26,10 @@ export default function StoreAlerts() {
           {[0,1,2].map(i => <div key={i} className="h-16 bg-gray-100 rounded-xl" />)}
         </div>
       ) : safeAlerts.length === 0 ? (
-        <div className="bg-green-50 border border-green-200 rounded-xl p-6 text-center">
-          <Package size={32} className="mx-auto text-green-500 mb-2" />
-          <p className="text-lg font-semibold text-green-900">All stock levels are healthy</p>
-          <p className="text-sm text-green-700 mt-1">No items below reorder level.</p>
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-6 text-center">
+          <Package size={32} className="mx-auto text-emerald-500 mb-2" />
+          <p className="text-lg font-semibold text-emerald-900">All stock levels are healthy</p>
+          <p className="text-sm text-emerald-700 mt-1">No items below reorder level.</p>
         </div>
       ) : (
         <>

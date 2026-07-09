@@ -19,7 +19,7 @@ export default function FinancialsTab({ order, formatCurrency, formatPKR, totalC
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-gray-600">Advance Received</span>
-            <span className="font-medium text-green-600">{formatCurrency(order.advanceReceived)}</span>
+            <span className="font-medium text-emerald-600">{formatCurrency(order.advanceReceived)}</span>
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-gray-600">Balance Expected</span>
@@ -27,7 +27,7 @@ export default function FinancialsTab({ order, formatCurrency, formatPKR, totalC
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-gray-600">Balance Received</span>
-            <span className="font-medium text-green-600">{formatCurrency(order.balanceReceived)}</span>
+            <span className="font-medium text-emerald-600">{formatCurrency(order.balanceReceived)}</span>
           </div>
           <div className="border-t border-gray-200 pt-2 flex justify-between text-sm font-semibold">
             <span className="text-gray-700">Total Receivables</span>
@@ -93,19 +93,19 @@ export default function FinancialsTab({ order, formatCurrency, formatPKR, totalC
         <div className="space-y-3">
           <div className="flex justify-between text-sm">
             <span className="text-gray-600">Gross Profit (PKR)</span>
-            <span className={`font-semibold ${grossProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            <span className={`font-semibold ${grossProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
               {formatCost(grossProfit)}
             </span>
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-gray-600">Margin %</span>
-            <span className={`font-semibold ${parseFloat(marginPct) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            <span className={`font-semibold ${parseFloat(marginPct) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
               {marginPct}%
             </span>
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-gray-600">Outstanding Balance</span>
-            <span className={`font-semibold ${outstandingBalance > 0 ? 'text-amber-600' : 'text-green-600'}`}>
+            <span className={`font-semibold ${outstandingBalance > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
               {formatCurrency(outstandingBalance)}
             </span>
           </div>
@@ -165,7 +165,7 @@ export default function FinancialsTab({ order, formatCurrency, formatPKR, totalC
         <button
           disabled={!canConfirmAdvance}
           onClick={onConfirmAdvance}
-          className={`inline-flex items-center gap-2 px-4 py-2.5 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors ${!canConfirmAdvance ? 'opacity-50 cursor-not-allowed' : ''}`}
+          className={`inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors ${!canConfirmAdvance ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
           <DollarSign className="w-4 h-4" />
           Confirm Advance
@@ -187,7 +187,7 @@ export default function FinancialsTab({ order, formatCurrency, formatPKR, totalC
         </button>
         <button
           onClick={onAddReceivable}
-          className="inline-flex items-center gap-2 px-4 py-2.5 border border-green-300 rounded-lg text-sm font-medium text-green-700 bg-white hover:bg-green-50 transition-colors"
+          className="inline-flex items-center gap-2 px-4 py-2.5 border border-emerald-300 rounded-lg text-sm font-medium text-emerald-700 bg-white hover:bg-emerald-50 transition-colors"
         >
           <Plus className="w-4 h-4" />
           Add Receivable

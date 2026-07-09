@@ -114,9 +114,9 @@ export default function ProductsTab() {
                   <td className="px-4 py-3 text-gray-600">{p.grade || '—'}</td>
                   <td className="px-4 py-3 text-center">
                     {p.isByproduct ? (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">By-Product</span>
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">By-Product</span>
                     ) : (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">Finished</span>
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">Finished</span>
                     )}
                   </td>
                   <td className="px-4 py-3 text-right">

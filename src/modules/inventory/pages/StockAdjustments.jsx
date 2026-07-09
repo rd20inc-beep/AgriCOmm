@@ -181,7 +181,7 @@ export default function StockAdjustments() {
           </div>
           <div className="flex gap-4 mb-3 text-sm">
             <span className="text-gray-500">Total lots: <strong className="text-gray-900">{reconciliation.total}</strong></span>
-            <span className="text-green-600">Reconciled: <strong>{reconciliation.reconciled}</strong></span>
+            <span className="text-emerald-600">Reconciled: <strong>{reconciliation.reconciled}</strong></span>
             <span className="text-red-600">Discrepancies: <strong>{reconciliation.discrepancies?.length || 0}</strong></span>
           </div>
           {reconciliation.discrepancies?.length > 0 && (
@@ -285,7 +285,7 @@ export default function StockAdjustments() {
                   <td className="px-4 py-3 text-center align-top">
                     {isPending && (
                       <div className="flex gap-1 justify-center">
-                        <button onClick={() => handleApprove(a.id)} className="p-1.5 text-green-600 bg-green-50 rounded hover:bg-green-100" title="Approve">
+                        <button onClick={() => handleApprove(a.id)} className="p-1.5 text-emerald-600 bg-emerald-50 rounded hover:bg-emerald-100" title="Approve">
                           <CheckCircle className="w-4 h-4" />
                         </button>
                         <button onClick={() => handleReject(a.id)} className="p-1.5 text-red-600 bg-red-50 rounded hover:bg-red-100" title="Reject">
@@ -353,13 +353,13 @@ export default function StockAdjustments() {
 
           {/* Cost-impact preview */}
           {costPreview && (
-            <div className={`rounded-lg p-3 border ${costPreview.direction === 'add' ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+            <div className={`rounded-lg p-3 border ${costPreview.direction === 'add' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
               <div className="flex items-start gap-2 text-sm">
-                <Info size={14} className={`mt-0.5 ${costPreview.direction === 'add' ? 'text-green-600' : 'text-red-600'}`} />
+                <Info size={14} className={`mt-0.5 ${costPreview.direction === 'add' ? 'text-emerald-600' : 'text-red-600'}`} />
                 <div>
                   <div className="font-medium text-gray-900">
                     {costPreview.direction === 'add' ? 'Adds ' : costPreview.direction === 'remove' ? 'Writes off ' : 'Changes '}
-                    <span className={costPreview.direction === 'add' ? 'text-green-700' : 'text-red-700'}>
+                    <span className={costPreview.direction === 'add' ? 'text-emerald-700' : 'text-red-700'}>
                       {PKR(costPreview.total)}
                     </span>
                   </div>

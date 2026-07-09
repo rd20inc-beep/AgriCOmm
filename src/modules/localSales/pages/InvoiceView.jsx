@@ -24,7 +24,7 @@ const pkr = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
 const dt = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 const STATUS_TONE = {
   Paid: 'bg-emerald-100 text-emerald-700', Partial: 'bg-amber-100 text-amber-700',
-  Credit: 'bg-rose-100 text-rose-700', Unpaid: 'bg-rose-100 text-rose-700',
+  Credit: 'bg-red-100 text-red-700', Unpaid: 'bg-red-100 text-red-700',
 };
 
 export default function InvoiceView() {
@@ -66,7 +66,7 @@ export default function InvoiceView() {
   if (isError || !data?.sale) return (
     <div className="p-6">
       <button onClick={() => navigate(-1)} className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm"><ArrowLeft size={14} /> Back</button>
-      <p className="mt-4 text-sm text-rose-600">Invoice not found.</p>
+      <p className="mt-4 text-sm text-red-600">Invoice not found.</p>
     </div>
   );
 
@@ -145,7 +145,7 @@ export default function InvoiceView() {
           <h1 className="text-2xl font-bold text-gray-900 inline-flex items-center gap-2">
             Invoice {sale.invoiceNo}
             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_TONE[sale.paymentStatus] || 'bg-gray-100 text-gray-600'}`}>{sale.paymentStatus}</span>
-            {sale.overdue && <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-rose-100 text-rose-700 inline-flex items-center gap-1"><AlertTriangle size={11} /> Overdue</span>}
+            {sale.overdue && <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-red-100 text-red-700 inline-flex items-center gap-1"><AlertTriangle size={11} /> Overdue</span>}
           </h1>
           {sale.saleGroupNo && sale.saleGroupNo !== sale.invoiceNo && <p className="text-xs text-gray-400">Group {sale.saleGroupNo}</p>}
         </div>
@@ -279,8 +279,8 @@ export default function InvoiceView() {
           ))}
           {sale.outstanding > 0.01 && (
             <li className="ml-4">
-              <span className={`absolute -left-1.5 w-3 h-3 rounded-full ${sale.overdue ? 'bg-rose-500' : 'bg-amber-400'}`} />
-              <span className={`text-sm ${sale.overdue ? 'text-rose-600 font-medium' : 'text-gray-600'}`}>
+              <span className={`absolute -left-1.5 w-3 h-3 rounded-full ${sale.overdue ? 'bg-red-500' : 'bg-amber-400'}`} />
+              <span className={`text-sm ${sale.overdue ? 'text-red-600 font-medium' : 'text-gray-600'}`}>
                 {sale.overdue ? 'Overdue' : 'Balance due'} {pkr(sale.outstanding)}{sale.dueDate ? ` · due ${dt(sale.dueDate)}` : ''}
               </span>
             </li>
@@ -415,7 +415,7 @@ function ItemRow({ it }) {
 }
 
 function Field({ label, value, sub, tone = 'gray' }) {
-  const toneCls = { emerald: 'text-emerald-700', rose: 'text-rose-600', gray: 'text-gray-900' }[tone] || 'text-gray-900';
+  const toneCls = { emerald: 'text-emerald-700', rose: 'text-red-600', gray: 'text-gray-900' }[tone] || 'text-gray-900';
   return (
     <div>
       <p className="text-[11px] uppercase tracking-wider text-gray-400">{label}</p>

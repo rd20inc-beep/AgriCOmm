@@ -217,7 +217,7 @@ export default function ExportOrders() {
                     <td className="px-4 py-3 text-center">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                         advanceStatus === 'received'
-                          ? 'bg-green-100 text-green-700'
+                          ? 'bg-emerald-100 text-emerald-700'
                           : 'bg-amber-100 text-amber-700'
                       }`}>
                         {advanceStatus === 'received' ? 'Received' : 'Pending'}
@@ -226,7 +226,7 @@ export default function ExportOrders() {
                     <td className="px-4 py-3 text-center">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                         balanceStatus === 'received'
-                          ? 'bg-green-100 text-green-700'
+                          ? 'bg-emerald-100 text-emerald-700'
                           : 'bg-amber-100 text-amber-700'
                       }`}>
                         {balanceStatus === 'received' ? 'Received' : 'Pending'}
@@ -234,7 +234,7 @@ export default function ExportOrders() {
                     </td>
                     <td className="px-4 py-3 text-center">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                        shipmentStatus === 'Arrived' ? 'bg-green-100 text-green-700' :
+                        shipmentStatus === 'Arrived' ? 'bg-emerald-100 text-emerald-700' :
                         shipmentStatus === 'In Transit' ? 'bg-blue-100 text-blue-700' :
                         shipmentStatus === 'Booked' ? 'bg-cyan-100 text-cyan-700' :
                         'bg-gray-100 text-gray-600'

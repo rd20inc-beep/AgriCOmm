@@ -27,20 +27,20 @@ const TYPE_COLORS = {
   manual_journal: 'bg-indigo-100 text-indigo-700',
   cost_edit: 'bg-amber-100 text-amber-700',
   order_close: 'bg-gray-100 text-gray-700',
-  quality_override: 'bg-orange-100 text-orange-700',
+  quality_override: 'bg-amber-100 text-amber-700',
   price_change: 'bg-red-100 text-red-700',
 };
 
 const PRIORITY_COLORS = {
   Urgent: 'bg-red-100 text-red-700 border-red-200',
-  High: 'bg-orange-100 text-orange-700 border-orange-200',
+  High: 'bg-amber-100 text-amber-700 border-amber-200',
   Normal: 'bg-gray-100 text-gray-700 border-gray-200',
   Low: 'bg-gray-50 text-gray-500 border-gray-200',
 };
 
 const STATUS_COLORS = {
   Pending: 'bg-amber-100 text-amber-700',
-  Approved: 'bg-green-100 text-green-700',
+  Approved: 'bg-emerald-100 text-emerald-700',
   Rejected: 'bg-red-100 text-red-700',
   Cancelled: 'bg-gray-100 text-gray-600',
   Expired: 'bg-gray-100 text-gray-500',
@@ -174,7 +174,7 @@ export default function Approvals() {
         </div>
         <div className="bg-white rounded-lg border border-gray-200 p-4">
           <p className="text-xs font-medium text-gray-500 uppercase">Expiring &lt;24h</p>
-          <p className="text-2xl font-bold text-orange-600 mt-1">{stats.expiringSoon}</p>
+          <p className="text-2xl font-bold text-amber-600 mt-1">{stats.expiringSoon}</p>
         </div>
         <div className="bg-white rounded-lg border border-gray-200 p-4">
           <p className="text-xs font-medium text-gray-500 uppercase">Total Amount</p>
@@ -252,7 +252,7 @@ export default function Approvals() {
                         {approval.status}
                       </span>
                       {expiry && expiry !== 'Expired' && (
-                        <span className="inline-flex items-center gap-1 text-xs text-orange-600">
+                        <span className="inline-flex items-center gap-1 text-xs text-amber-600">
                           <Clock className="w-3 h-3" />
                           {expiry}
                         </span>
@@ -397,7 +397,7 @@ export default function Approvals() {
                   {selectedApproval.proposedData && (
                     <div>
                       <p className="text-xs font-medium text-gray-500 uppercase mb-2">Proposed</p>
-                      <pre className="bg-green-50 rounded-lg p-3 text-xs overflow-x-auto max-h-48 text-green-700">
+                      <pre className="bg-emerald-50 rounded-lg p-3 text-xs overflow-x-auto max-h-48 text-emerald-700">
                         {JSON.stringify(selectedApproval.proposedData, null, 2)}
                       </pre>
                     </div>

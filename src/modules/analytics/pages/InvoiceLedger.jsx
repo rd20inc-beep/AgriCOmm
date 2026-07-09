@@ -19,7 +19,7 @@ const ADMIN_PRICING_ROLES = ['Super Admin', 'Owner', 'Finance Manager', 'Mill Ma
 const pkr = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
 const dt = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 const STATUS_TONE = {
-  Paid: 'bg-emerald-100 text-emerald-700', Partial: 'bg-amber-100 text-amber-700', Unpaid: 'bg-rose-100 text-rose-700',
+  Paid: 'bg-emerald-100 text-emerald-700', Partial: 'bg-amber-100 text-amber-700', Unpaid: 'bg-red-100 text-red-700',
 };
 const COLS = [
   { label: 'Invoice', key: 'invoiceNo' },
@@ -162,7 +162,7 @@ export default function InvoiceLedger() {
         <Kpi label="Outstanding" value={pkr(totals.outstanding)} tone={totals.outstanding > 0 ? 'rose' : 'gray'} />
       </div>
 
-      {error && <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-sm text-rose-700 inline-flex items-center gap-1.5"><AlertTriangle size={14} /> {error}</div>}
+      {error && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700 inline-flex items-center gap-1.5"><AlertTriangle size={14} /> {error}</div>}
 
       {/* Table */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
@@ -204,7 +204,7 @@ export default function InvoiceLedger() {
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums">{pkr(r.total)}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{pkr(r.received)}</td>
-                <td className={`px-3 py-2 text-right tabular-nums ${r.outstanding > 0 ? 'text-rose-600' : 'text-gray-400'}`}>{pkr(r.outstanding)}</td>
+                <td className={`px-3 py-2 text-right tabular-nums ${r.outstanding > 0 ? 'text-red-600' : 'text-gray-400'}`}>{pkr(r.outstanding)}</td>
                 <td className="px-3 py-2"><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_TONE[r.paymentStatus] || 'bg-gray-100 text-gray-600'}`}>{r.paymentStatus}</span></td>
                 {canSeePricing && (
                   <td className="px-3 py-2">
@@ -280,7 +280,7 @@ function BpPanel({ groups, loading, kind }) {
 }
 
 function Kpi({ label, value, tone = 'gray' }) {
-  const toneCls = { emerald: 'text-emerald-700', rose: 'text-rose-600', gray: 'text-gray-900' }[tone] || 'text-gray-900';
+  const toneCls = { emerald: 'text-emerald-700', rose: 'text-red-600', gray: 'text-gray-900' }[tone] || 'text-gray-900';
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-3">
       <p className="text-[11px] uppercase tracking-wider text-gray-400">{label}</p>

@@ -63,7 +63,7 @@ export default function DraftEmailDrawer({ partyType, partyId, partyName, onClos
             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900" />
         </div>
 
-        {mut.isError && <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{mut.error?.message}</div>}
+        {mut.isError && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{mut.error?.message}</div>}
         {res?.aiEnabled === false && <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">{res.message}</div>}
 
         {res?.subject && (

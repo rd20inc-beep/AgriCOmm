@@ -21,7 +21,7 @@ const activityIcons = {
 const activityColors = {
   finance: 'bg-emerald-100 text-emerald-600',
   document: 'bg-blue-100 text-blue-600',
-  mill: 'bg-orange-100 text-orange-600',
+  mill: 'bg-amber-100 text-amber-600',
   alert: 'bg-red-100 text-red-600',
   shipment: 'bg-cyan-100 text-cyan-600',
   transfer: 'bg-violet-100 text-violet-600',

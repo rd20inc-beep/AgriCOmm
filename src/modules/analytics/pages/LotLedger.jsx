@@ -31,7 +31,7 @@ export default function LotLedger() {
   if (isError || !data?.lot) return (
     <div className="p-6">
       <button onClick={() => navigate(-1)} className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm"><ArrowLeft size={14} /> Back</button>
-      <p className="mt-4 text-sm text-rose-600">{error?.message || 'Lot ledger not available.'}</p>
+      <p className="mt-4 text-sm text-red-600">{error?.message || 'Lot ledger not available.'}</p>
     </div>
   );
 
@@ -70,7 +70,7 @@ export default function LotLedger() {
   });
 
   const Cell = ({ label, value, sub, tone = 'gray' }) => {
-    const t = { emerald: 'text-emerald-700', rose: 'text-rose-600', gray: 'text-gray-900' }[tone] || 'text-gray-900';
+    const t = { emerald: 'text-emerald-700', rose: 'text-red-600', gray: 'text-gray-900' }[tone] || 'text-gray-900';
     return <div><p className="text-[11px] uppercase tracking-wider text-gray-400">{label}</p><p className={`text-sm font-medium ${t}`}>{value}</p>{sub && <p className="text-[11px] text-gray-400">{sub}</p>}</div>;
   };
   const Section = ({ icon: Icon, title, children }) => (
@@ -189,7 +189,7 @@ export default function LotLedger() {
       {/* Activity ledger */}
       <Section icon={Truck} title="Lot activity ledger">
         <Tbl head={['Date', 'Activity', 'Reference', 'Counterparty', { t: 'In', r: 1 }, { t: 'Out', r: 1 }, { t: 'Balance', r: 1 }]}
-          rows={events.map(e => [dt(e.date), e.label, e.reference || e.txnNo || '—', e.href ? <Link to={e.href} className="text-blue-600 hover:underline">{e.counterparty || '—'}</Link> : (e.counterparty || '—'), e.inKg ? <span className="text-emerald-700">{Math.round(e.inKg).toLocaleString()}</span> : '', e.outKg ? <span className="text-rose-700">{Math.round(e.outKg).toLocaleString()}</span> : '', Math.round(e.balanceKg).toLocaleString()])}
+          rows={events.map(e => [dt(e.date), e.label, e.reference || e.txnNo || '—', e.href ? <Link to={e.href} className="text-blue-600 hover:underline">{e.counterparty || '—'}</Link> : (e.counterparty || '—'), e.inKg ? <span className="text-emerald-700">{Math.round(e.inKg).toLocaleString()}</span> : '', e.outKg ? <span className="text-red-700">{Math.round(e.outKg).toLocaleString()}</span> : '', Math.round(e.balanceKg).toLocaleString()])}
           empty="No recorded movements." />
       </Section>
 

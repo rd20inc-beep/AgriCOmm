@@ -104,7 +104,7 @@ function RiceTypeDetail({ id }) {
   if (isError || !data?.riceType) return (
     <div className="p-6">
       <button onClick={() => navigate(-1)} className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm"><ArrowLeft size={14} /> Back</button>
-      <p className="mt-4 text-sm text-rose-600">{error?.message || 'Rice type ledger not available.'}</p>
+      <p className="mt-4 text-sm text-red-600">{error?.message || 'Rice type ledger not available.'}</p>
     </div>
   );
 
@@ -129,7 +129,7 @@ function RiceTypeDetail({ id }) {
   });
 
   const Cell = ({ label, value, sub, tone = 'gray' }) => {
-    const t = { emerald: 'text-emerald-700', rose: 'text-rose-600', gray: 'text-gray-900' }[tone] || 'text-gray-900';
+    const t = { emerald: 'text-emerald-700', rose: 'text-red-600', gray: 'text-gray-900' }[tone] || 'text-gray-900';
     return <div><p className="text-[11px] uppercase tracking-wider text-gray-400">{label}</p><p className={`text-sm font-medium ${t}`}>{value}</p>{sub && <p className="text-[11px] text-gray-400">{sub}</p>}</div>;
   };
   const Section = ({ icon: Icon, title, children }) => (

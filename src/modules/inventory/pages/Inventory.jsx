@@ -133,9 +133,9 @@ export default function Inventory() {
           <p className="text-xs font-medium text-blue-600 uppercase">Finished</p>
           <p className="text-xl font-bold text-gray-900 mt-1">{dv(kpis.finishedKg)} <span className="text-sm font-normal text-gray-400">{ul()}</span></p>
         </div>
-        <div className="bg-green-50 rounded-xl border border-green-100 p-4">
-          <FlaskConical className="w-5 h-5 text-green-600 mb-1" />
-          <p className="text-xs font-medium text-green-600 uppercase">By-products</p>
+        <div className="bg-emerald-50 rounded-xl border border-emerald-100 p-4">
+          <FlaskConical className="w-5 h-5 text-emerald-600 mb-1" />
+          <p className="text-xs font-medium text-emerald-600 uppercase">By-products</p>
           <p className="text-xl font-bold text-gray-900 mt-1">{dv(kpis.byproductKg)} <span className="text-sm font-normal text-gray-400">{ul()}</span></p>
         </div>
         <div className="bg-white rounded-xl border border-gray-100 p-4">
@@ -237,7 +237,7 @@ export default function Inventory() {
                     <td className="text-gray-600 text-xs"><PartyLink type="supplier" id={lot.supplierId} name={lot.supplierName} /></td>
                     <td className="text-gray-600 text-xs">{lot.warehouseName || '—'}</td>
                     <td className="text-center">
-                      <span className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold ${lot.entity === 'mill' ? 'bg-orange-50 text-orange-700' : 'bg-blue-50 text-blue-700'}`}>
+                      <span className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold ${lot.entity === 'mill' ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'}`}>
                         {lot.entity === 'mill' ? 'Mill' : 'Export'}
                       </span>
                     </td>

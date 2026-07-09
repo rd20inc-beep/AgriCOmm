@@ -23,7 +23,7 @@ export default function WorkflowTimeline({ order }) {
                 <div
                   className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
                     isCompleted
-                      ? 'bg-green-500 text-white'
+                      ? 'bg-emerald-500 text-white'
                       : isCurrent
                       ? isOverdue
                         ? 'bg-red-500 text-white ring-4 ring-red-100 animate-pulse'
@@ -34,14 +34,14 @@ export default function WorkflowTimeline({ order }) {
                   {isCompleted ? <Check className="w-4 h-4" /> : step.step}
                 </div>
                 <span className={`text-xs mt-1.5 text-center leading-tight ${
-                  isCompleted ? 'text-green-600 font-medium' : isCurrent ? (isOverdue ? 'text-red-600 font-medium' : 'text-blue-600 font-medium') : 'text-gray-400'
+                  isCompleted ? 'text-emerald-600 font-medium' : isCurrent ? (isOverdue ? 'text-red-600 font-medium' : 'text-blue-600 font-medium') : 'text-gray-400'
                 }`}>
                   {step.label}
                 </span>
               </div>
               {index < workflowSteps.length - 1 && (
                 <div className={`flex-1 h-0.5 mx-1 ${
-                  isCompleted ? 'bg-green-400' : 'bg-gray-200'
+                  isCompleted ? 'bg-emerald-400' : 'bg-gray-200'
                 }`} />
               )}
             </div>

@@ -877,7 +877,7 @@ export default function PurchaseLotDrawer({
                       <span className="text-xs font-semibold text-gray-600">Vehicle {idx + 1}</span>
                       <button type="button"
                         onClick={() => setForm(prev => ({ ...prev, vehicles: prev.vehicles.filter((_, i) => i !== idx) }))}
-                        className="text-xs text-rose-500 hover:text-rose-700">Remove</button>
+                        className="text-xs text-red-500 hover:text-red-700">Remove</button>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <Input label="Vehicle no" value={v.vehicle_no}

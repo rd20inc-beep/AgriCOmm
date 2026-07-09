@@ -31,11 +31,11 @@ function exportAuditCsv(rows) {
 }
 
 const ACTION_COLORS = {
-  create: 'bg-green-100 text-green-700',
+  create: 'bg-emerald-100 text-emerald-700',
   update: 'bg-blue-100 text-blue-700',
   delete: 'bg-red-100 text-red-700',
   approve: 'bg-emerald-100 text-emerald-700',
-  reject: 'bg-orange-100 text-orange-700',
+  reject: 'bg-amber-100 text-amber-700',
   login: 'bg-indigo-100 text-indigo-700',
   confirm: 'bg-cyan-100 text-cyan-700',
   status_change: 'bg-violet-100 text-violet-700',
@@ -78,7 +78,7 @@ function DiffViewer({ before, after }) {
           <div className="text-red-600 bg-red-50 px-2 py-1 rounded break-all">
             {b !== undefined ? (typeof b === 'object' ? JSON.stringify(b) : String(b)) : <span className="text-gray-400">—</span>}
           </div>
-          <div className="text-green-600 bg-green-50 px-2 py-1 rounded break-all">
+          <div className="text-emerald-600 bg-emerald-50 px-2 py-1 rounded break-all">
             {a !== undefined ? (typeof a === 'object' ? JSON.stringify(a) : String(a)) : <span className="text-gray-400">—</span>}
           </div>
         </div>
@@ -166,7 +166,7 @@ export default function AuditLog() {
         </div>
         <div className="bg-white rounded-lg border border-gray-200 p-4">
           <p className="text-xs font-medium text-gray-500 uppercase">Creates</p>
-          <p className="text-2xl font-bold text-green-600 mt-1">{logs.filter(l => (l.action || '').toLowerCase().includes('create')).length}</p>
+          <p className="text-2xl font-bold text-emerald-600 mt-1">{logs.filter(l => (l.action || '').toLowerCase().includes('create')).length}</p>
         </div>
         <div className="bg-white rounded-lg border border-gray-200 p-4">
           <p className="text-xs font-medium text-gray-500 uppercase">Updates</p>
@@ -323,7 +323,7 @@ export default function AuditLog() {
             {selectedLog.details && (
               <div>
                 <h3 className="text-sm font-semibold text-gray-700 mb-2">Raw Data</h3>
-                <pre className="bg-gray-900 text-green-400 rounded-lg p-4 text-xs overflow-x-auto max-h-64">
+                <pre className="bg-gray-900 text-emerald-400 rounded-lg p-4 text-xs overflow-x-auto max-h-64">
                   {JSON.stringify(selectedLog.details, null, 2)}
                 </pre>
               </div>

@@ -262,12 +262,12 @@ export default function FinanceConfirmations() {
       >
         <div className="flex items-center gap-4 min-w-0 flex-1">
           <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
-            type === 'advance' ? 'bg-amber-100' : 'bg-orange-100'
+            type === 'advance' ? 'bg-amber-100' : 'bg-amber-100'
           }`}>
             {type === 'advance' ? (
               <Banknote size={20} className="text-amber-600" />
             ) : (
-              <CreditCard size={20} className="text-orange-600" />
+              <CreditCard size={20} className="text-amber-600" />
             )}
           </div>
           <div className="min-w-0">
@@ -285,7 +285,7 @@ export default function FinanceConfirmations() {
               {/* Progress bar */}
               <div className="w-24 bg-gray-200 rounded-full h-1.5">
                 <div
-                  className={`h-1.5 rounded-full ${pctReceived >= 100 ? 'bg-green-500' : pctReceived > 0 ? 'bg-amber-500' : 'bg-gray-300'}`}
+                  className={`h-1.5 rounded-full ${pctReceived >= 100 ? 'bg-emerald-500' : pctReceived > 0 ? 'bg-amber-500' : 'bg-gray-300'}`}
                   style={{ width: `${Math.min(pctReceived, 100)}%` }}
                 />
               </div>
@@ -356,9 +356,9 @@ export default function FinanceConfirmations() {
           </div>
           )}
           {canViewExport && (
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-orange-50 rounded-lg border border-orange-200">
-            <DollarSign size={14} className="text-orange-600" />
-            <span className="text-xs font-medium text-orange-700">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 rounded-lg border border-amber-200">
+            <DollarSign size={14} className="text-amber-600" />
+            <span className="text-xs font-medium text-amber-700">
               {pendingBalance.length} balances
             </span>
           </div>
@@ -451,13 +451,13 @@ export default function FinanceConfirmations() {
         </div>
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
           <div className="flex items-center gap-2 mb-1">
-            <CheckCircle size={16} className="text-green-500" />
+            <CheckCircle size={16} className="text-emerald-500" />
             <span className="text-xs font-medium text-gray-500 uppercase">Total Received</span>
           </div>
-          <p className="text-xl font-bold text-green-700">{cards.fmt(cards.received)}</p>
+          <p className="text-xl font-bold text-emerald-700">{cards.fmt(cards.received)}</p>
           <div className="w-full bg-gray-200 rounded-full h-1.5 mt-2">
             <div
-              className="h-1.5 rounded-full bg-green-500"
+              className="h-1.5 rounded-full bg-emerald-500"
               style={{ width: `${cards.receivables > 0 ? Math.min((cards.received / cards.receivables) * 100, 100) : 0}%` }}
             />
           </div>
@@ -526,7 +526,7 @@ export default function FinanceConfirmations() {
       {/* Pending Balance Confirmations */}
       <div className="bg-white rounded-xl shadow-sm p-5">
         <div className="flex items-center gap-2 mb-4">
-          <CreditCard size={16} className="text-orange-500" />
+          <CreditCard size={16} className="text-amber-500" />
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
             Pending Balance Confirmations
           </h2>
@@ -580,11 +580,11 @@ export default function FinanceConfirmations() {
                       </td>
                       <td className="py-2.5 px-3 text-gray-600 truncate max-w-[150px]"><PartyLink type="customer" id={o.customerId} name={o.customerName} /></td>
                       <td className="py-2.5 px-3 text-right text-gray-700">{formatCurrency(o.advanceExpected)}</td>
-                      <td className={`py-2.5 px-3 text-right font-medium ${o.advanceReceived >= o.advanceExpected ? 'text-green-600' : 'text-amber-600'}`}>
+                      <td className={`py-2.5 px-3 text-right font-medium ${o.advanceReceived >= o.advanceExpected ? 'text-emerald-600' : 'text-amber-600'}`}>
                         {formatCurrency(o.advanceReceived)}
                       </td>
                       <td className="py-2.5 px-3 text-right text-gray-700">{formatCurrency(o.balanceExpected)}</td>
-                      <td className={`py-2.5 px-3 text-right font-medium ${o.balanceReceived >= o.balanceExpected ? 'text-green-600' : 'text-amber-600'}`}>
+                      <td className={`py-2.5 px-3 text-right font-medium ${o.balanceReceived >= o.balanceExpected ? 'text-emerald-600' : 'text-amber-600'}`}>
                         {formatCurrency(o.balanceReceived)}
                       </td>
                       <td className="py-2.5 px-3 text-right font-bold text-red-600">{formatCurrency(outstanding)}</td>
@@ -645,8 +645,8 @@ export default function FinanceConfirmations() {
                       </td>
                       <td className="py-2 px-3 text-gray-600 truncate max-w-[150px]"><PartyLink type="customer" id={o.customerId} name={o.customerName} /></td>
                       <td className="py-2 px-3 text-right text-gray-700">{formatCurrency(o.contractValue)}</td>
-                      <td className="py-2 px-3 text-right text-green-600 font-medium">{formatCurrency(totalReceived)}</td>
-                      <td className={`py-2 px-3 text-right font-bold ${outstanding > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                      <td className="py-2 px-3 text-right text-emerald-600 font-medium">{formatCurrency(totalReceived)}</td>
+                      <td className={`py-2 px-3 text-right font-bold ${outstanding > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
                         {outstanding > 0 ? formatCurrency(outstanding) : 'Paid'}
                       </td>
                       <td className="py-2 px-3 text-center"><StatusBadge status={o.status} /></td>
@@ -665,7 +665,7 @@ export default function FinanceConfirmations() {
       {paymentHistory.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm p-5">
           <div className="flex items-center gap-2 mb-4">
-            <Receipt size={16} className="text-green-500" />
+            <Receipt size={16} className="text-emerald-500" />
             <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
               Payment History (This Session)
             </h2>
@@ -673,9 +673,9 @@ export default function FinanceConfirmations() {
           </div>
           <div className="space-y-2">
             {paymentHistory.map(p => (
-              <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 bg-green-50 border border-green-100 rounded-lg px-4 py-2.5 text-sm">
+              <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 bg-emerald-50 border border-emerald-100 rounded-lg px-4 py-2.5 text-sm">
                 <div className="flex items-center gap-3">
-                  <CheckCircle size={16} className="text-green-500" />
+                  <CheckCircle size={16} className="text-emerald-500" />
                   <div>
                     <span className="font-semibold text-gray-900">{p.orderId}</span>
                     <span className="text-gray-400 mx-2">—</span>
@@ -683,7 +683,7 @@ export default function FinanceConfirmations() {
                   </div>
                 </div>
                 <div className="flex items-center gap-4">
-                  <span className="font-bold text-green-700">{formatCurrency(p.amount)}</span>
+                  <span className="font-bold text-emerald-700">{formatCurrency(p.amount)}</span>
                   <span className="text-xs text-gray-500">{p.method}</span>
                   {p.bankAccount && <span className="text-xs text-gray-400">{p.bankAccount}</span>}
                   {p.reference && <span className="text-xs text-gray-400 font-mono">Ref: {p.reference}</span>}
@@ -724,7 +724,7 @@ export default function FinanceConfirmations() {
                 </div>
                 <div>
                   <span className="text-gray-500">Received so far:</span>{' '}
-                  <span className="font-medium text-green-600">
+                  <span className="font-medium text-emerald-600">
                     {formatCurrency(milestoneType === 'advance' ? selectedOrder.advanceReceived : selectedOrder.balanceReceived)}
                   </span>
                 </div>

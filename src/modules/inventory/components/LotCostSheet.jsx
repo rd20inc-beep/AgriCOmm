@@ -169,7 +169,7 @@ export default function LotCostSheet({ lot, companyProfile, linkedBatch, transac
           <div><p className="text-[10px] font-semibold text-gray-500 uppercase">Purchase Date</p><p className="font-semibold text-gray-900">{fmtDate(lot.purchaseDate)}</p></div>
           <div><p className="text-[10px] font-semibold text-gray-500 uppercase">Crop Year</p><p className="font-semibold text-gray-900">{lot.cropYear || '—'}</p></div>
           <div><p className="text-[10px] font-semibold text-gray-500 uppercase">Status</p><p className="font-semibold text-gray-900">{lot.status}</p></div>
-          <div><p className="text-[10px] font-semibold text-gray-500 uppercase">Payment</p><p className={`font-semibold ${lot.paymentStatus === 'Paid' ? 'text-green-700' : 'text-red-700'}`}>{lot.paymentStatus || 'Unpaid'}</p></div>
+          <div><p className="text-[10px] font-semibold text-gray-500 uppercase">Payment</p><p className={`font-semibold ${lot.paymentStatus === 'Paid' ? 'text-emerald-700' : 'text-red-700'}`}>{lot.paymentStatus || 'Unpaid'}</p></div>
         </div>
 
         {/* ===== QUALITY ===== */}

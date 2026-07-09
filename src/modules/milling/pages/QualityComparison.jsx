@@ -250,7 +250,7 @@ export default function QualityComparison() {
                         <span className="text-xs text-gray-400">—</span>
                       )}
                     </td>
-                    <td className={`text-right font-semibold ${batch.qualityVariance > 1.0 ? 'text-red-600' : batch.qualityVariance > 0 ? 'text-green-600' : 'text-gray-400'}`}>
+                    <td className={`text-right font-semibold ${batch.qualityVariance > 1.0 ? 'text-red-600' : batch.qualityVariance > 0 ? 'text-emerald-600' : 'text-gray-400'}`}>
                       {batch.qualityVariance != null ? `${batch.qualityVariance}%` : '—'}
                     </td>
                     <td className="text-center"><StatusBadge status={batch.status} /></td>
@@ -280,7 +280,7 @@ export default function QualityComparison() {
               <div className="grid grid-cols-3 gap-3 text-sm">
                 <div><span className="text-gray-500">Supplier:</span> <span className="font-medium"><PartyLink type="supplier" id={selectedBatch.supplierId} name={selectedBatch.supplierName} /></span></div>
                 <div><span className="text-gray-500">Raw Qty:</span> <span className="font-medium">{selectedBatch.rawQtyMT} MT</span></div>
-                <div><span className="text-gray-500">Variance:</span> <span className={`font-semibold ${selectedBatch.qualityVariance > 1.0 ? 'text-red-600' : 'text-green-600'}`}>{selectedBatch.qualityVariance != null ? `${selectedBatch.qualityVariance}%` : '—'}</span></div>
+                <div><span className="text-gray-500">Variance:</span> <span className={`font-semibold ${selectedBatch.qualityVariance > 1.0 ? 'text-red-600' : 'text-emerald-600'}`}>{selectedBatch.qualityVariance != null ? `${selectedBatch.qualityVariance}%` : '—'}</span></div>
               </div>
             </div>
 
@@ -320,7 +320,7 @@ export default function QualityComparison() {
                           <td className="py-2.5 px-3 text-center">
                             {variance === null ? <span className="text-xs text-gray-400">—</span>
                               : isFail ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">Fail</span>
-                              : <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">Pass</span>}
+                              : <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">Pass</span>}
                           </td>
                         </tr>
                       );
@@ -359,7 +359,7 @@ export default function QualityComparison() {
 
             {/* Actions */}
             <div className="flex items-center gap-3 pt-3 border-t border-gray-100">
-              <button onClick={() => handleApprove(selectedBatch)} className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700"><CheckCircle size={16} /> Approve</button>
+              <button onClick={() => handleApprove(selectedBatch)} className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700"><CheckCircle size={16} /> Approve</button>
               <button onClick={() => handleHold(selectedBatch)} className="inline-flex items-center gap-2 px-4 py-2 bg-amber-500 text-white text-sm font-medium rounded-lg hover:bg-amber-600"><PauseCircle size={16} /> Hold</button>
               <button onClick={() => handleReject(selectedBatch)} className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700"><XCircle size={16} /> Reject</button>
               <div className="ml-auto">

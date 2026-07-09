@@ -680,12 +680,12 @@ export default function ExportOrderDetail() {
         </div>
       )}
       {order.status === 'Advance Received' && canCreateMilling && (
-        <div className="bg-green-50 border border-green-300 rounded-xl p-4 flex items-center justify-between">
+        <div className="bg-emerald-50 border border-emerald-300 rounded-xl p-4 flex items-center justify-between">
           <div>
-            <p className="text-sm font-semibold text-green-800">Advance Received — Ready to Mill</p>
-            <p className="text-xs text-green-600">Create a milling batch to start production for this order.</p>
+            <p className="text-sm font-semibold text-emerald-800">Advance Received — Ready to Mill</p>
+            <p className="text-xs text-emerald-600">Create a milling batch to start production for this order.</p>
           </div>
-          <button onClick={openMillingModal} className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700">Create Milling Batch</button>
+          <button onClick={openMillingModal} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700">Create Milling Batch</button>
         </div>
       )}
       {order.status === 'In Milling' && order.millingOrderId && (
@@ -736,7 +736,7 @@ export default function ExportOrderDetail() {
             <p className="text-sm font-semibold text-teal-800">Shipment Arrived</p>
             <p className="text-xs text-teal-600">Verify all payments received and close the order.</p>
           </div>
-          <button onClick={handleCloseOrder} className="px-4 py-2 bg-teal-600 text-white rounded-lg text-sm font-medium hover:bg-teal-700">Close Order</button>
+          <button onClick={handleCloseOrder} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700">Close Order</button>
         </div>
       )}
       {order.status === 'Closed' && (

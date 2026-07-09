@@ -187,10 +187,10 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
   ];
   const allByproducts = [
     ...brokenRows,
-    { type: 'Sortex Rejects',      key: 'sortex', qty: sortexMT,           rate: rate(batch.sortexRejectsPricePerMT || batch.sortex_rejects_price_per_mt, byproductRates.sortex), color: 'bg-orange-500' },
+    { type: 'Sortex Rejects',      key: 'sortex', qty: sortexMT,           rate: rate(batch.sortexRejectsPricePerMT || batch.sortex_rejects_price_per_mt, byproductRates.sortex), color: 'bg-amber-500' },
     { type: 'Powder',              key: 'powder', qty: pf(batch.powderMT),   rate: rate(batch.powderPricePerMT,   byproductRates.powder),   color: 'bg-gray-400' },
     { type: 'Sweeping',            key: 'sweeping', qty: pf(batch.sweepingMT), rate: rate(batch.sweepingPricePerMT, byproductRates.sweeping), color: 'bg-gray-300' },
-    { type: 'Rice Bran (legacy)',  key: 'bran',   qty: branMTval,          rate: rate(batch.branPricePerMT,                                         byproductRates.bran),   color: 'bg-green-500',  legacy: true },
+    { type: 'Rice Bran (legacy)',  key: 'bran',   qty: branMTval,          rate: rate(batch.branPricePerMT,                                         byproductRates.bran),   color: 'bg-emerald-500',  legacy: true },
     { type: 'Rice Husk (legacy)',  key: 'husk',   qty: huskMTval,          rate: rate(batch.huskPricePerMT,                                         byproductRates.husk),   color: 'bg-purple-500', legacy: true },
   ];
   const byProducts = allByproducts
@@ -438,9 +438,9 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
           <div className="grid grid-cols-5 gap-4 mb-3">
             <div><p className="text-xs text-blue-600">Raw Input</p><p className="text-base font-bold text-gray-900">{Math.round(rawQtyKG).toLocaleString()} kg</p></div>
             <div><p className="text-xs text-blue-600">Finished Rice</p><p className="text-base font-bold text-blue-900">{Math.round(finishedKG).toLocaleString()} kg</p></div>
-            <div><p className="text-xs text-blue-600">Yield %</p><p className={`text-base font-bold ${pf(finishedYieldPct) >= 65 ? 'text-green-700' : 'text-red-700'}`}>{finishedYieldPct}%</p></div>
+            <div><p className="text-xs text-blue-600">Yield %</p><p className={`text-base font-bold ${pf(finishedYieldPct) >= 65 ? 'text-emerald-700' : 'text-red-700'}`}>{finishedYieldPct}%</p></div>
             <div><p className="text-xs text-blue-600">Total Output</p><p className="text-base font-bold text-gray-900">{Math.round(totalOutputMT * 1000).toLocaleString()} kg</p></div>
-            <div><p className="text-xs text-blue-600">Recovery %</p><p className={`text-base font-bold ${pf(totalRecoveryPct) > 100 ? 'text-red-700' : 'text-green-700'}`}>{totalRecoveryPct}%</p>
+            <div><p className="text-xs text-blue-600">Recovery %</p><p className={`text-base font-bold ${pf(totalRecoveryPct) > 100 ? 'text-red-700' : 'text-emerald-700'}`}>{totalRecoveryPct}%</p>
               {pf(totalRecoveryPct) > 100.5 && <p className="text-[10px] text-red-600">⚠ Exceeds 100%</p>}
             </div>
           </div>
@@ -475,7 +475,7 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
                   <td className="px-6 py-2 text-right text-gray-700">{bp.qty > 0 ? Math.round(bp.qtyKG).toLocaleString() : '—'}</td>
                   <td className="px-6 py-2 text-right text-gray-600">{bp.qty > 0 ? bp.yieldPct + '%' : '—'}</td>
                   <td className="px-6 py-2 text-right text-gray-600">{fmtPKR(bp.rate / 1000)}</td>
-                  <td className="px-6 py-2 text-right font-medium text-green-700">{bp.value > 0 ? fmtPKR(bp.value) : '—'}</td>
+                  <td className="px-6 py-2 text-right font-medium text-emerald-700">{bp.value > 0 ? fmtPKR(bp.value) : '—'}</td>
                 </tr>
               ))}
               <tr className="bg-gray-50">
@@ -487,12 +487,12 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
               </tr>
             </tbody>
             <tfoot>
-              <tr className="border-t-2 border-green-300 bg-green-50">
-                <td className="px-6 py-2 font-bold text-green-900">Total By-Product Value (B)</td>
-                <td className="px-6 py-2 text-right font-bold text-green-900">{Math.round(byProducts.reduce((s, bp) => s + bp.qty, 0) * 1000).toLocaleString()}</td>
+              <tr className="border-t-2 border-emerald-300 bg-emerald-50">
+                <td className="px-6 py-2 font-bold text-emerald-900">Total By-Product Value (B)</td>
+                <td className="px-6 py-2 text-right font-bold text-emerald-900">{Math.round(byProducts.reduce((s, bp) => s + bp.qty, 0) * 1000).toLocaleString()}</td>
                 <td className="px-6 py-2"></td>
                 <td className="px-6 py-2"></td>
-                <td className="px-6 py-2 text-right font-bold text-green-900">{fmtPKR(totalByproductValue)}</td>
+                <td className="px-6 py-2 text-right font-bold text-emerald-900">{fmtPKR(totalByproductValue)}</td>
               </tr>
             </tfoot>
           </table>
@@ -506,7 +506,7 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
           <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4">
             <div className="space-y-2 text-sm">
               <div className="flex justify-between"><span className="text-gray-600">Total Batch Cost (A)</span><span className="font-bold text-gray-900">{fmtPKR(totalBatchCost)}</span></div>
-              <div className="flex justify-between text-green-700"><span>Less: By-Product Recovery (B)</span><span className="font-bold">- {fmtPKR(totalByproductValue)}</span></div>
+              <div className="flex justify-between text-emerald-700"><span>Less: By-Product Recovery (B)</span><span className="font-bold">- {fmtPKR(totalByproductValue)}</span></div>
               <div className="flex justify-between border-t-2 border-gray-300 pt-2"><span className="font-bold text-gray-900">Net Cost of Finished Rice (A - B)</span><span className="text-lg font-bold text-gray-900">{fmtPKR(netCostAfterByproducts)}</span></div>
             </div>
           </div>

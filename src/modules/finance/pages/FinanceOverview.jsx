@@ -94,7 +94,7 @@ export default function FinanceOverview() {
   const consolidatedProfit = consolidated.profitPkr || 0;
   const consolidatedColor = consolidatedProfit >= 0
     ? 'from-emerald-600 via-emerald-500 to-teal-500'
-    : 'from-red-600 via-red-500 to-rose-500';
+    : 'from-red-600 via-red-500 to-red-500';
 
   return (
     <div className="space-y-5 pb-4">
@@ -413,7 +413,7 @@ function Skeleton() {
 function KpiTile({ icon: Icon, tone = 'gray', label, primary, secondary, hint, hintBad, onClick }) {
   const tones = {
     emerald: { ring: 'ring-emerald-100', icon: 'text-emerald-500 bg-emerald-50', accent: 'text-emerald-600' },
-    rose:    { ring: 'ring-rose-100',    icon: 'text-rose-500 bg-rose-50',       accent: 'text-rose-600' },
+    rose:    { ring: 'ring-red-100',    icon: 'text-red-500 bg-red-50',       accent: 'text-red-600' },
     indigo:  { ring: 'ring-indigo-100',  icon: 'text-indigo-500 bg-indigo-50',   accent: 'text-indigo-600' },
     violet:  { ring: 'ring-violet-100',  icon: 'text-violet-500 bg-violet-50',   accent: 'text-violet-600' },
     amber:   { ring: 'ring-amber-100',   icon: 'text-amber-500 bg-amber-50',     accent: 'text-amber-600' },
@@ -433,7 +433,7 @@ function KpiTile({ icon: Icon, tone = 'gray', label, primary, secondary, hint, h
       <div className="text-xl font-bold text-gray-900 leading-none truncate">{primary}</div>
       {secondary && <div className="text-[11px] text-gray-500 mt-1">{secondary}</div>}
       {hint && (
-        <div className={`text-[11px] mt-2 ${hintBad ? 'text-rose-600' : 'text-emerald-600'} font-medium`}>
+        <div className={`text-[11px] mt-2 ${hintBad ? 'text-red-600' : 'text-emerald-600'} font-medium`}>
           {hintBad ? '● ' : '✓ '}{hint}
         </div>
       )}
@@ -452,7 +452,7 @@ function SegmentCard({ tone = 'gray', title, subtitle, revenueLabel, revenue, re
   const t = tones[tone] || tones.gray;
   const margin = parseFloat(marginPct) || 0;
   const profitNum = typeof profit === 'string' ? parseFloat(profit.replace(/[^0-9.-]/g, '')) : profit;
-  const profitColor = profitNum >= 0 ? 'text-emerald-700' : 'text-rose-600';
+  const profitColor = profitNum >= 0 ? 'text-emerald-700' : 'text-red-600';
   const Cmp = onClick ? 'button' : 'div';
   return (
     <Cmp
@@ -463,7 +463,7 @@ function SegmentCard({ tone = 'gray', title, subtitle, revenueLabel, revenue, re
       <div className="flex items-center justify-between mb-3">
         <h3 className={`text-sm font-semibold ${t.accent}`}>{title}</h3>
         {margin !== 0 && (
-          <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${margin >= 15 ? 'bg-emerald-50 text-emerald-700' : margin >= 5 ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700'}`}>
+          <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${margin >= 15 ? 'bg-emerald-50 text-emerald-700' : margin >= 5 ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'}`}>
             {margin.toFixed(1)}% margin
           </span>
         )}
@@ -491,7 +491,7 @@ function AgingPanel({ title, icon: Icon, tone, data, totalLabel, totalSubLabel, 
     <div className="bg-white rounded-xl border border-gray-200 p-5">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-          <Icon size={14} className={tone === 'emerald' ? 'text-emerald-500' : 'text-rose-500'} />
+          <Icon size={14} className={tone === 'emerald' ? 'text-emerald-500' : 'text-red-500'} />
           {title}
         </h3>
         <button onClick={onClickAll} className="text-xs text-blue-600 hover:underline inline-flex items-center gap-1">
@@ -536,7 +536,7 @@ function CounterpartyList({ title, icon: Icon, rows, itemLabel, itemAmount, item
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
       <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
-        <Icon size={14} className="text-rose-500" /> {title}
+        <Icon size={14} className="text-red-500" /> {title}
       </h3>
       {rows.length === 0 ? (
         <div className="text-center text-sm text-gray-400 py-6 flex items-center justify-center gap-2">
@@ -606,7 +606,7 @@ function CogsCell({ tone, label, value, sub }) {
   const t = {
     amber:   'bg-amber-50 border-amber-100 text-amber-800',
     emerald: 'bg-emerald-50 border-emerald-100 text-emerald-800',
-    rose:    'bg-rose-50 border-rose-100 text-rose-800',
+    rose:    'bg-red-50 border-red-100 text-red-800',
     gray:    'bg-gray-50 border-gray-100 text-gray-700',
   }[tone];
   return (
@@ -622,7 +622,7 @@ function CogsCell({ tone, label, value, sub }) {
 function QuickAction({ icon: Icon, label, onClick, tone }) {
   const tones = {
     emerald: 'hover:bg-emerald-500/20 text-emerald-300',
-    rose:    'hover:bg-rose-500/20 text-rose-300',
+    rose:    'hover:bg-red-500/20 text-red-300',
     indigo:  'hover:bg-indigo-500/20 text-indigo-300',
     violet:  'hover:bg-violet-500/20 text-violet-300',
     amber:   'hover:bg-amber-500/20 text-amber-300',

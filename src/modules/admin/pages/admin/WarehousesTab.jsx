@@ -90,7 +90,7 @@ export default function WarehousesTab() {
                   <td className="px-4 py-3 font-medium text-gray-900">{w.name}</td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                      w.entity === 'mill' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'
+                      w.entity === 'mill' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
                     }`}>
                       {w.entity === 'mill' ? 'Mill' : 'Export'}
                     </span>
@@ -98,7 +98,7 @@ export default function WarehousesTab() {
                   <td className="px-4 py-3">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                       w.type === 'raw' ? 'bg-amber-100 text-amber-700' :
-                      w.type === 'finished' ? 'bg-green-100 text-green-700' :
+                      w.type === 'finished' ? 'bg-emerald-100 text-emerald-700' :
                       w.type === 'byproduct' ? 'bg-purple-100 text-purple-700' :
                       'bg-cyan-100 text-cyan-700'
                     }`}>

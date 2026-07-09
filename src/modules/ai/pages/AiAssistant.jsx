@@ -6,7 +6,7 @@ import { useCustomers, useSuppliers } from '../../../api/queries';
 import SearchSelect from '../../../shared/components/SearchSelect';
 
 const PKR = (v) => 'Rs ' + Math.round(Number(v) || 0).toLocaleString('en-PK');
-const SEV = { high: 'bg-rose-100 text-rose-700 border-rose-200', medium: 'bg-amber-100 text-amber-700 border-amber-200', low: 'bg-slate-100 text-slate-600 border-slate-200' };
+const SEV = { high: 'bg-red-100 text-red-700 border-red-200', medium: 'bg-amber-100 text-amber-700 border-amber-200', low: 'bg-slate-100 text-slate-600 border-slate-200' };
 
 const TABS = [
   { key: 'ask', label: 'Ask', icon: Search },
@@ -219,7 +219,7 @@ function AnomaliesTab({ enabled }) {
 }
 
 function Err({ msg }) {
-  return <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{msg || 'Something went wrong.'}</div>;
+  return <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{msg || 'Something went wrong.'}</div>;
 }
 
 function fmtCell(v) {

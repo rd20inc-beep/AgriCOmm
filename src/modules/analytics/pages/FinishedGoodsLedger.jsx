@@ -104,7 +104,7 @@ export default function FinishedGoodsLedger() {
       </div>
 
       {isLoading ? <div className="p-6 text-sm text-gray-400">Loading finished goods ledger…</div>
-        : isError ? <p className="p-6 text-sm text-rose-600">{error?.message || 'Finished goods ledger not available.'}</p>
+        : isError ? <p className="p-6 text-sm text-red-600">{error?.message || 'Finished goods ledger not available.'}</p>
           : (
             <>
               {/* KPIs */}

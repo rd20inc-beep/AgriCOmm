@@ -3,8 +3,8 @@ import { Link } from 'react-router-dom';
 import { Sparkles, RefreshCw, ShieldCheck, AlertTriangle, ExternalLink, Loader2 } from 'lucide-react';
 import api from '../../../api/client';
 
-const SEV_DOT = { high: 'bg-rose-500', medium: 'bg-amber-500', low: 'bg-slate-400' };
-const SEV_TEXT = { high: 'text-rose-700', medium: 'text-amber-700', low: 'text-slate-600' };
+const SEV_DOT = { high: 'bg-red-500', medium: 'bg-amber-500', low: 'bg-slate-400' };
+const SEV_TEXT = { high: 'text-red-700', medium: 'text-amber-700', low: 'text-slate-600' };
 
 // Finance-dashboard card: auto-scans for anomalies via the AI endpoint, cached
 // 10 min (so it surfaces proactively without an OpenAI call on every page view).

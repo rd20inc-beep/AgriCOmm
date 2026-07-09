@@ -27,14 +27,14 @@ const ACCENT_TONES = {
   emerald: { tile: 'bg-emerald-50 text-emerald-700 border-emerald-100', active: 'bg-emerald-600' },
   violet:  { tile: 'bg-violet-50 text-violet-700 border-violet-100',   active: 'bg-violet-600' },
   sky:     { tile: 'bg-sky-50 text-sky-700 border-sky-100',           active: 'bg-sky-600' },
-  rose:    { tile: 'bg-rose-50 text-rose-700 border-rose-100',         active: 'bg-rose-600' },
+  rose:    { tile: 'bg-red-50 text-red-700 border-red-100',         active: 'bg-red-600' },
   indigo:  { tile: 'bg-indigo-50 text-indigo-700 border-indigo-100',   active: 'bg-indigo-600' },
-  orange:  { tile: 'bg-orange-50 text-orange-700 border-orange-100',   active: 'bg-orange-500' },
+  orange:  { tile: 'bg-amber-50 text-amber-700 border-amber-100',   active: 'bg-amber-500' },
   gray:    { tile: 'bg-gray-50 text-gray-700 border-gray-200',         active: 'bg-gray-700' },
 };
 
 const ROLE_TONE = {
-  'Super Admin':          'bg-rose-100 text-rose-700',
+  'Super Admin':          'bg-red-100 text-red-700',
   'Owner':                'bg-purple-100 text-purple-700',
   'Export Manager':       'bg-blue-100 text-blue-700',
   'Finance Manager':      'bg-violet-100 text-violet-700',

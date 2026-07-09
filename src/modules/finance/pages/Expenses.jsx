@@ -158,8 +158,8 @@ const UTILITY_VENDORS = [
 ];
 
 const STATUS_COLORS = {
-  Unpaid: 'bg-rose-100 text-rose-800',
-  Pending: 'bg-rose-100 text-rose-800',
+  Unpaid: 'bg-red-100 text-red-800',
+  Pending: 'bg-red-100 text-red-800',
   Partial: 'bg-amber-100 text-amber-800',
   Paid: 'bg-emerald-100 text-emerald-800',
 };
@@ -311,7 +311,7 @@ export default function Expenses() {
   return (
     <div className="space-y-5 pb-4">
       {/* ─── Hero band ────────────────────────────────────────────── */}
-      <div className="rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-rose-900 p-5 sm:p-6 text-white shadow-sm relative overflow-hidden">
+      <div className="rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-red-900 p-5 sm:p-6 text-white shadow-sm relative overflow-hidden">
         <div className="absolute inset-0 opacity-15" style={{ backgroundImage: 'radial-gradient(circle at 80% 20%, white 0%, transparent 60%)' }} />
         <div className="relative flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
           <div>
@@ -321,7 +321,7 @@ export default function Expenses() {
             <h1 className="text-3xl font-bold leading-tight">{fmtPKR(summary.total_amount_pkr)}</h1>
             <p className="text-sm opacity-80 mt-1">
               {summary.total_expenses || 0} expenses ·
-              <span className="text-rose-300 font-medium"> {fmtPKR(summary.unpaid_amount_pkr)} unpaid</span>
+              <span className="text-red-300 font-medium"> {fmtPKR(summary.unpaid_amount_pkr)} unpaid</span>
               <span className="opacity-60"> · {summary.unpaid_count || 0} pending</span>
             </p>
           </div>
@@ -523,7 +523,7 @@ export default function Expenses() {
                   <button type="button" onClick={() => setPayForm(p => ({ ...p, amount: '' }))}
                     className="text-xs px-3 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">Custom</button>
                 </div>
-                {overPay && <p className="text-[11px] text-rose-500 mt-1">Amount exceeds the outstanding (Rs {remaining.toLocaleString()}).</p>}
+                {overPay && <p className="text-[11px] text-red-500 mt-1">Amount exceeds the outstanding (Rs {remaining.toLocaleString()}).</p>}
               </div>
 
               {/* Payment Method — first; it drives whether an account is needed

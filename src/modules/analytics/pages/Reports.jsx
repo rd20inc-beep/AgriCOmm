@@ -275,7 +275,7 @@ function ScheduledEmailsManager() {
             placeholder="owner@company.com, finance@company.com"
             className="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2 py-2 outline-none" />
         </label>
-        {msg && <p className={`text-xs ${msg.t === 'ok' ? 'text-emerald-600' : 'text-rose-600'}`}>{msg.m}</p>}
+        {msg && <p className={`text-xs ${msg.t === 'ok' ? 'text-emerald-600' : 'text-red-600'}`}>{msg.m}</p>}
         <button onClick={create} disabled={busy}
           className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
           <Plus size={14} /> Create schedule
@@ -298,7 +298,7 @@ function ScheduledEmailsManager() {
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     <button onClick={() => runNow(r.id)} disabled={busy} title="Send now" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg disabled:opacity-50"><Send size={14} /></button>
-                    <button onClick={() => del(r.id)} disabled={busy} title="Delete" className="p-1.5 text-gray-300 hover:text-rose-500 rounded-lg disabled:opacity-50"><Trash2 size={14} /></button>
+                    <button onClick={() => del(r.id)} disabled={busy} title="Delete" className="p-1.5 text-gray-300 hover:text-red-500 rounded-lg disabled:opacity-50"><Trash2 size={14} /></button>
                   </div>
                 </div>
               ))}
@@ -366,7 +366,7 @@ function AiAnalystDrawer() {
         </div>
       </div>
 
-      {err && <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-700">{err}</div>}
+      {err && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">{err}</div>}
 
       {res && (
         <div className="rounded-lg border border-gray-200 overflow-hidden">
@@ -568,7 +568,7 @@ function ReportBuilderDrawer() {
           {Object.keys(layouts).map(name => (
             <span key={name} className="inline-flex items-center gap-1 text-[11px] bg-gray-100 rounded-full pl-2.5 pr-1 py-0.5">
               <button onClick={() => loadLayout(name)} className="text-gray-700 hover:text-blue-600">{name}</button>
-              <button onClick={() => delLayout(name)} className="text-gray-300 hover:text-rose-500"><Trash2 size={11} /></button>
+              <button onClick={() => delLayout(name)} className="text-gray-300 hover:text-red-500"><Trash2 size={11} /></button>
             </span>
           ))}
         </div>
@@ -797,7 +797,7 @@ export default function Reports() {
                             <span className="block text-sm font-medium truncate">{r.name}</span>
                             <span className="block text-[11px] text-gray-400">{(TABS.find(t => t.key === rt) || {}).label || rt}{!known ? ' · (not a dashboard tab)' : ''}{r.isShared || r.is_shared ? ' · shared' : ''}</span>
                           </button>
-                          <button onClick={() => delMut.mutate(r.id)} title="Delete" className="shrink-0 text-gray-300 hover:text-rose-500"><Trash2 size={14} /></button>
+                          <button onClick={() => delMut.mutate(r.id)} title="Delete" className="shrink-0 text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
                         </div>
                       );
                     })}
@@ -1147,7 +1147,7 @@ function SaleTrackerPanel({ sale, statementHref, companyProfile }) {
         <Cell label="Sale" value={<span className="font-mono">{sale.saleNo}</span>} />
         <Cell label="Customer" value={custHref ? <Link to={custHref} className="text-blue-600 hover:underline">{sale.customerName}</Link> : (sale.customerName || '—')} />
         <Cell label="Date" value={sale.saleDate ? new Date(sale.saleDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'} />
-        <Cell label="Payment" value={<><StatusBadgeMini s={sale.paymentStatus} /> {sale.dueAmount > 0 ? <span className="text-xs text-rose-600">{fmtPKR(sale.dueAmount)} due</span> : <span className="text-xs text-emerald-600">received</span>}</>} />
+        <Cell label="Payment" value={<><StatusBadgeMini s={sale.paymentStatus} /> {sale.dueAmount > 0 ? <span className="text-xs text-red-600">{fmtPKR(sale.dueAmount)} due</span> : <span className="text-xs text-emerald-600">received</span>}</>} />
       </div>
 
       {/* What was sold */}
@@ -1192,11 +1192,11 @@ function SaleTrackerPanel({ sale, statementHref, companyProfile }) {
             <tbody className="divide-y divide-gray-100">
               <tr><td className="px-3 py-2 text-gray-600">Sale value</td><td className="px-3 py-2 text-right tabular-nums font-medium">{fmtPKR(sale.totalAmount)}</td></tr>
               <tr><td className="px-3 py-2 text-gray-600">Received</td><td className="px-3 py-2 text-right tabular-nums text-emerald-700">{fmtPKR(sale.paidAmount)}</td></tr>
-              <tr><td className="px-3 py-2 text-gray-600">Outstanding</td><td className={`px-3 py-2 text-right tabular-nums ${sale.dueAmount > 0 ? 'text-rose-700' : 'text-gray-500'}`}>{fmtPKR(sale.dueAmount)}</td></tr>
+              <tr><td className="px-3 py-2 text-gray-600">Outstanding</td><td className={`px-3 py-2 text-right tabular-nums ${sale.dueAmount > 0 ? 'text-red-700' : 'text-gray-500'}`}>{fmtPKR(sale.dueAmount)}</td></tr>
               <tr><td className="px-3 py-2 text-gray-600">Cost of goods (landed)</td><td className="px-3 py-2 text-right tabular-nums">{sale.soldCostPerKg > 0 ? fmtPKR(sale.cost) : '—'}</td></tr>
               <tr className="bg-gray-50">
                 <td className="px-3 py-2 font-semibold text-gray-800">Gross margin</td>
-                <td className={`px-3 py-2 text-right tabular-nums font-bold ${sale.margin >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{sale.soldCostPerKg > 0 ? <>{fmtPKR(sale.margin)} ({(parseFloat(sale.marginPct) || 0).toFixed(1)}%)</> : '—'}</td>
+                <td className={`px-3 py-2 text-right tabular-nums font-bold ${sale.margin >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{sale.soldCostPerKg > 0 ? <>{fmtPKR(sale.margin)} ({(parseFloat(sale.marginPct) || 0).toFixed(1)}%)</> : '—'}</td>
               </tr>
             </tbody>
           </table>
@@ -1488,7 +1488,7 @@ function MarginBySale({ params, openDoc }) {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <SummaryCell label="Revenue" value={fmtPKR(totRev)} />
         <SummaryCell label="Cost (buy + exp)" value={fmtPKR(totCost)} />
-        <SummaryCell label="Gross Margin" value={<span className={totMargin >= 0 ? 'text-emerald-600' : 'text-rose-600'}>{fmtPKR(totMargin)}</span>} />
+        <SummaryCell label="Gross Margin" value={<span className={totMargin >= 0 ? 'text-emerald-600' : 'text-red-600'}>{fmtPKR(totMargin)}</span>} />
         <SummaryCell label="Avg Margin" value={fmtPct(avgPct)} />
       </div>
       <Table
@@ -1509,7 +1509,7 @@ function MarginBySale({ params, openDoc }) {
             e.hasCost ? fmtPKR(e.cost) : '—',
             <span className="font-semibold text-gray-900">{fmtPKR(e.sale)}</span>,
             e.hasCost ? <ProfitCell v={e.margin} /> : <span className="text-gray-400">—</span>,
-            e.hasCost ? <span className={`font-medium ${e.marginPct >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{e.marginPct.toFixed(1)}%</span> : '—',
+            e.hasCost ? <span className={`font-medium ${e.marginPct >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{e.marginPct.toFixed(1)}%</span> : '—',
           ];
         })}
       />
@@ -1545,8 +1545,8 @@ function MarginBreakdown({ e, companyProfile }) {
             <tr><td className="px-3 py-2 text-gray-600">Selling price</td><td className="px-3 py-2 text-right tabular-nums">Rs {Math.round(e.salePerKg).toLocaleString()}</td><td className="px-3 py-2 text-right tabular-nums font-medium">{fmtPKR(e.sale)}</td></tr>
             <tr className="bg-gray-50">
               <td className="px-3 py-2 font-semibold text-gray-800">Gross margin</td>
-              <td className={`px-3 py-2 text-right tabular-nums font-semibold ${perKgMargin >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{perKgMargin >= 0 ? '+' : ''}Rs {Math.round(perKgMargin).toLocaleString()}</td>
-              <td className={`px-3 py-2 text-right tabular-nums font-bold ${e.margin >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{fmtPKR(e.margin)} ({e.marginPct.toFixed(1)}%)</td>
+              <td className={`px-3 py-2 text-right tabular-nums font-semibold ${perKgMargin >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{perKgMargin >= 0 ? '+' : ''}Rs {Math.round(perKgMargin).toLocaleString()}</td>
+              <td className={`px-3 py-2 text-right tabular-nums font-bold ${e.margin >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{fmtPKR(e.margin)} ({e.marginPct.toFixed(1)}%)</td>
             </tr>
           </tbody>
         </table>
@@ -1594,7 +1594,7 @@ function MarginByBatch({ params, openDoc }) {
         <SummaryCell label="Input cost (raw + milling)" value={fmtPKR(totInput)} />
         <SummaryCell label="Output sold" value={fmtPKR(totSold)} />
         <SummaryCell label="Cost of sold" value={fmtPKR(totCostOfSold)} />
-        <SummaryCell label="Realised margin" value={<span className={totMargin >= 0 ? 'text-emerald-600' : 'text-rose-600'}>{fmtPKR(totMargin)}</span>} />
+        <SummaryCell label="Realised margin" value={<span className={totMargin >= 0 ? 'text-emerald-600' : 'text-red-600'}>{fmtPKR(totMargin)}</span>} />
         <SummaryCell label="On-hand (at cost)" value={fmtPKR(totOnHand)} />
       </div>
       <Table
@@ -1613,7 +1613,7 @@ function MarginByBatch({ params, openDoc }) {
             <span className="font-semibold text-gray-900">{fmtPKR(sold)}</span>,
             hasSales ? fmtPKR(b.costOfSold) : '—',
             hasSales ? <ProfitCell v={b.realizedMargin} /> : <span className="text-gray-400">—</span>,
-            hasSales ? <span className={`font-medium ${(parseFloat(b.realizedMarginPct) || 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{(parseFloat(b.realizedMarginPct) || 0).toFixed(1)}%</span> : '—',
+            hasSales ? <span className={`font-medium ${(parseFloat(b.realizedMarginPct) || 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{(parseFloat(b.realizedMarginPct) || 0).toFixed(1)}%</span> : '—',
             <Link to={`/reports/batch-ledger/${b.id}`} onClick={(ev) => ev.stopPropagation()}
               className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-700 bg-blue-50 rounded hover:bg-blue-100 whitespace-nowrap">
               <Factory size={12} /> Batch 360
@@ -1652,7 +1652,7 @@ function BatchMarginBreakdown({ b }) {
             <tr><td className="px-3 py-2 text-gray-600">Cost of sold output</td><td className="px-3 py-2 text-right tabular-nums">{fmtPKR(costOfSold)}</td></tr>
             <tr className="bg-gray-50">
               <td className="px-3 py-2 font-semibold text-gray-800">Realised margin</td>
-              <td className={`px-3 py-2 text-right tabular-nums font-bold ${margin >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{fmtPKR(margin)} ({marginPct.toFixed(1)}%)</td>
+              <td className={`px-3 py-2 text-right tabular-nums font-bold ${margin >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{fmtPKR(margin)} ({marginPct.toFixed(1)}%)</td>
             </tr>
             <tr><td className="px-3 py-2 text-gray-500">Unsold output on hand (at cost)</td><td className="px-3 py-2 text-right tabular-nums text-gray-600">{fmtPKR(onHand)}</td></tr>
           </tbody>
@@ -1687,7 +1687,7 @@ function BatchMarginBreakdown({ b }) {
                       <td className="px-2 py-1.5 text-right tabular-nums">Rs {Math.round(parseFloat(g.valuationPerKg) || 0).toLocaleString()}</td>
                       <td className="px-2 py-1.5 text-right tabular-nums font-medium">{fmtPKR(g.valuationValue)}</td>
                       <td className="px-2 py-1.5 text-right tabular-nums">{soldV > 0 ? fmtPKR(soldV) : '—'}</td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">{soldV > 0 ? <span className={m >= 0 ? 'text-emerald-700' : 'text-rose-700'}>{fmtPKR(m)}</span> : '—'}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">{soldV > 0 ? <span className={m >= 0 ? 'text-emerald-700' : 'text-red-700'}>{fmtPKR(m)}</span> : '—'}</td>
                     </tr>
                   );
                 })}
@@ -1863,7 +1863,7 @@ function LotsTab({ params, statementHref, openDoc }) {
             <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${LOT_STATUS_TONE[r.status] || 'bg-gray-100 text-gray-600'}`}>{r.status}</span>,
             <span className="font-semibold text-gray-900">{fmtPKR(r.landedTotal)}</span>,
             r.hasSales
-              ? <span className="inline-flex flex-col items-end leading-tight"><ProfitCell v={r.realizedMargin} /><span className={`text-[10px] ${(parseFloat(r.realizedMarginPct) || 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{(parseFloat(r.realizedMarginPct) || 0).toFixed(1)}%</span></span>
+              ? <span className="inline-flex flex-col items-end leading-tight"><ProfitCell v={r.realizedMargin} /><span className={`text-[10px] ${(parseFloat(r.realizedMarginPct) || 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{(parseFloat(r.realizedMarginPct) || 0).toFixed(1)}%</span></span>
               : <span className="text-gray-400">—</span>,
             <Link to={`/reports/lot-ledger/${r.lotId}`} onClick={(e) => e.stopPropagation()}
               className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-700 bg-blue-50 rounded hover:bg-blue-100 whitespace-nowrap">
@@ -1911,7 +1911,7 @@ function LotTrackerPanel({ lot, statementHref }) {
           <Cell label="Rate / kg" value={lot.ratePerKg > 0 ? `Rs ${Math.round(lot.ratePerKg).toLocaleString()}` : '—'} />
           <Cell label="Landed / kg" value={lot.landedCostPerKg > 0 ? `Rs ${Math.round(lot.landedCostPerKg).toLocaleString()}` : '—'} />
           <Cell label="Landed total" value={fmtPKR(lot.landedTotal)} />
-          <Cell label="Payment" value={<><StatusBadgeMini s={lot.paymentStatus} /> {lot.dueAmount > 0 ? <span className="text-xs text-rose-600">{fmtPKR(lot.dueAmount)} due</span> : <span className="text-xs text-emerald-600">paid</span>}</>} />
+          <Cell label="Payment" value={<><StatusBadgeMini s={lot.paymentStatus} /> {lot.dueAmount > 0 ? <span className="text-xs text-red-600">{fmtPKR(lot.dueAmount)} due</span> : <span className="text-xs text-emerald-600">paid</span>}</>} />
         </div>
       </div>
 
@@ -1995,7 +1995,7 @@ function LotTrackerPanel({ lot, statementHref }) {
                 <tr><td className="px-3 py-2 text-gray-600">Cost of goods sold</td><td className="px-3 py-2 text-right tabular-nums">{fmtPKR(lot.realizedCost)}</td></tr>
                 <tr className="bg-gray-50">
                   <td className="px-3 py-2 font-semibold text-gray-800">Gross margin</td>
-                  <td className={`px-3 py-2 text-right tabular-nums font-bold ${lot.realizedMargin >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{fmtPKR(lot.realizedMargin)} ({(parseFloat(lot.realizedMarginPct) || 0).toFixed(1)}%)</td>
+                  <td className={`px-3 py-2 text-right tabular-nums font-bold ${lot.realizedMargin >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{fmtPKR(lot.realizedMargin)} ({(parseFloat(lot.realizedMarginPct) || 0).toFixed(1)}%)</td>
                 </tr>
               </tbody>
             </table>
@@ -2076,7 +2076,7 @@ function LotLedgerSection({ lotId }) {
                     <td className="px-2 py-1.5 font-medium text-gray-800">{e.label}</td>
                     <td className="px-2 py-1.5 text-gray-600 max-w-[10rem] truncate">{e.href ? <Link to={e.href} className="text-blue-600 hover:underline">{e.counterparty || '—'}</Link> : (e.counterparty || '—')}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums text-emerald-700">{e.inKg ? Math.round(e.inKg).toLocaleString() : ''}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums text-rose-700">{e.outKg ? Math.round(e.outKg).toLocaleString() : ''}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums text-red-700">{e.outKg ? Math.round(e.outKg).toLocaleString() : ''}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums font-medium">{Math.round(e.balanceKg).toLocaleString()}</td>
                   </tr>
                 ))}
@@ -2118,7 +2118,7 @@ function BuyerRow({ b, statementHref, showOutput }) {
 }
 
 function StatusBadgeMini({ s }) {
-  const tone = (s || '').toLowerCase() === 'paid' ? 'bg-emerald-100 text-emerald-700' : (s || '').toLowerCase() === 'partial' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700';
+  const tone = (s || '').toLowerCase() === 'paid' ? 'bg-emerald-100 text-emerald-700' : (s || '').toLowerCase() === 'partial' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700';
   return <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${tone}`}>{s || 'Pending'}</span>;
 }
 
@@ -2241,10 +2241,10 @@ function ForecastTab() {
     <div className="space-y-5">
       <SectionHeader title="Cash Forecast — projected balance (next 30 days)" subtitle="Current cash plus expected receipts (from receivable due dates) less expected payments (payable due dates)." />
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <SummaryCell label="Current cash" value={<span className={cur < 0 ? 'text-rose-600' : ''}>{fmtPKR(cur)}</span>} />
+        <SummaryCell label="Current cash" value={<span className={cur < 0 ? 'text-red-600' : ''}>{fmtPKR(cur)}</span>} />
         <SummaryCell label="Expected in" value={<span className="text-emerald-600">{fmtPKR(recv)}</span>} />
-        <SummaryCell label="Expected out" value={<span className="text-rose-600">{fmtPKR(pay)}</span>} />
-        <SummaryCell label="Projected balance" value={<span className={endBal < 0 ? 'text-rose-600' : 'text-emerald-600'}>{fmtPKR(endBal)}</span>} />
+        <SummaryCell label="Expected out" value={<span className="text-red-600">{fmtPKR(pay)}</span>} />
+        <SummaryCell label="Projected balance" value={<span className={endBal < 0 ? 'text-red-600' : 'text-emerald-600'}>{fmtPKR(endBal)}</span>} />
       </div>
       {chart.length > 0 && (
         <div className="bg-gray-50 rounded-xl p-4 border border-gray-200" style={{ height: 260 }}>
@@ -2265,8 +2265,8 @@ function ForecastTab() {
         rows={proj.map(d => [
           new Date(d.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }),
           fmtPKR(d.expectedReceipts), fmtPKR(d.expectedPayments),
-          <span className={(parseFloat(d.netCashFlow) || 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'}>{fmtPKR(d.netCashFlow)}</span>,
-          <span className={(parseFloat(d.projectedBalance) || 0) < 0 ? 'text-rose-600 font-medium' : ''}>{fmtPKR(d.projectedBalance)}</span>,
+          <span className={(parseFloat(d.netCashFlow) || 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}>{fmtPKR(d.netCashFlow)}</span>,
+          <span className={(parseFloat(d.projectedBalance) || 0) < 0 ? 'text-red-600 font-medium' : ''}>{fmtPKR(d.projectedBalance)}</span>,
         ])}
       />
       <p className="text-[11px] text-gray-400">Forward-looking 30 days — the global date range filter does not apply here.</p>
@@ -2282,7 +2282,7 @@ function KpiTab({ millScoped }) {
   if (list.length === 0) return <Empty msg="No KPI benchmarks configured." />;
   const met = list.filter(k => k.status === 'Met').length;
   const missed = list.filter(k => k.status === 'Missed').length;
-  const tone = (s) => s === 'Met' ? 'bg-emerald-100 text-emerald-700' : s === 'Missed' ? 'bg-rose-100 text-rose-700' : 'bg-gray-100 text-gray-500';
+  const tone = (s) => s === 'Met' ? 'bg-emerald-100 text-emerald-700' : s === 'Missed' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-500';
   const fmtVal = (v, unit) => unit === '%' ? `${(parseFloat(v) || 0).toFixed(1)}%` : (parseFloat(v) || 0).toLocaleString();
   return (
     <div className="space-y-5">
@@ -2290,7 +2290,7 @@ function KpiTab({ millScoped }) {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <SummaryCell label="KPIs" value={String(list.length)} />
         <SummaryCell label="Met" value={<span className="text-emerald-600">{met}</span>} />
-        <SummaryCell label="Missed" value={<span className="text-rose-600">{missed}</span>} />
+        <SummaryCell label="Missed" value={<span className="text-red-600">{missed}</span>} />
         <SummaryCell label="On track" value={`${list.length ? Math.round((met / list.length) * 100) : 0}%`} />
       </div>
       <Table
@@ -2301,7 +2301,7 @@ function KpiTab({ millScoped }) {
           <span className="text-xs capitalize">{k.entity || '—'}</span>,
           fmtVal(k.target, k.unit),
           fmtVal(k.actual, k.unit),
-          <span className={(parseFloat(k.variance) || 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'}>{fmtVal(k.variance, k.unit)}</span>,
+          <span className={(parseFloat(k.variance) || 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}>{fmtVal(k.variance, k.unit)}</span>,
           <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${tone(k.status)}`}>{k.status || 'Unknown'}</span>,
         ])}
       />
@@ -2515,8 +2515,8 @@ function InventoryTab({ millScoped, hideValue }) {
         <SummaryCell
           label="Dead stock (90+d)"
           value={hideValue
-            ? <span className={deadStock.length ? 'text-rose-600' : 'text-emerald-600'}>{deadStock.length} lots</span>
-            : <span className={deadStock.length ? 'text-rose-600' : 'text-emerald-600'}>{deadStock.length} · {fmtPKR(deadValue)}</span>}
+            ? <span className={deadStock.length ? 'text-red-600' : 'text-emerald-600'}>{deadStock.length} lots</span>
+            : <span className={deadStock.length ? 'text-red-600' : 'text-emerald-600'}>{deadStock.length} · {fmtPKR(deadValue)}</span>}
         />
       </div>
 
@@ -2580,7 +2580,7 @@ function InventoryTab({ millScoped, hideValue }) {
               rowClick={oldest.map((l) => l.id ? () => navigate(`/lot-inventory/${l.id}`) : null)}
               rows={oldest.map((l) => {
                 const daysCell = l.isDeadStock
-                  ? <span className="inline-flex items-center gap-1 text-rose-600 font-medium"><AlertTriangle size={12} /> {l.daysInStock}</span>
+                  ? <span className="inline-flex items-center gap-1 text-red-600 font-medium"><AlertTriangle size={12} /> {l.daysInStock}</span>
                   : (l.daysInStock || 0);
                 const base = [
                   <span className="font-medium text-blue-600">{l.lotNo || '—'}</span>,
@@ -2772,7 +2772,7 @@ function InventoryMovementLedgerSection({ entity, hideValue }) {
                   <td className="px-3 py-1.5 font-medium text-gray-800">{r.label}</td>
                   <td className="px-3 py-1.5">{r.lotId ? <Link to={r.href || `/lot-inventory/${r.lotId}`} className="font-mono text-blue-600 hover:underline">{r.lotNo || `#${r.lotId}`}</Link> : (r.batchNo ? <Link to={r.href} className="text-blue-600 hover:underline">{r.batchNo}</Link> : '—')}</td>
                   <td className="px-3 py-1.5 text-gray-500 text-xs">{[r.fromWh, r.toWh].filter(Boolean).join(' → ') || r.reference || '—'}</td>
-                  <td className={`px-3 py-1.5 text-right tabular-nums ${r.direction === 'out' ? 'text-rose-700' : 'text-emerald-700'}`}>{r.direction === 'out' ? '−' : '+'}{Math.round(r.qtyKg).toLocaleString()}</td>
+                  <td className={`px-3 py-1.5 text-right tabular-nums ${r.direction === 'out' ? 'text-red-700' : 'text-emerald-700'}`}>{r.direction === 'out' ? '−' : '+'}{Math.round(r.qtyKg).toLocaleString()}</td>
                   {!hideValue && <td className="px-3 py-1.5 text-right tabular-nums text-gray-600">{r.costPkr > 0 ? fmtPKR(r.costPkr) : '—'}</td>}
                 </tr>
               ))}
@@ -2787,7 +2787,7 @@ function InventoryMovementLedgerSection({ entity, hideValue }) {
 // ─── Tab: Quality ─────────────────────────────────────────────────────
 function QualityScoreChip({ v }) {
   const n = parseFloat(v) || 0;
-  const tone = n >= 70 ? 'bg-emerald-100 text-emerald-700' : n >= 50 ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700';
+  const tone = n >= 70 ? 'bg-emerald-100 text-emerald-700' : n >= 50 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700';
   return <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${tone}`}>{n.toFixed(1)}</span>;
 }
 
@@ -2861,7 +2861,7 @@ function QualityTab({ params }) {
               fmtPct(v.avgYield), fmtPct(v.avgBrokenPct),
               v.benchmarkYield != null ? fmtPct(v.benchmarkYield) : '—',
               v.varianceFromBenchmark != null
-                ? <span className={(parseFloat(v.varianceFromBenchmark) || 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'}>{fmtPct(v.varianceFromBenchmark)}</span>
+                ? <span className={(parseFloat(v.varianceFromBenchmark) || 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}>{fmtPct(v.varianceFromBenchmark)}</span>
                 : '—',
             ])}
           />
@@ -2878,7 +2878,7 @@ function KpiTile({ icon: Icon, tone = 'gray', label, primary, secondary, loading
     emerald: { ring: 'ring-emerald-100', icon: 'text-emerald-500 bg-emerald-50' },
     amber:   { ring: 'ring-amber-100',   icon: 'text-amber-500 bg-amber-50' },
     violet:  { ring: 'ring-violet-100',  icon: 'text-violet-500 bg-violet-50' },
-    rose:    { ring: 'ring-rose-100',    icon: 'text-rose-500 bg-rose-50' },
+    rose:    { ring: 'ring-red-100',    icon: 'text-red-500 bg-red-50' },
     gray:    { ring: 'ring-gray-100',    icon: 'text-gray-500 bg-gray-50' },
   };
   const t = tones[tone] || tones.gray;
@@ -2938,14 +2938,14 @@ function StatusChip({ s }) {
   const tone =
     s === 'Closed' || s === 'Arrived' ? 'bg-slate-100 text-slate-700'
     : s === 'Shipped' ? 'bg-cyan-100 text-cyan-700'
-    : s === 'Cancelled' ? 'bg-rose-100 text-rose-700'
+    : s === 'Cancelled' ? 'bg-red-100 text-red-700'
     : 'bg-blue-100 text-blue-700';
   return <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${tone}`}>{s || '—'}</span>;
 }
 
 function ProfitCell({ v }) {
   const n = parseFloat(v) || 0;
-  const cls = n > 0 ? 'text-emerald-600' : n < 0 ? 'text-rose-600' : 'text-gray-500';
+  const cls = n > 0 ? 'text-emerald-600' : n < 0 ? 'text-red-600' : 'text-gray-500';
   return <span className={`font-semibold ${cls}`}>{fmtPKR(n)}</span>;
 }
 

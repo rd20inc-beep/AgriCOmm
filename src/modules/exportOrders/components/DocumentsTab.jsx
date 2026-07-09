@@ -58,7 +58,7 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
         </div>
         <div className="w-full bg-gray-200 rounded-full h-2">
           <div
-            className={`h-2 rounded-full transition-all ${allChecked ? 'bg-green-500' : 'bg-blue-500'}`}
+            className={`h-2 rounded-full transition-all ${allChecked ? 'bg-emerald-500' : 'bg-blue-500'}`}
             style={{ width: `${(checkedCount / docKeys.length) * 100}%` }}
           />
         </div>
@@ -76,17 +76,17 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
             <div
               key={key}
               className={`flex items-center gap-4 px-5 py-4 transition-colors ${
-                isChecked ? 'bg-green-50/50' : 'hover:bg-gray-50'
+                isChecked ? 'bg-emerald-50/50' : 'hover:bg-gray-50'
               }`}
             >
               {isChecked ? (
-                <CheckCircle className="w-6 h-6 text-green-500 flex-shrink-0" />
+                <CheckCircle className="w-6 h-6 text-emerald-500 flex-shrink-0" />
               ) : (
                 <Circle className="w-6 h-6 text-gray-300 flex-shrink-0" />
               )}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <p className={`text-sm font-medium ${isChecked ? 'text-green-800' : 'text-gray-900'}`}>
+                  <p className={`text-sm font-medium ${isChecked ? 'text-emerald-800' : 'text-gray-900'}`}>
                     {documentLabels[key]}
                   </p>
                   {uploadOnly && !isChecked && (
@@ -109,7 +109,7 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
                   </p>
                 )}
                 {isChecked && doc.date && (
-                  <p className="text-xs text-green-600 mt-0.5">Confirmed {doc.date}</p>
+                  <p className="text-xs text-emerald-600 mt-0.5">Confirmed {doc.date}</p>
                 )}
               </div>
 
@@ -133,13 +133,13 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
                 {!isChecked && (
                   <button
                     onClick={(e) => handleConfirm(key, e)}
-                    className="inline-flex items-center gap-1 text-xs font-medium px-3 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded-lg hover:bg-green-100"
+                    className="inline-flex items-center gap-1 text-xs font-medium px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-100"
                   >
                     <CheckCircle className="w-3.5 h-3.5" /> Confirm Ready
                   </button>
                 )}
                 {isChecked && (
-                  <span className="text-xs font-medium text-green-600 bg-green-100 px-2 py-1 rounded-full">
+                  <span className="text-xs font-medium text-emerald-600 bg-emerald-100 px-2 py-1 rounded-full">
                     Ready
                   </span>
                 )}
@@ -150,10 +150,10 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
       </div>
 
       {allChecked && (
-        <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-center">
-          <CheckCircle className="w-8 h-8 text-green-500 mx-auto mb-2" />
-          <p className="text-sm font-semibold text-green-800">All documents confirmed</p>
-          <p className="text-xs text-green-600 mt-1">Order is ready to advance to the next stage.</p>
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center">
+          <CheckCircle className="w-8 h-8 text-emerald-500 mx-auto mb-2" />
+          <p className="text-sm font-semibold text-emerald-800">All documents confirmed</p>
+          <p className="text-xs text-emerald-600 mt-1">Order is ready to advance to the next stage.</p>
         </div>
       )}
     </div>

@@ -72,7 +72,7 @@ function WarehousePicker() {
                       <td className="px-3 py-2"><span className={`inline-flex px-1.5 py-0.5 rounded text-[11px] font-medium ${r.entity === 'export' ? 'bg-violet-50 text-violet-700' : 'bg-sky-50 text-sky-700'}`}>{r.entity}</span></td>
                       <td className="px-3 py-2 text-right tabular-nums">{r.lotCount}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{kg(r.onHandKg)}</td>
-                      <td className={`px-3 py-2 text-right tabular-nums ${r.reservedKg > 0 ? 'text-rose-600' : ''}`}>{kg(r.reservedKg)}</td>
+                      <td className={`px-3 py-2 text-right tabular-nums ${r.reservedKg > 0 ? 'text-red-600' : ''}`}>{kg(r.reservedKg)}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{kg(r.availableKg)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{pkr(r.stockValue)}</td>
                     </tr>
@@ -101,7 +101,7 @@ function WarehouseDetail({ id }) {
   if (isError || !data?.warehouse) return (
     <div className="p-6">
       <button onClick={() => navigate(-1)} className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm"><ArrowLeft size={14} /> Back</button>
-      <p className="mt-4 text-sm text-rose-600">{error?.message || 'Warehouse ledger not available.'}</p>
+      <p className="mt-4 text-sm text-red-600">{error?.message || 'Warehouse ledger not available.'}</p>
     </div>
   );
 
@@ -127,7 +127,7 @@ function WarehouseDetail({ id }) {
   });
 
   const Cell = ({ label, value, sub, tone = 'gray' }) => {
-    const t = { emerald: 'text-emerald-700', rose: 'text-rose-600', gray: 'text-gray-900' }[tone] || 'text-gray-900';
+    const t = { emerald: 'text-emerald-700', rose: 'text-red-600', gray: 'text-gray-900' }[tone] || 'text-gray-900';
     return <div><p className="text-[11px] uppercase tracking-wider text-gray-400">{label}</p><p className={`text-sm font-medium ${t}`}>{value}</p>{sub && <p className="text-[11px] text-gray-400">{sub}</p>}</div>;
   };
   const Section = ({ icon: Icon, title, children }) => (
@@ -230,7 +230,7 @@ function WarehouseDetail({ id }) {
                     <td className="px-3 py-2">{l.riceType || '—'}{l.label && l.label !== l.riceType ? <span className="text-gray-400"> · {l.label}</span> : ''}</td>
                     <td className="px-3 py-2">{typeLabel(l.type)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{kg(l.inKg)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-rose-600">{l.outKg ? kg(l.outKg) : '—'}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-red-600">{l.outKg ? kg(l.outKg) : '—'}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{l.reservedKg ? kg(l.reservedKg) : '—'}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{kg(l.availableKg)}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{kg(l.closingKg)}</td>

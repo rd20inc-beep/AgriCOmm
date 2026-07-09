@@ -71,7 +71,7 @@ export default function CostCategoriesTab() {
                 setCostCatLabel('');
                 setShowCostCatForm(false);
               }}
-              className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors"
+              className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors"
             >
               Save
             </button>
@@ -107,20 +107,20 @@ export default function CostCategoriesTab() {
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-            <Factory className="w-5 h-5 text-orange-600" />
+            <Factory className="w-5 h-5 text-amber-600" />
             Milling Cost Categories
             <span className="text-xs font-normal text-gray-400 ml-1">(PKR)</span>
           </h2>
           <button
             onClick={() => { setMillCostKey(''); setMillCostLabel(''); setShowMillCostForm(true); }}
-            className="inline-flex items-center gap-2 bg-orange-600 text-white px-4 py-2 rounded-lg hover:bg-orange-700 transition-colors font-medium text-sm"
+            className="inline-flex items-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-lg hover:bg-amber-700 transition-colors font-medium text-sm"
           >
             <Plus className="w-4 h-4" />
             Add Category
           </button>
         </div>
         {showMillCostForm && (
-          <div className="px-6 py-4 border-b border-gray-200 bg-orange-50/50 flex items-end gap-3">
+          <div className="px-6 py-4 border-b border-gray-200 bg-amber-50/50 flex items-end gap-3">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Key</label>
               <input
@@ -128,7 +128,7 @@ export default function CostCategoriesTab() {
                 value={millCostKey}
                 onChange={(e) => setMillCostKey(e.target.value)}
                 placeholder="e.g. fumigation"
-                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none"
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none"
               />
             </div>
             <div>
@@ -138,7 +138,7 @@ export default function CostCategoriesTab() {
                 value={millCostLabel}
                 onChange={(e) => setMillCostLabel(e.target.value)}
                 placeholder="e.g. Fumigation Charges"
-                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none"
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none"
               />
             </div>
             <button
@@ -151,7 +151,7 @@ export default function CostCategoriesTab() {
                 addToast(`Milling cost category "${millCostLabel.trim()}" added`, 'success');
                 setMillCostKey(''); setMillCostLabel(''); setShowMillCostForm(false);
               }}
-              className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors"
+              className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors"
             >
               Save
             </button>

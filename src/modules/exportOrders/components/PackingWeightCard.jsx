@@ -121,7 +121,7 @@ export default function PackingWeightCard({ order, onUpdated }) {
             {rec && rec.approval_status !== 'not_required' && (
               <div className="flex justify-between items-center text-sm">
                 <span className="text-gray-500">Approval</span>
-                <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${rec.approval_status === 'approved' ? 'bg-emerald-100 text-emerald-700' : rec.approval_status === 'rejected' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'}`}>
+                <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${rec.approval_status === 'approved' ? 'bg-emerald-100 text-emerald-700' : rec.approval_status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
                   {rec.approval_status === 'pending' ? 'Approval Required' : rec.approval_status}
                 </span>
               </div>

@@ -27,7 +27,7 @@ const STATUS_TONE = {
   Partial:  'bg-amber-50 text-amber-700 border-amber-200',
   Pending:  'bg-gray-50 text-gray-600 border-gray-200',
   Credit:   'bg-blue-50 text-blue-700 border-blue-200',
-  Refunded: 'bg-rose-50 text-rose-700 border-rose-200',
+  Refunded: 'bg-red-50 text-red-700 border-red-200',
 };
 
 export default function LocalSalesFinance() {
@@ -104,7 +104,7 @@ export default function LocalSalesFinance() {
 
   const heroGradient = filteredTotals.profit >= 0
     ? 'from-purple-700 via-fuchsia-600 to-pink-500'
-    : 'from-red-700 via-red-600 to-rose-500';
+    : 'from-red-700 via-red-600 to-red-500';
 
   function exportCsv() {
     const rows = filtered.map(s => ({

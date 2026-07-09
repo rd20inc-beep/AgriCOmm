@@ -124,7 +124,7 @@ const ENTITY_COLORS = {
 
 const RECIPIENT_COLORS = {
   Customer: 'bg-sky-100 text-sky-700',
-  Supplier: 'bg-orange-100 text-orange-700',
+  Supplier: 'bg-amber-100 text-amber-700',
   Internal: 'bg-slate-100 text-slate-700',
 };
 
@@ -571,7 +571,7 @@ export default function WhatsAppTemplatesTab() {
           </div>
           <div className="text-right shrink-0">
             <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
-              qrStatus.status === 'connected' ? 'bg-green-100 text-green-700' :
+              qrStatus.status === 'connected' ? 'bg-emerald-100 text-emerald-700' :
               qrStatus.status === 'qr' ? 'bg-amber-100 text-amber-700' :
               qrStatus.status === 'connecting' ? 'bg-blue-100 text-blue-700' :
               qrStatus.status === 'error' ? 'bg-red-100 text-red-700' :
@@ -589,10 +589,10 @@ export default function WhatsAppTemplatesTab() {
         </div>
 
         {qrStatus.status === 'connected' ? (
-          <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-4 py-3">
-            <div className="text-sm text-green-800">
+          <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3">
+            <div className="text-sm text-emerald-800">
               <div className="font-medium">Linked to {qrStatus.phone ? `+${qrStatus.phone}` : 'this device'}</div>
-              <div className="text-xs text-green-700 mt-0.5">Templates with channel "QR" will send through this connection.</div>
+              <div className="text-xs text-emerald-700 mt-0.5">Templates with channel "QR" will send through this connection.</div>
             </div>
             <button
               onClick={handleQrLogout}
@@ -647,7 +647,7 @@ export default function WhatsAppTemplatesTab() {
             <select
               value={provider}
               onChange={(e) => setProvider(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none bg-white"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none bg-white"
             >
               <option value="Custom API">Custom API</option>
               <option value="WATI">WATI</option>
@@ -663,7 +663,7 @@ export default function WhatsAppTemplatesTab() {
               value={apiUrl}
               onChange={(e) => setApiUrl(e.target.value)}
               placeholder="https://api.whatsapp.com/v1"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
             />
           </div>
 
@@ -675,7 +675,7 @@ export default function WhatsAppTemplatesTab() {
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 placeholder="Enter your API key"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 pr-10 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 pr-10 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
               />
               <button
                 type="button"
@@ -696,7 +696,7 @@ export default function WhatsAppTemplatesTab() {
                 value={senderPhone}
                 onChange={(e) => setSenderPhone(e.target.value)}
                 placeholder="+92 300 1234567"
-                className="w-full border border-gray-300 rounded-lg pl-9 pr-3 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+                className="w-full border border-gray-300 rounded-lg pl-9 pr-3 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
               />
             </div>
           </div>
@@ -754,13 +754,13 @@ export default function WhatsAppTemplatesTab() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search templates..."
-              className="w-full border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+              className="w-full border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
             />
           </div>
           <select
             value={filterEntity}
             onChange={(e) => setFilterEntity(e.target.value)}
-            className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none bg-white"
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none bg-white"
           >
             <option value="All">All Entities</option>
             {ENTITIES.map(e => <option key={e} value={e}>{e}</option>)}
@@ -814,7 +814,7 @@ export default function WhatsAppTemplatesTab() {
                     {tpl.recipientType}
                   </span>
                   {tpl.active ? (
-                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">Active</span>
+                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">Active</span>
                   ) : (
                     <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-600">Inactive</span>
                   )}
@@ -833,7 +833,7 @@ export default function WhatsAppTemplatesTab() {
                   <button
                     onClick={() => handleToggleAutoSend(tpl.id)}
                     className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                      tpl.autoSend ? 'bg-green-400' : 'bg-gray-200'
+                      tpl.autoSend ? 'bg-emerald-400' : 'bg-gray-200'
                     }`}
                   >
                     <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
@@ -927,7 +927,7 @@ export default function WhatsAppTemplatesTab() {
                     value={formName}
                     onChange={(e) => setFormName(e.target.value)}
                     placeholder="e.g. Order Confirmation"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
                   />
                 </div>
                 <div>
@@ -937,7 +937,7 @@ export default function WhatsAppTemplatesTab() {
                     value={formSlug}
                     onChange={(e) => setFormSlug(e.target.value)}
                     placeholder="auto_generated_slug"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm font-mono focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm font-mono focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
                   />
                 </div>
                 <div>
@@ -945,7 +945,7 @@ export default function WhatsAppTemplatesTab() {
                   <select
                     value={formEntity}
                     onChange={(e) => setFormEntity(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none bg-white"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none bg-white"
                   >
                     {ENTITIES.map(e => <option key={e} value={e}>{e}</option>)}
                   </select>
@@ -955,7 +955,7 @@ export default function WhatsAppTemplatesTab() {
                   <select
                     value={formTrigger}
                     onChange={(e) => setFormTrigger(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none bg-white"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none bg-white"
                   >
                     {(TRIGGER_EVENTS[formEntity] || []).map(t => (
                       <option key={t.value} value={t.value}>{t.label}</option>
@@ -967,7 +967,7 @@ export default function WhatsAppTemplatesTab() {
                   <select
                     value={formRecipient}
                     onChange={(e) => setFormRecipient(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none bg-white"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none bg-white"
                   >
                     {RECIPIENT_TYPES.map(r => <option key={r} value={r}>{r}</option>)}
                   </select>
@@ -978,7 +978,7 @@ export default function WhatsAppTemplatesTab() {
                       type="checkbox"
                       checked={formAutoSend}
                       onChange={(e) => setFormAutoSend(e.target.checked)}
-                      className="w-4 h-4 rounded border-gray-300 focus:ring-green-500"
+                      className="w-4 h-4 rounded border-gray-300 focus:ring-emerald-500"
                       style={{ accentColor: '#25D366' }}
                     />
                     <span className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
@@ -1000,7 +1000,7 @@ export default function WhatsAppTemplatesTab() {
                     onChange={(e) => setFormBody(e.target.value)}
                     rows={14}
                     placeholder="Type your WhatsApp message template here. Use {{variableName}} for dynamic content."
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm font-mono leading-relaxed focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none resize-none"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm font-mono leading-relaxed focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none resize-none"
                   />
                   <p className="text-xs text-gray-400">
                     {formBody.length} characters
@@ -1022,8 +1022,8 @@ export default function WhatsAppTemplatesTab() {
                           onClick={() => insertVariable(v)}
                           className={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md border transition-colors ${
                             copiedVar === v
-                              ? 'bg-green-100 border-green-300 text-green-700'
-                              : 'bg-white border-gray-200 text-gray-600 hover:bg-green-50 hover:border-green-300 hover:text-green-700'
+                              ? 'bg-emerald-100 border-emerald-300 text-emerald-700'
+                              : 'bg-white border-gray-200 text-gray-600 hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-700'
                           }`}
                         >
                           {copiedVar === v ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}

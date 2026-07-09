@@ -109,7 +109,7 @@ export default function MillsTab() {
                   <td className="py-3 px-4 text-gray-600">{mill.contactPerson || '—'}</td>
                   <td className="py-3 px-4">
                     <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
-                      mill.status === 'Active' ? 'bg-green-100 text-green-700' :
+                      mill.status === 'Active' ? 'bg-emerald-100 text-emerald-700' :
                       mill.status === 'Maintenance' ? 'bg-amber-100 text-amber-700' :
                       'bg-red-100 text-red-700'
                     }`}>

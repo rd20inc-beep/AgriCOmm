@@ -60,7 +60,7 @@ export default function ProcessingLossLedger() {
   });
 
   const Kpi = ({ label, value, tone = 'gray', sub }) => {
-    const t = { rose: 'text-rose-600', emerald: 'text-emerald-700', amber: 'text-amber-600', gray: 'text-gray-900' }[tone] || 'text-gray-900';
+    const t = { rose: 'text-red-600', emerald: 'text-emerald-700', amber: 'text-amber-600', gray: 'text-gray-900' }[tone] || 'text-gray-900';
     return (
       <div className="bg-white rounded-xl border border-gray-200 p-4">
         <p className="text-[11px] uppercase tracking-wider text-gray-400">{label}</p>
@@ -96,7 +96,7 @@ export default function ProcessingLossLedger() {
                   <td className="px-3 py-2 text-right tabular-nums">{r.batches}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{kgMt(r.inputKg)}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{kgMt(r.outputKg)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-rose-600">{kgMt(r.lossKg)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-red-600">{kgMt(r.lossKg)}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{pc(r.lossPct)}</td>
                 </tr>
               ))}
@@ -136,7 +136,7 @@ export default function ProcessingLossLedger() {
       </div>
 
       {isLoading ? <div className="p-6 text-sm text-gray-400">Loading processing-loss ledger…</div>
-        : isError ? <p className="p-6 text-sm text-rose-600">{error?.message || 'Processing-loss ledger not available.'}</p>
+        : isError ? <p className="p-6 text-sm text-red-600">{error?.message || 'Processing-loss ledger not available.'}</p>
           : (
             <>
               {/* KPIs */}
@@ -186,8 +186,8 @@ export default function ProcessingLossLedger() {
                             <td className="px-3 py-2">{b.operator}</td>
                             <td className="px-3 py-2 text-right tabular-nums">{kgMt(b.inputKg)}</td>
                             <td className="px-3 py-2 text-right tabular-nums">{kgMt(b.outputKg)}</td>
-                            <td className="px-3 py-2 text-right tabular-nums text-rose-600">{kgMt(b.lossKg)}</td>
-                            <td className={`px-3 py-2 text-right tabular-nums ${b.lossPct > 10 ? 'text-rose-600 font-medium' : ''}`}>{pc(b.lossPct)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-red-600">{kgMt(b.lossKg)}</td>
+                            <td className={`px-3 py-2 text-right tabular-nums ${b.lossPct > 10 ? 'text-red-600 font-medium' : ''}`}>{pc(b.lossPct)}</td>
                           </tr>
                         ))}
                     </tbody>

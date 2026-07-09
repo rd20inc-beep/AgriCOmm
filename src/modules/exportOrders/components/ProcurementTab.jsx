@@ -150,7 +150,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
                 </div>
                 <div className="w-full bg-gray-200 rounded-full h-2">
                   <div
-                    className={`h-2 rounded-full transition-all ${fulfillmentPct >= 100 ? 'bg-green-500' : fulfillmentPct >= 50 ? 'bg-blue-500' : 'bg-amber-500'}`}
+                    className={`h-2 rounded-full transition-all ${fulfillmentPct >= 100 ? 'bg-emerald-500' : fulfillmentPct >= 50 ? 'bg-blue-500' : 'bg-amber-500'}`}
                     style={{ width: `${Math.min(100, fulfillmentPct)}%` }}
                   />
                 </div>
@@ -291,7 +291,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
           <p className="text-xs text-gray-400 mb-4">
             {remainingNeeded > 0
               ? <>Need <span className="font-semibold text-emerald-700">{Math.round(remainingNeeded * 1000).toLocaleString()} kg</span> more. Enter qty or click Reserve for the full amount.</>
-              : <span className="text-green-600 font-medium">Fully reserved!</span>
+              : <span className="text-emerald-600 font-medium">Fully reserved!</span>
             }
           </p>
 
@@ -574,7 +574,7 @@ function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
   }
 
   return (
-    <div className="bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl shadow-sm border-2 border-amber-300 p-6">
+    <div className="bg-gradient-to-r from-amber-50 to-amber-50 rounded-xl shadow-sm border-2 border-amber-300 p-6">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold text-amber-800 uppercase tracking-wide flex items-center gap-2">
           <Truck className="w-4 h-4" />

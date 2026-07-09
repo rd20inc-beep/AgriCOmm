@@ -74,7 +74,7 @@ export default function Profit() {
       <span className={v >= 0 ? 'text-emerald-600 font-medium' : 'text-red-600 font-medium'}>{fmtPKR(v)}</span>
     )},
     { key: 'fxGainLossPkr', label: 'FX +/-', sortable: true, align: 'right', render: (v) => (
-      <span className={v >= 0 ? 'text-blue-600' : 'text-orange-600'}>{fmtPKR(v)}</span>
+      <span className={v >= 0 ? 'text-blue-600' : 'text-amber-600'}>{fmtPKR(v)}</span>
     )},
     { key: 'marginPct', label: 'Margin', sortable: true, align: 'right', render: (v) => v == null || isNaN(v) ? '—' : `${v}%`},
     { key: 'calculationStatus', label: 'Accuracy', render: (v) => <AccuracyBadge status={v} /> },
@@ -164,7 +164,7 @@ export default function Profit() {
 
   const heroGradient = consolidatedPkr >= 0
     ? 'from-emerald-600 via-emerald-500 to-teal-500'
-    : 'from-red-600 via-red-500 to-rose-500';
+    : 'from-red-600 via-red-500 to-red-500';
   const HeroIcon = consolidatedPkr >= 0 ? TrendingUp : TrendingDown;
   const totalRevenue = (summary.export?.totalRevenuePkr ?? exportRows.reduce((a, r) => a + (parseFloat(r.revenuePkrBooked) || 0), 0))
     + millRows.reduce((a, r) => a + (parseFloat(r.revenue) || 0), 0)

@@ -38,7 +38,7 @@ const STATUS_TONE = {
   paid:    'bg-emerald-50 text-emerald-700 border-emerald-200',
   partial: 'bg-amber-50 text-amber-700 border-amber-200',
   pending: 'bg-gray-50 text-gray-600 border-gray-200',
-  unpaid:  'bg-rose-50 text-rose-700 border-rose-200',
+  unpaid:  'bg-red-50 text-red-700 border-red-200',
 };
 function statusTone(s) {
   const k = String(s || 'pending').toLowerCase();
@@ -744,7 +744,7 @@ function RefLink({ p }) {
 function KpiTile({ label, primary, secondary, tone = 'gray' }) {
   const ring = {
     emerald: 'ring-emerald-100',
-    rose:    'ring-rose-100',
+    rose:    'ring-red-100',
     blue:    'ring-blue-100',
     gray:    'ring-gray-100',
   }[tone] || 'ring-gray-100';

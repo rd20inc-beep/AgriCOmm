@@ -270,7 +270,7 @@ export default function FinanceAlerts() {
                           className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                             alert.status === 'Snoozed'
                               ? 'bg-yellow-100 text-yellow-700'
-                              : 'bg-green-100 text-green-700'
+                              : 'bg-emerald-100 text-emerald-700'
                           }`}
                         >
                           {alert.status}
@@ -326,7 +326,7 @@ export default function FinanceAlerts() {
                       </button>
                       <button
                         onClick={() => handleResolve(alert.id)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-green-700 bg-green-50 rounded-lg hover:bg-green-100 transition-colors"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 rounded-lg hover:bg-emerald-100 transition-colors"
                       >
                         <CheckCircle2 size={14} />
                         Resolve
