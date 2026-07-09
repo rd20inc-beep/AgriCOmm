@@ -117,7 +117,7 @@ export default function ServiceMilling() {
               <tr className="text-left text-[11px] uppercase tracking-wide text-gray-500 border-b border-gray-100">
                 <th className="px-4 py-2.5 font-semibold">Lot</th>
                 <th className="px-4 py-2.5 font-semibold">Client</th>
-                <th className="px-4 py-2.5 font-semibold text-right">Kattas</th>
+                <th className="px-4 py-2.5 font-semibold text-right">Kattas / Bags</th>
                 <th className="px-4 py-2.5 font-semibold text-right">Milled</th>
                 <th className="px-4 py-2.5 font-semibold text-right">In Stock</th>
                 <th className="px-4 py-2.5 font-semibold">Lot Status</th>
@@ -138,7 +138,13 @@ export default function ServiceMilling() {
                     {b.date_received && <div className="text-[11px] text-gray-400">{new Date(b.date_received).toLocaleDateString('en-GB')}</div>}
                   </td>
                   <td className="px-4 py-2.5 text-gray-800">{b.client_name || <span className="text-gray-400">—</span>}</td>
-                  <td className="px-4 py-2.5 text-right text-gray-700">{num(b.katta_count) || num(b.bag_count) || '—'}</td>
+                  <td className="px-4 py-2.5 text-right text-gray-700">
+                    {num(b.katta_count) > 0
+                      ? <span>{num(b.katta_count).toLocaleString()} <span className="text-gray-400 text-xs">kattas</span></span>
+                      : num(b.bag_count) > 0
+                        ? <span>{num(b.bag_count).toLocaleString()} <span className="text-gray-400 text-xs">bags</span></span>
+                        : '—'}
+                  </td>
                   <td className="px-4 py-2.5 text-right text-gray-700">{kg(b.milled_kg)}</td>
                   <td className="px-4 py-2.5 text-right text-gray-700">{kg(b.rollup?.remainingKg)}</td>
                   <td className="px-4 py-2.5"><Chip text={b.service_lot_status} map={LOT_STATUS_STYLE} /></td>
