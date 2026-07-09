@@ -38,6 +38,7 @@ import { millingApi as millingModApi } from '../api/services';
 import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import SearchSelect from '../../../components/SearchSelect';
 import Modal from '../../../components/Modal';
+import SlideDrawer from '../../../components/SlideDrawer';
 import StatusBadge from '../../../components/StatusBadge';
 import MillingCostSheet from '../components/MillingCostSheet';
 import ConsumptionPanel from '../../millStore/components/ConsumptionPanel';
@@ -996,7 +997,18 @@ export default function MillingBatchDetail() {
                     <span className="text-[11px] text-gray-400">Inherited from source lots</span>
                   ) : (
                     <button
-                      onClick={() => setShowVehicleModal(true)}
+                      onClick={() => {
+                        // Prefill the truck's weight + bags with the amount not yet
+                        // received on this batch (editable — enter less/more).
+                        const expectedWeight = parseFloat(batch.rawQtyKg) || 0;
+                        const expectedBags = parseInt(batch.kattaCount, 10) || parseInt(batch.bagCount, 10) || 0;
+                        const usedWeight = safeVehicles.reduce((s, v) => s + (parseFloat(v.weight_kg) || 0), 0);
+                        const usedBags = safeVehicles.reduce((s, v) => s + (parseInt(v.total_bags, 10) || 0), 0);
+                        const remW = Math.max(0, Math.round(expectedWeight - usedWeight));
+                        const remB = Math.max(0, expectedBags - usedBags);
+                        setVehicleForm(prev => ({ ...prev, weightKg: remW > 0 ? String(remW) : '', totalBags: remB > 0 ? String(remB) : '' }));
+                        setShowVehicleModal(true);
+                      }}
                       className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors"
                     >
                       <Plus size={12} /> Add Vehicle
@@ -2206,8 +2218,8 @@ export default function MillingBatchDetail() {
         <MillingCostSheet batch={batch} companyProfile={companyProfileData} millingCostCategories={millingCostCategories} vehicles={safeVehicles} sourceLots={sourceLots} byproductRates={{ broken: commodityPrices.broken, sortex: commodityPrices.sortex, bran: commodityPrices.bran, husk: commodityPrices.husk }} />
       </Modal>
 
-      {/* Add Vehicle Modal */}
-      <Modal isOpen={showVehicleModal} onClose={() => setShowVehicleModal(false)} title="Add Vehicle Arrival">
+      {/* Add Vehicle — right slide-over */}
+      <SlideDrawer open={showVehicleModal} onClose={() => setShowVehicleModal(false)} title="Add Vehicle Arrival" icon={Truck} size="xl">
         <form onSubmit={handleAddVehicle} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -2398,7 +2410,7 @@ export default function MillingBatchDetail() {
             </button>
           </div>
         </form>
-      </Modal>
+      </SlideDrawer>
 
       {/* Confirm Product Prices Modal */}
       <Modal isOpen={showPriceModal} onClose={() => setShowPriceModal(false)} title="Costing — by-product prices & finished cost" size="md">
