@@ -21,6 +21,7 @@ router.use('/mill-store', authenticate, require('./millStore'));
 router.use('/inventory', authenticate, require('./inventory'));
 router.use('/lot-inventory', authenticate, require('./lotInventory'));
 router.use('/local-sales', authenticate, require('./localSales'));
+router.use('/service-milling', authenticate, require('../modules/serviceMilling/serviceMilling.routes'));
 router.use('/finance', authenticate, require('./finance'));
 router.use('/expenses', authenticate, require('./expenses'));
 router.use('/expense-vendors', authenticate, require('../modules/expenseVendors/expenseVendors.routes'));

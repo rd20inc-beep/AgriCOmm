@@ -225,7 +225,13 @@ const millingController = {
         else if (r.type === 'byproduct') b.byproductKg += produced;
       }
 
-      // Billing status placeholder until Phase A2 (invoices) lands.
+      // Billing status per batch from its invoice (A2). No invoice → Not Invoiced.
+      const invRows = ids.length
+        ? await db('service_milling_invoices').whereIn('service_batch_id', ids).select('service_batch_id', 'id', 'invoice_no', 'total_amount', 'payment_status')
+        : [];
+      const invByBatch = {};
+      for (const inv of invRows) invByBatch[inv.service_batch_id] = inv;
+
       const num = (v) => parseFloat(v) || 0;
       const data = batches.map((b) => {
         const roll = rollup[b.id] || { finishedKg: 0, byproductKg: 0, remainingKg: 0, producedKg: 0 };
@@ -234,6 +240,10 @@ const millingController = {
         const millingAmount = milledKg * num(b.service_milling_rate_per_kg);
         const rentalAmount = kattas * num(b.service_rental_rate_per_katta);
         const labourAmount = kattas * num(b.service_labour_rate_per_katta);
+        const inv = invByBatch[b.id];
+        const billing = inv
+          ? (inv.payment_status === 'Paid' ? 'Paid' : inv.payment_status === 'Partial' ? 'Partial' : 'Invoiced')
+          : 'Not Invoiced';
         return {
           ...b,
           client_name: b.client_name || null,
@@ -242,8 +252,11 @@ const millingController = {
           service_milling_amount: millingAmount,
           service_rental_amount: rentalAmount,
           service_labour_amount: labourAmount,
-          service_total_amount: millingAmount + rentalAmount + labourAmount,
-          billing_status: 'Not Invoiced', // A2 will derive from service_milling_invoices
+          // If invoiced, the invoice total is authoritative; else the estimate.
+          service_total_amount: inv ? num(inv.total_amount) : (millingAmount + rentalAmount + labourAmount),
+          invoice_id: inv?.id || null,
+          invoice_no: inv?.invoice_no || null,
+          billing_status: billing,
         };
       });
       return res.json({ success: true, data });
