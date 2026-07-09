@@ -18,6 +18,7 @@ import QualityAnalysisDrawer from '../components/QualityAnalysisDrawer';
 import YieldOutputDrawer from '../components/YieldOutputDrawer';
 import VehicleArrivalDrawer from '../components/VehicleArrivalDrawer';
 import ServiceDispatchTab from '../components/ServiceDispatchTab';
+import ServiceBillingTab from '../components/ServiceBillingTab';
 import { qualityParams } from '../qualityParams';
 
 const num = (v) => parseFloat(v) || 0;
@@ -439,15 +440,9 @@ export default function ServiceMillingBatchDetail() {
         <ServiceDispatchTab routeId={id} onChanged={invalidateBatch} />
       )}
 
-      {/* ---- Billing (placeholder — Phase 3) ---- */}
+      {/* ---- Billing ---- */}
       {activeTab === 'billing' && (
-        <Card title="Service Billing" icon={Wallet}>
-          <div className="py-6 text-center">
-            <Wallet size={28} className="mx-auto text-gray-300 mb-2" />
-            <p className="text-sm text-gray-500">Service invoicing (milling + rental + labour) is coming in the next update.</p>
-            <p className="text-xs text-gray-400 mt-1">Invoices and payments are managed under Mill → Service Invoices in the meantime.</p>
-          </div>
-        </Card>
+        <ServiceBillingTab routeId={id} batchDbId={batchId} onChanged={invalidateBatch} />
       )}
 
       {/* Drawers */}
