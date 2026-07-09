@@ -11,6 +11,7 @@ import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { RouteErrorBoundary } from './ErrorBoundary';
 import ChatWidget from './ChatWidget';
+import { SkeletonPage } from '../shared/components/Skeleton';
 
 const millNav = [
   { section: 'Mill' },
@@ -413,7 +414,7 @@ export default function MillLayout({ children }) {
           {/* Scope lazy-page loading to the right pane so the sidebar + header
               stay mounted on navigation (no full-shell remount/flash). */}
           <RouteErrorBoundary>
-            <Suspense fallback={<div className="flex items-center justify-center h-full text-sm text-gray-400">Loading…</div>}>
+            <Suspense fallback={<SkeletonPage />}>
               {children}
             </Suspense>
           </RouteErrorBoundary>

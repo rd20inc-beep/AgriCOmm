@@ -13,6 +13,7 @@ import { useAuth } from '../context/AuthContext';
 import { useMasterDataApprovalsCount } from '../modules/admin/api/queries';
 import { RouteErrorBoundary } from './ErrorBoundary';
 import ChatWidget from './ChatWidget';
+import { SkeletonPage } from '../shared/components/Skeleton';
 
 const sidebarNav = [
   { section: 'Main' },
@@ -551,7 +552,7 @@ export default function Layout({ children }) {
               card here instead of taking down the whole shell, and navigating to
               another page clears it (RouteErrorBoundary is keyed by route). */}
           <RouteErrorBoundary>
-            <Suspense fallback={<div className="flex items-center justify-center h-full text-sm text-gray-400">Loading…</div>}>
+            <Suspense fallback={<SkeletonPage />}>
               {children}
             </Suspense>
           </RouteErrorBoundary>
