@@ -491,6 +491,17 @@ const createBatch = Joi.object({
     Joi.array().items(Joi.string().max(60)),
     Joi.string().allow('', null),
   ),
+  // Service milling (toll/job-work): client-owned rice, billed for service fees.
+  is_service_milling: Joi.boolean().default(false),
+  client_customer_id: Joi.number().integer().positive().allow(null),
+  service_milling_rate_per_kg: Joi.number().min(0).allow(null, ''),
+  service_rental_rate_per_katta: Joi.number().min(0).allow(null, ''),
+  service_labour_rate_per_katta: Joi.number().min(0).allow(null, ''),
+  date_received: Joi.date().allow(null, ''),
+  katta_count: Joi.number().integer().min(0).allow(null, ''),
+  bag_count: Joi.number().integer().min(0).allow(null, ''),
+  expected_output_kg: Joi.number().min(0).allow(null, ''),
+  service_remarks: Joi.string().allow('', null),
 }).or('raw_qty_kg', 'source_lots');
 
 const recordYield = Joi.object({

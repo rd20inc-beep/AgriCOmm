@@ -848,6 +848,8 @@ COL inventory_lots.net_weight_kg:numeric:NOT NULL
 COL inventory_lots.notes:text:NULL
 COL inventory_lots.ordered_net_weight_kg:numeric:NULL
 COL inventory_lots.other_cost:numeric:NOT NULL
+COL inventory_lots.owner_customer_id:integer:NULL
+COL inventory_lots.ownership:character varying:NOT NULL
 COL inventory_lots.packing_cost:numeric:NOT NULL
 COL inventory_lots.paid_amount:numeric:NOT NULL
 COL inventory_lots.payment_status:character varying:NOT NULL
@@ -866,6 +868,7 @@ COL inventory_lots.raw_cost_component:numeric:NULL
 COL inventory_lots.received_net_weight_kg:numeric:NULL
 COL inventory_lots.reserved_against:character varying:NULL
 COL inventory_lots.reserved_qty:numeric:NOT NULL
+COL inventory_lots.service_batch_id:integer:NULL
 COL inventory_lots.sold_weight_kg:numeric:NOT NULL
 COL inventory_lots.sortex_status:character varying:NULL
 COL inventory_lots.standard_unit_type:character varying:NOT NULL
@@ -1461,6 +1464,7 @@ COL milling_batches.b2_kg:numeric:NOT NULL
 COL milling_batches.b2_price_per_kg:numeric:NULL
 COL milling_batches.b3_kg:numeric:NOT NULL
 COL milling_batches.b3_price_per_kg:numeric:NULL
+COL milling_batches.bag_count:integer:NULL
 COL milling_batches.batch_name:character varying:NULL
 COL milling_batches.batch_no:character varying:NOT NULL
 COL milling_batches.benchmark_id:integer:NULL
@@ -1470,16 +1474,21 @@ COL milling_batches.broken_kg:numeric:NOT NULL
 COL milling_batches.broken_price_per_kg:numeric:NULL
 COL milling_batches.choba_kg:numeric:NOT NULL
 COL milling_batches.choba_price_per_kg:numeric:NULL
+COL milling_batches.client_customer_id:integer:NULL
 COL milling_batches.completed_at:timestamp with time zone:NULL
 COL milling_batches.created_at:timestamp with time zone:NOT NULL
 COL milling_batches.created_by:integer:NOT NULL
 COL milling_batches.csr_kg:numeric:NOT NULL
 COL milling_batches.csr_price_per_kg:numeric:NULL
 COL milling_batches.custom_tags:jsonb:NOT NULL
+COL milling_batches.date_received:date:NULL
+COL milling_batches.expected_output_kg:numeric:NULL
 COL milling_batches.finished_price_per_kg:numeric:NULL
 COL milling_batches.husk_kg:numeric:NOT NULL
 COL milling_batches.husk_price_per_kg:numeric:NULL
 COL milling_batches.id:integer:NOT NULL
+COL milling_batches.is_service_milling:boolean:NOT NULL
+COL milling_batches.katta_count:integer:NULL
 COL milling_batches.linked_export_order_id:integer:NULL
 COL milling_batches.machine_line:character varying:NULL
 COL milling_batches.manual_milling_cost_pkr:numeric:NULL
@@ -1507,6 +1516,11 @@ COL milling_batches.raw_cost_total:numeric:NULL
 COL milling_batches.raw_qty_kg:numeric:NULL
 COL milling_batches.rejected_by:integer:NULL
 COL milling_batches.rejection_reason:text:NULL
+COL milling_batches.service_labour_rate_per_katta:numeric:NULL
+COL milling_batches.service_lot_status:character varying:NULL
+COL milling_batches.service_milling_rate_per_kg:numeric:NULL
+COL milling_batches.service_remarks:text:NULL
+COL milling_batches.service_rental_rate_per_katta:numeric:NULL
 COL milling_batches.shift:character varying:NULL
 COL milling_batches.short_grain_kg:numeric:NOT NULL
 COL milling_batches.short_grain_price_per_kg:numeric:NULL
@@ -2540,6 +2554,7 @@ CON inventory_lots.chk_inventory_lots_landed_cost_total_nn(c)
 CON inventory_lots.chk_inventory_lots_milling_cost_component_nn(c)
 CON inventory_lots.chk_inventory_lots_moisture_pct_range(c)
 CON inventory_lots.chk_inventory_lots_other_cost_nn(c)
+CON inventory_lots.chk_inventory_lots_ownership_valid(c)
 CON inventory_lots.chk_inventory_lots_packing_cost_nn(c)
 CON inventory_lots.chk_inventory_lots_paid_amount_nn(c)
 CON inventory_lots.chk_inventory_lots_payment_status_valid(c)
@@ -2563,11 +2578,13 @@ CON inventory_lots.inventory_lots_entity_check(c)
 CON inventory_lots.inventory_lots_lot_no_unique(u)
 CON inventory_lots.inventory_lots_milling_status_check(c)
 CON inventory_lots.inventory_lots_netweight_nonneg_chk(c)
+CON inventory_lots.inventory_lots_owner_customer_id_foreign(f)
 CON inventory_lots.inventory_lots_pkey(p)
 CON inventory_lots.inventory_lots_product_id_foreign(f)
 CON inventory_lots.inventory_lots_purchase_invoice_id_foreign(f)
 CON inventory_lots.inventory_lots_qty_nonneg_chk(c)
 CON inventory_lots.inventory_lots_reserved_nonneg_chk(c)
+CON inventory_lots.inventory_lots_service_batch_id_foreign(f)
 CON inventory_lots.inventory_lots_status_chk(c)
 CON inventory_lots.inventory_lots_supplier_id_foreign(f)
 CON inventory_lots.inventory_lots_transport_vendor_id_foreign(f)
@@ -2803,6 +2820,7 @@ CON milling_batches.chk_milling_batches_processing_type(c)
 CON milling_batches.chk_milling_batches_purchase_price_per_kg_nn(c)
 CON milling_batches.chk_milling_batches_raw_cost_per_kg_finished_nn(c)
 CON milling_batches.chk_milling_batches_raw_cost_total_nonneg(c)
+CON milling_batches.chk_milling_batches_service_lot_status_valid(c)
 CON milling_batches.chk_milling_batches_sortex_rejects_price_per_mt_nn(c)
 CON milling_batches.chk_milling_batches_status_valid(c)
 CON milling_batches.chk_milling_batches_total_cost_per_kg_finished_nonneg(c)
@@ -2810,6 +2828,7 @@ CON milling_batches.chk_milling_batches_yield_pct_range(c)
 CON milling_batches.milling_batches_approved_by_foreign(f)
 CON milling_batches.milling_batches_batch_no_unique(u)
 CON milling_batches.milling_batches_benchmark_id_foreign(f)
+CON milling_batches.milling_batches_client_customer_id_foreign(f)
 CON milling_batches.milling_batches_created_by_foreign(f)
 CON milling_batches.milling_batches_linked_export_order_id_foreign(f)
 CON milling_batches.milling_batches_mill_id_foreign(f)

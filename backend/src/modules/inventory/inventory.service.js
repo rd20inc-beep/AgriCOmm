@@ -554,6 +554,14 @@ const inventoryService = {
     const parsedWeight = parseFloat(weightKg);
     const parsedCost = parseFloat(costPerKg) || 0;
 
+    // Service-milling intake belongs to the CLIENT — stamp the raw lot
+    // client-owned so it never counts as company stock/valuation. Empty object
+    // for a normal batch → the owned-stock insert is byte-for-byte unchanged.
+    const svcBatch = await trx('milling_batches').where({ id: batchId }).first('is_service_milling', 'client_customer_id');
+    const svcOwnership = svcBatch?.is_service_milling
+      ? { ownership: 'client', owner_customer_id: svcBatch.client_customer_id || null, service_batch_id: batchId }
+      : {};
+
     // Look for an existing rice lot for this batch in Mill Raw Stock.
     // Vehicles auto-attach to today's open batch (see receiveRice controller),
     // so one batch_ref naturally collects all trucks for the same
@@ -661,6 +669,7 @@ const inventoryService = {
           purchase_amount: 0,
           landed_cost_total: 0,
           landed_cost_per_kg: 0,
+          ...svcOwnership,
         })
         .returning('*');
 
@@ -849,6 +858,14 @@ const inventoryService = {
     // all carry processing_type for rollups that group by product.
     const isBlend = batchRow?.processing_type === 'blended';
     const blendNo = isBlend ? (batchRow.batch_no || `batch-${batchId}`) : null;
+    // Service-milling output belongs to the CLIENT: every output lot is stamped
+    // client-owned (tracked physically, excluded from company stock/valuation/
+    // availability) and correctly zero-cost (cost_incomplete=false so it is not
+    // flagged by findProblematicLots). For a normal batch this object is empty,
+    // so the owned-stock path is byte-for-byte unchanged.
+    const svcOwnership = batchRow?.is_service_milling
+      ? { ownership: 'client', owner_customer_id: batchRow.client_customer_id || null, service_batch_id: batchId, cost_incomplete: false }
+      : {};
     let finishedProductId = batchRow && batchRow.product_id ? batchRow.product_id : null;
     if (!finishedProductId && batchRow && batchRow.linked_export_order_id) {
       const linked = await trx('export_orders').where({ id: batchRow.linked_export_order_id }).first('product_id');
@@ -984,6 +1001,7 @@ const inventoryService = {
           landed_cost_per_kg: rawCostComponent ? (rawCostComponent + (millingCostComponent || 0)) : 0,
           raw_cost_component: rawCostComponent || null,
           milling_cost_component: millingCostComponent || null,
+          ...svcOwnership,
         })
         .returning('*');
 
@@ -1106,6 +1124,7 @@ const inventoryService = {
           variety: isBlend ? `Blend ${blendNo}` : (qualityInfo?.variety || productName || null),
           status: 'Available',
           created_by: userId || null,
+          ...svcOwnership,
         })
         .returning('*');
 
@@ -1424,6 +1443,11 @@ const inventoryService = {
 
     const lot = await trx('inventory_lots').where('id', lotId).first();
     if (!lot) throw new Error(`Lot ${lotId} not found`);
+    // Client-owned (service-milling) stock can only be dispatched back to its
+    // client — it can never be reserved/sold as company stock (export or local).
+    if (lot.ownership === 'client') {
+      throw new Error(`Lot ${lot.lot_no} is client-owned (service milling) and cannot be reserved or sold as company stock.`);
+    }
 
     const availableQty = parseFloat(lot.available_qty) || 0;
     if (availableQty < parsedQty) {
@@ -2146,7 +2170,9 @@ const inventoryService = {
    * Take a valuation snapshot — captures current inventory value by entity/type
    */
   async takeValuationSnapshot() {
-    const lots = await db('inventory_lots').where('available_qty', '>', 0).select('type', 'entity', 'available_qty', 'rate_per_kg', 'landed_cost_per_kg', 'net_weight_kg');
+    // Company-owned only — client-owned (service-milling) stock must never
+    // inflate company inventory valuation or average cost.
+    const lots = await db('inventory_lots').where('available_qty', '>', 0).where('ownership', 'company').select('type', 'entity', 'available_qty', 'rate_per_kg', 'landed_cost_per_kg', 'net_weight_kg');
 
     const groups = {};
     for (const lot of lots) {
@@ -2180,9 +2206,11 @@ const inventoryService = {
    * Find lots with data problems
    */
   async findProblematicLots() {
-    const zeroCost = await db('inventory_lots').where(function () { this.where('rate_per_kg', 0).orWhereNull('rate_per_kg'); }).where('qty', '>', 0).select('id', 'lot_no', 'type', 'qty');
-    const incomplete = await db('inventory_lots').where('cost_incomplete', true).select('id', 'lot_no', 'type', 'qty');
-    const noLineage = await db.raw("SELECT l.id, l.lot_no, l.type, l.qty FROM inventory_lots l WHERE l.type IN ('finished','byproduct') AND l.id NOT IN (SELECT child_lot_id FROM lot_source_mapping) AND l.qty > 0");
+    // Client-owned (service-milling) lots are INTENTIONALLY zero-cost and have no
+    // company lineage — exclude them from all data-quality alerts below.
+    const zeroCost = await db('inventory_lots').where(function () { this.where('rate_per_kg', 0).orWhereNull('rate_per_kg'); }).where('qty', '>', 0).where('ownership', 'company').select('id', 'lot_no', 'type', 'qty');
+    const incomplete = await db('inventory_lots').where('cost_incomplete', true).where('ownership', 'company').select('id', 'lot_no', 'type', 'qty');
+    const noLineage = await db.raw("SELECT l.id, l.lot_no, l.type, l.qty FROM inventory_lots l WHERE l.type IN ('finished','byproduct') AND l.ownership = 'company' AND l.id NOT IN (SELECT child_lot_id FROM lot_source_mapping) AND l.qty > 0");
     const missingCOGSOrders = await db('export_orders').where('status', 'Shipped').where(function () { this.whereNull('inventory_cogs_total_pkr').orWhere('inventory_cogs_total_pkr', 0); }).select('id', 'order_no', 'contract_value');
 
     return {

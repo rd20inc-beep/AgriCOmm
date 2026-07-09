@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 import { usePendingExportReceipts } from '../../../api/queries';
+import { SkeletonPage } from '../../../shared/components/Skeleton';
 
 // Grouped tab bar: a handful of top-level items, related pages tucked into
 // dropdowns, so the finance nav is short and each group is self-explanatory.
@@ -176,7 +177,7 @@ export default function FinanceLayout({ children }) {
       <div className="flex-1 overflow-y-auto p-4 sm:p-6">
         {/* Keep the finance sub-nav mounted while a lazy sub-page loads. */}
         <RouteErrorBoundary>
-          <Suspense fallback={<div className="flex items-center justify-center py-20 text-sm text-gray-400">Loading…</div>}>
+          <Suspense fallback={<SkeletonPage />}>
             {children}
           </Suspense>
         </RouteErrorBoundary>

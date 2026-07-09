@@ -24,6 +24,9 @@ const aiService = require('../ai/ai.service');
 // =============================================================================
 
 router.get('/batches', authorize('milling', 'view'), controller.list);
+// Service-milling (toll/job-work) dashboard feed — gated by the dedicated
+// service_milling.view perm (Milling/Inventory roles), not the generic milling perm.
+router.get('/service-batches', authorize('service_milling', 'view'), controller.listServiceBatches);
 router.get('/batches/:id', authorize('milling', 'view'), controller.getById);
 router.put('/batches/:id', authorize('milling', 'edit'),
   auditAction('update_batch', 'milling_batch', (req) => req.params.id),
