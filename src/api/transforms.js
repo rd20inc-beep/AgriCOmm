@@ -360,7 +360,13 @@ export function transformBatch(dbBatch) {
     purchasePricePerKg: parseFloat(dbBatch.purchase_price_per_kg) || 0,
     productId: dbBatch.product_id,
     notes: dbBatch.notes || '',
-    isServiceMilling: (dbBatch.notes || '').includes('[SERVICE MILLING]'),
+    // Prefer the structured column; fall back to the legacy notes marker for
+    // batches created before the is_service_milling column existed.
+    isServiceMilling: dbBatch.is_service_milling === true || dbBatch.is_service_milling === 't'
+      || (dbBatch.notes || '').includes('[SERVICE MILLING]'),
+    clientCustomerId: dbBatch.client_customer_id || null,
+    clientName: dbBatch.client_name || null,
+    serviceLotStatus: dbBatch.service_lot_status || null,
   };
 }
 
