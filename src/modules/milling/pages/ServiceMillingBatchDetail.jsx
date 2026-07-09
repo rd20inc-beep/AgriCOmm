@@ -17,6 +17,7 @@ import StatusBadge from '../../../components/StatusBadge';
 import QualityAnalysisDrawer from '../components/QualityAnalysisDrawer';
 import YieldOutputDrawer from '../components/YieldOutputDrawer';
 import VehicleArrivalDrawer from '../components/VehicleArrivalDrawer';
+import ServiceDispatchTab from '../components/ServiceDispatchTab';
 import { qualityParams } from '../qualityParams';
 
 const num = (v) => parseFloat(v) || 0;
@@ -433,15 +434,9 @@ export default function ServiceMillingBatchDetail() {
         </Card>
       )}
 
-      {/* ---- Dispatch (placeholder — Phase 2) ---- */}
+      {/* ---- Dispatch ---- */}
       {activeTab === 'dispatch' && (
-        <Card title="Dispatch to Client" icon={Send}>
-          <div className="py-6 text-center">
-            <Send size={28} className="mx-auto text-gray-300 mb-2" />
-            <p className="text-sm text-gray-500">Dispatch of client-owned finished goods is coming in the next update.</p>
-            <p className="text-xs text-gray-400 mt-1">You'll be able to hand milled stock back to the client and track partial/full dispatch here.</p>
-          </div>
-        </Card>
+        <ServiceDispatchTab routeId={id} onChanged={invalidateBatch} />
       )}
 
       {/* ---- Billing (placeholder — Phase 3) ---- */}

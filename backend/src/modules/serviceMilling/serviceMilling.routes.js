@@ -28,4 +28,20 @@ router.post(
   controller.recordPayment,
 );
 
+// Dispatch — hand client-owned finished/by-product stock back to the client.
+// Gated by the milling-side record_dispatch perm (not the invoice perms).
+router.get('/batches/:id/dispatch-summary', authorize('service_milling', 'view'), controller.getDispatchSummary);
+router.post(
+  '/batches/:id/dispatches',
+  authorize('service_milling', 'record_dispatch'),
+  auditAction('service_dispatch', 'service_milling_dispatch', (req, data) => data?.id),
+  controller.createDispatch,
+);
+router.delete(
+  '/dispatches/:id',
+  authorize('service_milling', 'record_dispatch'),
+  auditAction('service_dispatch_reverse', 'service_milling_dispatch', (req) => req.params.id),
+  controller.deleteDispatch,
+);
+
 module.exports = router;

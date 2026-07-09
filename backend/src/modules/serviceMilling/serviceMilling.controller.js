@@ -4,6 +4,7 @@
 // AR to 1120; payments settle the receivable. No inventory/COGS GL (client-owned).
 const db = require('../../config/database');
 const accountingService = require('../accounting/accounting.service');
+const inventoryService = require('../../services/inventoryService');
 const { resolveCashAccountId } = require('../../shared/cashAccounts');
 const { nextDocNo } = require('../../utils/docNumber');
 
@@ -14,6 +15,30 @@ function deriveStatus(total, received) {
   if (received <= 0) return 'Unpaid';
   if (received + 0.009 < total) return 'Partial';
   return 'Paid';
+}
+
+// Advance a service batch's lot status from how much client-owned stock is still
+// on hand vs how much has been handed back. Driven by dispatch records + the
+// lots' remaining available_qty, so it survives qty drawdown on each dispatch.
+async function recomputeServiceLotStatus(trx, batchId) {
+  const disp = await trx('service_milling_dispatches').where({ service_batch_id: batchId }).sum('qty_kg as t').first();
+  const dispatchedKg = num(disp?.t);
+  const rem = await trx('inventory_lots')
+    .where({ service_batch_id: batchId, ownership: 'client' })
+    .sum('available_qty as a').first();
+  const remainingKg = num(rem?.a);
+  let status;
+  if (dispatchedKg <= 0) {
+    // Nothing dispatched yet — reflect whether the lot has been milled.
+    const batch = await trx('milling_batches').where({ id: batchId }).first();
+    status = num(batch?.actual_finished_kg) > 0 ? 'Milled' : 'Received';
+  } else if (remainingKg <= 0.001) {
+    status = 'Fully Dispatched';
+  } else {
+    status = 'Partially Dispatched';
+  }
+  await trx('milling_batches').where({ id: batchId }).update({ service_lot_status: status, updated_at: trx.fn.now() });
+  return status;
 }
 
 // Move a receiving account's balance + drop a linked Cash & Bank sub-ledger row
@@ -231,6 +256,126 @@ module.exports = {
     } catch (err) {
       console.error('Service payment error:', err);
       return res.status(400).json({ success: false, message: err.message || 'Failed to record payment.' });
+    }
+  },
+
+  // ── Dispatch: the client-owned finished/by-product lots + handover history ──
+  async getDispatchSummary(req, res) {
+    try {
+      const batch = await db('milling_batches').where({ id: req.params.id }).first()
+        || await db('milling_batches').where({ batch_no: req.params.id }).first();
+      if (!batch) return res.status(404).json({ success: false, message: 'Service batch not found.' });
+
+      const lots = await db('inventory_lots')
+        .where({ service_batch_id: batch.id, ownership: 'client' })
+        .select('id', 'lot_no', 'item_name', 'type', 'grade', 'unit',
+          'qty', 'available_qty', 'received_net_weight_kg', 'bag_weight_kg')
+        .orderBy('type', 'asc').orderBy('id', 'asc');
+
+      const dispatches = await db('service_milling_dispatches as d')
+        .leftJoin('inventory_lots as l', 'd.lot_id', 'l.id')
+        .where('d.service_batch_id', batch.id)
+        .select('d.*', 'l.lot_no', 'l.item_name')
+        .orderBy('d.created_at', 'desc');
+
+      const producedKg = lots.reduce((s, l) => s + (num(l.received_net_weight_kg) || num(l.qty)), 0);
+      const remainingKg = lots.reduce((s, l) => s + num(l.available_qty), 0);
+      const dispatchedKg = dispatches.reduce((s, d) => s + num(d.qty_kg), 0);
+
+      return res.json({
+        success: true,
+        data: { lot_status: batch.service_lot_status, lots, dispatches, summary: { producedKg, remainingKg, dispatchedKg } },
+      });
+    } catch (err) {
+      console.error('Dispatch summary error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  // Record a handover of client-owned stock. NOT a sale — draws down the client
+  // lot only (postMovement 'service_dispatch'); no revenue, COGS or GL.
+  async createDispatch(req, res) {
+    const b = req.body || {};
+    try {
+      const result = await db.transaction(async (trx) => {
+        const batch = await trx('milling_batches').where({ id: req.params.id }).first()
+          || await trx('milling_batches').where({ batch_no: req.params.id }).first();
+        if (!batch) throw new Error('Service batch not found');
+        if (!batch.is_service_milling) throw new Error('Batch is not a service-milling batch');
+
+        const lot = await trx('inventory_lots').where({ id: b.lot_id }).first();
+        if (!lot) throw new Error('Lot not found');
+        if (lot.service_batch_id !== batch.id || lot.ownership !== 'client') {
+          throw new Error('Lot does not belong to this service batch');
+        }
+        const qtyKg = round2(b.qty_kg);
+        if (qtyKg <= 0) throw new Error('Dispatch quantity must be greater than zero');
+        if (qtyKg - num(lot.available_qty) > 0.001) {
+          throw new Error(`Only ${num(lot.available_qty)} kg available in lot ${lot.lot_no}`);
+        }
+
+        const dispatchNo = await nextDocNo(trx, { table: 'service_milling_dispatches', column: 'dispatch_no', prefix: 'SMD-', pad: 0 });
+        const [disp] = await trx('service_milling_dispatches').insert({
+          dispatch_no: dispatchNo,
+          service_batch_id: batch.id,
+          client_customer_id: batch.client_customer_id,
+          lot_id: lot.id,
+          qty_kg: qtyKg,
+          bag_count: b.bag_count != null ? parseInt(b.bag_count, 10) : null,
+          vehicle_no: b.vehicle_no || null,
+          driver_name: b.driver_name || null,
+          dispatch_date: b.dispatch_date || trx.fn.now(),
+          notes: b.notes || null,
+          created_by: req.user?.id || null,
+        }).returning('*');
+
+        // Draw down the client-owned lot — no GL (client already owns the rice).
+        await inventoryService.postMovement(trx, {
+          movementType: 'service_dispatch',
+          lotId: lot.id,
+          qty: qtyKg,
+          costPerUnit: 0,
+          batchId: batch.id,
+          linkedRef: dispatchNo,
+          notes: `Service dispatch ${dispatchNo} to client`,
+          userId: req.user?.id,
+        });
+
+        const lotStatus = await recomputeServiceLotStatus(trx, batch.id);
+        return { ...disp, lot_status: lotStatus };
+      });
+      return res.status(201).json({ success: true, data: result });
+    } catch (err) {
+      console.error('Service dispatch error:', err);
+      return res.status(400).json({ success: false, message: err.message || 'Failed to record dispatch.' });
+    }
+  },
+
+  // Reverse a dispatch — add the client-owned stock back and drop the record.
+  async deleteDispatch(req, res) {
+    try {
+      const result = await db.transaction(async (trx) => {
+        const disp = await trx('service_milling_dispatches').where({ id: req.params.id }).first();
+        if (!disp) throw new Error('Dispatch not found');
+
+        await inventoryService.postMovement(trx, {
+          movementType: 'service_dispatch_reverse',
+          lotId: disp.lot_id,
+          qty: num(disp.qty_kg),
+          costPerUnit: 0,
+          batchId: disp.service_batch_id,
+          linkedRef: disp.dispatch_no,
+          notes: `Reversal of service dispatch ${disp.dispatch_no}`,
+          userId: req.user?.id,
+        });
+        await trx('service_milling_dispatches').where({ id: disp.id }).del();
+        const lotStatus = await recomputeServiceLotStatus(trx, disp.service_batch_id);
+        return { reversed: disp.dispatch_no, lot_status: lotStatus };
+      });
+      return res.json({ success: true, data: result });
+    } catch (err) {
+      console.error('Service dispatch delete error:', err);
+      return res.status(400).json({ success: false, message: err.message || 'Failed to reverse dispatch.' });
     }
   },
 };

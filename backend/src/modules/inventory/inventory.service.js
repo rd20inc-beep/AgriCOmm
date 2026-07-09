@@ -21,6 +21,13 @@ const MOVEMENT_TYPES = {
   // Sales & dispatch
   EXPORT_DISPATCH: 'export_dispatch',
   LOCAL_SALE: 'local_sale',
+  // Service milling: hand client-owned finished/by-product stock back to the
+  // client. Outbound, but NOT a sale — no revenue, no COGS, no GL (the client
+  // already owns the rice; the mill only charges a separate service fee).
+  SERVICE_DISPATCH: 'service_dispatch',
+  // Reverse of a service dispatch (deleting a recorded handover) — adds the
+  // client-owned stock back. Inbound, no GL.
+  SERVICE_DISPATCH_REVERSE: 'service_dispatch_reverse',
   // Reservations (no qty change, reservation_effect only)
   RESERVATION_HOLD: 'reservation_hold',
   RESERVATION_RELEASE: 'reservation_release',
@@ -37,6 +44,7 @@ const OUTBOUND_TYPES = new Set([
   MOVEMENT_TYPES.TRANSFER_OUT,
   MOVEMENT_TYPES.EXPORT_DISPATCH,
   MOVEMENT_TYPES.LOCAL_SALE,
+  MOVEMENT_TYPES.SERVICE_DISPATCH,
   MOVEMENT_TYPES.ADJUSTMENT_MINUS,
   MOVEMENT_TYPES.DAMAGE_WRITEOFF,
   MOVEMENT_TYPES.SHORTAGE_WRITEOFF,
@@ -52,6 +60,7 @@ const INBOUND_TYPES = new Set([
   MOVEMENT_TYPES.ADJUSTMENT_PLUS,
   MOVEMENT_TYPES.RETURN,
   MOVEMENT_TYPES.OPENING_BALANCE,
+  MOVEMENT_TYPES.SERVICE_DISPATCH_REVERSE,
 ]);
 
 // Reservation types — no qty change, only reservation_effect
@@ -71,6 +80,8 @@ const LOT_TRANSACTION_TYPE_MAP = {
   [MOVEMENT_TYPES.TRANSFER_IN]: 'warehouse_transfer_in',
   [MOVEMENT_TYPES.EXPORT_DISPATCH]: 'export_dispatch_out',
   [MOVEMENT_TYPES.LOCAL_SALE]: 'local_sale_out',
+  [MOVEMENT_TYPES.SERVICE_DISPATCH]: 'service_dispatch_out',
+  [MOVEMENT_TYPES.SERVICE_DISPATCH_REVERSE]: 'service_dispatch_in',
   [MOVEMENT_TYPES.RESERVATION_HOLD]: 'export_allocation',
   [MOVEMENT_TYPES.RESERVATION_RELEASE]: 'export_release',
   [MOVEMENT_TYPES.ADJUSTMENT_PLUS]: 'stock_adjustment_plus',
