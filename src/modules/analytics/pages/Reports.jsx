@@ -7,6 +7,7 @@ import {
   ArrowUpRight, ArrowDownLeft, Activity, Calendar, ExternalLink, AlertTriangle, FileText,
   ShoppingCart, Truck, Receipt, Scale, ChevronDown, ChevronRight, Layers,
   Factory, Gauge, Wallet, Star, Plus, Trash2, Hash, Search, Download, Mail, Send,
+  BookOpen, Wrench,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell,
@@ -650,6 +651,19 @@ export default function Reports() {
   const saveMut = useSaveReport();
   const delMut = useDeleteSavedReport();
   const [savedOpen, setSavedOpen] = useState(false);
+  const [ledgersOpen, setLedgersOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  // Ledger reports live behind one "Ledgers" dropdown so the hero band stays tidy.
+  const ledgerLinks = [
+    { to: '/reports/invoices',                 icon: Receipt, label: 'Invoice Ledger' },
+    { to: '/reports/supplier-ledger',          icon: Users,   label: 'Supplier Ledger' },
+    { to: '/reports/rice-type-ledger',         icon: Package, label: 'Rice Type Ledger' },
+    { to: '/reports/warehouse-ledger',         icon: Layers,  label: 'Warehouse Ledger' },
+    { to: '/reports/processing-loss-ledger',   icon: Scale,   label: 'Processing Loss' },
+    { to: '/reports/finished-goods-ledger',    icon: Factory, label: 'Finished Goods' },
+    { to: '/reports/inventory-movement-ledger',icon: Truck,   label: 'Stock Movements' },
+    { to: '/reports/lots',                     icon: FileText,label: 'Lot Reports', always: true },
+  ].filter(l => l.always || !operatorScoped);
   const tabKeys = TABS.map(t => t.key);
   const saveCurrentView = async () => {
     const name = window.prompt('Name this view (tab + date range):', `${(TABS.find(t => t.key === tab) || {}).label || tab} — ${(RANGES.find(r => r.value === range) || {}).label || 'All Time'}`);
@@ -711,32 +725,63 @@ export default function Reports() {
               className="bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors">
               <RefreshCw size={12} /> Refresh
             </button>
+            {/* Tools — Build / Ask AI / Schedule tucked into one dropdown */}
             {!operatorScoped && (
-              <button onClick={() => setBuilderOpen(true)} title="Build a custom report"
-                className="bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors">
-                <Layers size={12} /> Build
-              </button>
+              <div className="relative">
+                <button onClick={() => { setToolsOpen(o => !o); setLedgersOpen(false); setSavedOpen(false); }}
+                  className="bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors">
+                  <Wrench size={12} /> Tools <ChevronDown size={12} className={`transition-transform ${toolsOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {toolsOpen && (
+                  <div className="absolute right-0 mt-1 w-52 bg-white text-gray-800 rounded-lg shadow-xl border border-gray-200 z-30 overflow-hidden py-1">
+                    <button onClick={() => { setBuilderOpen(true); setToolsOpen(false); }} className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 inline-flex items-center gap-2">
+                      <Layers size={14} className="text-gray-500" /> Build a custom report
+                    </button>
+                    <button onClick={() => { setAiOpen(true); setToolsOpen(false); }} className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 inline-flex items-center gap-2">
+                      <Search size={14} className="text-gray-500" /> Ask AI about your data
+                    </button>
+                    <button onClick={() => { setSchedOpen(true); setToolsOpen(false); }} className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 inline-flex items-center gap-2">
+                      <Mail size={14} className="text-gray-500" /> Schedule by email
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
-            {!operatorScoped && (
-              <button onClick={() => setAiOpen(true)} title="Ask AI about your data"
-                className="bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors">
-                <Search size={12} /> Ask AI
-              </button>
-            )}
-            {!operatorScoped && (
-              <button onClick={() => setSchedOpen(true)} title="Schedule reports by email"
-                className="bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors">
-                <Mail size={12} /> Schedule
-              </button>
+            {/* Ledgers — the detailed report links grouped into one dropdown */}
+            {ledgerLinks.length === 1 ? (
+              <Link to={ledgerLinks[0].to}
+                className="bg-white/15 hover:bg-white/25 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-sm font-medium inline-flex items-center gap-2 transition-colors">
+                <FileText size={14} /> {ledgerLinks[0].label}
+              </Link>
+            ) : (
+              <div className="relative">
+                <button onClick={() => { setLedgersOpen(o => !o); setToolsOpen(false); setSavedOpen(false); }}
+                  className="bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors">
+                  <BookOpen size={12} /> Ledgers <ChevronDown size={12} className={`transition-transform ${ledgersOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {ledgersOpen && (
+                  <div className="absolute right-0 mt-1 w-56 bg-white text-gray-800 rounded-lg shadow-xl border border-gray-200 z-30 overflow-hidden py-1">
+                    {ledgerLinks.map(l => {
+                      const LIcon = l.icon;
+                      return (
+                        <Link key={l.to} to={l.to} onClick={() => setLedgersOpen(false)}
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2">
+                          <LIcon size={14} className="text-gray-500 flex-shrink-0" /> {l.label}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             )}
             {/* Saved views */}
             <div className="relative">
-              <button onClick={() => setSavedOpen(o => !o)}
+              <button onClick={() => { setSavedOpen(o => !o); setLedgersOpen(false); setToolsOpen(false); }}
                 className="bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors">
                 <Star size={12} /> Saved{savedReports.length ? ` (${savedReports.length})` : ''} <ChevronDown size={12} />
               </button>
               {savedOpen && (
-                <div className="absolute right-0 mt-1 w-72 bg-white text-gray-800 rounded-lg shadow-xl border border-gray-200 z-20 overflow-hidden">
+                <div className="absolute right-0 mt-1 w-72 bg-white text-gray-800 rounded-lg shadow-xl border border-gray-200 z-30 overflow-hidden">
                   <button onClick={saveCurrentView} className="w-full text-left px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 border-b border-gray-100 inline-flex items-center gap-1.5">
                     <Plus size={14} /> Save current view
                   </button>
@@ -760,57 +805,14 @@ export default function Reports() {
                 </div>
               )}
             </div>
-            {!operatorScoped && (
-              <Link to="/reports/invoices"
-                className="bg-white/15 hover:bg-white/25 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-sm font-medium inline-flex items-center gap-2 transition-colors">
-                <Receipt size={14} /> Invoice Ledger
-              </Link>
-            )}
-            {!operatorScoped && (
-              <Link to="/reports/supplier-ledger"
-                className="bg-white/15 hover:bg-white/25 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-sm font-medium inline-flex items-center gap-2 transition-colors">
-                <Users size={14} /> Supplier Ledger
-              </Link>
-            )}
-            {!operatorScoped && (
-              <Link to="/reports/rice-type-ledger"
-                className="bg-white/15 hover:bg-white/25 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-sm font-medium inline-flex items-center gap-2 transition-colors">
-                <Package size={14} /> Rice Type Ledger
-              </Link>
-            )}
-            {!operatorScoped && (
-              <Link to="/reports/warehouse-ledger"
-                className="bg-white/15 hover:bg-white/25 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-sm font-medium inline-flex items-center gap-2 transition-colors">
-                <Layers size={14} /> Warehouse Ledger
-              </Link>
-            )}
-            {!operatorScoped && (
-              <Link to="/reports/processing-loss-ledger"
-                className="bg-white/15 hover:bg-white/25 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-sm font-medium inline-flex items-center gap-2 transition-colors">
-                <Scale size={14} /> Processing Loss
-              </Link>
-            )}
-            {!operatorScoped && (
-              <Link to="/reports/finished-goods-ledger"
-                className="bg-white/15 hover:bg-white/25 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-sm font-medium inline-flex items-center gap-2 transition-colors">
-                <Factory size={14} /> Finished Goods
-              </Link>
-            )}
-            {!operatorScoped && (
-              <Link to="/reports/inventory-movement-ledger"
-                className="bg-white/15 hover:bg-white/25 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-sm font-medium inline-flex items-center gap-2 transition-colors">
-                <Truck size={14} /> Stock Movements
-              </Link>
-            )}
-            <Link to="/reports/lots"
-              className="bg-white/15 hover:bg-white/25 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-sm font-medium inline-flex items-center gap-2 transition-colors">
-              <FileText size={14} /> Lot Reports
-            </Link>
             <Link to="/reports/print"
               className="bg-white text-slate-900 hover:bg-gray-100 px-4 py-2 rounded-lg text-sm font-medium inline-flex items-center gap-2 shadow-sm transition-colors">
               <Printer size={14} /> Print Reports
             </Link>
           </div>
+          {(ledgersOpen || toolsOpen || savedOpen) && (
+            <div className="fixed inset-0 z-20" onClick={() => { setLedgersOpen(false); setToolsOpen(false); setSavedOpen(false); }} />
+          )}
         </div>
       </div>
 
