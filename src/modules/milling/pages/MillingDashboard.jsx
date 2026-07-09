@@ -89,10 +89,24 @@ export default function MillingDashboard() {
     // Service milling (toll/job-work) — client owns the rice; we bill service fees.
     clientCustomerId: '',
     serviceMillingRatePerKg: '', serviceRentalRatePerKatta: '', serviceLabourRatePerKatta: '',
-    dateReceived: '', kattaCount: '', bagCount: '', expectedOutputKg: '', serviceRemarks: '',
+    dateReceived: '', kattaCount: '', kattaSizeKg: '', bagCount: '', expectedOutputKg: '', serviceRemarks: '',
     serviceVehicles: [], // [{ vehicle_no, driver_name, weight_kg, total_bags }]
   });
   const setBF = (k, v) => setBatchForm(p => ({ ...p, [k]: v }));
+  // Service milling: Kattas × Katta size → auto-fills Quantity Received (weight)
+  // + Expected Finished. Weight stays editable (this only pre-fills it).
+  const recomputeKattaWeight = (nextKatta, nextSize) => {
+    const count = parseFloat(nextKatta); const size = parseFloat(nextSize);
+    setBatchForm(p => {
+      const upd = { ...p, kattaCount: nextKatta, kattaSizeKg: nextSize };
+      if (count > 0 && size > 0) {
+        const w = Math.round(count * size);
+        upd.rawQtyKg = String(w);
+        upd.plannedFinishedKg = String(Math.round(w * 0.65));
+      }
+      return upd;
+    });
+  };
   // Blend: consume partial quantities from multiple stock lots (mixed
   // varieties / leftover finished rice) into one batch.
   // Source of the rice. true = from existing stock lot(s): landed cost flows in
@@ -162,7 +176,7 @@ export default function MillingDashboard() {
       millId: '', shift: 'Day', notes: '', batchName: '', customTags: '',
       clientCustomerId: '',
       serviceMillingRatePerKg: '', serviceRentalRatePerKatta: '', serviceLabourRatePerKatta: '',
-      dateReceived: '', kattaCount: '', bagCount: '', expectedOutputKg: '', serviceRemarks: '',
+      dateReceived: '', kattaCount: '', kattaSizeKg: '', bagCount: '', expectedOutputKg: '', serviceRemarks: '',
       serviceVehicles: [],
     });
     setUseBlend(true); setBlendProductId(''); setBlendRows([]); setBlendTag('All');
@@ -1161,11 +1175,14 @@ export default function MillingDashboard() {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Kattas Received</label>
-                  <input type="number" min="0" value={batchForm.kattaCount} onChange={e => setBF('kattaCount', e.target.value)} placeholder="e.g. 200" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
+                  <input type="number" min="0" value={batchForm.kattaCount} onChange={e => recomputeKattaWeight(e.target.value, batchForm.kattaSizeKg)} placeholder="e.g. 200" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Bags</label>
-                  <input type="number" min="0" value={batchForm.bagCount} onChange={e => setBF('bagCount', e.target.value)} placeholder="optional" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Katta Size (kg)</label>
+                  <input type="number" min="0" step="0.5" value={batchForm.kattaSizeKg} onChange={e => recomputeKattaWeight(batchForm.kattaCount, e.target.value)} placeholder="e.g. 100" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
+                  {batchForm.kattaCount && batchForm.kattaSizeKg && (
+                    <p className="text-[11px] text-emerald-700 mt-0.5">= {Math.round((parseFloat(batchForm.kattaCount) || 0) * (parseFloat(batchForm.kattaSizeKg) || 0)).toLocaleString()} kg</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Expected Output (kg)</label>
