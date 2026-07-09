@@ -1,0 +1,25 @@
+const express = require('express');
+const router = express.Router();
+const controller = require('./serviceMilling.controller');
+const authorize = require('../../middleware/rbac');
+const auditAction = require('../../middleware/audit');
+
+// Invoice/billing endpoints — gated by the invoice-side perms (Finance + Owner +
+// Mill Manager), NOT service_milling.view (which is the milling/stock side). This
+// is what keeps Finance to billing-only and Export out entirely.
+router.get('/invoices', authorize('service_milling', 'view_invoice'), controller.listInvoices);
+router.get('/invoices/:id', authorize('service_milling', 'view_invoice'), controller.getInvoice);
+router.post(
+  '/invoices',
+  authorize('service_milling', 'create_invoice'),
+  auditAction('create_service_invoice', 'service_milling_invoice', (req, data) => data?.id),
+  controller.createInvoice,
+);
+router.post(
+  '/invoices/:id/payments',
+  authorize('service_milling', 'record_payment'),
+  auditAction('record_service_payment', 'service_milling_invoice', (req) => req.params.id),
+  controller.recordPayment,
+);
+
+module.exports = router;
