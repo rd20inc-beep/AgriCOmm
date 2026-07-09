@@ -221,14 +221,14 @@ export default function MasterDataApprovalsTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-xl font-semibold text-gray-900">Master Data Approvals</h2>
           <p className="text-sm text-gray-500 mt-0.5">
             Review rice types, suppliers and walk-in customers added on-the-go by operators.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <StatusFilter value={statusFilter} onChange={setStatusFilter} />
           <button
             onClick={load}

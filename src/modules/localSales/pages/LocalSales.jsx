@@ -116,12 +116,12 @@ export default function LocalSales() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Local Sales</h1>
           <p className="text-sm text-gray-500 mt-0.5">Sell rice and by-products in the local market (PKR)</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button onClick={() => downloadCSV(filtered, [
             { key: 'saleNo', label: 'Sale #' },
             { key: 'saleDate', label: 'Date', accessor: s => s.saleDate ? new Date(s.saleDate).toLocaleDateString('en-GB') : '' },
@@ -139,8 +139,8 @@ export default function LocalSales() {
             <RefreshCw size={16} />
           </button>
           <button onClick={() => setShowSaleModal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">
-            <Plus size={16} /> New Sale
+            className="flex items-center gap-2 whitespace-nowrap px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">
+            <Plus size={16} className="shrink-0" /> New Sale
           </button>
         </div>
       </div>
