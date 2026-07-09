@@ -277,7 +277,8 @@ const millingController = {
       const batch = await db('milling_batches as mb')
         .leftJoin('suppliers as s', 'mb.supplier_id', 's.id')
         .leftJoin('products as p', 'mb.product_id', 'p.id')
-        .select('mb.*', 's.name as supplier_name', 's.supplier_code as supplier_code', 'p.name as product_name')
+        .leftJoin('customers as cl', 'mb.client_customer_id', 'cl.id')
+        .select('mb.*', 's.name as supplier_name', 's.supplier_code as supplier_code', 'p.name as product_name', 'cl.name as client_name')
         .where(whereClause)
         .first();
 

@@ -742,6 +742,8 @@ export default function MillingBatchDetail() {
                     </span>
                   ))}
                 </span>
+              ) : batch.isServiceMilling ? (
+                <span>Client (Service Milling): <span className="font-medium text-amber-700">{batch.clientName || 'Client-owned'}</span></span>
               ) : batch.supplierName ? (
                 <span>Supplier: <PartyLink type="supplier" id={batch.supplierId} name={batch.supplierName} /></span>
               ) : (
@@ -784,7 +786,7 @@ export default function MillingBatchDetail() {
                 <PauseCircle size={16} /> Awaiting Owner approval
               </span>
             )}
-            {!isFromLots && !batch.supplierName && batch.status !== 'Completed' && batch.status !== 'Cancelled' && (
+            {!isFromLots && !batch.supplierName && !batch.isServiceMilling && batch.status !== 'Completed' && batch.status !== 'Cancelled' && (
               <button
                 onClick={() => setShowSupplierModal(true)}
                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 transition-colors"
@@ -876,8 +878,8 @@ export default function MillingBatchDetail() {
                     <StatusBadge status={batch.status} />
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-gray-500">Supplier</span>
-                    <span className="font-medium text-gray-900">{batch.supplierName}</span>
+                    <span className="text-gray-500">{batch.isServiceMilling ? 'Client (Service Milling)' : 'Supplier'}</span>
+                    <span className="font-medium text-gray-900">{batch.isServiceMilling ? (batch.clientName || 'Client-owned') : (batch.supplierName || '—')}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500">Created</span>
@@ -961,8 +963,8 @@ export default function MillingBatchDetail() {
                 <h3 className="text-sm font-medium text-gray-500 mb-3">Source Lots</h3>
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
-                    <span className="text-gray-500">Supplier</span>
-                    <span className="font-medium text-gray-900">{batch.supplierName}</span>
+                    <span className="text-gray-500">{batch.isServiceMilling ? 'Client (Service Milling)' : 'Supplier'}</span>
+                    <span className="font-medium text-gray-900">{batch.isServiceMilling ? (batch.clientName || 'Client-owned') : (batch.supplierName || '—')}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500">Raw Quantity</span>
