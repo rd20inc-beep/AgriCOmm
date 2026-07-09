@@ -12,7 +12,7 @@ import {
   TrendingUp,
   ArrowRight,
   Eye,
-  Plus,
+  Plus, X,
   ShoppingCart,
   Check,
   Search,
@@ -90,6 +90,7 @@ export default function MillingDashboard() {
     clientCustomerId: '',
     serviceMillingRatePerKg: '', serviceRentalRatePerKatta: '', serviceLabourRatePerKatta: '',
     dateReceived: '', kattaCount: '', bagCount: '', expectedOutputKg: '', serviceRemarks: '',
+    serviceVehicles: [], // [{ vehicle_no, driver_name, weight_kg, total_bags }]
   });
   const setBF = (k, v) => setBatchForm(p => ({ ...p, [k]: v }));
   // Blend: consume partial quantities from multiple stock lots (mixed
@@ -162,6 +163,7 @@ export default function MillingDashboard() {
       clientCustomerId: '',
       serviceMillingRatePerKg: '', serviceRentalRatePerKatta: '', serviceLabourRatePerKatta: '',
       dateReceived: '', kattaCount: '', bagCount: '', expectedOutputKg: '', serviceRemarks: '',
+      serviceVehicles: [],
     });
     setUseBlend(true); setBlendProductId(''); setBlendRows([]); setBlendTag('All');
   };
@@ -208,15 +210,18 @@ export default function MillingDashboard() {
       return;
     } else if (batchForm.millingType === 'service_milling') {
       // Service milling: rice comes from the client (no company supplier). Require
-      // the client + the received quantity.
+      // the client + a received quantity (typed, or from the incoming vehicles).
+      const vehicleKg = (batchForm.serviceVehicles || []).reduce((s, v) => s + (parseFloat(v.weight_kg) || 0), 0);
       if (!batchForm.clientCustomerId) { addToast('Select the client we are milling for (service milling)', 'error'); return; }
-      if (!batchForm.rawQtyKg) { addToast('Quantity received is required', 'error'); return; }
+      if (!batchForm.rawQtyKg && vehicleKg <= 0) { addToast('Enter the quantity received, or add the incoming vehicle(s)', 'error'); return; }
     } else if (!batchForm.supplierId || !batchForm.rawQtyKg) {
       addToast('Supplier and raw quantity are required', 'error');
       return;
     }
     const isService = batchForm.millingType === 'service_milling';
-    const rawKg = parseFloat(batchForm.rawQtyKg) || 0; // backend stores KG (Phase 5c)
+    const vehicleKg = (batchForm.serviceVehicles || []).reduce((s, v) => s + (parseFloat(v.weight_kg) || 0), 0);
+    // Service milling qty comes from the trucks when entered, else the typed field.
+    const rawKg = (isService && vehicleKg > 0) ? vehicleKg : (parseFloat(batchForm.rawQtyKg) || 0);
     const plannedKg = parseFloat(batchForm.plannedFinishedKg)
       || Math.round((useBlend ? blendTotals.kg : rawKg) * 0.65);
 
@@ -241,6 +246,10 @@ export default function MillingDashboard() {
           bag_count: batchForm.bagCount || null,
           expected_output_kg: batchForm.expectedOutputKg || null,
           service_remarks: batchForm.serviceRemarks || null,
+          // Incoming trucks → recorded as arrivals + rice received (client-owned raw lot).
+          vehicles: (batchForm.serviceVehicles || [])
+            .filter(v => v.vehicle_no || parseFloat(v.weight_kg) > 0 || parseInt(v.total_bags, 10) > 0)
+            .map(v => ({ vehicle_no: v.vehicle_no || null, driver_name: v.driver_name || null, weight_kg: v.weight_kg || null, total_bags: v.total_bags || null })),
         } : {}),
         ...(useBlend
           ? { source_lots: blendLots, product_id: blendProductId ? parseInt(blendProductId) : null, processing_type: blendRecipe.processingType }
@@ -1198,6 +1207,41 @@ export default function MillingDashboard() {
                     </div>
                   );
                 })()}
+              </div>
+
+              {/* Incoming vehicles / trucks bringing the client's rice. Each is
+                  recorded as an arrival and its rice received into the (client-
+                  owned) batch raw lot, so the lot is ready to mill. */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-xs font-semibold text-amber-800 uppercase">Incoming Vehicles <span className="normal-case font-normal text-gray-400">(optional — trucks bringing the client's rice)</span></h4>
+                  <button type="button"
+                    onClick={() => setBF('serviceVehicles', [...(batchForm.serviceVehicles || []), { vehicle_no: '', driver_name: '', weight_kg: '', total_bags: '' }])}
+                    className="text-xs text-blue-600 hover:text-blue-700 font-medium inline-flex items-center gap-1">
+                    <Plus size={12} /> Add vehicle
+                  </button>
+                </div>
+                {(batchForm.serviceVehicles || []).length === 0 ? (
+                  <p className="text-[11px] text-gray-400">No vehicles added. You can add trucks here (their rice is received as client-owned stock) or record the total quantity below.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {(batchForm.serviceVehicles || []).map((v, i) => (
+                      <div key={i} className="grid grid-cols-12 gap-2 items-center bg-white rounded-lg border border-amber-200 p-2">
+                        <input value={v.vehicle_no} onChange={e => { const arr = [...batchForm.serviceVehicles]; arr[i] = { ...v, vehicle_no: e.target.value }; setBF('serviceVehicles', arr); }} placeholder="Truck no" className="col-span-3 border border-gray-200 rounded px-2 py-1.5 text-xs outline-none" />
+                        <input value={v.driver_name} onChange={e => { const arr = [...batchForm.serviceVehicles]; arr[i] = { ...v, driver_name: e.target.value }; setBF('serviceVehicles', arr); }} placeholder="Driver" className="col-span-3 border border-gray-200 rounded px-2 py-1.5 text-xs outline-none" />
+                        <input type="number" min="0" value={v.weight_kg} onChange={e => { const arr = [...batchForm.serviceVehicles]; arr[i] = { ...v, weight_kg: e.target.value }; setBF('serviceVehicles', arr); }} placeholder="Weight KG" className="col-span-3 border border-gray-200 rounded px-2 py-1.5 text-xs outline-none" />
+                        <input type="number" min="0" value={v.total_bags} onChange={e => { const arr = [...batchForm.serviceVehicles]; arr[i] = { ...v, total_bags: e.target.value }; setBF('serviceVehicles', arr); }} placeholder="Bags" className="col-span-2 border border-gray-200 rounded px-2 py-1.5 text-xs outline-none" />
+                        <button type="button" onClick={() => setBF('serviceVehicles', batchForm.serviceVehicles.filter((_, j) => j !== i))} className="col-span-1 text-gray-300 hover:text-rose-500 flex justify-center"><X size={14} /></button>
+                      </div>
+                    ))}
+                    {(() => {
+                      const sum = (batchForm.serviceVehicles || []).reduce((s, v) => s + (parseFloat(v.weight_kg) || 0), 0);
+                      const bags = (batchForm.serviceVehicles || []).reduce((s, v) => s + (parseInt(v.total_bags, 10) || 0), 0);
+                      if (sum <= 0 && bags <= 0) return null;
+                      return <p className="text-[11px] text-emerald-700 font-medium">Total received: {Math.round(sum).toLocaleString()} kg · {bags} bags — this becomes the batch quantity.</p>;
+                    })()}
+                  </div>
+                )}
               </div>
 
               <div>

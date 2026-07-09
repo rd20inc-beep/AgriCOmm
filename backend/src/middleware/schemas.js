@@ -502,6 +502,18 @@ const createBatch = Joi.object({
   bag_count: Joi.number().integer().min(0).allow(null, ''),
   expected_output_kg: Joi.number().min(0).allow(null, ''),
   service_remarks: Joi.string().allow('', null),
+  // Incoming trucks (service milling / direct intake). Each records an arrival +
+  // receives its rice into the batch raw lot.
+  vehicles: Joi.array().items(Joi.object({
+    vehicle_no: Joi.string().allow('', null),
+    driver_name: Joi.string().allow('', null),
+    driver_phone: Joi.string().allow('', null),
+    weight_kg: Joi.number().min(0).allow(null, ''),
+    total_bags: Joi.number().integer().min(0).allow(null, ''),
+    bag_size_kg: Joi.number().min(0).allow(null, ''),
+    arrival_date: Joi.date().allow(null, ''),
+    notes: Joi.string().allow('', null),
+  })).allow(null),
 }).or('raw_qty_kg', 'source_lots');
 
 const recordYield = Joi.object({

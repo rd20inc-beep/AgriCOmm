@@ -388,6 +388,9 @@ const millingController = {
         bag_count,
         expected_output_kg,
         service_remarks,
+        // Incoming trucks bringing the (client's) rice — each is recorded as a
+        // vehicle arrival AND its rice received (creating the batch raw lot).
+        vehicles,
       } = req.body;
       const isService = !!is_service_milling;
       const numOrNull = (v) => (v != null && v !== '' ? parseFloat(v) : null);
@@ -560,6 +563,51 @@ const millingController = {
             service_lot_status: isService ? 'Received' : null,
           })
           .returning('*');
+
+        // ── Incoming vehicles + rice receipt (service milling / direct intake) ──
+        // Record each truck and RECEIVE its rice, which creates the batch raw
+        // lot. For a service batch, receiveRice stamps that lot client-owned, so
+        // a toll batch captures the client's trucks at creation and is
+        // immediately ready to mill (no separate receive step).
+        const vehicleList = Array.isArray(vehicles)
+          ? vehicles.filter((v) => v && (numOrNull(v.weight_kg) || intOrNull(v.total_bags) || v.vehicle_no))
+          : [];
+        let vehicleWeightTotal = 0;
+        for (const v of vehicleList) {
+          const wKg = numOrNull(v.weight_kg) || 0;
+          const totalBags = intOrNull(v.total_bags);
+          const bagSize = numOrNull(v.bag_size_kg) || (wKg && totalBags ? wKg / totalBags : null);
+          await trx('milling_vehicle_arrivals').insert({
+            batch_id: batch.id,
+            vehicle_no: v.vehicle_no || null,
+            driver_name: v.driver_name || null,
+            driver_phone: v.driver_phone || null,
+            weight_kg: wKg || null,
+            bag_size_kg: bagSize || null,
+            total_bags: totalBags,
+            arrival_date: v.arrival_date || trx.fn.now(),
+            notes: v.notes || null,
+            created_by: req.user?.id || null,
+          });
+          if (wKg > 0) {
+            await inventoryService.receiveRice(trx, {
+              batchId: batch.id, weightKg: wKg, costPerKg: 0, currency: 'PKR',
+              supplierId: resolvedSupplierId, productId: resolvedProductId, vehicleNo: v.vehicle_no || null, userId: req.user.id,
+            });
+            vehicleWeightTotal += wKg;
+          }
+        }
+        // Service milling with no trucks entered: still create the client-owned
+        // raw lot from the received quantity so the toll batch is ready to mill.
+        if (vehicleWeightTotal === 0 && isService && resolvedRawQty > 0) {
+          await inventoryService.receiveRice(trx, {
+            batchId: batch.id, weightKg: resolvedRawQty, costPerKg: 0, currency: 'PKR',
+            supplierId: resolvedSupplierId, productId: resolvedProductId, vehicleNo: null, userId: req.user.id,
+          });
+        } else if (vehicleWeightTotal > 0) {
+          // Trucks carried the rice → the summed truck weight is the raw qty.
+          await trx('milling_batches').where({ id: batch.id }).update({ raw_qty_kg: vehicleWeightTotal });
+        }
 
         // ── Persist the blend: source-lot links, raw-cost pool, reservations ──
         if (blendRows.length > 0) {
