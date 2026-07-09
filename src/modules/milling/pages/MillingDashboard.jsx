@@ -1531,11 +1531,13 @@ export default function MillingDashboard() {
             )}
           </div>
 
-          {/* Notes */}
+          {/* Notes — hidden for service milling (its card already has Notes / Remarks). */}
+          {batchForm.millingType !== 'service_milling' && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
             <textarea value={batchForm.notes} onChange={e => setBF('notes', e.target.value)} rows={2} placeholder="Special instructions, quality requirements..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none resize-none" />
           </div>
+          )}
 
           {/* Summary */}
           {batchForm.rawQtyKg && (
