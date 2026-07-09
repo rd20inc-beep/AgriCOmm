@@ -37,3 +37,6 @@ backups/
 AgriCOmm/
 AgriCOmm-main/
 AgriCOmm-main.zip
+
+# Local planning docs (not part of the app)
+EXPORT_MILL_ENHANCEMENTS_PLAN.md
