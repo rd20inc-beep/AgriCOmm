@@ -1,4 +1,13 @@
 import api from '../../../api/client';
+
+// Service Milling billing (Phase A2).
+export const serviceMillingApi = {
+  listInvoices: () => api.get('/api/service-milling/invoices'),
+  getInvoice: (id) => api.get(`/api/service-milling/invoices/${id}`),
+  createInvoice: (data) => api.post('/api/service-milling/invoices', data),
+  recordPayment: (id, data) => api.post(`/api/service-milling/invoices/${id}/payments`, data),
+};
+
 export const millingApi = {
   listBatches: (params) => api.get('/api/milling/batches', params),
   listServiceBatches: () => api.get('/api/milling/service-batches'),
