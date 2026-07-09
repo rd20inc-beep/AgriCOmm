@@ -89,6 +89,9 @@ export default function MillingDashboard() {
     // Service milling (toll/job-work) — client owns the rice; we bill service fees.
     clientCustomerId: '',
     serviceMillingRatePerKg: '', serviceRentalRatePerKatta: '', serviceLabourRatePerKatta: '',
+    // Received in kattas (50kg) or small bags (2–25kg). `kattaCount`/`kattaSizeKg`
+    // hold the unit count + size for whichever is chosen.
+    receivedUnit: 'katta', // 'katta' | 'bag'
     dateReceived: '', kattaCount: '', kattaSizeKg: '50', bagCount: '', expectedOutputKg: '', serviceRemarks: '',
     serviceVehicles: [], // [{ vehicle_no, driver_name, weight_kg, total_bags }]
   });
@@ -107,6 +110,13 @@ export default function MillingDashboard() {
       return upd;
     });
   };
+  // Switch received unit: kattas default to 50 kg, bags to a blank custom size (2–25).
+  const setReceivedUnit = (unit) => {
+    const size = unit === 'katta' ? '50' : '';
+    recomputeKattaWeight('', size);
+    setBatchForm(p => ({ ...p, receivedUnit: unit }));
+  };
+  const isBagUnit = batchForm.receivedUnit === 'bag';
   // Blend: consume partial quantities from multiple stock lots (mixed
   // varieties / leftover finished rice) into one batch.
   // Source of the rice. true = from existing stock lot(s): landed cost flows in
@@ -176,6 +186,7 @@ export default function MillingDashboard() {
       millId: '', shift: 'Day', notes: '', batchName: '', customTags: '',
       clientCustomerId: '',
       serviceMillingRatePerKg: '', serviceRentalRatePerKatta: '', serviceLabourRatePerKatta: '',
+      receivedUnit: 'katta',
       dateReceived: '', kattaCount: '', kattaSizeKg: '50', bagCount: '', expectedOutputKg: '', serviceRemarks: '',
       serviceVehicles: [],
     });
@@ -257,8 +268,10 @@ export default function MillingDashboard() {
           service_rental_rate_per_katta: batchForm.serviceRentalRatePerKatta || null,
           service_labour_rate_per_katta: batchForm.serviceLabourRatePerKatta || null,
           date_received: batchForm.dateReceived || null,
-          katta_count: batchForm.kattaCount || null,
-          bag_count: batchForm.bagCount || null,
+          // The count goes to the matching column — kattas or bags — so billing
+          // (rental/labour per unit) and the dashboard read the right unit.
+          katta_count: isBagUnit ? null : (batchForm.kattaCount || null),
+          bag_count: isBagUnit ? (batchForm.kattaCount || null) : (batchForm.bagCount || null),
           expected_output_kg: batchForm.expectedOutputKg || null,
           service_remarks: batchForm.serviceRemarks || null,
           // Incoming trucks → recorded as arrivals + rice received (client-owned raw lot).
@@ -1169,21 +1182,33 @@ export default function MillingDashboard() {
                 createFn={(data) => serviceMillingApi.createClient(data)}
               />
 
+              {/* Received in 50kg kattas or small (2–25kg) bags — the count is the
+                  billable unit (rental/labour per katta/bag). */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-gray-700">Received in:</span>
+                <div className="inline-flex rounded-lg border border-amber-300 overflow-hidden text-xs">
+                  <button type="button" onClick={() => setReceivedUnit('katta')}
+                    className={`px-3 py-1.5 font-medium ${!isBagUnit ? 'bg-amber-500 text-white' : 'bg-white text-gray-600 hover:bg-amber-50'}`}>Kattas (50 kg)</button>
+                  <button type="button" onClick={() => setReceivedUnit('bag')}
+                    className={`px-3 py-1.5 font-medium border-l border-amber-300 ${isBagUnit ? 'bg-amber-500 text-white' : 'bg-white text-gray-600 hover:bg-amber-50'}`}>Bags (2–25 kg)</button>
+                </div>
+              </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Date Received</label>
                   <input type="date" value={batchForm.dateReceived} onChange={e => setBF('dateReceived', e.target.value)} className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Kattas Received</label>
-                  <input type="number" min="0" value={batchForm.kattaCount} onChange={e => recomputeKattaWeight(e.target.value, batchForm.kattaSizeKg)} placeholder="e.g. 200" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
+                  <label className="block text-xs font-medium text-gray-700 mb-1">{isBagUnit ? 'Bags Received' : 'Kattas Received'}</label>
+                  <input type="number" min="0" value={batchForm.kattaCount} onChange={e => recomputeKattaWeight(e.target.value, batchForm.kattaSizeKg)} placeholder={isBagUnit ? 'e.g. 800' : 'e.g. 200'} className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Katta Size (kg)</label>
-                  <input type="number" min="0" step="0.5" value={batchForm.kattaSizeKg} onChange={e => recomputeKattaWeight(batchForm.kattaCount, e.target.value)} placeholder="e.g. 50" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
+                  <label className="block text-xs font-medium text-gray-700 mb-1">{isBagUnit ? 'Bag Size (kg)' : 'Katta Size (kg)'}</label>
+                  <input type="number" min="0" step="0.5" value={batchForm.kattaSizeKg} onChange={e => recomputeKattaWeight(batchForm.kattaCount, e.target.value)} placeholder={isBagUnit ? 'e.g. 25' : 'e.g. 50'} className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
                   {batchForm.kattaCount && batchForm.kattaSizeKg && (
                     <p className="text-[11px] text-emerald-700 mt-0.5">= {Math.round((parseFloat(batchForm.kattaCount) || 0) * (parseFloat(batchForm.kattaSizeKg) || 0)).toLocaleString()} kg</p>
                   )}
+                  {isBagUnit && <p className="text-[11px] text-gray-400 mt-0.5">Mixed bag sizes? Enter total bags + type the weighed quantity below.</p>}
                 </div>
               </div>
 
