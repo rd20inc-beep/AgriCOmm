@@ -244,7 +244,8 @@ export default function MillingDashboard() {
         milling_fee_per_kg: 0, // fee removed from the form; milling cost is entered in the Costing dialog
         mill_id: batchForm.millId ? parseInt(batchForm.millId) : null,
         shift: batchForm.shift,
-        planned_finished_kg: plannedKg,
+        // Service milling has no planned target — the finished qty is decided at yield.
+        planned_finished_kg: isService ? null : plannedKg,
         batch_name: batchForm.batchName?.trim() || null,
         custom_tags: batchForm.customTags,  // comma string → backend normalises to array
         notes: batchForm.notes || null,
@@ -1168,7 +1169,7 @@ export default function MillingDashboard() {
                 createFn={(data) => serviceMillingApi.createClient(data)}
               />
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Date Received</label>
                   <input type="date" value={batchForm.dateReceived} onChange={e => setBF('dateReceived', e.target.value)} className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
@@ -1183,10 +1184,6 @@ export default function MillingDashboard() {
                   {batchForm.kattaCount && batchForm.kattaSizeKg && (
                     <p className="text-[11px] text-emerald-700 mt-0.5">= {Math.round((parseFloat(batchForm.kattaCount) || 0) * (parseFloat(batchForm.kattaSizeKg) || 0)).toLocaleString()} kg</p>
                   )}
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Expected Output (kg)</label>
-                  <input type="number" min="0" value={batchForm.expectedOutputKg} onChange={e => setBF('expectedOutputKg', e.target.value)} placeholder="optional" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
                 </div>
               </div>
 
@@ -1479,10 +1476,14 @@ export default function MillingDashboard() {
             </div>
           </div>
           )}
+          {/* Expected finished qty is decided at yield — not entered for service
+              milling. (Own-stock milling keeps a planned target for its costing.) */}
+          {batchForm.millingType !== 'service_milling' && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Expected Finished (KG)</label>
             <input type="number" value={batchForm.plannedFinishedKg} onChange={e => setBF('plannedFinishedKg', e.target.value)} placeholder="Auto: ~65% of raw" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
           </div>
+          )}
 
           {/* Mill & shift are not asked: there is a single mill (resolved
               server-side) and shift isn't tracked per batch. */}
@@ -1523,8 +1524,10 @@ export default function MillingDashboard() {
           {batchForm.rawQtyKg && (
             <div className="bg-gray-50 rounded-lg border border-gray-200 p-3 text-sm">
               <div className="flex justify-between"><span className="text-gray-500">Type</span><span className="font-medium">{batchForm.millingType === 'service_milling' ? 'Service Milling' : 'Own Stock'}</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">Raw Input</span><span className="font-medium">{parseFloat(batchForm.rawQtyKg).toLocaleString()} kg ({(parseFloat(batchForm.rawQtyKg) / 1000).toFixed(2)} MT)</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">Expected Output</span><span className="font-medium">{(parseFloat(batchForm.plannedFinishedKg) || Math.round(parseFloat(batchForm.rawQtyKg) * 0.65)).toLocaleString()} kg</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">{batchForm.millingType === 'service_milling' ? 'Received' : 'Raw Input'}</span><span className="font-medium">{parseFloat(batchForm.rawQtyKg).toLocaleString()} kg ({(parseFloat(batchForm.rawQtyKg) / 1000).toFixed(2)} MT)</span></div>
+              {batchForm.millingType !== 'service_milling' && (
+                <div className="flex justify-between"><span className="text-gray-500">Expected Output</span><span className="font-medium">{(parseFloat(batchForm.plannedFinishedKg) || Math.round(parseFloat(batchForm.rawQtyKg) * 0.65)).toLocaleString()} kg</span></div>
+              )}
               {batchForm.totalBags && parseInt(batchForm.totalBags, 10) > 0 && (
                 <div className="flex justify-between"><span className="text-gray-500">Bags</span><span className="font-medium">{batchForm.totalBags} bags · {(parseFloat(batchForm.rawQtyKg) / parseInt(batchForm.totalBags, 10)).toFixed(2)} kg/bag avg</span></div>
               )}
