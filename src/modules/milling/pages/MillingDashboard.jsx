@@ -102,6 +102,8 @@ export default function MillingDashboard() {
     const count = parseFloat(nextKatta); const size = parseFloat(nextSize);
     setBatchForm(p => {
       const upd = { ...p, kattaCount: nextKatta, kattaSizeKg: nextSize };
+      // Number of packing bags = the count of kattas/bags received.
+      upd.totalBags = nextKatta || '';
       if (count > 0 && size > 0) {
         const w = Math.round(count * size);
         upd.rawQtyKg = String(w);
