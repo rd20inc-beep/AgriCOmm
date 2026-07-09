@@ -420,8 +420,10 @@ const inventoryService = {
     }
     await trx('inventory_lots').where('id', lotId).update(lotUpdate);
 
-    // Flag zero-cost lots on inbound movements
-    if (INBOUND_TYPES.has(movementType) && parsedCost === 0) {
+    // Flag zero-cost lots on inbound movements — EXCEPT client-owned
+    // (service-milling) lots, which are correctly zero-cost (the client owns the
+    // rice; the mill only earns a service fee) and must not be flagged incomplete.
+    if (INBOUND_TYPES.has(movementType) && parsedCost === 0 && lot.ownership !== 'client') {
       await trx('inventory_lots').where('id', lotId).update({ cost_incomplete: true });
     }
 
