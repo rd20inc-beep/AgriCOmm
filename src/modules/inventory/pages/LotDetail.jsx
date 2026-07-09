@@ -14,6 +14,7 @@ import {
 import SupplierPicker from '../../../components/SupplierPicker';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
+import OrderRefLink from '../../../shared/components/OrderRefLink';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 import StatusBadge from '../../../components/StatusBadge';
 import Modal from '../../../components/Modal';
@@ -58,6 +59,8 @@ export default function LotDetail() {
   const navigate = useNavigate();
   const { addToast, warehousesList, companyProfileData } = useApp();
   const { user, hasPermission } = useAuth();
+  const canReports = hasPermission('reports', 'view');
+  const canExport = hasPermission('export_orders', 'view');
   const { data: suppliersList = [] } = useSuppliers();
   const [activeTab, setActiveTab] = useState('overview');
   const [displayUnit, setDisplayUnit] = useState('katta');
@@ -327,9 +330,11 @@ export default function LotDetail() {
           </Link>
         )}
         {/* Complete Lot 360 / Lot Ledger — full life of the lot (admin/finance). */}
+        {canReports && (
         <Link to={`/reports/lot-ledger/${lot.id}`} className="btn btn-sm btn-secondary">
           <BarChart3 className="w-4 h-4" /> Lot 360 / Ledger
         </Link>
+        )}
         {/* Mark finished/by-product rice Ready for Export (mill roles). */}
         {(lot.type === 'finished' || lot.type === 'byproduct')
           && hasPermission('milling', 'edit') && (
@@ -1094,9 +1099,9 @@ export default function LotDetail() {
                   return (
                     <div key={r.id} className="flex items-center gap-3 bg-amber-50 border border-amber-100 rounded-lg p-3">
                       <div className="flex-1 min-w-0">
-                        <Link to={`/export/${r.orderNo || r.orderId}`} className="text-sm font-semibold text-blue-600 hover:text-blue-800">
+                        <OrderRefLink to={`/export/${r.orderNo || r.orderId}`} module="export_orders" className="text-sm font-semibold text-blue-600 hover:text-blue-800">
                           {r.orderNo || `Order #${r.orderId}`}
-                        </Link>
+                        </OrderRefLink>
                         <p className="text-xs text-gray-500 mt-0.5">Reserved for export</p>
                       </div>
                       <div className="text-right">
@@ -1120,7 +1125,7 @@ export default function LotDetail() {
                   <p className="text-xs text-emerald-600">{dv(availKg).toLocaleString()} {ul()} not allocated to any order</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Link to="/export" className="text-xs font-medium text-emerald-700 bg-emerald-100 px-3 py-1.5 rounded-lg hover:bg-emerald-200">Allocate to Order</Link>
+                  {canExport && <Link to="/export" className="text-xs font-medium text-emerald-700 bg-emerald-100 px-3 py-1.5 rounded-lg hover:bg-emerald-200">Allocate to Order</Link>}
                   <Link to="/local-sales" className="text-xs font-medium text-blue-700 bg-blue-100 px-3 py-1.5 rounded-lg hover:bg-blue-200">Sell Locally</Link>
                 </div>
               </div>
@@ -1199,7 +1204,7 @@ export default function LotDetail() {
               <div className="space-y-2">
                 {reservations.map(r => (
                   <div key={r.id} className="flex items-center justify-between bg-gray-50 rounded-lg p-3">
-                    <Link to={`/export/${r.orderNo || r.orderId}`} className="text-sm font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1"><ChevronRight className="w-3 h-3" />{r.orderNo || `Order #${r.orderId}`}</Link>
+                    <OrderRefLink to={`/export/${r.orderNo || r.orderId}`} module="export_orders" className="text-sm font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1"><ChevronRight className="w-3 h-3" />{r.orderNo || `Order #${r.orderId}`}</OrderRefLink>
                     <span className="text-sm text-gray-600">{dv((parseFloat(r.reservedQty) || 0)).toLocaleString()} {ul()}</span>
                     <StatusBadge status={r.status} />
                   </div>
