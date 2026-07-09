@@ -51,6 +51,11 @@ export default function Dashboard() {
     && !hasPermission('export_orders', 'view')
     && !hasPermission('milling', 'view')
     && !hasPermission('inventory', 'view');
+  // Gate cross-domain shortcuts: a role without export/mill view (e.g. QC Analyst,
+  // Documentation Officer) would hit Access Denied on tiles that jump to /export
+  // or /milling. Only show those to roles that can actually open them.
+  const canExport = hasPermission('export_orders', 'view');
+  const canMill = hasPermission('milling', 'view');
   // Pending master-data quick-add approvals (Admin → Approvals). Hook must run
   // before the early return below to keep hook order stable.
   const { data: pendingMasterApprovals = 0 } = useMasterDataApprovalsCount();
@@ -291,11 +296,11 @@ export default function Dashboard() {
         {/* Other action items */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
           {isOwnerOrAdmin && <ActionItem icon={Inbox} label="Master-data approvals" count={masterApprovals} to="/admin" accent="amber" />}
-          <ActionItem icon={CreditCard}     label="Awaiting advance payment"  count={awaitingAdvance} to="/export?status=Awaiting+Advance"      accent="amber" />
-          <ActionItem icon={FileText}       label="Documents in preparation"  count={docsInPrep}      to="/export?status=Docs+In+Preparation"   accent="blue" />
-          <ActionItem icon={Ship}           label="Ready to ship"             count={readyToShip}     to="/export?status=Ready+to+Ship"         accent="green" />
-          <ActionItem icon={Clock}          label="Awaiting balance payment"  count={awaitingBalance} to="/export?status=Awaiting+Balance"      accent="amber" />
-          <ActionItem icon={AlertTriangle}  label="Mill yield variance"       count={varianceAlerts}  to="/quality"                              accent="red" />
+          {canExport && <ActionItem icon={CreditCard} label="Awaiting advance payment"  count={awaitingAdvance} to="/export?status=Awaiting+Advance"    accent="amber" />}
+          {canExport && <ActionItem icon={FileText}   label="Documents in preparation"  count={docsInPrep}      to="/export?status=Docs+In+Preparation" accent="blue" />}
+          {canExport && <ActionItem icon={Ship}       label="Ready to ship"             count={readyToShip}     to="/export?status=Ready+to+Ship"       accent="green" />}
+          {canExport && <ActionItem icon={Clock}      label="Awaiting balance payment"  count={awaitingBalance} to="/export?status=Awaiting+Balance"    accent="amber" />}
+          {canMill   && <ActionItem icon={AlertTriangle} label="Mill yield variance"    count={varianceAlerts}  to="/quality"                            accent="red" />}
         </div>
 
         {totalActions === 0 && (
@@ -315,7 +320,7 @@ export default function Dashboard() {
           primary={fmt(totalContractValue)}
           secondary={`${activeOrders} active orders`}
           hint={`${shipmentsInTransit} in transit`}
-          onClick={() => navigate('/export')}
+          onClick={canExport ? () => navigate('/export') : undefined}
         />
         <KpiTile
           icon={Wallet}
@@ -356,7 +361,7 @@ export default function Dashboard() {
             <Activity size={14} className="text-blue-500" /> Order Pipeline
             <span className="text-xs text-gray-400 font-normal">({totalPipelineOrders} orders · {fmt(phaseCounts.reduce((s, p) => s + p.value, 0))})</span>
           </h2>
-          <Link to="/export" className="text-xs text-blue-600 hover:underline">All orders →</Link>
+          {canExport && <Link to="/export" className="text-xs text-blue-600 hover:underline">All orders →</Link>}
         </div>
 
         {totalPipelineOrders > 0 ? (
@@ -421,7 +426,7 @@ export default function Dashboard() {
             <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
               <Truck size={14} className="text-cyan-500" /> Recent Shipments
             </h2>
-            <Link to="/export" className="text-xs text-blue-600 hover:underline">All shipments →</Link>
+            {canExport && <Link to="/export" className="text-xs text-blue-600 hover:underline">All shipments →</Link>}
           </div>
           {recentShipments.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-6">No shipments yet</p>
@@ -467,8 +472,8 @@ export default function Dashboard() {
       <div className="bg-gradient-to-r from-gray-900 to-gray-800 rounded-xl p-4 text-white">
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-xs uppercase tracking-wider text-gray-400 mr-2">Quick actions</span>
-          <QuickAction icon={Plus}            label="New Export Order"  onClick={() => navigate('/export?new=1')}    tone="blue" />
-          <QuickAction icon={Factory}         label="New Milling Batch" onClick={() => navigate('/milling?new=1')}    tone="amber" />
+          {canExport && <QuickAction icon={Plus} label="New Export Order" onClick={() => navigate("/export?new=1")} tone="blue" />}
+          {canMill && <QuickAction icon={Factory} label="New Milling Batch" onClick={() => navigate("/milling?new=1")} tone="amber" />}
           <QuickAction icon={ArrowDownLeft}   label="Record Receipt"    onClick={() => navigate('/finance/money-in')} tone="emerald" />
           <QuickAction icon={ArrowUpRight}    label="Make Payment"      onClick={() => navigate('/finance/money-out')} tone="rose" />
           <QuickAction icon={BarChart3}       label="Print Reports"     onClick={() => navigate('/reports/print')}    tone="violet" />
