@@ -81,7 +81,7 @@ export default function FinishedGoodsLedger() {
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <button onClick={() => navigate(-1)} className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm mb-1"><ArrowLeft size={14} /> Back</button>
+          <Link to="/reports" className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm mb-1"><ArrowLeft size={14} /> Business Reports</Link>
           <h1 className="text-2xl font-bold text-gray-900 inline-flex items-center gap-2"><Factory size={20} /> Finished Goods Ledger</h1>
           <p className="text-xs text-gray-400">Finished &amp; by-product stock register — produced, sold, on-hand, reserved and value. Grouped by product (finished) / grade (by-products).</p>
         </div>
