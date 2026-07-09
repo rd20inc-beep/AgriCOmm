@@ -205,8 +205,8 @@ export default function ServiceMillingBatchDetail() {
   }
 
   function openVehicleModal() {
-    const usedWeight = safeVehicles.reduce((s, v) => s + (parseFloat(v.weight_kg) || 0), 0);
-    const usedBags = safeVehicles.reduce((s, v) => s + (parseInt(v.total_bags, 10) || 0), 0);
+    const usedWeight = safeVehicles.reduce((s, v) => s + (parseFloat(v.weightKg) || 0), 0);
+    const usedBags = safeVehicles.reduce((s, v) => s + (parseInt(v.totalBags, 10) || 0), 0);
     const remW = Math.max(0, Math.round(num(batch.rawQtyKg) - usedWeight));
     const remB = Math.max(0, unitCount - usedBags);
     setVehicleForm({ ...emptyVehicleForm(), weightKg: remW > 0 ? String(remW) : '', totalBags: remB > 0 ? String(remB) : '' });
@@ -374,11 +374,11 @@ export default function ServiceMillingBatchDetail() {
                 {safeVehicles.map((v, i) => (
                   <div key={v.id || i} className="flex items-center justify-between text-sm border border-gray-100 rounded-lg px-3 py-2">
                     <div>
-                      <span className="font-medium text-gray-900">{v.vehicle_no}</span>
-                      {v.driver_name && <span className="text-gray-400 ml-2">{v.driver_name}</span>}
+                      <span className="font-medium text-gray-900">{v.vehicleNo}</span>
+                      {v.driverName && <span className="text-gray-400 ml-2">{v.driverName}</span>}
                     </div>
                     <div className="text-right text-gray-600">
-                      {kg(v.weight_kg)}{v.total_bags ? <span className="text-gray-400"> · {v.total_bags} bags</span> : null}
+                      {kg(v.weightKg)}{v.totalBags ? <span className="text-gray-400"> · {v.totalBags} bags</span> : null}
                     </div>
                   </div>
                 ))}

@@ -283,7 +283,10 @@ export function useMillingBatch(id) {
         // Merge sub-data (vehicles, costs, quality) into batch object
         raw.vehicleArrivals = (res?.data?.vehicles || []).map(v => ({
           id: v.id, vehicleNo: v.vehicle_no, driverName: v.driver_name,
-          driverPhone: v.driver_phone, weightMT: parseFloat(v.weight_mt) || 0,
+          driverPhone: v.driver_phone,
+          // weight is stored in KG (weight_kg); expose both KG and MT.
+          weightKg: parseFloat(v.weight_kg) || 0,
+          weightMT: (parseFloat(v.weight_kg) || 0) / 1000,
           totalBags: v.total_bags, bagSizeKg: v.bag_size_kg,
           // Per-truck quality entered on arrival — was dropped here, so the
           // Quality tab's per-vehicle samples never rendered. Keep both the
