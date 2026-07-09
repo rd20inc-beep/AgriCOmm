@@ -369,7 +369,7 @@ export default function LotDetail() {
       </div>
 
       {/* KPI Cards */}
-      <div className={`grid grid-cols-2 sm:grid-cols-3 gap-3 ${milledKg > 0 ? 'lg:grid-cols-7' : 'lg:grid-cols-6'}`}>
+      <div className={`grid grid-cols-2 sm:grid-cols-3 gap-3 ${milledKg > 0 ? 'xl:grid-cols-7' : 'xl:grid-cols-6'}`}>
         <div className="bg-white rounded-xl border border-gray-100 p-4">
           <p className="text-xs font-medium text-gray-500 uppercase">{milledKg > 0 ? 'Total Received' : 'Total Stock'}</p>
           <p className="text-xl font-bold text-gray-900 mt-1">{dv(receivedKg).toLocaleString()}</p>
