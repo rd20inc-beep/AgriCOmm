@@ -695,8 +695,8 @@ export default function Reports() {
   return (
     <div className="space-y-5 pb-4">
       {/* ─── Hero band ─────────────────────────────────────────── */}
-      <div className="rounded-2xl bg-gradient-to-r from-indigo-900 via-blue-800 to-cyan-700 p-5 sm:p-6 text-white shadow-sm relative overflow-hidden">
-        <div className="absolute inset-0 opacity-15" style={{ backgroundImage: 'radial-gradient(circle at 80% 20%, white 0%, transparent 60%)' }} />
+      <div className="rounded-2xl bg-gradient-to-r from-indigo-900 via-blue-800 to-cyan-700 p-5 sm:p-6 text-white shadow-sm relative overflow-visible">
+        <div className="absolute inset-0 rounded-2xl overflow-hidden opacity-15 pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle at 80% 20%, white 0%, transparent 60%)' }} />
         <div className="relative flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3">
           <div>
             <div className="flex items-center gap-2 text-xs uppercase tracking-wider opacity-80 mb-1">
