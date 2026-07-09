@@ -1,7 +1,11 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { Package, Factory, Boxes, Wallet, RefreshCw, Users } from 'lucide-react';
-import { millingApi } from '../api/services';
+import { Package, Factory, Boxes, Wallet, RefreshCw, Users, FileText } from 'lucide-react';
+import { millingApi, serviceMillingApi } from '../api/services';
+import { useApp } from '../../../context/AppContext';
+import { useAuth } from '../../../context/AuthContext';
+import { CreateInvoiceDrawer, RecordPaymentDrawer } from '../components/ServiceInvoiceDrawers';
 
 const num = (v) => parseFloat(v) || 0;
 const pkr = (v) => `PKR ${Math.round(num(v)).toLocaleString()}`;
@@ -42,6 +46,13 @@ function Kpi({ icon: Icon, tone, label, value, sub }) {
 }
 
 export default function ServiceMilling() {
+  const { addToast } = useApp();
+  const { hasPermission } = useAuth();
+  const canInvoice = hasPermission('service_milling', 'create_invoice');
+  const canPay = hasPermission('service_milling', 'record_payment');
+  const [invoiceBatch, setInvoiceBatch] = useState(null);
+  const [payInvoice, setPayInvoice] = useState(null);
+
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ['service-milling', 'batches'],
     queryFn: async () => {
@@ -50,6 +61,15 @@ export default function ServiceMilling() {
     },
   });
   const rows = Array.isArray(data) ? data : [];
+
+  async function openPayment(invoiceId) {
+    try {
+      const res = await serviceMillingApi.getInvoice(invoiceId);
+      setPayInvoice(res?.data);
+    } catch (err) {
+      addToast?.(err?.message || 'Failed to load invoice', 'error');
+    }
+  }
 
   const totals = rows.reduce((acc, b) => {
     acc.lots += 1;
@@ -103,13 +123,14 @@ export default function ServiceMilling() {
                 <th className="px-4 py-2.5 font-semibold">Lot Status</th>
                 <th className="px-4 py-2.5 font-semibold text-right">Service Amt</th>
                 <th className="px-4 py-2.5 font-semibold">Billing</th>
+                <th className="px-4 py-2.5 font-semibold text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {isLoading ? (
-                <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-400">Loading…</td></tr>
+                <tr><td colSpan={9} className="px-4 py-10 text-center text-gray-400">Loading…</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-400">No service-milling lots yet. Create one from Mill → New Batch → Service Milling.</td></tr>
+                <tr><td colSpan={9} className="px-4 py-10 text-center text-gray-400">No service-milling lots yet. Create one from Mill → New Batch → Service Milling.</td></tr>
               ) : rows.map((b) => (
                 <tr key={b.id} className="hover:bg-gray-50">
                   <td className="px-4 py-2.5">
@@ -123,12 +144,30 @@ export default function ServiceMilling() {
                   <td className="px-4 py-2.5"><Chip text={b.service_lot_status} map={LOT_STATUS_STYLE} /></td>
                   <td className="px-4 py-2.5 text-right font-medium text-gray-900">{pkr(b.service_total_amount)}</td>
                   <td className="px-4 py-2.5"><Chip text={b.billing_status} map={BILLING_STYLE} /></td>
+                  <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                    {b.billing_status === 'Not Invoiced' ? (
+                      canInvoice ? (
+                        <button onClick={() => setInvoiceBatch(b)} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100">
+                          <FileText size={12} /> Invoice
+                        </button>
+                      ) : <span className="text-xs text-gray-300">—</span>
+                    ) : (b.billing_status !== 'Paid' && canPay && b.invoice_id) ? (
+                      <button onClick={() => openPayment(b.invoice_id)} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100">
+                        <Wallet size={12} /> Pay
+                      </button>
+                    ) : <span className="text-xs text-gray-400">{b.invoice_no || '—'}</span>}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </div>
+
+      <CreateInvoiceDrawer open={!!invoiceBatch} batch={invoiceBatch} addToast={addToast}
+        onClose={() => setInvoiceBatch(null)} onCreated={() => refetch()} />
+      <RecordPaymentDrawer open={!!payInvoice} invoice={payInvoice} addToast={addToast}
+        onClose={() => setPayInvoice(null)} onPaid={() => refetch()} />
     </div>
   );
 }

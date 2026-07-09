@@ -3,7 +3,7 @@ import { NavLink, useSearchParams, useLocation } from 'react-router-dom';
 import { RouteErrorBoundary } from '../../../components/ErrorBoundary';
 import {
   LayoutDashboard, ArrowDownLeft, ArrowUpRight, DollarSign,
-  TrendingUp, Landmark, BookOpen, BookUser, Bell, Clock, Settings, ShoppingCart, Store, Printer, CalendarClock, Users, CheckCircle, ChevronDown,
+  TrendingUp, Landmark, BookOpen, BookUser, Bell, Clock, Settings, ShoppingCart, Store, Printer, CalendarClock, Users, CheckCircle, ChevronDown, FileText,
 } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 import { usePendingExportReceipts } from '../../../api/queries';
@@ -20,6 +20,7 @@ const NAV = [
     { label: 'Purchases',   path: '/finance/purchases',   icon: ShoppingCart },
     { label: 'Expenses',    path: '/finance/expenses',    icon: DollarSign },
     { label: 'Local Sales', path: '/finance/local-sales', icon: Store },
+    { label: 'Service Invoices', path: '/service-milling/invoices', icon: FileText, permission: { module: 'service_milling', action: 'view_invoice' } },
   ] },
   { label: 'Reports', icon: TrendingUp, children: [
     { label: 'Profit',     path: '/finance/profit',     icon: TrendingUp },

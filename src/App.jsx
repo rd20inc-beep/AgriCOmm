@@ -47,6 +47,7 @@ const ExportOrderDetail = lazyWithReload(() => import('./modules/exportOrders/pa
 const ExportHomeDashboard = lazyWithReload(() => import('./modules/exportOrders/pages/ExportHomeDashboard'));
 const MillingDashboard = lazyWithReload(() => import('./modules/milling/pages/MillingDashboard'));
 const ServiceMilling = lazyWithReload(() => import('./modules/milling/pages/ServiceMilling'));
+const ServiceInvoices = lazyWithReload(() => import('./modules/milling/pages/ServiceInvoices'));
 const PurchaseRequirements = lazyWithReload(() => import('./modules/purchaseRequirements/pages/PurchaseRequirements'));
 const MillHomeDashboard = lazyWithReload(() => import('./modules/milling/pages/MillHomeDashboard'));
 const StoreOverview = lazyWithReload(() => import('./modules/millStore/pages/StoreOverview'));
@@ -192,6 +193,7 @@ function MillRoutes() {
         <Route path="/" element={<MillHomeDashboard />} />
         <Route path="/milling" element={<MillingDashboard />} />
         <Route path="/milling/service" element={<ServiceMilling />} />
+        <Route path="/service-milling/invoices" element={<ServiceInvoices />} />
         <Route path="/milling/finance" element={<MillFinanceDashboard />} />
         <Route path="/milling/rice-purchases" element={<RicePurchasesLedger />} />
         <Route path="/milling/customers" element={<MillCustomers />} />
@@ -252,6 +254,7 @@ function StandardRoutes() {
         <Route path="/finance/*" element={<ProtectedRoute module="finance" action="view"><FinanceRoutes /></ProtectedRoute>} />
         <Route path="/milling" element={<ProtectedRoute module="milling" action="view"><MillingDashboard /></ProtectedRoute>} />
         <Route path="/milling/service" element={<ProtectedRoute module="service_milling" action="view"><ServiceMilling /></ProtectedRoute>} />
+        <Route path="/service-milling/invoices" element={<ProtectedRoute module="service_milling" action="view_invoice"><ServiceInvoices /></ProtectedRoute>} />
         <Route path="/milling/finance" element={<ProtectedRoute module="milling" action="view"><MillFinanceDashboard /></ProtectedRoute>} />
         <Route path="/milling/rice-purchases" element={<ProtectedRoute module="milling" action="view"><RicePurchasesLedger /></ProtectedRoute>} />
         <Route path="/stock-adjustments" element={<ProtectedRoute module="inventory" action="view"><StockAdjustments /></ProtectedRoute>} />
