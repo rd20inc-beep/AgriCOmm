@@ -369,6 +369,8 @@ export function transformBatch(dbBatch) {
     serviceLotStatus: dbBatch.service_lot_status || null,
     kattaCount: dbBatch.katta_count != null ? parseInt(dbBatch.katta_count, 10) : null,
     bagCount: dbBatch.bag_count != null ? parseInt(dbBatch.bag_count, 10) : null,
+    dateReceived: dbBatch.date_received || null,
+    serviceRemarks: dbBatch.service_remarks || null,
   };
 }
 

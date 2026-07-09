@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, Navigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import PartyLink from '../../../shared/components/PartyLink';
 import {
@@ -38,32 +38,15 @@ import { millingApi as millingModApi } from '../api/services';
 import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import SearchSelect from '../../../components/SearchSelect';
 import Modal from '../../../components/Modal';
-import SlideDrawer from '../../../components/SlideDrawer';
+import QualityAnalysisDrawer from '../components/QualityAnalysisDrawer';
+import YieldOutputDrawer from '../components/YieldOutputDrawer';
+import VehicleArrivalDrawer from '../components/VehicleArrivalDrawer';
 import StatusBadge from '../../../components/StatusBadge';
 import MillingCostSheet from '../components/MillingCostSheet';
 import ConsumptionPanel from '../../millStore/components/ConsumptionPanel';
 import PackingPanel from '../../millStore/components/PackingPanel';
 
-// Pakistani-rice per-grade quality split. Stored on milling_quality_samples
-// in snake_case (b1_pct / b2_pct / cobba_pct / csr_pct / nb_pct / ov_pct);
-// FE uses camelCase via the standard transformKeys pipeline.
-const qualityParams = [
-  // Aggregate metrics
-  { key: 'moisture',       label: 'Moisture %',       unit: '%', backendKey: 'moisture' },
-  { key: 'broken',         label: 'Broken %',         unit: '%', backendKey: 'broken' },
-  { key: 'foreignMatter',  label: 'Foreign matter %', unit: '%', backendKey: 'foreign_matter' },
-  { key: 'chalky',         label: 'Chalky %',         unit: '%', backendKey: 'chalky' },
-  { key: 'purity',         label: 'Purity %',         unit: '%', backendKey: 'purity' },
-  // Pakistani broken-grade breakdown
-  { key: 'b1Pct',          label: 'B-1',              unit: '%', backendKey: 'b1_pct' },
-  { key: 'b2Pct',          label: 'B-2',              unit: '%', backendKey: 'b2_pct' },
-  { key: 'b3Pct',          label: 'B-3',              unit: '%', backendKey: 'b3_pct' },
-  { key: 'csrPct',         label: 'C.S',              unit: '%', backendKey: 'csr_pct' },
-  { key: 'shortGrainPct',  label: 'Short Grain',      unit: '%', backendKey: 'short_grain_pct' },
-  { key: 'cobbaPct',       label: 'Choba',            unit: '%', backendKey: 'cobba_pct' },
-  { key: 'nbPct',          label: 'N.B',              unit: '%', backendKey: 'nb_pct' },
-  { key: 'ovPct',          label: 'O.V',              unit: '%', backendKey: 'ov_pct' },
-];
+import { qualityParams } from '../qualityParams';
 
 const tabs = [
   { key: 'overview', label: 'Overview', icon: Package },
@@ -237,6 +220,11 @@ export default function MillingBatchDetail() {
         </div>
       </div>
     );
+  }
+
+  // Service-milling batches have their own dedicated, cost-free page.
+  if (batch.isServiceMilling) {
+    return <Navigate to={`/service-milling/${id}`} replace />;
   }
 
   // Defensive data guards
@@ -1853,306 +1841,28 @@ export default function MillingBatchDetail() {
       </div>
 
       {/* Sample / Arrival Analysis — right slide-over */}
-      <SlideDrawer open={showAnalysisModal} onClose={() => setShowAnalysisModal(false)} title={analysisModalType === 'sample' ? 'Sample Analysis' : 'Arrival Analysis'} icon={FlaskConical} size="xl">
-        <form onSubmit={handleAnalysisSubmit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            {qualityParams.map((param) => (
-              <div key={param.key}>
-                <label className="block text-sm font-medium text-gray-700 mb-1">{param.label}</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={analysisForm[param.key]}
-                  onChange={(e) => setAnalysisForm((prev) => ({ ...prev, [param.key]: e.target.value }))}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder={`Enter ${param.label.toLowerCase()}`}
-                />
-              </div>
-            ))}
-          </div>
-
-          {/* Rice Price */}
-          <div className="border-t border-gray-200 pt-4">
-            <h4 className="text-sm font-semibold text-gray-700 mb-3">
-              {analysisModalType === 'sample' ? 'Offered Price' : 'Agreed Price'} (PKR)
-            </h4>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Price per KG</label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">Rs</span>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={analysisForm.pricePerKg}
-                  onChange={(e) => {
-                    const pkg = e.target.value;
-                    const pmt = pkg ? (parseFloat(pkg) * 1000).toFixed(2) : '';
-                    setAnalysisForm(prev => ({ ...prev, pricePerKg: pkg, pricePerMT: pmt }));
-                  }}
-                  className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="e.g. 85"
-                />
-              </div>
-            </div>
-            {analysisForm.pricePerKg && batch.rawQtyKg > 0 && (
-              <div className="mt-2 text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
-                Estimated total cost for {Math.round(batch.rawQtyKg).toLocaleString()} kg raw: <span className="font-semibold text-gray-800">Rs {Math.round(parseFloat(analysisForm.pricePerKg) * batch.rawQtyKg).toLocaleString()}</span>
-              </div>
-            )}
-          </div>
-
-          <div className="flex justify-end gap-3 pt-2">
-            <button
-              type="button"
-              onClick={() => setShowAnalysisModal(false)}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className={`px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors ${analysisModalType === 'sample' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'}`}
-            >
-              Save {analysisModalType === 'sample' ? 'Sample' : 'Arrival'} Analysis
-            </button>
-          </div>
-        </form>
-      </SlideDrawer>
+      <QualityAnalysisDrawer
+        open={showAnalysisModal}
+        onClose={() => setShowAnalysisModal(false)}
+        type={analysisModalType}
+        form={analysisForm}
+        setForm={setAnalysisForm}
+        onSubmit={handleAnalysisSubmit}
+        qualityParams={qualityParams}
+        batch={batch}
+        hidePricing={batch.isServiceMilling}
+      />
 
       {/* Yield Output — right slide-over */}
-      <SlideDrawer open={showYieldModal} onClose={() => setShowYieldModal(false)} title="Record Yield Output" icon={Boxes} size="xl">
-        <form onSubmit={handleYieldSubmit} className="space-y-4">
-          <div className="bg-blue-50 rounded-lg p-3 text-sm text-blue-800">
-            <span className="font-semibold">Raw Input:</span> {Math.round(batch.rawQtyKg).toLocaleString()} kg &nbsp;|&nbsp;
-            <span className="font-semibold">Planned Finished:</span> {Math.round(batch.plannedFinishedKg).toLocaleString()} kg
-          </div>
-
-          {/* Finished rice */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Finished Rice (KG) *</label>
-            <input type="number" step="0.01" min="0" required value={yieldForm.actualFinishedMT}
-              onChange={(e) => setYieldForm(prev => ({ ...prev, actualFinishedMT: e.target.value }))}
-              placeholder="e.g. 49.2"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
-          </div>
-
-          {/* Grades — B1/B2/B3/CSR/Short Grain are first-class outputs (no
-              generic "Broken Rice" tag). Total is computed and shown live. */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-sm font-medium text-gray-700">Grades (KG)</label>
-              {(() => {
-                const total = ['b1MT','b2MT','b3MT','csrMT','shortGrainMT']
-                  .reduce((s, k) => s + (parseFloat(yieldForm[k]) || 0), 0);
-                return total > 0 ? (
-                  <span className="text-xs font-medium text-amber-700">Total: {Math.round(total).toLocaleString()} kg</span>
-                ) : null;
-              })()}
-            </div>
-            <div className="grid grid-cols-5 gap-2">
-              <div>
-                <label className="block text-[11px] font-medium text-gray-600 mb-1">B1 (KG)</label>
-                <input type="number" step="0.01" min="0" value={yieldForm.b1MT}
-                  onChange={(e) => setYieldForm(prev => ({ ...prev, b1MT: e.target.value }))}
-                  placeholder="0"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium text-gray-600 mb-1">B2 (KG)</label>
-                <input type="number" step="0.01" min="0" value={yieldForm.b2MT}
-                  onChange={(e) => setYieldForm(prev => ({ ...prev, b2MT: e.target.value }))}
-                  placeholder="0"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium text-gray-600 mb-1">B3 (KG)</label>
-                <input type="number" step="0.01" min="0" value={yieldForm.b3MT}
-                  onChange={(e) => setYieldForm(prev => ({ ...prev, b3MT: e.target.value }))}
-                  placeholder="0"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium text-gray-600 mb-1">CSR (KG)</label>
-                <input type="number" step="0.01" min="0" value={yieldForm.csrMT}
-                  onChange={(e) => setYieldForm(prev => ({ ...prev, csrMT: e.target.value }))}
-                  placeholder="0"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium text-gray-600 mb-1">Short Grain (KG)</label>
-                <input type="number" step="0.01" min="0" value={yieldForm.shortGrainMT}
-                  onChange={(e) => setYieldForm(prev => ({ ...prev, shortGrainMT: e.target.value }))}
-                  placeholder="0"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
-              </div>
-            </div>
-          </div>
-
-          {/* By-products */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Sortex Rejects (KG)</label>
-              <input type="number" step="0.01" min="0" value={yieldForm.sortexMT}
-                onChange={(e) => setYieldForm(prev => ({ ...prev, sortexMT: e.target.value }))}
-                placeholder="e.g. 2.1"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
-              <p className="text-[11px] text-gray-400 mt-0.5">Color-sorter rejected kernels (yellow/damaged)</p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Powder (KG)</label>
-              <input type="number" step="0.01" min="0" value={yieldForm.powderMT}
-                onChange={(e) => setYieldForm(prev => ({ ...prev, powderMT: e.target.value }))}
-                placeholder="e.g. 0.5"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
-              <p className="text-[11px] text-gray-400 mt-0.5">Rice powder — sellable, goes to inventory</p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">S.W (KG)</label>
-              <input type="number" step="0.01" min="0" value={yieldForm.sweepingMT}
-                onChange={(e) => setYieldForm(prev => ({ ...prev, sweepingMT: e.target.value }))}
-                placeholder="e.g. 0.3"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
-              <p className="text-[11px] text-gray-400 mt-0.5">Sweeping — sellable, goes to inventory</p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Choba (KG)</label>
-              <input type="number" step="0.01" min="0" value={yieldForm.chobaMT}
-                onChange={(e) => setYieldForm(prev => ({ ...prev, chobaMT: e.target.value }))}
-                placeholder="e.g. 0.4"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
-              <p className="text-[11px] text-gray-400 mt-0.5">Choba — sellable, goes to inventory</p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">O.V (KG)</label>
-              <input type="number" step="0.01" min="0" value={yieldForm.ovMT}
-                onChange={(e) => setYieldForm(prev => ({ ...prev, ovMT: e.target.value }))}
-                placeholder="e.g. 0.2"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
-              <p className="text-[11px] text-gray-400 mt-0.5">Record-only — not priced or stocked</p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Stone (KG)</label>
-              <input type="number" step="0.01" min="0" value={yieldForm.stoneMT}
-                onChange={(e) => setYieldForm(prev => ({ ...prev, stoneMT: e.target.value }))}
-                placeholder="e.g. 0.1"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
-              <p className="text-[11px] text-gray-400 mt-0.5">Record-only — not priced or stocked</p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Wastage (KG)</label>
-              <input type="number" step="0.01" min="0" value={yieldForm.wastageMT}
-                onChange={(e) => setYieldForm(prev => ({ ...prev, wastageMT: e.target.value }))}
-                placeholder="e.g. 1.3"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
-              <p className="text-[11px] text-gray-400 mt-0.5">Dust / fines / unaccounted — no value</p>
-            </div>
-          </div>
-          {(parseFloat(yieldForm.branMT) > 0 || parseFloat(yieldForm.huskMT) > 0) && (
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-2 text-xs text-gray-600">
-              Legacy bran/husk carried from this batch: bran {parseFloat(yieldForm.branMT) || 0} kg, husk {parseFloat(yieldForm.huskMT) || 0} kg. New batches no longer record these.
-            </div>
-          )}
-
-          {/* Live calculation preview */}
-          {(() => {
-            const f = parseFloat(yieldForm.actualFinishedMT) || 0;
-            const b1 = parseFloat(yieldForm.b1MT) || 0;
-            const b2 = parseFloat(yieldForm.b2MT) || 0;
-            const b3 = parseFloat(yieldForm.b3MT) || 0;
-            const csr = parseFloat(yieldForm.csrMT) || 0;
-            const sg = parseFloat(yieldForm.shortGrainMT) || 0;
-            const br = parseFloat(yieldForm.branMT) || 0;   // legacy
-            const h = parseFloat(yieldForm.huskMT) || 0;    // legacy
-            const sx = parseFloat(yieldForm.sortexMT) || 0;
-            const pw = parseFloat(yieldForm.powderMT) || 0;
-            const sw = parseFloat(yieldForm.sweepingMT) || 0;
-            const ch = parseFloat(yieldForm.chobaMT) || 0;
-            const ovv = parseFloat(yieldForm.ovMT) || 0;
-            const st = parseFloat(yieldForm.stoneMT) || 0;
-            const w = parseFloat(yieldForm.wastageMT) || 0;
-            const gradeTotal = b1 + b2 + b3 + csr + sg;
-            // Broken total derives from the per-grade inputs (gradeTotal)
-            // — falls back to legacy yieldForm.brokenMT only for batches
-            // saved before this change.
-            const b = gradeTotal > 0 ? gradeTotal : (parseFloat(yieldForm.brokenMT) || 0);
-            const total = f + b + br + h + sx + pw + sw + ch + ovv + st + w;
-            const rawQty = (parseFloat(batch.rawQtyMT) || 0) * 1000; // KG (form is KG)
-            const yieldPct = rawQty > 0 ? ((f / rawQty) * 100).toFixed(1) : '0.0';
-            const accounted = rawQty > 0 ? ((total / rawQty) * 100).toFixed(1) : '0.0';
-
-            const rows = [
-              { label: finishedLabel, value: f, bold: true, color: 'text-blue-700' },
-            ];
-            if (b > 0) rows.push({ label: 'Grades (total)', value: b, color: 'text-amber-700' });
-            if (b1) rows.push({ label: '  B1', value: b1, indent: true });
-            if (b2) rows.push({ label: '  B2', value: b2, indent: true });
-            if (b3) rows.push({ label: '  B3', value: b3, indent: true });
-            if (csr) rows.push({ label: '  CSR', value: csr, indent: true });
-            if (sg) rows.push({ label: '  Short Grain', value: sg, indent: true });
-            rows.push({ label: 'Sortex Rejects', value: sx, color: 'text-amber-700' });
-            if (pw > 0) rows.push({ label: 'Powder', value: pw, color: 'text-gray-600' });
-            if (sw > 0) rows.push({ label: 'S.W', value: sw, color: 'text-gray-600' });
-            if (ch > 0) rows.push({ label: 'Choba', value: ch, color: 'text-gray-600' });
-            if (ovv > 0) rows.push({ label: 'O.V (record-only)', value: ovv, color: 'text-gray-500' });
-            if (st > 0) rows.push({ label: 'Stone (record-only)', value: st, color: 'text-gray-500' });
-            rows.push({ label: 'Wastage', value: w, color: 'text-red-600' });
-            // Show bran/husk in the preview only when they were carried from
-            // an existing batch — keeps the math correct for legacy batches.
-            if (br > 0) rows.push({ label: 'Rice Bran (legacy)', value: br, color: 'text-gray-500' });
-            if (h > 0)  rows.push({ label: 'Rice Husk (legacy)', value: h, color: 'text-gray-500' });
-
-            return (
-              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200 text-sm space-y-1.5">
-                {rows.map((r, i) => r.value > 0 && (
-                  <div key={i} className={`flex justify-between ${r.indent ? 'pl-4 text-xs text-gray-500' : ''}`}>
-                    <span className={r.bold ? 'font-semibold text-gray-900' : 'text-gray-600'}>{r.label}</span>
-                    <span className={`font-medium ${r.color || 'text-gray-900'}`}>{Math.round(r.value).toLocaleString()} kg</span>
-                  </div>
-                ))}
-                {gradeTotal > 0 && b > 0 && Math.abs(gradeTotal - b) > 0.01 && (
-                  <div className="flex justify-between pl-4 text-xs text-red-500">
-                    <span>Grade total vs Broken total mismatch</span>
-                    <span>{Math.round(gradeTotal).toLocaleString()} vs {Math.round(b).toLocaleString()} kg</span>
-                  </div>
-                )}
-                <div className="border-t border-gray-200 pt-2 mt-2 flex justify-between">
-                  <span className="font-semibold text-gray-700">Total Output</span>
-                  <span className="font-bold text-gray-900">{Math.round(total).toLocaleString()} kg</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Accounted for</span>
-                  <span className={`font-semibold ${parseFloat(accounted) > 100 ? 'text-red-600' : parseFloat(accounted) >= 95 ? 'text-emerald-600' : 'text-amber-600'}`}>
-                    {accounted}% of {Math.round(rawQty).toLocaleString()} kg
-                  </span>
-                </div>
-                <div className="flex justify-between border-t border-gray-200 pt-2">
-                  <span className="font-semibold text-gray-700">Yield %</span>
-                  <span className={`text-lg font-bold ${parseFloat(yieldPct) >= 75 ? 'text-emerald-600' : parseFloat(yieldPct) >= 60 ? 'text-amber-600' : 'text-red-600'}`}>
-                    {yieldPct}%
-                  </span>
-                </div>
-              </div>
-            );
-          })()}
-
-          <div className="flex justify-end gap-3 pt-2">
-            <button
-              type="button"
-              onClick={() => setShowYieldModal(false)}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors"
-            >
-              Save Yield Output
-            </button>
-          </div>
-        </form>
-      </SlideDrawer>
+      <YieldOutputDrawer
+        open={showYieldModal}
+        onClose={() => setShowYieldModal(false)}
+        form={yieldForm}
+        setForm={setYieldForm}
+        onSubmit={handleYieldSubmit}
+        batch={batch}
+        finishedLabel={finishedLabel}
+      />
 
       {/* Cost Entry Modal */}
       <Modal isOpen={showCostModal} onClose={() => setShowCostModal(false)} title="Milling Costs (PKR)" size="md">
@@ -2219,198 +1929,16 @@ export default function MillingBatchDetail() {
       </Modal>
 
       {/* Add Vehicle — right slide-over */}
-      <SlideDrawer open={showVehicleModal} onClose={() => setShowVehicleModal(false)} title="Add Vehicle Arrival" icon={Truck} size="xl">
-        <form onSubmit={handleAddVehicle} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle / Truck Number *</label>
-              <input
-                type="text"
-                required
-                value={vehicleForm.vehicleNo}
-                onChange={(e) => setVehicleForm(prev => ({ ...prev, vehicleNo: e.target.value }))}
-                placeholder="e.g. ABC-1234 or LEA-5678"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Arrival Date</label>
-              <input
-                type="date"
-                value={vehicleForm.arrivalDate}
-                onChange={(e) => setVehicleForm(prev => ({ ...prev, arrivalDate: e.target.value }))}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Driver Name</label>
-              <input
-                type="text"
-                value={vehicleForm.driverName}
-                onChange={(e) => setVehicleForm(prev => ({ ...prev, driverName: e.target.value }))}
-                placeholder="e.g. Muhammad Ali"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Driver Phone</label>
-              <input
-                type="text"
-                value={vehicleForm.driverPhone}
-                onChange={(e) => setVehicleForm(prev => ({ ...prev, driverPhone: e.target.value }))}
-                placeholder="e.g. 0300-1234567"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Weight (KG)</label>
-              <input
-                type="number"
-                step="1"
-                min="0"
-                value={vehicleForm.weightKg}
-                onChange={(e) => setVehicleForm(prev => ({ ...prev, weightKg: e.target.value }))}
-                placeholder="e.g. 30000"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-              {vehicleForm.weightKg && (
-                <p className="text-xs text-gray-400 mt-0.5">{Math.round(parseFloat(vehicleForm.weightKg) || 0).toLocaleString()} kg</p>
-              )}
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Number of Bags</label>
-              <input
-                type="number"
-                step="1"
-                min="0"
-                value={vehicleForm.totalBags}
-                onChange={(e) => setVehicleForm(prev => ({ ...prev, totalBags: e.target.value }))}
-                placeholder="e.g. 600"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-              {vehicleForm.weightKg && vehicleForm.totalBags && parseInt(vehicleForm.totalBags, 10) > 0 && (
-                <p className="text-xs text-emerald-600 mt-0.5 font-medium">Avg: {(parseFloat(vehicleForm.weightKg) / parseInt(vehicleForm.totalBags, 10)).toFixed(2)} kg/bag</p>
-              )}
-            </div>
-            <div className="col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-              <input
-                type="text"
-                value={vehicleForm.notes}
-                onChange={(e) => setVehicleForm(prev => ({ ...prev, notes: e.target.value }))}
-                placeholder="e.g. Weigh bridge slip #123"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-          </div>
-
-          {/* Per-truck quality (optional) */}
-          <div className="border-t pt-3">
-            <button
-              type="button"
-              onClick={() => setShowVehicleQuality(v => !v)}
-              className="flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-blue-600"
-            >
-              <span>{showVehicleQuality ? '▾' : '▸'}</span>
-              Quality (this truck)
-              <span className="text-xs text-gray-400 font-normal">— optional, overrides batch arrival price for this lot</span>
-            </button>
-            {showVehicleQuality && (() => {
-              const setQ = (key) => (e) => setVehicleForm(prev => ({ ...prev, [key]: e.target.value }));
-              const pctInput = (key, label) => (
-                <div>
-                  <label className="block text-[11px] font-medium text-gray-600 mb-0.5">{label}</label>
-                  <input
-                    type="number" step="0.01" min="0" max="100"
-                    value={vehicleForm[key]}
-                    onChange={setQ(key)}
-                    placeholder="0"
-                    className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-              );
-              const gradeTotal =
-                (parseFloat(vehicleForm.b1) || 0) + (parseFloat(vehicleForm.b2) || 0) +
-                (parseFloat(vehicleForm.b3) || 0) + (parseFloat(vehicleForm.csr) || 0) +
-                (parseFloat(vehicleForm.shortGrain) || 0) + (parseFloat(vehicleForm.cobba) || 0) +
-                (parseFloat(vehicleForm.nb) || 0) + (parseFloat(vehicleForm.ov) || 0);
-              const brokenPct = parseFloat(vehicleForm.broken) || 0;
-              const sumMatch = brokenPct > 0 && gradeTotal > 0
-                ? Math.abs(gradeTotal - brokenPct) < 0.1
-                : null;
-              return (
-                <div className="space-y-3 mt-3">
-                  <div>
-                    <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Aggregate</p>
-                    <div className="grid grid-cols-5 gap-2">
-                      {pctInput('moisture',      'Moisture %')}
-                      {pctInput('broken',        'Broken %')}
-                      {pctInput('foreignMatter', 'Foreign matter %')}
-                      {pctInput('chalky',        'Chalky %')}
-                      {pctInput('purity',        'Purity %')}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Broken-grade breakdown</p>
-                      {gradeTotal > 0 && (
-                        <span className={`text-[10px] font-medium ${
-                          sumMatch === true ? 'text-emerald-700' :
-                          sumMatch === false ? 'text-amber-700' : 'text-gray-500'
-                        }`}>
-                          Σ = {gradeTotal.toFixed(2)}%
-                          {sumMatch === false && brokenPct > 0 && (
-                            <span className="ml-1">(broken: {brokenPct.toFixed(2)}%)</span>
-                          )}
-                        </span>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-4 gap-2">
-                      {pctInput('b1',         'B1 %')}
-                      {pctInput('b2',         'B2 %')}
-                      {pctInput('b3',         'B3 %')}
-                      {pctInput('csr',        'CSR %')}
-                      {pctInput('shortGrain', 'Short Grain %')}
-                      {pctInput('cobba',      'Choba %')}
-                      {pctInput('nb',         'N.B %')}
-                      {pctInput('ov',         'O.V %')}
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 pt-1 border-t border-gray-200">
-                    <div>
-                      <label className="block text-[11px] font-medium text-gray-600 mb-0.5">Price / kg (PKR)</label>
-                      <input
-                        type="number" step="0.01" min="0"
-                        value={vehicleForm.pricePerKg}
-                        onChange={setQ('pricePerKg')}
-                        placeholder="e.g. 95"
-                        className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                      />
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
-
-          <div className="flex justify-end gap-3 pt-2">
-            <button
-              type="button"
-              onClick={() => setShowVehicleModal(false)}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              <Truck size={16} />
-              Add Vehicle
-            </button>
-          </div>
-        </form>
-      </SlideDrawer>
+      <VehicleArrivalDrawer
+        open={showVehicleModal}
+        onClose={() => setShowVehicleModal(false)}
+        form={vehicleForm}
+        setForm={setVehicleForm}
+        onSubmit={handleAddVehicle}
+        showQuality={showVehicleQuality}
+        setShowQuality={setShowVehicleQuality}
+        hidePricing={batch.isServiceMilling}
+      />
 
       {/* Confirm Product Prices Modal */}
       <Modal isOpen={showPriceModal} onClose={() => setShowPriceModal(false)} title="Costing — by-product prices & finished cost" size="md">
