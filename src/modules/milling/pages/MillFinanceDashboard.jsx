@@ -1030,7 +1030,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
           {/* Money OUT — paid vs outstanding */}
           <div>
             <div className="flex items-center gap-2 mb-2">
-              <ArrowUpRight size={15} className="text-rose-500" />
+              <ArrowUpRight size={15} className="text-red-500" />
               <h3 className="text-sm font-semibold text-gray-700">Money out — paid vs outstanding</h3>
             </div>
             <div className="rounded-xl border border-gray-200 bg-white divide-y divide-gray-100">
@@ -1101,9 +1101,9 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                           <span className="text-[10px] text-gray-400 ml-1.5">{r.category}{r.ref ? ` · ${r.ref}` : ''}</span>
                         </td>
                         <td className="px-3 py-1.5 text-gray-500 capitalize">{r.payment_method || '—'}</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums text-rose-600">{r.direction === 'out' ? PKR(r.amount_pkr) : ''}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums text-red-600">{r.direction === 'out' ? PKR(r.amount_pkr) : ''}</td>
                         <td className="px-3 py-1.5 text-right tabular-nums text-emerald-600">{r.direction === 'in' ? PKR(r.amount_pkr) : ''}</td>
-                        <td className={`px-3 py-1.5 text-right tabular-nums ${r.balance < 0 ? 'text-rose-700' : 'text-gray-800'}`}>{PKR(r.balance)}</td>
+                        <td className={`px-3 py-1.5 text-right tabular-nums ${r.balance < 0 ? 'text-red-700' : 'text-gray-800'}`}>{PKR(r.balance)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1690,13 +1690,13 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
               {payrollView === 'payroll' && canViewPayroll && (
                 <button onClick={() => setShowRequestsDrawer(true)} className="relative inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 bg-white hover:bg-gray-50">
                   <Inbox className="w-3.5 h-3.5" /> Requests
-                  {pendingRequestCount > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center">{pendingRequestCount}</span>}
+                  {pendingRequestCount > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">{pendingRequestCount}</span>}
                 </button>
               )}
               {payrollView === 'payroll' && canViewPayroll && (
                 <button onClick={() => setShowLeaveDrawer(true)} className="relative inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 bg-white hover:bg-gray-50">
                   <CalendarDays className="w-3.5 h-3.5" /> Leave
-                  {pendingLeaveCount > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center">{pendingLeaveCount}</span>}
+                  {pendingLeaveCount > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">{pendingLeaveCount}</span>}
                 </button>
               )}
               {canPreparePayroll && (
@@ -1746,7 +1746,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                     <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700">paid</span>
                     <span className="text-gray-600">{r.employeeCount} emp · <span className="font-semibold tabular-nums">{PKR(r.netTotal)}</span> · {r.payMethod === 'bank' ? (r.bankName || 'bank') : 'cash'} · {fmtDate(r.payDate)}</span>
                     <button onClick={() => setPayslipsRunId(r.id)} className="text-emerald-700 font-medium hover:underline">payslips</button>
-                    {canDeletePayroll && <button onClick={() => handleDeleteRun(r)} disabled={deleteRunMut.isPending} className="text-rose-500 hover:text-rose-700 disabled:opacity-50">undo</button>}
+                    {canDeletePayroll && <button onClick={() => handleDeleteRun(r)} disabled={deleteRunMut.isPending} className="text-red-500 hover:text-red-700 disabled:opacity-50">undo</button>}
                   </div>
                 ))}
               </div>
@@ -1788,7 +1788,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                           <button onClick={() => handleApproveAdvance(a)} disabled={approveAdvanceMut.isPending}
                             className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-60"><Check className="w-3.5 h-3.5" /> Approve</button>
                           <button onClick={() => handleRejectAdvance(a)} disabled={rejectAdvanceMut.isPending}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-rose-600 bg-rose-50 rounded-lg hover:bg-rose-100 disabled:opacity-60"><X className="w-3.5 h-3.5" /> Reject</button>
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-red-600 bg-red-50 rounded-lg hover:bg-red-100 disabled:opacity-60"><X className="w-3.5 h-3.5" /> Reject</button>
                         </>
                       )}
                       {a.approvalStatus === 'approved' && canPayPayroll && (
@@ -1856,9 +1856,9 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                         {canPreparePayroll && <button title="Bonuses & deductions" onClick={() => setAdjustWorker(w)} className="p-1.5 rounded-md text-violet-600 hover:bg-violet-50"><Plus className="w-3.5 h-3.5" /></button>}
                         {canPreparePayroll && <button title="Revise salary" onClick={() => setReviseWorker(w)} className="p-1.5 rounded-md text-blue-600 hover:bg-blue-50"><TrendingUp className="w-3.5 h-3.5" /></button>}
                         {canPreparePayroll && <button title="Edit" onClick={() => openWorkerDrawer(w)} className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100"><Pencil className="w-3.5 h-3.5" /></button>}
-                        {canPayPayroll && w.isActive && <button title="Final settlement" onClick={() => setSettleWorker(w)} className="p-1.5 rounded-md text-rose-600 hover:bg-rose-50"><LogOut className="w-3.5 h-3.5" /></button>}
+                        {canPayPayroll && w.isActive && <button title="Final settlement" onClick={() => setSettleWorker(w)} className="p-1.5 rounded-md text-red-600 hover:bg-red-50"><LogOut className="w-3.5 h-3.5" /></button>}
                         {canPreparePayroll && <button title={w.isActive ? 'Deactivate' : 'Reactivate'} onClick={() => handleToggleActive(w)} className={`p-1.5 rounded-md hover:bg-gray-100 ${w.isActive ? 'text-gray-500' : 'text-emerald-600'}`}><Power className="w-3.5 h-3.5" /></button>}
-                        {canDeletePayroll && <button title="Delete" onClick={() => setDeleteWorkerTarget(w)} className="p-1.5 rounded-md text-rose-500 hover:bg-rose-50"><Trash2 className="w-3.5 h-3.5" /></button>}
+                        {canDeletePayroll && <button title="Delete" onClick={() => setDeleteWorkerTarget(w)} className="p-1.5 rounded-md text-red-500 hover:bg-red-50"><Trash2 className="w-3.5 h-3.5" /></button>}
                         {!canPreparePayroll && !canDeletePayroll && <span className="text-[11px] text-gray-300">—</span>}
                       </div>
                     </td>
@@ -2337,7 +2337,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
               {workerForm.portal_enabled && (
                 <button
                   onClick={async () => { try { await setPinMut.mutateAsync({ id: workerForm.id, data: { enabled: false } }); setWorkerForm(p => ({ ...p, portal_enabled: false })); addToast('Self-service disabled', 'success'); } catch (e) { addToast(e.message, 'error'); } }}
-                  className="text-[11px] text-rose-600 hover:underline"
+                  className="text-[11px] text-red-600 hover:underline"
                 >Disable self-service</button>
               )}
             </div>
@@ -2594,8 +2594,8 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setDeleteWorkerTarget(null)}>
           <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
             <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center flex-shrink-0">
-                <Trash2 className="w-5 h-5 text-rose-600" />
+              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+                <Trash2 className="w-5 h-5 text-red-600" />
               </div>
               <div>
                 <h3 className="text-base font-semibold text-gray-900">Delete {deleteWorkerTarget.name}?</h3>
@@ -2610,7 +2610,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
             </div>
             <div className="flex justify-end gap-2 mt-6">
               <button onClick={() => setDeleteWorkerTarget(null)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
-              <button onClick={handleDeleteWorker} disabled={deleteWorkerMut.isPending} className="px-4 py-2 text-sm text-white bg-rose-600 rounded-lg hover:bg-rose-700 disabled:opacity-60">
+              <button onClick={handleDeleteWorker} disabled={deleteWorkerMut.isPending} className="px-4 py-2 text-sm text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-60">
                 {deleteWorkerMut.isPending ? 'Deleting…' : 'Delete Permanently'}
               </button>
             </div>
@@ -2813,7 +2813,7 @@ function CashEntryDrawer({ entry, companyProfile, onClose }) {
           <div><p className="text-xs text-gray-500">Category</p><p className="capitalize">{entry.category || '—'}</p></div>
           <div><p className="text-xs text-gray-500">Method</p><p className="capitalize">{entry.payment_method || '—'}</p></div>
           <div><p className="text-xs text-gray-500">Reference</p><p>{entry.ref || entry.payment_no || '—'}</p></div>
-          <div><p className="text-xs text-gray-500">Amount</p><p className={`font-semibold ${isIn ? 'text-emerald-700' : 'text-rose-600'}`}>{isIn ? '+' : '−'}{PKR(amount)}</p></div>
+          <div><p className="text-xs text-gray-500">Amount</p><p className={`font-semibold ${isIn ? 'text-emerald-700' : 'text-red-600'}`}>{isIn ? '+' : '−'}{PKR(amount)}</p></div>
         </div>
         <div className="pt-2 border-t border-gray-100">
           <TransactionDocument kind={isIn ? 'receipt' : 'voucher'} data={docData} companyProfile={companyProfile} />
@@ -2832,7 +2832,7 @@ const ATT_STYLE = {
   present: 'bg-emerald-500 text-white',
   half_day: 'bg-amber-400 text-white',
   leave: 'bg-sky-400 text-white',
-  absent: 'bg-rose-400 text-white',
+  absent: 'bg-red-400 text-white',
   off: 'bg-slate-400 text-white',
 };
 const ATT_LABEL = { present: 'Present', half_day: 'Half day', leave: 'Leave', absent: 'Absent', off: 'Off / holiday' };
@@ -3035,8 +3035,8 @@ function EmployeeAttendanceGrid({ month, employees, recordAttMut, addToast }) {
                 const sel = selDays.has(d);
                 const hol = holidayByDate[d];
                 return (
-                  <th key={d} className={`px-0 py-1 font-medium text-center w-7 ${sel ? 'bg-blue-100' : isSunday(d) ? 'bg-rose-50' : ''}`}>
-                    <button onClick={() => toggleDay(d)} title={`${d}${hol ? ` · ${hol.name}` : ''} — click to select`} className={`w-full leading-tight ${sel ? 'text-blue-700' : isSunday(d) || hol ? 'text-rose-500' : 'text-gray-400'}`}>
+                  <th key={d} className={`px-0 py-1 font-medium text-center w-7 ${sel ? 'bg-blue-100' : isSunday(d) ? 'bg-red-50' : ''}`}>
+                    <button onClick={() => toggleDay(d)} title={`${d}${hol ? ` · ${hol.name}` : ''} — click to select`} className={`w-full leading-tight ${sel ? 'text-blue-700' : isSunday(d) || hol ? 'text-red-500' : 'text-gray-400'}`}>
                       <div className="text-[8px]">{WEEKDAY[dow(d)]}</div>
                       <div className="text-[10px] font-semibold">{d.slice(8)}</div>
                       {hol && <div className="text-[7px] leading-none text-amber-500">★</div>}
@@ -3062,7 +3062,7 @@ function EmployeeAttendanceGrid({ month, employees, recordAttMut, addToast }) {
                   const st = statusOf(emp.id, d);
                   const colSel = selDays.has(d);
                   return (
-                    <td key={d} className={`px-0 py-1 text-center ${colSel ? 'bg-blue-50' : isSunday(d) ? 'bg-rose-50/40' : ''}`}>
+                    <td key={d} className={`px-0 py-1 text-center ${colSel ? 'bg-blue-50' : isSunday(d) ? 'bg-red-50/40' : ''}`}>
                       <button
                         onClick={() => cycle(emp, d)}
                         title={`${emp.name} · ${d}${st ? ` · ${ATT_LABEL[st]}` : ''}`}
@@ -3202,7 +3202,7 @@ function AttendanceImportDrawer({ employees, month, addToast, onClose }) {
           <>
             <div className="grid grid-cols-2 gap-2">
               <div className="rounded-lg bg-emerald-50 p-2.5"><div className="text-[10px] uppercase text-emerald-500">Ready to import</div><div className="text-lg font-bold text-emerald-700">{parsed.valid.length}</div></div>
-              <div className="rounded-lg bg-rose-50 p-2.5"><div className="text-[10px] uppercase text-rose-500">Errors (skipped)</div><div className="text-lg font-bold text-rose-700">{parsed.errors.length}</div></div>
+              <div className="rounded-lg bg-red-50 p-2.5"><div className="text-[10px] uppercase text-red-500">Errors (skipped)</div><div className="text-lg font-bold text-red-700">{parsed.errors.length}</div></div>
             </div>
             {parsed.valid.length > 0 && (
               <div className="rounded-lg border border-gray-200 overflow-hidden">
@@ -3218,9 +3218,9 @@ function AttendanceImportDrawer({ employees, month, addToast, onClose }) {
               </div>
             )}
             {parsed.errors.length > 0 && (
-              <div className="rounded-lg border border-rose-200 bg-rose-50/50 p-2.5 text-xs text-rose-700 space-y-0.5 max-h-40 overflow-auto">
+              <div className="rounded-lg border border-red-200 bg-red-50/50 p-2.5 text-xs text-red-700 space-y-0.5 max-h-40 overflow-auto">
                 {parsed.errors.slice(0, 30).map((e, i) => <div key={i}>Row {e.row}: {e.reason}</div>)}
-                {parsed.errors.length > 30 && <div className="text-rose-400">+ {parsed.errors.length - 30} more…</div>}
+                {parsed.errors.length > 30 && <div className="text-red-400">+ {parsed.errors.length - 30} more…</div>}
               </div>
             )}
             <div className="flex justify-end gap-2">
@@ -3366,11 +3366,11 @@ function WorkerAdvancesPanel({ worker, onClose, onGiveAdvance, addToast }) {
                   )}
                   {confirmId === a.id ? (
                     <span className="flex items-center gap-1">
-                      <button onClick={() => handleDelete(a.id)} disabled={deleteAdvanceMut.isPending} className="px-2 py-1 text-[11px] text-white bg-rose-600 rounded hover:bg-rose-700">Confirm</button>
+                      <button onClick={() => handleDelete(a.id)} disabled={deleteAdvanceMut.isPending} className="px-2 py-1 text-[11px] text-white bg-red-600 rounded hover:bg-red-700">Confirm</button>
                       <button onClick={() => setConfirmId(null)} className="p-1 text-gray-400 hover:text-gray-600"><X className="w-3.5 h-3.5" /></button>
                     </span>
                   ) : (
-                    <button title="Delete & reverse" onClick={() => setConfirmId(a.id)} className="p-1.5 rounded-md text-rose-500 hover:bg-rose-50"><Trash2 className="w-3.5 h-3.5" /></button>
+                    <button title="Delete & reverse" onClick={() => setConfirmId(a.id)} className="p-1.5 rounded-md text-red-500 hover:bg-red-50"><Trash2 className="w-3.5 h-3.5" /></button>
                   )}
                 </div>
               </div>
@@ -3415,8 +3415,8 @@ function AdjustmentsDrawer({ worker, month, onClose, addToast }) {
         <span className="text-[11px] text-gray-400 ml-2">{a.recurring ? 'every month' : a.period}{a.isActive ? '' : ' · inactive'}</span>
       </div>
       <div className="flex items-center gap-2">
-        <span className={`tabular-nums font-semibold ${a.type === 'bonus' ? 'text-emerald-700' : 'text-rose-600'}`}>{a.type === 'bonus' ? '+' : '−'}{PKR(a.amount)}</span>
-        <button onClick={async () => { try { await delMut.mutateAsync(a.id); addToast('Removed', 'success'); } catch (e) { addToast(e.message, 'error'); } }} className="p-1 text-rose-500 hover:bg-rose-50 rounded"><Trash2 className="w-3.5 h-3.5" /></button>
+        <span className={`tabular-nums font-semibold ${a.type === 'bonus' ? 'text-emerald-700' : 'text-red-600'}`}>{a.type === 'bonus' ? '+' : '−'}{PKR(a.amount)}</span>
+        <button onClick={async () => { try { await delMut.mutateAsync(a.id); addToast('Removed', 'success'); } catch (e) { addToast(e.message, 'error'); } }} className="p-1 text-red-500 hover:bg-red-50 rounded"><Trash2 className="w-3.5 h-3.5" /></button>
       </div>
     </div>
   );
@@ -3428,7 +3428,7 @@ function AdjustmentsDrawer({ worker, month, onClose, addToast }) {
         <div className="rounded-lg border border-gray-200 p-3 space-y-3">
           <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden text-sm">
             {[['bonus', 'Bonus / Allowance'], ['deduction', 'Deduction']].map(([v, l]) => (
-              <button key={v} onClick={() => setForm(f => ({ ...f, type: v }))} className={`px-3 py-1.5 font-medium ${form.type === v ? (v === 'bonus' ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white') : 'bg-white text-gray-600'}`}>{l}</button>
+              <button key={v} onClick={() => setForm(f => ({ ...f, type: v }))} className={`px-3 py-1.5 font-medium ${form.type === v ? (v === 'bonus' ? 'bg-emerald-600 text-white' : 'bg-red-600 text-white') : 'bg-white text-gray-600'}`}>{l}</button>
             ))}
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -3441,7 +3441,7 @@ function AdjustmentsDrawer({ worker, month, onClose, addToast }) {
             </div>
             {!form.recurring && <div className="col-span-2"><label className="block text-xs text-gray-600 mb-1">Month</label><input type="month" value={form.period} onChange={e => setForm(f => ({ ...f, period: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" /></div>}
           </div>
-          <button onClick={submit} disabled={createMut.isPending} className={`w-full px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50 ${form.type === 'bonus' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'}`}>{createMut.isPending ? 'Adding…' : `Add ${form.type === 'bonus' ? 'bonus' : 'deduction'}`}</button>
+          <button onClick={submit} disabled={createMut.isPending} className={`w-full px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50 ${form.type === 'bonus' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}`}>{createMut.isPending ? 'Adding…' : `Add ${form.type === 'bonus' ? 'bonus' : 'deduction'}`}</button>
         </div>
 
         {isLoading ? <p className="text-sm text-gray-400">Loading…</p> : (
@@ -3451,7 +3451,7 @@ function AdjustmentsDrawer({ worker, month, onClose, addToast }) {
               <div className="rounded-lg border border-gray-200 divide-y divide-gray-100">{bonuses.length ? bonuses.map(Row) : <p className="px-3 py-3 text-xs text-gray-400">None.</p>}</div>
             </div>
             <div>
-              <p className="text-xs font-semibold text-rose-700 uppercase tracking-wide mb-1">Deductions (−net)</p>
+              <p className="text-xs font-semibold text-red-700 uppercase tracking-wide mb-1">Deductions (−net)</p>
               <div className="rounded-lg border border-gray-200 divide-y divide-gray-100">{deductions.length ? deductions.map(Row) : <p className="px-3 py-3 text-xs text-gray-400">None.</p>}</div>
             </div>
             <p className="text-[11px] text-gray-400">Bonuses add to gross; deductions subtract from net (after advance recovery). Recurring items apply every month; one-off items only their month. Net never goes below zero.</p>
@@ -3469,7 +3469,7 @@ function AdvanceLedgerDrawer({ advanceId, onClose }) {
   const schedule = data?.schedule || [];
   const entries = data?.entries || [];
   const out = data?.outstanding != null ? data.outstanding : Math.max(0, (parseFloat(a.amount) || 0) - (parseFloat(a.recovered_amount) || 0));
-  const SCH_TONE = { pending: 'bg-gray-100 text-gray-600', partially_recovered: 'bg-amber-100 text-amber-700', recovered: 'bg-emerald-100 text-emerald-700', skipped: 'bg-rose-100 text-rose-700', cancelled: 'bg-gray-100 text-gray-400' };
+  const SCH_TONE = { pending: 'bg-gray-100 text-gray-600', partially_recovered: 'bg-amber-100 text-amber-700', recovered: 'bg-emerald-100 text-emerald-700', skipped: 'bg-red-100 text-red-700', cancelled: 'bg-gray-100 text-gray-400' };
   return (
     <SlideDrawer open onClose={onClose} title="Advance Ledger" subtitle={a.worker_name || ''} icon={HandCoins} size="lg">
       {isLoading ? <p className="text-sm text-gray-400">Loading…</p> : (
@@ -3992,14 +3992,14 @@ function PayrollRunDrawer({ month, entity = 'mill', employees, preselectId, bank
                         <div className="text-[10px] mt-0.5">
                           {r.prorated && <span className="text-amber-600 mr-2">prorated {r.employedDays}/{r.daysInMonth} days</span>}
                           {r.bonus > 0 && <span className="text-emerald-600 mr-2">+ bonus {PKR(r.bonus)}</span>}
-                          {r.deduction > 0 && <span className="text-rose-600 mr-2">− deduction {PKR(r.deduction)}</span>}
+                          {r.deduction > 0 && <span className="text-red-600 mr-2">− deduction {PKR(r.deduction)}</span>}
                           {r.statutory > 0 && <span className="text-violet-600">− tax/statutory {PKR(r.statutory)}</span>}
                         </div>
                       )}
                       {r.include && r.outstanding > 0 && (
                         <div className="flex gap-2 mt-0.5">
                           <button onClick={() => useScheduled(r)} className="text-[10px] text-blue-600 hover:underline">Use scheduled</button>
-                          <button onClick={() => skipRow(r)} className="text-[10px] text-rose-600 hover:underline">Skip this month</button>
+                          <button onClick={() => skipRow(r)} className="text-[10px] text-red-600 hover:underline">Skip this month</button>
                         </div>
                       )}
                     </td>
@@ -4192,7 +4192,7 @@ function StatutoryDeductionsDrawer({ canPay, entity = 'mill', bankAccounts = [],
                   <input type="number" value={s.threshold} onChange={(e) => setSlab(i, { threshold: e.target.value })} placeholder="0" className="border border-gray-200 rounded-md px-2 py-1.5 text-xs" />
                   <input type="number" step="0.01" value={s.rate} onChange={(e) => setSlab(i, { rate: e.target.value })} placeholder="0" className="border border-gray-200 rounded-md px-2 py-1.5 text-xs" />
                   <input type="number" value={s.base} onChange={(e) => setSlab(i, { base: e.target.value })} placeholder="0" className="border border-gray-200 rounded-md px-2 py-1.5 text-xs" />
-                  <button onClick={() => rmSlab(i)} className="p-1 rounded text-rose-500 hover:bg-rose-50"><Trash2 className="w-3.5 h-3.5" /></button>
+                  <button onClick={() => rmSlab(i)} className="p-1 rounded text-red-500 hover:bg-red-50"><Trash2 className="w-3.5 h-3.5" /></button>
                 </div>
               ))}
               <p className="text-[10px] text-gray-400">Tax = <em>fixed tax at the bracket</em> + <em>rate%</em> × (annual income − <em>bracket threshold</em>), then ÷12 for the month. Income is the chosen base × 12. Enter brackets lowest-threshold first.</p>
@@ -4219,7 +4219,7 @@ function StatutoryDeductionsDrawer({ canPay, entity = 'mill', bankAccounts = [],
                   <div className="flex items-center gap-1.5">
                     <button onClick={() => toggleActive(r)} className={`px-2 py-1 text-[11px] rounded-md ${r.isActive ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100' : 'text-gray-500 bg-gray-100 hover:bg-gray-200'}`}>{r.isActive ? 'Active' : 'Inactive'}</button>
                     <button onClick={() => startEdit(r)} className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100"><Pencil className="w-3.5 h-3.5" /></button>
-                    <button onClick={() => remove(r)} className="p-1.5 rounded-md text-rose-500 hover:bg-rose-50"><Trash2 className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => remove(r)} className="p-1.5 rounded-md text-red-500 hover:bg-red-50"><Trash2 className="w-3.5 h-3.5" /></button>
                   </div>
                 </div>
               ))}
@@ -4325,7 +4325,7 @@ function SalaryRevisionDrawer({ worker, company, onClose, addToast }) {
 
 // Payroll activity / audit log — a payroll-scoped slice of the audit trail.
 const AUDIT_ENTITY_LABEL = { mill_payroll_run: 'Payroll run', statutory_remittance: 'Statutory remittance', mill_final_settlement: 'Final settlement', mill_leave_request: 'Leave request', mill_leave_type: 'Leave type', mill_worker: 'Employee', mill_worker_advance: 'Advance', mill_worker_request: 'Request', mill_statutory_deduction: 'Statutory rule' };
-const AUDIT_ACTION_TONE = { pay: 'bg-emerald-100 text-emerald-700', settle: 'bg-emerald-100 text-emerald-700', approve: 'bg-blue-100 text-blue-700', accrue: 'bg-violet-100 text-violet-700', prepare: 'bg-amber-100 text-amber-700', remit: 'bg-indigo-100 text-indigo-700', void: 'bg-rose-100 text-rose-700', reject: 'bg-rose-100 text-rose-700', delete: 'bg-rose-100 text-rose-700', advance_delete: 'bg-rose-100 text-rose-700', create: 'bg-slate-100 text-slate-700', update: 'bg-slate-100 text-slate-700', advance_given: 'bg-amber-100 text-amber-700' };
+const AUDIT_ACTION_TONE = { pay: 'bg-emerald-100 text-emerald-700', settle: 'bg-emerald-100 text-emerald-700', approve: 'bg-blue-100 text-blue-700', accrue: 'bg-violet-100 text-violet-700', prepare: 'bg-amber-100 text-amber-700', remit: 'bg-indigo-100 text-indigo-700', void: 'bg-red-100 text-red-700', reject: 'bg-red-100 text-red-700', delete: 'bg-red-100 text-red-700', advance_delete: 'bg-red-100 text-red-700', create: 'bg-slate-100 text-slate-700', update: 'bg-slate-100 text-slate-700', advance_given: 'bg-amber-100 text-amber-700' };
 function auditSummary(l) {
   let d = l.details; if (typeof d === 'string') { try { d = JSON.parse(d); } catch { d = {}; } }
   const r = d?.result || {}; const b = d?.body || {};
@@ -4455,7 +4455,7 @@ function FinalSettlementDrawer({ worker, bankAccounts = [], company, onClose, ad
           <span className="text-sm text-gray-500">Net settlement <span className="font-semibold text-gray-900">{PKR(net)}</span></span>
           <div className="flex gap-2">
             <button onClick={onClose} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
-            <button onClick={finalize} disabled={finalizeMut.isPending} className="px-4 py-2 text-sm text-white bg-rose-600 rounded-lg hover:bg-rose-700 disabled:opacity-50">Pay &amp; close employment</button>
+            <button onClick={finalize} disabled={finalizeMut.isPending} className="px-4 py-2 text-sm text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50">Pay &amp; close employment</button>
           </div>
         </div>
       )}
@@ -4519,7 +4519,7 @@ function LeaveDrawer({ canManage, workers = [], onClose, addToast }) {
   const createType = useCreateLeaveType(); const updateType = useUpdateLeaveType(); const deleteType = useDeleteLeaveType();
   const [typeForm, setTypeForm] = useState({ name: '', paid: true, annual_quota: '', accrues: false });
   const list = tab === 'requests' ? requests : allReq;
-  const TONE = { pending: 'bg-amber-100 text-amber-700', approved: 'bg-emerald-100 text-emerald-700', rejected: 'bg-rose-100 text-rose-700', cancelled: 'bg-gray-100 text-gray-500' };
+  const TONE = { pending: 'bg-amber-100 text-amber-700', approved: 'bg-emerald-100 text-emerald-700', rejected: 'bg-red-100 text-red-700', cancelled: 'bg-gray-100 text-gray-500' };
   const act = async (mut, id, label) => { try { await mut.mutateAsync(id); addToast(`Leave ${label}`, 'success'); } catch (e) { addToast(e.message, 'error'); } };
   const addType = async () => {
     if (!typeForm.name.trim()) { addToast('Name required', 'error'); return; }
@@ -4552,7 +4552,7 @@ function LeaveDrawer({ canManage, workers = [], onClose, addToast }) {
                 {canManage && <div className="flex items-center gap-1.5">
                   {t.annualQuota != null && <button onClick={async () => { try { await updateType.mutateAsync({ id: t.id, data: { accrues: !t.accrues } }); addToast(t.accrues ? 'Now full-quota' : 'Now accrues monthly', 'success'); } catch (e) { addToast(e.message, 'error'); } }} className={`px-2 py-1 text-[11px] rounded-md ${t.accrues ? 'text-violet-700 bg-violet-50' : 'text-gray-500 bg-gray-100'}`}>{t.accrues ? 'Accrual' : 'Up-front'}</button>}
                   <button onClick={async () => { try { await updateType.mutateAsync({ id: t.id, data: { is_active: !t.isActive } }); } catch (e) { addToast(e.message, 'error'); } }} className={`px-2 py-1 text-[11px] rounded-md ${t.isActive ? 'text-emerald-700 bg-emerald-50' : 'text-gray-500 bg-gray-100'}`}>{t.isActive ? 'Active' : 'Inactive'}</button>
-                  <button onClick={async () => { try { await deleteType.mutateAsync(t.id); addToast('Removed', 'success'); } catch (e) { addToast(e.message, 'error'); } }} className="p-1.5 rounded-md text-rose-500 hover:bg-rose-50"><Trash2 className="w-3.5 h-3.5" /></button>
+                  <button onClick={async () => { try { await deleteType.mutateAsync(t.id); addToast('Removed', 'success'); } catch (e) { addToast(e.message, 'error'); } }} className="p-1.5 rounded-md text-red-500 hover:bg-red-50"><Trash2 className="w-3.5 h-3.5" /></button>
                 </div>}
               </div>
             ))}
@@ -4572,7 +4572,7 @@ function LeaveDrawer({ canManage, workers = [], onClose, addToast }) {
               {canManage && r.status === 'pending' && (
                 <div className="flex gap-1.5 mt-2">
                   <button onClick={() => act(approveMut, r.id, 'approved')} disabled={approveMut.isPending} className="px-2.5 py-1.5 text-xs text-white bg-emerald-600 rounded-lg hover:bg-emerald-700">Approve</button>
-                  <button onClick={() => act(rejectMut, r.id, 'rejected')} disabled={rejectMut.isPending} className="px-2.5 py-1.5 text-xs text-rose-600 bg-rose-50 rounded-lg hover:bg-rose-100">Reject</button>
+                  <button onClick={() => act(rejectMut, r.id, 'rejected')} disabled={rejectMut.isPending} className="px-2.5 py-1.5 text-xs text-red-600 bg-red-50 rounded-lg hover:bg-red-100">Reject</button>
                 </div>
               )}
             </div>
@@ -4596,7 +4596,7 @@ function WorkerRequestsDrawer({ canResolve, onClose, addToast }) {
     try { await resolveMut.mutateAsync({ id: r.id, data: { status, response: reply || null } }); setReplyId(null); setReply(''); addToast(`Request ${status}`, 'success'); }
     catch (e) { addToast(e.message, 'error'); }
   }
-  const TONE = { pending: 'bg-amber-100 text-amber-700', approved: 'bg-emerald-100 text-emerald-700', rejected: 'bg-rose-100 text-rose-700', resolved: 'bg-blue-100 text-blue-700' };
+  const TONE = { pending: 'bg-amber-100 text-amber-700', approved: 'bg-emerald-100 text-emerald-700', rejected: 'bg-red-100 text-red-700', resolved: 'bg-blue-100 text-blue-700' };
 
   return (
     <SlideDrawer open onClose={onClose} title="Employee requests" subtitle="Leave / advance / correction / query requests from the self-service portal" icon={Inbox} size="lg">
@@ -4624,7 +4624,7 @@ function WorkerRequestsDrawer({ canResolve, onClose, addToast }) {
                     <textarea rows={2} value={reply} onChange={(e) => setReply(e.target.value)} placeholder="Reply (optional)" className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs" />
                     <div className="flex gap-1.5">
                       <button onClick={() => act(r, 'approved')} disabled={resolveMut.isPending} className="px-2.5 py-1.5 text-xs text-white bg-emerald-600 rounded-lg hover:bg-emerald-700">Approve</button>
-                      <button onClick={() => act(r, 'rejected')} disabled={resolveMut.isPending} className="px-2.5 py-1.5 text-xs text-rose-600 bg-rose-50 rounded-lg hover:bg-rose-100">Reject</button>
+                      <button onClick={() => act(r, 'rejected')} disabled={resolveMut.isPending} className="px-2.5 py-1.5 text-xs text-red-600 bg-red-50 rounded-lg hover:bg-red-100">Reject</button>
                       <button onClick={() => act(r, 'resolved')} disabled={resolveMut.isPending} className="px-2.5 py-1.5 text-xs text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">Mark resolved</button>
                       <button onClick={() => { setReplyId(null); setReply(''); }} className="px-2.5 py-1.5 text-xs text-gray-500 bg-gray-100 rounded-lg">Cancel</button>
                     </div>
@@ -4815,7 +4815,7 @@ function StatutoryRemittancePanel({ canPay, entity = 'mill', bankAccounts = [], 
                 </div>
                 <div className="flex items-center gap-1.5">
                   <button onClick={() => printStatutoryRemittance(r, company)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100" title="Print remittance voucher"><Receipt className="w-3.5 h-3.5" /> Voucher</button>
-                  {canPay && <button onClick={() => reverse(r)} disabled={deleteMut.isPending} className="p-1.5 rounded-md text-rose-500 hover:bg-rose-50" title="Reverse remittance"><Trash2 className="w-3.5 h-3.5" /></button>}
+                  {canPay && <button onClick={() => reverse(r)} disabled={deleteMut.isPending} className="p-1.5 rounded-md text-red-500 hover:bg-red-50" title="Reverse remittance"><Trash2 className="w-3.5 h-3.5" /></button>}
                 </div>
               </div>
             ))}
@@ -4895,7 +4895,7 @@ function PayrollScheduleDrawer({ canManage, canPrepare, onClose, onRunNow, runNo
 
 // Run panel: review a run's payslip lines, see its approval status, and (for
 // Finance/Owner) Approve → Pay → or Void. Paid runs can be Undone (reversed).
-const RUN_STATUS_TONE = { prepared: 'bg-amber-100 text-amber-700', approved: 'bg-blue-100 text-blue-700', accrued: 'bg-violet-100 text-violet-700', partially_paid: 'bg-orange-100 text-orange-700', paid: 'bg-emerald-100 text-emerald-700', posted: 'bg-emerald-100 text-emerald-700', voided: 'bg-gray-100 text-gray-500' };
+const RUN_STATUS_TONE = { prepared: 'bg-amber-100 text-amber-700', approved: 'bg-blue-100 text-blue-700', accrued: 'bg-violet-100 text-violet-700', partially_paid: 'bg-amber-100 text-amber-700', paid: 'bg-emerald-100 text-emerald-700', posted: 'bg-emerald-100 text-emerald-700', voided: 'bg-gray-100 text-gray-500' };
 function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDelete, addToast, onClose, onUndo, onApprove, onPay, onVoid, onAccrue, onSettle, deleteRunMut, approveRunMut, payRunMut, voidRunMut, accrueRunMut, settleRunMut }) {
   const { data, isLoading } = usePayrollRun(runId);
   const run = data?.run;
@@ -4932,8 +4932,8 @@ function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDelete, a
             {canSelectPay && selected.size === 0 && unpaidLines.length > 0 && <button onClick={() => onPay(run)} disabled={busy} className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">{isPartial ? 'Pay remaining' : 'Pay all'} {PKR(unpaidTotal)}</button>}
             {canApprove && st === 'approved' && <button onClick={() => onAccrue(run)} disabled={busy} className="px-4 py-2 text-sm text-violet-700 bg-violet-50 rounded-lg hover:bg-violet-100 disabled:opacity-50">Accrue (pay later)</button>}
             {canPay && isAccrued && <button onClick={() => onSettle(run)} disabled={busy} className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">Settle {PKR(run.netTotal)}</button>}
-            {canApprove && (st === 'prepared' || st === 'approved') && <button onClick={() => onVoid(run)} disabled={busy} className="px-4 py-2 text-sm text-rose-600 bg-rose-50 rounded-lg hover:bg-rose-100 disabled:opacity-50">Void</button>}
-            {canDelete && (isPaid || isAccrued || isPartial) && <button onClick={() => onUndo(run)} disabled={busy} className="px-4 py-2 text-sm text-rose-600 bg-rose-50 rounded-lg hover:bg-rose-100 disabled:opacity-50">{isAccrued ? 'Reverse accrual' : 'Undo run'}</button>}
+            {canApprove && (st === 'prepared' || st === 'approved') && <button onClick={() => onVoid(run)} disabled={busy} className="px-4 py-2 text-sm text-red-600 bg-red-50 rounded-lg hover:bg-red-100 disabled:opacity-50">Void</button>}
+            {canDelete && (isPaid || isAccrued || isPartial) && <button onClick={() => onUndo(run)} disabled={busy} className="px-4 py-2 text-sm text-red-600 bg-red-50 rounded-lg hover:bg-red-100 disabled:opacity-50">{isAccrued ? 'Reverse accrual' : 'Undo run'}</button>}
           </div>
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Close</button>
         </div>
@@ -4952,7 +4952,7 @@ function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDelete, a
             </div>
           </div>
           {isAccrued && <div className="rounded-lg bg-violet-50 border border-violet-200 p-2.5 text-xs text-violet-800">Accrued — salary expense &amp; <span className="font-semibold">Salaries Payable</span> liability are booked and advances recovered, but no cash has moved. Settle to pay it out.{!canPay ? ' Finance/Owner must settle this.' : ''}</div>}
-          {isPartial && <div className="rounded-lg bg-orange-50 border border-orange-200 p-2.5 text-xs text-orange-800"><span className="font-semibold">Partially paid</span> — {paidCount} of {lines.length} employee(s) paid, {unpaidLines.length} still owed ({PKR(unpaidTotal)}). Tick employees and Pay remaining when ready.{!canPay ? ' Finance/Owner must complete this.' : ''}</div>}
+          {isPartial && <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5 text-xs text-amber-800"><span className="font-semibold">Partially paid</span> — {paidCount} of {lines.length} employee(s) paid, {unpaidLines.length} still owed ({PKR(unpaidTotal)}). Tick employees and Pay remaining when ready.{!canPay ? ' Finance/Owner must complete this.' : ''}</div>}
           {!isPaid && !isAccrued && !isPartial && <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5 text-xs text-amber-800">{st === 'prepared' ? 'Pending approval — no cash/GL has posted yet.' : 'Approved — pending payment. Pay all/selected (cash + GL) or Accrue (book the liability, pay later).'}{!canApprove ? ' Finance/Owner must complete this.' : ''}</div>}
           <div className="grid grid-cols-3 gap-2">
             <div className="rounded-lg bg-gray-50 p-2.5"><div className="text-[10px] text-gray-400 uppercase">Gross</div><div className="text-sm font-semibold tabular-nums">{PKR(run.grossTotal)}</div></div>
@@ -5171,7 +5171,7 @@ const LEDGER_TYPE_STYLE = {
 };
 // Compact labelled stat for the employee-ledger summary grid.
 function Sm({ label, value, tone = 'gray' }) {
-  const t = { gray: 'text-gray-900 border-gray-200 bg-gray-50', amber: 'text-amber-700 border-amber-200 bg-amber-50', emerald: 'text-emerald-700 border-emerald-200 bg-emerald-50', rose: 'text-rose-600 border-rose-200 bg-rose-50' }[tone] || 'text-gray-900 border-gray-200 bg-gray-50';
+  const t = { gray: 'text-gray-900 border-gray-200 bg-gray-50', amber: 'text-amber-700 border-amber-200 bg-amber-50', emerald: 'text-emerald-700 border-emerald-200 bg-emerald-50', rose: 'text-red-600 border-red-200 bg-red-50' }[tone] || 'text-gray-900 border-gray-200 bg-gray-50';
   return (
     <div className={`rounded-lg border p-2.5 ${t}`}>
       <p className="text-[10px] uppercase tracking-wider opacity-70">{label}</p>
@@ -5228,9 +5228,9 @@ function EmployeeLedgerDrawer({ worker, onClose }) {
                     <tr key={i} className="hover:bg-gray-50">
                       <td className="px-3 py-2 whitespace-nowrap text-gray-600">{e.date ? new Date(e.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</td>
                       <td className="px-3 py-2 text-gray-700">{e.label}{e.note ? <span className="text-gray-400 text-xs"> · {e.note}</span> : ''}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-rose-600">{e.debit ? rs(e.debit) : '—'}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-red-600">{e.debit ? rs(e.debit) : '—'}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-emerald-600">{e.credit ? rs(e.credit) : '—'}</td>
-                      <td className={`px-3 py-2 text-right tabular-nums font-medium ${e.balance < 0 ? 'text-rose-600' : 'text-gray-900'}`}>{rs(e.balance)}</td>
+                      <td className={`px-3 py-2 text-right tabular-nums font-medium ${e.balance < 0 ? 'text-red-600' : 'text-gray-900'}`}>{rs(e.balance)}</td>
                     </tr>
                   ))}
                 </tbody>

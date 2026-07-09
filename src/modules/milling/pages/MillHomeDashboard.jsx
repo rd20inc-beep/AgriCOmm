@@ -30,7 +30,7 @@ function hoursBetween(a, b) {
 function KPI({ icon: Icon, label, value, sub, accent = 'blue' }) {
   const accents = {
     blue: 'text-blue-600 bg-blue-50',
-    green: 'text-green-600 bg-green-50',
+    green: 'text-emerald-600 bg-emerald-50',
     amber: 'text-amber-600 bg-amber-50',
     red: 'text-red-600 bg-red-50',
     purple: 'text-purple-600 bg-purple-50',
@@ -97,7 +97,7 @@ function BatchColumn({ title, batches, accent, onBatchClick }) {
     slate: 'bg-slate-50 border-slate-200',
     blue: 'bg-blue-50 border-blue-200',
     amber: 'bg-amber-50 border-amber-200',
-    green: 'bg-green-50 border-green-200',
+    green: 'bg-emerald-50 border-emerald-200',
   };
   return (
     <div className={`rounded-lg border p-3 ${colors[accent]}`}>
@@ -341,7 +341,7 @@ export default function MillHomeDashboard() {
             accent="red"
           />
           {totalActions === 0 && (
-            <div className="md:col-span-2 flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg text-green-900">
+            <div className="md:col-span-2 flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-900">
               <CheckCircle2 size={18} />
               <span className="text-sm font-medium">All caught up — mill floor is green.</span>
             </div>

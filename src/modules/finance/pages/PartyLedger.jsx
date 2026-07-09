@@ -52,8 +52,8 @@ const refLink = (refNo) => {
 };
 
 // Per-row tint + pill so a sale/bill row reads Paid / Partial / Unpaid at a glance.
-const STATUS_ROW = { Paid: 'bg-emerald-50', Partial: 'bg-amber-50', Unpaid: 'bg-rose-50' };
-const STATUS_PILL = { Paid: 'bg-emerald-100 text-emerald-700', Partial: 'bg-amber-100 text-amber-700', Unpaid: 'bg-rose-100 text-rose-700' };
+const STATUS_ROW = { Paid: 'bg-emerald-50', Partial: 'bg-amber-50', Unpaid: 'bg-red-50' };
+const STATUS_PILL = { Paid: 'bg-emerald-100 text-emerald-700', Partial: 'bg-amber-100 text-amber-700', Unpaid: 'bg-red-100 text-red-700' };
 
 export default function PartyLedger() {
   const { companyProfileData } = useApp();
@@ -287,7 +287,7 @@ export default function PartyLedger() {
             {stmtLoading ? (
               <div className="p-10 text-center text-sm text-gray-400">Loading statement…</div>
             ) : isError ? (
-              <div className="p-10 text-center text-sm text-rose-500">
+              <div className="p-10 text-center text-sm text-red-500">
                 Couldn’t load statement{error?.message ? ` — ${error.message}` : ''}.
               </div>
             ) : (

@@ -278,7 +278,7 @@ export default function Dashboard() {
                           .then(() => { addToast(`Batch ${b.id} rejected`, 'success'); refreshFromApi('batches'); })
                           .catch(err => addToast(err?.response?.data?.message || 'Failed', 'error'));
                       }}
-                      className="px-3 py-1.5 bg-rose-100 text-rose-700 text-xs font-medium rounded-lg hover:bg-rose-200"
+                      className="px-3 py-1.5 bg-red-100 text-red-700 text-xs font-medium rounded-lg hover:bg-red-200"
                     >
                       Reject
                     </button>
@@ -406,7 +406,7 @@ export default function Dashboard() {
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-              <Factory size={14} className="text-orange-500" /> Production Summary
+              <Factory size={14} className="text-amber-500" /> Production Summary
             </h2>
             {canReports && <Link to="/reports/print" className="text-xs text-blue-600 hover:underline">Print report →</Link>}
           </div>
@@ -505,7 +505,7 @@ function ActionItem({ icon: Icon, label, count, to, accent = 'amber' }) {
   if (count === 0) return null;
   const colors = {
     amber: 'bg-amber-50 border-amber-200 text-amber-900 hover:bg-amber-100',
-    red: 'bg-rose-50 border-rose-200 text-rose-900 hover:bg-rose-100',
+    red: 'bg-red-50 border-red-200 text-red-900 hover:bg-red-100',
     blue: 'bg-blue-50 border-blue-200 text-blue-900 hover:bg-blue-100',
     green: 'bg-emerald-50 border-emerald-200 text-emerald-900 hover:bg-emerald-100',
   };
@@ -529,7 +529,7 @@ function KpiTile({ icon: Icon, tone = 'gray', label, primary, secondary, hint, h
     emerald: { ring: 'ring-emerald-100', icon: 'text-emerald-500 bg-emerald-50' },
     amber:   { ring: 'ring-amber-100',   icon: 'text-amber-500 bg-amber-50' },
     violet:  { ring: 'ring-violet-100',  icon: 'text-violet-500 bg-violet-50' },
-    rose:    { ring: 'ring-rose-100',    icon: 'text-rose-500 bg-rose-50' },
+    rose:    { ring: 'ring-red-100',    icon: 'text-red-500 bg-red-50' },
     gray:    { ring: 'ring-gray-100',    icon: 'text-gray-500 bg-gray-50' },
   };
   const t = tones[tone] || tones.gray;
@@ -546,7 +546,7 @@ function KpiTile({ icon: Icon, tone = 'gray', label, primary, secondary, hint, h
       <div className="text-xl font-bold text-gray-900 leading-none">{primary}</div>
       {secondary && <div className="text-[11px] text-gray-500 mt-1">{secondary}</div>}
       {hint && (
-        <div className={`text-[11px] mt-2 ${hintBad ? 'text-rose-600' : 'text-emerald-600'} font-medium`}>
+        <div className={`text-[11px] mt-2 ${hintBad ? 'text-red-600' : 'text-emerald-600'} font-medium`}>
           {hintBad ? '● ' : '✓ '}{hint}
         </div>
       )}
@@ -579,7 +579,7 @@ function QuickAction({ icon: Icon, label, onClick, tone }) {
   const tones = {
     blue:    'hover:bg-blue-500/20 text-blue-300',
     emerald: 'hover:bg-emerald-500/20 text-emerald-300',
-    rose:    'hover:bg-rose-500/20 text-rose-300',
+    rose:    'hover:bg-red-500/20 text-red-300',
     amber:   'hover:bg-amber-500/20 text-amber-300',
     violet:  'hover:bg-violet-500/20 text-violet-300',
   };

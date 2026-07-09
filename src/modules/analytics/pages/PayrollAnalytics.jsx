@@ -34,7 +34,7 @@ export default function PayrollAnalytics() {
       .finally(() => setLoading(false));
   }, [range]);
 
-  if (error) return <div className="max-w-2xl mx-auto p-6"><div className="flex items-center gap-2 text-rose-600"><AlertTriangle size={18} /> {error}</div></div>;
+  if (error) return <div className="max-w-2xl mx-auto p-6"><div className="flex items-center gap-2 text-red-600"><AlertTriangle size={18} /> {error}</div></div>;
 
   const s = data?.summary || {};
   const trend = data?.trend || [];

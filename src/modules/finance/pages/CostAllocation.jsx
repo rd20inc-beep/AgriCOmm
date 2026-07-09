@@ -36,7 +36,7 @@ function formatAmount(value, currency) {
 }
 
 const statusColors = {
-  Allocated: 'bg-green-100 text-green-700',
+  Allocated: 'bg-emerald-100 text-emerald-700',
   Partial: 'bg-amber-100 text-amber-700',
   Unallocated: 'bg-red-100 text-red-700',
 };
@@ -282,9 +282,9 @@ export default function CostAllocation() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 rounded-lg border border-green-200">
-            <CheckCircle size={14} className="text-green-600" />
-            <span className="text-xs font-medium text-green-700">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 rounded-lg border border-emerald-200">
+            <CheckCircle size={14} className="text-emerald-600" />
+            <span className="text-xs font-medium text-emerald-700">
               {summary.countAllocated} allocated
             </span>
           </div>
@@ -317,13 +317,13 @@ export default function CostAllocation() {
         </div>
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
           <div className="flex items-center gap-2 mb-1">
-            <CheckCircle size={16} className="text-green-500" />
+            <CheckCircle size={16} className="text-emerald-500" />
             <span className="text-xs font-medium text-gray-500 uppercase">Allocated (USD equiv.)</span>
           </div>
-          <p className="text-xl font-bold text-green-700">{formatUSD(Math.round(summary.totalAllocated))}</p>
+          <p className="text-xl font-bold text-emerald-700">{formatUSD(Math.round(summary.totalAllocated))}</p>
           <div className="w-full bg-gray-200 rounded-full h-1.5 mt-2">
             <div
-              className="h-1.5 rounded-full bg-green-500"
+              className="h-1.5 rounded-full bg-emerald-500"
               style={{ width: `${summary.totalGross > 0 ? Math.min((summary.totalAllocated / summary.totalGross) * 100, 100) : 0}%` }}
             />
           </div>
@@ -458,7 +458,7 @@ export default function CostAllocation() {
                       <td className="px-2 py-2.5 text-right font-medium text-gray-900 whitespace-nowrap">
                         {formatAmount(cost.grossAmount, cost.currency)}
                       </td>
-                      <td className="px-2 py-2.5 text-right font-medium text-green-600 whitespace-nowrap">
+                      <td className="px-2 py-2.5 text-right font-medium text-emerald-600 whitespace-nowrap">
                         {formatAmount(allocated, cost.currency)}
                       </td>
                       <td className={`px-2 py-2.5 text-right font-bold whitespace-nowrap ${unallocated > 0 ? 'text-red-600' : 'text-gray-400'}`}>
@@ -559,7 +559,7 @@ export default function CostAllocation() {
                                     <div
                                       className={`h-2 rounded-full transition-all ${
                                         allocated >= cost.grossAmount
-                                          ? 'bg-green-500'
+                                          ? 'bg-emerald-500'
                                           : allocated > 0
                                           ? 'bg-amber-500'
                                           : 'bg-gray-300'
@@ -575,7 +575,7 @@ export default function CostAllocation() {
                                 {unallocated > 0 && (
                                   <div>
                                     <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3 flex items-center gap-2">
-                                      <Plus size={14} className="text-green-500" />
+                                      <Plus size={14} className="text-emerald-500" />
                                       Add Allocation
                                     </h3>
                                     <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
@@ -692,7 +692,7 @@ export default function CostAllocation() {
                                           <span className={`font-bold ${
                                             unallocated - (parseFloat(allocForm.amount) || 0) > 0
                                               ? 'text-amber-600'
-                                              : 'text-green-600'
+                                              : 'text-emerald-600'
                                           }`}>
                                             {formatAmount(
                                               Math.max(0, unallocated - (parseFloat(allocForm.amount) || 0)),
@@ -704,7 +704,7 @@ export default function CostAllocation() {
                                           <span className="text-gray-500">New status:</span>
                                           <span className={`font-medium ${
                                             unallocated - (parseFloat(allocForm.amount) || 0) <= 0
-                                              ? 'text-green-600'
+                                              ? 'text-emerald-600'
                                               : 'text-amber-600'
                                           }`}>
                                             {unallocated - (parseFloat(allocForm.amount) || 0) <= 0

@@ -523,7 +523,7 @@ export default function MillingDashboard() {
                   <td className="py-2.5 px-2 text-gray-600"><PartyLink type="supplier" id={batch.supplierId} name={batch.supplierName} /></td>
                   <td className="py-2.5 px-2 text-right">{Math.round(batch.rawQtyKg).toLocaleString()}</td>
                   <td className="py-2.5 px-2 text-right">{batch.actualFinishedKg ? Math.round(batch.actualFinishedKg).toLocaleString() : '—'}</td>
-                  <td className={`py-2.5 px-2 text-right font-medium ${batch.yieldPct >= 60 ? 'text-green-600' : batch.yieldPct > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
+                  <td className={`py-2.5 px-2 text-right font-medium ${batch.yieldPct >= 60 ? 'text-emerald-600' : batch.yieldPct > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
                     {batch.yieldPct > 0 ? `${batch.yieldPct}%` : '—'}
                   </td>
                   <td className="py-2.5 px-2"><StatusBadge status={batch.status} /></td>
@@ -546,10 +546,10 @@ export default function MillingDashboard() {
               <p className="text-lg font-bold text-amber-900">{formatPKR(rawInventoryValue)}</p>
               <p className="text-xs text-amber-500">{Math.round(rawRiceStock * 1000).toLocaleString()} kg in stock</p>
             </div>
-            <div className="bg-green-50 rounded-lg p-4">
-              <p className="text-xs font-medium text-green-600 uppercase">Finished Rice</p>
-              <p className="text-lg font-bold text-green-900">{formatPKR(finishedInventoryValue)}</p>
-              <p className="text-xs text-green-500">{Math.round(finishedRiceStock * 1000).toLocaleString()} kg in stock</p>
+            <div className="bg-emerald-50 rounded-lg p-4">
+              <p className="text-xs font-medium text-emerald-600 uppercase">Finished Rice</p>
+              <p className="text-lg font-bold text-emerald-900">{formatPKR(finishedInventoryValue)}</p>
+              <p className="text-xs text-emerald-500">{Math.round(finishedRiceStock * 1000).toLocaleString()} kg in stock</p>
             </div>
             <div className="bg-purple-50 rounded-lg p-4">
               <p className="text-xs font-medium text-purple-600 uppercase">Byproducts</p>
@@ -606,14 +606,14 @@ export default function MillingDashboard() {
                     <div className="flex justify-between"><span className="text-red-500">Processing costs</span><span className="font-medium">{formatPKR(totalOtherBatchCosts)}</span></div>
                   </div>
                 </div>
-                <div className="bg-orange-50 rounded-lg p-4">
-                  <p className="text-xs font-medium text-orange-600 uppercase">Overheads</p>
-                  <p className="text-lg font-bold text-orange-900 mt-1">{formatPKR(totalOverhead)}</p>
+                <div className="bg-amber-50 rounded-lg p-4">
+                  <p className="text-xs font-medium text-amber-600 uppercase">Overheads</p>
+                  <p className="text-lg font-bold text-amber-900 mt-1">{formatPKR(totalOverhead)}</p>
                   <div className="mt-2 space-y-1 text-xs">
                     {expenseSummary.slice(0, 3).map(e => (
-                      <div key={e.category} className="flex justify-between"><span className="text-orange-500 capitalize">{e.category}</span><span className="font-medium">{formatPKR(parseFloat(e.total))}</span></div>
+                      <div key={e.category} className="flex justify-between"><span className="text-amber-500 capitalize">{e.category}</span><span className="font-medium">{formatPKR(parseFloat(e.total))}</span></div>
                     ))}
-                    {expenseSummary.length === 0 && <p className="text-orange-400">No expenses recorded</p>}
+                    {expenseSummary.length === 0 && <p className="text-amber-400">No expenses recorded</p>}
                   </div>
                 </div>
                 <div className={`${netProfit >= 0 ? 'bg-emerald-50' : 'bg-red-50'} rounded-lg p-4`}>
@@ -671,7 +671,7 @@ export default function MillingDashboard() {
               {/* Recent Expenses */}
               {millExpenses.length > 0 && (
                 <details className="mt-3">
-                  <summary className="text-xs font-medium text-orange-600 cursor-pointer hover:text-orange-800">View overhead expenses ({millExpenses.length} entries)</summary>
+                  <summary className="text-xs font-medium text-amber-600 cursor-pointer hover:text-amber-800">View overhead expenses ({millExpenses.length} entries)</summary>
                   <div className="mt-3 overflow-x-auto">
                     <table className="w-full text-xs">
                       <thead><tr className="border-b border-gray-200">
@@ -745,7 +745,7 @@ export default function MillingDashboard() {
                       </td>
                       <td className="py-2 px-3">
                         <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
-                          isAtExport ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'
+                          isAtExport ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'
                         }`}>
                           {isAtExport ? 'Export Warehouse' : 'Mill'}
                         </span>
@@ -826,7 +826,7 @@ export default function MillingDashboard() {
                     <td className="py-2.5 px-2 text-gray-600 font-mono text-xs">{`TRK-${batch.id.replace('M-','')}`}</td>
                     <td className="py-2.5 px-2 text-gray-600"><PartyLink type="supplier" id={batch.supplierId} name={batch.supplierName} /></td>
                     <td className="py-2.5 px-2">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
                         Approved
                       </span>
                     </td>
@@ -893,7 +893,7 @@ export default function MillingDashboard() {
                     <td className="py-2.5 px-2 text-right text-gray-600">{Math.round(batch.actualFinishedKg).toLocaleString()}</td>
                     <td className="py-2.5 px-2 text-right text-gray-600">{Math.round(batch.brokenKg).toLocaleString()}</td>
                     <td className={`py-2.5 px-2 text-right font-medium ${
-                      batch.yieldPct >= 75 ? 'text-green-600' : batch.yieldPct > 0 ? 'text-amber-600' : 'text-gray-400'
+                      batch.yieldPct >= 75 ? 'text-emerald-600' : batch.yieldPct > 0 ? 'text-amber-600' : 'text-gray-400'
                     }`}>
                       {batch.yieldPct > 0 ? `${batch.yieldPct}%` : '—'}
                     </td>
@@ -1379,7 +1379,7 @@ export default function MillingDashboard() {
               {batchForm.millingType === 'service_milling' && batchForm.serviceFeePerKg && (
                 <div className="flex justify-between border-t border-gray-200 mt-1 pt-1">
                   <span className="text-gray-500">Milling Revenue</span>
-                  <span className="font-bold text-green-700">PKR {Math.round(parseFloat(batchForm.serviceFeePerKg) * parseFloat(batchForm.rawQtyKg)).toLocaleString()}</span>
+                  <span className="font-bold text-emerald-700">PKR {Math.round(parseFloat(batchForm.serviceFeePerKg) * parseFloat(batchForm.rawQtyKg)).toLocaleString()}</span>
                 </div>
               )}
             </div>

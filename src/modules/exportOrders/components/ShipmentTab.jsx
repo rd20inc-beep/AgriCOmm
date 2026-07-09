@@ -71,7 +71,7 @@ export default function ShipmentTab({ order, onUpdateShipment, canUpdateShipment
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">ATD</span>
-              <span className={`font-medium ${order.atd ? 'text-green-700' : 'text-gray-400'}`}>{order.atd || '\u2014'}</span>
+              <span className={`font-medium ${order.atd ? 'text-emerald-700' : 'text-gray-400'}`}>{order.atd || '\u2014'}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">ETA</span>
@@ -79,7 +79,7 @@ export default function ShipmentTab({ order, onUpdateShipment, canUpdateShipment
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">ATA</span>
-              <span className={`font-medium ${order.ata ? 'text-green-700' : 'text-gray-400'}`}>{order.ata || '\u2014'}</span>
+              <span className={`font-medium ${order.ata ? 'text-emerald-700' : 'text-gray-400'}`}>{order.ata || '\u2014'}</span>
             </div>
           </div>
         </div>
@@ -139,7 +139,7 @@ export default function ShipmentTab({ order, onUpdateShipment, canUpdateShipment
             <div key={event.label} className="flex items-start gap-3">
               <div className="flex flex-col items-center">
                 <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
-                  event.completed ? 'bg-green-500' : 'bg-gray-200'
+                  event.completed ? 'bg-emerald-500' : 'bg-gray-200'
                 }`}>
                   {event.completed ? (
                     <Check className="w-3.5 h-3.5 text-white" />
@@ -148,7 +148,7 @@ export default function ShipmentTab({ order, onUpdateShipment, canUpdateShipment
                   )}
                 </div>
                 {index < shipmentEvents.length - 1 && (
-                  <div className={`w-0.5 h-8 ${event.completed ? 'bg-green-300' : 'bg-gray-200'}`} />
+                  <div className={`w-0.5 h-8 ${event.completed ? 'bg-emerald-300' : 'bg-gray-200'}`} />
                 )}
               </div>
               <div className="pt-0.5">

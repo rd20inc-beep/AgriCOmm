@@ -79,7 +79,7 @@ export default function InventoryMovementLedger() {
   });
 
   const Kpi = ({ label, value, tone = 'gray', icon: Icon }) => {
-    const t = { emerald: 'text-emerald-700', rose: 'text-rose-600', gray: 'text-gray-900' }[tone] || 'text-gray-900';
+    const t = { emerald: 'text-emerald-700', rose: 'text-red-600', gray: 'text-gray-900' }[tone] || 'text-gray-900';
     return (
       <div className="bg-white rounded-xl border border-gray-200 p-4">
         <p className="text-[11px] uppercase tracking-wider text-gray-400 inline-flex items-center gap-1">{Icon && <Icon size={12} />} {label}</p>
@@ -142,7 +142,7 @@ export default function InventoryMovementLedger() {
       </div>
 
       {isLoading ? <div className="p-6 text-sm text-gray-400">Loading inventory movements…</div>
-        : isError ? <p className="p-6 text-sm text-rose-600">{error?.message || 'Inventory movement ledger not available.'}</p>
+        : isError ? <p className="p-6 text-sm text-red-600">{error?.message || 'Inventory movement ledger not available.'}</p>
           : (
             <>
               {/* KPIs */}
@@ -178,7 +178,7 @@ export default function InventoryMovementLedger() {
                                 : r.batchNo ? <Link to={r.href} className="text-blue-600 hover:underline">{r.batchNo}</Link> : '—'}
                             </td>
                             <td className="px-3 py-1.5 text-gray-500 text-xs">{[r.fromWh, r.toWh].filter(Boolean).join(' → ') || r.reference || '—'}</td>
-                            <td className={`px-3 py-1.5 text-right tabular-nums ${r.direction === 'out' ? 'text-rose-700' : 'text-emerald-700'}`}>{r.direction === 'out' ? '−' : '+'}{n0(r.qtyKg)}</td>
+                            <td className={`px-3 py-1.5 text-right tabular-nums ${r.direction === 'out' ? 'text-red-700' : 'text-emerald-700'}`}>{r.direction === 'out' ? '−' : '+'}{n0(r.qtyKg)}</td>
                             <td className="px-3 py-1.5 text-right tabular-nums text-gray-600">{r.costPkr > 0 ? pkr(r.costPkr) : '—'}</td>
                           </tr>
                         ))}

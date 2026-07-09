@@ -328,7 +328,7 @@ export default function SettingsTab() {
               className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
             />
             <label htmlFor="enableTls" className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
-              <Shield className="w-4 h-4 text-green-500" />
+              <Shield className="w-4 h-4 text-emerald-500" />
               Enable TLS
             </label>
           </div>

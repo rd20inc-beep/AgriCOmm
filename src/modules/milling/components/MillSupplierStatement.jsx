@@ -17,8 +17,8 @@ function curSymbol(cur) {
 }
 const fmtCur = (v, cur) => `${curSymbol(cur)}${Math.round(parseFloat(v) || 0).toLocaleString()}`;
 
-const STATUS_ROW = { Paid: 'bg-emerald-50', Partial: 'bg-amber-50', Unpaid: 'bg-rose-50' };
-const STATUS_PILL = { Paid: 'bg-emerald-100 text-emerald-700', Partial: 'bg-amber-100 text-amber-700', Unpaid: 'bg-rose-100 text-rose-700' };
+const STATUS_ROW = { Paid: 'bg-emerald-50', Partial: 'bg-amber-50', Unpaid: 'bg-red-50' };
+const STATUS_PILL = { Paid: 'bg-emerald-100 text-emerald-700', Partial: 'bg-amber-100 text-amber-700', Unpaid: 'bg-red-100 text-red-700' };
 
 const METHOD_LABELS = {
   bank_transfer: 'Bank Transfer', cheque: 'Cheque', cash: 'Cash', online: 'Online',
@@ -112,7 +112,7 @@ export default function MillSupplierStatement({ supplierId, supplierName, params
       {/* KPI strip */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-gray-100">
         <Tile label="Opening" value={fmtCur(opening, cur)} icon={Scale} tone="text-gray-400" />
-        <Tile label="Billed to us" value={fmtCur(totalCredit, cur)} icon={ArrowUpRight} tone="text-rose-500" />
+        <Tile label="Billed to us" value={fmtCur(totalCredit, cur)} icon={ArrowUpRight} tone="text-red-500" />
         <Tile label="Paid" value={fmtCur(totalDebit, cur)} icon={ArrowDownLeft} tone="text-emerald-500" />
         <Tile label="We owe" value={fmtCur(closing, cur)} icon={Scale} tone={closing > 0 ? 'text-amber-500' : 'text-emerald-500'} bold />
       </div>
@@ -122,7 +122,7 @@ export default function MillSupplierStatement({ supplierId, supplierName, params
         {isLoading ? (
           <div className="p-6 text-center text-sm text-gray-400">Loading statement…</div>
         ) : isError ? (
-          <div className="p-6 text-center text-sm text-rose-500">Failed to load statement: {error?.message || 'error'}</div>
+          <div className="p-6 text-center text-sm text-red-500">Failed to load statement: {error?.message || 'error'}</div>
         ) : transactions.length === 0 ? (
           <div className="p-6 text-center text-sm text-gray-400">No transactions in this period.</div>
         ) : (
@@ -167,7 +167,7 @@ export default function MillSupplierStatement({ supplierId, supplierName, params
                       )}
                     </td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-emerald-600">{parseFloat(t.debit) ? fmtCur(t.debit, cur) : ''}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-rose-600">{parseFloat(t.credit) ? fmtCur(t.credit, cur) : ''}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-red-600">{parseFloat(t.credit) ? fmtCur(t.credit, cur) : ''}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-gray-800">{fmtCur(t.running_balance, cur)}</td>
                   </tr>
                 );
@@ -175,7 +175,7 @@ export default function MillSupplierStatement({ supplierId, supplierName, params
               <tr className="bg-gray-50 font-semibold border-t-2 border-gray-200">
                 <td className="px-3 py-2" colSpan={4}>Closing balance</td>
                 <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{fmtCur(totalDebit, cur)}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-rose-700">{fmtCur(totalCredit, cur)}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-red-700">{fmtCur(totalCredit, cur)}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{fmtCur(closing, cur)}</td>
               </tr>
             </tbody>

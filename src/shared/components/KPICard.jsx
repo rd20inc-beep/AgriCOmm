@@ -7,7 +7,7 @@ const colorMap = {
   violet:  { bg: 'bg-violet-50',  icon: 'text-violet-600',  ring: 'ring-violet-100' },
   indigo:  { bg: 'bg-indigo-50',  icon: 'text-indigo-600',  ring: 'ring-indigo-100' },
   cyan:    { bg: 'bg-cyan-50',    icon: 'text-cyan-600',    ring: 'ring-cyan-100' },
-  orange:  { bg: 'bg-orange-50',  icon: 'text-orange-600',  ring: 'ring-orange-100' },
+  orange:  { bg: 'bg-amber-50',  icon: 'text-amber-600',  ring: 'ring-amber-100' },
   emerald: { bg: 'bg-emerald-50', icon: 'text-emerald-600', ring: 'ring-emerald-100' },
 };
 

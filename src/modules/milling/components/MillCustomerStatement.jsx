@@ -19,8 +19,8 @@ function curSymbol(cur) {
 }
 const fmtCur = (v, cur) => `${curSymbol(cur)}${Math.round(parseFloat(v) || 0).toLocaleString()}`;
 
-const STATUS_ROW = { Paid: 'bg-emerald-50', Partial: 'bg-amber-50', Unpaid: 'bg-rose-50' };
-const STATUS_PILL = { Paid: 'bg-emerald-100 text-emerald-700', Partial: 'bg-amber-100 text-amber-700', Unpaid: 'bg-rose-100 text-rose-700' };
+const STATUS_ROW = { Paid: 'bg-emerald-50', Partial: 'bg-amber-50', Unpaid: 'bg-red-50' };
+const STATUS_PILL = { Paid: 'bg-emerald-100 text-emerald-700', Partial: 'bg-amber-100 text-amber-700', Unpaid: 'bg-red-100 text-red-700' };
 
 const refLink = (refNo) => {
   if (!refNo) return null;
@@ -110,7 +110,7 @@ export default function MillCustomerStatement({ customerId, customerName, params
         {isLoading ? (
           <div className="p-6 text-center text-sm text-gray-400">Loading statement…</div>
         ) : isError ? (
-          <div className="p-6 text-center text-sm text-rose-500">Failed to load statement: {error?.message || 'error'}</div>
+          <div className="p-6 text-center text-sm text-red-500">Failed to load statement: {error?.message || 'error'}</div>
         ) : transactions.length === 0 ? (
           <div className="p-6 text-center text-sm text-gray-400">No transactions yet.</div>
         ) : (

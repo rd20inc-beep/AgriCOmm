@@ -12,7 +12,7 @@ import Modal from '../../../components/Modal';
 
 const SEVERITY_CONFIG = {
   critical: { color: 'bg-red-500', bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', icon: AlertCircle },
-  high: { color: 'bg-orange-500', bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', icon: AlertTriangle },
+  high: { color: 'bg-amber-500', bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', icon: AlertTriangle },
   medium: { color: 'bg-amber-500', bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', icon: AlertTriangle },
   low: { color: 'bg-blue-500', bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', icon: Shield },
 };
@@ -120,9 +120,9 @@ export default function ExceptionDashboard() {
           <p className="text-xs font-medium text-red-600 uppercase">Critical</p>
           <p className="text-3xl font-bold text-red-700 mt-1">{criticalCount}</p>
         </div>
-        <div className="bg-orange-50 rounded-xl border border-orange-100 p-4">
-          <p className="text-xs font-medium text-orange-600 uppercase">High</p>
-          <p className="text-3xl font-bold text-orange-700 mt-1">{highCount}</p>
+        <div className="bg-amber-50 rounded-xl border border-amber-100 p-4">
+          <p className="text-xs font-medium text-amber-600 uppercase">High</p>
+          <p className="text-3xl font-bold text-amber-700 mt-1">{highCount}</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-100 p-4">
           <p className="text-xs font-medium text-gray-500 uppercase">Resolved Today</p>

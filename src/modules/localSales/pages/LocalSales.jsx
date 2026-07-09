@@ -147,10 +147,10 @@ export default function LocalSales() {
 
       {/* KPIs */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="bg-green-50 rounded-xl border border-green-200 p-4">
-          <p className="text-xs font-medium text-green-600 uppercase">Today</p>
-          <p className="text-xl font-bold text-green-700 mt-1">{fmtPKR(today.total)}</p>
-          <p className="text-xs text-green-500">{today.count || 0} sales · {Math.round(parseFloat(today.qtyKg) || 0).toLocaleString()} KG</p>
+        <div className="bg-emerald-50 rounded-xl border border-emerald-200 p-4">
+          <p className="text-xs font-medium text-emerald-600 uppercase">Today</p>
+          <p className="text-xl font-bold text-emerald-700 mt-1">{fmtPKR(today.total)}</p>
+          <p className="text-xs text-emerald-500">{today.count || 0} sales · {Math.round(parseFloat(today.qtyKg) || 0).toLocaleString()} KG</p>
         </div>
         <div className="bg-blue-50 rounded-xl border border-blue-200 p-4">
           <p className="text-xs font-medium text-blue-600 uppercase">This Month</p>
@@ -214,7 +214,7 @@ export default function LocalSales() {
                   <button onClick={() => handleConfirmSale(g)} disabled={confirmSaleMut.isPending}
                     className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-60"><Check size={14} /> Confirm</button>
                   <button onClick={() => handleRejectSale(g)} disabled={rejectSaleMut.isPending}
-                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-rose-600 bg-rose-50 rounded-lg hover:bg-rose-100 disabled:opacity-60"><X size={14} /> Reject</button>
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-red-600 bg-red-50 rounded-lg hover:bg-red-100 disabled:opacity-60"><X size={14} /> Reject</button>
                 </div>
               </div>
             ))}
@@ -340,7 +340,7 @@ export default function LocalSales() {
           <div className="space-y-5">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="bg-white rounded-lg border p-3"><p className="text-xs text-gray-500">Total</p><p className="text-lg font-bold text-gray-900">{fmtPKR(selectedSale.totalAmount)}</p></div>
-              <div className="bg-green-50 rounded-lg border border-green-200 p-3"><p className="text-xs text-green-600">Paid</p><p className="text-lg font-bold text-green-700">{fmtPKR(selectedSale.paidAmount)}</p></div>
+              <div className="bg-emerald-50 rounded-lg border border-emerald-200 p-3"><p className="text-xs text-emerald-600">Paid</p><p className="text-lg font-bold text-emerald-700">{fmtPKR(selectedSale.paidAmount)}</p></div>
               <div className={`rounded-lg border p-3 ${parseFloat(selectedSale.dueAmount) > 0 ? 'bg-red-50 border-red-200' : 'bg-gray-50'}`}>
                 <p className={`text-xs ${parseFloat(selectedSale.dueAmount) > 0 ? 'text-red-600' : 'text-gray-500'}`}>Remaining</p>
                 <p className={`text-lg font-bold ${parseFloat(selectedSale.dueAmount) > 0 ? 'text-red-700' : 'text-gray-400'}`}>{fmtPKR(selectedSale.dueAmount)}</p>
@@ -381,7 +381,7 @@ export default function LocalSales() {
 
             {parseFloat(selectedSale.dueAmount) > 0 && (
               <button onClick={() => { setPayForm(p => ({ ...p, amount: String(parseFloat(selectedSale.dueAmount) || 0), collection_location: selectedSale.collectionLocation || selectedSale.collection_location || 'Mill' })); setShowPaymentModal(true); }}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700">
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700">
                 <CreditCard size={16} /> Accept Payment ({fmtPKR(selectedSale.dueAmount)})
               </button>
             )}
@@ -435,7 +435,7 @@ export default function LocalSales() {
               } catch (err) { addToast(err.message || 'Payment failed', 'error'); }
               setPayLoading(false);
             }} disabled={payLoading}
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50">
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50">
               {payLoading ? 'Processing...' : 'Confirm Payment'}
             </button>
           </div>

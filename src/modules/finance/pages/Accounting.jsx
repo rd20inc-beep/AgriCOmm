@@ -131,7 +131,7 @@ export default function Accounting() {
   return (
     <div className="space-y-5 pb-4">
       {/* ─── HERO BAND ──────────────────────────────────────────── */}
-      <div className={`rounded-2xl bg-gradient-to-r ${isBalanced ? 'from-slate-800 via-slate-700 to-slate-600' : 'from-rose-700 via-rose-600 to-orange-500'} p-5 sm:p-6 text-white shadow-sm relative overflow-hidden`}>
+      <div className={`rounded-2xl bg-gradient-to-r ${isBalanced ? 'from-slate-800 via-slate-700 to-slate-600' : 'from-red-700 via-red-600 to-amber-500'} p-5 sm:p-6 text-white shadow-sm relative overflow-hidden`}>
         <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 80% 20%, white 0%, transparent 60%)' }} />
         <div className="relative flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
           <div className="min-w-0">
@@ -323,7 +323,7 @@ export default function Accounting() {
                         const balanced = drift < 1;
                         const orig = fmtOriginal(j.totalDebit || j.total_debit, j.currency);
                         return (
-                          <td className={`py-2.5 px-3 text-right font-medium whitespace-nowrap ${balanced ? 'text-gray-900' : 'text-rose-700'}`}
+                          <td className={`py-2.5 px-3 text-right font-medium whitespace-nowrap ${balanced ? 'text-gray-900' : 'text-red-700'}`}
                               title={balanced ? '' : `Imbalanced — DR ${fmtPkr(drPkr)} · CR ${fmtPkr(crPkr)}`}>
                             {fmtPkr(drPkr)}
                             {!balanced && <span className="ml-1 text-[10px]">⚠</span>}
@@ -334,7 +334,7 @@ export default function Accounting() {
                       <td className="py-2.5 px-3">
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                           j.status === 'Posted' ? 'bg-emerald-50 text-emerald-700'
-                          : j.status === 'Reversed' ? 'bg-rose-50 text-rose-700'
+                          : j.status === 'Reversed' ? 'bg-red-50 text-red-700'
                           : 'bg-gray-100 text-gray-600'}`}>
                           {j.status || 'Draft'}
                         </span>

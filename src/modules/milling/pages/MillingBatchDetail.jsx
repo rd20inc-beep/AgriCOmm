@@ -287,9 +287,9 @@ export default function MillingBatchDetail() {
   const yieldBreakdown = [
     { label: finishedLabel, value: parseFloat(batch.actualFinishedMT) || 0, color: 'bg-blue-500', pct: pct(parseFloat(batch.actualFinishedMT) || 0) },
     { label: 'Broken', value: parseFloat(batch.brokenMT) || 0, color: 'bg-amber-500', pct: pct(parseFloat(batch.brokenMT) || 0) },
-    { label: 'Sortex Rejects', value: sortexValue, color: 'bg-orange-500', pct: pct(sortexValue) },
+    { label: 'Sortex Rejects', value: sortexValue, color: 'bg-amber-500', pct: pct(sortexValue) },
     { label: 'Wastage', value: parseFloat(batch.wastageMT) || 0, color: 'bg-red-500', pct: pct(parseFloat(batch.wastageMT) || 0) },
-    ...(branValue > 0 ? [{ label: 'Bran (legacy)', value: branValue, color: 'bg-green-500', pct: pct(branValue) }] : []),
+    ...(branValue > 0 ? [{ label: 'Bran (legacy)', value: branValue, color: 'bg-emerald-500', pct: pct(branValue) }] : []),
     ...(huskValue > 0 ? [{ label: 'Husk (legacy)', value: huskValue, color: 'bg-purple-500', pct: pct(huskValue) }] : []),
   ].filter(r => r.value > 0 || r.label === finishedLabel);
 
@@ -713,7 +713,7 @@ export default function MillingBatchDetail() {
               </div>
             )}
             {batch.approvedByName && (
-              <p className="text-xs text-green-600 mt-0.5">Approved by: {batch.approvedByName}</p>
+              <p className="text-xs text-emerald-600 mt-0.5">Approved by: {batch.approvedByName}</p>
             )}
             {batch.rejectionReason && (
               <p className="text-xs text-red-600 mt-0.5">Rejected: {batch.rejectionReason}</p>
@@ -761,7 +761,7 @@ export default function MillingBatchDetail() {
                       invalidateBatch();
                     } catch (err) { addToast(`Failed: ${err?.response?.data?.message || err.message}`, 'error'); }
                   }}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors"
+                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
                 >
                   <CheckCircle size={16} /> Approve
                 </button>
@@ -1107,14 +1107,14 @@ export default function MillingBatchDetail() {
                     </div>
                     <div className="w-full bg-gray-200 rounded-full h-2">
                       <div
-                        className="bg-green-500 h-2 rounded-full"
+                        className="bg-emerald-500 h-2 rounded-full"
                         style={{ width: `${batch.plannedFinishedMT > 0 ? Math.min((batch.actualFinishedMT / batch.plannedFinishedMT) * 100, 100) : 0}%` }}
                       />
                     </div>
                   </div>
                   <div className="flex justify-between pt-2 border-t border-gray-100">
                     <span className="text-gray-500">Yield</span>
-                    <span className={`font-bold ${batch.yieldPct >= 75 ? 'text-green-600' : batch.yieldPct > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
+                    <span className={`font-bold ${batch.yieldPct >= 75 ? 'text-emerald-600' : batch.yieldPct > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
                       {batch.yieldPct > 0 ? `${batch.yieldPct}%` : '—'}
                     </span>
                   </div>
@@ -1271,7 +1271,7 @@ export default function MillingBatchDetail() {
                               ) : isHigh ? (
                                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">Fail</span>
                               ) : (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">Pass</span>
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">Pass</span>
                               )}
                             </td>
                           </tr>
@@ -1310,7 +1310,7 @@ export default function MillingBatchDetail() {
                         const diff = arrP - samP;
                         return (
                         <div className={`mt-2 text-xs px-3 py-2 rounded-lg flex items-center justify-between gap-3 ${
-                          arrP > samP ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'
+                          arrP > samP ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'
                         }`}>
                           <span>
                             Price difference: Rs {(Math.abs(diff) / 1000).toFixed(2)} /kg
@@ -1370,7 +1370,7 @@ export default function MillingBatchDetail() {
                 <div className="flex items-center gap-3">
                   <button
                     onClick={handleApproveAnyway}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors"
                   >
                     <CheckCircle size={16} />
                     Approve Anyway
@@ -1436,7 +1436,7 @@ export default function MillingBatchDetail() {
                 </h3>
                 <button
                   onClick={openYieldModal}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 transition-colors"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700 transition-colors"
                 >
                   <Edit3 size={14} />
                   {batch.actualFinishedMT > 0 ? 'Update Yield' : 'Record Yield Output'}
@@ -1500,7 +1500,7 @@ export default function MillingBatchDetail() {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-500">Actual Yield</span>
-                      <span className={`font-bold ${batch.yieldPct >= 75 ? 'text-green-600' : batch.yieldPct > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
+                      <span className={`font-bold ${batch.yieldPct >= 75 ? 'text-emerald-600' : batch.yieldPct > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
                         {batch.yieldPct > 0 ? `${batch.yieldPct}%` : '—'}
                       </span>
                     </div>
@@ -1590,7 +1590,7 @@ export default function MillingBatchDetail() {
               </div>
               <div className="bg-white rounded-xl border border-gray-100 p-4">
                 <p className="text-xs font-medium text-gray-500 uppercase">By-Product Value</p>
-                <p className="text-xl font-bold text-green-700 mt-1">{fmtPKR2(bpValue)}</p>
+                <p className="text-xl font-bold text-emerald-700 mt-1">{fmtPKR2(bpValue)}</p>
               </div>
               <div className="bg-white rounded-xl border border-gray-100 p-4">
                 <p className="text-xs font-medium text-gray-500 uppercase">Net Purchase</p>
@@ -1604,7 +1604,7 @@ export default function MillingBatchDetail() {
               </div>
               <div className="bg-white rounded-xl border border-gray-100 p-4">
                 <p className="text-xs font-medium text-gray-500 uppercase">Yield</p>
-                <p className={`text-xl font-bold mt-1 ${batch.yieldPct >= 65 ? 'text-green-700' : 'text-red-700'}`}>{batch.yieldPct > 0 ? `${batch.yieldPct}%` : '—'}</p>
+                <p className={`text-xl font-bold mt-1 ${batch.yieldPct >= 65 ? 'text-emerald-700' : 'text-red-700'}`}>{batch.yieldPct > 0 ? `${batch.yieldPct}%` : '—'}</p>
               </div>
             </div>
 
@@ -1669,7 +1669,7 @@ export default function MillingBatchDetail() {
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">Process Cost Breakdown</h3>
                 <div className="flex gap-2">
-                  <button onClick={openCostModal} className="btn btn-sm bg-green-600 text-white hover:bg-green-700 border-green-600">
+                  <button onClick={openCostModal} className="btn btn-sm bg-emerald-600 text-white hover:bg-emerald-700 border-emerald-600">
                     <Edit3 size={14} /> {totalCosts > 0 ? 'Update Costs' : 'Enter Costs'}
                   </button>
                   <button onClick={() => setShowCostSheet(true)} className="btn btn-sm btn-secondary">
@@ -1748,9 +1748,9 @@ export default function MillingBatchDetail() {
                     </tr>
                     {bpValue > 0 && (
                       <>
-                        <tr className="bg-green-50">
-                          <td className="py-2 px-3 text-green-700 font-medium">Less: By-Product Recovery</td>
-                          <td className="py-2 px-3 text-right text-green-700 font-bold">- {formatPKR(bpValue)}</td>
+                        <tr className="bg-emerald-50">
+                          <td className="py-2 px-3 text-emerald-700 font-medium">Less: By-Product Recovery</td>
+                          <td className="py-2 px-3 text-right text-emerald-700 font-bold">- {formatPKR(bpValue)}</td>
                           <td colSpan={2}></td>
                         </tr>
                         <tr className="bg-blue-50 border-t border-blue-200">
@@ -1920,7 +1920,7 @@ export default function MillingBatchDetail() {
             <input type="number" step="0.01" min="0" required value={yieldForm.actualFinishedMT}
               onChange={(e) => setYieldForm(prev => ({ ...prev, actualFinishedMT: e.target.value }))}
               placeholder="e.g. 49.2"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
           </div>
 
           {/* Grades — B1/B2/B3/CSR/Short Grain are first-class outputs (no
@@ -1942,35 +1942,35 @@ export default function MillingBatchDetail() {
                 <input type="number" step="0.01" min="0" value={yieldForm.b1MT}
                   onChange={(e) => setYieldForm(prev => ({ ...prev, b1MT: e.target.value }))}
                   placeholder="0"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
               </div>
               <div>
                 <label className="block text-[11px] font-medium text-gray-600 mb-1">B2 (KG)</label>
                 <input type="number" step="0.01" min="0" value={yieldForm.b2MT}
                   onChange={(e) => setYieldForm(prev => ({ ...prev, b2MT: e.target.value }))}
                   placeholder="0"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
               </div>
               <div>
                 <label className="block text-[11px] font-medium text-gray-600 mb-1">B3 (KG)</label>
                 <input type="number" step="0.01" min="0" value={yieldForm.b3MT}
                   onChange={(e) => setYieldForm(prev => ({ ...prev, b3MT: e.target.value }))}
                   placeholder="0"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
               </div>
               <div>
                 <label className="block text-[11px] font-medium text-gray-600 mb-1">CSR (KG)</label>
                 <input type="number" step="0.01" min="0" value={yieldForm.csrMT}
                   onChange={(e) => setYieldForm(prev => ({ ...prev, csrMT: e.target.value }))}
                   placeholder="0"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
               </div>
               <div>
                 <label className="block text-[11px] font-medium text-gray-600 mb-1">Short Grain (KG)</label>
                 <input type="number" step="0.01" min="0" value={yieldForm.shortGrainMT}
                   onChange={(e) => setYieldForm(prev => ({ ...prev, shortGrainMT: e.target.value }))}
                   placeholder="0"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
               </div>
             </div>
           </div>
@@ -1982,7 +1982,7 @@ export default function MillingBatchDetail() {
               <input type="number" step="0.01" min="0" value={yieldForm.sortexMT}
                 onChange={(e) => setYieldForm(prev => ({ ...prev, sortexMT: e.target.value }))}
                 placeholder="e.g. 2.1"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
               <p className="text-[11px] text-gray-400 mt-0.5">Color-sorter rejected kernels (yellow/damaged)</p>
             </div>
             <div>
@@ -1990,7 +1990,7 @@ export default function MillingBatchDetail() {
               <input type="number" step="0.01" min="0" value={yieldForm.powderMT}
                 onChange={(e) => setYieldForm(prev => ({ ...prev, powderMT: e.target.value }))}
                 placeholder="e.g. 0.5"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
               <p className="text-[11px] text-gray-400 mt-0.5">Rice powder — sellable, goes to inventory</p>
             </div>
             <div>
@@ -1998,7 +1998,7 @@ export default function MillingBatchDetail() {
               <input type="number" step="0.01" min="0" value={yieldForm.sweepingMT}
                 onChange={(e) => setYieldForm(prev => ({ ...prev, sweepingMT: e.target.value }))}
                 placeholder="e.g. 0.3"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
               <p className="text-[11px] text-gray-400 mt-0.5">Sweeping — sellable, goes to inventory</p>
             </div>
             <div>
@@ -2006,7 +2006,7 @@ export default function MillingBatchDetail() {
               <input type="number" step="0.01" min="0" value={yieldForm.chobaMT}
                 onChange={(e) => setYieldForm(prev => ({ ...prev, chobaMT: e.target.value }))}
                 placeholder="e.g. 0.4"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
               <p className="text-[11px] text-gray-400 mt-0.5">Choba — sellable, goes to inventory</p>
             </div>
             <div>
@@ -2014,7 +2014,7 @@ export default function MillingBatchDetail() {
               <input type="number" step="0.01" min="0" value={yieldForm.ovMT}
                 onChange={(e) => setYieldForm(prev => ({ ...prev, ovMT: e.target.value }))}
                 placeholder="e.g. 0.2"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
               <p className="text-[11px] text-gray-400 mt-0.5">Record-only — not priced or stocked</p>
             </div>
             <div>
@@ -2022,7 +2022,7 @@ export default function MillingBatchDetail() {
               <input type="number" step="0.01" min="0" value={yieldForm.stoneMT}
                 onChange={(e) => setYieldForm(prev => ({ ...prev, stoneMT: e.target.value }))}
                 placeholder="e.g. 0.1"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
               <p className="text-[11px] text-gray-400 mt-0.5">Record-only — not priced or stocked</p>
             </div>
             <div>
@@ -2030,7 +2030,7 @@ export default function MillingBatchDetail() {
               <input type="number" step="0.01" min="0" value={yieldForm.wastageMT}
                 onChange={(e) => setYieldForm(prev => ({ ...prev, wastageMT: e.target.value }))}
                 placeholder="e.g. 1.3"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
               <p className="text-[11px] text-gray-400 mt-0.5">Dust / fines / unaccounted — no value</p>
             </div>
           </div>
@@ -2076,7 +2076,7 @@ export default function MillingBatchDetail() {
             if (b3) rows.push({ label: '  B3', value: b3, indent: true });
             if (csr) rows.push({ label: '  CSR', value: csr, indent: true });
             if (sg) rows.push({ label: '  Short Grain', value: sg, indent: true });
-            rows.push({ label: 'Sortex Rejects', value: sx, color: 'text-orange-700' });
+            rows.push({ label: 'Sortex Rejects', value: sx, color: 'text-amber-700' });
             if (pw > 0) rows.push({ label: 'Powder', value: pw, color: 'text-gray-600' });
             if (sw > 0) rows.push({ label: 'S.W', value: sw, color: 'text-gray-600' });
             if (ch > 0) rows.push({ label: 'Choba', value: ch, color: 'text-gray-600' });
@@ -2108,13 +2108,13 @@ export default function MillingBatchDetail() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Accounted for</span>
-                  <span className={`font-semibold ${parseFloat(accounted) > 100 ? 'text-red-600' : parseFloat(accounted) >= 95 ? 'text-green-600' : 'text-amber-600'}`}>
+                  <span className={`font-semibold ${parseFloat(accounted) > 100 ? 'text-red-600' : parseFloat(accounted) >= 95 ? 'text-emerald-600' : 'text-amber-600'}`}>
                     {accounted}% of {Math.round(rawQty).toLocaleString()} kg
                   </span>
                 </div>
                 <div className="flex justify-between border-t border-gray-200 pt-2">
                   <span className="font-semibold text-gray-700">Yield %</span>
-                  <span className={`text-lg font-bold ${parseFloat(yieldPct) >= 75 ? 'text-green-600' : parseFloat(yieldPct) >= 60 ? 'text-amber-600' : 'text-red-600'}`}>
+                  <span className={`text-lg font-bold ${parseFloat(yieldPct) >= 75 ? 'text-emerald-600' : parseFloat(yieldPct) >= 60 ? 'text-amber-600' : 'text-red-600'}`}>
                     {yieldPct}%
                   </span>
                 </div>
@@ -2132,7 +2132,7 @@ export default function MillingBatchDetail() {
             </button>
             <button
               type="submit"
-              className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors"
+              className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors"
             >
               Save Yield Output
             </button>
@@ -2156,7 +2156,7 @@ export default function MillingBatchDetail() {
                     value={costForm[item.key]}
                     onChange={(e) => setCostForm(prev => ({ ...prev, [item.key]: e.target.value }))}
                     placeholder="0"
-                    className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                    className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                   />
                 </div>
               </div>
@@ -2191,7 +2191,7 @@ export default function MillingBatchDetail() {
             </button>
             <button
               type="submit"
-              className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors"
+              className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors"
             >
               Save Costs
             </button>
@@ -2465,13 +2465,13 @@ export default function MillingBatchDetail() {
                     <label className="block text-xs text-gray-600 mb-1">Milling Cost</label>
                     <input type="number" min="0" value={priceForm.millingCost}
                       onChange={e => setPriceForm(p => ({ ...p, millingCost: e.target.value }))}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
                   </div>
                   <div>
                     <label className="block text-xs text-gray-600 mb-1">Other Expenses</label>
                     <input type="number" min="0" value={priceForm.otherExpenses}
                       onChange={e => setPriceForm(p => ({ ...p, otherExpenses: e.target.value }))}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
                   </div>
                 </div>
                 {packingCost > 0 && (
@@ -2495,7 +2495,7 @@ export default function MillingBatchDetail() {
                       <label className="block text-xs text-gray-600 mb-1">{f.label}<span className="text-gray-400 ml-1">· {Math.round(f.qty * 1000).toLocaleString()} kg</span></label>
                       <input type="number" min="0" value={priceForm[f.key] ?? ''}
                         onChange={e => setPriceForm(p => ({ ...p, [f.key]: e.target.value }))}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
                     </div>
                   ))}
                 </div>
@@ -2537,7 +2537,7 @@ export default function MillingBatchDetail() {
                     invalidateBatch();
                     setShowPriceModal(false);
                   } catch (err) { addToast(err.message || 'Failed', 'error'); }
-                }} className="px-4 py-2 text-sm text-white bg-green-600 rounded-lg hover:bg-green-700">Save Costs</button>
+                }} className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700">Save Costs</button>
               </div>
             </div>
           );

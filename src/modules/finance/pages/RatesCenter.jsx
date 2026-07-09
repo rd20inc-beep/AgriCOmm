@@ -90,7 +90,7 @@ export default function RatesCenter() {
 
   const isFallback = latestFx.source === 'system_settings_fallback';
   const heroGradient = isFallback
-    ? 'from-amber-600 via-amber-500 to-orange-500'
+    ? 'from-amber-600 via-amber-500 to-amber-500'
     : 'from-violet-700 via-indigo-600 to-blue-600';
 
   const lockedCount = useMemo(() => commodityRates.filter(c => c.isLocked).length, [commodityRates]);

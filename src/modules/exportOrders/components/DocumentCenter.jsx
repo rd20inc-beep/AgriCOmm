@@ -1480,7 +1480,7 @@ export default function DocumentCenter({ order }) {
             <p className="text-xs text-gray-400 mt-0.5">{readyCount} ready to generate{lockedCount > 0 ? ` · ${lockedCount} need more data` : ''}</p>
           </div>
           <div className="flex items-center gap-2 text-xs">
-            <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-50 text-green-700 rounded-full font-medium">
+            <span className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-50 text-emerald-700 rounded-full font-medium">
               <CheckCircle className="w-3 h-3" /> {readyCount} Ready
             </span>
             {lockedCount > 0 && (

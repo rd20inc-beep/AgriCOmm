@@ -112,10 +112,10 @@ export default function Reconciliation() {
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <div className="bg-white rounded-lg border border-gray-200 p-4">
           <div className="flex items-center gap-2 mb-1">
-            <CheckCircle className="w-4 h-4 text-green-500" />
+            <CheckCircle className="w-4 h-4 text-emerald-500" />
             <p className="text-xs font-medium text-gray-500">Fully Matched</p>
           </div>
-          <p className="text-xl font-bold text-green-600">{kpis.fullyMatched}</p>
+          <p className="text-xl font-bold text-emerald-600">{kpis.fullyMatched}</p>
         </div>
         <div className="bg-white rounded-lg border border-gray-200 p-4">
           <div className="flex items-center gap-2 mb-1">
@@ -140,7 +140,7 @@ export default function Reconciliation() {
         </div>
         <div className="bg-white rounded-lg border border-gray-200 p-4">
           <p className="text-xs font-medium text-gray-500 mb-1">Collection Rate</p>
-          <p className="text-xl font-bold text-green-600">{kpis.collectionRate}%</p>
+          <p className="text-xl font-bold text-emerald-600">{kpis.collectionRate}%</p>
         </div>
         <div className="bg-white rounded-lg border border-gray-200 p-4">
           <div className="flex items-center gap-2 mb-1">
@@ -209,22 +209,22 @@ export default function Reconciliation() {
                   <td className="px-4 py-3 text-right font-medium text-gray-900">{formatCurrency(r.contractValue)}</td>
                   <td className="px-4 py-3 text-right text-gray-600">{formatCurrency(r.advanceExpected)}</td>
                   <td className="px-4 py-3 text-right">
-                    <span className={r.advanceMatched ? 'text-green-600 font-medium' : 'text-amber-600'}>
+                    <span className={r.advanceMatched ? 'text-emerald-600 font-medium' : 'text-amber-600'}>
                       {formatCurrency(r.advanceReceived)}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right text-gray-600">{formatCurrency(r.balanceExpected)}</td>
                   <td className="px-4 py-3 text-right">
-                    <span className={r.balanceMatched ? 'text-green-600 font-medium' : 'text-amber-600'}>
+                    <span className={r.balanceMatched ? 'text-emerald-600 font-medium' : 'text-amber-600'}>
                       {formatCurrency(r.balanceReceived)}
                     </span>
                   </td>
-                  <td className={`px-4 py-3 text-right font-semibold ${r.outstanding > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                  <td className={`px-4 py-3 text-right font-semibold ${r.outstanding > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
                     {formatCurrency(r.outstanding)}
                   </td>
                   <td className="px-4 py-3 text-center">
                     {r.matchStatus === 'fully_matched' && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
                         <CheckCircle className="w-3 h-3" /> Matched
                       </span>
                     )}

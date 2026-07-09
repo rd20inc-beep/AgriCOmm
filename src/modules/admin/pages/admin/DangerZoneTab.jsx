@@ -21,12 +21,12 @@ const errOf = (e) => e?.data?.message || e?.data?.errors?.[0]?.message || e?.mes
 
 function Card({ icon: Icon, title, subtitle, children }) {
   return (
-    <div className="bg-white rounded-xl border border-rose-200 overflow-hidden">
-      <div className="flex items-center gap-2 px-4 py-3 bg-rose-50 border-b border-rose-200">
-        <Icon size={16} className="text-rose-600" />
+    <div className="bg-white rounded-xl border border-red-200 overflow-hidden">
+      <div className="flex items-center gap-2 px-4 py-3 bg-red-50 border-b border-red-200">
+        <Icon size={16} className="text-red-600" />
         <div>
-          <h3 className="text-sm font-semibold text-rose-900">{title}</h3>
-          {subtitle && <p className="text-[11px] text-rose-700/80">{subtitle}</p>}
+          <h3 className="text-sm font-semibold text-red-900">{title}</h3>
+          {subtitle && <p className="text-[11px] text-red-700/80">{subtitle}</p>}
         </div>
       </div>
       <div className="p-4 space-y-3">{children}</div>
@@ -34,7 +34,7 @@ function Card({ icon: Icon, title, subtitle, children }) {
   );
 }
 
-const INPUT = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-rose-400 bg-white';
+const INPUT = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-red-400 bg-white';
 const LABEL = 'block text-[11px] font-semibold text-gray-600 uppercase mb-1';
 
 export default function DangerZoneTab() {
@@ -127,11 +127,11 @@ export default function DangerZoneTab() {
 
   return (
     <div className="space-y-5 max-w-3xl">
-      <div className="flex items-start gap-3 p-4 rounded-xl bg-rose-600 text-white">
+      <div className="flex items-start gap-3 p-4 rounded-xl bg-red-600 text-white">
         <ShieldAlert size={20} className="flex-shrink-0 mt-0.5" />
         <div>
           <p className="font-semibold text-sm">Danger Zone — permanent actions</p>
-          <p className="text-[12px] text-rose-100">These hard-delete records and adjust balances. Changes are irreversible and audit-logged. Super Admin only.</p>
+          <p className="text-[12px] text-red-100">These hard-delete records and adjust balances. Changes are irreversible and audit-logged. Super Admin only.</p>
         </div>
       </div>
 
@@ -153,12 +153,12 @@ export default function DangerZoneTab() {
               {Object.entries(lotImpact.counts || {}).filter(([, c]) => c > 0).map(([t, c]) => `${c} ${t.replace(/_/g, ' ')}`).join(', ') || 'no child records'}
             </p>
             {lotImpact.blockers?.length > 0 && (
-              <p className="text-rose-700 font-medium flex items-center gap-1"><AlertTriangle size={13} /> In use: {lotImpact.blockers.join('; ')} — requires force delete</p>
+              <p className="text-red-700 font-medium flex items-center gap-1"><AlertTriangle size={13} /> In use: {lotImpact.blockers.join('; ')} — requires force delete</p>
             )}
           </div>
         )}
         <button disabled={!lotId || lotBusy} onClick={deleteLot}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-rose-600 text-white text-sm font-medium rounded-lg hover:bg-rose-700 disabled:opacity-40">
+          className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 disabled:opacity-40">
           <Trash2 size={15} /> {lotBusy ? 'Deleting…' : 'Permanently delete lot'}
         </button>
       </Card>
@@ -186,7 +186,7 @@ export default function DangerZoneTab() {
           </div>
         )}
         <button disabled={!txnId || txnBusy} onClick={deleteTxn}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-rose-600 text-white text-sm font-medium rounded-lg hover:bg-rose-700 disabled:opacity-40">
+          className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 disabled:opacity-40">
           <Trash2 size={15} /> {txnBusy ? 'Deleting…' : 'Permanently delete transaction'}
         </button>
       </Card>
@@ -226,21 +226,21 @@ export default function DangerZoneTab() {
       </Card>
 
       {/* Reset to 0 */}
-      <div className="bg-white rounded-xl border-2 border-rose-400 overflow-hidden">
-        <div className="flex items-center gap-2 px-4 py-3 bg-rose-600 text-white">
+      <div className="bg-white rounded-xl border-2 border-red-400 overflow-hidden">
+        <div className="flex items-center gap-2 px-4 py-3 bg-red-600 text-white">
           <ShieldAlert size={16} />
           <div>
             <h3 className="text-sm font-bold">Reset system to 0</h3>
-            <p className="text-[11px] text-rose-100">Wipe ALL transactional data — lots, orders, batches, sales, finance. Masters (products, suppliers, customers, users, warehouses, bank accounts) are kept; bank balances are zeroed.</p>
+            <p className="text-[11px] text-red-100">Wipe ALL transactional data — lots, orders, batches, sales, finance. Masters (products, suppliers, customers, users, warehouses, bank accounts) are kept; bank balances are zeroed.</p>
           </div>
         </div>
         <div className="p-4 space-y-3">
-          <p className="text-xs text-gray-600">A backup of every wiped table is created first (a <code className="text-rose-700">backup_reset_…</code> schema in the database), but this cannot be undone from the UI. Type <b>RESET</b> to enable the button.</p>
+          <p className="text-xs text-gray-600">A backup of every wiped table is created first (a <code className="text-red-700">backup_reset_…</code> schema in the database), but this cannot be undone from the UI. Type <b>RESET</b> to enable the button.</p>
           <div className="max-w-xs">
             <input className={`${INPUT} font-mono`} value={resetConfirm} onChange={e => setResetConfirm(e.target.value)} placeholder="Type RESET" />
           </div>
           <button disabled={resetBusy || resetConfirm !== 'RESET'} onClick={resetSystem}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-rose-600 text-white text-sm font-bold rounded-lg hover:bg-rose-700 disabled:opacity-40">
+            className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white text-sm font-bold rounded-lg hover:bg-red-700 disabled:opacity-40">
             <Trash2 size={15} /> {resetBusy ? 'Resetting…' : 'Reset system to 0'}
           </button>
         </div>

@@ -5,7 +5,7 @@ const statusStyles = {
   'Procurement Pending': 'bg-indigo-50 text-indigo-700 ring-indigo-200',
   'In Milling': 'bg-indigo-50 text-indigo-700 ring-indigo-200',
   'Docs In Preparation': 'bg-purple-50 text-purple-700 ring-purple-200',
-  'Awaiting Balance': 'bg-orange-50 text-orange-700 ring-orange-200',
+  'Awaiting Balance': 'bg-amber-50 text-amber-700 ring-amber-200',
   'Ready to Ship': 'bg-cyan-50 text-cyan-700 ring-cyan-200',
   'Shipped': 'bg-blue-50 text-blue-600 ring-blue-200',
   'Arrived': 'bg-emerald-50 text-emerald-600 ring-emerald-200',

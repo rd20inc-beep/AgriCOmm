@@ -71,7 +71,7 @@ export function AdvancePaymentModal({
                 const isGain = delta > 0;
                 const pkrDelta = amountNum * Math.abs(delta);
                 return (
-                  <div className={`text-[11px] flex items-center justify-between px-3 py-1.5 rounded-md ${isGain ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+                  <div className={`text-[11px] flex items-center justify-between px-3 py-1.5 rounded-md ${isGain ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
                     <span>vs booked {order.bookedFxRate}: {isGain ? '+' : '-'}{Math.abs(delta).toFixed(4)} Rs/{symbol}</span>
                     <span className="font-semibold">{isGain ? '+' : '-'}Rs {pkrDelta.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
                   </div>
@@ -142,7 +142,7 @@ export function AdvancePaymentModal({
           </button>
           <button
             onClick={onConfirm}
-            className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors"
+            className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors"
           >
             Confirm Payment
           </button>
@@ -236,7 +236,7 @@ export function BalancePaymentModal({
                 const isGain = delta > 0;
                 const pkrDelta = amountNum * Math.abs(delta);
                 return (
-                  <div className={`text-[11px] flex items-center justify-between px-3 py-1.5 rounded-md ${isGain ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+                  <div className={`text-[11px] flex items-center justify-between px-3 py-1.5 rounded-md ${isGain ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
                     <span>vs advance/booked {lockedRate}: {isGain ? '+' : '-'}{Math.abs(delta).toFixed(4)} Rs/{symbol}</span>
                     <span className="font-semibold">{isGain ? '+' : '-'}Rs {pkrDelta.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
                   </div>
@@ -277,7 +277,7 @@ export function BalancePaymentModal({
         </div>
         <div className="flex items-center justify-end gap-3 pt-2">
           <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
-          <button onClick={onConfirm} className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors">Confirm Balance Payment</button>
+          <button onClick={onConfirm} className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors">Confirm Balance Payment</button>
         </div>
       </div>
     </Modal>

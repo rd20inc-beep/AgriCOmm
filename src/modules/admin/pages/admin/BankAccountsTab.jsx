@@ -111,7 +111,7 @@ export default function BankAccountsTab() {
         <div className="px-4 py-2 flex gap-4 text-xs text-gray-500 border-b border-gray-100">
           <span>PKR Accounts: <strong className="text-gray-900">{accounts.filter(a => a.currency === 'PKR').length}</strong></span>
           <span>USD Accounts: <strong className="text-blue-700">{accounts.filter(a => a.currency === 'USD').length}</strong></span>
-          <span>Cash Accounts: <strong className="text-green-700">{accounts.filter(a => a.type === 'cash').length}</strong></span>
+          <span>Cash Accounts: <strong className="text-emerald-700">{accounts.filter(a => a.type === 'cash').length}</strong></span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -135,7 +135,7 @@ export default function BankAccountsTab() {
                   <td className="px-4 py-3">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                       a.type === 'bank' ? 'bg-blue-100 text-blue-700' :
-                      a.type === 'cash' ? 'bg-green-100 text-green-700' :
+                      a.type === 'cash' ? 'bg-emerald-100 text-emerald-700' :
                       'bg-purple-100 text-purple-700'
                     }`}>
                       {a.type}
@@ -145,7 +145,7 @@ export default function BankAccountsTab() {
                   <td className="px-4 py-3 text-gray-600 font-mono text-xs">{a.accountNumber || '—'}</td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                      a.currency === 'PKR' ? 'bg-green-100 text-green-700' :
+                      a.currency === 'PKR' ? 'bg-emerald-100 text-emerald-700' :
                       a.currency === 'USD' ? 'bg-blue-100 text-blue-700' :
                       'bg-gray-100 text-gray-700'
                     }`}>

@@ -22,7 +22,7 @@ function KPI({ icon: Icon, label, value, sub, accent = 'blue' }) {
     blue: 'text-blue-600 bg-blue-50',
     amber: 'text-amber-600 bg-amber-50',
     red: 'text-red-600 bg-red-50',
-    green: 'text-green-600 bg-green-50',
+    green: 'text-emerald-600 bg-emerald-50',
   };
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-4">

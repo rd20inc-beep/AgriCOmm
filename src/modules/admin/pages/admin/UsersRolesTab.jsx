@@ -7,7 +7,7 @@ import Modal from '../../components/AdminDrawer';
 const ROLES = [
   { id: 1, name: 'Super Admin', color: 'bg-purple-100 text-purple-700' },
   { id: 2, name: 'Export Manager', color: 'bg-blue-100 text-blue-700' },
-  { id: 3, name: 'Finance Manager', color: 'bg-green-100 text-green-700' },
+  { id: 3, name: 'Finance Manager', color: 'bg-emerald-100 text-emerald-700' },
   { id: 4, name: 'Mill Manager', color: 'bg-amber-100 text-amber-700' },
   { id: 5, name: 'QC Analyst', color: 'bg-cyan-100 text-cyan-700' },
   { id: 6, name: 'Documentation Officer', color: 'bg-indigo-100 text-indigo-700' },
@@ -110,7 +110,7 @@ export default function UsersRolesTab() {
                   </td>
                   <td className="py-3 px-4">
                     <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
-                      user.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                      user.isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
                     }`}>
                       {user.isActive ? 'Active' : 'Inactive'}
                     </span>
@@ -124,7 +124,7 @@ export default function UsersRolesTab() {
                       className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg transition-colors ${
                         user.isActive
                           ? 'text-red-600 bg-red-50 hover:bg-red-100'
-                          : 'text-green-600 bg-green-50 hover:bg-green-100'
+                          : 'text-emerald-600 bg-emerald-50 hover:bg-emerald-100'
                       }`}
                     >
                       {user.isActive ? <><XCircle className="w-3.5 h-3.5" /> Deactivate</> : <><CheckCircle className="w-3.5 h-3.5" /> Activate</>}

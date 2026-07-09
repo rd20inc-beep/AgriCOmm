@@ -53,7 +53,7 @@ export default function PayrollLedger() {
   const exportMeta = useMemo(() => [`${rows.length} salary lines`, filters.month ? `Month: ${filters.month}` : null, filters.role ? `Role: ${filters.role}` : null].filter(Boolean), [rows.length, filters]);
 
   if (error) return (
-    <div className="max-w-2xl mx-auto p-6"><div className="flex items-center gap-2 text-rose-600"><AlertTriangle size={18} /> {error}</div></div>
+    <div className="max-w-2xl mx-auto p-6"><div className="flex items-center gap-2 text-red-600"><AlertTriangle size={18} /> {error}</div></div>
   );
 
   return (

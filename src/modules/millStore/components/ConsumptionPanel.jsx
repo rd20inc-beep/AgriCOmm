@@ -172,7 +172,7 @@ export default function ConsumptionPanel({ batchId, batchStatus, addToast }) {
                   />
                 </div>
                 <div className="col-span-2 text-right">
-                  <p className={`text-xs ${line.sufficient ? 'text-green-600' : 'text-red-600'}`}>
+                  <p className={`text-xs ${line.sufficient ? 'text-emerald-600' : 'text-red-600'}`}>
                     {line.on_hand} avail
                     {!line.sufficient && <AlertTriangle size={10} className="inline ml-0.5" />}
                   </p>
@@ -200,7 +200,7 @@ export default function ConsumptionPanel({ batchId, batchStatus, addToast }) {
               <button
                 onClick={handleConfirm}
                 disabled={confirmMut.isPending}
-                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50"
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50"
               >
                 {confirmMut.isPending ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
                 Confirm & Deduct

@@ -22,7 +22,7 @@ function ScoreBar({ score, label, maxScore = 100 }) {
   // Absent component (no underlying data) — show "—" rather than a misleading 0.
   const hasScore = score != null && !Number.isNaN(Number(score));
   const pct = hasScore ? Math.min(100, Math.max(0, (score / maxScore) * 100)) : 0;
-  const color = pct >= 75 ? 'bg-emerald-500' : pct >= 50 ? 'bg-amber-500' : pct >= 25 ? 'bg-orange-500' : 'bg-red-500';
+  const color = pct >= 75 ? 'bg-emerald-500' : pct >= 50 ? 'bg-amber-500' : pct >= 25 ? 'bg-amber-500' : 'bg-red-500';
   return (
     <div className="flex items-center gap-3">
       <span className="text-xs text-gray-500 w-20 text-right">{label}</span>
@@ -334,7 +334,7 @@ function RiskMonitorTab() {
                   <tr key={o.entityId || o.id}>
                     <td><Link to={`/export/${o.entityRef || o.entityId}`} className="text-blue-600 hover:text-blue-800 font-medium">{o.entityRef || o.entityId}</Link></td>
                     <td className="text-right font-bold">{o.riskScore || o.score}</td>
-                    <td><span className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold ${(o.riskLevel || o.level) === 'Critical' ? 'bg-red-50 text-red-700' : (o.riskLevel || o.level) === 'High' ? 'bg-orange-50 text-orange-700' : 'bg-amber-50 text-amber-700'}`}>{o.riskLevel || o.level}</span></td>
+                    <td><span className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold ${(o.riskLevel || o.level) === 'Critical' ? 'bg-red-50 text-red-700' : (o.riskLevel || o.level) === 'High' ? 'bg-amber-50 text-amber-700' : 'bg-amber-50 text-amber-700'}`}>{o.riskLevel || o.level}</span></td>
                     <td className="text-right font-medium text-red-600">{formatCurrency(o.financialExposure || o.exposure)}</td>
                   </tr>
                 )) : <tr><td colSpan={4} className="text-center py-8 text-gray-400">No risk data. Run exception scan first.</td></tr>}
@@ -344,7 +344,7 @@ function RiskMonitorTab() {
         </div>
         <div className="table-container">
           <div className="px-5 py-3 border-b border-gray-200 flex items-center gap-2">
-            <Users className="w-4 h-4 text-orange-500" />
+            <Users className="w-4 h-4 text-amber-500" />
             <h3 className="text-sm font-semibold text-gray-700 uppercase">Top Risk Customers</h3>
           </div>
           <div className="table-scroll">
@@ -355,7 +355,7 @@ function RiskMonitorTab() {
                   <tr key={c.entityId || c.id}>
                     <td className="font-medium text-gray-900">{c.entityRef || c.name || c.entityId}</td>
                     <td className="text-right font-bold">{c.riskScore || c.score}</td>
-                    <td><span className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold ${(c.riskLevel || c.level) === 'Critical' ? 'bg-red-50 text-red-700' : 'bg-orange-50 text-orange-700'}`}>{c.riskLevel || c.level}</span></td>
+                    <td><span className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold ${(c.riskLevel || c.level) === 'Critical' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}`}>{c.riskLevel || c.level}</span></td>
                     <td className="text-right font-medium text-red-600">{formatCurrency(c.financialExposure || c.exposure)}</td>
                   </tr>
                 )) : <tr><td colSpan={4} className="text-center py-8 text-gray-400">No customer risk data.</td></tr>}
@@ -376,7 +376,7 @@ function SmartAlertsTab() {
 
   const alertTypeConfig = {
     margin_risk: { icon: TrendingDown, color: 'text-red-600 bg-red-50' },
-    yield_anomaly: { icon: Activity, color: 'text-orange-600 bg-orange-50' },
+    yield_anomaly: { icon: Activity, color: 'text-amber-600 bg-amber-50' },
     payment_risk: { icon: DollarSign, color: 'text-amber-600 bg-amber-50' },
     cost_spike: { icon: ArrowUpRight, color: 'text-red-600 bg-red-50' },
     demand_shift: { icon: BarChart3, color: 'text-blue-600 bg-blue-50' },

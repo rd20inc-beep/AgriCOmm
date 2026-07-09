@@ -262,7 +262,7 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
             <div className="flex items-center justify-between mb-1">
               <span className="text-sm text-gray-600">Advance ({order.advancePct}%)</span>
               <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                order.advanceReceived >= order.advanceExpected ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
+                order.advanceReceived >= order.advanceExpected ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
               }`}>
                 {order.advanceReceived >= order.advanceExpected ? 'Received' : 'Pending'}
               </span>
@@ -273,7 +273,7 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
             </div>
             <div className="mt-1 w-full bg-gray-200 rounded-full h-1.5">
               <div
-                className={`h-1.5 rounded-full ${order.advanceReceived >= order.advanceExpected ? 'bg-green-500' : 'bg-amber-500'}`}
+                className={`h-1.5 rounded-full ${order.advanceReceived >= order.advanceExpected ? 'bg-emerald-500' : 'bg-amber-500'}`}
                 style={{ width: `${Math.min(100, order.advanceExpected > 0 ? (order.advanceReceived / order.advanceExpected) * 100 : 0)}%` }}
               />
             </div>
@@ -282,7 +282,7 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
             <div className="flex items-center justify-between mb-1">
               <span className="text-sm text-gray-600">Balance ({100 - order.advancePct}%)</span>
               <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                order.balanceReceived >= order.balanceExpected ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
+                order.balanceReceived >= order.balanceExpected ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
               }`}>
                 {order.balanceReceived >= order.balanceExpected ? 'Received' : 'Pending'}
               </span>
@@ -293,7 +293,7 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
             </div>
             <div className="mt-1 w-full bg-gray-200 rounded-full h-1.5">
               <div
-                className={`h-1.5 rounded-full ${order.balanceReceived >= order.balanceExpected ? 'bg-green-500' : 'bg-amber-500'}`}
+                className={`h-1.5 rounded-full ${order.balanceReceived >= order.balanceExpected ? 'bg-emerald-500' : 'bg-amber-500'}`}
                 style={{ width: `${Math.min(100, order.balanceExpected > 0 ? (order.balanceReceived / order.balanceExpected) * 100 : 0)}%` }}
               />
             </div>

@@ -235,7 +235,7 @@ export default function LotDetail() {
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-bold text-gray-900">{lot.lotNo}</h1>
             <StatusBadge status={lot.status} />
-            <span className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold ${lot.entity === 'mill' ? 'bg-orange-50 text-orange-700' : 'bg-blue-50 text-blue-700'}`}>
+            <span className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold ${lot.entity === 'mill' ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'}`}>
               {lot.entity === 'mill' ? 'Mill' : 'Export'}
             </span>
             <span className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold bg-gray-100 text-gray-600`}>
@@ -1805,11 +1805,11 @@ function LotLineage({ lotId, lotNo }) {
               <div key={i} className="flex items-center justify-between bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm">
                 <div>
                   <Link to={`/lot-inventory/${d.child_lot_no}`} className="font-medium text-blue-600 hover:underline">{d.child_lot_no}</Link>
-                  <span className={`ml-2 text-xs px-1.5 py-0.5 rounded ${d.child_type === 'finished' ? 'bg-green-100 text-green-700' : 'bg-purple-100 text-purple-700'}`}>{d.child_type}</span>
+                  <span className={`ml-2 text-xs px-1.5 py-0.5 rounded ${d.child_type === 'finished' ? 'bg-emerald-100 text-emerald-700' : 'bg-purple-100 text-purple-700'}`}>{d.child_type}</span>
                 </div>
                 <div className="text-right text-xs">
                   <span className="text-gray-500">{Math.round(parseFloat(d.qty) || 0).toLocaleString()} kg</span>
-                  <span className={`ml-2 px-1.5 py-0.5 rounded text-xs ${d.entity === 'mill' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>{d.entity}</span>
+                  <span className={`ml-2 px-1.5 py-0.5 rounded text-xs ${d.entity === 'mill' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>{d.entity}</span>
                 </div>
               </div>
             ))}
@@ -1834,7 +1834,7 @@ function LotLineage({ lotId, lotNo }) {
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
                     {c.outputs.map((o, j) => (
                       <Link key={j} to={`/lot-inventory/${o.lot_no}`}
-                        className={`text-[11px] px-1.5 py-0.5 rounded hover:underline ${o.type === 'finished' ? 'bg-green-100 text-green-700' : 'bg-purple-100 text-purple-700'}`}>
+                        className={`text-[11px] px-1.5 py-0.5 rounded hover:underline ${o.type === 'finished' ? 'bg-emerald-100 text-emerald-700' : 'bg-purple-100 text-purple-700'}`}>
                         {o.lot_no} ({Math.round(parseFloat(o.qty) || 0).toLocaleString()} kg)
                       </Link>
                     ))}

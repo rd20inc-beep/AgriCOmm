@@ -92,7 +92,7 @@ export default function SuppliersTab() {
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-            <Truck className="w-5 h-5 text-orange-600" />
+            <Truck className="w-5 h-5 text-amber-600" />
             Suppliers
           </h2>
           <button

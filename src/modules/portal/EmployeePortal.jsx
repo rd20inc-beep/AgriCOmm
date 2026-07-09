@@ -177,7 +177,7 @@ export default function EmployeePortal() {
       const r = await portalApi('/leave', { token }); setLeave(r.data);
     } catch (e2) { setErr(e2.message); }
   }
-  const REQ_TONE = { pending: 'bg-amber-100 text-amber-700', approved: 'bg-emerald-100 text-emerald-700', rejected: 'bg-rose-100 text-rose-700', resolved: 'bg-blue-100 text-blue-700', cancelled: 'bg-gray-100 text-gray-500' };
+  const REQ_TONE = { pending: 'bg-amber-100 text-amber-700', approved: 'bg-emerald-100 text-emerald-700', rejected: 'bg-red-100 text-red-700', resolved: 'bg-blue-100 text-blue-700', cancelled: 'bg-gray-100 text-gray-500' };
 
   // ── Login screen ──
   if (!token || !me) {
@@ -197,7 +197,7 @@ export default function EmployeePortal() {
               <label className="block text-xs font-medium text-gray-600 mb-1">PIN</label>
               <input type="password" inputMode="numeric" value={form.pin} onChange={(e) => setForm((f) => ({ ...f, pin: e.target.value.replace(/\D/g, '') }))} maxLength={8} placeholder="••••" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900" />
             </div>
-            {err && <div className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{err}</div>}
+            {err && <div className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{err}</div>}
             <button type="submit" disabled={loading} className="w-full px-4 py-2.5 text-sm font-medium text-white bg-[#1e3a5f] rounded-lg hover:bg-[#162a45] disabled:opacity-50">{loading ? 'Signing in…' : 'Sign in'}</button>
           </form>
           <p className="text-[11px] text-gray-400 text-center mt-4">Don't have a PIN? Ask your payroll administrator to set one up.</p>
@@ -387,7 +387,7 @@ export default function EmployeePortal() {
             ) : <p className="text-sm text-gray-400">No paid salary in {taxYear}.</p>}
           </div>
         )}
-        {err && <div className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{err}</div>}
+        {err && <div className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{err}</div>}
       </main>
     </div>
   );

@@ -58,7 +58,7 @@ export default function AdjustmentKPIBar({
 
   const tones = {
     amber: { border: 'border-l-amber-500', bg: 'bg-amber-50/50', icon: 'text-amber-500' },
-    green: { border: 'border-l-green-500', bg: 'bg-green-50/50', icon: 'text-green-500' },
+    green: { border: 'border-l-green-500', bg: 'bg-emerald-50/50', icon: 'text-emerald-500' },
     red:   { border: 'border-l-red-500',   bg: 'bg-red-50/50',   icon: 'text-red-500' },
     slate: { border: 'border-l-slate-400', bg: 'bg-slate-50/50', icon: 'text-slate-500' },
   };

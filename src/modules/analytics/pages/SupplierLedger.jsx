@@ -77,7 +77,7 @@ function SupplierPicker() {
                       <td className="px-3 py-2 text-right tabular-nums">{kg(r.purchasedKg)}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{kg(r.remainingKg)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{pkr(r.stockValue)}</td>
-                      <td className={`px-3 py-2 text-right tabular-nums ${r.payableOutstanding > 0 ? 'text-rose-600' : ''}`}>{pkr(r.payableOutstanding)}</td>
+                      <td className={`px-3 py-2 text-right tabular-nums ${r.payableOutstanding > 0 ? 'text-red-600' : ''}`}>{pkr(r.payableOutstanding)}</td>
                     </tr>
                   ))}
             </tbody>
@@ -104,7 +104,7 @@ function SupplierDetail({ id }) {
   if (isError || !data?.supplier) return (
     <div className="p-6">
       <button onClick={() => navigate(-1)} className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm"><ArrowLeft size={14} /> Back</button>
-      <p className="mt-4 text-sm text-rose-600">{error?.message || 'Supplier ledger not available.'}</p>
+      <p className="mt-4 text-sm text-red-600">{error?.message || 'Supplier ledger not available.'}</p>
     </div>
   );
 
@@ -131,7 +131,7 @@ function SupplierDetail({ id }) {
   });
 
   const Cell = ({ label, value, sub, tone = 'gray' }) => {
-    const t = { emerald: 'text-emerald-700', rose: 'text-rose-600', gray: 'text-gray-900' }[tone] || 'text-gray-900';
+    const t = { emerald: 'text-emerald-700', rose: 'text-red-600', gray: 'text-gray-900' }[tone] || 'text-gray-900';
     return <div><p className="text-[11px] uppercase tracking-wider text-gray-400">{label}</p><p className={`text-sm font-medium ${t}`}>{value}</p>{sub && <p className="text-[11px] text-gray-400">{sub}</p>}</div>;
   };
   const Section = ({ icon: Icon, title, children }) => (
@@ -227,7 +227,7 @@ function SupplierDetail({ id }) {
                     <td className="px-3 py-2 text-right tabular-nums">{l.costPerKg ? pkr(l.costPerKg) : '—'}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{pkr(l.stockValue)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{pkr(l.revenue)}</td>
-                    <td className={`px-3 py-2 text-right tabular-nums ${l.realizedProfit >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>{pkr(l.realizedProfit)}</td>
+                    <td className={`px-3 py-2 text-right tabular-nums ${l.realizedProfit >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{pkr(l.realizedProfit)}</td>
                   </tr>
                 ))}
             </tbody>

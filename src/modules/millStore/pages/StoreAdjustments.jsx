@@ -21,7 +21,7 @@ import {
 
 const STATUS_COLORS = {
   Pending: 'bg-amber-100 text-amber-800',
-  Approved: 'bg-green-100 text-green-800',
+  Approved: 'bg-emerald-100 text-emerald-800',
   Rejected: 'bg-red-100 text-red-800',
 };
 
@@ -327,7 +327,7 @@ export default function StoreAdjustments() {
                     <td className="py-2.5 px-4">
                       <AdjustmentTypeChip type={type} />
                     </td>
-                    <td className={`py-2.5 px-4 text-right font-bold ${Number(a.quantity_delta) < 0 ? 'text-red-600' : 'text-green-600'}`}>
+                    <td className={`py-2.5 px-4 text-right font-bold ${Number(a.quantity_delta) < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
                       {Number(a.quantity_delta) > 0 ? '+' : ''}{Number(a.quantity_delta)} {a.item_unit}
                     </td>
                     <td className="py-2.5 px-4 text-gray-600 max-w-xs truncate" title={a.reason}>{a.reason}</td>
@@ -340,7 +340,7 @@ export default function StoreAdjustments() {
                         <p className="text-[10px] text-red-500 mt-0.5 truncate max-w-[150px]">{a.rejection_reason}</p>
                       )}
                       {a.status === 'Approved' && a.approved_by_name && (
-                        <p className="text-[10px] text-green-600 mt-0.5">by {a.approved_by_name}</p>
+                        <p className="text-[10px] text-emerald-600 mt-0.5">by {a.approved_by_name}</p>
                       )}
                     </td>
                     {canApprove && (
@@ -350,7 +350,7 @@ export default function StoreAdjustments() {
                             <button
                               onClick={() => handleApprove(a.id)}
                               disabled={approveMut.isPending}
-                              className="p-1.5 bg-green-50 text-green-700 rounded hover:bg-green-100"
+                              className="p-1.5 bg-emerald-50 text-emerald-700 rounded hover:bg-emerald-100"
                               title="Approve"
                             >
                               <Check size={14} />

@@ -101,7 +101,7 @@ export default function PurchaseRequirementsPanel({ embedded = false, defaultTab
                   {r.status === 'pending' && canApprove && (
                     <>
                       <button onClick={() => act(purchaseRequirementsApi.approve, r.id, 'Approved — sent to Finance')} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-emerald-600 rounded hover:bg-emerald-700"><Check size={13} /> Approve</button>
-                      <button onClick={() => act((id) => purchaseRequirementsApi.reject(id, {}), r.id, 'Rejected')} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-rose-600 bg-rose-50 rounded hover:bg-rose-100"><X size={13} /> Reject</button>
+                      <button onClick={() => act((id) => purchaseRequirementsApi.reject(id, {}), r.id, 'Rejected')} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-600 bg-red-50 rounded hover:bg-red-100"><X size={13} /> Reject</button>
                     </>
                   )}
                   {r.status === 'approved' && canPurchase && (

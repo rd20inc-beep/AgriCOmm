@@ -117,7 +117,7 @@ export default function Documents() {
           <p className="text-sm text-gray-500 mt-0.5">Track export documentation across all orders</p>
         </div>
         <div className="flex items-center gap-4 text-sm">
-          <div className="flex items-center gap-1.5 text-green-600">
+          <div className="flex items-center gap-1.5 text-emerald-600">
             <FileCheck className="w-4 h-4" />
             <span className="font-medium">{approvedDocs}</span> Approved
           </div>
@@ -229,7 +229,7 @@ export default function Documents() {
                       {doc.status !== 'Approved' && doc.status !== 'Pending' && (
                         <button
                           onClick={() => handleMarkApproved(doc)}
-                          className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-green-600 hover:bg-green-50 rounded transition-colors"
+                          className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-emerald-600 hover:bg-emerald-50 rounded transition-colors"
                           title="Mark Approved"
                         >
                           <CheckCircle className="w-3.5 h-3.5" />
@@ -336,7 +336,7 @@ export default function Documents() {
                     handleMarkApproved(previewModal);
                     setPreviewModal(null);
                   }}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors"
                 >
                   <CheckCircle className="w-4 h-4" />
                   Mark Approved

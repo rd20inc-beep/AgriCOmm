@@ -109,7 +109,7 @@ export default function TransactionDocument({ kind = 'receipt', data, companyPro
 
   const STATUS = {
     Paid: 'bg-emerald-100 text-emerald-700', Partial: 'bg-amber-100 text-amber-700',
-    Unpaid: 'bg-rose-100 text-rose-700', Pending: 'bg-rose-100 text-rose-700',
+    Unpaid: 'bg-red-100 text-red-700', Pending: 'bg-red-100 text-red-700',
   };
 
   return (
@@ -186,7 +186,7 @@ export default function TransactionDocument({ kind = 'receipt', data, companyPro
           <div className="w-64 text-sm">
             <div className="flex justify-between py-1"><span className="text-gray-500">{kind === 'voucher' ? 'Bill amount' : kind === 'invoice' ? 'Total' : 'Expected'}</span><span className="tabular-nums font-medium">{money(m.total, cur)}</span></div>
             <div className="flex justify-between py-1"><span className="text-gray-500">{kind === 'receipt' ? 'Received' : 'Paid'}</span><span className="tabular-nums text-emerald-700 font-medium">{money(m.paid, cur)}</span></div>
-            <div className="flex justify-between py-1.5 border-t-2 border-gray-300 mt-1"><span className="font-semibold text-gray-700">Balance</span><span className={`tabular-nums font-bold ${m.balance > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>{money(m.balance, cur)}</span></div>
+            <div className="flex justify-between py-1.5 border-t-2 border-gray-300 mt-1"><span className="font-semibold text-gray-700">Balance</span><span className={`tabular-nums font-bold ${m.balance > 0 ? 'text-red-700' : 'text-emerald-700'}`}>{money(m.balance, cur)}</span></div>
           </div>
         </div>
 
