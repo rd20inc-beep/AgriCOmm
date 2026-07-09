@@ -1278,6 +1278,13 @@ export default function MillingDashboard() {
                   <p className="text-[11px] text-gray-400">No vehicles added. You can add trucks here (their rice is received as client-owned stock) or record the total quantity below.</p>
                 ) : (
                   <div className="space-y-2">
+                    <div className="grid grid-cols-12 gap-2 px-2 text-[10px] font-semibold text-gray-500 uppercase tracking-wide">
+                      <span className="col-span-3">Truck No</span>
+                      <span className="col-span-3">Driver</span>
+                      <span className="col-span-3">Weight (KG)</span>
+                      <span className="col-span-2">Bags</span>
+                      <span className="col-span-1" />
+                    </div>
                     {(batchForm.serviceVehicles || []).map((v, i) => (
                       <div key={i} className="grid grid-cols-12 gap-2 items-center bg-white rounded-lg border border-amber-200 p-2">
                         <input value={v.vehicle_no} onChange={e => { const arr = [...batchForm.serviceVehicles]; arr[i] = { ...v, vehicle_no: e.target.value }; setBF('serviceVehicles', arr); }} placeholder="Truck no" className="col-span-3 border border-gray-200 rounded px-2 py-1.5 text-xs outline-none" />
