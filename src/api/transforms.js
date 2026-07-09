@@ -54,6 +54,10 @@ const docTypeKeyMap = {
   'coo': 'coo',
   'Fumigation Certificate': 'fumigation',
   'fumigation': 'fumigation',
+  'Quality / Inspection Certificate': 'quality',
+  'quality': 'quality',
+  'Other / Custom Document': 'custom',
+  'custom': 'custom',
 };
 
 /** Convert costs from API array format to frontend keyed object format.
