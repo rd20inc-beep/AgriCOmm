@@ -38,7 +38,7 @@ function WarehousePicker() {
   return (
     <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-5">
       <div>
-        {id ? <button onClick={() => navigate(-1)} className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm mb-1"><ArrowLeft size={14} /> Back</button> : <Link to="/reports" className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm mb-1"><ArrowLeft size={14} /> Business Reports</Link>}
+        <Link to="/reports" className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm mb-1"><ArrowLeft size={14} /> Business Reports</Link>
         <h1 className="text-2xl font-bold text-gray-900 inline-flex items-center gap-2"><Warehouse size={20} /> Warehouse Ledger</h1>
         <p className="text-xs text-gray-400">Open a warehouse to see stock in, out, reserved, available, closing and value.</p>
       </div>
