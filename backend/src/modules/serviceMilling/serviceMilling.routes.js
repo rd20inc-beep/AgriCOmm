@@ -4,6 +4,12 @@ const controller = require('./serviceMilling.controller');
 const authorize = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 
+// Service-milling clients (the third-party rice owners) — mill-side perm, so the
+// New Batch form's client picker works for Mill/Inventory users. Never exposes
+// export customers.
+router.get('/clients', authorize('service_milling', 'view'), controller.listClients);
+router.post('/clients', authorize('service_milling', 'create_batch'), controller.createClient);
+
 // Invoice/billing endpoints — gated by the invoice-side perms (Finance + Owner +
 // Mill Manager), NOT service_milling.view (which is the milling/stock side). This
 // is what keeps Finance to billing-only and Export out entirely.
