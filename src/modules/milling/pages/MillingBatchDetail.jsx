@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
+import OrderRefLink from '../../../shared/components/OrderRefLink';
 import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import { queryKeys } from '../../../api/queryClient';
 import {
@@ -88,7 +89,8 @@ export default function MillingBatchDetail() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { addToast, millingCostCategories, companyProfileData, suppliersList } = useApp();
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
+  const canReports = hasPermission('reports', 'view');
   const { requestOwnerApproval } = useOwnerAuth();
   const isOwnerOrAdmin = user?.role === 'Owner' || user?.role === 'Super Admin' || user?.role === 'Mill Manager';
   const commodityPrices = useCommodityPrices();
@@ -673,9 +675,11 @@ export default function MillingBatchDetail() {
           <Link to="/milling" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
             <ArrowLeft size={16} /> Back to Milling Dashboard
           </Link>
+          {canReports && (
           <Link to={`/reports/batch-ledger/${batch.dbId || batch.id}`} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
             <BarChart3 size={14} /> Batch 360 / Ledger
           </Link>
+          )}
         </div>
         <div className="flex flex-col sm:flex-row items-start justify-between gap-4">
           <div>
@@ -718,9 +722,9 @@ export default function MillingBatchDetail() {
               {batch.linkedExportOrder && (
                 <span>
                   Linked Order:{' '}
-                  <Link to={`/export/${batch.linkedExportOrder}`} className="text-blue-600 hover:text-blue-800 font-medium">
+                  <OrderRefLink to={`/export/${batch.linkedExportOrder}`} module="export_orders" className="text-blue-600 hover:text-blue-800 font-medium">
                     {batch.linkedExportOrder}
-                  </Link>
+                  </OrderRefLink>
                 </span>
               )}
               {batch.productName && (
@@ -946,9 +950,9 @@ export default function MillingBatchDetail() {
                   {batch.linkedExportOrder && (
                     <div className="mt-3 pt-2 border-t border-gray-100 flex justify-between text-sm">
                       <span className="text-gray-500">Export Order</span>
-                      <Link to={`/export/${batch.linkedExportOrder}`} className="font-medium text-blue-600 hover:text-blue-800">
+                      <OrderRefLink to={`/export/${batch.linkedExportOrder}`} module="export_orders" className="font-medium text-blue-600 hover:text-blue-800">
                         {batch.linkedExportOrder}
-                      </Link>
+                      </OrderRefLink>
                     </div>
                   )}
                 </div>
@@ -973,9 +977,9 @@ export default function MillingBatchDetail() {
                   {batch.linkedExportOrder && (
                     <div className="flex justify-between">
                       <span className="text-gray-500">Export Order</span>
-                      <Link to={`/export/${batch.linkedExportOrder}`} className="font-medium text-blue-600 hover:text-blue-800">
+                      <OrderRefLink to={`/export/${batch.linkedExportOrder}`} module="export_orders" className="font-medium text-blue-600 hover:text-blue-800">
                         {batch.linkedExportOrder}
-                      </Link>
+                      </OrderRefLink>
                     </div>
                   )}
                 </div>

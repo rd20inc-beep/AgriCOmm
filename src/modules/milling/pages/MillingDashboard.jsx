@@ -31,6 +31,7 @@ import {
 } from 'recharts';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
+import OrderRefLink from '../../../shared/components/OrderRefLink';
 import { useCreateMillingBatch, useMillExpenses, useCreateMillExpense, useInventory, useProducts } from '../../../api/queries';
 import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import { useMillSummary } from '../hooks/useMillSummary';
@@ -739,7 +740,7 @@ export default function MillingDashboard() {
                       </td>
                       <td className="py-2 px-3">
                         {lot.reservedAgainst ? (
-                          <Link to={`/export/${lot.reservedAgainst}`} className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded">{lot.reservedAgainst}</Link>
+                          <OrderRefLink to={`/export/${lot.reservedAgainst}`} module="export_orders" className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded" plainClassName="text-xs font-medium text-gray-600 bg-gray-100 px-2 py-1 rounded">{lot.reservedAgainst}</OrderRefLink>
                         ) : <span className="text-gray-400">—</span>}
                       </td>
                       <td className="py-2 px-3">

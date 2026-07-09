@@ -56,6 +56,8 @@ export default function Dashboard() {
   // or /milling. Only show those to roles that can actually open them.
   const canExport = hasPermission('export_orders', 'view');
   const canMill = hasPermission('milling', 'view');
+  const canFinance = hasPermission('finance', 'view');
+  const canReports = hasPermission('reports', 'view');
   // Pending master-data quick-add approvals (Admin → Approvals). Hook must run
   // before the early return below to keep hook order stable.
   const { data: pendingMasterApprovals = 0 } = useMasterDataApprovalsCount();
@@ -330,7 +332,7 @@ export default function Dashboard() {
           secondary={`${collectionRate}% of expected`}
           hint={collectionRate >= 80 ? 'On target' : 'Below 80%'}
           hintBad={collectionRate < 80}
-          onClick={() => navigate('/finance/money-in')}
+          onClick={canFinance ? () => navigate('/finance/money-in') : undefined}
         />
         <KpiTile
           icon={Clock}
@@ -340,7 +342,7 @@ export default function Dashboard() {
           secondary="Open balance to collect"
           hint={awaitingBalance > 0 ? `${awaitingBalance} awaiting balance` : 'No urgent collections'}
           hintBad={awaitingBalance > 0}
-          onClick={() => navigate('/finance/money-in')}
+          onClick={canFinance ? () => navigate('/finance/money-in') : undefined}
         />
         <KpiTile
           icon={TrendingUp}
@@ -350,7 +352,7 @@ export default function Dashboard() {
           secondary="Across all open orders"
           hint={exportProfit > 0 ? 'Positive' : 'Below break-even'}
           hintBad={exportProfit <= 0}
-          onClick={() => navigate('/finance/profit')}
+          onClick={canFinance ? () => navigate('/finance/profit') : undefined}
         />
       </div>
 
@@ -406,7 +408,7 @@ export default function Dashboard() {
             <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
               <Factory size={14} className="text-orange-500" /> Production Summary
             </h2>
-            <Link to="/reports/print" className="text-xs text-blue-600 hover:underline">Print report →</Link>
+            {canReports && <Link to="/reports/print" className="text-xs text-blue-600 hover:underline">Print report →</Link>}
           </div>
           <div className="grid grid-cols-2 gap-3 mb-4">
             <ProductionCell label="This Week" batches={productionWeek.batches} rawMt={productionWeek.rawMt} finishedMt={productionWeek.finishedMt} />
@@ -474,9 +476,9 @@ export default function Dashboard() {
           <span className="text-xs uppercase tracking-wider text-gray-400 mr-2">Quick actions</span>
           {canExport && <QuickAction icon={Plus} label="New Export Order" onClick={() => navigate("/export?new=1")} tone="blue" />}
           {canMill && <QuickAction icon={Factory} label="New Milling Batch" onClick={() => navigate("/milling?new=1")} tone="amber" />}
-          <QuickAction icon={ArrowDownLeft}   label="Record Receipt"    onClick={() => navigate('/finance/money-in')} tone="emerald" />
+          {canFinance && <QuickAction icon={ArrowDownLeft} label="Record Receipt" onClick={() => navigate('/finance/money-in')} tone="emerald" />}
           <QuickAction icon={ArrowUpRight}    label="Make Payment"      onClick={() => navigate('/finance/money-out')} tone="rose" />
-          <QuickAction icon={BarChart3}       label="Print Reports"     onClick={() => navigate('/reports/print')}    tone="violet" />
+          {canReports && <QuickAction icon={BarChart3} label="Print Reports" onClick={() => navigate('/reports/print')} tone="violet" />}
         </div>
       </div>
     </div>
