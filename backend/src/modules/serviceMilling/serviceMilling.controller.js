@@ -17,6 +17,15 @@ function deriveStatus(total, received) {
   return 'Paid';
 }
 
+// The dispatch routes take the URL param, which is the batch_no (e.g. "M-011")
+// — NOT the numeric id. Querying `.where({ id: 'M-011' })` on an integer column
+// throws in Postgres (invalid input syntax), so resolve by which form it is.
+function resolveBatch(qb, idParam) {
+  return /^\d+$/.test(String(idParam))
+    ? qb('milling_batches').where({ id: idParam }).first()
+    : qb('milling_batches').where({ batch_no: idParam }).first();
+}
+
 // Advance a service batch's lot status from how much client-owned stock is still
 // on hand vs how much has been handed back. Driven by dispatch records + the
 // lots' remaining available_qty, so it survives qty drawdown on each dispatch.
@@ -262,8 +271,7 @@ module.exports = {
   // ── Dispatch: the client-owned finished/by-product lots + handover history ──
   async getDispatchSummary(req, res) {
     try {
-      const batch = await db('milling_batches').where({ id: req.params.id }).first()
-        || await db('milling_batches').where({ batch_no: req.params.id }).first();
+      const batch = await resolveBatch(db, req.params.id);
       if (!batch) return res.status(404).json({ success: false, message: 'Service batch not found.' });
 
       const lots = await db('inventory_lots')
@@ -298,8 +306,7 @@ module.exports = {
     const b = req.body || {};
     try {
       const result = await db.transaction(async (trx) => {
-        const batch = await trx('milling_batches').where({ id: req.params.id }).first()
-          || await trx('milling_batches').where({ batch_no: req.params.id }).first();
+        const batch = await resolveBatch(trx, req.params.id);
         if (!batch) throw new Error('Service batch not found');
         if (!batch.is_service_milling) throw new Error('Batch is not a service-milling batch');
 
