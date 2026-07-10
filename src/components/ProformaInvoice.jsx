@@ -53,6 +53,11 @@ export default function ProformaInvoice({ order, companyProfile }) {
   const customPaymentTerms = (order.paymentTerms || '').trim();
   const isLC = /l\/?c|letter of credit/i.test(customPaymentTerms);
   const payMethod = isLC ? 'an irrevocable Letter of Credit (L/C) at sight' : 'TT (Telegraphic Transfer)';
+  // Incoterm-driven responsibilities (freight / insurance) reused across the terms.
+  const incoterm = (order.incoterm || 'FOB').toUpperCase();
+  const portOfLoading = order.portOfLoading || 'Karachi, Pakistan';
+  const portOfDischarge = order.destinationPort || order.destinationCountry || order.country || 'the destination port';
+  const sellerInsures = ['CIF', 'CIP', 'DAP', 'DPU', 'DDP'].includes(incoterm);
   const bagSizeKg = order.bagSizeKg || 25;
   const bags = Math.round((qtyMT * 1000) / bagSizeKg);
   const containers = Math.ceil(qtyMT / 26);
@@ -453,74 +458,72 @@ export default function ProformaInvoice({ order, companyProfile }) {
             </h3>
             <ol className="list-decimal list-inside text-xs space-y-2" style={{ color: '#475569' }}>
               <li>
-                <span className="font-medium">Payment Terms:</span>{' '}
+                <span className="font-medium">Price Basis:</span> All prices are quoted in {order.currency || 'USD'} per Metric Ton on{' '}
+                <span className="font-medium">{incoterm} {sellerInsures || ['CFR', 'CNF', 'C&F', 'CPT'].includes(incoterm) ? portOfDischarge : portOfLoading}</span> basis (Incoterms® 2020).
+              </li>
+              <li>
+                <span className="font-medium">Payment:</span>{' '}
                 {advancePct >= 100
                   ? `100% advance payment via ${payMethod} before shipment.`
                   : advancePct <= 0
-                    ? (customPaymentTerms || `Payment 100% against presentation of shipping documents on sight, unless otherwise agreed.`)
-                    : `${advancePct}% advance payment via ${payMethod} before production; the balance ${balancePct}% payable against presentation of a scanned copy of the Bill of Lading.`}
-              </li>
-              {advancePct > 0 && (
-                <li>
-                  <span className="font-medium">Advance Deposit:</span> An advance of{' '}
-                  <span className="font-bold" style={{ color: '#1e3a5f' }}>{formatCurrency(advanceAmount)}</span>{' '}
-                  ({advancePct}%) is required to confirm this order and initiate production
-                  {balancePct > 0 ? <>; the balance <span className="font-bold" style={{ color: '#1e3a5f' }}>{formatCurrency(balanceAmount)}</span> ({balancePct}%) is payable as above.</> : '.'}
-                </li>
-              )}
-              <li>
-                <span className="font-medium">Packing:</span>{' '}
-                {order.bagType
-                  ? `${bagSizeKg} KG ${order.bagType}${order.bagQuality ? ` (${order.bagQuality})` : ''}${order.bagPrinting ? ` — ${order.bagPrinting}` : ''}. Bags marked as per buyer's instructions.`
-                  : `Standard packing in ${bagSizeKg} KG polypropylene bags. Bags marked as per buyer's instructions.`}
+                    ? (customPaymentTerms || `100% against presentation of shipping documents on sight, unless otherwise agreed.`)
+                    : `${advancePct}% advance via ${payMethod} before production; balance ${balancePct}% against presentation of a scanned copy of the Bill of Lading.`}
+                {advancePct > 0 && (
+                  <> Advance of <span className="font-bold" style={{ color: '#1e3a5f' }}>{formatCurrency(advanceAmount)}</span>
+                  {balancePct > 0 && <> and balance of <span className="font-bold" style={{ color: '#1e3a5f' }}>{formatCurrency(balanceAmount)}</span></>}.</>
+                )}
               </li>
               <li>
-                <span className="font-medium">Origin:</span> Product of Pakistan. All goods are of Pakistani origin
-                and comply with international food safety standards.
-              </li>
-              <li>
-                <span className="font-medium">Delivery / Incoterms:</span>{' '}
+                <span className="font-medium">Delivery (Incoterms):</span>{' '}
                 {(() => {
-                  const inc = (order.incoterm || 'FOB').toUpperCase();
-                  const pol = order.portOfLoading || 'Karachi, Pakistan';
-                  const pod = order.destinationPort || order.destinationCountry || order.country || 'the destination port';
                   const m = {
-                    EXW: `Ex Works — the buyer bears all costs and risks from our premises, including export clearance, freight and insurance.`,
-                    FCA: `FCA ${pol} — delivered to the buyer's carrier at ${pol}; ocean freight and insurance are to the buyer's account.`,
-                    FOB: `FOB ${pol} — delivered on board the vessel at ${pol}; ocean freight and marine insurance are to the buyer's account.`,
-                    CFR: `CFR ${pod} — we pay the cost and ocean freight to ${pod}; marine insurance is to the buyer's account.`,
-                    CNF: `CFR ${pod} — we pay the cost and ocean freight to ${pod}; marine insurance is to the buyer's account.`,
-                    'C&F': `CFR ${pod} — we pay the cost and ocean freight to ${pod}; marine insurance is to the buyer's account.`,
-                    CIF: `CIF ${pod} — we pay the cost, ocean freight and marine insurance to ${pod}.`,
-                    CPT: `CPT ${pod} — we pay carriage to ${pod}; insurance is to the buyer's account.`,
-                    CIP: `CIP ${pod} — we pay carriage and insurance to ${pod}.`,
-                    DAP: `DAP ${pod} — we bear all costs and risks to deliver at ${pod}, ready for unloading.`,
-                    DDP: `DDP ${pod} — we bear all costs and risks, including import duties, to deliver at ${pod}.`,
+                    EXW: `Ex Works — the Buyer bears all costs and risks from the Seller's premises, including export clearance, freight and insurance.`,
+                    FCA: `FCA ${portOfLoading} — delivered to the Buyer's carrier at ${portOfLoading}.`,
+                    FOB: `FOB ${portOfLoading} — delivered on board the vessel at ${portOfLoading}; risk passes on shipment.`,
+                    CFR: `CFR ${portOfDischarge} — Seller pays cost and ocean freight to ${portOfDischarge}; risk passes on shipment.`,
+                    CNF: `CFR ${portOfDischarge} — Seller pays cost and ocean freight to ${portOfDischarge}; risk passes on shipment.`,
+                    'C&F': `CFR ${portOfDischarge} — Seller pays cost and ocean freight to ${portOfDischarge}; risk passes on shipment.`,
+                    CIF: `CIF ${portOfDischarge} — Seller pays cost, ocean freight and insurance to ${portOfDischarge}; risk passes on shipment.`,
+                    CPT: `CPT ${portOfDischarge} — Seller pays carriage to ${portOfDischarge}.`,
+                    CIP: `CIP ${portOfDischarge} — Seller pays carriage and insurance to ${portOfDischarge}.`,
+                    DAP: `DAP ${portOfDischarge} — Seller bears all costs and risks to deliver at ${portOfDischarge}, ready for unloading.`,
+                    DDP: `DDP ${portOfDischarge} — Seller bears all costs and risks, including import duties, to deliver at ${portOfDischarge}.`,
                   };
-                  return m[inc] || `As per the agreed Incoterms® 2020 rule ${inc}.`;
+                  return m[incoterm] || `As per the agreed Incoterms® 2020 rule ${incoterm}.`;
                 })()}
               </li>
               <li>
-                <span className="font-medium">Shipment:</span> From {order.portOfLoading || 'Karachi, Pakistan'} to{' '}
-                {order.destinationPort || order.destinationCountry || order.country || 'the destination'}. Partial shipment
-                and transhipment permitted unless otherwise agreed in writing.
+                <span className="font-medium">Insurance:</span>{' '}
+                {sellerInsures
+                  ? `Marine insurance covered by the Seller under the ${incoterm} price (minimum 110% of CIF value).`
+                  : `Marine insurance is to the Buyer's account.`}
               </li>
               <li>
-                <span className="font-medium">Quality &amp; Weight:</span> As per the agreed specification. Quality and
-                weight as ascertained at the port of loading shall be final; independent inspection (e.g. SGS) at the
-                buyer's cost, if required.
+                <span className="font-medium">Quantity:</span> {qtyMT.toLocaleString()} MT with a tolerance of &plusmn;5% at the Seller's option, at the contract price.
               </li>
               <li>
-                <span className="font-medium">Validity:</span> This Proforma Invoice is valid for 15 days from the date of
-                issue unless extended in writing.
+                <span className="font-medium">Weight &amp; Quality:</span> Net shipped weight and quality as ascertained and certified by an independent surveyor (e.g. SGS) at the port of loading shall be final and binding on both parties.
               </li>
               <li>
-                <span className="font-medium">Force Majeure:</span> The Seller shall not be liable for any delay or failure
-                to perform arising from events beyond its reasonable control.
+                <span className="font-medium">Packing:</span>{' '}
+                {order.bagType
+                  ? `${bagSizeKg} KG ${order.bagType}${order.bagQuality ? ` (${order.bagQuality})` : ''}${order.bagPrinting ? ` — ${order.bagPrinting}` : ''} bags, marked as per Buyer's instructions.`
+                  : `New ${bagSizeKg} KG polypropylene (PP) bags, food-grade, marked as per Buyer's instructions.`}
               </li>
               <li>
-                <span className="font-medium">Governing Law:</span> This transaction is governed by the laws of the Islamic
-                Republic of Pakistan; any dispute shall be settled amicably or through arbitration.
+                <span className="font-medium">Origin &amp; Product:</span> Product of Pakistan, latest crop. GMO-free and fit for human consumption at any stage, free from live and dead weevils/insects, and compliant with international food-safety standards.
+              </li>
+              <li>
+                <span className="font-medium">Shipment:</span> From {portOfLoading} to {portOfDischarge}. Partial shipment and transhipment permitted unless otherwise agreed in writing.
+              </li>
+              <li>
+                <span className="font-medium">Validity:</span> This Proforma Invoice is valid for 15 days from the date of issue unless extended in writing.
+              </li>
+              <li>
+                <span className="font-medium">Force Majeure:</span> The Seller shall not be liable for any delay or failure to perform arising from events beyond its reasonable control (Act of God, war, strike, port congestion, government action, etc.).
+              </li>
+              <li>
+                <span className="font-medium">Arbitration &amp; Governing Law:</span> This transaction is governed by the laws of the Islamic Republic of Pakistan. Any dispute shall be settled amicably, failing which by arbitration under the rules of a recognized authority (ICC / GAFTA), whose award shall be final and binding.
               </li>
             </ol>
             <div className="mt-4 pt-3 border-t" style={{ borderColor: '#e2e8f0' }}>
