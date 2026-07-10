@@ -805,48 +805,167 @@ function renderBankFIRequest(doc) {
     </div>`;
 }
 
-// ─── Export Undertaking ───
+// ─── Shared letterhead/footer for the SBP / bank compliance documents ───
+// Logo (left) + AGRI COMMODITIES + tagline, and a navy footer bar with the
+// DHA export-office contact details — matching the source PDFs.
+function complianceLogo(company) {
+  const src = (typeof location !== 'undefined' ? location.origin : '') + (company.logo || '/logo.jpg');
+  return `<img src="${src}" alt="" style="height:56px; max-width:120px; object-fit:contain;" onerror="this.style.display='none'"/>`;
+}
+function renderComplianceHeader(company) {
+  return `
+    <div style="display:flex; align-items:center; gap:16px; border-bottom:2px solid #1e3a5f; padding-bottom:10px; margin-bottom:14px;">
+      <div style="flex:0 0 auto;">${complianceLogo(company)}</div>
+      <div style="flex:1; text-align:center;">
+        <div style="font-size:26px; font-weight:800; color:#1e3a5f; letter-spacing:1px; text-decoration:underline;">AGRI COMMODITIES</div>
+        <div style="font-style:italic; color:#c79a3a; font-size:13px; margin-top:2px;">${company.tagline || 'Serving Natural Nutrition'}</div>
+      </div>
+      <div style="flex:0 0 120px;"></div>
+    </div>`;
+}
+function renderComplianceFooter(company) {
+  const bits = [company.phone ? `Tel: ${company.phone}` : '', company.email ? `Email: ${company.email}` : '', company.website ? `Web: ${company.website}` : ''].filter(Boolean).join('  ·  ');
+  return `
+    <div style="margin-top:36px; background:#1e3a5f; color:#fff; text-align:center; font-size:10px; padding:8px 10px; line-height:1.5;">
+      ${company.address}<br/>${bits}
+    </div>`;
+}
+function signatureBlock(company) {
+  return `
+    <div style="margin-top:48px;">
+      <div style="border-top:1px solid #333; width:240px; padding-top:4px; font-size:11px;">
+        <b>${company.name}</b><br/>Proprietor<br/><span style="color:#666;">(Authorised Signature &amp; Stamp)</span>
+      </div>
+    </div>`;
+}
+
+// ─── Export Undertaking (full SBP text, incoterm-aware) ───
 function renderExportUndertaking(doc) {
   const { company, buyer, order } = doc;
+  const lines = buildLineItems(doc);
+  const productList = lines.length > 1
+    ? lines.map((l) => `<u>${l.productName || `Item ${l.sno}`}</u>`).join(', ')
+    : `<u>${(lines[0] && lines[0].productName) || order.product || '—'}</u>`;
+  const hsCodes = [...new Set(lines.map((l) => l.hsCode).filter(Boolean))];
+  const hs = hsCodes.length > 0 ? hsCodes.join(', ') : (order.hsCode || '—');
+  const client = [buyer.name, buyer.country].filter(Boolean).join(', ');
+  const pod = [order.destinationPort, buyer.country].filter(Boolean).join(', ') || '—';
+  const inc = doc.specific && doc.specific.incotermTerms;
   return `
-    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:800px; margin:0 auto; padding:20px;">
-      ${renderHeader(company)}
-      <p>The Manager<br/>${company.bank.name} - ${company.bank.branch},<br/>Karachi.</p>
-      <p>Dear Sir,</p>
-      <h3 style="text-align:center; text-decoration:underline; margin:15px 0;">EXPORT UNDERTAKING</h3>
+    <div style="font-family: Arial, sans-serif; font-size:11px; line-height:1.5; max-width:820px; margin:0 auto; padding:20px; color:#111;">
+      ${renderComplianceHeader(company)}
+      <p style="margin:0 0 12px;">The Manager<br/>${company.bank.name} - ${company.bank.branch},<br/>Karachi.</p>
+      <p style="margin:0 0 6px;">Dear Sir,</p>
+      <h3 style="text-align:center; text-decoration:underline; margin:14px 0; font-size:13px;">EXPORT UNDERTAKING</h3>
 
-      <p>The said export transaction relates to sale of ${(() => {
-        const lines = buildLineItems(doc);
-        const productList = lines.length > 1
-          ? lines.map((l) => `<u>${l.productName || `Item ${l.sno}`}</u>`).join(', ')
-          : `<u>${(lines[0] && lines[0].productName) || order.product || '—'}</u>`;
-        return productList;
-      })()} for a value of <u>${order.currency} ${order.contractValue.toLocaleString()}</u> with our client <u>${buyer.name}, ${buyer.country}</u> as per mutually agreed contract / Proforma Invoice No. <u>${order.invoiceNumber}</u> dated <u>${order.date}</u> with payment term <u>${order.paymentTerms}</u>.</p>
+      <p>The said export transaction relates to sale of ${productList} for a value of <u>${order.currency} ${(order.contractValue || 0).toLocaleString()}</u> with our client <u>${client || '—'}</u> as per mutually agreed contract / Proforma Invoice No. <u>${order.invoiceNumber || '—'}</u> dated <u>${order.date || '—'}</u> with payment term on <u>${order.paymentTerms || '—'}</u>.</p>
 
       <p>We are very much satisfied with the credentials, sound financial standing and good repute of our client (the importer/foreign buyer/consignee) and confirm their bona fide.</p>
 
       <p>I / We further confirm that:</p>
-      <ol style="line-height:2; font-size:11px;">
-        <li>The merchandise being exported falls under HS Code Number(s): <u>${(() => {
-          const codes = [...new Set(buildLineItems(doc).map((l) => l.hsCode).filter(Boolean))];
-          return codes.length > 0 ? codes.join(', ') : (order.hsCode || '—');
-        })()}</u>, is freely exportable / not subject to export license / does not contravene any of the provision of the aforesaid rules and regulations.</li>
+      <ol style="line-height:1.6; padding-left:18px;">
+        <li>The merchandise being exported falls under HS Code Number(s): <u>${hs}</u>, is freely exportable / not subject to export license / does not contravene any of the provision of the aforesaid rules and regulations and where required we have obtained necessary authorization from Ministry of Commerce/Trade Development Authority of Pakistan or from any other relevant Government Department which we enclose herewith in Original (if needed).</li>
         <li>We are commercial exporter / registered as an Industrial Unit with Trade Development Authority of Pakistan and hold valid export registration (GST Certificate) and membership of a recognized trade association.</li>
-        <li>We are fully aware and suitably conversant with all the valid and applicable rules and regulations governing exports from Pakistan.</li>
+        <li>We are fully aware and suitably conversant with all the valid and applicable rules and regulations governing exports from Pakistan as per the directives of State Bank of Pakistan in the Foreign Exchange Manual, yearly Export Policy Order(s) issued by Ministry of Commerce and other concerned government agencies in all respect and consequently fully understand our responsibility to ensure timely settlement of exports / sale proceeds in accordance with agreed terms not later than the prescribed time period allowed by the State Bank of Pakistan and other regulatory requirements.</li>
         <li>We shall ensure to timely submit to you all the required shipping documents for onward dispatch to concerned foreign bank or submission to State bank of Pakistan.</li>
-        <li>We are familiar with the list of sanctioned countries / entities with which trade transactions / dealings in any manner either directly or indirectly are proscribed.</li>
+        <li>We are familiar with the list of sanctioned countries / entities with which trade transactions / dealings in any manner either directly or indirectly are proscribed and that neither us nor any of our agent(s) will handle / be involved in any transaction / deal / shipment relating to any manner with any of the sanctioned countries / and as aforesaid we are satisfied that certainly no sanctioned / proscribed beneficial owner is involved in our dealing with our client / the importer / foreign buyer.</li>
         <li>We will never involve ourselves in any trade transaction of banned items as per Negative List of the Government of Pakistan.</li>
         <li>We confirm that the contracted price of the exported goods is in line with the current International market price without any significant variance.</li>
-        <li>We confirm that Origin of goods are Pakistani.</li>
-        <li>We will not affect any shipment through any shipping company which itself is sanctioned or operates under the flag of any sanctioned country.</li>
-        <li>We confirm that the port of discharge of goods is <u>${order.destinationPort}, ${buyer.country}</u> as mentioned on the Master Bill of Lading / Shipping Documents.</li>
+        <li>We confirm that Origin of goods are Pakistani and if shipments contain any foreign components it shall not belong to any sanctioned country or entity/producer, directly or indirectly, in any manner. Further, the port of loading and Port of discharge are exactly as mentioned in Certified Form-E and during voyage the ship does not call any sanctioned countries / ports and discharge the exports consignment at any port of any banned / sanctioned countries.</li>
+        <li>We will not affect any shipment through any shipping company which itself is sanctioned or owns or operates sanctioned vessels or any shipping company which operates under the flag of any sanctioned country directly or indirectly in any manner.</li>
+        <li>We confirm that the port of discharge of goods is <u>${pod}</u> as mentioned on the Master Bill of Lading / Shipping Documents / Airway Bill.</li>
       </ol>
 
-      <p style="margin-top:20px;">Yours faithfully,</p>
-      <div style="margin-top:30px;">
-        <p style="font-weight:bold;">${company.name}<br/>Proprietor</p>
+      ${inc ? `<p><b>Delivery / Freight Terms (${inc.incoterm}):</b> ${inc.text}</p>` : ''}
+
+      <p>We also undertake that if our client (the importer / foreign buyer / consignee) refuses to accept the goods, I / we shall either make immediate arrangements for shipping the goods back to Pakistan or find alternate buyer with the approval of the State Bank of Pakistan. However, I / we understand that prior approval of the State Bank of Pakistan will not be necessary in case where the consignment initially refused is taken up finally by the original consignee or an alternate buyer provided that payment for the consignment is not less than 90% of its original value less actual demurrage charges, if any. Further in case where our client defaults in making payment after taking delivery of the goods against their Acceptance or Trust Receipt, I / we undertake and confirm of being the prime responsible for initiating legal action against our client (the importer / foreign buyer / consignee).</p>
+
+      <p style="margin-top:18px;">Yours faithfully,</p>
+      ${signatureBlock(company)}
+      ${renderComplianceFooter(company)}
+    </div>`;
+}
+
+// ─── Appendix V-10A — SBP FERA Undertaking/Declaration by Exporter ───
+function renderAppendixV10A(doc) {
+  const { company } = doc;
+  return `
+    <div style="font-family: Arial, sans-serif; font-size:11px; line-height:1.6; max-width:820px; margin:0 auto; padding:20px; color:#111;">
+      ${renderComplianceHeader(company)}
+      <div style="text-align:right; font-weight:bold; margin-bottom:6px;">Appendix V-10A</div>
+      <p style="font-weight:bold;">[Declaration to be furnished by exporters pursuant to section 12(1) of the Foreign Exchange Regulation Act, 1947 read with government notifications No. 1(6)-ECS/48 and No. 1(7)-ECS/48 both dated the 1st July, 1948.]</p>
+      <p>{Documents covering the goods in the Financial Instrument (FI) including full set of bills of lading, railway receipt and/or other documents of the title to the goods must be passed through an Authorized Dealer (AD) in Foreign Exchange. In no case may they be dispatched directly without prior special/general authority in writing of the State Bank of Pakistan.}</p>
+      <h3 style="text-align:center; margin:16px 0; font-size:13px;">UNDERTAKING/DECLARATION BY EXPORTER</h3>
+      <p>An incorrect declaration constitutes an offence under Pakistan Penal Code 1860, Foreign Exchange Regulation Act, 1947 (VII of 1947), Customs Act 1969, and Anti Money Laundering Act 2010.</p>
+      <ol style="line-height:1.6; padding-left:18px;">
+        <li>I/We, hereby declare that I/We am/are the sellers/consignors/exporters of the goods described herein in respect of which this declaration is made out and that the particulars given in the Financial Instruments are true and that the invoice value declared in the Financial Instruments in case of firm contracts is full value as contracted with the buyers/in case of consignment sale is a fair value of goods which are being shipped on consignment sale.</li>
+        <li>I/We undertake that I/we shall deliver to the AD the foreign exchange proceeds resulting from the export of these goods, on the due date as per contractual maturity or within such time period as may be prescribed by State Bank of Pakistan, from the date of shipment/dispatch whichever is earlier.</li>
+        <li>In the event of consignment sale we undertake to furnish to the AD a fully documented account sale certified by the consignees / Chamber of Commerce of the country of import or any other documents required by the State Bank of Pakistan.</li>
+        <li>I/We declare that nothing material or relevant to the information has been omitted or suppressed and whatever is stated herein is true to my/our knowledge and belief.</li>
+        <li>I/We undertake to submit to the AD within fourteen days of shipment, the documents for negotiation / for sending on collection.</li>
+        <li>I/We hereby expressly authorize the State Bank of Pakistan (SBP) to share my/our outstanding overdue information with ADs/ banks, for the purpose of conducting due diligence related to my/our export activities (Irrespective of the fact whether the same is challenged before a Court or otherwise). I/We also permit the ADs/banks to access my/our outstanding overdue information available on the Exporter's Information Portal (EIP) maintained by SBP. This authorization is given in terms of Section 3(4) of the Foreign Exchange Regulation Act, 1947, to facilitate the assessment of my/our export performance and repatriation of proceeds thereof.</li>
+      </ol>
+      ${signatureBlock(company)}
+      ${renderComplianceFooter(company)}
+    </div>`;
+}
+
+// ─── Indemnity — Annexure IV (Related Party Transaction) ───
+function renderIndemnity(doc) {
+  const { company } = doc;
+  const counterParty = (doc.specific && doc.specific.counterParty) || (doc.buyer && doc.buyer.name) || '';
+  return `
+    <div style="font-family: Arial, sans-serif; font-size:11px; line-height:1.6; max-width:820px; margin:0 auto; padding:20px; color:#111;">
+      ${renderComplianceHeader(company)}
+      <div style="text-align:right; font-weight:bold; text-decoration:underline; margin-bottom:6px;">Annexure IV</div>
+      <h3 style="text-align:center; text-decoration:underline; margin:6px 0 12px; font-size:13px;">Customer Indemnity for Related Party Transaction</h3>
+      <p style="margin:0 0 10px;"><b>Name of the Counter Party:</b> <u>${counterParty || '________________________'}</u> (Importer/Exporter)</p>
+      <p>We, M/s <b>${company.name}</b> (hereinafter referred to as "Company") are aware that a "Related Party Transaction" means any transaction, arrangement or relationship, or any series of transactions, arrangements or relationships, in which (i) the Company or any of its subsidiaries / associated companies is or will be a participant, and (ii) any Related Party (which includes but not limited to a situation where owner/any of the owners of the counter-party are same as those of the bank's customer or person/persons controlling the counter-party are similar to that of the bank's customer or if the counter-party is a subsidiary or affiliate or principal or belongs to the same Business Group) has or will have a direct or indirect interest.</p>
+      <p>We, M/s <b>${company.name}</b> declare that this transaction is not a Related Party Transaction as defined above. We further confirm that the Ultimate Beneficial Owners (UBO) or any of the UBOs of the counter-party are not related to us in any way, the controlling person/persons of the counter-party are not family members of the controlling person/s of our Company. We further declare that the counter-party is not our subsidiary, affiliate / associated company or principal and does not belong to our business group in any manner whatsoever.</p>
+      <p>We, as a continuing obligor, unconditionally and irrevocably agree, to indemnify you and hold you harmless from and against all claims, demands, actions, proceedings, liabilities, damages, costs, charges, losses and expenses (including legal costs) of whatever nature which you may suffer, incur or sustain in any way directly or indirectly as a consequence of our above declarations/confirmations.</p>
+      <p>We hereby agree to keep Bank AL Habib Limited indemnified against all demands, actions, proceedings, liabilities, claims, damages, costs and expenses in relation to or arising out of subject transaction and undertake to pay Bank AL Habib Limited immediately on demand all payments, losses, costs and expenses made or suffered by the Bank in consequence thereof.</p>
+      <p>We, M/s <b>${company.name}</b> agree that the obligations on our part contained in this Indemnity shall continue to bind us notwithstanding any change in our constitution or change in the share-holding or amalgamation/ absorption/transfer of assets/novation of liabilities.</p>
+      ${signatureBlock(company)}
+      ${renderComplianceFooter(company)}
+    </div>`;
+}
+
+// ─── ITRS — SBP C-ITRS Reporting Variables (Import/Export) ───
+function renderITRS(doc) {
+  const { company, order } = doc;
+  const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const CHK = (on) => `<span style="font-family:monospace;">${on ? '☑' : '☐'}</span>`;
+  const row = (label, val) => `<tr><td style="padding:4px 6px; font-weight:bold; white-space:nowrap; vertical-align:top;">${label}</td><td style="padding:4px 6px; border-bottom:1px solid #999;">${val || ''}</td></tr>`;
+  return `
+    <div style="font-family: Arial, sans-serif; font-size:11px; line-height:1.5; max-width:820px; margin:0 auto; padding:20px; color:#111;">
+      ${renderComplianceHeader(company)}
+      <div style="background:#2e7d32; color:#fff; text-align:center; font-weight:bold; padding:6px; margin-bottom:12px;">SBP C-ITRS Reporting Variables &mdash; Import/Export</div>
+      <table style="width:100%; border-collapse:collapse;">
+        ${row('Branch Name:', company.bank.branch)}
+        ${row('Date:', today)}
+        ${row('Account No / IBAN:', company.bank.iban)}
+        ${row('Account Title:', company.name)}
+        ${row('Sales Order / Proforma / Invoice No:', order.invoiceNumber)}
+        ${row('Sales Order / Proforma / Invoice Date:', order.date)}
+      </table>
+      <div style="margin:8px 0;"><b>Transactions:</b> &nbsp; ${CHK(false)} Import &nbsp;&nbsp; ${CHK(true)} Export</div>
+      <div style="margin:6px 0;"><b>Product name</b> (as per HS Code): <u>${order.product || 'RICE'} — HS ${order.hsCode || '1006.30'}</u></div>
+      <div style="margin:6px 0;"><b>Customer Gender:</b> &nbsp; ${CHK(false)} Male &nbsp; ${CHK(false)} Female &nbsp; ${CHK(true)} Other</div>
+      <div style="margin:6px 0;"><b>Goods Type</b> (Physical Goods): &nbsp; ${CHK(false)} Raw &nbsp; ${CHK(false)} Intermediate &nbsp; ${CHK(false)} Capital &nbsp; ${CHK(true)} Finished</div>
+      <div style="margin:6px 0;"><b>Transaction model</b> (B2C, B2B, C2B, C2C, B2B2C, Other): <u>B2B</u></div>
+      <div style="margin:6px 0;"><b>Digitally Ordered Trade:</b> &nbsp; ${CHK(false)} DI &nbsp; ${CHK(false)} DO &nbsp; ${CHK(true)} Not Applicable</div>
+      <div style="margin:6px 0;"><b>Digitally Delivered Trade:</b> &nbsp; ${CHK(false)} DI &nbsp; ${CHK(false)} DO &nbsp; ${CHK(true)} Not Applicable</div>
+      <div style="margin:6px 0;"><b>Services Platform use:</b> &nbsp; ${CHK(true)} No &nbsp; ${CHK(false)} Yes</div>
+      <div style="margin:6px 0;"><b>Currency:</b> <u>${order.currency || 'USD'}</u></div>
+      <div style="border:1px solid #333; padding:6px; margin:8px 0; color:#666;"><b>For Only Imports:</b> Freight Currency: __________ &nbsp; Freight Amount: __________ &nbsp; <i>(not applicable — this is an export)</i></div>
+      <div style="margin:6px 0;">Reference of SBP's Approval (if applicable): __________________ &nbsp; SBP's Approval Date: ______________</div>
+      <div style="display:flex; justify-content:space-between; margin-top:40px; font-size:10px;">
+        <div style="border-top:1px solid #333; width:44%; padding-top:4px; text-align:center;">Applicant's Authorized Signature with Stamp</div>
+        <div style="border-top:1px solid #333; width:44%; padding-top:4px; text-align:center;">Applicant's Authorized Signature with Stamp</div>
       </div>
-      ${renderCompanyFooter(company)}
+      <div style="background:#2e7d32; color:#fff; text-align:center; font-weight:bold; padding:5px; margin:18px 0 8px;">For Bank use only</div>
+      <div style="font-size:10px; color:#555;">Transaction reference No: ____________________ &nbsp; Transaction Date: ____________<br/><br/>Scan Reference No: ____________________<br/><br/><br/>Reviewed by (Name &amp; Signature): ________________ &nbsp;&nbsp; Approved by (Name &amp; Signature): ________________</div>
+      ${renderComplianceFooter(company)}
     </div>`;
 }
 
@@ -1377,6 +1496,9 @@ const RENDERERS = {
   'production-plan': renderProductionPlan,
   'bank-fi-request': renderBankFIRequest,
   'export-undertaking': renderExportUndertaking,
+  'appendix-v-10a': renderAppendixV10A,
+  'itrs': renderITRS,
+  'indemnity': renderIndemnity,
   'invoice': renderInvoice,
   'bill-of-lading': renderBillOfLading,
   'packing-certificate': renderPackingCertificate,

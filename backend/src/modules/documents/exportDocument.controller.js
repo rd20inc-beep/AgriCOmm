@@ -63,6 +63,51 @@ function formatMoney(amount, currency = 'USD') {
   return `${currency} ${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+// The SBP / bank compliance documents (Export Undertaking, Appendix V-10A, ITRS,
+// Indemnity) use the DHA export-office letterhead, not the Uni Plaza head office.
+const DHA_OFFICE = {
+  address: 'Suite # 302, 3rd Floor, Building # 35C, Main Badar Commercial, Phase 5, DHA, Karachi-75500',
+  phone: '+92 300 8234924 & +92 300 8997323',
+  fax: '',
+  email: 'export@agririce.com',
+  website: 'www.agririce.com',
+};
+function withDhaOffice(company) {
+  return { ...company, ...DHA_OFFICE };
+}
+
+// Incoterm-aware delivery / freight & insurance terms — used so the compliance
+// documents state the correct responsibilities for the order's incoterm.
+function incotermTerms(incotermRaw, portOfLoading, destinationPort) {
+  const inc = String(incotermRaw || 'FOB').toUpperCase().trim();
+  const POL = portOfLoading || 'the port of loading';
+  const POD = destinationPort || 'the port of discharge';
+  const map = {
+    EXW: `EXW — Ex Works. The buyer bears all costs and risks of taking the goods from the seller's premises, including export clearance, inland carriage, ocean freight and marine insurance.`,
+    FCA: `FCA ${POL} — Free Carrier. The seller delivers the goods, cleared for export, to the carrier nominated by the buyer at ${POL}. Ocean freight and marine insurance are to the buyer's account.`,
+    FOB: `FOB ${POL} — Free On Board. The seller delivers the goods on board the vessel at ${POL} and clears them for export. Ocean freight and marine insurance are arranged and borne by the buyer.`,
+    CFR: `CFR ${POD} — Cost and Freight. The seller pays the cost and ocean freight to bring the goods to ${POD}. Marine insurance is to the buyer's account; risk passes on shipment.`,
+    CNF: `CFR ${POD} — Cost and Freight (C&F/CNF). The seller pays the cost and ocean freight to ${POD}. Marine insurance is to the buyer's account; risk passes on shipment.`,
+    'C&F': `CFR ${POD} — Cost and Freight. The seller pays the cost and ocean freight to ${POD}. Marine insurance is to the buyer's account; risk passes on shipment.`,
+    CIF: `CIF ${POD} — Cost, Insurance and Freight. The seller pays the cost, ocean freight and minimum marine insurance to bring the goods to ${POD}; risk passes on shipment.`,
+    CPT: `CPT ${POD} — Carriage Paid To. The seller pays carriage to ${POD}. Insurance is to the buyer's account; risk passes on handover to the first carrier.`,
+    CIP: `CIP ${POD} — Carriage and Insurance Paid To. The seller pays carriage and insurance to ${POD}; risk passes on handover to the first carrier.`,
+    DAP: `DAP ${POD} — Delivered At Place. The seller bears all costs and risks to deliver the goods, ready for unloading, at ${POD}.`,
+    DPU: `DPU ${POD} — Delivered at Place Unloaded. The seller bears all costs and risks to deliver and unload the goods at ${POD}.`,
+    DDP: `DDP ${POD} — Delivered Duty Paid. The seller bears all costs and risks, including import duties, to deliver the goods at ${POD}.`,
+  };
+  const sellerPaysFreight = ['CFR', 'CNF', 'C&F', 'CIF', 'CPT', 'CIP', 'DAP', 'DPU', 'DDP'].includes(inc);
+  const sellerPaysInsurance = ['CIF', 'CIP', 'DAP', 'DPU', 'DDP'].includes(inc);
+  return {
+    incoterm: inc,
+    text: map[inc] || `${inc}. Delivery, freight and insurance responsibilities are as per the agreed Incoterms® 2020 rule ${inc}.`,
+    sellerPaysFreight,
+    sellerPaysInsurance,
+    portOfLoading: POL,
+    portOfDischarge: POD,
+  };
+}
+
 const exportDocumentController = {
   /**
    * GET /api/export-orders/:id/documents/generate/:docType
@@ -311,6 +356,41 @@ const exportDocumentController = {
           document = {
             type: 'Export Undertaking',
             ...common,
+            company: withDhaOffice(common.company),
+            specific: {
+              incotermTerms: incotermTerms(common.order.incoterm, common.order.portOfLoading, common.order.destinationPort),
+            },
+          };
+          break;
+
+        case 'appendix-v-10a':
+          document = {
+            type: 'Appendix V-10A',
+            ...common,
+            company: withDhaOffice(common.company),
+          };
+          break;
+
+        case 'itrs':
+          document = {
+            type: 'ITRS',
+            ...common,
+            company: withDhaOffice(common.company),
+            specific: {
+              incotermTerms: incotermTerms(common.order.incoterm, common.order.portOfLoading, common.order.destinationPort),
+            },
+          };
+          break;
+
+        case 'indemnity':
+          document = {
+            type: 'Indemnity',
+            ...common,
+            company: withDhaOffice(common.company),
+            specific: {
+              // Related-party indemnity is between us and the order's buyer (importer).
+              counterParty: common.buyer.name || '',
+            },
           };
           break;
 
@@ -440,6 +520,9 @@ const exportDocumentController = {
         { key: 'production-plan', label: 'Production Plan', availableFrom: 5, ready: true },
         { key: 'bank-fi-request', label: 'Bank FI Request (E-Form)', availableFrom: 6, ready: true },
         { key: 'export-undertaking', label: 'Export Undertaking', availableFrom: 6, ready: true },
+        { key: 'appendix-v-10a', label: 'Appendix V-10A (Exporter Declaration)', availableFrom: 6, ready: true },
+        { key: 'itrs', label: 'ITRS Reporting Form (SBP C-ITRS)', availableFrom: 6, ready: true },
+        { key: 'indemnity', label: 'Indemnity — Related Party (Annexure IV)', availableFrom: 6, ready: true },
         { key: 'invoice', label: 'Invoice', availableFrom: 7, ready: true },
         { key: 'commercial-invoice', label: 'Commercial Invoice', availableFrom: 8, ready: true },
         { key: 'bill-of-lading', label: 'Bill of Lading (Draft)', availableFrom: 8, ready: true },
