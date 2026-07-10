@@ -212,6 +212,10 @@ const exportDocumentController = {
             : `Pakistani ${order.product_name || 'Rice'} - ${order.broken_pct_target || 2}% Broken - Double (silky) polished & color sorted, Latest Crop - PACKED IN ${parseFloat(order.bag_size_kg) || 50} KGS ${order.bag_type || 'PP'} BAG - GMO FREE, FIT FOR HUMAN CONSUMPTION AT ANY STAGE, FREE FROM ALIVE AND DEAD WEEVILS/INSECTS`),
         },
 
+        // Incoterm-aware delivery/freight terms — available to every document
+        // (proforma/commercial terms & conditions, undertaking, etc.).
+        incotermInfo: incotermTerms(order.incoterm, settings.port_of_loading || 'Karachi, Pakistan', order.destination_port),
+
         // Notify Party
         notifyParty: {
           name: order.notify_party_name || '',
