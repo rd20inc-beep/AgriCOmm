@@ -130,6 +130,7 @@ const updateExportShipment = Joi.object({
   eta: Joi.date().iso().allow(null, ''),
   ata: Joi.date().iso().allow(null, ''),
   destination_port: Joi.string().allow('', null),
+  gate_pass_no: Joi.string().allow('', null),
   notes: Joi.string().allow('', null),
 });
 

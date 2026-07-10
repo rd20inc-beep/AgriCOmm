@@ -2376,24 +2376,19 @@ function MarkExportReadyDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
 // Transfer a finished/by-product mill lot's stock to the export entity. Deducts
 // this lot and creates a matching export-entity lot (lot-precise, validated).
 function TransferToExportDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
-  const { exportOrders } = useApp();
-  const { hasPermission } = useAuth();
   // Mill Operator/Supervisor move finished goods to the export-ready pool but do
-  // NOT select/connect export orders — that's the Export user's job. Only users
-  // with export-order access see the "Link to export order" picker.
-  const canLinkOrder = hasPermission('export_orders', 'view');
+  // NOT select/connect export orders — that's the Export user's job (allocation
+  // happens on the export side), so this drawer never shows an order picker.
   const availableKg = parseFloat(lot?.availableQty) || 0;
   const defaultPrice = Math.round((parseFloat(lot?.costPerUnit) || 0) * 100) / 100; // per KG
   const [qty, setQty] = useState('');
   const [price, setPrice] = useState('');
-  const [orderId, setOrderId] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
     setQty(availableKg ? String(availableKg) : '');
     setPrice(defaultPrice ? String(defaultPrice) : '');
-    setOrderId('');
   }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!lot) return null;
@@ -2401,8 +2396,6 @@ function TransferToExportDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
   const q = parseFloat(qty) || 0;
   const exceeds = q > availableKg + 0.0001;
   const totalVal = q * (parseFloat(price) || 0); // qty (kg) × price (per-kg)
-  const activeOrders = (Array.isArray(exportOrders) ? exportOrders : [])
-    .filter(o => !['Closed', 'Cancelled', 'Draft'].includes(o.status));
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -2414,7 +2407,6 @@ function TransferToExportDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
         qty_kg: q,
         // Input is per-kg; the export/transfer doc boundary is per-MT.
         transfer_price_pkr: price === '' ? null : parseFloat(price) * 1000,
-        export_order_id: orderId ? Number(orderId) : null,
       });
       addToast(res?.message || 'Transferred to export', 'success');
       onSuccess?.();
@@ -2456,21 +2448,7 @@ function TransferToExportDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
           <p className="text-xs text-gray-400 mt-1">Defaults to the lot's cost. Sets the export lot's cost and the inter-entity transfer value.</p>
         </div>
-        {canLinkOrder ? (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Link to export order (optional)</label>
-            <select value={orderId} onChange={e => setOrderId(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 bg-white">
-              <option value="">None — transfer to the export pool</option>
-              {activeOrders.map(o => (
-                <option key={o.id} value={o.id}>{o.order_no || o.orderNo} — {o.customer_name || o.customerName || ''}</option>
-              ))}
-            </select>
-            <p className="text-xs text-gray-400 mt-1">{orderId ? 'The transferred stock is reserved for this order and dispatched when it ships.' : 'No order — the stock stays available in the export pool to allocate later.'}</p>
-          </div>
-        ) : (
-          <p className="text-xs text-gray-400">The stock moves to the export-ready pool. An Export user allocates it to an order later.</p>
-        )}
+        <p className="text-xs text-gray-400">The stock moves to the export-ready pool. An Export user allocates it to an order later.</p>
       </form>
     </SlideDrawer>
   );

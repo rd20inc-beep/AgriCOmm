@@ -139,6 +139,7 @@ export default function ExportOrderDetail() {
   const [shipNotifyPhone, setShipNotifyPhone] = useState('');
   const [shipNotifyEmail, setShipNotifyEmail] = useState('');
   const [shipRemarks, setShipRemarks] = useState('');
+  const [shipGatePass, setShipGatePass] = useState('');
 
   // Expense form state
   const [expenseCategory, setExpenseCategory] = useState('rice');
@@ -302,6 +303,7 @@ export default function ExportOrderDetail() {
     setShipNotifyPhone(order.notifyPartyPhone || '');
     setShipNotifyEmail(order.notifyPartyEmail || '');
     setShipRemarks(order.shipmentRemarks || '');
+    setShipGatePass(order.gatePassNo || '');
     setShowShipmentModal(true);
   };
 
@@ -416,6 +418,11 @@ export default function ExportOrderDetail() {
   };
 
   const handleUpdateShipment = async () => {
+    // A gate pass is required to release the goods (marking departure → Shipped).
+    if (shipATD && !String(shipGatePass || '').trim()) {
+      addToast('Enter the Gate Pass No to mark the shipment as departed/shipped.', 'error');
+      return;
+    }
     try {
       const containers = shipContainers
         .map((container, index) => ({
@@ -457,6 +464,7 @@ export default function ExportOrderDetail() {
           eta: shipETA || null,
           ata: shipATA || null,
           destination_port: shipDestPort || null,
+          gate_pass_no: shipGatePass || null,
           voyage_number: shipVoyage || null,
           gd_number: shipGD || null,
           gd_date: shipGDDate || null,
@@ -949,6 +957,7 @@ export default function ExportOrderDetail() {
         shipNotifyPhone={shipNotifyPhone} setShipNotifyPhone={setShipNotifyPhone}
         shipNotifyEmail={shipNotifyEmail} setShipNotifyEmail={setShipNotifyEmail}
         shipRemarks={shipRemarks} setShipRemarks={setShipRemarks}
+        shipGatePass={shipGatePass} setShipGatePass={setShipGatePass}
         shipmentContainers={shipContainers}
         setShipmentContainers={setShipContainers}
         onConfirm={handleUpdateShipment}
