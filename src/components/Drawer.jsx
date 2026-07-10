@@ -31,6 +31,7 @@ export default function Drawer({
   width = 'md',
   footer,
   children,
+  closeOnBackdrop = false,
 }) {
   useEffect(() => {
     if (!isOpen) return undefined;
@@ -51,9 +52,9 @@ export default function Drawer({
       className={`fixed inset-0 z-50 ${isOpen ? 'pointer-events-auto' : 'pointer-events-none'}`}
       aria-hidden={!isOpen}
     >
-      {/* Backdrop */}
+      {/* Backdrop — does not close on click by default (avoid losing form data). */}
       <div
-        onClick={onClose}
+        onClick={closeOnBackdrop ? onClose : undefined}
         className={`absolute inset-0 bg-black/40 transition-opacity duration-200 ${
           isOpen ? 'opacity-100' : 'opacity-0'
         }`}

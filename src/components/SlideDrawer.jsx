@@ -6,7 +6,7 @@ import { X } from 'lucide-react';
  * src/modules/finance/pages/Purchases.jsx so behavior matches existing
  * drawers (Escape closes, click-outside closes, max-w-md panel).
  */
-export default function SlideDrawer({ open, onClose, title, subtitle, icon: Icon, children, footer, size = 'md' }) {
+export default function SlideDrawer({ open, onClose, title, subtitle, icon: Icon, children, footer, size = 'md', closeOnBackdrop = false }) {
   useEffect(() => {
     if (!open) return undefined;
     const handler = (e) => { if (e.key === 'Escape') onClose?.(); };
@@ -21,7 +21,7 @@ export default function SlideDrawer({ open, onClose, title, subtitle, icon: Icon
   return (
     <div
       className="fixed inset-0 z-50 bg-black/30 backdrop-blur-sm flex items-stretch justify-end"
-      onClick={onClose}
+      onClick={closeOnBackdrop ? onClose : undefined}
     >
       <div
         className={`bg-white w-full ${widthClass} h-full shadow-xl flex flex-col animate-in slide-in-from-right duration-200`}
