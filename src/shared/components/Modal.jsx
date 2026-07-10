@@ -9,7 +9,7 @@ const sizeClasses = {
   full: 'max-w-[calc(100vw-2rem)]',
 };
 
-export default function Modal({ isOpen, onClose, title, children, size = 'md', footer }) {
+export default function Modal({ isOpen, onClose, title, children, size = 'md', footer, closeOnBackdrop = false }) {
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = 'hidden';
@@ -35,8 +35,9 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md', f
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
-      {/* Overlay */}
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" onClick={onClose} />
+      {/* Overlay — backdrop click does NOT close by default, so an accidental
+          click while filling a form never wipes the entered data (use X/Cancel). */}
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" onClick={closeOnBackdrop ? onClose : undefined} />
 
       {/* Modal card - slides up on mobile, centers on desktop */}
       <div
