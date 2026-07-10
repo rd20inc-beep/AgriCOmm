@@ -66,7 +66,8 @@ function lineRows(inv) {
     rows.push([`Milling`, `${n0(inv.milling_qty_kg)} kg`, `${pkr(inv.milling_rate_per_kg)}/kg`, pkr(inv.milling_amount)]);
   }
   if (num(inv.rental_amount) || num(inv.rental_kattas)) {
-    rows.push([`Rental`, `${n0(inv.rental_kattas)} kattas`, `${pkr(inv.rental_rate_per_katta)}/katta`, pkr(inv.rental_amount)]);
+    const period = (inv.rental_from || inv.rental_to) ? ` (${dt(inv.rental_from)} – ${dt(inv.rental_to)})` : '';
+    rows.push([`Rental${period}`, `${n0(inv.rental_kattas)} kattas`, `${pkr(inv.rental_rate_per_katta)}/katta`, pkr(inv.rental_amount)]);
   }
   if (num(inv.labour_amount) || num(inv.labour_kattas)) {
     rows.push([`Labour`, `${n0(inv.labour_kattas)} kattas`, `${pkr(inv.labour_rate_per_katta)}/katta`, pkr(inv.labour_amount)]);

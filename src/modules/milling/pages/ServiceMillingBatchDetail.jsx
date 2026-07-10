@@ -326,6 +326,12 @@ export default function ServiceMillingBatchDetail() {
 
   const isPending = batch.status === 'Pending Approval';
   const producedKg = num(batch.actualFinishedKg);
+  // "Milled" = raw actually processed (Σ yield outputs). For a partial mill this
+  // is less than the received quantity, so each service can bill on its own basis.
+  const milledKg = num(batch.actualFinishedKg) + num(batch.brokenKg) + num(batch.sortexRejectsKg)
+    + num(batch.powderKg) + num(batch.sweepingKg) + num(batch.chobaKg) + num(batch.ovKg)
+    + num(batch.stoneKg) + num(batch.wastageKg) + num(batch.branMT) * 1000 + num(batch.huskMT) * 1000;
+  const unmilledKg = Math.max(0, num(batch.rawQtyKg) - milledKg);
 
   return (
     <div className="space-y-5 pb-6">
@@ -403,8 +409,10 @@ export default function ServiceMillingBatchDetail() {
           <Card title="Lot Summary" icon={Package}>
             <Row label="Client">{batch.clientName || '—'}</Row>
             <Row label="Date Received">{batch.dateReceived ? new Date(batch.dateReceived).toLocaleDateString('en-GB') : '—'}</Row>
-            <Row label="Raw Quantity">{kg(batch.rawQtyKg)}</Row>
-            {unit && <Row label={unit === 'kattas' ? 'Kattas' : 'Bags'}>{unitCount.toLocaleString()} {unit}</Row>}
+            <Row label="Received Quantity">{kg(batch.rawQtyKg)}</Row>
+            {unit && <Row label={unit === 'kattas' ? 'Kattas Received' : 'Bags Received'}>{unitCount.toLocaleString()} {unit}</Row>}
+            {milledKg > 0 && <Row label="Milled">{kg(milledKg)}</Row>}
+            {milledKg > 0 && <Row label="Unmilled">{kg(unmilledKg)}</Row>}
             {batch.serviceRemarks && <Row label="Remarks">{batch.serviceRemarks}</Row>}
           </Card>
 
