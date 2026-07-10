@@ -268,6 +268,49 @@ module.exports = {
     }
   },
 
+  // ── Void an invoice so the batch can be re-issued ──
+  // Reverses any payment receipts (bank/cash), marks the revenue journal
+  // Reversed (Posted-only convention — no reverse+repost), drops the receivable
+  // and the invoice row. The batch then has no invoice, so a fresh one can be
+  // created (e.g. after the katta count was corrected).
+  async voidInvoice(req, res) {
+    try {
+      const result = await db.transaction(async (trx) => {
+        const inv = await trx('service_milling_invoices').where({ id: req.params.id }).first();
+        if (!inv) throw new Error('Invoice not found');
+
+        // 1. Reverse payment receipts linked to this invoice (account balance +
+        //    bank_transactions), then drop the payment rows.
+        const payments = await trx('payments').where({ service_invoice_id: inv.id });
+        for (const pay of payments) {
+          const bts = await trx('bank_transactions').where({ linked_payment_id: pay.id });
+          for (const bt of bts) {
+            await trx('bank_accounts').where({ id: bt.bank_account_id }).decrement('current_balance', parseFloat(bt.amount) || 0);
+            await trx('bank_transactions').where({ id: bt.id }).del();
+          }
+          await trx('payments').where({ id: pay.id }).del();
+        }
+
+        // 2. Reverse the revenue GL (DR 1120 / CR 4050) — mark Reversed only.
+        const journals = await trx('journal_entries')
+          .where({ ref_type: 'Service Milling Invoice', ref_no: inv.invoice_no, status: 'Posted' });
+        for (const j of journals) {
+          await accountingService.reverseJournal(trx, { journalId: j.id, reason: `Voided invoice ${inv.invoice_no}`, userId: req.user?.id });
+        }
+
+        // 3. Drop the receivable + the invoice row so the batch is re-invoiceable.
+        await trx('receivables').where({ service_invoice_id: inv.id }).del();
+        await trx('service_milling_invoices').where({ id: inv.id }).del();
+
+        return { voided: inv.invoice_no, service_batch_id: inv.service_batch_id, reversed_journals: journals.length, reversed_payments: payments.length };
+      });
+      return res.json({ success: true, data: result });
+    } catch (err) {
+      console.error('Service invoice void error:', err);
+      return res.status(400).json({ success: false, message: err.message || 'Failed to void invoice.' });
+    }
+  },
+
   // ── Dispatch: the client-owned finished/by-product lots + handover history ──
   async getDispatchSummary(req, res) {
     try {

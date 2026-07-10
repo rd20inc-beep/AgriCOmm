@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Wallet, FileText, Receipt, Printer } from 'lucide-react';
+import { Wallet, FileText, Receipt, Printer, Ban } from 'lucide-react';
 import { millingApi, serviceMillingApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
@@ -33,6 +33,22 @@ export default function ServiceBillingTab({ routeId, batchDbId, onChanged }) {
     if (!invoice) return;
     if (!printServiceInvoice(invoice, companyProfileData)) {
       addToast?.('Pop-up blocked — allow pop-ups to view/print the invoice.', 'error');
+    }
+  }
+
+  async function voidInvoice() {
+    if (!invoiceId) return;
+    const paid = invoice && num(invoice.received_amount) > 0;
+    const msg = paid
+      ? `Void ${row?.invoice_no}? It has PKR ${Math.round(num(invoice.received_amount)).toLocaleString()} received — the payment(s) will be reversed (account balance + receipt undone) and the invoice removed so you can re-issue. Continue?`
+      : `Void ${row?.invoice_no}? The invoice and its revenue posting are reversed and removed so you can create a fresh one. Continue?`;
+    if (!window.confirm(msg)) return;
+    try {
+      await serviceMillingApi.voidInvoice(invoiceId);
+      addToast?.('Invoice voided — you can now create a new one', 'success');
+      afterChange();
+    } catch (err) {
+      addToast?.(err?.response?.data?.message || err.message || 'Failed to void invoice', 'error');
     }
   }
 
@@ -86,6 +102,11 @@ export default function ServiceBillingTab({ routeId, batchDbId, onChanged }) {
             {invoice && (
               <button onClick={viewInvoice} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-gray-700 bg-white border border-gray-300 text-xs font-medium rounded-lg hover:bg-gray-50">
                 <Printer size={14} /> View / Download
+              </button>
+            )}
+            {canInvoice && invoiceId && (
+              <button onClick={voidInvoice} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-red-600 bg-white border border-red-200 text-xs font-medium rounded-lg hover:bg-red-50">
+                <Ban size={14} /> Void
               </button>
             )}
             {billing !== 'Paid' && canPay && invoiceId && (

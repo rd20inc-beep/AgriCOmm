@@ -27,6 +27,13 @@ router.post(
   auditAction('record_service_payment', 'service_milling_invoice', (req) => req.params.id),
   controller.recordPayment,
 );
+// Void an invoice (reverse GL + payments, drop it) so the batch can be re-issued.
+router.post(
+  '/invoices/:id/void',
+  authorize('service_milling', 'create_invoice'),
+  auditAction('void_service_invoice', 'service_milling_invoice', (req) => req.params.id),
+  controller.voidInvoice,
+);
 
 // Dispatch — hand client-owned finished/by-product stock back to the client.
 // Gated by the milling-side record_dispatch perm (not the invoice perms).
