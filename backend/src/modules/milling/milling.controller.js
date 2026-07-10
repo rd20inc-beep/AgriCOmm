@@ -28,6 +28,24 @@ async function resolveBatchId(idParam) {
   return batch ? batch.id : null;
 }
 
+// Keep a service lot's katta/bag count in sync with the actual vehicle arrivals
+// (Σ total_bags), the same way raw_qty_kg tracks Σ weight. Without this, adding
+// or removing a truck changed the batch weight but left katta_count frozen at
+// what was typed on creation — so the invoice billed rental/labour on a stale
+// count (e.g. still 500 kattas after a second truck was added). Only updates the
+// unit the lot actually uses, and only when the trucks recorded bag counts.
+async function syncServiceKattaCount(trx, batchId) {
+  const agg = await trx('milling_vehicle_arrivals').where({ batch_id: batchId }).sum('total_bags as b').first();
+  const totalBags = parseInt(agg?.b, 10) || 0;
+  if (totalBags <= 0) return;
+  const b = await trx('milling_batches').where({ id: batchId }).first('katta_count', 'bag_count');
+  if (b?.katta_count != null) {
+    await trx('milling_batches').where({ id: batchId }).update({ katta_count: totalBags, updated_at: trx.fn.now() });
+  } else if (b?.bag_count != null) {
+    await trx('milling_batches').where({ id: batchId }).update({ bag_count: totalBags, updated_at: trx.fn.now() });
+  }
+}
+
 async function generateBatchNo(trx) {
   const last = await (trx || db)('milling_batches')
     .select('batch_no')
@@ -1756,6 +1774,7 @@ const millingController = {
 
         // Keep the raw_rice cost in sync with the trucks (Σ weight × per-truck price).
         await inventoryService.recomputeRawRiceCostFromVehicles(trx, batchId, req.user?.id);
+        await syncServiceKattaCount(trx, batchId);
 
         return v;
       });
@@ -1866,6 +1885,7 @@ const millingController = {
         const totals = await trx('milling_vehicle_arrivals').where({ batch_id: batchId }).sum('weight_kg as total').first();
         await trx('milling_batches').where({ id: batchId }).update({ raw_qty_kg: parseFloat(totals?.total) || 0, updated_at: trx.fn.now() });
         await inventoryService.recomputeRawRiceCostFromVehicles(trx, batchId, req.user?.id);
+        await syncServiceKattaCount(trx, batchId);
 
         return trx('milling_vehicle_arrivals').where({ id: vehicleId }).first();
       });
@@ -2095,6 +2115,7 @@ const millingController = {
 
         // Keep raw_rice cost in sync with the remaining trucks.
         await inventoryService.recomputeRawRiceCostFromVehicles(trx, batchId, req.user?.id);
+        await syncServiceKattaCount(trx, batchId);
       });
 
       return res.json({ success: true, message: 'Vehicle arrival deleted; inventory reversed.' });
