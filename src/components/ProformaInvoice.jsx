@@ -47,6 +47,12 @@ export default function ProformaInvoice({ order, companyProfile }) {
   const totalAmount = parseFloat(order.contractValue) || qtyMT * pricePerMT;
   const advanceAmount = parseFloat(order.advanceExpected) || (totalAmount * advancePct) / 100;
   const balancePct = 100 - advancePct;
+  const balanceAmount = Math.max(0, totalAmount - advanceAmount);
+  // Payment terms are derived from the order — advance %, method (TT vs L/C) and
+  // any custom payment_terms — so the clause changes with the deal, not hardcoded.
+  const customPaymentTerms = (order.paymentTerms || '').trim();
+  const isLC = /l\/?c|letter of credit/i.test(customPaymentTerms);
+  const payMethod = isLC ? 'an irrevocable Letter of Credit (L/C) at sight' : 'TT (Telegraphic Transfer)';
   const bagSizeKg = order.bagSizeKg || 25;
   const bags = Math.round((qtyMT * 1000) / bagSizeKg);
   const containers = Math.ceil(qtyMT / 26);
@@ -447,14 +453,21 @@ export default function ProformaInvoice({ order, companyProfile }) {
             </h3>
             <ol className="list-decimal list-inside text-xs space-y-2" style={{ color: '#475569' }}>
               <li>
-                <span className="font-medium">Payment Terms:</span> {advancePct}% advance payment via TT (Telegraphic Transfer)
-                before production. {balancePct}% balance payable against scanned copy of Bill of Lading.
+                <span className="font-medium">Payment Terms:</span>{' '}
+                {advancePct >= 100
+                  ? `100% advance payment via ${payMethod} before shipment.`
+                  : advancePct <= 0
+                    ? (customPaymentTerms || `Payment 100% against presentation of shipping documents on sight, unless otherwise agreed.`)
+                    : `${advancePct}% advance payment via ${payMethod} before production; the balance ${balancePct}% payable against presentation of a scanned copy of the Bill of Lading.`}
               </li>
-              <li>
-                <span className="font-medium">Advance Deposit:</span> An advance amount of{' '}
-                <span className="font-bold" style={{ color: '#1e3a5f' }}>{formatCurrency(advanceAmount)}</span>{' '}
-                is required to confirm this order and initiate production.
-              </li>
+              {advancePct > 0 && (
+                <li>
+                  <span className="font-medium">Advance Deposit:</span> An advance of{' '}
+                  <span className="font-bold" style={{ color: '#1e3a5f' }}>{formatCurrency(advanceAmount)}</span>{' '}
+                  ({advancePct}%) is required to confirm this order and initiate production
+                  {balancePct > 0 ? <>; the balance <span className="font-bold" style={{ color: '#1e3a5f' }}>{formatCurrency(balanceAmount)}</span> ({balancePct}%) is payable as above.</> : '.'}
+                </li>
+              )}
               <li>
                 <span className="font-medium">Packing:</span>{' '}
                 {order.bagType
