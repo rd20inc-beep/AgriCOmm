@@ -25,6 +25,7 @@ export const millingApi = {
   updateBatch: (id, data) => api.put(`/api/milling/batches/${id}`, data),
   saveQuality: (id, data) => api.post(`/api/milling/batches/${id}/quality`, data),
   recordYield: (id, data) => api.post(`/api/milling/batches/${id}/yield`, data),
+  setMilledQty: (id, data) => api.put(`/api/milling/batches/${id}/milled-qty`, data),
   addCost: (id, data) => api.post(`/api/milling/batches/${id}/costs`, data),
   addVehicle: (id, data) => api.post(`/api/milling/batches/${id}/vehicles`, data),
   updateVehicle: (id, vehicleId, data) => api.put(`/api/milling/batches/${id}/vehicles/${vehicleId}`, data),

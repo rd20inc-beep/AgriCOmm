@@ -263,11 +263,13 @@ const millingController = {
         // Quantity breakdown so each service can be billed on its own basis.
         const receivedKg = num(b.raw_qty_kg);
         const receivedBags = num(b.katta_count) || num(b.bag_count);
-        // "Milled" = raw actually processed = Σ of all yield outputs (finished +
-        // by-products + wastage), which for a partial mill is less than received.
-        const milledKg = Math.round((num(b.actual_finished_kg) + num(b.broken_kg) + num(b.sortex_rejects_kg)
+        // "Milled" = the operator-declared milled quantity if set; otherwise the
+        // raw actually processed = Σ of all yield outputs (finished + by-products
+        // + wastage), which for a partial mill is less than received.
+        const yieldOutputKg = num(b.actual_finished_kg) + num(b.broken_kg) + num(b.sortex_rejects_kg)
           + num(b.powder_kg) + num(b.sweeping_kg) + num(b.choba_kg) + num(b.ov_kg) + num(b.stone_kg)
-          + num(b.wastage_kg) + num(b.bran_kg) + num(b.husk_kg)) * 100) / 100;
+          + num(b.wastage_kg) + num(b.bran_kg) + num(b.husk_kg);
+        const milledKg = b.milled_qty_kg != null ? Math.round(num(b.milled_qty_kg) * 100) / 100 : Math.round(yieldOutputKg * 100) / 100;
         const unmilledKg = Math.max(0, Math.round((receivedKg - milledKg) * 100) / 100);
         const dispatchedKg = dispatchedByBatch[b.id] || 0;
         const inStockKg = roll.remainingKg;
@@ -2152,6 +2154,34 @@ const millingController = {
     } catch (err) {
       console.error('Milling deleteVehicle error:', err);
       return res.status(err.statusCode || 500).json({ success: false, message: err.message || 'Internal server error.' });
+    }
+  },
+
+  // Set how much of a service lot is being milled (raw kg). The operator picks
+  // this after the batch is created; the remainder stays unmilled. It becomes
+  // the "milled" basis for billing the milling service. Pass null/0 to clear
+  // (fall back to yield-derived milled).
+  async setMilledQty(req, res) {
+    try {
+      const batchId = await resolveBatchId(req.params.id);
+      if (!batchId) return res.status(404).json({ success: false, message: 'Milling batch not found.' });
+      const batch = await db('milling_batches').where({ id: batchId }).first();
+      if (!batch) return res.status(404).json({ success: false, message: 'Milling batch not found.' });
+
+      const raw = req.body?.milled_qty_kg;
+      let val = (raw === '' || raw == null) ? null : parseFloat(raw);
+      if (val != null && (Number.isNaN(val) || val < 0)) {
+        return res.status(400).json({ success: false, message: 'Milling quantity must be zero or more.' });
+      }
+      const received = parseFloat(batch.raw_qty_kg) || 0;
+      if (val != null && received > 0 && val - received > 0.001) {
+        return res.status(400).json({ success: false, message: `Milling quantity cannot exceed the received quantity (${Math.round(received).toLocaleString()} kg).` });
+      }
+      await db('milling_batches').where({ id: batchId }).update({ milled_qty_kg: val, updated_at: db.fn.now() });
+      return res.json({ success: true, data: { milled_qty_kg: val, unmilled_qty_kg: val == null ? null : Math.max(0, received - val) } });
+    } catch (err) {
+      console.error('Milling setMilledQty error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
   },
 
