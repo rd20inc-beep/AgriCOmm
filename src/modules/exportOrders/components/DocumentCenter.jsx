@@ -839,6 +839,22 @@ function signatureBlock(company) {
     </div>`;
 }
 
+// Scoped typography for the compliance documents. The preview/print HTML is
+// injected raw (dangerouslySetInnerHTML) and the app runs under Tailwind's CSS
+// reset which zeroes <p>/<ol> spacing — so paragraphs ran together. This <style>
+// is scoped to .agri-doc (no leak) and restores professional spacing, justified
+// body text and consistent headings in both preview and printed PDF.
+const DOC_CSS = `<style>
+  .agri-doc { line-height:1.65; color:#111; }
+  .agri-doc p { margin:0 0 11px; text-align:justify; }
+  .agri-doc h1,.agri-doc h2,.agri-doc h3,.agri-doc h4 { margin:16px 0 12px; }
+  .agri-doc ol,.agri-doc ul { margin:0 0 11px; padding-left:22px; }
+  .agri-doc li { margin:0 0 7px; text-align:justify; }
+  .agri-doc table { border-collapse:collapse; }
+  .agri-doc td { vertical-align:top; }
+  .agri-doc u { text-underline-offset:2px; }
+</style>`;
+
 // Explicit-numbered clause list. We hardcode the "N." numbers (not <ol>) because
 // the in-app preview runs under Tailwind's CSS reset (list-style:none), which
 // would hide the numbers — hanging indent + justified text like the source docs.
@@ -859,7 +875,7 @@ function renderExportUndertaking(doc) {
   const pod = [order.destinationPort, buyer.country].filter(Boolean).join(', ') || '—';
   const inc = doc.specific && doc.specific.incotermTerms;
   return `
-    <div style="font-family: Arial, sans-serif; font-size:11px; line-height:1.5; max-width:820px; margin:0 auto; padding:20px; color:#111;">
+    ${DOC_CSS}<div class="agri-doc" style="font-family: Arial, sans-serif; font-size:11px; line-height:1.65; max-width:820px; margin:0 auto; padding:20px; color:#111;">
       ${renderComplianceHeader(company)}
       <p style="margin:0 0 12px;">The Manager<br/>${company.bank.name} - ${company.bank.branch},<br/>Karachi.</p>
       <p style="margin:0 0 6px;">Dear Sir,</p>
@@ -897,7 +913,7 @@ function renderExportUndertaking(doc) {
 function renderAppendixV10A(doc) {
   const { company } = doc;
   return `
-    <div style="font-family: Arial, sans-serif; font-size:11px; line-height:1.6; max-width:820px; margin:0 auto; padding:20px; color:#111;">
+    ${DOC_CSS}<div class="agri-doc" style="font-family: Arial, sans-serif; font-size:11px; line-height:1.65; max-width:820px; margin:0 auto; padding:20px; color:#111;">
       ${renderComplianceHeader(company)}
       <div style="text-align:right; font-weight:bold; margin-bottom:6px;">Appendix V-10A</div>
       <p style="font-weight:bold;">[Declaration to be furnished by exporters pursuant to section 12(1) of the Foreign Exchange Regulation Act, 1947 read with government notifications No. 1(6)-ECS/48 and No. 1(7)-ECS/48 both dated the 1st July, 1948.]</p>
@@ -922,7 +938,7 @@ function renderIndemnity(doc) {
   const { company } = doc;
   const counterParty = (doc.specific && doc.specific.counterParty) || (doc.buyer && doc.buyer.name) || '';
   return `
-    <div style="font-family: Arial, sans-serif; font-size:11px; line-height:1.6; max-width:820px; margin:0 auto; padding:20px; color:#111;">
+    ${DOC_CSS}<div class="agri-doc" style="font-family: Arial, sans-serif; font-size:11px; line-height:1.65; max-width:820px; margin:0 auto; padding:20px; color:#111;">
       ${renderComplianceHeader(company)}
       <div style="text-align:right; font-weight:bold; text-decoration:underline; margin-bottom:6px;">Annexure IV</div>
       <h3 style="text-align:center; text-decoration:underline; margin:6px 0 12px; font-size:13px;">Customer Indemnity for Related Party Transaction</h3>
@@ -944,7 +960,7 @@ function renderITRS(doc) {
   const CHK = (on) => `<span style="font-family:monospace;">${on ? '☑' : '☐'}</span>`;
   const row = (label, val) => `<tr><td style="padding:4px 6px; font-weight:bold; white-space:nowrap; vertical-align:top;">${label}</td><td style="padding:4px 6px; border-bottom:1px solid #999;">${val || ''}</td></tr>`;
   return `
-    <div style="font-family: Arial, sans-serif; font-size:11px; line-height:1.5; max-width:820px; margin:0 auto; padding:20px; color:#111;">
+    ${DOC_CSS}<div class="agri-doc" style="font-family: Arial, sans-serif; font-size:11px; line-height:1.65; max-width:820px; margin:0 auto; padding:20px; color:#111;">
       ${renderComplianceHeader(company)}
       <div style="background:#2e7d32; color:#fff; text-align:center; font-weight:bold; padding:6px; margin-bottom:12px;">SBP C-ITRS Reporting Variables &mdash; Import/Export</div>
       <table style="width:100%; border-collapse:collapse;">
