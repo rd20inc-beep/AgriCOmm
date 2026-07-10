@@ -62,6 +62,10 @@ export default function ShipmentTab({ order, onUpdateShipment, canUpdateShipment
               <span className="text-gray-500">BL Number</span>
               <span className="font-medium text-blue-700">{order.blNumber || '\u2014'}</span>
             </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-500">Gate Pass No</span>
+              <span className="font-medium text-gray-900">{order.gatePassNo || '\u2014'}</span>
+            </div>
           </div>
           <div className="space-y-3">
             <h4 className="text-xs font-semibold text-gray-400 uppercase">Dates</h4>

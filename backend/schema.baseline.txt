@@ -632,6 +632,7 @@ COL export_orders.freight_terms:character varying:NULL
 COL export_orders.fx_gain_loss_pkr:numeric:NOT NULL
 COL export_orders.fx_rate_locked_at:timestamp with time zone:NULL
 COL export_orders.fx_rate_source:character varying:NULL
+COL export_orders.gate_pass_no:character varying:NULL
 COL export_orders.gd_date:date:NULL
 COL export_orders.gd_number:character varying:NULL
 COL export_orders.gross_profit_pkr:numeric:NULL

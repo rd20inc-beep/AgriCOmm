@@ -382,6 +382,7 @@ export function ShipmentModal({
   shipNotifyPhone, setShipNotifyPhone,
   shipNotifyEmail, setShipNotifyEmail,
   shipRemarks, setShipRemarks,
+  shipGatePass, setShipGatePass,
   shipmentContainers, setShipmentContainers,
   reservedLots = [],
   onConfirm,
@@ -624,6 +625,14 @@ export function ShipmentModal({
             <label className="block text-sm font-medium text-gray-700 mb-1">ATD (Actual Departure)</label>
             <input type="date" value={shipATD} onChange={e => setShipATD(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
           </div>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Gate Pass No {shipATD ? <span className="text-red-500">*</span> : <span className="text-gray-400 font-normal">— required to ship out</span>}
+          </label>
+          <input type="text" value={shipGatePass || ''} onChange={e => setShipGatePass(e.target.value)} placeholder="e.g. GP-2026-014"
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          <p className="text-xs text-gray-400 mt-1">Recorded when the goods leave the premises (set an ATD to mark departure). Tracked on the order.</p>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
