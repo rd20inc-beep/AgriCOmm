@@ -99,6 +99,39 @@ function buildLineItems(doc) {
 const fmtMoney = (n) => (parseFloat(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtMt = (n) => (parseFloat(n) || 0).toFixed(3);
 
+// Amount-in-words for the Commercial Invoice / Statement of Origin
+// ("Amount in US$: US DOLLARS … ONLY"). Handles up to billions + cents.
+function numToWords(num) {
+  const a = ['', 'ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', 'NINE', 'TEN', 'ELEVEN', 'TWELVE', 'THIRTEEN', 'FOURTEEN', 'FIFTEEN', 'SIXTEEN', 'SEVENTEEN', 'EIGHTEEN', 'NINETEEN'];
+  const b = ['', '', 'TWENTY', 'THIRTY', 'FORTY', 'FIFTY', 'SIXTY', 'SEVENTY', 'EIGHTY', 'NINETY'];
+  const chunk = (n) => {
+    let s = '';
+    if (n >= 100) { s += `${a[Math.floor(n / 100)]} HUNDRED `; n %= 100; }
+    if (n >= 20) { s += `${b[Math.floor(n / 10)]} `; n %= 10; }
+    if (n > 0) { s += `${a[n]} `; }
+    return s.trim();
+  };
+  let n = Math.floor(num);
+  if (n === 0) return 'ZERO';
+  const scales = ['', 'THOUSAND', 'MILLION', 'BILLION'];
+  const groups = [];
+  while (n > 0) { groups.push(n % 1000); n = Math.floor(n / 1000); }
+  let words = '';
+  for (let g = groups.length - 1; g >= 0; g--) {
+    if (groups[g] !== 0) words += `${chunk(groups[g])}${scales[g] ? ` ${scales[g]}` : ''} `;
+  }
+  return words.trim();
+}
+function amountInWords(amount, currency = 'USD') {
+  const n = parseFloat(amount) || 0;
+  const whole = Math.floor(n);
+  const cents = Math.round((n - whole) * 100);
+  const unit = currency === 'USD' ? 'US DOLLARS' : currency;
+  let w = `${unit} ${numToWords(whole)}`;
+  if (cents > 0) w += ` AND ${numToWords(cents)} CENTS`;
+  return `${w} ONLY`;
+}
+
 function renderHeader(company) {
   return `
     <div style="text-align:center; margin-bottom:20px; border-bottom:2px solid #1e3a5f; padding-bottom:15px;">
@@ -243,115 +276,155 @@ function renderProformaInvoice(doc) {
     </div>`;
 }
 
-function renderCommercialInvoice(doc) {
+// Shared Commercial-Invoice body. The Statement of Origin is the same document
+// with the REX/GSP origin declaration box injected (opts.originBox), so both
+// share one renderer to stay pixel-identical.
+function commercialInvoiceHtml(doc, opts = {}) {
   const { company, buyer, order, shipment, containers, totals } = doc;
   const lines = buildLineItems(doc);
   const totalBags = lines.reduce((s, l) => s + (l.bagCount || 0), 0) || (totals && totals.totalBags) || order.totalBags || 0;
-  const totalQty = lines.reduce((s, l) => s + (l.qtyMT || 0), 0);
   const totalAmt = lines.reduce((s, l) => s + (l.amount || 0), 0);
+
+  // Advance is conditional — the "ADVANCE PAID / SUB TOTAL" rows only appear
+  // when the order actually carries an advance (per the in-house template note).
+  const advancePct = parseFloat(order.advancePct) || 0;
+  const advanceAmt = parseFloat(order.advanceAmount) || (advancePct > 0 ? (totalAmt * advancePct) / 100 : 0);
+  const showAdvance = advancePct > 0 || advanceAmt > 0;
+  const subTotal = showAdvance ? Math.max(0, totalAmt - advanceAmt) : totalAmt;
+
+  // Unit-price basis follows the incoterm: FOB → port of loading (Karachi),
+  // CFR/CIF/etc. → port of discharge. Header reads e.g. "FOB KARACHI".
+  const inc = doc.incotermInfo || {};
+  const term = inc.incoterm || order.incoterm || 'FOB';
+  const basisPort = inc.sellerPaysFreight
+    ? (inc.portOfDischarge || order.destinationPort || '')
+    : (inc.portOfLoading || order.portOfLoading || 'KARACHI');
+  const basisLabel = `${term} ${String(basisPort).replace(/,\s*pakistan/i, '')}`.trim().toUpperCase();
+  const cur = order.currency || 'USD';
+  const curShort = cur === 'USD' ? 'US$' : cur;
+
   return `
-    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:800px; margin:0 auto; padding:20px;">
-      ${renderHeader(company)}
-      <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-        <h2 style="font-size:16px; margin:0;">COMMERCIAL INVOICE</h2>
-        <span style="font-size:11px;">REX # ${company.rexNumber}</span>
+    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px; color:#111;">
+      ${renderComplianceHeader(company)}
+      <p style="text-align:center; font-weight:bold; text-decoration:underline; margin:0 0 6px;">ORIGINAL</p>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <div style="flex:1;"></div>
+        <h2 style="font-size:15px; margin:0; text-decoration:underline;">COMMERCIAL INVOICE</h2>
+        <div style="flex:1; text-align:right; font-size:10px; font-style:italic;">REX # ${company.rexNumber}</div>
       </div>
 
-      <table style="width:100%; margin:15px 0;">
+      <table style="width:100%; margin:6px 0; border-collapse:collapse;">
         <tr>
-          <td style="vertical-align:top; width:55%;">
-            <strong>Name & Address of Consignee:</strong><br/>
-            <div style="border:1px solid #333; padding:8px; margin-top:4px;">
-              ${buyer.name}<br/>${buyer.address}<br/>${buyer.country}
-              ${buyer.vatNumber ? `<br/>VAT #: ${buyer.vatNumber}` : ''}
-              ${buyer.email ? `<br/>Email: ${buyer.email}` : ''}
+          <td style="vertical-align:top; width:56%; padding-right:10px;">
+            <div style="font-weight:bold; font-style:italic;">Name &amp; Address of Consignee:</div>
+            <div style="border:1px solid #333; padding:8px; margin-top:3px; min-height:60px;">
+              ${[buyer.name, buyer.address, buyer.country, buyer.port ? `Port: ${buyer.port}` : '', buyer.vatNumber ? `VAT NO: ${buyer.vatNumber}` : ''].filter(Boolean).join('<br/>')}
             </div>
           </td>
-          <td style="vertical-align:top; width:45%;">
+          <td style="vertical-align:top; width:44%;">
             <table style="border-collapse:collapse; width:100%;">
-              <tr><td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">INVOICE NO:</td><td style="border:1px solid #333; padding:4px 8px;">${order.invoiceNumber}</td></tr>
-              <tr><td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">CONTRACT No.</td><td style="border:1px solid #333; padding:4px 8px;">${order.contractNumber}</td></tr>
-              <tr><td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">INVOICE DT:</td><td style="border:1px solid #333; padding:4px 8px;">${order.date}</td></tr>
+              <tr><td style="border:1px solid #333; padding:4px 8px; font-weight:bold; width:44%;">INVOICE NO:</td><td style="border:1px solid #333; padding:4px 8px;">${order.invoiceNumber || ''}</td></tr>
+              <tr><td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">CONTRACT No.</td><td style="border:1px solid #333; padding:4px 8px;">${order.contractNumber || ''}</td></tr>
+              <tr><td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">INVOICE DT:</td><td style="border:1px solid #333; padding:4px 8px;">${order.date || ''}</td></tr>
             </table>
           </td>
         </tr>
       </table>
 
-      <table style="width:100%; border-collapse:collapse; font-size:11px;">
+      <div style="font-weight:bold; font-style:italic; margin:4px 0 3px;">Shipper bank details:</div>
+      <div style="border:1px solid #333; padding:8px; margin-bottom:10px; font-size:10.5px; line-height:1.5;">
+        A/C Title: ${company.name},<br/>
+        ${company.bank.name}, ${company.bank.branch},<br/>
+        ${company.bank.city}.<br/>
+        A/C # ${company.bank.account}<br/>
+        SWIFT: ${company.bank.swift} &nbsp; IBAN # ${company.bank.iban}
+      </div>
+
+      <table style="width:100%; border-collapse:collapse; font-size:10.5px;">
         <tr>
-          <td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">Shipment Ports</td>
-          <td style="border:1px solid #333; padding:4px 8px;">${order.portOfLoading} to ${order.destinationPort}, ${buyer.country}</td>
-          <td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">F.I. #</td>
-          <td style="border:1px solid #333; padding:4px 8px;">${[shipment.fiNumber, shipment.fiNumber2, shipment.fiNumber3].filter(Boolean).join('<br/>') || '—'}</td>
+          <td style="border:1px solid #333; padding:4px 8px; font-weight:bold; width:20%;">Shipment Ports</td>
+          <td style="border:1px solid #333; padding:4px 8px; width:30%;">${[order.portOfLoading, [order.destinationPort, buyer.country].filter(Boolean).join(', ')].filter(Boolean).join(' to ')}</td>
+          <td style="border:1px solid #333; padding:4px 8px; font-weight:bold; width:20%;">F.I. # 1.</td>
+          <td style="border:1px solid #333; padding:4px 8px; width:30%;">${[shipment.fiNumber, shipment.fiNumber2, shipment.fiNumber3].filter(Boolean).join(', ')}</td>
         </tr>
         <tr>
           <td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">No. of Containers</td>
-          <td style="border:1px solid #333; padding:4px 8px;">${shipment.containerCount} X ${shipment.containerType === '20ft' ? "20'" : "40'"} Fcl</td>
-          <td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">F.I. Date</td>
-          <td style="border:1px solid #333; padding:4px 8px;">${shipment.fiDate || '—'}</td>
+          <td style="border:1px solid #333; padding:4px 8px;">${shipment.containerCount} X ${shipment.containerType === '40ft' ? "40'" : "20'"} Fcl</td>
+          <td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">F.I Dated</td>
+          <td style="border:1px solid #333; padding:4px 8px;">${shipment.fiDate || ''}</td>
         </tr>
         <tr>
           <td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">Shipped by Sea as</td>
-          <td style="border:1px solid #333; padding:4px 8px;">${shipment.vesselName || '—'}</td>
+          <td style="border:1px solid #333; padding:4px 8px;">${shipment.vesselName || ''}${shipment.voyageNumber ? ` / ${shipment.voyageNumber}` : ''}</td>
           <td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">Payment Term</td>
-          <td style="border:1px solid #333; padding:4px 8px;">${order.paymentTerms}</td>
+          <td style="border:1px solid #333; padding:4px 8px;">${order.paymentTerms || ''}</td>
         </tr>
-        ${shipment.blNumber ? `<tr>
-          <td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">BL #</td>
-          <td style="border:1px solid #333; padding:4px 8px;">${shipment.blNumber}</td>
+        <tr>
+          <td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">Bill of Lading #</td>
+          <td style="border:1px solid #333; padding:4px 8px;">${shipment.blNumber || ''}</td>
           <td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">BL Date</td>
-          <td style="border:1px solid #333; padding:4px 8px;">${shipment.blDate || '—'}</td>
-        </tr>` : ''}
+          <td style="border:1px solid #333; padding:4px 8px;">${shipment.blDate || ''}</td>
+        </tr>
       </table>
 
-      <table style="width:100%; border-collapse:collapse; margin-top:15px;">
+      <table style="width:100%; border-collapse:collapse; margin-top:12px; font-size:10.5px;">
         <thead>
-          <tr style="background:#f5f5f5;">
-            <th style="border:1px solid #333; padding:8px;">MARKS & NOS.</th>
-            <th style="border:1px solid #333; padding:8px;">QUANTITY</th>
-            <th style="border:1px solid #333; padding:8px;">DESCRIPTION</th>
-            <th style="border:1px solid #333; padding:8px;">UNIT PRICE<br/>FOB (${order.currency})</th>
-            <th style="border:1px solid #333; padding:8px;">AMOUNT (${order.currency})</th>
+          <tr style="background:#f0f0f0;">
+            <th style="border:1px solid #333; padding:6px; width:15%;">MARKS &amp; NOS.</th>
+            <th style="border:1px solid #333; padding:6px; width:14%;">QUANTITY</th>
+            <th style="border:1px solid #333; padding:6px;">DESCRIPTION</th>
+            <th style="border:1px solid #333; padding:6px; width:15%;">UNIT PRICE<br/>${basisLabel}<br/>PMT(${curShort})</th>
+            <th style="border:1px solid #333; padding:6px; width:14%;">AMOUNT ${term}<br/>(${curShort})</th>
           </tr>
         </thead>
         <tbody>
           ${lines.map((l) => `
             <tr>
-              <td style="border:1px solid #333; padding:8px; text-align:center; font-weight:bold; font-style:italic; color:#d4a017;">${l.brand}</td>
-              <td style="border:1px solid #333; padding:8px; text-align:center;">${(l.bagCount || 0).toLocaleString()} Bags<br/><br/>${fmtMt(l.qtyMT)}<br/><br/>MT</td>
-              <td style="border:1px solid #333; padding:8px;">${l.description}</td>
-              <td style="border:1px solid #333; padding:8px; text-align:center;">${fmtMoney(l.pricePerMT)}</td>
-              <td style="border:1px solid #333; padding:8px; text-align:right;">${fmtMoney(l.amount)}</td>
+              <td style="border:1px solid #333; padding:6px; text-align:center; font-weight:bold; font-style:italic; color:#c79a3a;">${l.brand}</td>
+              <td style="border:1px solid #333; padding:6px; text-align:center;">${(l.bagCount || 0).toLocaleString()} Bags<br/><br/>${fmtMt(l.qtyMT)}<br/>MT</td>
+              <td style="border:1px solid #333; padding:6px;">${l.description}</td>
+              <td style="border:1px solid #333; padding:6px; text-align:center;">${fmtMoney(l.pricePerMT)}</td>
+              <td style="border:1px solid #333; padding:6px; text-align:right;">${fmtMoney(l.amount)}</td>
             </tr>
           `).join('')}
           <tr style="font-weight:bold;">
-            <td colspan="4" style="border:1px solid #333; padding:8px; text-align:right;">Total</td>
-            <td style="border:1px solid #333; padding:8px; text-align:right;">${fmtMoney(totalAmt)}</td>
+            <td colspan="4" style="border:1px solid #333; padding:6px; text-align:right;">Total</td>
+            <td style="border:1px solid #333; padding:6px; text-align:right;">${fmtMoney(totalAmt)}</td>
           </tr>
+          ${showAdvance ? `
+          <tr style="font-weight:bold;">
+            <td colspan="4" style="border:1px solid #333; padding:6px; text-align:right;">ADVANCE PAID${advancePct ? ` ${advancePct}%` : ''}</td>
+            <td style="border:1px solid #333; padding:6px; text-align:right;">${fmtMoney(advanceAmt)}</td>
+          </tr>
+          <tr style="font-weight:bold;">
+            <td colspan="4" style="border:1px solid #333; padding:6px; text-align:right;">SUB TOTAL</td>
+            <td style="border:1px solid #333; padding:6px; text-align:right;">${fmtMoney(subTotal)}</td>
+          </tr>` : ''}
         </tbody>
       </table>
 
-      ${containers.length > 0 ? `
-        <div style="margin-top:15px; font-size:11px;">
-          <p>Container # ${containers.map(c => c.containerNo).filter(Boolean).join(', ')}</p>
-          <p>TOTAL BAGS: ${totalBags.toLocaleString()}</p>
-          <p>GROSS WEIGHT: ${(totals.grossWeightMT || order.qtyMT).toFixed(3)} MT</p>
-          <p>NET WEIGHT: ${(totals.netWeightMT || order.qtyMT).toFixed(3)} MT</p>
-        </div>
-      ` : ''}
+      ${opts.originBox || ''}
 
-      <p style="font-style:italic; font-size:11px; margin-top:10px;">
-        <em>Certification: Goods shipped under this invoice are from Pakistan origin</em>
-      </p>
+      <div style="margin-top:8px; font-weight:bold; font-style:italic;">Amount in ${curShort}: <span style="font-weight:normal; font-style:normal;">${amountInWords(subTotal, cur)}</span></div>
 
-      <div style="margin-top:40px; text-align:right;">
-        <p>Name of Signing authority:</p>
-        <p style="font-weight:bold;">${company.proprietor}<br/>Proprietor</p>
-        <p style="font-weight:bold;">${company.name}</p>
+      ${containers && containers.length > 0 ? `
+        <div style="margin-top:8px; font-size:10.5px;">
+          Container # ${containers.map(c => c.containerNo).filter(Boolean).join(', ')}<br/>
+          TOTAL BAGS: ${totalBags.toLocaleString()} &nbsp;|&nbsp; GROSS: ${((totals && totals.grossWeightMT) || order.qtyMT || 0).toFixed(3)} MT &nbsp;|&nbsp; NET: ${((totals && totals.netWeightMT) || order.qtyMT || 0).toFixed(3)} MT
+        </div>` : ''}
+
+      <p style="font-style:italic; font-size:10.5px; margin-top:10px; text-decoration:underline;">Certification: Goods shipped under this invoice are from Pakistan origin</p>
+
+      <div style="margin-top:26px;">
+        <p style="margin:0;">Name of Signing authority:</p>
+        <div style="margin-top:22px; font-weight:bold;">${company.proprietor}<br/>Proprietor<br/>${company.name}</div>
       </div>
-
-      ${renderCompanyFooter(company)}
+      ${renderComplianceFooter(company)}
     </div>`;
+}
+
+function renderCommercialInvoice(doc) {
+  return commercialInvoiceHtml(doc);
 }
 
 function renderPackingList(doc) {
@@ -435,7 +508,9 @@ function renderPackingList(doc) {
 
   return `
     <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px;">
-      <h2 style="text-align:center; font-size:18px; margin:10px 0 18px; letter-spacing:1px;">PACKING LIST</h2>
+      ${renderComplianceHeader(company)}
+      <p style="text-align:center; font-weight:bold; text-decoration:underline; margin:0 0 6px;">ORIGINAL</p>
+      <h2 style="text-align:center; font-size:16px; margin:6px 0 16px; letter-spacing:1px; text-decoration:underline;">PACKING LIST</h2>
 
       <table style="width:100%; margin:0 0 12px; border-collapse:collapse;">
         <tr>
@@ -470,10 +545,16 @@ function renderPackingList(doc) {
           <td style="border:1px solid #333; padding:5px 8px;">${shipment.fiDate || ''}</td>
         </tr>
         <tr>
-          <td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">Shipped by Sea</td>
+          <td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">Shipped by Sea as</td>
           <td style="border:1px solid #333; padding:5px 8px;">${shipment.vesselName || ''}${shipment.voyageNumber ? ` / ${shipment.voyageNumber}` : ''}</td>
-          <td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">Payment Terms</td>
+          <td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">Payment Term</td>
           <td style="border:1px solid #333; padding:5px 8px;">${order.paymentTerms || ''}</td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">Bill of Lading #</td>
+          <td style="border:1px solid #333; padding:5px 8px;">${shipment.blNumber || ''}</td>
+          <td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">BL Date</td>
+          <td style="border:1px solid #333; padding:5px 8px;">${shipment.blDate || ''}</td>
         </tr>
       </table>
 
@@ -517,7 +598,7 @@ function renderPackingList(doc) {
         Certification: Goods are shipped from Pakistan origin
       </p>
 
-      ${renderCompanyFooter(company)}
+      ${renderComplianceFooter(company)}
     </div>`;
 }
 
@@ -1211,9 +1292,9 @@ function renderPackingCertificate(doc) {
   const totalBags = totals?.totalBags || order.totalBags;
   return `
     <div style="font-family: Arial, sans-serif; font-size:12px; max-width:800px; margin:0 auto; padding:20px;">
-      ${renderHeader(company)}
-      <p style="text-align:center; font-weight:bold;">ORIGINAL</p>
-      <h2 style="text-align:center; font-size:16px; margin:5px 0;">PACKING CERTIFICATE</h2>
+      ${renderComplianceHeader(company)}
+      <p style="text-align:center; font-weight:bold; text-decoration:underline;">ORIGINAL</p>
+      <h2 style="text-align:center; font-size:16px; margin:5px 0; text-decoration:underline;">PACKING CERTIFICATE</h2>
 
       <table style="width:100%; font-size:11px; line-height:1.8; margin:15px 0;">
         <tr><td style="width:130px; font-weight:bold;">DATE:</td><td>${order.date}</td></tr>
@@ -1267,24 +1348,22 @@ function renderPackingCertificate(doc) {
         <p>Name of Signing authority:</p>
         <p style="font-weight:bold;">${company.proprietor}<br/>${company.name}<br/>Proprietor</p>
       </div>
-      ${renderCompanyFooter(company)}
+      ${renderComplianceFooter(company)}
     </div>`;
 }
 
-// ─── Statement of Origin (uses same layout as Commercial Invoice with origin text) ───
+// ─── Statement of Origin — the Commercial Invoice with the REX/GSP origin
+// declaration box injected right under the totals, exactly as the in-house form. ───
 function renderStatementOfOrigin(doc) {
-  const { company, buyer, order, shipment, containers, totals } = doc;
-  const totalBags = totals?.totalBags || order.totalBags;
-  const ciHtml = renderCommercialInvoice(doc);
-  // Append origin declaration text
-  const originText = `
-    <div style="text-align:center; margin:20px 0; padding:15px; border:2px solid #333;">
-      <h3 style="text-decoration:underline;">TEXT FOR STATEMENT OF ORIGIN</h3>
-      <p style="font-size:11px; line-height:1.8;">
-        We M/s. ${company.name}, "The exporter under Rex reg # ${company.rexNumber} of the products covered by this document declares that, except where otherwise clearly indicated, these products are of Pakistani preferential origin according to rules of origin of the Generalized System of Preferences of the European Union and that the origin criterion met is P."
-      </p>
+  const { company } = doc;
+  const decl = (doc.specific && doc.specific.originDeclaration)
+    || `We M/s. ${company.name}, "The exporter under Rex reg # ${company.rexNumber} of the products covered by this document declares that, except where otherwise clearly indicated, these products are of Pakistani preferential origin according to rules of origin of the Generalized System of Preferences of the European Union and that the origin criterion met is P."`;
+  const originBox = `
+    <div style="margin-top:12px; border:1px solid #333; padding:12px;">
+      <div style="text-align:center; font-weight:bold; text-decoration:underline; margin-bottom:8px;">TEXT FOR STATEMENT OF ORIGIN</div>
+      <p style="margin:0; text-align:justify; line-height:1.7;">${decl}</p>
     </div>`;
-  return ciHtml.replace('</div>\n    </div>', `${originText}</div>\n    </div>`);
+  return commercialInvoiceHtml(doc, { originBox });
 }
 
 // ─── Certificate of Origin (data for KCCI form) ───
@@ -1461,9 +1540,9 @@ function renderBuyerCoveringLetter(doc) {
   const { company, buyer, order, shipment, containers, notifyParty } = doc;
   return `
     <div style="font-family: Arial, sans-serif; font-size:12px; max-width:800px; margin:0 auto; padding:20px;">
-      ${renderHeader(company)}
+      ${renderComplianceHeader(company)}
       <p>Date: ${order.date}</p>
-      <p style="margin-top:15px;">${buyer.name}<br/>${buyer.address}<br/>${buyer.country}${buyer.vatNumber ? `<br/>VAT NO: ${buyer.vatNumber}` : ''}</p>
+      <p style="margin-top:15px;">${[buyer.name, buyer.address, buyer.country, buyer.vatNumber ? `VAT NO: ${buyer.vatNumber}` : ''].filter(Boolean).join('<br/>')}</p>
 
       <h3 style="text-decoration:underline; margin:20px 0;">EXPORT DOCUMENTS AGAINST SALES CONTRACT # ${order.contractNumber} DATED: ${order.date}</h3>
       <p>Dear Sir,</p>
@@ -1493,7 +1572,7 @@ function renderBuyerCoveringLetter(doc) {
 
       <p>THANK YOU AND WAITING FOR YOUR NEXT CONSIGNMENT.</p>
       <div style="margin-top:40px;"><p>Best Regards,</p><p style="font-weight:bold;">${company.name}<br/>Proprietor</p></div>
-      ${renderCompanyFooter(company)}
+      ${renderComplianceFooter(company)}
     </div>`;
 }
 

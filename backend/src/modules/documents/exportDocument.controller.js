@@ -198,6 +198,11 @@ const exportDocumentController = {
           pricePerMT: parseFloat(order.price_per_mt) || 0,
           currency: order.currency || 'USD',
           contractValue: parseFloat(order.contract_value) || 0,
+          // Advance — exposed to every renderer so the Commercial Invoice /
+          // Statement of Origin can show the conditional "ADVANCE PAID" +
+          // "SUB TOTAL" rows only when the order carries an advance.
+          advancePct: parseFloat(order.advance_pct) || 0,
+          advanceAmount: parseFloat(order.advance_expected) || 0,
           incoterm: order.incoterm || 'FOB',
           // Precedence: per-order override → customer default → auto-generated.
           paymentTerms: order.payment_terms
@@ -409,6 +414,7 @@ const exportDocumentController = {
           document = {
             type: 'Commercial Invoice',
             ...common,
+            company: withDhaOffice(common.company),
           };
           break;
 
@@ -430,6 +436,7 @@ const exportDocumentController = {
           document = {
             type: 'Packing Certificate',
             ...common,
+            company: withDhaOffice(common.company),
           };
           break;
 
@@ -437,6 +444,7 @@ const exportDocumentController = {
           document = {
             type: 'Packing List',
             ...common,
+            company: withDhaOffice(common.company),
           };
           break;
 
@@ -451,6 +459,7 @@ const exportDocumentController = {
           document = {
             type: 'Statement of Origin',
             ...common,
+            company: withDhaOffice(common.company),
             specific: {
               originDeclaration: `We M/s. ${common.company.name}, "The exporter under Rex reg #${common.company.rexNumber} of the products covered by this document declares that, except where otherwise clearly indicated, these products are of Pakistani preferential origin according to rules of origin of the Generalized System of Preferences of the European Union and that the origin criterion met is P."`,
             },
@@ -462,7 +471,7 @@ const exportDocumentController = {
           break;
 
         case 'buyer-covering-letter':
-          document = { type: 'Buyer Covering Letter', ...common };
+          document = { type: 'Buyer Covering Letter', ...common, company: withDhaOffice(common.company) };
           break;
 
         case 'lab-test-request':
