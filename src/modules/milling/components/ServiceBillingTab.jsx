@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Wallet, FileText, Receipt } from 'lucide-react';
+import { Wallet, FileText, Receipt, Printer } from 'lucide-react';
 import { millingApi, serviceMillingApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { CreateInvoiceDrawer, RecordPaymentDrawer } from './ServiceInvoiceDrawers';
+import { printServiceInvoice } from '../utils/serviceInvoicePrint';
 
 const num = (v) => parseFloat(v) || 0;
 const pkr = (v) => `PKR ${Math.round(num(v)).toLocaleString()}`;
@@ -22,11 +23,18 @@ const BILLING_STYLE = {
  * drawers. This is a SERVICE fee, not a sale of rice.
  */
 export default function ServiceBillingTab({ routeId, batchDbId, onChanged }) {
-  const { addToast } = useApp();
+  const { addToast, companyProfileData } = useApp();
   const { hasPermission } = useAuth();
   const canInvoice = hasPermission('service_milling', 'create_invoice');
   const canPay = hasPermission('service_milling', 'record_payment');
   const canViewInvoice = hasPermission('service_milling', 'view_invoice');
+
+  function viewInvoice() {
+    if (!invoice) return;
+    if (!printServiceInvoice(invoice, companyProfileData)) {
+      addToast?.('Pop-up blocked — allow pop-ups to view/print the invoice.', 'error');
+    }
+  }
 
   const [showInvoice, setShowInvoice] = useState(false);
   const [showPay, setShowPay] = useState(false);
@@ -73,11 +81,20 @@ export default function ServiceBillingTab({ routeId, batchDbId, onChanged }) {
               <FileText size={14} /> Create Invoice
             </button>
           ) : <span className="text-xs text-gray-400">No invoice yet</span>
-        ) : (billing !== 'Paid' && canPay && invoiceId) ? (
-          <button onClick={() => setShowPay(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700">
-            <Wallet size={14} /> Record Payment
-          </button>
-        ) : null}
+        ) : (
+          <div className="flex items-center gap-2">
+            {invoice && (
+              <button onClick={viewInvoice} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-gray-700 bg-white border border-gray-300 text-xs font-medium rounded-lg hover:bg-gray-50">
+                <Printer size={14} /> View / Download
+              </button>
+            )}
+            {billing !== 'Paid' && canPay && invoiceId && (
+              <button onClick={() => setShowPay(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700">
+                <Wallet size={14} /> Record Payment
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {billing === 'Not Invoiced' ? (
@@ -104,7 +121,12 @@ export default function ServiceBillingTab({ routeId, batchDbId, onChanged }) {
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
             <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
               <div className="flex items-center gap-2"><Receipt size={15} className="text-gray-400" /><span className="text-sm font-semibold text-gray-900">{invoice.invoice_no}</span></div>
-              <span className="text-xs text-gray-400">{invoice.invoice_date ? new Date(invoice.invoice_date).toLocaleDateString('en-GB') : ''}</span>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-gray-400">{invoice.invoice_date ? new Date(invoice.invoice_date).toLocaleDateString('en-GB') : ''}</span>
+                <button onClick={viewInvoice} className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
+                  <Printer size={13} /> View / Download
+                </button>
+              </div>
             </div>
             <div className="p-4 space-y-1 text-sm">
               <Line label={`Milling — ${Math.round(num(invoice.milling_qty_kg)).toLocaleString()} kg × ${pkr(invoice.milling_rate_per_kg)}`} value={invoice.milling_amount} />

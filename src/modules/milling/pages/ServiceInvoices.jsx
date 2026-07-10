@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { FileText, Wallet, RefreshCw } from 'lucide-react';
+import { FileText, Wallet, RefreshCw, Printer } from 'lucide-react';
 import { serviceMillingApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { RecordPaymentDrawer } from '../components/ServiceInvoiceDrawers';
+import { printServiceInvoice } from '../utils/serviceInvoicePrint';
 
 const num = (v) => parseFloat(v) || 0;
 const pkr = (v) => `PKR ${Math.round(num(v)).toLocaleString()}`;
@@ -15,10 +16,17 @@ const BILLING_STYLE = {
 };
 
 export default function ServiceInvoices() {
-  const { addToast } = useApp();
+  const { addToast, companyProfileData } = useApp();
   const { hasPermission } = useAuth();
   const canPay = hasPermission('service_milling', 'record_payment');
   const [payInvoice, setPayInvoice] = useState(null);
+
+  async function viewInvoice(id) {
+    try {
+      const inv = (await serviceMillingApi.getInvoice(id))?.data;
+      if (!printServiceInvoice(inv, companyProfileData)) addToast?.('Pop-up blocked — allow pop-ups to view/print the invoice.', 'error');
+    } catch (err) { addToast?.(err?.message || 'Failed to load invoice', 'error'); }
+  }
 
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ['service-milling', 'invoices'],
@@ -83,10 +91,11 @@ export default function ServiceInvoices() {
                   <td className="px-4 py-2.5 text-right text-emerald-700">{pkr(r.received_amount)}</td>
                   <td className="px-4 py-2.5 text-right text-rose-600">{pkr(r.balance_amount)}</td>
                   <td className="px-4 py-2.5"><span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${BILLING_STYLE[r.payment_status] || 'bg-gray-100 text-gray-600'}`}>{r.payment_status}</span></td>
-                  <td className="px-4 py-2.5 text-right">
-                    {r.payment_status !== 'Paid' && canPay ? (
+                  <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                    <button onClick={() => viewInvoice(r.id)} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 mr-2"><Printer size={12} /> View</button>
+                    {r.payment_status !== 'Paid' && canPay && (
                       <button onClick={() => openPayment(r.id)} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100"><Wallet size={12} /> Pay</button>
-                    ) : <span className="text-xs text-gray-300">—</span>}
+                    )}
                   </td>
                 </tr>
               ))}
