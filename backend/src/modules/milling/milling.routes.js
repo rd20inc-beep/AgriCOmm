@@ -108,6 +108,14 @@ router.put(
   auditAction('update_vehicle', 'milling_batch', (req) => req.params.id),
   controller.updateVehicle
 );
+// Operator declares how much of a service lot to mill (rest stays unmilled).
+// A production decision — gated by record_yield, which mill operators hold.
+router.put(
+  '/batches/:id/milled-qty',
+  authorize('milling', 'record_yield'),
+  auditAction('set_milled_qty', 'milling_batch', (req) => req.params.id),
+  controller.setMilledQty
+);
 
 // High-level rice purchase entry: auto-finds/creates today's open batch
 // for (supplier, variety) so multiple trucks land in ONE batch + ONE lot.

@@ -215,6 +215,16 @@ export default function ServiceMillingBatchDetail() {
     setShowYieldModal(false);
   }
 
+  async function saveMilledQty(val) {
+    try {
+      await millingModApi.setMilledQty(batchId, { milled_qty_kg: val === '' || val == null ? null : Number(val) });
+      addToast(val === '' ? 'Milling quantity cleared — will derive from yield' : 'Milling quantity saved', 'success');
+      invalidateBatch();
+    } catch (err) {
+      addToast(err?.response?.data?.message || err.message || 'Failed to save milling quantity', 'error');
+    }
+  }
+
   function openVehicleModal() {
     setEditingVehicleId(null);
     const usedWeight = safeVehicles.reduce((s, v) => s + (parseFloat(v.weightKg) || 0), 0);
@@ -326,11 +336,13 @@ export default function ServiceMillingBatchDetail() {
 
   const isPending = batch.status === 'Pending Approval';
   const producedKg = num(batch.actualFinishedKg);
-  // "Milled" = raw actually processed (Σ yield outputs). For a partial mill this
-  // is less than the received quantity, so each service can bill on its own basis.
-  const milledKg = num(batch.actualFinishedKg) + num(batch.brokenKg) + num(batch.sortexRejectsKg)
+  // "Milled" = the operator-declared milling quantity if set, else the raw
+  // actually processed (Σ yield outputs). For a partial mill this is less than
+  // the received quantity, so each service can bill on its own basis.
+  const yieldOutputKg = num(batch.actualFinishedKg) + num(batch.brokenKg) + num(batch.sortexRejectsKg)
     + num(batch.powderKg) + num(batch.sweepingKg) + num(batch.chobaKg) + num(batch.ovKg)
     + num(batch.stoneKg) + num(batch.wastageKg) + num(batch.branMT) * 1000 + num(batch.huskMT) * 1000;
+  const milledKg = batch.milledQtyKg != null ? num(batch.milledQtyKg) : yieldOutputKg;
   const unmilledKg = Math.max(0, num(batch.rawQtyKg) - milledKg);
 
   return (
@@ -471,6 +483,8 @@ export default function ServiceMillingBatchDetail() {
 
       {/* ---- Yield ---- */}
       {activeTab === 'yield' && (
+        <div className="space-y-4">
+        <MillingQtyCard receivedKg={num(batch.rawQtyKg)} milledQtyKg={batch.milledQtyKg} milledKg={milledKg} onSave={saveMilledQty} />
         <Card title="Yield Output (client-owned)" icon={Boxes} action={
           <button onClick={openYieldModal} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700">
             <Boxes size={14} /> {producedKg > 0 ? 'Update Yield' : 'Record Yield Output'}
@@ -491,6 +505,7 @@ export default function ServiceMillingBatchDetail() {
             </div>
           )}
         </Card>
+        </div>
       )}
 
       {/* ---- Dispatch ---- */}
@@ -574,6 +589,39 @@ function Row({ label, children }) {
       <span className="text-gray-500">{label}</span>
       <span className="font-medium text-gray-900">{children}</span>
     </div>
+  );
+}
+
+function MillingQtyCard({ receivedKg, milledQtyKg, milledKg, onSave }) {
+  const [val, setVal] = useState(milledQtyKg != null ? String(Math.round(milledQtyKg)) : '');
+  const [saving, setSaving] = useState(false);
+  const declared = val !== '' ? Math.min(num(val), receivedKg) : null;
+  const effectiveMilled = declared != null ? declared : milledKg;
+  const unmilled = Math.max(0, receivedKg - effectiveMilled);
+  const chip = 'px-2 py-0.5 text-[10px] font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded hover:bg-blue-100 whitespace-nowrap';
+  async function save() { setSaving(true); await onSave(val); setSaving(false); }
+  return (
+    <Card title="Milling Quantity" icon={Boxes}>
+      <p className="text-xs text-gray-400 mb-3">Pick how much of the received rice you're milling. The rest stays <b>unmilled</b> and carries no milling fee (charge it as rental if it's stored).</p>
+      <div className="grid grid-cols-3 gap-3 mb-3 text-sm">
+        <div><span className="block text-[11px] text-gray-400">Received</span><span className="font-semibold text-gray-900">{kg(receivedKg)}</span></div>
+        <div><span className="block text-[11px] text-gray-400">Milling</span><span className="font-semibold text-emerald-700">{kg(effectiveMilled)}</span></div>
+        <div><span className="block text-[11px] text-gray-400">Unmilled</span><span className="font-semibold text-amber-700">{kg(unmilled)}</span></div>
+      </div>
+      <div className="flex items-end gap-2">
+        <div className="flex-1">
+          <label className="block text-[11px] font-medium text-gray-600 mb-1">Milling quantity (kg)</label>
+          <input type="number" min="0" value={val} onChange={(e) => setVal(e.target.value)} placeholder={`${Math.round(milledKg)} (auto)`}
+            className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm" />
+          <div className="flex gap-1 mt-1 flex-wrap">
+            <button type="button" className={chip} onClick={() => setVal(String(Math.round(receivedKg)))}>Full {kg(receivedKg)}</button>
+            <button type="button" className={chip} onClick={() => setVal(String(Math.round(receivedKg / 2)))}>Half</button>
+            <button type="button" className={chip} onClick={() => setVal('')}>Auto (from yield)</button>
+          </div>
+        </div>
+        <button onClick={save} disabled={saving} className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50 whitespace-nowrap">{saving ? 'Saving…' : 'Save'}</button>
+      </div>
+    </Card>
   );
 }
 

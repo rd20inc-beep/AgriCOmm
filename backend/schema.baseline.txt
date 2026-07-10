@@ -1494,6 +1494,7 @@ COL milling_batches.machine_line:character varying:NULL
 COL milling_batches.manual_milling_cost_pkr:numeric:NULL
 COL milling_batches.manual_other_expenses_pkr:numeric:NULL
 COL milling_batches.mill_id:integer:NOT NULL
+COL milling_batches.milled_qty_kg:numeric:NULL
 COL milling_batches.milling_cost_per_kg_finished:numeric:NULL
 COL milling_batches.milling_fee_per_kg:numeric:NULL
 COL milling_batches.moisture_loss_pct:numeric:NOT NULL

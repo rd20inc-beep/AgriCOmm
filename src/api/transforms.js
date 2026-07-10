@@ -371,6 +371,8 @@ export function transformBatch(dbBatch) {
     bagCount: dbBatch.bag_count != null ? parseInt(dbBatch.bag_count, 10) : null,
     dateReceived: dbBatch.date_received || null,
     serviceRemarks: dbBatch.service_remarks || null,
+    // Operator-declared milled quantity (raw kg being milled); null → derive from yield.
+    milledQtyKg: dbBatch.milled_qty_kg != null ? parseFloat(dbBatch.milled_qty_kg) : null,
   };
 }
 

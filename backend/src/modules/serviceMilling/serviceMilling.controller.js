@@ -158,12 +158,14 @@ module.exports = {
         // Each service bills on its OWN chargeable quantity (all overridable in
         // the request) — milling on kg actually milled, rental & labour on their
         // own katta/bag counts. Do NOT force all three onto the received qty.
-        // Milling default = raw actually processed (Σ yield outputs), which for a
-        // partial mill is less than the received quantity.
-        const milledInputKg = num(batch.actual_finished_kg) + num(batch.broken_kg) + num(batch.sortex_rejects_kg)
+        // Milling default = the operator-declared milled quantity if set, else the
+        // raw actually processed (Σ yield outputs) — for a partial mill this is
+        // less than the received quantity.
+        const yieldOutputKg = num(batch.actual_finished_kg) + num(batch.broken_kg) + num(batch.sortex_rejects_kg)
           + num(batch.powder_kg) + num(batch.sweeping_kg) + num(batch.choba_kg) + num(batch.ov_kg)
           + num(batch.stone_kg) + num(batch.wastage_kg) + num(batch.bran_kg) + num(batch.husk_kg);
-        const millingQtyKg = round2(b.milling_qty_kg != null ? b.milling_qty_kg : (milledInputKg || num(batch.expected_output_kg)));
+        const defaultMilled = batch.milled_qty_kg != null ? num(batch.milled_qty_kg) : (yieldOutputKg || num(batch.expected_output_kg));
+        const millingQtyKg = round2(b.milling_qty_kg != null ? b.milling_qty_kg : defaultMilled);
         const millingRate = num(b.milling_rate_per_kg != null ? b.milling_rate_per_kg : batch.service_milling_rate_per_kg);
         const rentalKattas = parseInt(b.rental_kattas != null ? b.rental_kattas : (batch.katta_count || batch.bag_count || 0), 10) || 0;
         const rentalRate = num(b.rental_rate_per_katta != null ? b.rental_rate_per_katta : batch.service_rental_rate_per_katta);
