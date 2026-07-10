@@ -839,6 +839,13 @@ function signatureBlock(company) {
     </div>`;
 }
 
+// Explicit-numbered clause list. We hardcode the "N." numbers (not <ol>) because
+// the in-app preview runs under Tailwind's CSS reset (list-style:none), which
+// would hide the numbers — hanging indent + justified text like the source docs.
+function numberedClauses(items) {
+  return items.map((c, i) => `<div style="display:flex; gap:8px; margin:0 0 7px; text-align:justify;"><div style="flex:0 0 22px;">${i + 1}.</div><div style="flex:1;">${c}</div></div>`).join('');
+}
+
 // ─── Export Undertaking (full SBP text, incoterm-aware) ───
 function renderExportUndertaking(doc) {
   const { company, buyer, order } = doc;
@@ -863,18 +870,18 @@ function renderExportUndertaking(doc) {
       <p>We are very much satisfied with the credentials, sound financial standing and good repute of our client (the importer/foreign buyer/consignee) and confirm their bona fide.</p>
 
       <p>I / We further confirm that:</p>
-      <ol style="line-height:1.6; padding-left:18px;">
-        <li>The merchandise being exported falls under HS Code Number(s): <u>${hs}</u>, is freely exportable / not subject to export license / does not contravene any of the provision of the aforesaid rules and regulations and where required we have obtained necessary authorization from Ministry of Commerce/Trade Development Authority of Pakistan or from any other relevant Government Department which we enclose herewith in Original (if needed).</li>
-        <li>We are commercial exporter / registered as an Industrial Unit with Trade Development Authority of Pakistan and hold valid export registration (GST Certificate) and membership of a recognized trade association.</li>
-        <li>We are fully aware and suitably conversant with all the valid and applicable rules and regulations governing exports from Pakistan as per the directives of State Bank of Pakistan in the Foreign Exchange Manual, yearly Export Policy Order(s) issued by Ministry of Commerce and other concerned government agencies in all respect and consequently fully understand our responsibility to ensure timely settlement of exports / sale proceeds in accordance with agreed terms not later than the prescribed time period allowed by the State Bank of Pakistan and other regulatory requirements.</li>
-        <li>We shall ensure to timely submit to you all the required shipping documents for onward dispatch to concerned foreign bank or submission to State bank of Pakistan.</li>
-        <li>We are familiar with the list of sanctioned countries / entities with which trade transactions / dealings in any manner either directly or indirectly are proscribed and that neither us nor any of our agent(s) will handle / be involved in any transaction / deal / shipment relating to any manner with any of the sanctioned countries / and as aforesaid we are satisfied that certainly no sanctioned / proscribed beneficial owner is involved in our dealing with our client / the importer / foreign buyer.</li>
-        <li>We will never involve ourselves in any trade transaction of banned items as per Negative List of the Government of Pakistan.</li>
-        <li>We confirm that the contracted price of the exported goods is in line with the current International market price without any significant variance.</li>
-        <li>We confirm that Origin of goods are Pakistani and if shipments contain any foreign components it shall not belong to any sanctioned country or entity/producer, directly or indirectly, in any manner. Further, the port of loading and Port of discharge are exactly as mentioned in Certified Form-E and during voyage the ship does not call any sanctioned countries / ports and discharge the exports consignment at any port of any banned / sanctioned countries.</li>
-        <li>We will not affect any shipment through any shipping company which itself is sanctioned or owns or operates sanctioned vessels or any shipping company which operates under the flag of any sanctioned country directly or indirectly in any manner.</li>
-        <li>We confirm that the port of discharge of goods is <u>${pod}</u> as mentioned on the Master Bill of Lading / Shipping Documents / Airway Bill.</li>
-      </ol>
+      ${numberedClauses([
+        `The merchandise being exported falls under HS Code Number(s): <u>${hs}</u>, is freely exportable / not subject to export license / does not contravene any of the provision of the aforesaid rules and regulations and where required we have obtained necessary authorization from Ministry of Commerce/Trade Development Authority of Pakistan or from any other relevant Government Department which we enclose herewith in Original (if needed).`,
+        `We are commercial exporter / registered as an Industrial Unit with Trade Development Authority of Pakistan and hold valid export registration (GST Certificate) and membership of a recognized trade association.`,
+        `We are fully aware and suitably conversant with all the valid and applicable rules and regulations governing exports from Pakistan as per the directives of State Bank of Pakistan in the Foreign Exchange Manual, yearly Export Policy Order(s) issued by Ministry of Commerce and other concerned government agencies in all respect and consequently fully understand our responsibility to ensure timely settlement of exports / sale proceeds in accordance with agreed terms not later than the prescribed time period allowed by the State Bank of Pakistan and other regulatory requirements.`,
+        `We shall ensure to timely submit to you all the required shipping documents for onward dispatch to concerned foreign bank or submission to State bank of Pakistan.`,
+        `We are familiar with the list of sanctioned countries / entities with which trade transactions / dealings in any manner either directly or indirectly are proscribed and that neither us nor any of our agent(s) will handle / be involved in any transaction / deal / shipment relating to any manner with any of the sanctioned countries / and as aforesaid we are satisfied that certainly no sanctioned / proscribed beneficial owner is involved in our dealing with our client / the importer / foreign buyer.`,
+        `We will never involve ourselves in any trade transaction of banned items as per Negative List of the Government of Pakistan.`,
+        `We confirm that the contracted price of the exported goods is in line with the current International market price without any significant variance.`,
+        `We confirm that Origin of goods are Pakistani and if shipments contain any foreign components it shall not belong to any sanctioned country or entity/producer, directly or indirectly, in any manner. Further, the port of loading and Port of discharge are exactly as mentioned in Certified Form-E and during voyage the ship does not call any sanctioned countries / ports and discharge the exports consignment at any port of any banned / sanctioned countries.`,
+        `We will not affect any shipment through any shipping company which itself is sanctioned or owns or operates sanctioned vessels or any shipping company which operates under the flag of any sanctioned country directly or indirectly in any manner.`,
+        `We confirm that the port of discharge of goods is <u>${pod}</u> as mentioned on the Master Bill of Lading / Shipping Documents / Airway Bill.`
+      ])}
 
       ${inc ? `<p><b>Delivery / Freight Terms (${inc.incoterm}):</b> ${inc.text}</p>` : ''}
 
