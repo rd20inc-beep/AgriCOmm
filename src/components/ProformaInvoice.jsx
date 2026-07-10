@@ -465,6 +465,50 @@ export default function ProformaInvoice({ order, companyProfile }) {
                 <span className="font-medium">Origin:</span> Product of Pakistan. All goods are of Pakistani origin
                 and comply with international food safety standards.
               </li>
+              <li>
+                <span className="font-medium">Delivery / Incoterms:</span>{' '}
+                {(() => {
+                  const inc = (order.incoterm || 'FOB').toUpperCase();
+                  const pol = order.portOfLoading || 'Karachi, Pakistan';
+                  const pod = order.destinationPort || order.destinationCountry || order.country || 'the destination port';
+                  const m = {
+                    EXW: `Ex Works — the buyer bears all costs and risks from our premises, including export clearance, freight and insurance.`,
+                    FCA: `FCA ${pol} — delivered to the buyer's carrier at ${pol}; ocean freight and insurance are to the buyer's account.`,
+                    FOB: `FOB ${pol} — delivered on board the vessel at ${pol}; ocean freight and marine insurance are to the buyer's account.`,
+                    CFR: `CFR ${pod} — we pay the cost and ocean freight to ${pod}; marine insurance is to the buyer's account.`,
+                    CNF: `CFR ${pod} — we pay the cost and ocean freight to ${pod}; marine insurance is to the buyer's account.`,
+                    'C&F': `CFR ${pod} — we pay the cost and ocean freight to ${pod}; marine insurance is to the buyer's account.`,
+                    CIF: `CIF ${pod} — we pay the cost, ocean freight and marine insurance to ${pod}.`,
+                    CPT: `CPT ${pod} — we pay carriage to ${pod}; insurance is to the buyer's account.`,
+                    CIP: `CIP ${pod} — we pay carriage and insurance to ${pod}.`,
+                    DAP: `DAP ${pod} — we bear all costs and risks to deliver at ${pod}, ready for unloading.`,
+                    DDP: `DDP ${pod} — we bear all costs and risks, including import duties, to deliver at ${pod}.`,
+                  };
+                  return m[inc] || `As per the agreed Incoterms® 2020 rule ${inc}.`;
+                })()}
+              </li>
+              <li>
+                <span className="font-medium">Shipment:</span> From {order.portOfLoading || 'Karachi, Pakistan'} to{' '}
+                {order.destinationPort || order.destinationCountry || order.country || 'the destination'}. Partial shipment
+                and transhipment permitted unless otherwise agreed in writing.
+              </li>
+              <li>
+                <span className="font-medium">Quality &amp; Weight:</span> As per the agreed specification. Quality and
+                weight as ascertained at the port of loading shall be final; independent inspection (e.g. SGS) at the
+                buyer's cost, if required.
+              </li>
+              <li>
+                <span className="font-medium">Validity:</span> This Proforma Invoice is valid for 15 days from the date of
+                issue unless extended in writing.
+              </li>
+              <li>
+                <span className="font-medium">Force Majeure:</span> The Seller shall not be liable for any delay or failure
+                to perform arising from events beyond its reasonable control.
+              </li>
+              <li>
+                <span className="font-medium">Governing Law:</span> This transaction is governed by the laws of the Islamic
+                Republic of Pakistan; any dispute shall be settled amicably or through arbitration.
+              </li>
             </ol>
             <div className="mt-4 pt-3 border-t" style={{ borderColor: '#e2e8f0' }}>
               <p className="text-xs font-semibold mb-1" style={{ color: '#1e3a5f' }}>Documents Provided:</p>
