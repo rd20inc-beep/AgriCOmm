@@ -3,7 +3,7 @@ const router = express.Router();
 const controller = require('../../controllers/adminController');
 const approvalsCtrl = require('./approvals.controller');
 const authorize = require('../../middleware/rbac');
-const { authorizeRole } = require('../../middleware/rbac');
+const { authorizeRole, authorizeAny } = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 const ownerApproval = require('../../middleware/ownerApproval');
 
@@ -18,9 +18,12 @@ router.post(
   auditAction('quick_add', 'supplier', (req, data) => data?.data?.supplier?.id),
   approvalsCtrl.quickAddSupplier
 );
+// Rice type (product) quick-add is reachable from both the inventory Purchase
+// Lot drawer and the export-order screen, so allow either create perm. Non-admins
+// still land in the pending approval queue.
 router.post(
   '/products/quick-add',
-  authorize('inventory', 'create'),
+  authorizeAny(['inventory', 'create'], ['export_orders', 'create']),
   auditAction('quick_add', 'product', (req, data) => data?.data?.product?.id),
   approvalsCtrl.quickAddProduct
 );
