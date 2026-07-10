@@ -70,6 +70,50 @@ function authorize(module, action) {
 }
 
 /**
+ * Allow the request if the user holds ANY of the given permissions. Each pair is
+ * [module, action]. Useful where one action is reachable from two contexts —
+ * e.g. quick-adding a rice type from either the inventory (inventory.create) or
+ * the export-order (export_orders.create) screen.
+ *
+ * Usage: authorizeAny(['inventory','create'], ['export_orders','create'])
+ */
+function authorizeAny(...pairs) {
+  return async (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: 'Access denied. Not authenticated.' });
+    }
+    try {
+      if (!req.user._permissionsLoaded) {
+        let roleId = req.user.role_id;
+        if (!roleId) {
+          const dbUser = await db('users').where({ id: req.user.id }).select('role_id').first();
+          if (!dbUser) return res.status(401).json({ success: false, message: 'User not found.' });
+          roleId = dbUser.role_id;
+          req.user.role_id = roleId;
+        }
+        const perms = await db('role_permissions as rp')
+          .join('permissions as p', 'rp.permission_id', 'p.id')
+          .where('rp.role_id', roleId)
+          .select('p.module', 'p.action');
+        req.user.permissions = new Set(perms.map((p) => `${p.module}.${p.action}`));
+        req.user._permissionsLoaded = true;
+      }
+      const role = await db('roles').where({ id: req.user.role_id }).select('name').first();
+      if (role && (role.name === 'Super Admin' || role.name === 'Owner')) return next();
+
+      const ok = pairs.some(([m, a]) => req.user.permissions.has(`${m}.${a}`));
+      if (!ok) {
+        return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission to perform this action.' });
+      }
+      next();
+    } catch (err) {
+      console.error('Authorization error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error during authorization.' });
+    }
+  };
+}
+
+/**
  * Backward-compatible role-name-based authorization.
  * Checks if the user's role name matches one of the provided role names.
  *
@@ -161,5 +205,6 @@ function denyRoles(...roles) {
 
 module.exports = authorize;
 module.exports.authorize = authorize;
+module.exports.authorizeAny = authorizeAny;
 module.exports.authorizeRole = authorizeRole;
 module.exports.denyRoles = denyRoles;
