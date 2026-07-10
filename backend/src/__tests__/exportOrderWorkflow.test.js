@@ -469,6 +469,7 @@ describe('Export order workflow', () => {
         atd: '2026-04-07',
         eta: '2026-04-20',
         destination_port: 'Jebel Ali',
+        gate_pass_no: 'GP-TEST-001', // required to release goods (mark Shipped)
         notes: 'Container departed',
       },
     });
