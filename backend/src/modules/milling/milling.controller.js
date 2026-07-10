@@ -243,6 +243,13 @@ const millingController = {
         else if (r.type === 'byproduct') b.byproductKg += produced;
       }
 
+      // Dispatched-to-client total per batch (Phase 2 handovers).
+      const dispRows = ids.length
+        ? await db('service_milling_dispatches').whereIn('service_batch_id', ids).select('service_batch_id').sum('qty_kg as d').groupBy('service_batch_id')
+        : [];
+      const dispatchedByBatch = {};
+      for (const r of dispRows) dispatchedByBatch[r.service_batch_id] = parseFloat(r.d) || 0;
+
       // Billing status per batch from its invoice (A2). No invoice → Not Invoiced.
       const invRows = ids.length
         ? await db('service_milling_invoices').whereIn('service_batch_id', ids).select('service_batch_id', 'id', 'invoice_no', 'total_amount', 'payment_status')
@@ -253,8 +260,23 @@ const millingController = {
       const num = (v) => parseFloat(v) || 0;
       const data = batches.map((b) => {
         const roll = rollup[b.id] || { finishedKg: 0, byproductKg: 0, remainingKg: 0, producedKg: 0 };
-        const milledKg = num(b.actual_finished_kg) || roll.finishedKg;
-        const kattas = num(b.katta_count) || num(b.bag_count);
+        // Quantity breakdown so each service can be billed on its own basis.
+        const receivedKg = num(b.raw_qty_kg);
+        const receivedBags = num(b.katta_count) || num(b.bag_count);
+        // "Milled" = raw actually processed = Σ of all yield outputs (finished +
+        // by-products + wastage), which for a partial mill is less than received.
+        const milledKg = Math.round((num(b.actual_finished_kg) + num(b.broken_kg) + num(b.sortex_rejects_kg)
+          + num(b.powder_kg) + num(b.sweeping_kg) + num(b.choba_kg) + num(b.ov_kg) + num(b.stone_kg)
+          + num(b.wastage_kg) + num(b.bran_kg) + num(b.husk_kg)) * 100) / 100;
+        const unmilledKg = Math.max(0, Math.round((receivedKg - milledKg) * 100) / 100);
+        const dispatchedKg = dispatchedByBatch[b.id] || 0;
+        const inStockKg = roll.remainingKg;
+        // Bag-equivalents (rounded) so the rental/labour quick-fills have a basis.
+        const bagsFor = (kg) => (receivedKg > 0 ? Math.round(receivedBags * (kg / receivedKg)) : 0);
+        const milledBags = bagsFor(milledKg);
+        const unmilledBags = Math.max(0, receivedBags - milledBags);
+
+        const kattas = receivedBags;
         const millingAmount = milledKg * num(b.service_milling_rate_per_kg);
         const rentalAmount = kattas * num(b.service_rental_rate_per_katta);
         const labourAmount = kattas * num(b.service_labour_rate_per_katta);
@@ -267,6 +289,14 @@ const millingController = {
           client_name: b.client_name || null,
           rollup: roll,
           milled_kg: milledKg,
+          // Quantity breakdown (kg + bag-equivalents) surfaced for billing UI.
+          quantities: {
+            receivedKg, receivedBags,
+            milledKg, milledBags,
+            unmilledKg, unmilledBags,
+            dispatchedKg,
+            inStockKg,
+          },
           service_milling_amount: millingAmount,
           service_rental_amount: rentalAmount,
           service_labour_amount: labourAmount,

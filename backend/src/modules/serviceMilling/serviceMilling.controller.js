@@ -155,8 +155,15 @@ module.exports = {
         const existing = await trx('service_milling_invoices').where({ service_batch_id: batch.id }).first();
         if (existing) throw new Error(`Batch ${batch.batch_no} already has invoice ${existing.invoice_no}`);
 
-        // Defaults pulled from the batch; all overridable in the request.
-        const millingQtyKg = round2(b.milling_qty_kg != null ? b.milling_qty_kg : (num(batch.actual_finished_kg) || num(batch.expected_output_kg)));
+        // Each service bills on its OWN chargeable quantity (all overridable in
+        // the request) — milling on kg actually milled, rental & labour on their
+        // own katta/bag counts. Do NOT force all three onto the received qty.
+        // Milling default = raw actually processed (Σ yield outputs), which for a
+        // partial mill is less than the received quantity.
+        const milledInputKg = num(batch.actual_finished_kg) + num(batch.broken_kg) + num(batch.sortex_rejects_kg)
+          + num(batch.powder_kg) + num(batch.sweeping_kg) + num(batch.choba_kg) + num(batch.ov_kg)
+          + num(batch.stone_kg) + num(batch.wastage_kg) + num(batch.bran_kg) + num(batch.husk_kg);
+        const millingQtyKg = round2(b.milling_qty_kg != null ? b.milling_qty_kg : (milledInputKg || num(batch.expected_output_kg)));
         const millingRate = num(b.milling_rate_per_kg != null ? b.milling_rate_per_kg : batch.service_milling_rate_per_kg);
         const rentalKattas = parseInt(b.rental_kattas != null ? b.rental_kattas : (batch.katta_count || batch.bag_count || 0), 10) || 0;
         const rentalRate = num(b.rental_rate_per_katta != null ? b.rental_rate_per_katta : batch.service_rental_rate_per_katta);
@@ -182,6 +189,7 @@ module.exports = {
           invoice_date: b.invoice_date || trx.fn.now(),
           milling_qty_kg: millingQtyKg, milling_rate_per_kg: millingRate, milling_amount: millingAmount,
           rental_kattas: rentalKattas, rental_rate_per_katta: rentalRate, rental_amount: rentalAmount,
+          rental_from: b.rental_from || null, rental_to: b.rental_to || null,
           labour_kattas: labourKattas, labour_rate_per_katta: labourRate, labour_amount: labourAmount,
           extra_charges: extra, discount, tax_pct: taxPct, tax_amount: taxAmount,
           subtotal, total_amount: total,

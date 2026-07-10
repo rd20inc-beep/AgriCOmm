@@ -2073,8 +2073,10 @@ COL service_milling_invoices.notes:text:NULL
 COL service_milling_invoices.payment_status:character varying:NOT NULL
 COL service_milling_invoices.received_amount:numeric:NOT NULL
 COL service_milling_invoices.rental_amount:numeric:NULL
+COL service_milling_invoices.rental_from:date:NULL
 COL service_milling_invoices.rental_kattas:integer:NULL
 COL service_milling_invoices.rental_rate_per_katta:numeric:NULL
+COL service_milling_invoices.rental_to:date:NULL
 COL service_milling_invoices.service_batch_id:integer:NULL
 COL service_milling_invoices.subtotal:numeric:NULL
 COL service_milling_invoices.tax_amount:numeric:NULL
