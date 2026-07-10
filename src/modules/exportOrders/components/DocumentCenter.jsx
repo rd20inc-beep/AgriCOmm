@@ -201,6 +201,31 @@ function renderProformaInvoice(doc) {
         <em>Certification: Goods shipped under this Proforma Invoice are of Pakistan Origin.</em>
       </p>
 
+      ${(() => {
+        const inc = doc.incotermInfo || {};
+        const pol = inc.portOfLoading || order.portOfLoading || 'Karachi, Pakistan';
+        const pod = inc.portOfDischarge || order.destinationPort || '—';
+        const bagSize = (buildLineItems(doc)[0] && buildLineItems(doc)[0].bagSizeKg) || order.bagSizeKg || 50;
+        const bagType = (buildLineItems(doc)[0] && buildLineItems(doc)[0].bagType) || order.bagType || 'PP';
+        return `
+      <div style="margin-top:16px; font-size:10.5px;">
+        <div style="font-weight:bold; text-decoration:underline; margin-bottom:6px;">Terms &amp; Conditions</div>
+        <ol>
+          <li><b>Price Basis:</b> All prices are in ${order.currency} per Metric Ton on <b>${inc.incoterm || order.incoterm || 'FOB'}</b> ${inc.sellerPaysFreight ? pod : pol} basis.</li>
+          <li><b>Delivery / Incoterms:</b> ${inc.text || `As per the agreed Incoterms® rule ${order.incoterm || 'FOB'}.`}</li>
+          <li><b>Payment:</b> ${order.paymentTerms || 'As mutually agreed.'}</li>
+          <li><b>Shipment:</b> From ${pol} to ${pod}. Partial shipment and transhipment permitted unless otherwise agreed in writing.</li>
+          <li><b>Packing:</b> ${bagSize} KG ${bagType} bags — new, food-grade and suitable for export by sea.</li>
+          <li><b>Quality &amp; Weight:</b> As per the agreed specification. Quality and weight as ascertained at the port of loading shall be final; independent inspection (e.g. SGS) at buyer's cost, if required.</li>
+          <li><b>Documents:</b> Commercial Invoice, Packing List, Certificate of Origin, Bill of Lading and any other documents required under the L/C / contract.</li>
+          <li><b>Origin:</b> Pakistan.</li>
+          <li><b>Validity:</b> This Proforma Invoice is valid for 15 days from the date of issue unless extended in writing.</li>
+          <li><b>Force Majeure:</b> The Seller shall not be liable for any delay or failure to perform arising from events beyond its reasonable control.</li>
+          <li><b>Governing Law:</b> This transaction is governed by the laws of Islamic Republic of Pakistan; any dispute shall be settled amicably or through arbitration.</li>
+        </ol>
+      </div>`;
+      })()}
+
       <div style="margin-top:30px; display:flex; justify-content:space-between;">
         <div>
           <div style="border-top:1px solid #333; width:200px; margin-top:40px; padding-top:4px; text-align:center;">
@@ -845,13 +870,14 @@ function signatureBlock(company) {
 // is scoped to .agri-doc (no leak) and restores professional spacing, justified
 // body text and consistent headings in both preview and printed PDF.
 const DOC_CSS = `<style>
-  .agri-doc { line-height:1.65; color:#111; }
-  .agri-doc p { margin:0 0 11px; text-align:justify; }
-  .agri-doc h1,.agri-doc h2,.agri-doc h3,.agri-doc h4 { margin:16px 0 12px; }
-  .agri-doc ol,.agri-doc ul { margin:0 0 11px; padding-left:22px; }
-  .agri-doc li { margin:0 0 7px; text-align:justify; }
+  .agri-doc { line-height:1.6; color:#111; }
+  .agri-doc p { margin:0 0 10px; }
+  .agri-doc h1,.agri-doc h2,.agri-doc h3,.agri-doc h4 { margin:14px 0 10px; }
+  .agri-doc ol { margin:0 0 10px; padding-left:26px; list-style:decimal outside; }
+  .agri-doc ul { margin:0 0 10px; padding-left:26px; list-style:disc outside; }
+  .agri-doc li { margin:0 0 6px; }
   .agri-doc table { border-collapse:collapse; }
-  .agri-doc td { vertical-align:top; }
+  .agri-doc td, .agri-doc th { vertical-align:top; }
   .agri-doc u { text-underline-offset:2px; }
 </style>`;
 
@@ -875,7 +901,7 @@ function renderExportUndertaking(doc) {
   const pod = [order.destinationPort, buyer.country].filter(Boolean).join(', ') || '—';
   const inc = doc.specific && doc.specific.incotermTerms;
   return `
-    ${DOC_CSS}<div class="agri-doc" style="font-family: Arial, sans-serif; font-size:11px; line-height:1.65; max-width:820px; margin:0 auto; padding:20px; color:#111;">
+    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px; color:#111;">
       ${renderComplianceHeader(company)}
       <p style="margin:0 0 12px;">The Manager<br/>${company.bank.name} - ${company.bank.branch},<br/>Karachi.</p>
       <p style="margin:0 0 6px;">Dear Sir,</p>
@@ -913,7 +939,7 @@ function renderExportUndertaking(doc) {
 function renderAppendixV10A(doc) {
   const { company } = doc;
   return `
-    ${DOC_CSS}<div class="agri-doc" style="font-family: Arial, sans-serif; font-size:11px; line-height:1.65; max-width:820px; margin:0 auto; padding:20px; color:#111;">
+    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px; color:#111;">
       ${renderComplianceHeader(company)}
       <div style="text-align:right; font-weight:bold; margin-bottom:6px;">Appendix V-10A</div>
       <p style="font-weight:bold;">[Declaration to be furnished by exporters pursuant to section 12(1) of the Foreign Exchange Regulation Act, 1947 read with government notifications No. 1(6)-ECS/48 and No. 1(7)-ECS/48 both dated the 1st July, 1948.]</p>
@@ -938,7 +964,7 @@ function renderIndemnity(doc) {
   const { company } = doc;
   const counterParty = (doc.specific && doc.specific.counterParty) || (doc.buyer && doc.buyer.name) || '';
   return `
-    ${DOC_CSS}<div class="agri-doc" style="font-family: Arial, sans-serif; font-size:11px; line-height:1.65; max-width:820px; margin:0 auto; padding:20px; color:#111;">
+    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px; color:#111;">
       ${renderComplianceHeader(company)}
       <div style="text-align:right; font-weight:bold; text-decoration:underline; margin-bottom:6px;">Annexure IV</div>
       <h3 style="text-align:center; text-decoration:underline; margin:6px 0 12px; font-size:13px;">Customer Indemnity for Related Party Transaction</h3>
@@ -960,7 +986,7 @@ function renderITRS(doc) {
   const CHK = (on) => `<span style="font-family:monospace;">${on ? '☑' : '☐'}</span>`;
   const row = (label, val) => `<tr><td style="padding:4px 6px; font-weight:bold; white-space:nowrap; vertical-align:top;">${label}</td><td style="padding:4px 6px; border-bottom:1px solid #999;">${val || ''}</td></tr>`;
   return `
-    ${DOC_CSS}<div class="agri-doc" style="font-family: Arial, sans-serif; font-size:11px; line-height:1.65; max-width:820px; margin:0 auto; padding:20px; color:#111;">
+    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px; color:#111;">
       ${renderComplianceHeader(company)}
       <div style="background:#2e7d32; color:#fff; text-align:center; font-weight:bold; padding:6px; margin-bottom:12px;">SBP C-ITRS Reporting Variables &mdash; Import/Export</div>
       <table style="width:100%; border-collapse:collapse;">
@@ -1534,7 +1560,11 @@ const RENDERERS = {
 
 function renderDocument(doc) {
   const renderer = RENDERERS[doc._docType];
-  return renderer ? renderer(doc) : renderGenericDocument(doc);
+  const inner = renderer ? renderer(doc) : renderGenericDocument(doc);
+  // Wrap EVERY document in the .agri-doc scope so the professional typography
+  // (paragraph spacing, list numbering/bullets, heading spacing) applies to all
+  // documents uniformly — the app's Tailwind reset would otherwise flatten them.
+  return `${DOC_CSS}<div class="agri-doc">${inner}</div>`;
 }
 
 // ─── Document Center Component ───
