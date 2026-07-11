@@ -264,20 +264,38 @@ const dangerZone = {
           await trx.raw(`TRUNCATE TABLE ${list} RESTART IDENTITY CASCADE`);
         }
 
-        // 3. Zero bank/cash balances (accounts are kept masters).
+        // 3. Clear in-flight master-data approval requests. Pending quick-adds
+        //    live as approval_status='pending' rows INSIDE the kept master tables
+        //    (products/suppliers/customers), so a plain wipe leaves the Approvals
+        //    queue + top-bar badge populated after a reset. Back the pending rows
+        //    up, then delete them so a reset truly starts clean. Approved masters
+        //    are untouched. (Runs after the wipe, so transactional FKs are gone.)
+        const APPROVAL_MASTERS = ['products', 'suppliers', 'customers'];
+        let clearedApprovals = 0;
+        for (const t of APPROVAL_MASTERS) {
+          if (!(await trx.schema.hasColumn(t, 'approval_status'))) continue;
+          await trx.raw(
+            `CREATE TABLE "${backupSchema}"."${t}_pending_approvals" AS
+               SELECT * FROM public."${t}" WHERE approval_status = 'pending'`
+          );
+          clearedApprovals += await trx(t).where({ approval_status: 'pending' }).del();
+        }
+
+        // 4. Zero bank/cash balances (accounts are kept masters).
         await trx('bank_accounts').update({ current_balance: 0, updated_at: trx.fn.now() });
 
-        // 4. Audit (audit_logs was just wiped — write a fresh record).
+        // 5. Audit (audit_logs was just wiped — write a fresh record).
         await auditDanger(trx, req, 'reset_transactional', 'system', 'all', {
-          wiped_tables: wipe.length, kept_tables: allTables.length - wipe.length, backup_schema: backupSchema,
+          wiped_tables: wipe.length, kept_tables: allTables.length - wipe.length,
+          cleared_pending_approvals: clearedApprovals, backup_schema: backupSchema,
         });
 
-        return { wiped: wipe.length, kept: allTables.length - wipe.length, backupSchema, wipedTables: wipe };
+        return { wiped: wipe.length, kept: allTables.length - wipe.length, clearedApprovals, backupSchema, wipedTables: wipe };
       });
 
       return res.json({
         success: true,
-        message: `System reset complete — ${result.wiped} transactional tables wiped (backup: ${result.backupSchema}), ${result.kept} master/config tables kept, bank balances zeroed.`,
+        message: `System reset complete — ${result.wiped} transactional tables wiped (backup: ${result.backupSchema}), ${result.kept} master/config tables kept, ${result.clearedApprovals} pending approval(s) cleared, bank balances zeroed.`,
         data: result,
       });
     } catch (err) {
