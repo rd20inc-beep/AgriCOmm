@@ -7,12 +7,23 @@ import SlideDrawer from '../../../components/SlideDrawer';
  * The yield form itself carries no costing/pricing UI (costs are derived on the
  * backend), so it is shared verbatim by regular and service-milling batches.
  */
-export default function YieldOutputDrawer({ open, onClose, form, setForm, onSubmit, batch, finishedLabel }) {
+export default function YieldOutputDrawer({ open, onClose, form, setForm, onSubmit, batch, finishedLabel, basisKg }) {
+  // The yield basis is what's actually being milled. For a partial (service)
+  // mill the operator declares a milling quantity (basisKg) that is less than
+  // the received quantity — yield %, "accounted for" and the header all measure
+  // against THAT, not the full lot. When no basis is passed (regular milling)
+  // we fall back to the received raw quantity, so behaviour is unchanged.
+  const receivedKg = Number(batch.rawQtyKg) || (parseFloat(batch.rawQtyMT) || 0) * 1000;
+  const basis = (basisKg != null && !Number.isNaN(Number(basisKg)) && Number(basisKg) > 0)
+    ? Number(basisKg)
+    : receivedKg;
+  const isPartial = basis < receivedKg - 0.5;
   return (
     <SlideDrawer open={open} onClose={onClose} title="Record Yield Output" icon={Boxes} size="xl">
       <form onSubmit={onSubmit} className="space-y-4">
         <div className="bg-blue-50 rounded-lg p-3 text-sm text-blue-800">
-          <span className="font-semibold">Raw Input:</span> {Math.round(batch.rawQtyKg).toLocaleString()} kg &nbsp;|&nbsp;
+          <span className="font-semibold">{isPartial ? 'Milling Qty' : 'Raw Input'}:</span> {Math.round(basis).toLocaleString()} kg
+          {isPartial && <span className="text-blue-600"> (of {Math.round(receivedKg).toLocaleString()} kg received)</span>} &nbsp;|&nbsp;
           <span className="font-semibold">Planned Finished:</span> {Math.round(batch.plannedFinishedKg).toLocaleString()} kg
         </div>
 
@@ -165,7 +176,7 @@ export default function YieldOutputDrawer({ open, onClose, form, setForm, onSubm
           // saved before this change.
           const b = gradeTotal > 0 ? gradeTotal : (parseFloat(form.brokenMT) || 0);
           const total = f + b + br + h + sx + pw + sw + ch + ovv + st + w;
-          const rawQty = (parseFloat(batch.rawQtyMT) || 0) * 1000; // KG (form is KG)
+          const rawQty = basis; // milling basis in KG (declared milling qty, else received)
           const yieldPct = rawQty > 0 ? ((f / rawQty) * 100).toFixed(1) : '0.0';
           const accounted = rawQty > 0 ? ((total / rawQty) * 100).toFixed(1) : '0.0';
 

@@ -344,6 +344,10 @@ export default function ServiceMillingBatchDetail() {
     + num(batch.stoneKg) + num(batch.wastageKg) + num(batch.branMT) * 1000 + num(batch.huskMT) * 1000;
   const milledKg = batch.milledQtyKg != null ? num(batch.milledQtyKg) : yieldOutputKg;
   const unmilledKg = Math.max(0, num(batch.rawQtyKg) - milledKg);
+  // Basis the Yield Output drawer measures against: the operator-declared
+  // milling quantity when set, otherwise the full received quantity (so yield %
+  // and "accounted for" are computed against what's actually being milled).
+  const yieldBasisKg = batch.milledQtyKg != null ? num(batch.milledQtyKg) : num(batch.rawQtyKg);
 
   return (
     <div className="space-y-5 pb-6">
@@ -538,6 +542,7 @@ export default function ServiceMillingBatchDetail() {
         onSubmit={handleYieldSubmit}
         batch={batch}
         finishedLabel={finishedLabel}
+        basisKg={yieldBasisKg}
       />
       <VehicleArrivalDrawer
         open={showVehicleModal}
