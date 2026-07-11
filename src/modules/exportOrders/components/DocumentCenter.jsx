@@ -296,8 +296,16 @@ function commercialInvoiceHtml(doc, opts = {}) {
   // CFR/CIF/etc. → port of discharge. Header reads e.g. "FOB KARACHI".
   const inc = doc.incotermInfo || {};
   const term = inc.incoterm || order.incoterm || 'FOB';
+  // Discharge-side terms (CFR/CIF/…) label by the destination; loading-side
+  // terms (FOB/EXW/…) by the port of loading. When the discharge port is blank
+  // the backend leaves the placeholder "the port of discharge" — fall back to
+  // the order's destination port, then the buyer's country, so the header reads
+  // e.g. "CFR ROTTERDAM" / "CFR NETHERLANDS" rather than the placeholder.
+  const dischargePort = order.destinationPort
+    || (inc.portOfDischarge && !/port of discharge/i.test(inc.portOfDischarge) ? inc.portOfDischarge : '')
+    || buyer.country || '';
   const basisPort = inc.sellerPaysFreight
-    ? (inc.portOfDischarge || order.destinationPort || '')
+    ? dischargePort
     : (inc.portOfLoading || order.portOfLoading || 'KARACHI');
   const basisLabel = `${term} ${String(basisPort).replace(/,\s*pakistan/i, '')}`.trim().toUpperCase();
   const cur = order.currency || 'USD';
