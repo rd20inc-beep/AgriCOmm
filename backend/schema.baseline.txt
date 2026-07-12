@@ -700,6 +700,44 @@ COL export_packing_weights.variance_kg:numeric:NOT NULL
 COL export_packing_weights.variance_pct:numeric:NOT NULL
 COL export_packing_weights.variance_reason:text:NULL
 COL export_packing_weights.variance_status:character varying:NOT NULL
+COL export_quotation_items.bag_count:integer:NULL
+COL export_quotation_items.bag_size_kg:numeric:NULL
+COL export_quotation_items.bag_type:character varying:NULL
+COL export_quotation_items.broken_pct_target:numeric:NULL
+COL export_quotation_items.created_at:timestamp with time zone:NOT NULL
+COL export_quotation_items.hs_code:character varying:NULL
+COL export_quotation_items.id:integer:NOT NULL
+COL export_quotation_items.line_no:integer:NOT NULL
+COL export_quotation_items.line_total:numeric:NOT NULL
+COL export_quotation_items.notes:text:NULL
+COL export_quotation_items.packing:character varying:NULL
+COL export_quotation_items.price_per_mt:numeric:NOT NULL
+COL export_quotation_items.product_id:integer:NULL
+COL export_quotation_items.product_name:character varying:NULL
+COL export_quotation_items.qty_mt:numeric:NOT NULL
+COL export_quotation_items.quality_description:text:NULL
+COL export_quotation_items.quotation_id:integer:NOT NULL
+COL export_quotation_items.updated_at:timestamp with time zone:NOT NULL
+COL export_quotations.advance_pct:numeric:NOT NULL
+COL export_quotations.converted_order_id:integer:NULL
+COL export_quotations.country:character varying:NULL
+COL export_quotations.created_at:timestamp with time zone:NOT NULL
+COL export_quotations.created_by:integer:NULL
+COL export_quotations.currency:character varying:NOT NULL
+COL export_quotations.customer_id:integer:NULL
+COL export_quotations.destination_port:character varying:NULL
+COL export_quotations.id:integer:NOT NULL
+COL export_quotations.incoterm:character varying:NULL
+COL export_quotations.notes:text:NULL
+COL export_quotations.payment_terms:text:NULL
+COL export_quotations.port_of_loading:character varying:NULL
+COL export_quotations.quotation_no:character varying:NOT NULL
+COL export_quotations.quote_date:date:NULL
+COL export_quotations.status:character varying:NOT NULL
+COL export_quotations.subtotal:numeric:NOT NULL
+COL export_quotations.total_amount:numeric:NOT NULL
+COL export_quotations.updated_at:timestamp with time zone:NOT NULL
+COL export_quotations.valid_until:date:NULL
 COL follow_ups.created_at:timestamp with time zone:NULL
 COL follow_ups.follow_up_date:date:NOT NULL
 COL follow_ups.id:integer:NOT NULL
@@ -2538,6 +2576,14 @@ CON export_orders.export_orders_product_id_foreign(f)
 CON export_packing_weights.export_packing_weights_order_id_foreign(f)
 CON export_packing_weights.export_packing_weights_order_id_unique(u)
 CON export_packing_weights.export_packing_weights_pkey(p)
+CON export_quotation_items.export_quotation_items_pkey(p)
+CON export_quotation_items.export_quotation_items_product_id_foreign(f)
+CON export_quotation_items.export_quotation_items_quotation_id_foreign(f)
+CON export_quotations.export_quotations_converted_order_id_foreign(f)
+CON export_quotations.export_quotations_created_by_foreign(f)
+CON export_quotations.export_quotations_customer_id_foreign(f)
+CON export_quotations.export_quotations_pkey(p)
+CON export_quotations.export_quotations_quotation_no_unique(u)
 CON follow_ups.chk_follow_ups_status_valid(c)
 CON follow_ups.follow_ups_pkey(p)
 CON follow_ups.follow_ups_user_id_foreign(f)
