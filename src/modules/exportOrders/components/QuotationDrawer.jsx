@@ -29,6 +29,7 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
       destinationPort: '', portOfLoading: 'Karachi, Pakistan',
       paymentTerms: '20% advance, balance against documents', advancePct: '20',
       validUntil: '', notes: '',
+      packingCost: '', freightCost: '', otherCharges: '',
     };
   }
 
@@ -46,6 +47,9 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
         advancePct: quotation.advance_pct != null ? String(quotation.advance_pct) : '0',
         validUntil: quotation.valid_until ? String(quotation.valid_until).split('T')[0] : '',
         notes: quotation.notes || '',
+        packingCost: num(quotation.packing_cost) ? String(quotation.packing_cost) : '',
+        freightCost: num(quotation.freight_cost) ? String(quotation.freight_cost) : '',
+        otherCharges: num(quotation.other_charges) ? String(quotation.other_charges) : '',
       });
       setItems((quotation.items || []).length
         ? quotation.items.map((it) => ({
@@ -77,7 +81,9 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
     setItems((prev) => prev.map((it, idx) => (idx === i ? { ...it, productId: id, productName: p?.name || '' } : it)));
   };
 
-  const total = items.reduce((s, it) => s + num(it.qtyMT) * num(it.pricePerMT), 0);
+  const itemsTotal = items.reduce((s, it) => s + num(it.qtyMT) * num(it.pricePerMT), 0);
+  const chargesTotal = num(form.packingCost) + num(form.freightCost) + num(form.otherCharges);
+  const total = itemsTotal + chargesTotal;
 
   async function save(sendNow = false) {
     if (!form.customerId) { addToast('Select a customer', 'error'); return; }
@@ -95,6 +101,9 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
         payment_terms: form.paymentTerms || null,
         advance_pct: num(form.advancePct),
         valid_until: form.validUntil || null,
+        packing_cost: num(form.packingCost),
+        freight_cost: num(form.freightCost),
+        other_charges: num(form.otherCharges),
         notes: form.notes || null,
         items: cleanItems.map((it) => ({
           product_id: it.productId ? Number(it.productId) : null,
@@ -243,6 +252,29 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+
+        {/* Charges — flat amounts added to the rice subtotal for the client-facing total */}
+        <div>
+          <label className="block text-sm font-semibold text-gray-800 mb-2">Charges ({form.currency})</label>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-[11px] text-gray-500 mb-0.5">Packing / Bags</label>
+              <input type="number" min="0" step="0.01" value={form.packingCost} onChange={(e) => set('packingCost', e.target.value)} className={inputCls} placeholder="0.00" />
+            </div>
+            <div>
+              <label className="block text-[11px] text-gray-500 mb-0.5">Freight</label>
+              <input type="number" min="0" step="0.01" value={form.freightCost} onChange={(e) => set('freightCost', e.target.value)} className={inputCls} placeholder="0.00" />
+            </div>
+            <div>
+              <label className="block text-[11px] text-gray-500 mb-0.5">Other</label>
+              <input type="number" min="0" step="0.01" value={form.otherCharges} onChange={(e) => set('otherCharges', e.target.value)} className={inputCls} placeholder="0.00" />
+            </div>
+          </div>
+          <div className="mt-2 flex justify-between text-xs text-gray-500">
+            <span>Rice subtotal: {form.currency} {itemsTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            <span>+ Charges: {form.currency} {chargesTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
           </div>
         </div>
 

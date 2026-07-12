@@ -34,8 +34,15 @@ function quotationToOrder(q) {
     qualityDescription: it.quality_description || '',
   }));
   const qty = items.reduce((s, it) => s + it.qtyMT, 0);
-  const total = num(q.total_amount) || items.reduce((s, it) => s + it.lineTotal, 0);
+  const riceSubtotal = items.reduce((s, it) => s + it.lineTotal, 0);
+  const charges = [
+    { label: 'Packing / Bags', amount: num(q.packing_cost) },
+    { label: 'Freight', amount: num(q.freight_cost) },
+    { label: 'Other Charges', amount: num(q.other_charges) },
+  ].filter((c) => c.amount > 0);
+  const total = num(q.total_amount) || (riceSubtotal + charges.reduce((s, c) => s + c.amount, 0));
   return {
+    charges,
     id: q.quotation_no,
     createdAt: q.quote_date || q.created_at,
     customerName: q.customer_name || '',
@@ -222,7 +229,7 @@ export default function QuotationsPanel() {
       <QuotationDrawer open={drawerOpen} onClose={() => { setDrawerOpen(false); setEditing(null); }} quotation={editing} onSaved={() => load()} />
 
       <Modal isOpen={!!pdfOrder} onClose={() => setPdfOrder(null)} title={pdfOrder ? `Quotation — ${pdfOrder.id}` : ''} size="full">
-        {pdfOrder && <div className="overflow-x-auto"><ProformaInvoice order={pdfOrder} companyProfile={companyProfileData} title="Quotation" docNo={pdfOrder.id} /></div>}
+        {pdfOrder && <div className="overflow-x-auto"><ProformaInvoice order={pdfOrder} companyProfile={companyProfileData} title="Quotation" docNo={pdfOrder.id} charges={pdfOrder.charges} /></div>}
       </Modal>
     </div>
   );

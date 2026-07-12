@@ -35,7 +35,10 @@ function numberToWords(num) {
  * @param {object} props.order - Export order object
  * @param {object} props.companyProfile - Company profile with bank details
  */
-export default function ProformaInvoice({ order, companyProfile, title, docNo }) {
+export default function ProformaInvoice({ order, companyProfile, title, docNo, charges }) {
+  // Optional flat charges (packing/bags, freight, other) shown as their own
+  // lines under the rice subtotal, with a grand total. Used by quotations.
+  const chargeLines = Array.isArray(charges) ? charges.filter((c) => (parseFloat(c.amount) || 0) > 0) : [];
   // `title`/`docNo` let this same layout render as a QUOTATION (or any variant);
   // default is the Proforma Invoice with a PI- number derived from the order.
   const badgeTitle = title || 'Proforma Invoice';
@@ -360,6 +363,28 @@ export default function ProformaInvoice({ order, companyProfile, title, docNo })
                   {formatCurrency(subtotal)}
                 </td>
               </tr>
+
+              {/* Optional charge lines (packing/bags, freight, other) + grand total */}
+              {chargeLines.map((c, i) => (
+                <tr key={`chg-${i}`}>
+                  <td colSpan={6} />
+                  <td className="py-2 px-4 text-right border-b" style={{ borderColor: '#e2e8f0', color: '#334155' }}>{c.label}:</td>
+                  <td className="py-2 px-4 text-right font-medium border-b" style={{ borderColor: '#e2e8f0', color: '#334155' }}>
+                    {formatCurrency(c.amount)}
+                  </td>
+                </tr>
+              ))}
+              {chargeLines.length > 0 && (
+                <tr>
+                  <td colSpan={6} />
+                  <td className="py-3 px-4 text-right font-bold border-b" style={{ borderColor: '#e2e8f0', color: '#1e3a5f' }}>
+                    Grand Total:
+                  </td>
+                  <td className="py-3 px-4 text-right font-bold border-b" style={{ borderColor: '#e2e8f0', color: '#1e3a5f' }}>
+                    {formatCurrency(totalAmount)}
+                  </td>
+                </tr>
+              )}
 
               {/* Advance Payment Row */}
               <tr>

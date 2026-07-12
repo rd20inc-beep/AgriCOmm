@@ -125,6 +125,10 @@ const quotationsController = {
       const items = normalizeItems(b.items);
       if (items.length === 0) return res.status(400).json({ success: false, message: 'At least one line item is required.' });
       const subtotal = round2(items.reduce((s, it) => s + num(it.line_total), 0));
+      const packing = round2(b.packing_cost);
+      const freight = round2(b.freight_cost);
+      const other = round2(b.other_charges);
+      const total = round2(subtotal + packing + freight + other);
 
       const result = await db.transaction(async (trx) => {
         await fillProductNames(trx, items);
@@ -143,7 +147,10 @@ const quotationsController = {
           payment_terms: b.payment_terms || null,
           advance_pct: num(b.advance_pct),
           subtotal,
-          total_amount: subtotal,
+          packing_cost: packing,
+          freight_cost: freight,
+          other_charges: other,
+          total_amount: total,
           notes: b.notes || null,
           created_by: req.user?.id || null,
         }).returning('*');
@@ -179,16 +186,25 @@ const quotationsController = {
       if (b.advance_pct !== undefined) patch.advance_pct = num(b.advance_pct);
 
       await db.transaction(async (trx) => {
+        let subtotal = num(quote.subtotal);
         if (Array.isArray(b.items)) {
           const items = normalizeItems(b.items);
           if (items.length === 0) throw Object.assign(new Error('At least one line item is required.'), { code: 'EMPTY_ITEMS' });
           await fillProductNames(trx, items);
           await trx('export_quotation_items').where({ quotation_id: id }).del();
           await trx('export_quotation_items').insert(items.map((it) => ({ ...it, quotation_id: id })));
-          const subtotal = round2(items.reduce((s, it) => s + num(it.line_total), 0));
+          subtotal = round2(items.reduce((s, it) => s + num(it.line_total), 0));
           patch.subtotal = subtotal;
-          patch.total_amount = subtotal;
         }
+        // Recompute the grand total from the effective subtotal + charges (either
+        // the newly-supplied charge or the stored one).
+        const packing = b.packing_cost !== undefined ? round2(b.packing_cost) : num(quote.packing_cost);
+        const freight = b.freight_cost !== undefined ? round2(b.freight_cost) : num(quote.freight_cost);
+        const other = b.other_charges !== undefined ? round2(b.other_charges) : num(quote.other_charges);
+        if (b.packing_cost !== undefined) patch.packing_cost = packing;
+        if (b.freight_cost !== undefined) patch.freight_cost = freight;
+        if (b.other_charges !== undefined) patch.other_charges = other;
+        patch.total_amount = round2(subtotal + packing + freight + other);
         await trx('export_quotations').where({ id }).update(patch);
       });
       const updated = await db('export_quotations').where({ id }).first();
@@ -242,22 +258,21 @@ const quotationsController = {
       const items = await db('export_quotation_items').where({ quotation_id: id }).orderBy('line_no');
       if (!items.length) return res.status(400).json({ success: false, message: 'Quotation has no line items to convert.' });
 
-      const body = {
-        customer_id: quote.customer_id,
-        country: quote.country,
-        currency: quote.currency || 'USD',
-        incoterm: quote.incoterm,
-        destination_port: quote.destination_port,
-        advance_pct: num(quote.advance_pct),
-        payment_terms: quote.payment_terms,
-        notes: quote.notes,
-        source: 'Quotation',
-        status: 'Awaiting Advance',
-        items: items.map((it) => ({
+      // Fold packing/freight/other charges into the order value so the produced
+      // order's contract value = the quoted grand total (receivables match what
+      // the client agreed). Distribute the charge total evenly per MT across the
+      // rice lines; any rounding remainder lands on the first line so the sum is
+      // exact to the cent.
+      const chargesTotal = round2(num(quote.packing_cost) + num(quote.freight_cost) + num(quote.other_charges));
+      const totalQty = items.reduce((s, it) => s + num(it.qty_mt), 0);
+      const perMtBump = chargesTotal > 0 && totalQty > 0 ? chargesTotal / totalQty : 0;
+      const orderItems = items.map((it) => {
+        const price = round2(num(it.price_per_mt) + perMtBump);
+        return {
           product_id: it.product_id,
           product_name: it.product_name,
-          qty_mt: it.qty_mt,
-          price_per_mt: it.price_per_mt,
+          qty_mt: num(it.qty_mt),
+          price_per_mt: price,
           hs_code: it.hs_code,
           packing: it.packing,
           bag_size_kg: it.bag_size_kg,
@@ -266,7 +281,33 @@ const quotationsController = {
           quality_description: it.quality_description,
           broken_pct_target: it.broken_pct_target,
           notes: it.notes,
-        })),
+        };
+      });
+      // Correct any per-line rounding drift so the order total is exactly the quote total.
+      if (chargesTotal > 0 && orderItems.length) {
+        const built = round2(orderItems.reduce((s, it) => s + num(it.qty_mt) * num(it.price_per_mt), 0));
+        const target = num(quote.total_amount);
+        const drift = round2(target - built);
+        if (Math.abs(drift) >= 0.01 && num(orderItems[0].qty_mt) > 0) {
+          orderItems[0].price_per_mt = round2(num(orderItems[0].price_per_mt) + drift / num(orderItems[0].qty_mt));
+        }
+      }
+      const chargeNote = chargesTotal > 0
+        ? `Includes charges folded into price — packing ${round2(num(quote.packing_cost))}, freight ${round2(num(quote.freight_cost))}, other ${round2(num(quote.other_charges))} (${quote.currency}).`
+        : '';
+
+      const body = {
+        customer_id: quote.customer_id,
+        country: quote.country,
+        currency: quote.currency || 'USD',
+        incoterm: quote.incoterm,
+        destination_port: quote.destination_port,
+        advance_pct: num(quote.advance_pct),
+        payment_terms: quote.payment_terms,
+        notes: [quote.notes, chargeNote].filter(Boolean).join(' ') || null,
+        source: 'Quotation',
+        status: 'Awaiting Advance',
+        items: orderItems,
       };
 
       // Synthetic invocation of the export-order create handler.
