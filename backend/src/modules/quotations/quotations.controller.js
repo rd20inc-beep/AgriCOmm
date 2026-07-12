@@ -65,6 +65,7 @@ function normalizePackingLines(lines) {
       kind: l.kind || 'bag',
       itemId: l.itemId != null && l.itemId !== '' ? Number(l.itemId) : null,
       label: l.label || null,
+      sizeKg: l.sizeKg != null && l.sizeKg !== '' ? num(l.sizeKg) : null,
       qty: num(l.qty),
       unitCost: num(l.unitCost),
       amount: round2(l.amount != null ? l.amount : num(l.qty) * num(l.unitCost)),
