@@ -726,9 +726,12 @@ COL export_quotations.created_by:integer:NULL
 COL export_quotations.currency:character varying:NOT NULL
 COL export_quotations.customer_id:integer:NULL
 COL export_quotations.destination_port:character varying:NULL
+COL export_quotations.freight_cost:numeric:NOT NULL
 COL export_quotations.id:integer:NOT NULL
 COL export_quotations.incoterm:character varying:NULL
 COL export_quotations.notes:text:NULL
+COL export_quotations.other_charges:numeric:NOT NULL
+COL export_quotations.packing_cost:numeric:NOT NULL
 COL export_quotations.payment_terms:text:NULL
 COL export_quotations.port_of_loading:character varying:NULL
 COL export_quotations.quotation_no:character varying:NOT NULL
