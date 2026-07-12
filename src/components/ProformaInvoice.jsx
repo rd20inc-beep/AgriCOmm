@@ -35,8 +35,11 @@ function numberToWords(num) {
  * @param {object} props.order - Export order object
  * @param {object} props.companyProfile - Company profile with bank details
  */
-export default function ProformaInvoice({ order, companyProfile }) {
-  const piNumber = 'PI-' + (order.id || '').replace('EX-', '');
+export default function ProformaInvoice({ order, companyProfile, title, docNo }) {
+  // `title`/`docNo` let this same layout render as a QUOTATION (or any variant);
+  // default is the Proforma Invoice with a PI- number derived from the order.
+  const badgeTitle = title || 'Proforma Invoice';
+  const piNumber = docNo || ('PI-' + (order.id || '').replace('EX-', ''));
   const invoiceDate = order.createdAt
     ? new Date(order.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
     : new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -131,7 +134,7 @@ export default function ProformaInvoice({ order, companyProfile }) {
     if (!node) return;
     const links = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
       .map((l) => l.outerHTML).join('');
-    const title = `Proforma Invoice - ${order?.id || order?.orderNo || order?.order_no || ''}`.trim();
+    const title = `${badgeTitle} - ${piNumber}`.trim();
     const w = window.open('', '_blank', 'width=900,height=1100');
     if (!w) { window.print(); return; } // popup blocked → fall back
     // A4 portrait printable area at 8mm margins ≈ 194mm × 281mm. Auto-pick the
@@ -207,7 +210,7 @@ export default function ProformaInvoice({ order, companyProfile }) {
           {/* Right: Invoice badge */}
           <div className="bg-white bg-opacity-95 rounded-xl px-6 py-3 text-center shadow-md">
             <p className="text-xs font-semibold tracking-widest uppercase" style={{ color: '#1e3a5f' }}>
-              Proforma Invoice
+              {badgeTitle}
             </p>
             <p className="text-lg font-bold mt-0.5" style={{ color: '#10b981' }}>
               {piNumber}
