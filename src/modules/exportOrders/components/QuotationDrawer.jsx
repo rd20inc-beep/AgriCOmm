@@ -3,6 +3,8 @@ import { FileText, Plus, Trash2 } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { useApp } from '../../../context/AppContext';
 import { INCOTERMS } from '../../../shared/constants/incoterms';
+import CustomerPicker from '../../../components/CustomerPicker';
+import RiceTypePicker from '../../../components/RiceTypePicker';
 import { quotationsApi } from '../api/services';
 
 const num = (v) => parseFloat(v) || 0;
@@ -15,7 +17,6 @@ const emptyItem = () => ({ productId: '', productName: '', qtyMT: '', pricePerMT
  */
 export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
   const { customersList = [], productsList = [], addToast } = useApp();
-  const exportCustomers = customersList.filter((c) => (c.customer_type || c.customerType || '') !== 'local');
   const isEdit = !!quotation?.id;
 
   const [form, setForm] = useState(defaults());
@@ -66,12 +67,14 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
 
   const onPickCustomer = (id) => {
     set('customerId', id);
-    const c = exportCustomers.find((x) => String(x.id) === String(id));
-    if (c && !form.country) set('country', c.country || '');
+    const c = customersList.find((x) => String(x.id) === String(id));
+    if (c && c.country && !form.country) set('country', c.country);
   };
   const onPickProduct = (i, id) => {
+    // Name may be blank for a just-quick-added rice type — the backend backfills
+    // product_name from product_id on save, so passing '' here is safe.
     const p = productsList.find((x) => String(x.id) === String(id));
-    setItems((prev) => prev.map((it, idx) => (idx === i ? { ...it, productId: id, productName: p?.name || it.productName } : it)));
+    setItems((prev) => prev.map((it, idx) => (idx === i ? { ...it, productId: id, productName: p?.name || '' } : it)));
   };
 
   const total = items.reduce((s, it) => s + num(it.qtyMT) * num(it.pricePerMT), 0);
@@ -145,11 +148,14 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
         {/* Customer + terms */}
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2">
-            <label className="block text-xs font-medium text-gray-600 mb-1">Customer *</label>
-            <select value={form.customerId} onChange={(e) => onPickCustomer(e.target.value)} className={inputCls}>
-              <option value="">Select export customer…</option>
-              {exportCustomers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            <CustomerPicker
+              label={<span>Customer <span className="text-red-500">*</span></span>}
+              value={form.customerId ? String(form.customerId) : ''}
+              onChange={onPickCustomer}
+              onCreated={(c) => { if (c?.id) { set('customerId', c.id); if (c.country) set('country', c.country); } }}
+              addToast={addToast}
+              clearable
+            />
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Country</label>
@@ -200,11 +206,14 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
               <div key={i} className="rounded-lg border border-gray-200 p-2.5 space-y-2">
                 <div className="grid grid-cols-12 gap-2 items-end">
                   <div className="col-span-5">
-                    <label className="block text-[10px] text-gray-500 mb-0.5">Product</label>
-                    <select value={it.productId} onChange={(e) => onPickProduct(i, e.target.value)} className={inputCls}>
-                      <option value="">Select…</option>
-                      {productsList.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
+                    <label className="block text-[10px] text-gray-500 mb-0.5">Rice Type</label>
+                    <RiceTypePicker
+                      value={it.productId ? String(it.productId) : ''}
+                      onChange={(id) => onPickProduct(i, id)}
+                      products={productsList}
+                      addToast={addToast}
+                      placeholder="Search rice type…"
+                    />
                   </div>
                   <div className="col-span-2">
                     <label className="block text-[10px] text-gray-500 mb-0.5">Qty (MT)</label>

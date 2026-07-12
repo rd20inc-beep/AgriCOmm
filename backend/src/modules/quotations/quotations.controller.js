@@ -43,6 +43,19 @@ function normalizeItems(items) {
     });
 }
 
+// Fill in product_name for items that carry a product_id but no name — happens
+// when a rice type was just quick-added in the picker (the client only knows the
+// new id). Keeps stored quotes + the produced order showing the real name.
+async function fillProductNames(trx, items) {
+  const ids = items.filter((it) => it.product_id && !it.product_name).map((it) => it.product_id);
+  if (!ids.length) return;
+  const prods = await trx('products').whereIn('id', ids).select('id', 'name');
+  const map = new Map(prods.map((p) => [p.id, p.name]));
+  for (const it of items) {
+    if (it.product_id && !it.product_name) it.product_name = map.get(it.product_id) || null;
+  }
+}
+
 async function resolveId(idParam) {
   if (/^\d+$/.test(String(idParam))) return parseInt(idParam);
   const row = await db('export_quotations').where({ quotation_no: idParam }).first('id');
@@ -114,6 +127,7 @@ const quotationsController = {
       const subtotal = round2(items.reduce((s, it) => s + num(it.line_total), 0));
 
       const result = await db.transaction(async (trx) => {
+        await fillProductNames(trx, items);
         const quotationNo = await nextDocNo(trx, { table: 'export_quotations', column: 'quotation_no', prefix: 'QUO-' });
         const [quote] = await trx('export_quotations').insert({
           quotation_no: quotationNo,
@@ -168,6 +182,7 @@ const quotationsController = {
         if (Array.isArray(b.items)) {
           const items = normalizeItems(b.items);
           if (items.length === 0) throw Object.assign(new Error('At least one line item is required.'), { code: 'EMPTY_ITEMS' });
+          await fillProductNames(trx, items);
           await trx('export_quotation_items').where({ quotation_id: id }).del();
           await trx('export_quotation_items').insert(items.map((it) => ({ ...it, quotation_id: id })));
           const subtotal = round2(items.reduce((s, it) => s + num(it.line_total), 0));
