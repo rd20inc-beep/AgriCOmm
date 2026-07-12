@@ -35,8 +35,14 @@ function quotationToOrder(q) {
   }));
   const qty = items.reduce((s, it) => s + it.qtyMT, 0);
   const riceSubtotal = items.reduce((s, it) => s + it.lineTotal, 0);
+  // Itemize the packing breakdown (bag + master + poly) when present, else the
+  // single flat packing charge.
+  const packLines = Array.isArray(q.packing_lines) ? q.packing_lines : [];
+  const packCharges = packLines.length
+    ? packLines.map((l) => ({ label: `${l.label || 'Packing'}${num(l.qty) ? ` (${Math.round(num(l.qty)).toLocaleString()})` : ''}`, amount: num(l.amount) }))
+    : [{ label: 'Packing / Bags', amount: num(q.packing_cost) }];
   const charges = [
-    { label: 'Packing / Bags', amount: num(q.packing_cost) },
+    ...packCharges,
     { label: 'Freight', amount: num(q.freight_cost) },
     { label: 'Other Charges', amount: num(q.other_charges) },
   ].filter((c) => c.amount > 0);

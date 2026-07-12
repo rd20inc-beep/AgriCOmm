@@ -56,6 +56,23 @@ async function fillProductNames(trx, items) {
   }
 }
 
+// Normalize the packing breakdown (bag + master-bag + polythene lines) built in
+// the drawer. Returns a clean array; the packing charge is the sum of amounts.
+function normalizePackingLines(lines) {
+  if (!Array.isArray(lines)) return null;
+  return lines
+    .map((l) => ({
+      kind: l.kind || 'bag',
+      itemId: l.itemId != null && l.itemId !== '' ? Number(l.itemId) : null,
+      label: l.label || null,
+      qty: num(l.qty),
+      unitCost: num(l.unitCost),
+      amount: round2(l.amount != null ? l.amount : num(l.qty) * num(l.unitCost)),
+    }))
+    .filter((l) => (l.itemId || l.label) && (l.amount > 0 || l.qty > 0));
+}
+const packingFromLines = (lines) => round2((lines || []).reduce((s, l) => s + num(l.amount), 0));
+
 async function resolveId(idParam) {
   if (/^\d+$/.test(String(idParam))) return parseInt(idParam);
   const row = await db('export_quotations').where({ quotation_no: idParam }).first('id');
@@ -125,7 +142,8 @@ const quotationsController = {
       const items = normalizeItems(b.items);
       if (items.length === 0) return res.status(400).json({ success: false, message: 'At least one line item is required.' });
       const subtotal = round2(items.reduce((s, it) => s + num(it.line_total), 0));
-      const packing = round2(b.packing_cost);
+      const packingLines = normalizePackingLines(b.packing_lines);
+      const packing = packingLines && packingLines.length ? packingFromLines(packingLines) : round2(b.packing_cost);
       const freight = round2(b.freight_cost);
       const other = round2(b.other_charges);
       const total = round2(subtotal + packing + freight + other);
@@ -148,6 +166,7 @@ const quotationsController = {
           advance_pct: num(b.advance_pct),
           subtotal,
           packing_cost: packing,
+          packing_lines: packingLines && packingLines.length ? JSON.stringify(packingLines) : null,
           freight_cost: freight,
           other_charges: other,
           total_amount: total,
@@ -197,11 +216,22 @@ const quotationsController = {
           patch.subtotal = subtotal;
         }
         // Recompute the grand total from the effective subtotal + charges (either
-        // the newly-supplied charge or the stored one).
-        const packing = b.packing_cost !== undefined ? round2(b.packing_cost) : num(quote.packing_cost);
+        // the newly-supplied charge or the stored one). packing_lines (the itemized
+        // bag/master/poly breakdown), when sent, drives the packing charge.
+        let packing;
+        if (b.packing_lines !== undefined) {
+          const packingLines = normalizePackingLines(b.packing_lines);
+          packing = packingLines && packingLines.length ? packingFromLines(packingLines) : round2(b.packing_cost || 0);
+          patch.packing_lines = packingLines && packingLines.length ? JSON.stringify(packingLines) : null;
+          patch.packing_cost = packing;
+        } else if (b.packing_cost !== undefined) {
+          packing = round2(b.packing_cost);
+          patch.packing_cost = packing;
+        } else {
+          packing = num(quote.packing_cost);
+        }
         const freight = b.freight_cost !== undefined ? round2(b.freight_cost) : num(quote.freight_cost);
         const other = b.other_charges !== undefined ? round2(b.other_charges) : num(quote.other_charges);
-        if (b.packing_cost !== undefined) patch.packing_cost = packing;
         if (b.freight_cost !== undefined) patch.freight_cost = freight;
         if (b.other_charges !== undefined) patch.other_charges = other;
         patch.total_amount = round2(subtotal + packing + freight + other);
