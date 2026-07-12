@@ -732,6 +732,7 @@ COL export_quotations.incoterm:character varying:NULL
 COL export_quotations.notes:text:NULL
 COL export_quotations.other_charges:numeric:NOT NULL
 COL export_quotations.packing_cost:numeric:NOT NULL
+COL export_quotations.packing_lines:jsonb:NULL
 COL export_quotations.payment_terms:text:NULL
 COL export_quotations.port_of_loading:character varying:NULL
 COL export_quotations.quotation_no:character varying:NOT NULL

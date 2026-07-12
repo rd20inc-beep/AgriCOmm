@@ -5,10 +5,16 @@ import { useApp } from '../../../context/AppContext';
 import { INCOTERMS } from '../../../shared/constants/incoterms';
 import CustomerPicker from '../../../components/CustomerPicker';
 import RiceTypePicker from '../../../components/RiceTypePicker';
+import ItemPicker from '../../../components/ItemPicker';
+import { millStoreApi } from '../../millStore/api/services';
 import { quotationsApi } from '../api/services';
 
 const num = (v) => parseFloat(v) || 0;
 const emptyItem = () => ({ productId: '', productName: '', qtyMT: '', pricePerMT: '', hsCode: '', bagSizeKg: '', bagType: 'PP' });
+// Below this retail-bag size (kg) a shipment needs an outer master bag + a
+// polythene liner per bag — same ≤15kg rule as the mill packing flow.
+const SMALL_BAG_KG = 15;
+const emptyPack = () => ({ bagItemId: '', bagUnitCost: '', bagQty: '', masterItemId: '', masterUnitCost: '', masterQty: '', polyItemId: '', polyUnitCost: '', polyQty: '' });
 
 /**
  * Create / edit an export quotation. Right slide-over (no backdrop close, so a
@@ -22,6 +28,19 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
   const [form, setForm] = useState(defaults());
   const [items, setItems] = useState([emptyItem()]);
   const [saving, setSaving] = useState(false);
+  const [packagingItems, setPackagingItems] = useState([]);
+  const [pack, setPack] = useState(emptyPack());
+
+  // Packaging items (bags / master bags / polythene) — searchable + quick-add.
+  useEffect(() => {
+    if (!open) return;
+    millStoreApi.listItems({ category: 'packaging' })
+      .then((res) => setPackagingItems(res?.data?.items || res?.data || []))
+      .catch(() => setPackagingItems([]));
+  }, [open]);
+  const findPkg = (id) => packagingItems.find((p) => String(p.id) === String(id));
+  const setPackF = (k, v) => setPack((p) => ({ ...p, [k]: v }));
+  const onPkgAdded = (it) => setPackagingItems((prev) => [it, ...prev]);
 
   function defaults() {
     return {
@@ -29,7 +48,7 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
       destinationPort: '', portOfLoading: 'Karachi, Pakistan',
       paymentTerms: '20% advance, balance against documents', advancePct: '20',
       validUntil: '', notes: '',
-      packingCost: '', freightCost: '', otherCharges: '',
+      freightCost: '', otherCharges: '',
     };
   }
 
@@ -47,7 +66,6 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
         advancePct: quotation.advance_pct != null ? String(quotation.advance_pct) : '0',
         validUntil: quotation.valid_until ? String(quotation.valid_until).split('T')[0] : '',
         notes: quotation.notes || '',
-        packingCost: num(quotation.packing_cost) ? String(quotation.packing_cost) : '',
         freightCost: num(quotation.freight_cost) ? String(quotation.freight_cost) : '',
         otherCharges: num(quotation.other_charges) ? String(quotation.other_charges) : '',
       });
@@ -58,9 +76,19 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
             hsCode: it.hs_code || '', bagSizeKg: it.bag_size_kg != null ? String(it.bag_size_kg) : '', bagType: it.bag_type || 'PP',
           }))
         : [emptyItem()]);
+      const pl = Array.isArray(quotation.packing_lines) ? quotation.packing_lines : [];
+      const byKind = (k) => pl.find((l) => l.kind === k) || {};
+      const bg = byKind('bag'); const ms = byKind('master'); const py = byKind('poly');
+      const s = (v) => (v != null && v !== '' ? String(v) : '');
+      setPack({
+        bagItemId: bg.itemId || '', bagUnitCost: s(bg.unitCost), bagQty: s(bg.qty),
+        masterItemId: ms.itemId || '', masterUnitCost: s(ms.unitCost), masterQty: s(ms.qty),
+        polyItemId: py.itemId || '', polyUnitCost: s(py.unitCost), polyQty: s(py.qty),
+      });
     } else {
       setForm(defaults());
       setItems([emptyItem()]);
+      setPack(emptyPack());
     }
   }, [open, quotation]);
 
@@ -81,8 +109,48 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
     setItems((prev) => prev.map((it, idx) => (idx === i ? { ...it, productId: id, productName: p?.name || '' } : it)));
   };
 
+  const round2 = (n) => Math.round((num(n)) * 100) / 100;
   const itemsTotal = items.reduce((s, it) => s + num(it.qtyMT) * num(it.pricePerMT), 0);
-  const chargesTotal = num(form.packingCost) + num(form.freightCost) + num(form.otherCharges);
+
+  // ── Packaging builder maths ──
+  const totalBagCount = items.reduce((s, it) => {
+    const q = num(it.qtyMT); const bs = num(it.bagSizeKg) || 50;
+    return s + (q > 0 && bs > 0 ? Math.ceil((q * 1000) / bs) : 0);
+  }, 0);
+  const totalRiceKg = items.reduce((s, it) => s + num(it.qtyMT) * 1000, 0);
+  const bagItem = findPkg(pack.bagItemId);
+  const minLineBag = items.reduce((m, it) => { const bs = num(it.bagSizeKg); return bs > 0 ? Math.min(m, bs) : m; }, Infinity);
+  const smallBag = num(bagItem?.capacity_kg) > 0
+    ? num(bagItem.capacity_kg) <= SMALL_BAG_KG
+    : (minLineBag !== Infinity && minLineBag <= SMALL_BAG_KG);
+  const eff = (v, auto) => (v !== '' && v != null ? num(v) : auto);
+  const bagQty = eff(pack.bagQty, totalBagCount);
+  const bagCost = eff(pack.bagUnitCost, num(bagItem?.avg_cost_per_unit));
+  const bagAmt = round2(bagQty * bagCost);
+  const masterItem = findPkg(pack.masterItemId);
+  const masterAutoQty = num(masterItem?.capacity_kg) > 0 ? Math.ceil(totalRiceKg / num(masterItem.capacity_kg)) : 0;
+  const masterQty = eff(pack.masterQty, masterAutoQty);
+  const masterCost = eff(pack.masterUnitCost, num(masterItem?.avg_cost_per_unit));
+  const masterAmt = smallBag ? round2(masterQty * masterCost) : 0;
+  const polyItem = findPkg(pack.polyItemId);
+  const polyQty = eff(pack.polyQty, totalBagCount);
+  const polyCost = eff(pack.polyUnitCost, num(polyItem?.avg_cost_per_unit));
+  const polyAmt = smallBag ? round2(polyQty * polyCost) : 0;
+  const packingTotal = round2(bagAmt + masterAmt + polyAmt);
+
+  function buildPackingLines() {
+    const lines = [];
+    if (pack.bagItemId && (bagAmt > 0 || bagQty > 0)) lines.push({ kind: 'bag', itemId: Number(pack.bagItemId), label: bagItem?.name || 'Bag', qty: bagQty, unitCost: bagCost, amount: bagAmt });
+    if (smallBag && pack.masterItemId && (masterAmt > 0 || masterQty > 0)) lines.push({ kind: 'master', itemId: Number(pack.masterItemId), label: masterItem?.name || 'Master Bag', qty: masterQty, unitCost: masterCost, amount: masterAmt });
+    if (smallBag && pack.polyItemId && (polyAmt > 0 || polyQty > 0)) lines.push({ kind: 'poly', itemId: Number(pack.polyItemId), label: polyItem?.name || 'Polythene', qty: polyQty, unitCost: polyCost, amount: polyAmt });
+    return lines;
+  }
+  // Prefill unit cost from the packaging item's stored cost (editable, in quote currency).
+  const pickBag = (id) => setPack((p) => ({ ...p, bagItemId: id, bagUnitCost: findPkg(id)?.avg_cost_per_unit != null ? String(findPkg(id).avg_cost_per_unit) : p.bagUnitCost }));
+  const pickMaster = (id) => setPack((p) => ({ ...p, masterItemId: id, masterUnitCost: findPkg(id)?.avg_cost_per_unit != null ? String(findPkg(id).avg_cost_per_unit) : p.masterUnitCost }));
+  const pickPoly = (id) => setPack((p) => ({ ...p, polyItemId: id, polyUnitCost: findPkg(id)?.avg_cost_per_unit != null ? String(findPkg(id).avg_cost_per_unit) : p.polyUnitCost }));
+
+  const chargesTotal = packingTotal + num(form.freightCost) + num(form.otherCharges);
   const total = itemsTotal + chargesTotal;
 
   async function save(sendNow = false) {
@@ -101,7 +169,8 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
         payment_terms: form.paymentTerms || null,
         advance_pct: num(form.advancePct),
         valid_until: form.validUntil || null,
-        packing_cost: num(form.packingCost),
+        packing_lines: buildPackingLines(),
+        packing_cost: packingTotal,
         freight_cost: num(form.freightCost),
         other_charges: num(form.otherCharges),
         notes: form.notes || null,
@@ -255,14 +324,77 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
           </div>
         </div>
 
-        {/* Charges — flat amounts added to the rice subtotal for the client-facing total */}
-        <div>
-          <label className="block text-sm font-semibold text-gray-800 mb-2">Charges ({form.currency})</label>
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="block text-[11px] text-gray-500 mb-0.5">Packing / Bags</label>
-              <input type="number" min="0" step="0.01" value={form.packingCost} onChange={(e) => set('packingCost', e.target.value)} className={inputCls} placeholder="0.00" />
+        {/* Charges — packaging (item-driven, with auto master+poly) + freight/other */}
+        <div className="space-y-3">
+          <label className="block text-sm font-semibold text-gray-800">Packaging ({form.currency})</label>
+
+          {/* Bag line */}
+          <div className="rounded-lg border border-gray-200 p-3 space-y-2">
+            <div className="grid grid-cols-12 gap-2 items-end">
+              <div className="col-span-6">
+                <ItemPicker label="Bag" category="packaging" value={pack.bagItemId ? String(pack.bagItemId) : ''}
+                  onChange={pickBag} items={packagingItems} onItemAdded={onPkgAdded} addToast={addToast} placeholder="Search bag…" />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-[10px] text-gray-500 mb-0.5">Bags</label>
+                <input type="number" min="0" value={pack.bagQty} onChange={(e) => setPackF('bagQty', e.target.value)} placeholder={totalBagCount ? String(totalBagCount) : '0'} className={inputCls} />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-[10px] text-gray-500 mb-0.5">Unit cost</label>
+                <input type="number" min="0" step="0.0001" value={pack.bagUnitCost} onChange={(e) => setPackF('bagUnitCost', e.target.value)} placeholder="0.00" className={inputCls} />
+              </div>
+              <div className="col-span-2 text-right pb-1.5 text-sm font-medium text-gray-800">{bagAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
             </div>
+            {smallBag && (
+              <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                Small bag (≤{SMALL_BAG_KG} kg) — a master bag &amp; polythene liner are added below.
+              </div>
+            )}
+          </div>
+
+          {/* Master bag + polythene — only for small bags */}
+          {smallBag && (
+            <>
+              <div className="grid grid-cols-12 gap-2 items-end">
+                <div className="col-span-6">
+                  <ItemPicker label="Master Bag" category="packaging" value={pack.masterItemId ? String(pack.masterItemId) : ''}
+                    onChange={pickMaster} items={packagingItems} onItemAdded={onPkgAdded} addToast={addToast} placeholder="Search master bag…" />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-[10px] text-gray-500 mb-0.5">Masters</label>
+                  <input type="number" min="0" value={pack.masterQty} onChange={(e) => setPackF('masterQty', e.target.value)} placeholder={masterAutoQty ? String(masterAutoQty) : '0'} className={inputCls} />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-[10px] text-gray-500 mb-0.5">Unit cost</label>
+                  <input type="number" min="0" step="0.0001" value={pack.masterUnitCost} onChange={(e) => setPackF('masterUnitCost', e.target.value)} placeholder="0.00" className={inputCls} />
+                </div>
+                <div className="col-span-2 text-right pb-1.5 text-sm font-medium text-gray-800">{masterAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              </div>
+              <div className="grid grid-cols-12 gap-2 items-end">
+                <div className="col-span-6">
+                  <ItemPicker label="Polythene" category="packaging" value={pack.polyItemId ? String(pack.polyItemId) : ''}
+                    onChange={pickPoly} items={packagingItems} onItemAdded={onPkgAdded} addToast={addToast} placeholder="Search polythene…" />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-[10px] text-gray-500 mb-0.5">Sheets</label>
+                  <input type="number" min="0" value={pack.polyQty} onChange={(e) => setPackF('polyQty', e.target.value)} placeholder={totalBagCount ? String(totalBagCount) : '0'} className={inputCls} />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-[10px] text-gray-500 mb-0.5">Unit cost</label>
+                  <input type="number" min="0" step="0.0001" value={pack.polyUnitCost} onChange={(e) => setPackF('polyUnitCost', e.target.value)} placeholder="0.00" className={inputCls} />
+                </div>
+                <div className="col-span-2 text-right pb-1.5 text-sm font-medium text-gray-800">{polyAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              </div>
+            </>
+          )}
+
+          <div className="flex justify-between text-xs text-gray-600">
+            <span>Packing charge</span>
+            <span className="font-semibold text-gray-900">{form.currency} {packingTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+          </div>
+
+          {/* Freight + Other (flat) */}
+          <div className="grid grid-cols-2 gap-3 pt-1">
             <div>
               <label className="block text-[11px] text-gray-500 mb-0.5">Freight</label>
               <input type="number" min="0" step="0.01" value={form.freightCost} onChange={(e) => set('freightCost', e.target.value)} className={inputCls} placeholder="0.00" />
@@ -272,7 +404,8 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
               <input type="number" min="0" step="0.01" value={form.otherCharges} onChange={(e) => set('otherCharges', e.target.value)} className={inputCls} placeholder="0.00" />
             </div>
           </div>
-          <div className="mt-2 flex justify-between text-xs text-gray-500">
+
+          <div className="mt-1 flex justify-between text-xs text-gray-500">
             <span>Rice subtotal: {form.currency} {itemsTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             <span>+ Charges: {form.currency} {chargesTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
           </div>
