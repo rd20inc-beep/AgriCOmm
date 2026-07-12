@@ -23,6 +23,17 @@ export const exportOrdersApi = {
   allocateStock: (id, data) => api.post(`/api/export-orders/${id}/allocate-stock`, data),
 };
 
+// Export quotations — pre-order price quotes that convert into an export order.
+export const quotationsApi = {
+  list: (params) => api.get('/api/quotations', params),
+  get: (id) => api.get(`/api/quotations/${id}`),
+  create: (data) => api.post('/api/quotations', data),
+  update: (id, data) => api.put(`/api/quotations/${id}`, data),
+  setStatus: (id, status) => api.put(`/api/quotations/${id}/status`, { status }),
+  convert: (id) => api.post(`/api/quotations/${id}/convert`, {}),
+  remove: (id) => api.delete(`/api/quotations/${id}`),
+};
+
 // Printed-bag procurement for an export order (mounted at /api/printed-bag-orders).
 export const printedBagsApi = {
   list: (orderId) => api.get('/api/printed-bag-orders', { orderId }),

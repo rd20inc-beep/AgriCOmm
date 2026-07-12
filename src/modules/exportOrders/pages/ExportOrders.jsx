@@ -8,6 +8,7 @@ import { downloadCSV } from '../../../utils/csvExport';
 import Modal from '../../../components/Modal';
 import ProformaInvoice from '../../../components/ProformaInvoice';
 import EmailComposer from '../../../components/EmailComposer';
+import QuotationsPanel from '../components/QuotationsPanel';
 
 const tabs = [
   { key: 'All', label: 'All' },
@@ -17,6 +18,7 @@ const tabs = [
   { key: 'Awaiting Balance', label: 'Awaiting Balance' },
   { key: 'Ready to Ship', label: 'Ready to Ship' },
   { key: 'Shipped', label: 'Shipped' },
+  { key: 'Quotations', label: 'Quotations' },
 ];
 
 function matchesTab(order, tab) {
@@ -107,6 +109,7 @@ export default function ExportOrders() {
     <div className="space-y-6">
       <div className="page-header">
         <h1 className="text-2xl font-bold text-gray-900">Export Orders</h1>
+        {activeTab !== 'Quotations' && (
         <div className="flex items-center gap-2">
           <button
             onClick={() => downloadCSV(filteredOrders, [
@@ -126,6 +129,8 @@ export default function ExportOrders() {
             <Download className="w-4 h-4" /> CSV
           </button>
         </div>
+        )}
+        {activeTab !== 'Quotations' && (
         <Link
           to="/export/create"
           className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
@@ -133,6 +138,7 @@ export default function ExportOrders() {
           <Plus className="w-4 h-4" />
           Create Export Order
         </Link>
+        )}
       </div>
 
       <div className="flex items-center gap-1 border-b border-gray-200 overflow-x-auto">
@@ -151,6 +157,10 @@ export default function ExportOrders() {
         ))}
       </div>
 
+      {activeTab === 'Quotations' ? (
+        <QuotationsPanel />
+      ) : (
+       <>
       <div className="filter-bar">
         <div className="relative flex-1 max-w-full sm:max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -295,6 +305,8 @@ export default function ExportOrders() {
           </table>
         </div>
       </div>
+       </>
+      )}
 
       {/* Proforma Invoice Modal */}
       <Modal isOpen={!!piOrder} onClose={() => setPiOrder(null)} title={piOrder ? `Proforma Invoice — ${piOrder.id}` : ''} size="full">
