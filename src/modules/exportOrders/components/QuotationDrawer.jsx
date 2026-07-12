@@ -14,7 +14,7 @@ const emptyItem = () => ({ productId: '', productName: '', qtyMT: '', pricePerMT
 // Below this retail-bag size (kg) a shipment needs an outer master bag + a
 // polythene liner per bag — same ≤15kg rule as the mill packing flow.
 const SMALL_BAG_KG = 15;
-const emptyPack = () => ({ bagItemId: '', bagUnitCost: '', bagQty: '', masterItemId: '', masterUnitCost: '', masterQty: '', polyItemId: '', polyUnitCost: '', polyQty: '' });
+const emptyPack = () => ({ bagItemId: '', bagSize: '', bagUnitCost: '', masterItemId: '', masterSize: '', masterUnitCost: '', polyItemId: '', polyUnitCost: '' });
 
 /**
  * Create / edit an export quotation. Right slide-over (no backdrop close, so a
@@ -81,9 +81,9 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
       const bg = byKind('bag'); const ms = byKind('master'); const py = byKind('poly');
       const s = (v) => (v != null && v !== '' ? String(v) : '');
       setPack({
-        bagItemId: bg.itemId || '', bagUnitCost: s(bg.unitCost), bagQty: s(bg.qty),
-        masterItemId: ms.itemId || '', masterUnitCost: s(ms.unitCost), masterQty: s(ms.qty),
-        polyItemId: py.itemId || '', polyUnitCost: s(py.unitCost), polyQty: s(py.qty),
+        bagItemId: bg.itemId || '', bagSize: s(bg.sizeKg), bagUnitCost: s(bg.unitCost),
+        masterItemId: ms.itemId || '', masterSize: s(ms.sizeKg), masterUnitCost: s(ms.unitCost),
+        polyItemId: py.itemId || '', polyUnitCost: s(py.unitCost),
       });
     } else {
       setForm(defaults());
@@ -110,44 +110,51 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
   };
 
   const round2 = (n) => Math.round((num(n)) * 100) / 100;
+  const fmt2 = (n) => num(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmt3 = (n) => num(n).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+  const fmtN = (n) => num(n).toLocaleString(undefined, { maximumFractionDigits: 4 });
   const itemsTotal = items.reduce((s, it) => s + num(it.qtyMT) * num(it.pricePerMT), 0);
 
-  // ── Packaging builder maths ──
-  const totalBagCount = items.reduce((s, it) => {
-    const q = num(it.qtyMT); const bs = num(it.bagSizeKg) || 50;
-    return s + (q > 0 && bs > 0 ? Math.ceil((q * 1000) / bs) : 0);
-  }, 0);
-  const totalRiceKg = items.reduce((s, it) => s + num(it.qtyMT) * 1000, 0);
-  const bagItem = findPkg(pack.bagItemId);
-  const minLineBag = items.reduce((m, it) => { const bs = num(it.bagSizeKg); return bs > 0 ? Math.min(m, bs) : m; }, Infinity);
-  const smallBag = num(bagItem?.capacity_kg) > 0
-    ? num(bagItem.capacity_kg) <= SMALL_BAG_KG
-    : (minLineBag !== Infinity && minLineBag <= SMALL_BAG_KG);
+  // ── Packaging builder maths — quantities are DERIVED live from the net weight
+  // and the bag / master-bag sizes, so they auto-fill and re-compute as any of
+  // those change. Sizes default from the picked item's capacity or the rice
+  // line bag size, and are editable. ──
   const eff = (v, auto) => (v !== '' && v != null ? num(v) : auto);
-  const bagQty = eff(pack.bagQty, totalBagCount);
+  const totalRiceKg = items.reduce((s, it) => s + num(it.qtyMT) * 1000, 0);
+  const totalMt = totalRiceKg / 1000;
+  const minLineBag = items.reduce((m, it) => { const bs = num(it.bagSizeKg); return bs > 0 ? Math.min(m, bs) : m; }, Infinity);
+  const lineBagDefault = minLineBag !== Infinity ? minLineBag : 0;
+
+  const bagItem = findPkg(pack.bagItemId);
+  const bagSize = eff(pack.bagSize, num(bagItem?.capacity_kg) || lineBagDefault) || 0;
+  const bagCount = totalRiceKg > 0 && bagSize > 0 ? Math.ceil(totalRiceKg / bagSize) : 0;
+  const smallBag = bagSize > 0 && bagSize <= SMALL_BAG_KG;
   const bagCost = eff(pack.bagUnitCost, num(bagItem?.avg_cost_per_unit));
-  const bagAmt = round2(bagQty * bagCost);
+  const bagAmt = round2(bagCount * bagCost);
+
   const masterItem = findPkg(pack.masterItemId);
-  const masterAutoQty = num(masterItem?.capacity_kg) > 0 ? Math.ceil(totalRiceKg / num(masterItem.capacity_kg)) : 0;
-  const masterQty = eff(pack.masterQty, masterAutoQty);
+  const masterSize = eff(pack.masterSize, num(masterItem?.capacity_kg) || 25) || 0;
+  const masterCount = smallBag && masterSize > 0 && totalRiceKg > 0 ? Math.ceil(totalRiceKg / masterSize) : 0;
   const masterCost = eff(pack.masterUnitCost, num(masterItem?.avg_cost_per_unit));
-  const masterAmt = smallBag ? round2(masterQty * masterCost) : 0;
+  const masterAmt = round2(masterCount * masterCost);
+
   const polyItem = findPkg(pack.polyItemId);
-  const polyQty = eff(pack.polyQty, totalBagCount);
+  const polyCount = smallBag ? bagCount : 0; // one liner per retail bag
   const polyCost = eff(pack.polyUnitCost, num(polyItem?.avg_cost_per_unit));
-  const polyAmt = smallBag ? round2(polyQty * polyCost) : 0;
+  const polyAmt = round2(polyCount * polyCost);
+
   const packingTotal = round2(bagAmt + masterAmt + polyAmt);
 
   function buildPackingLines() {
     const lines = [];
-    if (pack.bagItemId && (bagAmt > 0 || bagQty > 0)) lines.push({ kind: 'bag', itemId: Number(pack.bagItemId), label: bagItem?.name || 'Bag', qty: bagQty, unitCost: bagCost, amount: bagAmt });
-    if (smallBag && pack.masterItemId && (masterAmt > 0 || masterQty > 0)) lines.push({ kind: 'master', itemId: Number(pack.masterItemId), label: masterItem?.name || 'Master Bag', qty: masterQty, unitCost: masterCost, amount: masterAmt });
-    if (smallBag && pack.polyItemId && (polyAmt > 0 || polyQty > 0)) lines.push({ kind: 'poly', itemId: Number(pack.polyItemId), label: polyItem?.name || 'Polythene', qty: polyQty, unitCost: polyCost, amount: polyAmt });
+    if (pack.bagItemId && bagCount > 0) lines.push({ kind: 'bag', itemId: Number(pack.bagItemId), label: bagItem?.name || 'Bag', sizeKg: bagSize, qty: bagCount, unitCost: bagCost, amount: bagAmt });
+    if (smallBag && pack.masterItemId && masterCount > 0) lines.push({ kind: 'master', itemId: Number(pack.masterItemId), label: masterItem?.name || 'Master Bag', sizeKg: masterSize, qty: masterCount, unitCost: masterCost, amount: masterAmt });
+    if (smallBag && pack.polyItemId && polyCount > 0) lines.push({ kind: 'poly', itemId: Number(pack.polyItemId), label: polyItem?.name || 'Polythene', qty: polyCount, unitCost: polyCost, amount: polyAmt });
     return lines;
   }
-  // Prefill unit cost from the packaging item's stored cost (editable, in quote currency).
-  const pickBag = (id) => setPack((p) => ({ ...p, bagItemId: id, bagUnitCost: findPkg(id)?.avg_cost_per_unit != null ? String(findPkg(id).avg_cost_per_unit) : p.bagUnitCost }));
-  const pickMaster = (id) => setPack((p) => ({ ...p, masterItemId: id, masterUnitCost: findPkg(id)?.avg_cost_per_unit != null ? String(findPkg(id).avg_cost_per_unit) : p.masterUnitCost }));
+  // Prefill size + unit cost from the packaging item (both editable, quote currency).
+  const pickBag = (id) => setPack((p) => { const it = findPkg(id); return { ...p, bagItemId: id, bagUnitCost: it?.avg_cost_per_unit != null ? String(it.avg_cost_per_unit) : p.bagUnitCost, bagSize: (!p.bagSize && num(it?.capacity_kg) > 0) ? String(it.capacity_kg) : p.bagSize }; });
+  const pickMaster = (id) => setPack((p) => { const it = findPkg(id); return { ...p, masterItemId: id, masterUnitCost: it?.avg_cost_per_unit != null ? String(it.avg_cost_per_unit) : p.masterUnitCost, masterSize: (!p.masterSize && num(it?.capacity_kg) > 0) ? String(it.capacity_kg) : p.masterSize }; });
   const pickPoly = (id) => setPack((p) => ({ ...p, polyItemId: id, polyUnitCost: findPkg(id)?.avg_cost_per_unit != null ? String(findPkg(id).avg_cost_per_unit) : p.polyUnitCost }));
 
   const chargesTotal = packingTotal + num(form.freightCost) + num(form.otherCharges);
@@ -324,27 +331,33 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
           </div>
         </div>
 
-        {/* Charges — packaging (item-driven, with auto master+poly) + freight/other */}
+        {/* Charges — packaging (item-driven, sizes drive live qty/weight) + freight/other */}
         <div className="space-y-3">
-          <label className="block text-sm font-semibold text-gray-800">Packaging ({form.currency})</label>
+          <div className="flex items-baseline justify-between">
+            <label className="block text-sm font-semibold text-gray-800">Packaging ({form.currency})</label>
+            <span className="text-[11px] text-gray-500">
+              Net weight <b className="text-gray-700">{fmt3(totalMt)} MT</b>
+              {bagSize > 0 && <> · <b className="text-gray-700">{bagCount.toLocaleString()}</b> bags @ {fmtN(bagSize)} kg</>}
+            </span>
+          </div>
 
-          {/* Bag line */}
-          <div className="rounded-lg border border-gray-200 p-3 space-y-2">
+          {/* Bag line — size + unit cost are editable; bag count is derived live */}
+          <div className="rounded-lg border border-gray-200 p-3 space-y-1.5">
             <div className="grid grid-cols-12 gap-2 items-end">
               <div className="col-span-6">
                 <ItemPicker label="Bag" category="packaging" value={pack.bagItemId ? String(pack.bagItemId) : ''}
                   onChange={pickBag} items={packagingItems} onItemAdded={onPkgAdded} addToast={addToast} placeholder="Search bag…" />
               </div>
-              <div className="col-span-2">
-                <label className="block text-[10px] text-gray-500 mb-0.5">Bags</label>
-                <input type="number" min="0" value={pack.bagQty} onChange={(e) => setPackF('bagQty', e.target.value)} placeholder={totalBagCount ? String(totalBagCount) : '0'} className={inputCls} />
+              <div className="col-span-3">
+                <label className="block text-[10px] text-gray-500 mb-0.5">Bag size (kg)</label>
+                <input type="number" min="0" step="0.001" value={pack.bagSize} onChange={(e) => setPackF('bagSize', e.target.value)} placeholder={lineBagDefault ? String(lineBagDefault) : '50'} className={inputCls} />
               </div>
-              <div className="col-span-2">
-                <label className="block text-[10px] text-gray-500 mb-0.5">Unit cost</label>
+              <div className="col-span-3">
+                <label className="block text-[10px] text-gray-500 mb-0.5">Unit cost / bag</label>
                 <input type="number" min="0" step="0.0001" value={pack.bagUnitCost} onChange={(e) => setPackF('bagUnitCost', e.target.value)} placeholder="0.00" className={inputCls} />
               </div>
-              <div className="col-span-2 text-right pb-1.5 text-sm font-medium text-gray-800">{bagAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
             </div>
+            <div className="text-right text-xs text-gray-600"><b className="text-gray-800">{bagCount.toLocaleString()}</b> bags × {fmtN(bagCost)} = <b className="text-gray-900">{form.currency} {fmt2(bagAmt)}</b></div>
             {smallBag && (
               <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
                 Small bag (≤{SMALL_BAG_KG} kg) — a master bag &amp; polythene liner are added below.
@@ -352,45 +365,46 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
             )}
           </div>
 
-          {/* Master bag + polythene — only for small bags */}
+          {/* Master bag + polythene — only for small bags; quantities derive from sizes */}
           {smallBag && (
             <>
-              <div className="grid grid-cols-12 gap-2 items-end">
-                <div className="col-span-6">
-                  <ItemPicker label="Master Bag" category="packaging" value={pack.masterItemId ? String(pack.masterItemId) : ''}
-                    onChange={pickMaster} items={packagingItems} onItemAdded={onPkgAdded} addToast={addToast} placeholder="Search master bag…" />
+              <div className="rounded-lg border border-gray-200 p-3 space-y-1.5">
+                <div className="grid grid-cols-12 gap-2 items-end">
+                  <div className="col-span-6">
+                    <ItemPicker label="Master Bag" category="packaging" value={pack.masterItemId ? String(pack.masterItemId) : ''}
+                      onChange={pickMaster} items={packagingItems} onItemAdded={onPkgAdded} addToast={addToast} placeholder="Search master bag…" />
+                  </div>
+                  <div className="col-span-3">
+                    <label className="block text-[10px] text-gray-500 mb-0.5">Master size (kg)</label>
+                    <input type="number" min="0" step="0.001" value={pack.masterSize} onChange={(e) => setPackF('masterSize', e.target.value)} placeholder="25" className={inputCls} />
+                  </div>
+                  <div className="col-span-3">
+                    <label className="block text-[10px] text-gray-500 mb-0.5">Unit cost / master</label>
+                    <input type="number" min="0" step="0.0001" value={pack.masterUnitCost} onChange={(e) => setPackF('masterUnitCost', e.target.value)} placeholder="0.00" className={inputCls} />
+                  </div>
                 </div>
-                <div className="col-span-2">
-                  <label className="block text-[10px] text-gray-500 mb-0.5">Masters</label>
-                  <input type="number" min="0" value={pack.masterQty} onChange={(e) => setPackF('masterQty', e.target.value)} placeholder={masterAutoQty ? String(masterAutoQty) : '0'} className={inputCls} />
-                </div>
-                <div className="col-span-2">
-                  <label className="block text-[10px] text-gray-500 mb-0.5">Unit cost</label>
-                  <input type="number" min="0" step="0.0001" value={pack.masterUnitCost} onChange={(e) => setPackF('masterUnitCost', e.target.value)} placeholder="0.00" className={inputCls} />
-                </div>
-                <div className="col-span-2 text-right pb-1.5 text-sm font-medium text-gray-800">{masterAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                <div className="text-right text-xs text-gray-600"><b className="text-gray-800">{masterCount.toLocaleString()}</b> masters × {fmtN(masterCost)} = <b className="text-gray-900">{form.currency} {fmt2(masterAmt)}</b></div>
               </div>
-              <div className="grid grid-cols-12 gap-2 items-end">
-                <div className="col-span-6">
-                  <ItemPicker label="Polythene" category="packaging" value={pack.polyItemId ? String(pack.polyItemId) : ''}
-                    onChange={pickPoly} items={packagingItems} onItemAdded={onPkgAdded} addToast={addToast} placeholder="Search polythene…" />
+              <div className="rounded-lg border border-gray-200 p-3 space-y-1.5">
+                <div className="grid grid-cols-12 gap-2 items-end">
+                  <div className="col-span-6">
+                    <ItemPicker label="Polythene" category="packaging" value={pack.polyItemId ? String(pack.polyItemId) : ''}
+                      onChange={pickPoly} items={packagingItems} onItemAdded={onPkgAdded} addToast={addToast} placeholder="Search polythene…" />
+                  </div>
+                  <div className="col-span-3 pb-1.5 text-[11px] text-gray-400">1 sheet / bag</div>
+                  <div className="col-span-3">
+                    <label className="block text-[10px] text-gray-500 mb-0.5">Unit cost / sheet</label>
+                    <input type="number" min="0" step="0.0001" value={pack.polyUnitCost} onChange={(e) => setPackF('polyUnitCost', e.target.value)} placeholder="0.00" className={inputCls} />
+                  </div>
                 </div>
-                <div className="col-span-2">
-                  <label className="block text-[10px] text-gray-500 mb-0.5">Sheets</label>
-                  <input type="number" min="0" value={pack.polyQty} onChange={(e) => setPackF('polyQty', e.target.value)} placeholder={totalBagCount ? String(totalBagCount) : '0'} className={inputCls} />
-                </div>
-                <div className="col-span-2">
-                  <label className="block text-[10px] text-gray-500 mb-0.5">Unit cost</label>
-                  <input type="number" min="0" step="0.0001" value={pack.polyUnitCost} onChange={(e) => setPackF('polyUnitCost', e.target.value)} placeholder="0.00" className={inputCls} />
-                </div>
-                <div className="col-span-2 text-right pb-1.5 text-sm font-medium text-gray-800">{polyAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                <div className="text-right text-xs text-gray-600"><b className="text-gray-800">{polyCount.toLocaleString()}</b> sheets × {fmtN(polyCost)} = <b className="text-gray-900">{form.currency} {fmt2(polyAmt)}</b></div>
               </div>
             </>
           )}
 
           <div className="flex justify-between text-xs text-gray-600">
             <span>Packing charge</span>
-            <span className="font-semibold text-gray-900">{form.currency} {packingTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            <span className="font-semibold text-gray-900">{form.currency} {fmt2(packingTotal)}</span>
           </div>
 
           {/* Freight + Other (flat) */}

@@ -39,7 +39,11 @@ function quotationToOrder(q) {
   // single flat packing charge.
   const packLines = Array.isArray(q.packing_lines) ? q.packing_lines : [];
   const packCharges = packLines.length
-    ? packLines.map((l) => ({ label: `${l.label || 'Packing'}${num(l.qty) ? ` (${Math.round(num(l.qty)).toLocaleString()})` : ''}`, amount: num(l.amount) }))
+    ? packLines.map((l) => {
+        const sz = num(l.sizeKg) > 0 ? ` ${num(l.sizeKg)}kg` : '';
+        const qn = num(l.qty) ? ` (${Math.round(num(l.qty)).toLocaleString()})` : '';
+        return { label: `${l.label || 'Packing'}${sz}${qn}`, amount: num(l.amount) };
+      })
     : [{ label: 'Packing / Bags', amount: num(q.packing_cost) }];
   const charges = [
     ...packCharges,
