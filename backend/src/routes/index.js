@@ -14,6 +14,7 @@ router.use('/customers', authenticate, require('./customers'));
 router.use('/suppliers', authenticate, require('./suppliers'));
 router.use('/products', authenticate, require('./products'));
 router.use('/export-orders', authenticate, require('./exportOrders'));
+router.use('/quotations', authenticate, require('../modules/quotations/quotations.routes'));
 router.use('/printed-bag-orders', authenticate, require('../modules/exportOrders/printedBags.routes'));
 router.use('/purchase-requirements', authenticate, require('../modules/purchaseRequirements/purchaseRequirements.routes'));
 router.use('/milling', authenticate, require('./milling'));
