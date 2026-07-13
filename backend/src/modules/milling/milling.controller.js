@@ -1596,7 +1596,12 @@ const millingController = {
     try {
       const id = await resolveBatchId(req.params.id);
       if (!id) return res.status(404).json({ success: false, message: 'Batch not found.' });
-      const { category, amount, notes } = req.body;
+      let { category, amount, notes } = req.body;
+      // Duplicate-post guard: the cost drawer's "Bagging / Packing" (packing) and
+      // the mill-store packing flow (packaging) are the same bag cost. Canonicalize
+      // to 'packaging' so the upsert-by-(batch, category) keeps a SINGLE row instead
+      // of posting the bag cost twice (once into Other Expenses, once into Packing).
+      if (category === 'packing') category = 'packaging';
 
       if (!category || amount == null) {
         return res.status(400).json({

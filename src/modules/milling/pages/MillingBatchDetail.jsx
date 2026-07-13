@@ -626,6 +626,9 @@ export default function MillingBatchDetail() {
       const val = parseFloat(v);
       if (val > 0) byNorm[norm(k)] = val;
     }
+    // The drawer's "Bagging / Packing" (packing) is stored canonically as
+    // 'packaging' (dedupe guard), so pre-fill the field from the packaging value.
+    if (byNorm.packaging != null && byNorm.packing == null) byNorm.packing = byNorm.packaging;
     const form = {};
     millingCostCategories.forEach(cat => {
       const v = byNorm[norm(cat.key)];
