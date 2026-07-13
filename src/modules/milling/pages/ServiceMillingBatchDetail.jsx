@@ -9,7 +9,7 @@ import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { queryKeys } from '../../../api/queryClient';
 import {
-  useMillingBatch, useSaveQuality, useRecordYield,
+  useMillingBatch, useSaveQuality, useRecordYield, useUpdateMillingBatch,
   useAddVehicle, useUpdateVehicle, useDeleteVehicle, useDeleteBatch, useBatchSourceLots,
 } from '../../../api/queries';
 import { millingApi as millingModApi } from '../api/services';
@@ -66,12 +66,17 @@ export default function ServiceMillingBatchDetail() {
 
   const saveQualityMut = useSaveQuality();
   const recordYieldMut = useRecordYield();
+  const updateBatchMut = useUpdateMillingBatch();
   const addVehicleMut = useAddVehicle();
   const updateVehicleMut = useUpdateVehicle();
   const deleteVehicleMut = useDeleteVehicle();
   const deleteBatchMut = useDeleteBatch();
 
   const [activeTab, setActiveTab] = useState('intake');
+
+  // Rename the service lot — a friendly custom name, like regular batches/lots.
+  const [editingName, setEditingName] = useState(false);
+  const [nameForm, setNameForm] = useState('');
 
   // Quality analysis drawer
   const [showAnalysisModal, setShowAnalysisModal] = useState(false);
@@ -144,6 +149,21 @@ export default function ServiceMillingBatchDetail() {
   const canApprove = hasPermission('service_milling', 'create_batch');
 
   // ---- handlers ----
+  function openNameEditor() {
+    setNameForm(batch.batchName || '');
+    setEditingName(true);
+  }
+  async function saveName() {
+    try {
+      await updateBatchMut.mutateAsync({ id: batchId, data: { batch_name: nameForm.trim() || null } });
+      addToast(nameForm.trim() ? 'Service lot renamed' : 'Custom name cleared');
+      setEditingName(false);
+      invalidateBatch();
+    } catch (err) {
+      addToast(err?.response?.data?.message || err.message || 'Failed to rename', 'error');
+    }
+  }
+
   function openAnalysisModal(type = 'arrival') {
     setAnalysisModalType(type);
     const source = (type === 'sample' ? safeSample : safeArrival) || vehicleQualityAgg;
@@ -370,6 +390,29 @@ export default function ServiceMillingBatchDetail() {
                 </span>
               )}
             </div>
+            {/* Rename the service lot — custom name, like regular lots.
+                Editing is a manager correction (same roles as vehicle edits). */}
+            {editingName && canEditVehicles ? (
+              <div className="mt-2 flex items-center gap-2 max-w-md">
+                <input
+                  type="text" value={nameForm} maxLength={200} autoFocus
+                  onChange={(e) => setNameForm(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') saveName(); if (e.key === 'Escape') setEditingName(false); }}
+                  placeholder="Service lot name — e.g. Ali Traders — Basmati (June)"
+                  className="flex-1 border border-gray-300 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-amber-500" />
+                <button onClick={saveName} disabled={updateBatchMut.isPending} className="px-3 py-1 text-xs font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50">Save</button>
+                <button onClick={() => setEditingName(false)} className="px-3 py-1 text-xs text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+              </div>
+            ) : (
+              <div className="mt-1 flex items-center gap-2 flex-wrap">
+                {batch.batchName
+                  ? <span className="text-sm font-semibold text-gray-800">{batch.batchName}</span>
+                  : <span className="text-sm text-gray-400 italic">No custom name</span>}
+                {canEditVehicles && (
+                  <button onClick={openNameEditor} className="text-xs text-amber-600 hover:text-amber-800 inline-flex items-center gap-0.5"><Pencil size={12} /> {batch.batchName ? 'Rename' : 'Add name'}</button>
+                )}
+              </div>
+            )}
             <p className="text-sm text-gray-600 mt-1 flex items-center gap-1.5">
               <Users size={14} className="text-gray-400" />
               Client: <span className="font-semibold text-gray-900">{batch.clientName || 'Client-owned'}</span>
