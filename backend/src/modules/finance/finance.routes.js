@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const controller = require('../../controllers/financeController');
 const authorize = require('../../middleware/rbac');
+const { authorizeAny } = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
@@ -78,7 +79,9 @@ router.post(
 router.get('/internal-transfers/:id', authorize('finance', 'view'), controller.getInternalTransferDetail);
 router.put(
   '/internal-transfers/:id/confirm-export',
-  authorize('inventory', 'transfer'),
+  // Mill side (inventory.transfer) OR the export team (export_orders.edit) may
+  // accept an incoming transfer — the export manager accepts what the mill sent.
+  authorizeAny(['inventory', 'transfer'], ['export_orders', 'edit']),
   auditAction('confirm_internal_transfer_export', 'internal_transfers', (req) => req.params.id),
   controller.confirmInternalTransferExport
 );

@@ -4,9 +4,10 @@ import PartyLink from '../../../shared/components/PartyLink';
 import PendingApprovalsCard from '../../dashboard/components/PendingApprovalsCard';
 import {
   Ship, AlertTriangle, Clock, FileText, CreditCard,
-  TrendingUp, Users, Package, ArrowRight, Plus, CheckCircle2,
+  TrendingUp, Users, Package, ArrowRight, Plus, CheckCircle2, ArrowRightLeft, Loader2,
 } from 'lucide-react';
-import { useExportOrders, useCustomers } from '../../../api/queries';
+import { useExportOrders, useCustomers, useInternalTransfers, useConfirmTransferExport } from '../../../api/queries';
+import { useApp } from '../../../context/AppContext';
 import { workflowSteps } from '../components/constants';
 
 function formatUSD(value) {
@@ -69,8 +70,22 @@ function ActionItem({ icon: Icon, label, count, to, accent = 'amber' }) {
 
 export default function ExportHomeDashboard() {
   const navigate = useNavigate();
+  const { addToast } = useApp();
   const { data: orders = [], isLoading: ordersLoading } = useExportOrders({});
   const { data: customers = [] } = useCustomers({});
+
+  // Incoming stock the mill has transferred to export but not yet accepted.
+  const { data: transfers = [] } = useInternalTransfers();
+  const incoming = (transfers || []).filter(t => t.status === 'In Transit' || t.status === 'Pending');
+  const confirmTransfer = useConfirmTransferExport();
+  const acceptTransfer = async (t) => {
+    try {
+      await confirmTransfer.mutateAsync(t.id);
+      addToast?.(`Accepted transfer ${t.transferNo || ''} — ${Math.round((Number(t.qtyMt) || 0) * 1000).toLocaleString()} kg received into export`, 'success');
+    } catch (err) {
+      addToast?.(err?.response?.data?.message || err?.message || 'Failed to accept transfer', 'error');
+    }
+  };
 
   const stats = useMemo(() => {
     const now = new Date();
@@ -189,6 +204,40 @@ export default function ExportHomeDashboard() {
 
       {/* Pending approvals — export confirmations, fund transfers (same feed as chat) */}
       <PendingApprovalsCard excludeKinds={['batch', 'masterdata']} />
+
+      {/* Incoming stock transfers from the mill — accept to confirm receipt into export */}
+      {incoming.length > 0 && (
+        <div className="bg-white rounded-xl border border-amber-200 p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <ArrowRightLeft size={18} className="text-amber-600" />
+            <h2 className="text-base font-semibold text-gray-900">Incoming Stock Transfers</h2>
+            <span className="ml-1 inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800">{incoming.length}</span>
+          </div>
+          <p className="text-xs text-gray-500 mb-3">Finished rice the mill has transferred to export. Accept to confirm receipt.</p>
+          <div className="divide-y divide-gray-100">
+            {incoming.map(t => (
+              <div key={t.id} className="flex items-center justify-between gap-3 py-2.5">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-gray-900 truncate">
+                    {t.productName || 'Finished Rice'} · <span className="tabular-nums">{Math.round((Number(t.qtyMt) || 0) * 1000).toLocaleString()} kg</span>
+                  </p>
+                  <p className="text-[11px] text-gray-400">
+                    {t.transferNo || `IT-${t.id}`} · from batch {t.batchNo || `#${t.batchId}`}
+                    {t.dispatchDate ? ` · ${new Date(t.dispatchDate).toLocaleDateString('en-GB')}` : ''}
+                  </p>
+                </div>
+                <button
+                  onClick={() => acceptTransfer(t)}
+                  disabled={confirmTransfer.isPending}
+                  className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  {confirmTransfer.isPending ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />} Accept
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Action Queue */}
       <div className="bg-white rounded-xl border border-gray-200 p-5">
