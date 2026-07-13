@@ -1,7 +1,12 @@
 import { useState } from 'react';
 import { ArrowRightLeft, Package, DollarSign, Calendar, Warehouse, CheckCircle, Building2, Clock, Truck, Loader2, ArrowDown } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
+import { useAuth } from '../../../context/AuthContext';
 import { useInternalTransfers, useCreateTransfer, useInternalTransfer, useConfirmTransferExport } from '../../../api/queries';
+
+// Roles allowed to see supplier names — mirrors the backend redaction
+// (export roles never see who the mill bought from).
+const SUPPLIER_NAME_ROLES = ['Super Admin', 'Owner', 'Mill Manager', 'Mill Operator'];
 import StatusBadge from '../../../components/StatusBadge';
 import SlideDrawer from '../../../components/SlideDrawer';
 
@@ -11,8 +16,15 @@ const formatUSD = (value) => '$' + (parseFloat(value) || 0).toLocaleString('en-U
 
 export default function InternalTransfer() {
   const { millingBatches, exportOrders, addToast, settings } = useApp();
+  const { user, hasPermission } = useAuth();
   const { data: transfers = [], isLoading: loading } = useInternalTransfers();
   const createTransferMut = useCreateTransfer();
+
+  // Mill users (no export access) transfer to the export pool and must NOT pick
+  // an export order — that's the export team's job. Export users must NOT see the
+  // mill's supplier names.
+  const canLinkOrder = hasPermission('export_orders', 'view');
+  const canSeeSupplier = SUPPLIER_NAME_ROLES.includes(user?.role);
 
   // Any batch with finished output is a candidate — not only batches in
   // the literal "Completed" status. "Pending Approval" or "Approved"
@@ -60,7 +72,7 @@ export default function InternalTransfer() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!form.batchNo || !form.exportOrder || !form.qtyKg || !form.transferPrice || !form.dispatchDate) {
+    if (!form.batchNo || (canLinkOrder && !form.exportOrder) || !form.qtyKg || !form.transferPrice || !form.dispatchDate) {
       addToast('Please fill in all required fields', 'error');
       return;
     }
@@ -80,7 +92,7 @@ export default function InternalTransfer() {
     try {
       const res = await createTransferMut.mutateAsync({
         batch_id: batchId,
-        export_order_id: orderId,
+        export_order_id: canLinkOrder ? orderId : null,
         product_name: productName || 'Finished Rice',
         qty_mt: qty / 1000,            // KG → MT for the export/transfer doc boundary
         transfer_price_pkr: price * 1000, // per-kg → per-MT
@@ -134,27 +146,29 @@ export default function InternalTransfer() {
                   <option value="">Select completed batch...</option>
                   {completedBatches.map(b => (
                     <option key={b.id} value={b.id}>
-                      {b.id} - {Math.round(b.actualFinishedKg).toLocaleString()} kg ({b.supplierName}){b.batchName ? ` · ${b.batchName}` : ''}
+                      {b.id} - {Math.round(b.actualFinishedKg).toLocaleString()} kg{canSeeSupplier && b.supplierName ? ` (${b.supplierName})` : ''}{b.batchName ? ` · ${b.batchName}` : ''}
                     </option>
                   ))}
                 </select>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Export Order</label>
-                <select
-                  value={form.exportOrder}
-                  onChange={(e) => handleChange('exportOrder', e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
-                >
-                  <option value="">Select active export order...</option>
-                  {activeExportOrders.map(o => (
-                    <option key={o.id} value={o.id}>
-                      {o.id} - {o.customerName} ({Math.round((o.qtyMT || 0) * 1000).toLocaleString()} kg)
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {canLinkOrder && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Export Order</label>
+                  <select
+                    value={form.exportOrder}
+                    onChange={(e) => handleChange('exportOrder', e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
+                  >
+                    <option value="">Select active export order...</option>
+                    {activeExportOrders.map(o => (
+                      <option key={o.id} value={o.id}>
+                        {o.id} - {o.customerName} ({Math.round((o.qtyMT || 0) * 1000).toLocaleString()} kg)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Product</label>
@@ -323,7 +337,7 @@ export default function InternalTransfer() {
               <tr className="bg-gray-50 border-b border-gray-200">
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">Transfer ID</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">Batch No</th>
-                <th className="text-left px-4 py-3 font-semibold text-gray-600">Export Order</th>
+                {canLinkOrder && <th className="text-left px-4 py-3 font-semibold text-gray-600">Export Order</th>}
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">Product</th>
                 <th className="text-right px-4 py-3 font-semibold text-gray-600">Qty kg</th>
                 <th className="text-right px-4 py-3 font-semibold text-gray-600">Price/kg</th>
@@ -342,7 +356,7 @@ export default function InternalTransfer() {
                   <tr key={t.id} onClick={() => setOpenId(t.id)} className="hover:bg-blue-50/50 transition-colors cursor-pointer">
                     <td className="px-4 py-3 font-medium text-blue-600 hover:underline">{t.transferNo}</td>
                     <td className="px-4 py-3 text-gray-900">{t.batchNo || `B-${t.batchId}`}</td>
-                    <td className="px-4 py-3 text-gray-900">{t.exportOrderNo || `#${t.exportOrderId}`}</td>
+                    {canLinkOrder && <td className="px-4 py-3 text-gray-900">{t.exportOrderNo || `#${t.exportOrderId}`}</td>}
                     <td className="px-4 py-3 text-gray-600">{t.productName}</td>
                     <td className="px-4 py-3 text-right text-gray-900 font-medium">{Math.round((parseFloat(t.qtyMt) || 0) * 1000).toLocaleString()}</td>
                     <td className="px-4 py-3 text-right text-gray-900">{formatPKR((parseFloat(t.transferPricePkr) || 0) / 1000)}</td>
@@ -359,12 +373,12 @@ export default function InternalTransfer() {
         </div>
       </div>
 
-      <TransferDetailDrawer transferId={openId} onClose={() => setOpenId(null)} />
+      <TransferDetailDrawer transferId={openId} onClose={() => setOpenId(null)} canLinkOrder={canLinkOrder} />
     </div>
   );
 }
 
-function TransferDetailDrawer({ transferId, onClose }) {
+function TransferDetailDrawer({ transferId, onClose, canLinkOrder = true }) {
   const { addToast } = useApp();
   const { data, isLoading } = useInternalTransfer(transferId);
   const confirmMut = useConfirmTransferExport();
@@ -406,7 +420,7 @@ function TransferDetailDrawer({ transferId, onClose }) {
           {/* Key facts */}
           <div className="grid grid-cols-2 gap-3 text-sm">
             <Fact label="Batch" value={t.batchNo || (t.batchId ? `B-${t.batchId}` : '—')} />
-            <Fact label="Export order" value={t.exportOrderNo || (t.exportOrderId ? `#${t.exportOrderId}` : '—')} />
+            {canLinkOrder && <Fact label="Export order" value={t.exportOrderNo || (t.exportOrderId ? `#${t.exportOrderId}` : '—')} />}
             <Fact label="Customer" value={t.exportCustomerName || '—'} />
             <Fact label="Dispatch date" value={t.dispatchDate || '—'} />
             <Fact label="Qty" value={`${Math.round((parseFloat(t.qtyMt) || 0) * 1000).toLocaleString()} kg`} />
