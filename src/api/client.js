@@ -3,6 +3,8 @@
  * All API calls go through this module.
  */
 
+import { markServerOnline, markServerOffline } from '../offline/useOnline';
+
 const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:3001');
 
 class ApiError extends Error {
@@ -51,6 +53,7 @@ async function request(endpoint, options = {}) {
 
   try {
     const res = await fetch(`${API_BASE}${endpoint}`, config);
+    markServerOnline(); // the server responded — we're connected
 
     clearTimeout(timer);
 
@@ -81,6 +84,9 @@ async function request(endpoint, options = {}) {
       throw new ApiError('Request timed out', 408);
     }
     if (err instanceof ApiError) throw err;
+    // A genuine network failure (server unreachable) — flag offline so the UI
+    // can show the banner and hold work for sync.
+    markServerOffline();
     throw new ApiError(err.message || 'Network error', 0);
   }
 }

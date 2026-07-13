@@ -4,7 +4,7 @@ export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 30 * 1000,        // 30 seconds before data is considered stale
-      gcTime: 5 * 60 * 1000,       // 5 minutes garbage collection
+      gcTime: 24 * 60 * 60 * 1000, // keep cached data 24h so it persists for offline viewing
       retry: 1,                     // retry once on failure
       refetchOnWindowFocus: false,   // don't refetch when user tabs back
     },
