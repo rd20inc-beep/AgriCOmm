@@ -88,6 +88,14 @@ router.put(
   controller.setLotPurchaseRate
 );
 
+// Rename a lot (custom lot number/name) — works for company + service lots.
+router.put(
+  '/lots/:id/rename',
+  authorize('inventory', 'edit'),
+  auditAction('rename_lot', 'inventory_lot', (req) => req.params.id),
+  controller.renameLot
+);
+
 // Record the actual RECEIVED quantity (ordered vs received) — re-bills to received
 router.put(
   '/lots/:id/received-qty',
