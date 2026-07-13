@@ -569,12 +569,16 @@ const exportOrderController = {
       for (const txn of allocatedTxns) {
         const existing = lotMap.get(txn.id);
         if (existing) {
-          existing.allocated_qty_kg = Math.abs(parseFloat(txn.allocated_qty_kg) || 0);
+          // A pure reservation writes a 0-qty ledger marker (no stock moves), so
+          // fall back to the lot's reserved qty rather than showing 0 allocated.
+          const txnKg = Math.abs(parseFloat(txn.allocated_qty_kg) || 0);
+          existing.allocated_qty_kg = txnKg > 0 ? txnKg : (parseFloat(existing.reserved_qty) || 0);
           existing.source = 'both';
         } else {
+          const txnKg = Math.abs(parseFloat(txn.allocated_qty_kg) || 0);
           lotMap.set(txn.id, {
             ...txn,
-            allocated_qty_kg: Math.abs(parseFloat(txn.allocated_qty_kg) || 0),
+            allocated_qty_kg: txnKg > 0 ? txnKg : (parseFloat(txn.reserved_qty) || 0),
             source: 'allocation',
           });
         }
