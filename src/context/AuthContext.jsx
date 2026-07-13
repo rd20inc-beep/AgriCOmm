@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback } from 'rea
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { API_BASE } from '../api/client';
+import { clearQueryCache } from '../offline/queryPersist';
 
 const AuthContext = createContext(null);
 
@@ -158,6 +159,8 @@ export function AuthProvider({ children }) {
   const logout = useCallback(() => {
     localStorage.removeItem('riceflow_token');
     localStorage.removeItem('riceflow_user');
+    // Drop the offline data snapshot so a device doesn't retain this user's data.
+    clearQueryCache();
     setToken(null);
     setUser(null);
   }, []);

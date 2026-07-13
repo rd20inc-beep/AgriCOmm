@@ -13,6 +13,7 @@ import { useAuth } from '../context/AuthContext';
 import { useMasterDataApprovalsCount } from '../modules/admin/api/queries';
 import { RouteErrorBoundary } from './ErrorBoundary';
 import ChatWidget from './ChatWidget';
+import OfflineBanner from './OfflineBanner';
 import { SkeletonPage } from '../shared/components/Skeleton';
 
 const sidebarNav = [
@@ -409,6 +410,8 @@ export default function Layout({ children }) {
 
       {/* Main area */}
       <div className="flex flex-col flex-1 min-w-0">
+        {/* Offline status banner (shown only when the server is unreachable) */}
+        <OfflineBanner />
         {/* Top header */}
         <header
           className="flex items-center gap-3 px-3 sm:px-5 bg-white border-b flex-shrink-0"
