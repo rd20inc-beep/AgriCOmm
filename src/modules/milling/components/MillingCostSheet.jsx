@@ -140,7 +140,9 @@ export default function MillingCostSheet({ batch, companyProfile, millingCostCat
   // Expenses falls back to recorded processing costs (process + overhead), to
   // match the engine's Net Purchase.
   const millingCostVal = batch.manualMillingCostPkr != null ? pf(batch.manualMillingCostPkr) : 0;
-  const otherExpVal = batch.manualOtherExpensesPkr != null ? pf(batch.manualOtherExpensesPkr) : (processCostTotal + overheadCostTotal);
+  // Only a POSITIVE manual Other overrides the itemized process/overhead costs;
+  // a stored 0 must not hide them (matches the backend residual engine).
+  const otherExpVal = pf(batch.manualOtherExpensesPkr) > 0 ? pf(batch.manualOtherExpensesPkr) : (processCostTotal + overheadCostTotal);
   // Packing (bags) is a separate always-added line so it loads the finished cost
   // even when a manual Other figure overrides the auto process/overhead costs.
   const packingCostVal = pf(safeCosts.packaging);
