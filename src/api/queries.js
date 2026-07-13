@@ -402,8 +402,11 @@ export function useAddBatchCost() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }) => millingApi.addCost(id, data),
-    onSuccess: (_, { id }) => {
-      qc.invalidateQueries({ queryKey: queryKeys.batches.detail(id) });
+    // Invalidate the whole batches namespace, not detail(id): callers pass the
+    // numeric dbId while the detail query is keyed by the route slug (e.g.
+    // "M-004"), so detail(id) would miss and the costing sheet would stay stale.
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.batches.all });
     },
   });
 }

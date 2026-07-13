@@ -38,6 +38,7 @@ import { millingApi as millingModApi } from '../api/services';
 import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import SearchSelect from '../../../components/SearchSelect';
 import Modal from '../../../components/Modal';
+import SlideDrawer from '../../../components/SlideDrawer';
 import QualityAnalysisDrawer from '../components/QualityAnalysisDrawer';
 import YieldOutputDrawer from '../components/YieldOutputDrawer';
 import VehicleArrivalDrawer from '../components/VehicleArrivalDrawer';
@@ -653,7 +654,7 @@ export default function MillingBatchDetail() {
           total += amount;
         }
       }
-      addToast(`Costs updated for ${batch.id} — Total: Rs ${Math.round(total).toLocaleString()}`);
+      addToast(`Costs updated for ${batch.id} — Total: Rs ${total.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
     } catch (err) {
       addToast(`Failed to save costs: ${err.message}`, 'error');
     }
@@ -1925,8 +1926,8 @@ export default function MillingBatchDetail() {
         finishedLabel={finishedLabel}
       />
 
-      {/* Cost Entry Modal */}
-      <Modal isOpen={showCostModal} onClose={() => setShowCostModal(false)} title="Milling Costs (PKR)" size="md">
+      {/* Cost Entry — right slide-over */}
+      <SlideDrawer open={showCostModal} onClose={() => setShowCostModal(false)} title="Milling Costs (PKR)" subtitle={batch.id} icon={Edit3} size="lg">
         <form onSubmit={handleCostSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             {millingCostCategories.map(item => (
@@ -1936,11 +1937,11 @@ export default function MillingBatchDetail() {
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">Rs</span>
                   <input
                     type="number"
-                    step="1"
+                    step="0.01"
                     min="0"
                     value={costForm[item.key]}
                     onChange={(e) => setCostForm(prev => ({ ...prev, [item.key]: e.target.value }))}
-                    placeholder="0"
+                    placeholder="0.00"
                     className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                   />
                 </div>
@@ -1952,11 +1953,12 @@ export default function MillingBatchDetail() {
           {(() => {
             const total = Object.values(costForm).reduce((s, v) => s + (parseFloat(v) || 0), 0);
             const perKg = batch.rawQtyKg > 0 ? total / batch.rawQtyKg : 0;
+            const money = (v) => v.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             return (
               <div className="bg-gray-50 rounded-lg p-4 border border-gray-200 text-sm space-y-2">
                 <div className="flex justify-between">
                   <span className="text-gray-600">Total Cost</span>
-                  <span className="font-bold text-gray-900">Rs {Math.round(total).toLocaleString()}</span>
+                  <span className="font-bold text-gray-900">Rs {money(total)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Cost per kg (raw)</span>
@@ -1982,7 +1984,7 @@ export default function MillingBatchDetail() {
             </button>
           </div>
         </form>
-      </Modal>
+      </SlideDrawer>
 
       {/* Costing Sheet Modal */}
       <Modal isOpen={showCostSheet} onClose={() => setShowCostSheet(false)} title={`Costing Sheet — ${batch.id}`} size="lg">
