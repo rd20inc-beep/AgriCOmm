@@ -2331,7 +2331,10 @@ const inventoryService = {
     // is a SEPARATE always-added term — it stands even when a manual Other figure
     // overrides the auto processing costs, so bagging always loads the finished cost.
     const millingCost = batch.manual_milling_cost_pkr != null ? p(batch.manual_milling_cost_pkr) : 0;
-    const otherExpenses = batch.manual_other_expenses_pkr != null ? p(batch.manual_other_expenses_pkr) : processingCosts;
+    // A 0 (unset) manual Other must NOT hide the real recorded processing costs —
+    // only a positive manual figure overrides them (was `!= null`, which let a
+    // stored 0 zero-out itemized labor/stitching/etc.).
+    const otherExpenses = p(batch.manual_other_expenses_pkr) > 0 ? p(batch.manual_other_expenses_pkr) : processingCosts;
     const packing = p(packingCost);
     const netPurchase = rawCostTotal + millingCost + otherExpenses + packing;
 
