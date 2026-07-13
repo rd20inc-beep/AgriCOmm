@@ -29,6 +29,8 @@ router.get('/inventory-ledger', authorize('reports', 'view'), controller.invento
 // Stock movement ledger by dimension (variety|grade|byproduct|product) — Batch 5.
 router.get('/stock-ledger', authorize('reports', 'view'), controller.stockLedger);
 router.get('/finished-goods-ledger', authorize('reports', 'view'), controller.finishedGoodsLedger);
+// Client-owned service-milling stock register (qty-only) — no finance data.
+router.get('/service-milling-stock', authorize('reports', 'view'), controller.serviceMillingStock);
 router.get('/executive/summary', authorize('reports', 'view'), noFinanceForOperator, controller.executiveSummary);
 router.get('/executive/pipeline', authorize('reports', 'view'), noFinanceForOperator, controller.orderPipeline);
 router.get('/executive/advance-funnel', authorize('reports', 'view'), noFinanceForOperator, controller.advanceFunnel);

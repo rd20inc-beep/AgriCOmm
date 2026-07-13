@@ -227,6 +227,16 @@ const reportingController = {
     }
   },
 
+  async serviceMillingStock(req, res) {
+    try {
+      const data = await reportingService.getServiceMillingStock();
+      return res.json({ success: true, ...data });
+    } catch (err) {
+      console.error('Service milling stock error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
   async supplierInventoryIndex(req, res) {
     try {
       const data = redactReport(req, await reportingService.getSupplierInventoryIndex());

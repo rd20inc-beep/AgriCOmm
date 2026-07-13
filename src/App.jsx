@@ -81,6 +81,7 @@ const RiceTypeLedger = lazyWithReload(() => import('./modules/analytics/pages/Ri
 const WarehouseLedger = lazyWithReload(() => import('./modules/analytics/pages/WarehouseLedger'));
 const ProcessingLossLedger = lazyWithReload(() => import('./modules/analytics/pages/ProcessingLossLedger'));
 const FinishedGoodsLedger = lazyWithReload(() => import('./modules/analytics/pages/FinishedGoodsLedger'));
+const ServiceMillingStock = lazyWithReload(() => import('./modules/analytics/pages/ServiceMillingStock'));
 const InventoryMovementLedger = lazyWithReload(() => import('./modules/analytics/pages/InventoryMovementLedger'));
 const StockLedger = lazyWithReload(() => import('./modules/analytics/pages/StockLedger'));
 const StandalonePrintReport = lazyWithReload(() => import('./modules/analytics/pages/StandalonePrintReport'));
@@ -179,6 +180,7 @@ function ExportRoutes() {
         <Route path="/reports/warehouse-ledger/:id" element={<WarehouseLedger />} />
         <Route path="/reports/processing-loss-ledger" element={<ProcessingLossLedger />} />
         <Route path="/reports/finished-goods-ledger" element={<FinishedGoodsLedger />} />
+        <Route path="/reports/service-milling-stock" element={<ServiceMillingStock />} />
         <Route path="/reports/inventory-movement-ledger" element={<InventoryMovementLedger />} />
         <Route path="/reports/stock-ledger" element={<StockLedger />} />
         <Route path="*" element={<Navigate to="/" replace />} />
@@ -236,6 +238,7 @@ function MillRoutes() {
         <Route path="/reports/warehouse-ledger/:id" element={<WarehouseLedger />} />
         <Route path="/reports/processing-loss-ledger" element={<ProcessingLossLedger />} />
         <Route path="/reports/finished-goods-ledger" element={<FinishedGoodsLedger />} />
+        <Route path="/reports/service-milling-stock" element={<ServiceMillingStock />} />
         <Route path="/reports/inventory-movement-ledger" element={<InventoryMovementLedger />} />
         <Route path="/reports/stock-ledger" element={<StockLedger />} />
         <Route path="*" element={<Navigate to="/" replace />} />
@@ -299,6 +302,7 @@ function StandardRoutes() {
         <Route path="/reports/warehouse-ledger/:id" element={<ProtectedRoute module="reports" action="view"><WarehouseLedger /></ProtectedRoute>} />
         <Route path="/reports/processing-loss-ledger" element={<ProtectedRoute module="reports" action="view"><ProcessingLossLedger /></ProtectedRoute>} />
         <Route path="/reports/finished-goods-ledger" element={<ProtectedRoute module="reports" action="view"><FinishedGoodsLedger /></ProtectedRoute>} />
+        <Route path="/reports/service-milling-stock" element={<ProtectedRoute module="reports" action="view"><ServiceMillingStock /></ProtectedRoute>} />
         <Route path="/reports/inventory-movement-ledger" element={<ProtectedRoute module="reports" action="view"><InventoryMovementLedger /></ProtectedRoute>} />
         <Route path="/reports/stock-ledger" element={<ProtectedRoute module="reports" action="view"><StockLedger /></ProtectedRoute>} />
         <Route path="/exceptions" element={<ProtectedRoute module="admin" action="view"><ExceptionDashboard /></ProtectedRoute>} />
