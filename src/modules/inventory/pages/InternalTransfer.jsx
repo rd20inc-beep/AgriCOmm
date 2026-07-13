@@ -42,8 +42,11 @@ export default function InternalTransfer() {
 
   // Any batch with finished output still to transfer is a candidate — not only
   // "Completed" batches ("Pending Approval"/"Approved" often have output ready).
-  // Batches whose finished output is fully transferred are excluded.
+  // Batches whose finished output is fully transferred are excluded. Service
+  // Milling (client-owned) batches are NEVER transferable to export — their rice
+  // belongs to the client and leaves only via a Service Milling dispatch.
   const completedBatches = millingBatches
+    .filter(b => !(b.isServiceMilling ?? b.is_service_milling))
     .map(b => {
       const finishedKg = parseFloat(b.actualFinishedKg) || (parseFloat(b.actualFinishedMT ?? b.actual_finished_mt) || 0) * 1000;
       const transferredKg = transferredKgByBatch[b.dbId] || transferredKgByBatch[b.id] || 0;

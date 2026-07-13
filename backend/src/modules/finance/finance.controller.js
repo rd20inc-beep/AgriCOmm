@@ -1548,6 +1548,21 @@ const financeController = {
         });
       }
 
+      // Service Milling stock is CLIENT-owned — it must never enter the company
+      // export/sale pipeline. Reject up front if the source batch is a service
+      // (toll/job-work) batch; the client's rice leaves only via a Service
+      // Milling dispatch, not an internal transfer to an export order.
+      const srcBatch = await db('milling_batches')
+        .where('id', batch_id)
+        .select('is_service_milling')
+        .first();
+      if (srcBatch && srcBatch.is_service_milling) {
+        return res.status(422).json({
+          success: false,
+          message: 'This is a Service Milling (client-owned) batch. Its rice cannot be transferred to export — hand it to the client via a Service Milling dispatch instead.',
+        });
+      }
+
       const transfer = await db.transaction(async (trx) => {
         const transferNo = await generateTransferNo(trx);
 
@@ -1576,9 +1591,14 @@ const financeController = {
         // books from physical stock, the exact invariant the 5c harness protects).
         // Prefer this transfer's OWN batch output lots (batch_ref = 'batch-<id>'),
         // then fall back to other mill finished stock oldest-first.
+        // NEVER draw client-owned Service Milling stock (ownership='client') into
+        // a company export transfer — that inventory belongs to the client and is
+        // ring-fenced from the export/sale pipeline. Company stock is ownership
+        // 'company' or NULL (legacy rows), so exclude only 'client'.
         const candidateLots = await trx('inventory_lots')
           .where({ entity: 'mill', type: 'finished' })
           .where('available_qty', '>', 0)
+          .where(function () { this.whereNot('ownership', 'client').orWhereNull('ownership'); })
           .orderByRaw('(batch_ref = ?) DESC, created_at ASC', [`batch-${batch_id}`]);
 
         const totalAvailableKg = candidateLots.reduce((s, l) => s + (parseFloat(l.available_qty) || 0), 0);
