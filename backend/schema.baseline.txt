@@ -831,6 +831,17 @@ COL historical_cost_repair_log.order_id:integer:NULL
 COL historical_cost_repair_log.repaired_at:timestamp with time zone:NULL
 COL historical_cost_repair_log.repaired_by:integer:NULL
 COL historical_cost_repair_log.updated_at:timestamp with time zone:NULL
+COL idempotency_keys.completed_at:timestamp with time zone:NULL
+COL idempotency_keys.created_at:timestamp with time zone:NULL
+COL idempotency_keys.id:integer:NOT NULL
+COL idempotency_keys.key:character varying:NOT NULL
+COL idempotency_keys.method:character varying:NULL
+COL idempotency_keys.path:text:NULL
+COL idempotency_keys.request_hash:character varying:NULL
+COL idempotency_keys.response_body:jsonb:NULL
+COL idempotency_keys.response_status:integer:NULL
+COL idempotency_keys.status:character varying:NOT NULL
+COL idempotency_keys.user_id:integer:NULL
 COL internal_transfers.batch_id:integer:NULL
 COL internal_transfers.confirmed_at:timestamp with time zone:NULL
 COL internal_transfers.confirmed_by:integer:NULL
@@ -2626,6 +2637,8 @@ CON historical_cost_repair_log.historical_cost_repair_log_lot_id_foreign(f)
 CON historical_cost_repair_log.historical_cost_repair_log_order_id_foreign(f)
 CON historical_cost_repair_log.historical_cost_repair_log_pkey(p)
 CON historical_cost_repair_log.historical_cost_repair_log_repaired_by_foreign(f)
+CON idempotency_keys.idempotency_keys_key_unique(u)
+CON idempotency_keys.idempotency_keys_pkey(p)
 CON internal_transfers.chk_internal_transfers_qty_mt_nn(c)
 CON internal_transfers.chk_internal_transfers_status_valid(c)
 CON internal_transfers.chk_internal_transfers_total_value_pkr_nn(c)
