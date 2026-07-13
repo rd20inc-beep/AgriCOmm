@@ -48,6 +48,10 @@ function createApp() {
   // Rate limiting (general only — login uses captcha guard per-IP)
   app.use('/api', apiLimiter);
 
+  // Idempotency for replay-safe writes (only activates when the offline-sync
+  // client sends an Idempotency-Key; normal online traffic is unaffected).
+  app.use('/api', require('./middleware/idempotency'));
+
   // Mount routes
   const routes = require('./routes/index');
   app.use('/api', routes);
