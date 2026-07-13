@@ -1255,6 +1255,9 @@ const inventoryService = {
         reserved_qty: 0,
         available_qty: 0,
         status: 'Available',
+        // Stock physically moved into the export entity IS ready to allocate —
+        // so it surfaces in the export order's "Reserve Finished Stock" picker.
+        export_ready: true,
         created_by: userId || null,
         // Enrichment carried over from source mill lot so the export-side
         // grid shows supplier / variety / quality instead of blanks.

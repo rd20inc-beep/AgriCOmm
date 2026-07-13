@@ -2886,7 +2886,10 @@ const exportOrderController = {
         .leftJoin('products as p', 'l.product_id', 'p.id')
         .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
         .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
-        .where('l.export_ready', true)
+        // Available = mill stock explicitly marked export-ready, OR anything
+        // already sitting in the export entity (transferred lots are ready by
+        // definition), so a transferred lot is pickable on the order.
+        .where(function () { this.where('l.export_ready', true).orWhere('l.entity', 'export'); })
         // Client-owned (service milling) stock never enters the export pool.
         .whereNot('l.ownership', 'client')
         .whereIn('l.type', ['finished', 'byproduct'])
