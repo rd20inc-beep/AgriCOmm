@@ -4,6 +4,7 @@ import './index.css'
 import App from './App.jsx'
 import { queryClient } from './api/queryClient'
 import { restoreQueryCache, startQueryCachePersistence } from './offline/queryPersist'
+import { initOfflineSync } from './offline/sync'
 
 // Register the service worker: notifications (call alerts on mobile) + offline
 // shell/asset caching so the app still loads during an internet outage.
@@ -24,6 +25,7 @@ async function boot() {
   );
 
   startQueryCachePersistence(queryClient);
+  initOfflineSync();
 }
 
 boot();

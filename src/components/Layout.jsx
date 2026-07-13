@@ -14,6 +14,7 @@ import { useMasterDataApprovalsCount } from '../modules/admin/api/queries';
 import { RouteErrorBoundary } from './ErrorBoundary';
 import ChatWidget from './ChatWidget';
 import OfflineBanner from './OfflineBanner';
+import PendingSyncTray from './PendingSyncTray';
 import { SkeletonPage } from '../shared/components/Skeleton';
 
 const sidebarNav = [
@@ -564,6 +565,7 @@ export default function Layout({ children }) {
         </main>
       </div>
       <ChatWidget />
+      <PendingSyncTray />
     </div>
   );
 }
