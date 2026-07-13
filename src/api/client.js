@@ -3,9 +3,68 @@
  * All API calls go through this module.
  */
 
-import { markServerOnline, markServerOffline } from '../offline/useOnline';
+import { markServerOnline, markServerOffline, isOnline } from '../offline/useOnline';
+import { enqueue } from '../offline/outbox';
 
 const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:3001');
+
+const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+// Which mutating calls are safe to queue for offline sync. Excludes auth, file
+// uploads (FormData can't be reliably serialized/replayed), and read-style POST
+// endpoints (search/AI/reporting) that mutate nothing.
+function isQueueable(method, endpoint, body) {
+  if (!MUTATING.has(method)) return false;
+  if (typeof FormData !== 'undefined' && body instanceof FormData) return false;
+  if (/^\/api\/(auth|portal|streams)\b/.test(endpoint)) return false;
+  if (/^\/api\/(ai|smart|intelligence|reporting)\b/.test(endpoint)) return false;
+  if (/(search|preview|export|download|login|refresh|logout)/i.test(endpoint)) return false;
+  return true;
+}
+
+// Friendly label for the Pending Sync tray.
+function describeRequest(method, endpoint) {
+  const p = endpoint.replace(/^\/api\//, '').split('?')[0];
+  const verb = method === 'DELETE' ? 'Delete' : method === 'POST' ? 'New' : 'Update';
+  const rules = [
+    [/^local-sales/, 'local sale'],
+    [/payment|receipt|pay\b/, 'payment'],
+    [/^milling\/batches\/[^/]+\/yield/, 'milling yield'],
+    [/^milling\/batches\/[^/]+\/costs/, 'batch cost'],
+    [/^milling\/batches/, 'milling batch'],
+    [/^service-milling/, 'service milling'],
+    [/^lot-inventory|^inventory/, 'inventory'],
+    [/^finance\/internal-transfers/, 'stock transfer'],
+    [/^finance/, 'finance entry'],
+    [/^export-orders/, 'export order'],
+    [/^quotations/, 'quotation'],
+    [/^procurement/, 'procurement'],
+    [/^expenses/, 'expense'],
+    [/^payroll|advances/, 'payroll'],
+  ];
+  for (const [re, name] of rules) if (re.test(p)) return `${verb} ${name}`;
+  return `${verb} ${p.split('/')[0]}`;
+}
+
+// A synthetic success envelope returned when a write is captured offline, so the
+// UI flow completes (toast/close). The real record lands after sync; the query
+// cache refreshes on reconnect.
+function queuedResponse(id, body) {
+  return {
+    success: true,
+    _offlineQueued: true,
+    message: 'Saved offline — will sync when the connection returns.',
+    data: (body && typeof body === 'object' && !(body instanceof FormData))
+      ? { ...body, id, _pendingSync: true }
+      : { id, _pendingSync: true },
+  };
+}
+
+async function queueWrite(method, endpoint, body) {
+  const id = (crypto?.randomUUID?.() || `${Date.now()}-${Math.round(Math.random() * 1e9)}`);
+  await enqueue({ id, method, endpoint, body: body ?? null, label: describeRequest(method, endpoint) });
+  return queuedResponse(id, body);
+}
 
 class ApiError extends Error {
   constructor(message, status, data) {
@@ -44,6 +103,11 @@ async function request(endpoint, options = {}) {
     } else {
       config.body = typeof body === 'string' ? body : JSON.stringify(body);
     }
+  }
+
+  // Known-offline: queue eligible writes immediately (skip the network + timeout).
+  if (!isOnline() && isQueueable(method, endpoint, body)) {
+    return queueWrite(method, endpoint, body);
   }
 
   // Timeout via AbortController
@@ -87,6 +151,10 @@ async function request(endpoint, options = {}) {
     // A genuine network failure (server unreachable) — flag offline so the UI
     // can show the banner and hold work for sync.
     markServerOffline();
+    // Capture eligible writes into the outbox instead of losing them.
+    if (isQueueable(method, endpoint, body)) {
+      return queueWrite(method, endpoint, body);
+    }
     throw new ApiError(err.message || 'Network error', 0);
   }
 }
@@ -166,5 +234,37 @@ const api = {
   download: downloadFile,
 };
 
+// Replay a queued write from the outbox. Sends the stored request with its
+// stable Idempotency-Key so the server (Phase 2 middleware) returns the original
+// result rather than re-executing. Returns a verdict for the outbox flusher:
+//   { ok }                         → applied (2xx)
+//   { retry }                      → still offline / transient (network, 5xx, 401/403, 409-in-progress)
+//   { ok:false, status, body }     → server refused the data (other 4xx) → tray
+async function replayRequest(item) {
+  const token = getToken();
+  const headers = { 'Content-Type': 'application/json', 'Idempotency-Key': item.id };
+  if (token && token !== 'mock-prototype-token') headers['Authorization'] = `Bearer ${token}`;
+  let res;
+  try {
+    res = await fetch(`${API_BASE}${item.endpoint}`, {
+      method: item.method,
+      headers,
+      body: item.body != null ? JSON.stringify(item.body) : undefined,
+    });
+  } catch {
+    markServerOffline();
+    return { retry: true }; // network still down
+  }
+  markServerOnline();
+  const body = await res.json().catch(() => null);
+  if (res.ok) return { ok: true, status: res.status, body };
+  // Auth / server / mid-flight-duplicate → don't discard; try again later.
+  if (res.status === 401 || res.status === 403 || res.status === 409 || res.status >= 500) {
+    return { retry: true, status: res.status };
+  }
+  // Genuine data rejection (400/422/…): surface in the tray for the user.
+  return { ok: false, status: res.status, body };
+}
+
 export default api;
-export { ApiError, API_BASE };
+export { ApiError, API_BASE, replayRequest };

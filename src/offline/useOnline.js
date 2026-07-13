@@ -13,7 +13,18 @@ export function markServerOffline() {
   if (serverReachable) { serverReachable = false; emit(); }
 }
 export function markServerOnline() {
-  if (!serverReachable) { serverReachable = true; emit(); }
+  if (!serverReachable) {
+    serverReachable = true;
+    emit();
+    // Transitioned offline → online: let the sync layer flush the write outbox.
+    try { window.dispatchEvent(new Event('riceflow:reconnect')); } catch { /* noop */ }
+  }
+}
+
+// Plain (non-hook) connectivity read for imperative code (API client, sync).
+export function isOnline() {
+  const browserOnline = typeof navigator === 'undefined' ? true : navigator.onLine;
+  return browserOnline && serverReachable;
 }
 
 function subscribe(cb) {
