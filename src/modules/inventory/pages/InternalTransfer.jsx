@@ -29,13 +29,27 @@ export default function InternalTransfer() {
   const canLinkOrder = ORDER_LINK_ROLES.includes(user?.role);
   const canSeeSupplier = SUPPLIER_NAME_ROLES.includes(user?.role);
 
-  // Any batch with finished output is a candidate — not only batches in
-  // the literal "Completed" status. "Pending Approval" or "Approved"
-  // batches frequently have output rice ready to dispatch.
-  const completedBatches = millingBatches.filter(b => {
-    const finished = parseFloat(b.actualFinishedMT ?? b.actual_finished_mt) || 0;
-    return finished > 0 && !['Cancelled', 'Rejected'].includes(b.status);
-  });
+  // Already-transferred kg per batch (any non-cancelled transfer counts), so a
+  // batch drops out of the picker once its finished output is fully transferred
+  // and can't be transferred twice.
+  const transferredKgByBatch = {};
+  for (const t of transfers) {
+    if (t.status === 'Cancelled') continue;
+    const bid = t.batchId;
+    if (bid == null) continue;
+    transferredKgByBatch[bid] = (transferredKgByBatch[bid] || 0) + (parseFloat(t.qtyMt) || 0) * 1000;
+  }
+
+  // Any batch with finished output still to transfer is a candidate — not only
+  // "Completed" batches ("Pending Approval"/"Approved" often have output ready).
+  // Batches whose finished output is fully transferred are excluded.
+  const completedBatches = millingBatches
+    .map(b => {
+      const finishedKg = parseFloat(b.actualFinishedKg) || (parseFloat(b.actualFinishedMT ?? b.actual_finished_mt) || 0) * 1000;
+      const transferredKg = transferredKgByBatch[b.dbId] || transferredKgByBatch[b.id] || 0;
+      return { ...b, _remainingKg: Math.max(0, finishedKg - transferredKg) };
+    })
+    .filter(b => b._remainingKg > 1 && !['Cancelled', 'Rejected'].includes(b.status));
   const activeExportOrders = exportOrders.filter(o =>
     !['Closed', 'Cancelled', 'Draft'].includes(o.status)
   );
@@ -65,8 +79,8 @@ export default function InternalTransfer() {
   // rate (the backend books the cost at booked_fx_rate too). Fall back to the live
   // settings rate, then the module default. NOT a hardcoded 280.
   const fxRate = parseFloat(selectedOrder?.bookedFxRate) || parseFloat(settings?.pkrRate) || PKR_RATE;
-  // Cap the transfer to the selected batch's finished output (KG).
-  const batchFinishedKg = selectedBatch ? (parseFloat(selectedBatch.actualFinishedKg) || 0) : 0;
+  // Cap the transfer to the batch's REMAINING (not-yet-transferred) finished output (KG).
+  const batchFinishedKg = selectedBatch ? (parseFloat(selectedBatch._remainingKg) || 0) : 0;
   const exceedsStock = batchFinishedKg > 0 && qty > batchFinishedKg + 1e-6;
 
   const handleChange = (field, value) => {
@@ -80,7 +94,7 @@ export default function InternalTransfer() {
       return;
     }
     if (exceedsStock) {
-      addToast(`Cannot transfer more than the batch's ${Math.round(batchFinishedKg).toLocaleString()} kg finished output`, 'error');
+      addToast(`Cannot transfer more than the ${Math.round(batchFinishedKg).toLocaleString()} kg still available on this batch`, 'error');
       return;
     }
 
@@ -149,7 +163,7 @@ export default function InternalTransfer() {
                   <option value="">Select completed batch...</option>
                   {completedBatches.map(b => (
                     <option key={b.id} value={b.id}>
-                      {b.id} - {Math.round(b.actualFinishedKg).toLocaleString()} kg{canSeeSupplier && b.supplierName ? ` (${b.supplierName})` : ''}{b.batchName ? ` · ${b.batchName}` : ''}
+                      {b.id} - {Math.round(b._remainingKg).toLocaleString()} kg available{canSeeSupplier && b.supplierName ? ` (${b.supplierName})` : ''}{b.batchName ? ` · ${b.batchName}` : ''}
                     </option>
                   ))}
                 </select>
