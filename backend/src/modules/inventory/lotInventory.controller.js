@@ -1850,6 +1850,39 @@ module.exports = {
     }
   },
 
+  // ─── Rename a lot (custom lot number/name) ───
+  // Service-milling output lots are auto-numbered at yield with no naming step;
+  // this lets the client's lots be named like any purchased lot. Works for
+  // company lots too. Enforces uniqueness and cascades the string reference on
+  // supplier payables (linked_ref = lot_no) so purchase-invoice linkage survives.
+  async renameLot(req, res) {
+    try {
+      const { id } = req.params;
+      const raw = (req.body?.lot_no ?? '').toString().trim();
+      if (!raw) return res.status(400).json({ success: false, message: 'A lot number/name is required.' });
+      if (raw.length > 50) return res.status(400).json({ success: false, message: 'Lot number must be 50 characters or fewer.' });
+
+      const isNumeric = /^\d+$/.test(id);
+      const lot = await db('inventory_lots').where(isNumeric ? { id: +id } : { lot_no: id }).first();
+      if (!lot) return res.status(404).json({ success: false, message: 'Lot not found.' });
+      if (raw === lot.lot_no) return res.json({ success: true, data: { lot_no: raw } });
+
+      const clash = await db('inventory_lots').where({ lot_no: raw }).whereNot('id', lot.id).first('id');
+      if (clash) return res.status(409).json({ success: false, message: `Lot number "${raw}" is already in use.` });
+
+      const oldLotNo = lot.lot_no;
+      await db.transaction(async (trx) => {
+        await trx('inventory_lots').where({ id: lot.id }).update({ lot_no: raw, updated_at: trx.fn.now() });
+        // Supplier payables link to the lot by its number string — keep them in sync.
+        await trx('payables').where({ linked_ref: oldLotNo }).update({ linked_ref: raw });
+      });
+      return res.json({ success: true, data: { id: lot.id, lot_no: raw, previous: oldLotNo } });
+    } catch (err) {
+      console.error('renameLot error:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
   // ─── Record the RECEIVED quantity on a raw lot (ordered vs received) ───
   //
   // A lot ordered for 14 MT but only 10 MT received: set received to the actual

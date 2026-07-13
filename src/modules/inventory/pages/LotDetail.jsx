@@ -91,6 +91,20 @@ export default function LotDetail() {
   const batchYield = data?.batchYield || null;
   const { data: lotSales = [] } = useLocalSalesByLot(lot.id);
 
+  async function handleRenameLot() {
+    const next = window.prompt('Rename this lot — enter a new lot number/name:', lot.lotNo || '');
+    if (next == null) return;
+    const trimmed = next.trim();
+    if (!trimmed || trimmed === lot.lotNo) return;
+    try {
+      await lotInventoryApi.renameLot(lot.id, { lot_no: trimmed });
+      addToast?.('Lot renamed', 'success');
+      refetch?.();
+    } catch (err) {
+      addToast?.(err?.response?.data?.message || err.message || 'Failed to rename lot', 'error');
+    }
+  }
+
   // Fetch linked milling batch for vehicles and quality
   useEffect(() => {
     if (!lot.batchRef && !lot.id) return;
@@ -234,6 +248,11 @@ export default function LotDetail() {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-bold text-gray-900">{lot.lotNo}</h1>
+            {canEditLot && (
+              <button onClick={handleRenameLot} title="Rename lot" className="text-gray-400 hover:text-blue-600">
+                <Edit3 className="w-4 h-4" />
+              </button>
+            )}
             <StatusBadge status={lot.status} />
             <span className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold ${lot.entity === 'mill' ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'}`}>
               {lot.entity === 'mill' ? 'Mill' : 'Export'}

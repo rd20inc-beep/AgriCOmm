@@ -17,6 +17,7 @@ export const lotInventoryApi = {
   previewLotNo: (params) => api.get('/api/lot-inventory/lots/next-lot-no', params),
   createPurchaseLot: (data) => api.post('/api/lot-inventory/lots/purchase', data),
   addPurchaseToLot: (id, data) => api.post(`/api/lot-inventory/lots/${id}/add-purchase`, data),
+  renameLot: (id, data) => api.put(`/api/lot-inventory/lots/${id}/rename`, data),
   // Lot-level vehicles + multi-pass Start Milling
   listLotVehicles: (id) => api.get(`/api/lot-inventory/lots/${id}/vehicles`),
   addLotVehicle: (id, data) => api.post(`/api/lot-inventory/lots/${id}/vehicles`, data),
