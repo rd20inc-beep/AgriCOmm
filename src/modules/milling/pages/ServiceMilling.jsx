@@ -118,7 +118,9 @@ export default function ServiceMilling() {
                 <th className="px-4 py-2.5 font-semibold">Lot</th>
                 <th className="px-4 py-2.5 font-semibold">Client</th>
                 <th className="px-4 py-2.5 font-semibold text-right">Kattas / Bags</th>
-                <th className="px-4 py-2.5 font-semibold text-right">Milled</th>
+                <th className="px-4 py-2.5 font-semibold text-right">Raw Rice</th>
+                <th className="px-4 py-2.5 font-semibold text-right">Finished</th>
+                <th className="px-4 py-2.5 font-semibold text-right">By-product</th>
                 <th className="px-4 py-2.5 font-semibold text-right">In Stock</th>
                 <th className="px-4 py-2.5 font-semibold">Lot Status</th>
                 <th className="px-4 py-2.5 font-semibold text-right">Service Amt</th>
@@ -128,10 +130,16 @@ export default function ServiceMilling() {
             </thead>
             <tbody className="divide-y divide-gray-50">
               {isLoading ? (
-                <tr><td colSpan={9} className="px-4 py-10 text-center text-gray-400">Loading…</td></tr>
+                <tr><td colSpan={11} className="px-4 py-10 text-center text-gray-400">Loading…</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={9} className="px-4 py-10 text-center text-gray-400">No service-milling lots yet. Create one from Mill → New Batch → Service Milling.</td></tr>
-              ) : rows.map((b) => (
+                <tr><td colSpan={11} className="px-4 py-10 text-center text-gray-400">No service-milling lots yet. Create one from Mill → New Batch → Service Milling.</td></tr>
+              ) : rows.map((b) => {
+                const raw = num(b.raw_qty_kg) || num(b.quantities?.receivedKg);
+                const finished = num(b.actual_finished_kg);
+                const byproduct = ['broken_kg', 'sortex_rejects_kg', 'powder_kg', 'sweeping_kg', 'choba_kg', 'ov_kg', 'stone_kg', 'wastage_kg', 'bran_kg', 'husk_kg']
+                  .reduce((s, k) => s + num(b[k]), 0);
+                const inStock = num(b.rollup?.remainingKg) || num(b.quantities?.inStockKg);
+                return (
                 <tr key={b.id} className="hover:bg-gray-50">
                   <td className="px-4 py-2.5">
                     <Link to={`/service-milling/${b.batch_no || b.id}`} className="font-semibold text-blue-600 hover:underline">{b.batch_no || `#${b.id}`}</Link>
@@ -145,8 +153,10 @@ export default function ServiceMilling() {
                         ? <span>{num(b.bag_count).toLocaleString()} <span className="text-gray-400 text-xs">bags</span></span>
                         : '—'}
                   </td>
-                  <td className="px-4 py-2.5 text-right text-gray-700">{kg(b.milled_kg)}</td>
-                  <td className="px-4 py-2.5 text-right text-gray-700">{kg(b.rollup?.remainingKg)}</td>
+                  <td className="px-4 py-2.5 text-right text-gray-700">{kg(raw)}</td>
+                  <td className="px-4 py-2.5 text-right font-medium text-indigo-700">{kg(finished)}</td>
+                  <td className="px-4 py-2.5 text-right text-gray-600">{byproduct > 0 ? kg(byproduct) : '—'}</td>
+                  <td className="px-4 py-2.5 text-right font-medium text-emerald-700">{kg(inStock)}</td>
                   <td className="px-4 py-2.5"><Chip text={b.service_lot_status} map={LOT_STATUS_STYLE} /></td>
                   <td className="px-4 py-2.5 text-right font-medium text-gray-900">{pkr(b.service_total_amount)}</td>
                   <td className="px-4 py-2.5"><Chip text={b.billing_status} map={BILLING_STYLE} /></td>
@@ -164,7 +174,8 @@ export default function ServiceMilling() {
                     ) : <span className="text-xs text-gray-400">{b.invoice_no || '—'}</span>}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
