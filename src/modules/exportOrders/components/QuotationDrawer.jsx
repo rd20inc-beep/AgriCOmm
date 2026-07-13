@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { FileText, Plus, Trash2 } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { useApp } from '../../../context/AppContext';
@@ -30,6 +30,8 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [packagingItems, setPackagingItems] = useState([]);
   const [pack, setPack] = useState(emptyPack());
+  // Auto-default master/poly only once per open (so it never fights a manual clear).
+  const didDefault = useRef(false);
 
   // Packaging items (bags / master bags / polythene) — searchable + quick-add.
   useEffect(() => {
@@ -85,10 +87,13 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
         masterItemId: ms.itemId || '', masterSize: s(ms.sizeKg), masterUnitCost: s(ms.unitCost),
         polyItemId: py.itemId || '', polyUnitCost: s(py.unitCost),
       });
+      // Editing an existing quote already has its master/poly — don't auto-default over it.
+      didDefault.current = true;
     } else {
       setForm(defaults());
       setItems([emptyItem()]);
       setPack(emptyPack());
+      didDefault.current = false;
     }
   }, [open, quotation]);
 
@@ -144,6 +149,24 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
   const polyAmt = round2(polyCount * polyCost);
 
   const packingTotal = round2(bagAmt + masterAmt + polyAmt);
+
+  // Auto-pick sensible master-bag + polythene items the first time a small bag is
+  // in play, so operators don't re-select them each time. Runs once per open
+  // (didDefault) and never overrides a manual choice/clear.
+  useEffect(() => {
+    if (!open || didDefault.current || !smallBag || !packagingItems.length) return;
+    const master = packagingItems.find((x) => /master/i.test(x.name || '') || /master|mstr/i.test(x.code || ''))
+      || packagingItems.find((x) => num(x.capacity_kg) > SMALL_BAG_KG);
+    const poly = packagingItems.find((x) => /poly|polythene|liner/i.test(x.name || '') || /poly/i.test(x.code || ''));
+    if (!master && !poly) return;
+    setPack((p) => {
+      let next = p;
+      if (master && !p.masterItemId) next = { ...next, masterItemId: String(master.id), masterUnitCost: master.avg_cost_per_unit != null ? String(master.avg_cost_per_unit) : next.masterUnitCost, masterSize: num(master.capacity_kg) > 0 ? String(master.capacity_kg) : next.masterSize };
+      if (poly && !p.polyItemId) next = { ...next, polyItemId: String(poly.id), polyUnitCost: poly.avg_cost_per_unit != null ? String(poly.avg_cost_per_unit) : next.polyUnitCost };
+      return next;
+    });
+    didDefault.current = true;
+  }, [open, smallBag, packagingItems]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function buildPackingLines() {
     const lines = [];
@@ -340,6 +363,7 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
               {bagSize > 0 && <> · <b className="text-gray-700">{bagCount.toLocaleString()}</b> bags @ {fmtN(bagSize)} kg</>}
             </span>
           </div>
+          <p className="text-[11px] text-gray-400 -mt-1.5">Unit costs pre-fill from each item's saved cost — enter/adjust them in <b>{form.currency}</b>.</p>
 
           {/* Bag line — size + unit cost are editable; bag count is derived live */}
           <div className="rounded-lg border border-gray-200 p-3 space-y-1.5">
@@ -353,7 +377,7 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
                 <input type="number" min="0" step="0.001" value={pack.bagSize} onChange={(e) => setPackF('bagSize', e.target.value)} placeholder={lineBagDefault ? String(lineBagDefault) : '50'} className={inputCls} />
               </div>
               <div className="col-span-3">
-                <label className="block text-[10px] text-gray-500 mb-0.5">Unit cost / bag</label>
+                <label className="block text-[10px] text-gray-500 mb-0.5">Unit cost / bag ({form.currency})</label>
                 <input type="number" min="0" step="0.0001" value={pack.bagUnitCost} onChange={(e) => setPackF('bagUnitCost', e.target.value)} placeholder="0.00" className={inputCls} />
               </div>
             </div>
@@ -379,7 +403,7 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
                     <input type="number" min="0" step="0.001" value={pack.masterSize} onChange={(e) => setPackF('masterSize', e.target.value)} placeholder="25" className={inputCls} />
                   </div>
                   <div className="col-span-3">
-                    <label className="block text-[10px] text-gray-500 mb-0.5">Unit cost / master</label>
+                    <label className="block text-[10px] text-gray-500 mb-0.5">Unit cost / master ({form.currency})</label>
                     <input type="number" min="0" step="0.0001" value={pack.masterUnitCost} onChange={(e) => setPackF('masterUnitCost', e.target.value)} placeholder="0.00" className={inputCls} />
                   </div>
                 </div>
@@ -393,7 +417,7 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
                   </div>
                   <div className="col-span-3 pb-1.5 text-[11px] text-gray-400">1 sheet / bag</div>
                   <div className="col-span-3">
-                    <label className="block text-[10px] text-gray-500 mb-0.5">Unit cost / sheet</label>
+                    <label className="block text-[10px] text-gray-500 mb-0.5">Unit cost / sheet ({form.currency})</label>
                     <input type="number" min="0" step="0.0001" value={pack.polyUnitCost} onChange={(e) => setPackF('polyUnitCost', e.target.value)} placeholder="0.00" className={inputCls} />
                   </div>
                 </div>
