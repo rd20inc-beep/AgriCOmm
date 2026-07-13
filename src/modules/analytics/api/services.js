@@ -44,6 +44,7 @@ export const reportingApi = {
   inventoryLedger: (params) => api.get('/api/reporting/inventory-ledger', params),
   stockLedger: (params) => api.get('/api/reporting/stock-ledger', params),
   finishedGoodsLedger: (params) => api.get('/api/reporting/finished-goods-ledger', params),
+  serviceMillingStock: () => api.get('/api/reporting/service-milling-stock'),
   lotTracker: (params) => api.get('/api/reporting/lot-tracker', params),
   salesTracker: (params) => api.get('/api/reporting/sales-tracker', params),
   savedReports: () => api.get('/api/reporting/saved'),

@@ -2448,6 +2448,9 @@ const reportingService = {
     const num = (v) => parseFloat(v) || 0;
     let q = db('inventory_lots as l')
       .leftJoin('products as p', 'l.product_id', 'p.id')
+      // Company finished goods only — client-owned service-milling stock is
+      // reported separately (Service Milling Stock ledger).
+      .whereNot('l.ownership', 'client')
       .whereIn('l.type', (type === 'finished' || type === 'byproduct') ? [type] : ['finished', 'byproduct']);
     if (entity) q = q.where('l.entity', entity);
     const lots = await q.select(
@@ -2475,6 +2478,51 @@ const reportingService = {
     }
     const rows = Object.values(groups).sort((a, b) => b.onHandKg - a.onHandKg);
     const grand = rows.reduce((s, g) => ({ producedKg: s.producedKg + g.producedKg, onHandKg: s.onHandKg + g.onHandKg, reservedKg: s.reservedKg + g.reservedKg, soldKg: s.soldKg + g.soldKg, valuePkr: s.valuePkr + g.valuePkr }), { producedKg: 0, onHandKg: 0, reservedKg: 0, soldKg: 0, valuePkr: 0 });
+    return { rows, grand };
+  },
+
+  // Service Milling stock register — CLIENT-owned output (finished + by-product)
+  // grouped by client, each expandable to its lots. Quantity-only (the rice is
+  // the client's — no company cost/value). Produced vs dispatched vs on-hand so
+  // the mill can maintain + print the client's stock position.
+  async getServiceMillingStock() {
+    const num = (v) => parseFloat(v) || 0;
+    const lots = await db('inventory_lots as l')
+      .leftJoin('milling_batches as mb', 'l.service_batch_id', 'mb.id')
+      .leftJoin('customers as c1', 'l.owner_customer_id', 'c1.id')
+      .leftJoin('customers as c2', 'mb.client_customer_id', 'c2.id')
+      .where('l.ownership', 'client')
+      .select(
+        'l.id', 'l.lot_no', 'l.item_name', 'l.type', 'l.grade', 'l.variety', 'l.unit',
+        'l.available_qty', 'l.net_weight_kg', 'l.received_net_weight_kg', 'l.qty',
+        'mb.batch_no', 'mb.batch_name',
+        db.raw('COALESCE(c1.name, c2.name) as client_name'),
+        db.raw('COALESCE(l.owner_customer_id, mb.client_customer_id) as client_id'),
+        db.raw('(SELECT COALESCE(SUM(d.qty_kg), 0) FROM service_milling_dispatches d WHERE d.lot_id = l.id) as dispatched_kg'),
+      )
+      .orderBy('l.lot_no', 'asc');
+
+    const groups = {};
+    for (const l of lots) {
+      const produced = num(l.received_net_weight_kg) || num(l.net_weight_kg) || num(l.qty);
+      const onHand = num(l.available_qty);
+      const dispatched = num(l.dispatched_kg);
+      const key = l.client_name || 'Unassigned client';
+      const g = groups[key] || (groups[key] = { key, clientId: l.client_id || null, producedKg: 0, dispatchedKg: 0, onHandKg: 0, lots: [] });
+      g.producedKg += produced; g.dispatchedKg += dispatched; g.onHandKg += onHand;
+      g.lots.push({
+        lotId: l.id, lotNo: l.lot_no, batchNo: l.batch_no || null, batchName: l.batch_name || null,
+        type: l.type, item: l.grade || l.variety || l.item_name || (l.type === 'byproduct' ? 'By-product' : 'Finished'),
+        producedKg: produced, dispatchedKg: dispatched, onHandKg: onHand,
+        href: `/lot-inventory/${l.id}`,
+      });
+    }
+    const rows = Object.values(groups).sort((a, b) => a.key.localeCompare(b.key));
+    const grand = rows.reduce((s, g) => ({
+      producedKg: s.producedKg + g.producedKg, dispatchedKg: s.dispatchedKg + g.dispatchedKg, onHandKg: s.onHandKg + g.onHandKg,
+      clients: s.clients, lots: s.lots + g.lots.length,
+    }), { producedKg: 0, dispatchedKg: 0, onHandKg: 0, clients: 0, lots: 0 });
+    grand.clients = rows.length;
     return { rows, grand };
   },
 

@@ -7,7 +7,7 @@ import {
   ArrowUpRight, ArrowDownLeft, Activity, Calendar, ExternalLink, AlertTriangle, FileText,
   ShoppingCart, Truck, Receipt, Scale, ChevronDown, ChevronRight, Layers,
   Factory, Gauge, Wallet, Star, Plus, Trash2, Hash, Search, Download, Mail, Send,
-  BookOpen, Wrench,
+  BookOpen, Wrench, Boxes,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell,
@@ -662,6 +662,7 @@ export default function Reports() {
     { to: '/reports/processing-loss-ledger',   icon: Scale,   label: 'Processing Loss' },
     { to: '/reports/finished-goods-ledger',    icon: Factory, label: 'Finished Goods' },
     { to: '/reports/inventory-movement-ledger',icon: Truck,   label: 'Stock Movements' },
+    { to: '/reports/service-milling-stock',    icon: Boxes,   label: 'Service Milling Stock', always: true },
     { to: '/reports/lots',                     icon: FileText,label: 'Lot Reports', always: true },
   ].filter(l => l.always || !operatorScoped);
   const tabKeys = TABS.map(t => t.key);
