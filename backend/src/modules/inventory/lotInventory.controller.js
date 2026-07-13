@@ -2378,6 +2378,9 @@ module.exports = {
         const lot = await trx('inventory_lots').where('id', id).first();
         if (!lot) { const e = new Error('Lot not found.'); e.status = 404; throw e; }
         if (lot.entity !== 'mill') { const e = new Error('Only mill-entity lots can be transferred to export.'); e.status = 422; throw e; }
+        // Service-milling output belongs to the client, not the company — it must
+        // never enter our export/sale pipeline. Kept fully separate.
+        if (lot.ownership === 'client') { const e = new Error('This is client-owned Service Milling stock and cannot be transferred to export. Use the Service Milling dispatch to hand it to the client.'); e.status = 422; throw e; }
         if (!['finished', 'byproduct'].includes(lot.type)) { const e = new Error('Only finished or by-product lots can be transferred to export.'); e.status = 422; throw e; }
 
         const avail = parseFloat(lot.available_qty) || 0; // KG (Phase 5c)
