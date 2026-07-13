@@ -143,6 +143,7 @@ export default function ServiceMilling() {
                 <tr key={b.id} className="hover:bg-gray-50">
                   <td className="px-4 py-2.5">
                     <Link to={`/service-milling/${b.batch_no || b.id}`} className="font-semibold text-blue-600 hover:underline">{b.batch_no || `#${b.id}`}</Link>
+                    {b.batch_name && <div className="text-[11px] font-medium text-gray-600 truncate max-w-[180px]" title={b.batch_name}>{b.batch_name}</div>}
                     {b.date_received && <div className="text-[11px] text-gray-400">{new Date(b.date_received).toLocaleDateString('en-GB')}</div>}
                   </td>
                   <td className="px-4 py-2.5 text-gray-800">{b.client_name || <span className="text-gray-400">—</span>}</td>
