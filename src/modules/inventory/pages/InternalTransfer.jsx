@@ -7,6 +7,10 @@ import { useInternalTransfers, useCreateTransfer, useInternalTransfer, useConfir
 // Roles allowed to see supplier names — mirrors the backend redaction
 // (export roles never see who the mill bought from).
 const SUPPLIER_NAME_ROLES = ['Super Admin', 'Owner', 'Mill Manager', 'Mill Operator'];
+// Only finance / owner (management) may LINK a transfer to an export order. Every
+// mill-side role (Mill Manager, Mill Operator, Inventory Officer, …) transfers to
+// the export pool; the export team allocates it to an order later.
+const ORDER_LINK_ROLES = ['Super Admin', 'Owner', 'Finance Manager'];
 import StatusBadge from '../../../components/StatusBadge';
 import SlideDrawer from '../../../components/SlideDrawer';
 
@@ -16,14 +20,13 @@ const formatUSD = (value) => '$' + (parseFloat(value) || 0).toLocaleString('en-U
 
 export default function InternalTransfer() {
   const { millingBatches, exportOrders, addToast, settings } = useApp();
-  const { user, hasPermission } = useAuth();
+  const { user } = useAuth();
   const { data: transfers = [], isLoading: loading } = useInternalTransfers();
   const createTransferMut = useCreateTransfer();
 
-  // Mill users (no export access) transfer to the export pool and must NOT pick
-  // an export order — that's the export team's job. Export users must NOT see the
-  // mill's supplier names.
-  const canLinkOrder = hasPermission('export_orders', 'view');
+  // Mill-side users transfer to the export pool and must NOT pick an export order —
+  // only finance/owner link one. Export-side users must NOT see supplier names.
+  const canLinkOrder = ORDER_LINK_ROLES.includes(user?.role);
   const canSeeSupplier = SUPPLIER_NAME_ROLES.includes(user?.role);
 
   // Any batch with finished output is a candidate — not only batches in
