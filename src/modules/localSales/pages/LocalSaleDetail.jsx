@@ -8,7 +8,7 @@ import { useLocalSale, useLocalSalePayments } from '../../../api/queries';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 
 function fmtPkr(n) {
-  return 'Rs ' + Math.round(parseFloat(n) || 0).toLocaleString();
+  return 'Rs ' + (parseFloat(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 function fmtDate(s) {
   if (!s) return '—';

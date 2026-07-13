@@ -8,7 +8,7 @@ import { RecordPaymentDrawer } from '../components/ServiceInvoiceDrawers';
 import { printServiceInvoice } from '../utils/serviceInvoicePrint';
 
 const num = (v) => parseFloat(v) || 0;
-const pkr = (v) => `PKR ${Math.round(num(v)).toLocaleString()}`;
+const pkr = (v) => `PKR ${(num(v)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const BILLING_STYLE = {
   'Unpaid': 'bg-rose-100 text-rose-700',
   'Partial': 'bg-amber-100 text-amber-800',

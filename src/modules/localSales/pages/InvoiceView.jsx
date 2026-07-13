@@ -20,7 +20,7 @@ import { printCustomerInvoice, printAdminInvoice } from '../utils/invoicePrint';
 // Roles allowed to view the admin invoice copy (mirrors the backend route gate).
 const ADMIN_INVOICE_ROLES = ['Super Admin', 'Owner', 'Finance Manager', 'Mill Manager'];
 
-const pkr = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
+const pkr = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const dt = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 const STATUS_TONE = {
   Paid: 'bg-emerald-100 text-emerald-700', Partial: 'bg-amber-100 text-amber-700',
@@ -97,9 +97,9 @@ export default function InvoiceView() {
       `*${co}* — Invoice ${sale.invoiceNo}`,
       `Date: ${new Date(sale.date).toLocaleDateString('en-GB')}`,
       `Items: ${(items.map(i => i.gradeProduct).join(', ')) || '—'}`,
-      `Total: Rs ${Math.round(totals.total || 0).toLocaleString()}`,
-      `Received: Rs ${Math.round(totals.received || 0).toLocaleString()}`,
-      `Outstanding: Rs ${Math.round(totals.outstanding || 0).toLocaleString()}`,
+      `Total: Rs ${(totals.total || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      `Received: Rs ${(totals.received || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      `Outstanding: Rs ${(totals.outstanding || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
     ];
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(lines.join('\n'))}`, '_blank');
   };

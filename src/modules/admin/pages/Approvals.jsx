@@ -53,10 +53,10 @@ function formatDate(dateStr) {
 
 function formatCurrency(amount, currency = 'PKR') {
   if (!amount) return '—';
-  if (currency === 'USD') return '$' + parseFloat(amount).toLocaleString('en-US');
-  if (currency === 'EUR') return '€' + parseFloat(amount).toLocaleString('en-US');
-  if (currency === 'GBP') return '£' + parseFloat(amount).toLocaleString('en-US');
-  return 'Rs ' + Math.round(amount).toLocaleString('en-PK');
+  if (currency === 'USD') return '$' + parseFloat(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (currency === 'EUR') return '€' + parseFloat(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (currency === 'GBP') return '£' + parseFloat(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return 'Rs ' + (amount).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function timeUntilExpiry(expiresAt) {

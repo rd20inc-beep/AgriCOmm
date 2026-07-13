@@ -10,7 +10,7 @@ import { lotInventoryApi } from '../../../api/services';
 import { useApp } from '../../../context/AppContext';
 import { printPurchaseInvoice } from '../../localSales/utils/invoicePrint';
 
-const pkr = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
+const pkr = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const dt = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 const STATUS_TONE = { Paid: 'bg-emerald-100 text-emerald-700', Partial: 'bg-amber-100 text-amber-700', Unpaid: 'bg-red-100 text-red-700', Pending: 'bg-red-100 text-red-700' };
 

@@ -627,7 +627,7 @@ function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
                 <div>
                   <span className="text-gray-500">Total Finished Cost</span>
                   <p className="font-bold text-emerald-700">PKR {(linkedBatch.totalCostPerKgFinished || 0).toFixed(2)}/KG</p>
-                  <p className="text-gray-400">= PKR {Math.round(linkedBatch.totalCostPerKgFinished || 0).toLocaleString()}/kg</p>
+                  <p className="text-gray-400">= PKR {(linkedBatch.totalCostPerKgFinished || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/kg</p>
                 </div>
               </div>
             )}
@@ -646,7 +646,7 @@ function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
               />
               {transferPrice && finishedMT > 0 && (
                 <p className="text-xs text-amber-600 mt-1">
-                  Total: PKR {Math.round(parseFloat(transferPrice) * finishedMT * 1000).toLocaleString()} (~${Math.round((parseFloat(transferPrice) * finishedMT * 1000) / (parseFloat(order?.bookedFxRate) || 280)).toLocaleString()})
+                  Total: PKR {(parseFloat(transferPrice) * finishedMT * 1000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (~${((parseFloat(transferPrice) * finishedMT * 1000) / (parseFloat(order?.bookedFxRate) || 280)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
                 </p>
               )}
             </div>

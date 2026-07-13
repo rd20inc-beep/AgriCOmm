@@ -16,7 +16,7 @@ import {
   themeFor,
 } from '../../../shared/components/adjustments';
 
-const PKR = (v) => 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString();
+const PKR = (v) => 'Rs ' + (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 // Period for KPI calc — last 30 days, computed once per render.
 function periodStart() {
@@ -364,7 +364,7 @@ export default function StockAdjustments() {
                     </span>
                   </div>
                   <div className="text-[11px] text-gray-600 mt-0.5">
-                    {costPreview.qty.toLocaleString()} KG × {PKR(costPreview.costPerKg)}/kg ·
+                    {costPreview.qty.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} KG × {PKR(costPreview.costPerKg)}/kg ·
                     Lot {costPreview.lotNo} ({costPreview.lotName} · {Math.round(costPreview.lotQtyMT || 0).toLocaleString()} kg on hand)
                   </div>
                 </div>

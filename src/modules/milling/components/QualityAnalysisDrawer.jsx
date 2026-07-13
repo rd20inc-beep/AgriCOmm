@@ -58,7 +58,7 @@ export default function QualityAnalysisDrawer({
           </div>
           {form.pricePerKg && batch.rawQtyKg > 0 && (
             <div className="mt-2 text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
-              Estimated total cost for {Math.round(batch.rawQtyKg).toLocaleString()} kg raw: <span className="font-semibold text-gray-800">Rs {Math.round(parseFloat(form.pricePerKg) * batch.rawQtyKg).toLocaleString()}</span>
+              Estimated total cost for {(batch.rawQtyKg).toLocaleString()} kg raw: <span className="font-semibold text-gray-800">Rs {(parseFloat(form.pricePerKg) * batch.rawQtyKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
           )}
         </div>

@@ -4,7 +4,7 @@
 
 const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const num = (v) => parseFloat(v) || 0;
-const pkr = (v) => `Rs ${Math.round(num(v)).toLocaleString()}`;
+const pkr = (v) => `Rs ${(num(v)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const n0 = (v) => `${Math.round(num(v)).toLocaleString()}`;
 const dt = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 

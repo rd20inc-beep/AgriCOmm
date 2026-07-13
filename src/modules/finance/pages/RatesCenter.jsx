@@ -83,7 +83,7 @@ export default function RatesCenter() {
     { key: 'productType', label: 'Product', sortable: true, render: (v) => v || '—' },
     { key: 'unit', label: 'Unit', render: (v) => v || 'per_mt' },
     { key: 'currency', label: 'Currency', render: (v) => v || 'PKR' },
-    { key: 'rateValue', label: 'Rate', sortable: true, align: 'right', render: (v) => `Rs ${parseFloat(v).toLocaleString()}` },
+    { key: 'rateValue', label: 'Rate', sortable: true, align: 'right', render: (v) => `Rs ${parseFloat(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` },
     { key: 'effectiveDate', label: 'Effective', sortable: true, render: (v) => v ? new Date(v).toLocaleDateString('en-GB') : '—' },
     { key: 'isLocked', label: 'Locked', render: (v) => v ? <Check size={14} className="text-emerald-500" /> : '—' },
   ];

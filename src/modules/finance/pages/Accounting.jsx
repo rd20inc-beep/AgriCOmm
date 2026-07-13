@@ -8,7 +8,7 @@ import { useApp } from '../../../context/AppContext';
 
 function fmtPkr(v) {
   if (!v || Number(v) === 0) return '—';
-  return `Rs ${Math.round(parseFloat(v)).toLocaleString()}`;
+  return `Rs ${(parseFloat(v)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function fmtOriginal(v, currency) {
@@ -24,7 +24,7 @@ function fmtPkrCompact(n) {
   if (Math.abs(v) >= 10_000_000) return `Rs ${(v / 10_000_000).toFixed(2)}Cr`;
   if (Math.abs(v) >= 100_000) return `Rs ${(v / 100_000).toFixed(2)}L`;
   if (Math.abs(v) >= 1_000) return `Rs ${(v / 1_000).toFixed(0)}K`;
-  return `Rs ${Math.round(v).toLocaleString()}`;
+  return `Rs ${(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 const ENTITY_TONE = {

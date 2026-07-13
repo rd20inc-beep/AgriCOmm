@@ -41,7 +41,7 @@ export default function ReceivablesPayablesChart({ data }) {
                 borderRadius: '8px',
                 fontSize: '12px',
               }}
-              formatter={(value) => [`$${value.toLocaleString()}`, undefined]}
+              formatter={(value) => [`$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, undefined]}
             />
             <Legend
               verticalAlign="top"

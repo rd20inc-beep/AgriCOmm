@@ -8,7 +8,7 @@ const n = (v) => Number(v) || 0;
 const toMT = (kg) => n(kg) / 1000;
 const fmtMT = (kg) => `${Math.round(n(kg)).toLocaleString()} kg`;
 const fmtMTnum = (mt) => `${Math.round(n(mt) * 1000).toLocaleString()} kg`;
-const fmtPKR = (v) => `Rs ${Math.round(n(v)).toLocaleString('en-PK')}`;
+const fmtPKR = (v) => `Rs ${(n(v)).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const ENTITIES = [{ v: '', l: 'All' }, { v: 'mill', l: 'Mill' }, { v: 'export', l: 'Export' }];
 const STATUSES = [{ v: 'Available', l: 'In stock' }, { v: 'all', l: 'All statuses' }];
@@ -277,7 +277,7 @@ function ProductStockDrawer({ row, entity, status, onClose, onOpenLot }) {
                     <Stat label="Value" value={fmtPKR(value)} align="right" />
                   </div>
                   <div className="mt-2 pt-2 border-t border-gray-100 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-gray-500">
-                    <span>Cost <span className="font-medium text-gray-700">Rs {Math.round(perKg).toLocaleString('en-PK')}/kg</span></span>
+                    <span>Cost <span className="font-medium text-gray-700">Rs {(perKg).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/kg</span></span>
                     {receivedKg > 0 && <span>Intake {fmtMTnum(receivedKg / 1000)} <span className="text-gray-400">({fmtMTnum(usedKg / 1000)} used)</span></span>}
                     {l.batch_ref && <span>Batch {l.batch_ref}</span>}
                     {l.created_at && <span>Added {String(l.created_at).slice(0, 10)}</span>}

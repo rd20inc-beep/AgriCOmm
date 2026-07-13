@@ -12,7 +12,7 @@ function curSymbol(cur) {
 }
 function fmt(v, cur) {
   const n = parseFloat(v) || 0;
-  return `${curSymbol(cur)}${Math.round(n).toLocaleString()}`;
+  return `${curSymbol(cur)}${(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 const eqStatus = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase();
@@ -264,7 +264,7 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
               <option value="">Select bank account…</option>
               {bankAccounts.map((a) => (
                 <option key={a.id} value={a.id}>
-                  {a.name} — {a.bankName || ''} ({a.currency || 'PKR'} {Math.round(parseFloat(a.currentBalance) || 0).toLocaleString()})
+                  {a.name} — {a.bankName || ''} ({a.currency || 'PKR'} {(parseFloat(a.currentBalance) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
                 </option>
               ))}
             </select>

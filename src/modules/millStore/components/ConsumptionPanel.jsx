@@ -3,7 +3,7 @@ import { Package, AlertTriangle, Check, Loader2 } from 'lucide-react';
 import { useConsumptionHistory, useSuggestConsumption, useConfirmConsumption } from '../api/queries';
 
 function formatPKR(v) {
-  return 'Rs ' + Math.round(Number(v) || 0).toLocaleString('en-PK');
+  return 'Rs ' + (Number(v) || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 export default function ConsumptionPanel({ batchId, batchStatus, addToast }) {

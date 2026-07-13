@@ -61,7 +61,7 @@ const tabs = [
 ];
 
 function formatPKR(value) {
-  return 'Rs ' + Math.round(value).toLocaleString('en-PK');
+  return 'Rs ' + (value).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 // Costing figures show 2 decimals (per-kg costs especially — whole-rupee
 // rounding hid real cost, e.g. 145.37/kg shown as 145).
@@ -394,7 +394,7 @@ export default function MillingBatchDetail() {
         // Auto-populate raw rice cost from agreed price
         if (formValues.pricePerKg && batch.rawQtyKg > 0) {
           const rawRiceCost = Math.round(formValues.pricePerKg * batch.rawQtyKg);
-          addToast(`Raw rice cost auto-updated: Rs ${rawRiceCost.toLocaleString()} (${Math.round(batch.rawQtyKg).toLocaleString()} kg × Rs ${formValues.pricePerKg.toFixed(2)}/kg)`, 'info');
+          addToast(`Raw rice cost auto-updated: Rs ${rawRiceCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${(batch.rawQtyKg).toLocaleString()} kg × Rs ${formValues.pricePerKg.toFixed(2)}/kg)`, 'info');
         }
       }
       invalidateBatch();
@@ -1357,7 +1357,7 @@ export default function MillingBatchDetail() {
                           {sampleForDisplay?.pricePerMT ? (
                             <>
                               <p className="text-lg font-bold text-amber-900">Rs {(parseFloat(sampleForDisplay.pricePerKg) || (parseFloat(sampleForDisplay.pricePerMT) || 0) / 1000).toFixed(2)}<span className="text-xs font-normal text-amber-600"> /kg</span></p>
-                              {rawQty > 0 && <p className="text-xs text-amber-500 mt-0.5">Est. total: Rs {Math.round((parseFloat(sampleForDisplay.pricePerMT) || 0) * rawQty).toLocaleString()}</p>}
+                              {rawQty > 0 && <p className="text-xs text-amber-500 mt-0.5">Est. total: Rs {((parseFloat(sampleForDisplay.pricePerMT) || 0) * rawQty).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>}
                             </>
                           ) : <p className="text-sm text-gray-400">Not set</p>}
                         </div>
@@ -1366,7 +1366,7 @@ export default function MillingBatchDetail() {
                           {safeArrival?.pricePerMT ? (
                             <>
                               <p className="text-lg font-bold text-blue-900">Rs {(parseFloat(safeArrival.pricePerKg) || (parseFloat(safeArrival.pricePerMT) || 0) / 1000).toFixed(2)}<span className="text-xs font-normal text-blue-600"> /kg</span></p>
-                              {rawQty > 0 && <p className="text-xs text-blue-500 mt-0.5">Est. total: Rs {Math.round((parseFloat(safeArrival.pricePerMT) || 0) * rawQty).toLocaleString()}</p>}
+                              {rawQty > 0 && <p className="text-xs text-blue-500 mt-0.5">Est. total: Rs {((parseFloat(safeArrival.pricePerMT) || 0) * rawQty).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>}
                             </>
                           ) : <p className="text-sm text-gray-400">Not set</p>}
                         </div>
@@ -2054,7 +2054,7 @@ export default function MillingBatchDetail() {
           const readyRiceCost = Math.max(0, netPurchase - byproductValue);
           const clamped = netPurchase - byproductValue < 0;
           const finishedPerMT = finishedMT > 0 ? readyRiceCost / finishedMT : 0;
-          const Rs = (n) => 'Rs ' + Math.round(n).toLocaleString('en-PK');
+          const Rs = (n) => 'Rs ' + (n).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
           return (
             <div className="space-y-4">
@@ -2067,7 +2067,7 @@ export default function MillingBatchDetail() {
                     <div className="w-full border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm text-gray-700">{Rs(rawPurchase)}</div>
                     {rawQtyKg > 0 && (
                       <p className="text-[11px] text-gray-500 mt-1">
-                        <span className="font-semibold text-gray-700">{Rs(rawCostPerKg)}/kg</span> · {Math.round(rawQtyKg).toLocaleString()} kg raw milled
+                        <span className="font-semibold text-gray-700">{Rs(rawCostPerKg)}/kg</span> · {(rawQtyKg).toLocaleString()} kg raw milled
                       </p>
                     )}
                   </div>

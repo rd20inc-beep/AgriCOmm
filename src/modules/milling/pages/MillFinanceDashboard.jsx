@@ -43,7 +43,7 @@ import StatementPayDrawer from '../../finance/components/StatementPayDrawer';
 import TransferFundsDrawer from '../../finance/components/TransferFundsDrawer';
 import AnomalyWatchCard from '../../ai/components/AnomalyWatchCard';
 
-const PKR = (v) => 'Rs ' + Math.round(v || 0).toLocaleString('en-PK');
+const PKR = (v) => 'Rs ' + (v || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = (d) => {
   if (!d) return '—';
   const dt = new Date(d);
@@ -54,7 +54,7 @@ const COMPACT_PKR = (v) => {
   if (Math.abs(n) >= 10000000) return `Rs ${(n / 10000000).toFixed(2)}Cr`;
   if (Math.abs(n) >= 100000) return `Rs ${(n / 100000).toFixed(2)}L`;
   if (Math.abs(n) >= 1000) return `Rs ${(n / 1000).toFixed(1)}k`;
-  return `Rs ${n.toLocaleString('en-PK')}`;
+  return `Rs ${n.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
 const EXPENSE_CATS = [
@@ -903,9 +903,9 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
 
           {/* Inventory breakdown */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <Stat tone="amber"  label="Raw Rice"      value={PKR(inventoryValue.raw)} sub={`${Math.round(inventory.filter(i => i.type === 'raw').reduce((s, i) => s + pf(i.qty), 0)).toLocaleString()} kg`} />
-            <Stat tone="green"  label="Finished Rice" value={PKR(inventoryValue.fin)} sub={`${Math.round(inventory.filter(i => i.type === 'finished').reduce((s, i) => s + pf(i.availableQty), 0)).toLocaleString()} kg`} />
-            <Stat tone="purple" label="Byproducts"    value={PKR(inventoryValue.bp)}  sub={`${Math.round(inventory.filter(i => i.type === 'byproduct').reduce((s, i) => s + pf(i.availableQty), 0)).toLocaleString()} kg`} />
+            <Stat tone="amber"  label="Raw Rice"      value={PKR(inventoryValue.raw)} sub={`${(inventory.filter(i => i.type === 'raw').reduce((s, i) => s + pf(i.qty), 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`} />
+            <Stat tone="green"  label="Finished Rice" value={PKR(inventoryValue.fin)} sub={`${(inventory.filter(i => i.type === 'finished').reduce((s, i) => s + pf(i.availableQty), 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`} />
+            <Stat tone="purple" label="Byproducts"    value={PKR(inventoryValue.bp)}  sub={`${(inventory.filter(i => i.type === 'byproduct').reduce((s, i) => s + pf(i.availableQty), 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`} />
             <Stat tone="blue"   label="Working Cap."  value={PKR(inventoryValue.total)} sub="Locked in stock" />
           </div>
 
@@ -2465,15 +2465,15 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                 const amt = parseFloat(advanceForm.amount) || 0;
                 if (!amt) return null;
                 let line = null;
-                if (advanceForm.recovery_method === 'full_next_salary') line = `Recovery: full Rs ${amt.toLocaleString()} from the next payroll.`;
+                if (advanceForm.recovery_method === 'full_next_salary') line = `Recovery: full Rs ${amt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} from the next payroll.`;
                 else if (advanceForm.recovery_method === 'manual') line = 'Recovery: admin enters the deduction manually each payroll.';
                 else if (advanceForm.recovery_method === 'fixed_installment') {
                   const inst = parseFloat(advanceForm.installment_amount) || 0;
                   const cnt = parseInt(advanceForm.installment_count, 10) || (inst > 0 ? Math.ceil(amt / inst) : 0);
-                  if (inst > 0 && cnt > 0) line = `Recovery: Rs ${inst.toLocaleString()} per month for ${cnt} month(s)${advanceForm.recovery_start_period ? `, from ${advanceForm.recovery_start_period}` : ''}.`;
+                  if (inst > 0 && cnt > 0) line = `Recovery: Rs ${inst.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} per month for ${cnt} month(s)${advanceForm.recovery_start_period ? `, from ${advanceForm.recovery_start_period}` : ''}.`;
                 } else if (advanceForm.recovery_method === 'salary_percentage') {
                   const pct = parseFloat(advanceForm.deduction_percent) || 0;
-                  if (pct > 0) line = `Recovery: ${pct}% of each salary${advanceForm.recovery_start_period ? `, from ${advanceForm.recovery_start_period}` : ''}, until Rs ${amt.toLocaleString()} is recovered.`;
+                  if (pct > 0) line = `Recovery: ${pct}% of each salary${advanceForm.recovery_start_period ? `, from ${advanceForm.recovery_start_period}` : ''}, until Rs ${amt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} is recovered.`;
                 }
                 return line ? <div className="rounded-md bg-blue-50 border border-blue-100 p-2 text-xs text-blue-800">{line}</div> : null;
               })()}
@@ -2674,7 +2674,7 @@ function ExpensePayDrawer({ expense, bankAccounts = [], companyProfile, addToast
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expense]);
   if (!expense) return null;
-  const PKR = (n) => `Rs ${Math.round(parseFloat(n) || 0).toLocaleString()}`;
+  const PKR = (n) => `Rs ${(parseFloat(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   // Mill cash payments are drawn from the dedicated Mill Cash account so they
   // reduce "Mill Cash available" on the dashboard (and go negative when the mill
   // has spent more than it holds — a signal it needs funding from Head Office).
@@ -2797,7 +2797,7 @@ function ExpensePayDrawer({ expense, bankAccounts = [], companyProfile, addToast
 // (payment) or receipt (money in). Read-only — these are settled cash movements.
 function CashEntryDrawer({ entry, companyProfile, onClose }) {
   if (!entry) return null;
-  const PKR = (n) => `Rs ${Math.round(parseFloat(n) || 0).toLocaleString()}`;
+  const PKR = (n) => `Rs ${(parseFloat(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const isIn = entry.direction === 'in';
   const amount = parseFloat(entry.amount_pkr) || 0;
   // Build the doc model TransactionDocument expects (voucher for out, receipt for in).
@@ -3573,7 +3573,7 @@ function payslipBody(run, line, company) {
   const co = company || {};
   const name = co.legalName || co.name || 'AGRI COMMODITIES';
   const logo = co.logo ? (String(co.logo).startsWith('http') ? co.logo : `${typeof location !== 'undefined' ? location.origin : ''}${co.logo}`) : null;
-  const rs = (v) => 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString();
+  const rs = (v) => 'Rs ' + (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const payDate = run.payDate ? new Date(run.payDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
   const method = run.payMethod === 'bank' ? (run.bankName || 'Bank transfer') : 'Cash';
   const ot = parseFloat(line.otPay) || 0; const adv = parseFloat(line.advanceDeducted) || 0;
@@ -3658,7 +3658,7 @@ function docHeaderHtml(company, docTitle, sub1, sub2) {
   </div>`;
 }
 
-const rsAmt = (v) => 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString();
+const rsAmt = (v) => 'Rs ' + (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const docDate = (x) => x ? new Date(x).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 // Derived (un-stored) document numbers — the run id + period make them stable
 // and unique without a vouchers table (mirrors the "sale row = invoice" model).
@@ -5018,7 +5018,7 @@ function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDelete, a
 function printPayrollReport(runs, totals, company, range) {
   const co = company || {};
   const name = co.legalName || co.name || 'AGRI COMMODITIES';
-  const rs = (v) => 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString();
+  const rs = (v) => 'Rs ' + (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const d = (x) => x ? new Date(x).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
   const runBlocks = runs.map((r) => `
     <div style="margin-top:18px;break-inside:avoid">
@@ -5182,7 +5182,7 @@ function Sm({ label, value, tone = 'gray' }) {
 
 function EmployeeLedgerDrawer({ worker, onClose }) {
   const { data, isLoading } = useWorkerLedger(worker?.id);
-  const rs = (n) => `Rs ${Math.round(parseFloat(n) || 0).toLocaleString()}`;
+  const rs = (n) => `Rs ${(parseFloat(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const entries = data?.entries || [];
   return (
     <SlideDrawer

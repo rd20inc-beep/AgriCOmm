@@ -10,8 +10,8 @@ import { INCOTERMS } from '../../../shared/constants/incoterms';
 
 function formatCurrency(v, cur = 'USD') {
   if (!v && v !== 0) return '—';
-  if (cur === 'PKR') return 'Rs ' + Math.round(v).toLocaleString();
-  return '$' + parseFloat(v).toLocaleString();
+  if (cur === 'PKR') return 'Rs ' + (v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return '$' + parseFloat(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function ResultCard({ label, value, subtitle, positive }) {

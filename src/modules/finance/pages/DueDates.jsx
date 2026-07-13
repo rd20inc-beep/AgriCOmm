@@ -3,10 +3,10 @@ import { ArrowDownLeft, ArrowUpRight, CalendarClock, AlertTriangle, CheckCircle 
 import { useUpcoming, useClearCheque } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
 
-const fmtPKR = (n) => `Rs ${Math.round(parseFloat(n) || 0).toLocaleString()}`;
+const fmtPKR = (n) => `Rs ${(parseFloat(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 // Format an amount in its own currency (USD export receivables vs PKR dues).
 const CUR_SYMBOL = { USD: '$', PKR: 'Rs', EUR: '€' };
-const fmtMoney = (n, cur) => `${CUR_SYMBOL[(cur || 'PKR').toUpperCase()] || (cur + ' ')}${Math.round(parseFloat(n) || 0).toLocaleString()}`;
+const fmtMoney = (n, cur) => `${CUR_SYMBOL[(cur || 'PKR').toUpperCase()] || (cur + ' ')}${(parseFloat(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtDate = (s) => s ? new Date(s).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 const isOverdue = (s) => s && new Date(s) < new Date(new Date().toDateString());
 

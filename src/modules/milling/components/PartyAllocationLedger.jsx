@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { FileText, ArrowDownRight } from 'lucide-react';
 import { accountingApi } from '../../accounting/api/services';
 
-const PKR = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
+const PKR = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtDate = (d) => { if (!d) return '—'; const dt = new Date(d); return Number.isNaN(dt.getTime()) ? d : dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }); };
 const METHOD = { cash: 'Cash', cheque: 'Cheque', bank_transfer: 'Bank transfer', online: 'Online', mobile: 'Mobile' };
 const STATUS_TONE = { Paid: 'bg-emerald-100 text-emerald-700', Partial: 'bg-amber-100 text-amber-700', Unpaid: 'bg-red-100 text-red-700' };

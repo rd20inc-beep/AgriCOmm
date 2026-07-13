@@ -15,7 +15,7 @@ const tabs = [
   { key: 'packaging', label: 'Bags/Packaging', icon: Box },
 ];
 
-function fmtPKR(v) { return 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString(); }
+function fmtPKR(v) { return 'Rs ' + (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
 export default function Inventory() {
   const [activeTab, setActiveTab] = useState('all');

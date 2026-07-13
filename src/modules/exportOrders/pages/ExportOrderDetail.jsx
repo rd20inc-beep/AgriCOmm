@@ -218,8 +218,8 @@ export default function ExportOrderDetail() {
   const marginPct = contractValuePkr > 0 ? ((grossProfit / contractValuePkr) * 100).toFixed(1) : '0.0';
   const currencySymbols = { USD: '$', EUR: '€', GBP: '£' };
   const orderSymbol = currencySymbols[order.currency] || '$';
-  const formatCurrency = (value) => orderSymbol + (parseFloat(value) || 0).toLocaleString();
-  const formatPKR = (value) => 'Rs ' + (parseFloat(value) || 0).toLocaleString();
+  const formatCurrency = (value) => orderSymbol + (parseFloat(value) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const formatPKR = (value) => 'Rs ' + (parseFloat(value) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const backendActions = order.allowedActions || {};
 
   // --- Modal openers (reset form state then show) ---
@@ -520,7 +520,7 @@ export default function ExportOrderDetail() {
         id: orderId,
         data: { category: expenseCategory, amount, notes: expenseNotes },
       });
-      addToast(`Rs ${amount.toLocaleString()} added to ${expenseCategory}`);
+      addToast(`Rs ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} added to ${expenseCategory}`);
     } catch (err) {
       addToast(err.message || 'Failed to add expense', 'error');
     }
@@ -995,7 +995,7 @@ export default function ExportOrderDetail() {
         onClose={() => setShowEmailComposer(false)}
         defaultTo={(customersList.find(c => c.id === order.customerId) || {}).email || ''}
         defaultSubject={`Proforma Invoice - PI-${order.id.replace('EX-','')}`}
-        defaultBody={`Dear Customer,\n\nPlease find attached the Proforma Invoice for Order ${order.id}.\n\nProduct: ${order.productName}\nQuantity: ${order.qtyMT} MT\nContract Value: $${order.contractValue.toLocaleString()}\n\nBest regards,\nAGRI COMMODITIES`}
+        defaultBody={`Dear Customer,\n\nPlease find attached the Proforma Invoice for Order ${order.id}.\n\nProduct: ${order.productName}\nQuantity: ${order.qtyMT} MT\nContract Value: $${order.contractValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n\nBest regards,\nAGRI COMMODITIES`}
         attachmentLabel={`PI-${order.id.replace('EX-','')}.pdf`}
       />
     </div>

@@ -37,21 +37,21 @@ let EXACT_NUMBERS = false;
 export function setExactNumbers(on) { EXACT_NUMBERS = !!on; }
 function fmtPKR(n) {
   if (n == null || isNaN(n)) return 'Rs 0';
-  if (EXACT_NUMBERS) return `Rs ${Math.round(n).toLocaleString()}`;
+  if (EXACT_NUMBERS) return `Rs ${(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   if (Math.abs(n) >= 10_000_000) return `Rs ${(n / 10_000_000).toFixed(2)}Cr`;
   if (Math.abs(n) >= 100_000) return `Rs ${(n / 100_000).toFixed(2)}L`;
   if (Math.abs(n) >= 1_000) return `Rs ${(n / 1_000).toFixed(0)}K`;
-  return `Rs ${Math.round(n).toLocaleString()}`;
+  return `Rs ${(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 function fmtUSD(n) {
   if (n == null || isNaN(n)) return '$0';
-  if (EXACT_NUMBERS) return `$${Math.round(n).toLocaleString()}`;
+  if (EXACT_NUMBERS) return `$${(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
   if (Math.abs(n) >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
-  return `$${Math.round(n).toLocaleString()}`;
+  return `$${(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 // Exact value for a title tooltip — always full digits regardless of toggle.
-function exactPKR(n) { return (n == null || isNaN(n)) ? 'Rs 0' : `Rs ${Math.round(n).toLocaleString()}`; }
+function exactPKR(n) { return (n == null || isNaN(n)) ? 'Rs 0' : `Rs ${(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
 function fmtPct(n) {
   if (n == null || isNaN(n)) return '—';
   return `${Number(n).toFixed(1)}%`;
@@ -1157,7 +1157,7 @@ function SaleTrackerPanel({ sale, statementHref, companyProfile }) {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <Cell label="Item" value={`${sale.itemName || '—'}${sale.itemType ? ` (${sale.itemType})` : ''}`} />
           <Cell label="Quantity" value={`${mt2(sale.quantityKg)}${sale.quantityBags ? ` · ${sale.quantityBags} bags` : ''}`} />
-          <Cell label="Rate / kg" value={sale.ratePerKg > 0 ? `Rs ${Math.round(sale.ratePerKg).toLocaleString()}` : '—'} />
+          <Cell label="Rate / kg" value={sale.ratePerKg > 0 ? `Rs ${(sale.ratePerKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'} />
           <Cell label="From lot" value={sale.lotId ? <Link to={`/lot-inventory/${sale.lotId}`} className="text-blue-600 hover:underline font-mono text-xs">{sale.lotNo || '—'}</Link> : (sale.lotNo || '—')} />
           {sale.collectionLocation && <Cell label="Collected at" value={sale.collectionLocation} />}
         </div>
@@ -1264,7 +1264,7 @@ function SaleDetailSection({ saleId }) {
               <thead className="bg-gray-50 text-gray-500"><tr><th className="px-2 py-1.5 text-left font-medium">Item</th><th className="px-2 py-1.5 text-left font-medium">Lot</th><th className="px-2 py-1.5 text-right font-medium">kg</th><th className="px-2 py-1.5 text-right font-medium">Rate/kg</th><th className="px-2 py-1.5 text-right font-medium">Value</th></tr></thead>
               <tbody className="divide-y divide-gray-100">
                 {items.map(it => (
-                  <tr key={it.id}><td className="px-2 py-1.5">{it.item || '—'}</td><td className="px-2 py-1.5">{it.href ? <Link to={it.href} className="font-mono text-blue-600 hover:underline">{it.lotNo}</Link> : (it.lotNo || '—')}</td><td className="px-2 py-1.5 text-right tabular-nums">{Math.round(it.quantityKg).toLocaleString()}</td><td className="px-2 py-1.5 text-right tabular-nums">{it.ratePerKg > 0 ? `Rs ${Math.round(it.ratePerKg).toLocaleString()}` : '—'}</td><td className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(it.totalAmount)}</td></tr>
+                  <tr key={it.id}><td className="px-2 py-1.5">{it.item || '—'}</td><td className="px-2 py-1.5">{it.href ? <Link to={it.href} className="font-mono text-blue-600 hover:underline">{it.lotNo}</Link> : (it.lotNo || '—')}</td><td className="px-2 py-1.5 text-right tabular-nums">{(it.quantityKg).toLocaleString()}</td><td className="px-2 py-1.5 text-right tabular-nums">{it.ratePerKg > 0 ? `Rs ${(it.ratePerKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td><td className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(it.totalAmount)}</td></tr>
                 ))}
                 <tr className="bg-gray-50 font-semibold"><td className="px-2 py-1.5" colSpan={2}>Total</td><td className="px-2 py-1.5 text-right tabular-nums">{Math.round(t.quantityKg).toLocaleString()}</td><td className="px-2 py-1.5" /><td className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(t.totalAmount)}</td></tr>
               </tbody>
@@ -1505,8 +1505,8 @@ function MarginBySale({ params, openDoc }) {
               : <span className="text-xs text-gray-500">{s.lotRef || '—'}</span>,
             <span className="text-xs">{s.itemName || '—'}</span>,
             `${Math.round(e.soldKg).toLocaleString()} kg`,
-            e.hasCost ? `Rs ${Math.round(e.costPerKg).toLocaleString()}` : '—',
-            `Rs ${Math.round(e.salePerKg).toLocaleString()}`,
+            e.hasCost ? `Rs ${(e.costPerKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—',
+            `Rs ${(e.salePerKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
             e.hasCost ? fmtPKR(e.cost) : '—',
             <span className="font-semibold text-gray-900">{fmtPKR(e.sale)}</span>,
             e.hasCost ? <ProfitCell v={e.margin} /> : <span className="text-gray-400">—</span>,
@@ -1542,11 +1542,11 @@ function MarginBreakdown({ e, companyProfile }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            <tr><td className="px-3 py-2 text-gray-600">Buying price + expenses</td><td className="px-3 py-2 text-right tabular-nums">Rs {Math.round(e.costPerKg).toLocaleString()}</td><td className="px-3 py-2 text-right tabular-nums font-medium">{fmtPKR(e.cost)}</td></tr>
-            <tr><td className="px-3 py-2 text-gray-600">Selling price</td><td className="px-3 py-2 text-right tabular-nums">Rs {Math.round(e.salePerKg).toLocaleString()}</td><td className="px-3 py-2 text-right tabular-nums font-medium">{fmtPKR(e.sale)}</td></tr>
+            <tr><td className="px-3 py-2 text-gray-600">Buying price + expenses</td><td className="px-3 py-2 text-right tabular-nums">Rs {(e.costPerKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td><td className="px-3 py-2 text-right tabular-nums font-medium">{fmtPKR(e.cost)}</td></tr>
+            <tr><td className="px-3 py-2 text-gray-600">Selling price</td><td className="px-3 py-2 text-right tabular-nums">Rs {(e.salePerKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td><td className="px-3 py-2 text-right tabular-nums font-medium">{fmtPKR(e.sale)}</td></tr>
             <tr className="bg-gray-50">
               <td className="px-3 py-2 font-semibold text-gray-800">Gross margin</td>
-              <td className={`px-3 py-2 text-right tabular-nums font-semibold ${perKgMargin >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{perKgMargin >= 0 ? '+' : ''}Rs {Math.round(perKgMargin).toLocaleString()}</td>
+              <td className={`px-3 py-2 text-right tabular-nums font-semibold ${perKgMargin >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{perKgMargin >= 0 ? '+' : ''}Rs {(perKgMargin).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
               <td className={`px-3 py-2 text-right tabular-nums font-bold ${e.margin >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{fmtPKR(e.margin)} ({e.marginPct.toFixed(1)}%)</td>
             </tr>
           </tbody>
@@ -1685,7 +1685,7 @@ function BatchMarginBreakdown({ b }) {
                     <tr key={i}>
                       <td className="px-2 py-1.5 font-medium text-gray-800">{gradeLabel(g.grade)}</td>
                       <td className="px-2 py-1.5 text-right tabular-nums">{Math.round(parseFloat(g.producedKg) || 0).toLocaleString()} kg</td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">Rs {Math.round(parseFloat(g.valuationPerKg) || 0).toLocaleString()}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">Rs {(parseFloat(g.valuationPerKg) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                       <td className="px-2 py-1.5 text-right tabular-nums font-medium">{fmtPKR(g.valuationValue)}</td>
                       <td className="px-2 py-1.5 text-right tabular-nums">{soldV > 0 ? fmtPKR(soldV) : '—'}</td>
                       <td className="px-2 py-1.5 text-right tabular-nums">{soldV > 0 ? <span className={m >= 0 ? 'text-emerald-700' : 'text-red-700'}>{fmtPKR(m)}</span> : '—'}</td>
@@ -1801,7 +1801,7 @@ function BatchLedgerSection({ batchId }) {
                 <thead className="bg-gray-50 text-gray-500"><tr><th className="px-2 py-1.5 text-left font-medium">Lot</th><th className="px-2 py-1.5 text-left font-medium">Output</th><th className="px-2 py-1.5 text-right font-medium">kg</th><th className="px-2 py-1.5 text-right font-medium">Cost/kg</th><th className="px-2 py-1.5 text-right font-medium">Value</th></tr></thead>
                 <tbody className="divide-y divide-gray-100">
                   {outputs.map((o, i) => (
-                    <tr key={i}><td className="px-2 py-1.5 font-mono">{o.href ? <Link to={o.href} className="text-blue-600 hover:underline">{o.lotNo}</Link> : o.lotNo}</td><td className="px-2 py-1.5">{o.item}<span className="text-gray-400"> · {o.type === 'byproduct' ? 'by-product' : 'finished'}</span></td><td className="px-2 py-1.5 text-right tabular-nums">{Math.round(o.kg).toLocaleString()}</td><td className="px-2 py-1.5 text-right tabular-nums">{o.costPerKg > 0 ? `Rs ${Math.round(o.costPerKg).toLocaleString()}` : '—'}</td><td className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(o.valuePkr)}</td></tr>
+                    <tr key={i}><td className="px-2 py-1.5 font-mono">{o.href ? <Link to={o.href} className="text-blue-600 hover:underline">{o.lotNo}</Link> : o.lotNo}</td><td className="px-2 py-1.5">{o.item}<span className="text-gray-400"> · {o.type === 'byproduct' ? 'by-product' : 'finished'}</span></td><td className="px-2 py-1.5 text-right tabular-nums">{(o.kg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td><td className="px-2 py-1.5 text-right tabular-nums">{o.costPerKg > 0 ? `Rs ${(o.costPerKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td><td className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(o.valuePkr)}</td></tr>
                   ))}
                   {outputs.length === 0 && <tr><td colSpan={5} className="px-2 py-1.5 text-gray-400">No output lots yet.</td></tr>}
                 </tbody>
@@ -1909,8 +1909,8 @@ function LotTrackerPanel({ lot, statementHref }) {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <Cell label="Received" value={`${mt2(lot.receivedKg)} · ${Math.round(lot.receivedKg).toLocaleString()} kg`} />
           <Cell label="Katta (bags)" value={lot.bags != null ? `${Number(lot.bags).toLocaleString()}${lot.bagWeightKg ? ` × ${lot.bagWeightKg} kg` : ''}` : '—'} />
-          <Cell label="Rate / kg" value={lot.ratePerKg > 0 ? `Rs ${Math.round(lot.ratePerKg).toLocaleString()}` : '—'} />
-          <Cell label="Landed / kg" value={lot.landedCostPerKg > 0 ? `Rs ${Math.round(lot.landedCostPerKg).toLocaleString()}` : '—'} />
+          <Cell label="Rate / kg" value={lot.ratePerKg > 0 ? `Rs ${(lot.ratePerKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'} />
+          <Cell label="Landed / kg" value={lot.landedCostPerKg > 0 ? `Rs ${(lot.landedCostPerKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'} />
           <Cell label="Landed total" value={fmtPKR(lot.landedTotal)} />
           <Cell label="Payment" value={<><StatusBadgeMini s={lot.paymentStatus} /> {lot.dueAmount > 0 ? <span className="text-xs text-red-600">{fmtPKR(lot.dueAmount)} due</span> : <span className="text-xs text-emerald-600">paid</span>}</>} />
         </div>
@@ -1940,7 +1940,7 @@ function LotTrackerPanel({ lot, statementHref }) {
                     <span className="font-medium">{v.vehicleNo}{v.driverName ? <span className="text-gray-500 font-normal"> · {v.driverName}</span> : ''}</span>
                     <span className="text-xs text-gray-500">{v.weightMt ? `${v.weightMt} MT` : ''}{v.totalBags ? ` · ${v.totalBags} bags` : ''}</span>
                   </div>
-                  {qbits.length > 0 && <div className="mt-1 flex flex-wrap gap-x-3 text-[11px] text-gray-500">{qbits.map(([k, x, u]) => <span key={k}>{k}: <span className="font-medium text-gray-700">{u === '' ? `Rs ${Math.round(x).toLocaleString()}` : `${x}${u}`}</span></span>)}</div>}
+                  {qbits.length > 0 && <div className="mt-1 flex flex-wrap gap-x-3 text-[11px] text-gray-500">{qbits.map(([k, x, u]) => <span key={k}>{k}: <span className="font-medium text-gray-700">{u === '' ? `Rs ${(x).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : `${x}${u}`}</span></span>)}</div>}
                 </div>
               );
             })}
@@ -2341,7 +2341,7 @@ function OrdersTab({ params }) {
           <Link to={`/export/${r.orderNo || r.id}`} className="text-blue-600 hover:underline font-medium">{r.orderNo}</Link>,
           r.customerName || '—',
           <StatusChip s={r.status} />,
-          <span className="text-xs text-gray-600">{(r.currency || 'PKR')} {Number(r.contractValue || 0).toLocaleString()}</span>,
+          <span className="text-xs text-gray-600">{(r.currency || 'PKR')} {Number(r.contractValue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>,
           fmtPKR(r.revenuePkr),
           fmtPKR(r.costs),
           <ProfitCell v={r.grossProfit} />,

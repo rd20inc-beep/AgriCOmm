@@ -5,7 +5,7 @@ import api from '../../../api/client';
 import { useCustomers, useSuppliers } from '../../../api/queries';
 import SearchSelect from '../../../shared/components/SearchSelect';
 
-const PKR = (v) => 'Rs ' + Math.round(Number(v) || 0).toLocaleString('en-PK');
+const PKR = (v) => 'Rs ' + (Number(v) || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const SEV = { high: 'bg-red-100 text-red-700 border-red-200', medium: 'bg-amber-100 text-amber-700 border-amber-200', low: 'bg-slate-100 text-slate-600 border-slate-200' };
 
 const TABS = [

@@ -4,7 +4,7 @@
 import { useState, useEffect, useCallback } from 'react';
 
 const TOKEN_KEY = 'rf_portal_token';
-const PKR = (v) => 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString('en-PK');
+const PKR = (v) => 'Rs ' + (parseFloat(v) || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 // ── tiny self-contained print stack (kept separate from the staff app) ──
 function amountInWords(value) {

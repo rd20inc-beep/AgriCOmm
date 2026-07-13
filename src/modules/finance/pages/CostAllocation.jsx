@@ -24,11 +24,11 @@ import { DEFAULT_FX_RATE } from '../utils/fx';
 const PKR_RATE_DEFAULT_DEFAULT = DEFAULT_FX_RATE;
 
 function formatPKR(value) {
-  return 'Rs ' + Math.round(value).toLocaleString('en-PK');
+  return 'Rs ' + (value).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function formatUSD(value) {
-  return '$' + value.toLocaleString('en-US');
+  return '$' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function formatAmount(value, currency) {

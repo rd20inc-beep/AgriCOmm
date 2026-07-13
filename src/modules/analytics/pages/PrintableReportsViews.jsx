@@ -636,7 +636,7 @@ export function SalesLedgerView({ data, companyName, range }) {
         { label: 'Local Qty', value: `${fmtMt(totals.localMt)} MT` },
         { label: 'Local Value', value: fmtPkr(totals.localPkr) },
         { label: 'Export Orders', value: totals.exportCount },
-        { label: 'Export Value', value: `$${(totals.exportUsd || 0).toLocaleString()}` },
+        { label: 'Export Value', value: `$${(totals.exportUsd || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` },
       ]} />
       <Section title="Local Sales">
         <Table
@@ -665,10 +665,10 @@ export function SalesLedgerView({ data, companyName, range }) {
             fmtDate(r.date),
             r.customerId ? <RefLink to={`/finance/statements?type=customer&id=${r.customerId}`}>{r.customer}</RefLink> : (r.customer || '—'),
             r.item || '—',
-            fmtMt(r.mt), fmtKg(r.mt * 1000), `$${(r.ratePerMt || 0).toLocaleString()}`, `$${((r.ratePerMt || 0) / 1000).toFixed(3)}`, fmtKg(r.bags), `$${(r.valueUsd || 0).toLocaleString()}`, r.status || '—',
+            fmtMt(r.mt), fmtKg(r.mt * 1000), `$${(r.ratePerMt || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, `$${((r.ratePerMt || 0) / 1000).toFixed(3)}`, fmtKg(r.bags), `$${(r.valueUsd || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, r.status || '—',
           ])}
           empty="No export orders."
-          totalRow={['', '', '', 'TOTAL', fmtMt(totals.exportMt), fmtKg(totals.exportMt * 1000), '', '', fmtKg(exp.reduce((s, r) => s + (parseFloat(r.bags) || 0), 0)), `$${(totals.exportUsd || 0).toLocaleString()}`, '']}
+          totalRow={['', '', '', 'TOTAL', fmtMt(totals.exportMt), fmtKg(totals.exportMt * 1000), '', '', fmtKg(exp.reduce((s, r) => s + (parseFloat(r.bags) || 0), 0)), `$${(totals.exportUsd || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, '']}
         />
       </Section>
       <Footer />

@@ -24,7 +24,7 @@ function fmtCur(n, currency = 'USD') {
   if (Math.abs(n) >= 1_000_000) return `${symbol}${(n / 1_000_000).toFixed(2)}M`;
   if (Math.abs(n) >= 100_000) return `${symbol}${(n / 100_000).toFixed(2)}L`;
   if (Math.abs(n) >= 1_000) return `${symbol}${(n / 1_000).toFixed(1)}K`;
-  return `${symbol}${Math.round(n).toLocaleString()}`;
+  return `${symbol}${(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 // PKR equivalent of any row — prefers locked base_amount_pkr, falls back
 // to amount × fx_rate, finally amount as-is for PKR rows. Falls back
@@ -401,7 +401,7 @@ export default function MoneyIn() {
                       <option value="">Select bank account...</option>
                       {bankAccounts.map(a => (
                         <option key={a.id} value={a.id}>
-                          {a.name} — {a.bankName || ''} ({a.currency || 'PKR'} {Math.round(parseFloat(a.currentBalance) || 0).toLocaleString()})
+                          {a.name} — {a.bankName || ''} ({a.currency || 'PKR'} {(parseFloat(a.currentBalance) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
                         </option>
                       ))}
                     </select>

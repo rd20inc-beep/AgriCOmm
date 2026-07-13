@@ -22,12 +22,12 @@ function curSymbol(cur) {
 }
 function fmtCur(v, cur) {
   const n = parseFloat(v) || 0;
-  return `${curSymbol(cur)}${Math.round(n).toLocaleString()}`;
+  return `${curSymbol(cur)}${(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 function fmtCurSigned(v, cur) {
   const n = parseFloat(v) || 0;
   const sign = n < 0 ? '-' : '';
-  return `${sign}${curSymbol(cur)}${Math.round(Math.abs(n)).toLocaleString()}`;
+  return `${sign}${curSymbol(cur)}${(Math.abs(n)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 function fmtCurCompact(v, cur) {
   const n = parseFloat(v) || 0;

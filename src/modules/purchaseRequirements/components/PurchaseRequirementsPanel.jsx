@@ -46,7 +46,7 @@ export default function PurchaseRequirementsPanel({ embedded = false, defaultTab
     catch (e) { addToast?.(e?.response?.data?.message || e.message || 'Action failed', 'error'); }
   }
 
-  const money = (v, c) => (v != null ? `${c || 'PKR'} ${Math.round(parseFloat(v)).toLocaleString()}` : '—');
+  const money = (v, c) => (v != null ? `${c || 'PKR'} ${(parseFloat(v)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—');
   const subtitle = masked ? 'Approved material purchase requests awaiting payment.' : 'Material shortages requiring purchase — approve to send to Finance.';
 
   const header = embedded ? (
