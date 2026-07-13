@@ -344,13 +344,13 @@ export default function QualityComparison() {
                   <div className="bg-amber-50 rounded-lg p-3">
                     <p className="text-xs text-amber-600 font-medium mb-1">Sample / Offered Price</p>
                     {selectedBatch.sampleAnalysis?.pricePerMT ? (
-                      <p className="text-lg font-bold text-amber-900">Rs {Math.round(selectedBatch.sampleAnalysis.pricePerMT).toLocaleString()} /MT</p>
+                      <p className="text-lg font-bold text-amber-900">Rs {(selectedBatch.sampleAnalysis.pricePerMT).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} /MT</p>
                     ) : <p className="text-sm text-gray-400">Not set</p>}
                   </div>
                   <div className="bg-blue-50 rounded-lg p-3">
                     <p className="text-xs text-blue-600 font-medium mb-1">Arrival / Agreed Price</p>
                     {selectedBatch.arrivalAnalysis?.pricePerMT ? (
-                      <p className="text-lg font-bold text-blue-900">Rs {Math.round(selectedBatch.arrivalAnalysis.pricePerMT).toLocaleString()} /MT</p>
+                      <p className="text-lg font-bold text-blue-900">Rs {(selectedBatch.arrivalAnalysis.pricePerMT).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} /MT</p>
                     ) : <p className="text-sm text-gray-400">Not set</p>}
                   </div>
                 </div>

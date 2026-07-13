@@ -399,7 +399,7 @@ async function assembleInvoice(id, includeAdmin = false) {
 // Mirrors the on-screen customer invoice; NO cost/margin.
 function renderInvoiceEmailHtml(data, company = {}) {
   const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const pkr = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
+  const pkr = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const d = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
   const { sale, items = [], dispatch = {}, totals = {} } = data;
   const coName = company.legal_name || company.name || 'AGRI COMMODITIES';

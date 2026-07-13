@@ -9,7 +9,7 @@ import SupplierPicker from '../../../components/SupplierPicker';
 import { printedBagsApi } from '../api/services';
 
 const PRINTING_OPTIONS = ['Plain', 'Buyer Logo', 'Buyer Logo + Text', 'Custom Design'];
-const rs = (n) => `Rs ${Math.round(parseFloat(n) || 0).toLocaleString()}`;
+const rs = (n) => `Rs ${(parseFloat(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 function StatusPill({ status }) {
   const map = {

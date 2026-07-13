@@ -13,7 +13,7 @@ function fmtPKR(n) {
   if (Math.abs(n) >= 10_000_000) return `Rs ${(n / 10_000_000).toFixed(2)}Cr`;
   if (Math.abs(n) >= 100_000) return `Rs ${(n / 100_000).toFixed(2)}L`;
   if (Math.abs(n) >= 1_000) return `Rs ${(n / 1_000).toFixed(0)}K`;
-  return `Rs ${Math.round(n).toLocaleString()}`;
+  return `Rs ${(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 export default function Cash() {
@@ -180,7 +180,7 @@ export default function Cash() {
           subtitle={`${accounts.length} accounts`} status={totalBalance > 0 ? 'good' : 'danger'} loading={loadingAccounts} />
         <FinanceKPI icon={Wallet} title="PKR Accounts" value={fmtPKR(pkrBalance)}
           subtitle={`${pkrAccounts.length} accounts`} status="info" loading={loadingAccounts} />
-        <FinanceKPI icon={Wallet} title="USD Accounts" value={`$${Math.round(usdBalance).toLocaleString()}`}
+        <FinanceKPI icon={Wallet} title="USD Accounts" value={`$${(usdBalance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
           subtitle={`${usdAccounts.length} accounts`} status="info" loading={loadingAccounts} />
         <FinanceKPI icon={Landmark} title="Active Accounts" value={String(accounts.filter(a => a.isActive !== false).length)}
           subtitle="In use" status="neutral" loading={loadingAccounts} />

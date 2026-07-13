@@ -6,7 +6,7 @@
 // No new dependency; browser print → Save as PDF.
 
 const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-const pkr = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
+const pkr = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const dt = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 const n0 = (v) => `${Math.round(parseFloat(v) || 0).toLocaleString()}`;
 const pct = (v) => `${(parseFloat(v) || 0).toFixed(1)}%`;

@@ -26,7 +26,7 @@ import QualityEditModal from '../components/QualityEditModal';
 import api from '../../../api/client';
 import { lotInventoryApi } from '../../../api/services';
 
-function fmtPKR(v) { return 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString(); }
+function fmtPKR(v) { return 'Rs ' + (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function fmtDate(d) { return d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'; }
 
 const TABS = [
@@ -743,7 +743,7 @@ export default function LotDetail() {
                 <div><p className="text-xs text-gray-500">Status</p><StatusBadge status={linkedBatch.status} /></div>
                 <div><p className="text-xs text-gray-500">Supplier</p><p className="text-sm font-medium"><PartyLink type="supplier" id={linkedBatch.supplierId} name={linkedBatch.supplierName} /></p></div>
                 {linkedBatch.arrivalAnalysis?.pricePerMT && (
-                  <div><p className="text-xs text-gray-500">Agreed Price</p><p className="text-sm font-bold text-gray-900">Rs {(Math.round((linkedBatch.arrivalAnalysis.pricePerMT / 1000) * 100) / 100).toLocaleString()} /kg</p></div>
+                  <div><p className="text-xs text-gray-500">Agreed Price</p><p className="text-sm font-bold text-gray-900">Rs {(Math.round((linkedBatch.arrivalAnalysis.pricePerMT / 1000) * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} /kg</p></div>
                 )}
               </div>
 
@@ -1542,7 +1542,7 @@ function PriceEditModal({ isOpen, onClose, lot, addToast, refetch }) {
     try {
       const res = await lotInventoryApi.setPurchaseRate(lot.id, newRate);
       const prop = res?.data?.propagation;
-      const parts = [`Price set to Rs ${Math.round(newRate).toLocaleString()}/kg`];
+      const parts = [`Price set to Rs ${(newRate).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/kg`];
       if (res?.data?.payableUpdated) parts.push('payable adjusted');
       if (prop?.affectedBatches > 0) parts.push(`${prop.affectedBatches} batch(es) re-costed`);
       if (prop?.cogsLockedSkipped) parts.push(`${prop.cogsLockedSkipped} locked left as-is`);
@@ -1569,7 +1569,7 @@ function PriceEditModal({ isOpen, onClose, lot, addToast, refetch }) {
         <div>
           <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">New Rate (Rs / kg)</label>
           <input type="number" step="0.01" value={rate} onChange={e => setRate(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm" autoFocus />
-          <p className="text-[11px] text-gray-400 mt-1">Current: Rs {currentRate.toLocaleString()}/kg</p>
+          <p className="text-[11px] text-gray-400 mt-1">Current: Rs {currentRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/kg</p>
         </div>
         <div className="bg-gray-50 rounded-lg p-3 space-y-1.5 text-sm">
           <div className="flex justify-between"><span className="text-gray-500">Received weight</span><span className="font-medium">{Math.round(receivedKg).toLocaleString()} kg</span></div>
@@ -1645,7 +1645,7 @@ function ReceivedQtyModal({ isOpen, onClose, lot, addToast, refetch }) {
           </div>
         )}
         <div className="bg-gray-50 rounded-lg p-3 space-y-1.5 text-sm">
-          <div className="flex justify-between"><span className="text-gray-500">Rate</span><span className="font-medium">Rs {rate.toLocaleString()}/kg</span></div>
+          <div className="flex justify-between"><span className="text-gray-500">Rate</span><span className="font-medium">Rs {rate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/kg</span></div>
           <div className="flex justify-between"><span className="text-gray-500">Add-on costs</span><span className="font-medium">{fmtPKR(addOns)}</span></div>
           <div className="flex justify-between border-t pt-1.5"><span className="text-gray-600 font-semibold">New bill</span><span className="font-bold text-gray-900">{fmtPKR(newBill)}</span></div>
         </div>
@@ -2441,7 +2441,7 @@ function TransferToExportDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
 
   const footer = (
     <div className="flex items-center justify-between gap-3">
-      <span className="text-sm text-gray-500">Value <span className="font-semibold text-gray-900">Rs {totalVal.toLocaleString()}</span></span>
+      <span className="text-sm text-gray-500">Value <span className="font-semibold text-gray-900">Rs {totalVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>
       <div className="flex gap-2">
         <button onClick={onClose} className="btn btn-secondary btn-sm">Cancel</button>
         <button onClick={handleSubmit} disabled={saving || !q || exceeds} className="btn btn-primary btn-sm">
@@ -2520,7 +2520,7 @@ function TransferToMillDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
 
   const footer = (
     <div className="flex items-center justify-between gap-3">
-      <span className="text-sm text-gray-500">Value <span className="font-semibold text-gray-900">Rs {totalVal.toLocaleString()}</span></span>
+      <span className="text-sm text-gray-500">Value <span className="font-semibold text-gray-900">Rs {totalVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>
       <div className="flex gap-2">
         <button onClick={onClose} className="btn btn-secondary btn-sm">Cancel</button>
         <button onClick={handleSubmit} disabled={saving || !q || exceeds} className="btn btn-primary btn-sm">

@@ -6,8 +6,8 @@ import { useReceivables, usePayables } from '../../../api/queries';
 
 function formatCurrency(value, currency = 'USD') {
   if (!value || isNaN(value)) return '$0';
-  if (currency === 'PKR') return 'Rs ' + Math.round(value).toLocaleString('en-PK');
-  return '$' + parseFloat(value).toLocaleString('en-US');
+  if (currency === 'PKR') return 'Rs ' + (value).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return '$' + parseFloat(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function getDaysOverdue(dueDate) {

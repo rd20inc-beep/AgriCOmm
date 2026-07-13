@@ -48,7 +48,7 @@ import MillExpenseDrawer from '../../../components/MillExpenseDrawer';
 // Chart data computed from real batch data below (no mock imports)
 
 function formatPKR(value) {
-  return 'Rs ' + Math.round(value).toLocaleString('en-PK');
+  return 'Rs ' + (value).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 // REMOVED: hardcoded MILL_PRICES_PKR — now uses useCommodityPrices() hook
@@ -1045,7 +1045,7 @@ export default function MillingDashboard() {
                     borderRadius: '8px',
                     fontSize: '12px',
                   }}
-                  formatter={(value) => [`Rs ${Math.round(value).toLocaleString()}`, undefined]}
+                  formatter={(value) => [`Rs ${(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, undefined]}
                 />
                 <Legend
                   verticalAlign="top"
@@ -1094,7 +1094,7 @@ export default function MillingDashboard() {
                     borderRadius: '8px',
                     fontSize: '12px',
                   }}
-                  formatter={(value) => [`Rs ${Math.round(value).toLocaleString()}`, undefined]}
+                  formatter={(value) => [`Rs ${(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, undefined]}
                 />
                 <Legend
                   verticalAlign="top"
@@ -1241,10 +1241,10 @@ export default function MillingDashboard() {
                   if (total <= 0) return null;
                   return (
                     <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs bg-white rounded-lg border border-amber-200 px-3 py-2">
-                      <span className="text-gray-500">Milling <b className="text-gray-800">PKR {Math.round(mill).toLocaleString()}</b></span>
-                      <span className="text-gray-500">Rental <b className="text-gray-800">PKR {Math.round(rent).toLocaleString()}</b></span>
-                      <span className="text-gray-500">Labour <b className="text-gray-800">PKR {Math.round(lab).toLocaleString()}</b></span>
-                      <span className="ml-auto text-emerald-700 font-bold">Est. Service Total PKR {Math.round(total).toLocaleString()}</span>
+                      <span className="text-gray-500">Milling <b className="text-gray-800">PKR {(mill).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></span>
+                      <span className="text-gray-500">Rental <b className="text-gray-800">PKR {(rent).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></span>
+                      <span className="text-gray-500">Labour <b className="text-gray-800">PKR {(lab).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></span>
+                      <span className="ml-auto text-emerald-700 font-bold">Est. Service Total PKR {(total).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                     </div>
                   );
                 })()}
@@ -1400,7 +1400,7 @@ export default function MillingDashboard() {
                             <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${CAT_COLOR[cat] || 'bg-gray-100 text-gray-600'}`}>{cat}</span>
                             <span className="min-w-0 flex-1">
                               <span className="block text-sm text-gray-800 truncate">{l.lotNo || l.itemName}</span>
-                              <span className="block text-[11px] text-gray-400 truncate">{l.variety || (l.type === 'finished' ? 'Finished' : 'Raw')} · {Math.round(avail).toLocaleString()} kg{costKg > 0 ? ` · Rs${costKg.toLocaleString()}/kg` : ''}</span>
+                              <span className="block text-[11px] text-gray-400 truncate">{l.variety || (l.type === 'finished' ? 'Finished' : 'Raw')} · {(avail).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg{costKg > 0 ? ` · Rs${costKg.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/kg` : ''}</span>
                             </span>
                           </button>
                           {sel && (
@@ -1423,7 +1423,7 @@ export default function MillingDashboard() {
               {blendTotals.mt > 0 && (
                 <div className="flex justify-between text-sm border-t border-blue-200 pt-2">
                   <span className="text-gray-600">Combined total</span>
-                  <span className="font-semibold">{Math.round(blendTotals.kg).toLocaleString()} kg · Rs {Math.round(blendTotals.cost).toLocaleString()} <span className="text-gray-400 font-normal">(≈Rs {Math.round(blendTotals.cost / (blendTotals.mt * 1000))}/kg)</span></span>
+                  <span className="font-semibold">{(blendTotals.kg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg · Rs {(blendTotals.cost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-gray-400 font-normal">(≈Rs {Math.round(blendTotals.cost / (blendTotals.mt * 1000))}/kg)</span></span>
                 </div>
               )}
               {/* Live recipe + processing type — yield is computed against the combined total above */}
@@ -1569,7 +1569,7 @@ export default function MillingDashboard() {
               {batchForm.millingType === 'service_milling' && batchForm.serviceMillingRatePerKg && (
                 <div className="flex justify-between border-t border-gray-200 mt-1 pt-1">
                   <span className="text-gray-500">Est. Milling Service</span>
-                  <span className="font-bold text-emerald-700">PKR {Math.round(parseFloat(batchForm.serviceMillingRatePerKg) * (parseFloat(batchForm.expectedOutputKg) || parseFloat(batchForm.rawQtyKg) || 0)).toLocaleString()}</span>
+                  <span className="font-bold text-emerald-700">PKR {(parseFloat(batchForm.serviceMillingRatePerKg) * (parseFloat(batchForm.expectedOutputKg) || parseFloat(batchForm.rawQtyKg) || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
               )}
             </div>

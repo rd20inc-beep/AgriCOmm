@@ -8,13 +8,13 @@ import {
 import { Users, TrendingUp, Wallet, HandCoins, AlertTriangle, FileText } from 'lucide-react';
 import { reportingApi } from '../api/services';
 
-const pkr = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
+const pkr = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const pkrShort = (v) => {
   const n = Math.abs(parseFloat(v) || 0);
   if (n >= 1e7) return `Rs ${(v / 1e7).toFixed(1)}Cr`;
   if (n >= 1e5) return `Rs ${(v / 1e5).toFixed(1)}L`;
   if (n >= 1e3) return `Rs ${Math.round(v / 1e3)}K`;
-  return `Rs ${Math.round(v)}`;
+  return `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 const monthShort = (p) => { if (!/^\d{4}-\d{2}$/.test(p || '')) return p; const d = new Date(Date.UTC(+p.slice(0, 4), +p.slice(5, 7) - 1, 1)); return d.toLocaleDateString('en-GB', { month: 'short', year: '2-digit', timeZone: 'UTC' }); };
 const ROLE_COLORS = ['#2563eb', '#059669', '#d97706', '#7c3aed', '#dc2626', '#0891b2', '#65a30d', '#db2777'];

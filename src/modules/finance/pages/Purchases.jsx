@@ -19,9 +19,9 @@ function fmtPKR(n) {
   if (Math.abs(v) >= 1_00_00_000) return `Rs ${(v / 1_00_00_000).toFixed(2)}Cr`;
   if (Math.abs(v) >= 1_00_000) return `Rs ${(v / 1_00_000).toFixed(2)}L`;
   if (Math.abs(v) >= 1_000) return `Rs ${(v / 1_000).toFixed(0)}K`;
-  return `Rs ${Math.round(v).toLocaleString()}`;
+  return `Rs ${(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
-const fmtFull = (n) => `Rs ${Math.round(parseFloat(n) || 0).toLocaleString()}`;
+const fmtFull = (n) => `Rs ${(parseFloat(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const methodLabel = (m) => ({ cash: 'Cash', bank_transfer: 'Bank Transfer', bank: 'Bank Transfer', cheque: 'Cheque', lc: 'Letter of Credit', online: 'Online' }[m] || (m ? String(m).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '—'));
 
 const SOURCES = [
@@ -489,7 +489,7 @@ export default function Purchases() {
                 due_date: form.dueDate || null,
                 notes: form.notes || null,
               });
-              addToast(`Payment of Rs ${Number(form.amount).toLocaleString()} recorded`, 'success');
+              addToast(`Payment of Rs ${Number(form.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} recorded`, 'success');
               setPayTarget(null);
             } catch (err) {
               addToast(err?.message || 'Failed to record payment', 'error');
@@ -639,7 +639,7 @@ function PayPurchaseDrawer({ purchase, bankAccounts, isPending, onClose, onSubmi
             </div>
             <div className="flex justify-between">
               <span className="text-gray-500">Total</span>
-              <span className="font-medium text-gray-900">Rs {Math.round(outstanding).toLocaleString()}</span>
+              <span className="font-medium text-gray-900">Rs {(outstanding).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-500">Current status</span>
@@ -678,7 +678,7 @@ function PayPurchaseDrawer({ purchase, bankAccounts, isPending, onClose, onSubmi
                 <option value="">Select a bank account…</option>
                 {bankAccounts.map(a => (
                   <option key={a.id} value={a.id}>
-                    {a.name} · {a.bankName || '—'} ({a.currency || 'PKR'} {Math.round(parseFloat(a.currentBalance) || 0).toLocaleString()})
+                    {a.name} · {a.bankName || '—'} ({a.currency || 'PKR'} {(parseFloat(a.currentBalance) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
                   </option>
                 ))}
               </select>

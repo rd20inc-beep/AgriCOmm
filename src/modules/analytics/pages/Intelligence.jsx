@@ -36,8 +36,8 @@ function ScoreBar({ score, label, maxScore = 100 }) {
 
 function formatCurrency(v, currency = 'USD') {
   if (!v && v !== 0) return '—';
-  if (currency === 'PKR') return 'Rs ' + Math.round(v).toLocaleString();
-  return '$' + parseFloat(v).toLocaleString();
+  if (currency === 'PKR') return 'Rs ' + (v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return '$' + parseFloat(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function ProfitabilityTab() {
@@ -126,7 +126,7 @@ function ProfitabilityTab() {
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartData}><CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                   <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#94a3b8' }} /><YAxis tick={{ fontSize: 11 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
-                  <Tooltip formatter={v => [`$${v.toLocaleString()}`, 'Profit']} /><Bar dataKey="profit" fill="#3b82f6" radius={[4,4,0,0]} />
+                  <Tooltip formatter={v => [`$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Profit']} /><Bar dataKey="profit" fill="#3b82f6" radius={[4,4,0,0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : <div className="flex items-center justify-center h-full text-sm text-gray-400">No cost data yet</div>}

@@ -4,7 +4,7 @@ import SlideDrawer from '../../../components/SlideDrawer';
 import { serviceMillingApi } from '../api/services';
 
 const num = (v) => parseFloat(v) || 0;
-const pkr = (v) => `PKR ${Math.round(num(v)).toLocaleString()}`;
+const pkr = (v) => `PKR ${(num(v)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const kg0 = (v) => `${Math.round(num(v)).toLocaleString()} kg`;
 const bags0 = (v) => `${Math.round(num(v)).toLocaleString()}`;

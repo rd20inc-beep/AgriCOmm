@@ -8,7 +8,7 @@ import { useAuth } from '../../../context/AuthContext';
 import { CreateInvoiceDrawer, RecordPaymentDrawer } from '../components/ServiceInvoiceDrawers';
 
 const num = (v) => parseFloat(v) || 0;
-const pkr = (v) => `PKR ${Math.round(num(v)).toLocaleString()}`;
+const pkr = (v) => `PKR ${(num(v)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const kg = (v) => `${Math.round(num(v)).toLocaleString()} kg`;
 
 const LOT_STATUS_STYLE = {

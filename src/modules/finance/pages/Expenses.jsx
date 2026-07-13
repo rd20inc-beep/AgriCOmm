@@ -19,7 +19,7 @@ function fmtPKR(n) {
   if (Math.abs(v) >= 10_000_000) return `Rs ${(v / 10_000_000).toFixed(2)}Cr`;
   if (Math.abs(v) >= 100_000) return `Rs ${(v / 100_000).toFixed(2)}L`;
   if (Math.abs(v) >= 1_000) return `Rs ${(v / 1_000).toFixed(0)}K`;
-  return `Rs ${Math.round(v).toLocaleString()}`;
+  return `Rs ${(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 function unwrap(res, key) {
   const d = res?.data?.data || res?.data || res;
@@ -300,7 +300,7 @@ export default function Expenses() {
     const remaining = pe ? remainingOf(pe) : 0;
     const payNum = parseFloat(payForm.amount) || 0;
     if (!(payNum > 0)) { addToast('Enter a payment amount', 'error'); return; }
-    if (payNum > remaining + 0.01) { addToast(`Amount exceeds the outstanding (Rs ${remaining.toLocaleString()})`, 'error'); return; }
+    if (payNum > remaining + 0.01) { addToast(`Amount exceeds the outstanding (Rs ${remaining.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`, 'error'); return; }
     try {
       await payMut.mutateAsync({ id: payId, data: payForm });
       addToast(payNum >= remaining - 0.01 ? 'Payment recorded — fully paid' : 'Partial payment recorded', 'success');
@@ -435,7 +435,7 @@ export default function Expenses() {
             <span className="text-sm font-medium text-gray-900 text-right">{value || '—'}</span>
           </div>
         );
-        const amt = e.currency === 'PKR' ? fmtPKR(e.amount) : `${e.currency} ${Number(e.amount).toLocaleString()}`;
+        const amt = e.currency === 'PKR' ? fmtPKR(e.amount) : `${e.currency} ${Number(e.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
         return (
           <SlideDrawer open={!!detailExpense} onClose={() => setDetailExpense(null)}
             title={e.expense_no || 'Expense'} subtitle={e.created_by_name ? `Created by ${e.created_by_name}` : undefined}
@@ -485,7 +485,7 @@ export default function Expenses() {
           and the other pay/receive flows), not a centered dialog */}
       {payId && (() => {
         const pe = filtered.find((x) => String(x.id) === String(payId));
-        const amt = pe ? (pe.currency === 'PKR' ? fmtPKR(pe.amount) : `${pe.currency} ${Number(pe.amount).toLocaleString()}`) : '';
+        const amt = pe ? (pe.currency === 'PKR' ? fmtPKR(pe.amount) : `${pe.currency} ${Number(pe.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`) : '';
         const remaining = pe ? remainingOf(pe) : 0;
         const alreadyPaid = pe ? Math.round(parseFloat(pe.paid_pkr) || 0) : 0;
         const payNum = parseFloat(payForm.amount) || 0;
@@ -504,14 +504,14 @@ export default function Expenses() {
                 <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-center">
                   <p className="text-xs text-gray-500">Paying{pe.vendor_name || pe.supplier_name_joined ? ` ${pe.vendor_name || pe.supplier_name_joined}` : ''}</p>
                   <p className="text-lg font-semibold text-gray-900 tabular-nums">{amt}</p>
-                  {alreadyPaid > 0 && <p className="text-[11px] text-gray-400">Rs {alreadyPaid.toLocaleString()} paid · Rs {remaining.toLocaleString()} outstanding</p>}
+                  {alreadyPaid > 0 && <p className="text-[11px] text-gray-400">Rs {alreadyPaid.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} paid · Rs {remaining.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} outstanding</p>}
                 </div>
               )}
 
               {/* Amount — defaults to the outstanding; enter a smaller figure for
                   a partial / installment payment. */}
               <div>
-                <label className="text-xs text-gray-500 block mb-1">Amount (PKR){remaining > 0 ? ` · outstanding Rs ${remaining.toLocaleString()}` : ''}</label>
+                <label className="text-xs text-gray-500 block mb-1">Amount (PKR){remaining > 0 ? ` · outstanding Rs ${remaining.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''}</label>
                 <input type="number" step="0.01" min="0" value={payForm.amount}
                   onChange={e => setPayForm(p => ({ ...p, amount: e.target.value }))}
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
@@ -523,7 +523,7 @@ export default function Expenses() {
                   <button type="button" onClick={() => setPayForm(p => ({ ...p, amount: '' }))}
                     className="text-xs px-3 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">Custom</button>
                 </div>
-                {overPay && <p className="text-[11px] text-red-500 mt-1">Amount exceeds the outstanding (Rs {remaining.toLocaleString()}).</p>}
+                {overPay && <p className="text-[11px] text-red-500 mt-1">Amount exceeds the outstanding (Rs {remaining.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}).</p>}
               </div>
 
               {/* Payment Method — first; it drives whether an account is needed
@@ -565,7 +565,7 @@ export default function Expenses() {
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                     <option value="">Select bank account…</option>
                     {(bankAccountsList || []).map(b => (
-                      <option key={b.id} value={b.id}>{b.name} — {b.bankName || ''} ({b.currency || 'PKR'} {Math.round(parseFloat(b.currentBalance) || 0).toLocaleString()})</option>
+                      <option key={b.id} value={b.id}>{b.name} — {b.bankName || ''} ({b.currency || 'PKR'} {(parseFloat(b.currentBalance) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</option>
                     ))}
                   </select>
                 </div>
@@ -981,7 +981,7 @@ function ExpenseTable({ loading, rows, onPay, onView }) {
                 </span>
               </td>
               <td className="py-2.5 px-4 text-right font-bold text-gray-900">
-                {e.currency === 'PKR' ? fmtPKR(e.amount) : `${e.currency} ${Number(e.amount).toLocaleString()}`}
+                {e.currency === 'PKR' ? fmtPKR(e.amount) : `${e.currency} ${Number(e.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               </td>
               <td className="py-2.5 px-4 text-xs">
                 {e.batch_no ? <span className="text-blue-600 font-medium">{e.batch_no}</span>

@@ -88,7 +88,7 @@ function subtypeLabel(s) {
   return opt ? opt.label.trim() : s;
 }
 
-function fmtPKR(v) { return 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString(); }
+function fmtPKR(v) { return 'Rs ' + (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
 // Heuristic mirroring the backend deriveProductCode — strings that
 // look like auto-generated SKUs (PRD-DATETIME-…, PROD-…, long-digit IDs)
@@ -1272,7 +1272,7 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
                   <span><span className="text-gray-400">≈</span> <span className="font-medium text-gray-900">{qtyEquiv.katta.toLocaleString()}</span> bags ({bagWt.toFixed(0)} kg)</span>
                   <span><span className="text-gray-400">·</span> <span className="font-medium text-gray-900">{qtyEquiv.maund.toLocaleString()}</span> maund</span>
                   <span><span className="text-gray-400">·</span> <span className="font-medium text-gray-900">{qtyEquiv.ton}</span> MT</span>
-                  <span className="ml-auto"><span className="text-gray-400">Rate</span> Rs {rateEquiv.perKg}/kg <span className="text-gray-300 mx-1">·</span> Rs {rateEquiv.perKatta.toLocaleString()}/bag</span>
+                  <span className="ml-auto"><span className="text-gray-400">Rate</span> Rs {rateEquiv.perKg}/kg <span className="text-gray-300 mx-1">·</span> Rs {rateEquiv.perKatta.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/bag</span>
                 </div>
               )}
 
@@ -1294,15 +1294,15 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
                 <div className="bg-gray-50 rounded-lg p-4 grid grid-cols-3 gap-4">
                   <div>
                     <p className="text-[10px] text-gray-500 uppercase tracking-wide">Purchase</p>
-                    <p className="text-base font-medium text-gray-900">Rs {purchaseAmt.toLocaleString()}</p>
+                    <p className="text-base font-medium text-gray-900">Rs {purchaseAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                   </div>
                   <div>
                     <p className="text-[10px] text-gray-500 uppercase tracking-wide">+ Costs</p>
-                    <p className="text-base font-medium text-gray-900">Rs {directCosts.toLocaleString()}</p>
+                    <p className="text-base font-medium text-gray-900">Rs {directCosts.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                   </div>
                   <div>
                     <p className="text-[10px] text-gray-500 uppercase tracking-wide">Landed Total</p>
-                    <p className="text-base font-medium text-emerald-700">Rs {landedTotal.toLocaleString()} <span className="text-[11px] text-gray-400 font-normal">· Rs {landedPerKg.toFixed(2)}/kg</span></p>
+                    <p className="text-base font-medium text-emerald-700">Rs {landedTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-[11px] text-gray-400 font-normal">· Rs {landedPerKg.toFixed(2)}/kg</span></p>
                   </div>
                 </div>
               )}
@@ -1348,11 +1348,11 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
                   <div className="flex justify-between"><dt className="text-gray-500">Supplier</dt><dd className="font-medium text-gray-900 truncate ml-2">{(suppliers.find(s => String(s.id) === String(form.supplier_id)))?.name || '—'}</dd></div>
                   <div className="flex justify-between"><dt className="text-gray-500">Quantity</dt><dd className="font-medium text-gray-900">{kgEntered.toLocaleString()} kg{bagsEntered ? ` · ${bagsEntered} bags` : ''}</dd></div>
                   <div className="flex justify-between"><dt className="text-gray-500">Rate</dt><dd className="font-medium text-gray-900">Rs {rateEquiv.perKg}/kg</dd></div>
-                  <div className="flex justify-between"><dt className="text-gray-500">Purchase</dt><dd className="font-medium text-gray-900">Rs {purchaseAmt.toLocaleString()}</dd></div>
-                  <div className="flex justify-between"><dt className="text-gray-500">Add'l Costs</dt><dd className="font-medium text-gray-900">Rs {directCosts.toLocaleString()}</dd></div>
+                  <div className="flex justify-between"><dt className="text-gray-500">Purchase</dt><dd className="font-medium text-gray-900">Rs {purchaseAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</dd></div>
+                  <div className="flex justify-between"><dt className="text-gray-500">Add'l Costs</dt><dd className="font-medium text-gray-900">Rs {directCosts.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</dd></div>
                   <div className="flex justify-between border-t border-gray-100 pt-2 col-span-2 mt-1">
                     <dt className="text-gray-900 font-medium">Landed Total</dt>
-                    <dd className="font-semibold text-emerald-700 text-base">Rs {landedTotal.toLocaleString()} <span className="text-xs text-gray-400 font-normal ml-1">Rs {landedPerKg.toFixed(2)}/kg</span></dd>
+                    <dd className="font-semibold text-emerald-700 text-base">Rs {landedTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-xs text-gray-400 font-normal ml-1">Rs {landedPerKg.toFixed(2)}/kg</span></dd>
                   </div>
                 </dl>
               </div>
@@ -1365,7 +1365,7 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
           <div className="text-xs text-gray-500 flex items-center gap-4 flex-wrap">
             {kgEntered > 0 && <span><span className="font-medium text-gray-900">{kgEntered.toLocaleString()}</span> kg</span>}
             {bagsEntered > 0 && <span><span className="font-medium text-gray-900">{bagsEntered}</span> bags</span>}
-            {landedTotal > 0 && <span><span className="text-gray-400">Landed</span> <span className="font-medium text-emerald-700">Rs {landedTotal.toLocaleString()}</span></span>}
+            {landedTotal > 0 && <span><span className="text-gray-400">Landed</span> <span className="font-medium text-emerald-700">Rs {landedTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>}
             {createdSoFar.count > 0 && (
               <span className="text-emerald-700 font-medium border-l border-gray-200 pl-3">
                 <Check size={11} className="inline mr-0.5" />

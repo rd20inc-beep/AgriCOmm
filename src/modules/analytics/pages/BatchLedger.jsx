@@ -10,7 +10,7 @@ import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printBatchLedger } from '../utils/ledgerExport';
 
-const pkr = (v) => (v == null ? '—' : `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`);
+const pkr = (v) => (v == null ? '—' : `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 const kg = (v) => `${Math.round(parseFloat(v) || 0).toLocaleString()} kg`;
 const mt = (v) => `${(parseFloat(v) || 0).toFixed(2)} MT`;
 const dt = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';

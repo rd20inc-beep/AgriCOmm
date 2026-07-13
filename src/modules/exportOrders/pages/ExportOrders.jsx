@@ -76,7 +76,7 @@ export default function ExportOrders() {
     });
 
   const formatCurrency = (value) => {
-    return '$' + value.toLocaleString();
+    return '$' + value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
 
   const getAdvanceStatus = (order) => {
@@ -320,7 +320,7 @@ export default function ExportOrders() {
           onClose={() => setEmailOrder(null)}
           defaultTo={(customersList.find(c => c.id === emailOrder.customerId) || {}).email || ''}
           defaultSubject={`Proforma Invoice - PI-${emailOrder.id.replace('EX-','')}`}
-          defaultBody={`Dear Customer,\n\nPlease find attached the Proforma Invoice for Order ${emailOrder.id}.\n\nProduct: ${emailOrder.productName}\nQuantity: ${emailOrder.qtyMT} MT\nContract Value: $${emailOrder.contractValue.toLocaleString()}\n\nBest regards,\nAGRI COMMODITIES`}
+          defaultBody={`Dear Customer,\n\nPlease find attached the Proforma Invoice for Order ${emailOrder.id}.\n\nProduct: ${emailOrder.productName}\nQuantity: ${emailOrder.qtyMT} MT\nContract Value: $${emailOrder.contractValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n\nBest regards,\nAGRI COMMODITIES`}
           attachmentLabel={`PI-${emailOrder.id.replace('EX-','')}.pdf`}
         />
       )}

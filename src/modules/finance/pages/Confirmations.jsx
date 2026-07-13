@@ -25,11 +25,11 @@ import StatusBadge from '../../../components/StatusBadge';
 import EmailComposer from '../../../components/EmailComposer';
 
 function formatCurrency(value) {
-  return '$' + value.toLocaleString('en-US');
+  return '$' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function fmtPKR(value) {
-  return 'Rs ' + Math.round(parseFloat(value) || 0).toLocaleString('en-PK');
+  return 'Rs ' + (parseFloat(value) || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function daysSince(dateStr) {

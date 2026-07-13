@@ -416,7 +416,7 @@ export default function MillHomeDashboard() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
           <div className="rounded-lg border border-amber-100 bg-amber-50/40 p-3">
             <p className="text-[11px] uppercase tracking-wide text-amber-700 font-medium">Stock Value</p>
-            <p className="text-lg font-bold text-gray-900 mt-0.5">Rs {Math.round(Number(storeSummary?.stock_value || 0)).toLocaleString('en-PK')}</p>
+            <p className="text-lg font-bold text-gray-900 mt-0.5">Rs {(Number(storeSummary?.stock_value || 0)).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
             <p className="text-[11px] text-gray-500 mt-0.5">across {storeSummary?.total_items || 0} items</p>
           </div>
           <div className={`rounded-lg border p-3 ${(storeSummary?.low_stock_items || 0) > 0 ? 'border-red-200 bg-red-50/40' : 'border-emerald-100 bg-emerald-50/40'}`}>
@@ -496,7 +496,7 @@ export default function MillHomeDashboard() {
                       <p className="text-gray-800 font-medium truncate">{name}</p>
                       <p className="text-[11px] text-gray-400 truncate">
                         {qty} {unit}
-                        {rate > 0 ? ` @ Rs ${Math.round(rate).toLocaleString('en-PK')}` : ''}
+                        {rate > 0 ? ` @ Rs ${(rate).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''}
                         {category ? ` · ${category}` : ''}
                         {ref ? ` · ${ref}` : ''}
                         {refType && refType !== 'milling' ? ` (${refType})` : ''}
@@ -504,7 +504,7 @@ export default function MillHomeDashboard() {
                       </p>
                     </div>
                     <span className={`tabular-nums flex-shrink-0 ${cost > 0 ? 'text-gray-700 font-medium' : 'text-gray-300'}`}>
-                      {cost > 0 ? `Rs ${cost.toLocaleString('en-PK')}` : 'no cost'}
+                      {cost > 0 ? `Rs ${cost.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'no cost'}
                     </span>
                   </div>
                 );

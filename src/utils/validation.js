@@ -69,7 +69,7 @@ export function paymentNotExceedOutstanding(paymentAmount, outstanding) {
   const out = parseFloat(outstanding);
   if (isNaN(payment) || isNaN(out)) return null;
   if (payment > out + 0.01) {
-    return `Payment ($${payment.toLocaleString()}) exceeds outstanding amount ($${out.toLocaleString()})`;
+    return `Payment ($${payment.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) exceeds outstanding amount ($${out.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`;
   }
   return null;
 }
@@ -103,7 +103,7 @@ export function contractValueConsistent(qty, pricePerMT, contractValue) {
   const actual = parseFloat(contractValue);
   if (isNaN(expected) || isNaN(actual)) return null;
   if (Math.abs(expected - actual) > 1) {
-    return `Contract value ($${actual.toLocaleString()}) doesn't match Qty (${qty}) x Price ($${pricePerMT}/MT) = $${expected.toLocaleString()}`;
+    return `Contract value ($${actual.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) doesn't match Qty (${qty}) x Price ($${pricePerMT}/MT) = $${expected.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }
   return null;
 }

@@ -200,7 +200,7 @@ export default function CreateExportOrder() {
     return { estimatedRawQty, bagsCost, riceCost, loadingCost, clearingCost, freightCost, totalEstimatedCost, contractValue, estimatedGrossProfit, marginPct, advPct, advanceExpected, balanceExpected };
   }, [qtyMT, pricePerMT, form.incoterm, form.receivingMode, form.advancePct, contractValue]);
 
-  const fmtUSD = (v) => '$' + Math.round(v).toLocaleString();
+  const fmtUSD = (v) => '$' + (v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   // ─── Wizard step ───
   // 1 = Buyer & Items, 2 = Terms & Packing, 3 = Specs & Review
@@ -1113,7 +1113,7 @@ export default function CreateExportOrder() {
                     </div>
                     <div className="form-group">
                       <label className="form-label text-xs">Line Total</label>
-                      <div className="form-input bg-gray-100 text-sm py-1.5 text-gray-700 font-medium">Rs {Math.round(lineTotal).toLocaleString()}</div>
+                      <div className="form-input bg-gray-100 text-sm py-1.5 text-gray-700 font-medium">Rs {(lineTotal).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
                     </div>
                   </div>
                 </div>

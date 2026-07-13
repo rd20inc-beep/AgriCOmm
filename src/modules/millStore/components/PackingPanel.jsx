@@ -290,7 +290,7 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
                         </div>
                         <div className="mt-1.5 text-xs text-gray-500 flex flex-wrap gap-x-3">
                           <span>In stock: <b className={masterQty > masterAvail ? 'text-red-600' : ''}>{masterAvail}</b></span>
-                          {num(masterSel?.avg_cost_per_unit) > 0 && <span>Cost: <b>Rs {Math.round(masterCost).toLocaleString()}</b></span>}
+                          {num(masterSel?.avg_cost_per_unit) > 0 && <span>Cost: <b>Rs {(masterCost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></span>}
                         </div>
                         {masterShort && <p className="text-xs text-amber-600 mt-1">Short {masterQty - masterAvail} — packing allowed, purchase required.</p>}
                       </>
@@ -318,7 +318,7 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
                         </div>
                         <div className="mt-1.5 text-xs text-gray-500 flex flex-wrap gap-x-3">
                           <span>In stock: <b className={polyQty > polyAvail ? 'text-red-600' : ''}>{polyAvail}</b></span>
-                          {num(polySel?.avg_cost_per_unit) > 0 && <span>Cost: <b>Rs {Math.round(polyCost).toLocaleString()}</b></span>}
+                          {num(polySel?.avg_cost_per_unit) > 0 && <span>Cost: <b>Rs {(polyCost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></span>}
                         </div>
                         {polyShort && <p className="text-xs text-amber-600 mt-1">Short {polyQty - polyAvail} — packing allowed, purchase required.</p>}
                       </>

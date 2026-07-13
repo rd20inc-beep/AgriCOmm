@@ -4,7 +4,7 @@ import SlideDrawer from '../../../components/SlideDrawer';
 import { useBankAccounts, useCreateFundTransfer } from '../../../api/queries';
 
 const TODAY = () => new Date().toISOString().slice(0, 10);
-const fmt = (n) => `Rs ${Math.round(parseFloat(n) || 0).toLocaleString()}`;
+const fmt = (n) => `Rs ${(parseFloat(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 // Reusable Head Office ⇄ Mill money-transfer drawer. Moves cash between two real
 // accounts AND records the inter-company GL; used from both Finance (Cash) and

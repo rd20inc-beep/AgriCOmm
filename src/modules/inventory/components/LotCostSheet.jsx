@@ -3,7 +3,7 @@ import { Printer } from 'lucide-react';
 import { allEquivalents, allRateEquivalents } from '../../../utils/unitConversion';
 import PartyLink from '../../../shared/components/PartyLink';
 
-function fmtPKR(v) { return 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString('en-PK'); }
+function fmtPKR(v) { return 'Rs ' + (parseFloat(v) || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function fmtDate(d) { return d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'; }
 
 /**

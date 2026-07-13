@@ -8,7 +8,7 @@ import {
 import KPICard from '../../../../components/KPICard';
 
 const fmt = (v) => '$' + (parseFloat(v) || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
-const fmtPKR = (v) => 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString('en-PK');
+const fmtPKR = (v) => 'Rs ' + (parseFloat(v) || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function KPICardsRow({
   activeOrders,

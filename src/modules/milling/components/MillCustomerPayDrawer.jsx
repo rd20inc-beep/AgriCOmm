@@ -4,7 +4,7 @@ import SlideDrawer from '../../../components/SlideDrawer';
 import { useApp } from '../../../context/AppContext';
 import { useLocalSales, useAcceptLocalSalePayment } from '../../../api/queries';
 
-const PKR = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
+const PKR = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtDate = (d) => { const dt = new Date(d); return Number.isNaN(dt.getTime()) ? '' : dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }); };
 
 // Record a receipt from a local customer AGAINST a specific invoice (local

@@ -16,9 +16,9 @@ function fmtPKR(n) {
   if (Math.abs(v) >= 10_000_000) return `Rs ${(v / 10_000_000).toFixed(2)}Cr`;
   if (Math.abs(v) >= 100_000) return `Rs ${(v / 100_000).toFixed(2)}L`;
   if (Math.abs(v) >= 1_000) return `Rs ${(v / 1_000).toFixed(0)}K`;
-  return `Rs ${Math.round(v).toLocaleString()}`;
+  return `Rs ${(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
-const fmtFull = (n) => `Rs ${Math.round(parseFloat(n) || 0).toLocaleString()}`;
+const fmtFull = (n) => `Rs ${(parseFloat(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtDate = (s) => s ? new Date(s).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '—';
 const methodLabel = (m) => ({ cash: 'Cash', bank_transfer: 'Bank Transfer', cheque: 'Cheque', lc: 'Letter of Credit', online: 'Online' }[m] || (m ? m.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '—'));
 

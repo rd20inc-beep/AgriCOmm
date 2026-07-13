@@ -70,7 +70,7 @@ export function printLedger({ companyName = 'AGRI COMMODITIES', title, subtitle,
 // activity), A4. data = the /reporting/lot-ledger/:id payload.
 export function printLotLedger(data, { companyName = 'AGRI COMMODITIES', generatedBy } = {}) {
   const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const pkr = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
+  const pkr = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const kg = (v) => `${Math.round(parseFloat(v) || 0).toLocaleString()} kg`;
   const dd = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
   const { lot = {}, quantitySummary: qs = {}, financialSummary: fs = {}, millingHistory = [], outputs = [], directSales = [], processedSales = [], events = [], exportUse = {} } = data;
@@ -144,7 +144,7 @@ export function printLotLedger(data, { companyName = 'AGRI COMMODITIES', generat
 // /reporting/supplier-ledger/:id payload.
 export function printSupplierLedger(data, { companyName = 'AGRI COMMODITIES', generatedBy } = {}) {
   const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const pkr = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
+  const pkr = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const kg = (v) => `${Math.round(parseFloat(v) || 0).toLocaleString()} kg`;
   const dd = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
   const { supplier: sup = {}, summary: sm = {}, lots = [] } = data;
@@ -192,7 +192,7 @@ export function printSupplierLedger(data, { companyName = 'AGRI COMMODITIES', ge
 // per-lot rows, A4. data = the /reporting/rice-type-ledger/:id payload.
 export function printRiceTypeLedger(data, { companyName = 'AGRI COMMODITIES', generatedBy } = {}) {
   const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const pkr = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
+  const pkr = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const kg = (v) => `${Math.round(parseFloat(v) || 0).toLocaleString()} kg`;
   const dd = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
   const { riceType: rt = {}, summary: sm = {}, bySupplier = [], byWarehouse = [], lots = [] } = data;
@@ -244,7 +244,7 @@ export function printRiceTypeLedger(data, { companyName = 'AGRI COMMODITIES', ge
 // A4. data = the /reporting/warehouse-ledger/:id payload.
 export function printWarehouseLedger(data, { companyName = 'AGRI COMMODITIES', generatedBy } = {}) {
   const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const pkr = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
+  const pkr = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const kg = (v) => `${Math.round(parseFloat(v) || 0).toLocaleString()} kg`;
   const { warehouse: wh = {}, summary: sm = {}, byRiceType = [], lots = [] } = data;
   const now = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -334,7 +334,7 @@ export function printProcessingLossLedger(data, { companyName = 'AGRI COMMODITIE
 // A4. data = the /reporting/finished-goods-ledger payload ({ rows, grand }).
 export function printFinishedGoodsLedger(data, { companyName = 'AGRI COMMODITIES', generatedBy, filterText } = {}) {
   const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const pkr = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
+  const pkr = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const kg = (v) => `${Math.round(parseFloat(v) || 0).toLocaleString()} kg`;
   const { rows = [], grand = {} } = data || {};
   const now = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -372,7 +372,7 @@ export function printFinishedGoodsLedger(data, { companyName = 'AGRI COMMODITIES
 // A4. data = the /reporting/inventory-ledger payload ({ rows, totals }).
 export function printInventoryMovementLedger(data, { companyName = 'AGRI COMMODITIES', generatedBy, filterText } = {}) {
   const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const pkr = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
+  const pkr = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const n0 = (v) => Math.round(parseFloat(v) || 0).toLocaleString();
   const dd = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
   const { rows = [], totals = {} } = data || {};
@@ -410,7 +410,7 @@ export function printInventoryMovementLedger(data, { companyName = 'AGRI COMMODI
 // financials), A4. data = the /reporting/batch-ledger/:id payload.
 export function printBatchLedger(data, { companyName = 'AGRI COMMODITIES', generatedBy } = {}) {
   const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const pkr = (v) => `Rs ${Math.round(parseFloat(v) || 0).toLocaleString()}`;
+  const pkr = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const kg = (v) => `${Math.round(parseFloat(v) || 0).toLocaleString()} kg`;
   const mt = (v) => `${(parseFloat(v) || 0).toFixed(2)} MT`;
   const dd = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';

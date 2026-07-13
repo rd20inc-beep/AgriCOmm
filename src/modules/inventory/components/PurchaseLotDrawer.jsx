@@ -450,9 +450,9 @@ export default function PurchaseLotDrawer({
               <span>
                 <span className="font-medium text-gray-700">{Math.round(weightKg).toLocaleString('en-PK')} kg</span>
                 {' × '}
-                <span className="font-medium text-gray-700">Rs {ratePerKg.toLocaleString('en-PK')}/kg</span>
+                <span className="font-medium text-gray-700">Rs {ratePerKg.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/kg</span>
                 {' = '}
-                <span className="font-semibold text-emerald-700">Rs {Math.round(totalValue).toLocaleString('en-PK')}</span>
+                <span className="font-semibold text-emerald-700">Rs {(totalValue).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </span>
             )}
           </div>
@@ -730,7 +730,7 @@ export default function PurchaseLotDrawer({
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
           {pricePerMT > 0 && (
-            <p className="text-[11px] text-gray-500 mt-1">≈ Rs {pricePerMT.toLocaleString('en-PK')}/MT</p>
+            <p className="text-[11px] text-gray-500 mt-1">≈ Rs {pricePerMT.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/MT</p>
           )}
         </div>
 

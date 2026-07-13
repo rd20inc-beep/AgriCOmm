@@ -5,7 +5,7 @@ import SlideDrawer from '../../../components/SlideDrawer';
 import { useApp } from '../../../context/AppContext';
 import { useAddPurchaseToLot } from '../../../api/queries';
 
-const fmtPKR = (v) => 'Rs ' + (Math.round((parseFloat(v) || 0) * 100) / 100).toLocaleString();
+const fmtPKR = (v) => 'Rs ' + (Math.round((parseFloat(v) || 0) * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const num = (v) => parseFloat(v) || 0;
 
 // Landed (in-COGS) add-on costs. Transport is NOT here — it's a hauler payable set

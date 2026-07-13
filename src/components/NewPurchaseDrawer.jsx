@@ -114,7 +114,7 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved }) {
       size="lg"
       footer={
         <div className="flex items-center justify-between gap-3">
-          <span className="text-sm text-gray-500">Total <span className="font-semibold text-gray-900">Rs {totalAmount.toLocaleString()}</span></span>
+          <span className="text-sm text-gray-500">Total <span className="font-semibold text-gray-900">Rs {totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>
           <div className="flex gap-2">
             <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
             <button onClick={handleSubmit} disabled={createMut.isPending}
@@ -249,7 +249,7 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved }) {
                     </div>
                     <div>
                       <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-0.5">Total</label>
-                      <p className="text-sm font-medium text-gray-900 py-2 tabular-nums">Rs {lineTotal.toLocaleString()}</p>
+                      <p className="text-sm font-medium text-gray-900 py-2 tabular-nums">Rs {lineTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                     </div>
                   </div>
                   {lines.length > 1 && (
@@ -265,7 +265,7 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved }) {
           </div>
           <div className="mt-3 pt-3 border-t border-gray-200 flex justify-between items-center">
             <p className="text-sm text-gray-500">{lines.filter(l => l.item_id).length} item(s)</p>
-            <p className="text-base font-bold text-gray-900">Total: Rs {totalAmount.toLocaleString()}</p>
+            <p className="text-base font-bold text-gray-900">Total: Rs {totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
           </div>
         </div>
       </div>

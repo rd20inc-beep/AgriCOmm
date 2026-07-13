@@ -12,10 +12,10 @@ import {
 import KPICard from '../../components/KPICard';
 
 function formatCurrency(value) {
-  return '$' + (parseFloat(value) || 0).toLocaleString('en-US');
+  return '$' + (parseFloat(value) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-const formatPKR = (value) => 'Rs ' + Math.round(parseFloat(value) || 0).toLocaleString('en-PK');
+const formatPKR = (value) => 'Rs ' + (parseFloat(value) || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function KPICardsRow({
   entityFilter,

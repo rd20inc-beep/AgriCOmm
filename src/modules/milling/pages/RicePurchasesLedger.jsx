@@ -5,7 +5,7 @@ import api from '../../../api/client';
 
 function formatPKR(value) {
   if (!value) return '—';
-  return 'Rs ' + Math.round(value).toLocaleString('en-PK');
+  return 'Rs ' + (value).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function formatMT(value) {

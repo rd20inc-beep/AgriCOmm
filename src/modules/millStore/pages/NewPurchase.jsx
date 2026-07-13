@@ -193,7 +193,7 @@ export default function NewPurchase() {
                   </div>
                   <div className="col-span-2 text-right">
                     {idx === 0 && <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-1">Total</label>}
-                    <p className="text-sm font-medium text-gray-900 py-2">Rs {lineTotal.toLocaleString()}</p>
+                    <p className="text-sm font-medium text-gray-900 py-2">Rs {lineTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                   </div>
                   <div className="col-span-1 text-right">
                     {lines.length > 1 && (
@@ -211,7 +211,7 @@ export default function NewPurchase() {
 
           <div className="mt-4 pt-3 border-t border-gray-200 flex justify-between items-center">
             <p className="text-sm text-gray-500">{lines.filter(l => l.item_id).length} items</p>
-            <p className="text-lg font-bold text-gray-900">Total: Rs {totalAmount.toLocaleString()}</p>
+            <p className="text-lg font-bold text-gray-900">Total: Rs {totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
           </div>
         </div>
 

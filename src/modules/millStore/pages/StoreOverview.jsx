@@ -14,7 +14,7 @@ function formatPKR(v) {
   const n = Number(v) || 0;
   if (n >= 1_000_000) return `Rs ${(n / 1_000_000).toFixed(2)}M`;
   if (n >= 1_000) return `Rs ${(n / 1_000).toFixed(1)}K`;
-  return `Rs ${n.toFixed(0)}`;
+  return `Rs ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function KPI({ icon: Icon, label, value, sub, accent = 'blue' }) {
@@ -278,7 +278,7 @@ function PurchasePaymentsCard() {
         payment_reference: form.reference || null,
         due_date: form.dueDate || null,
       } });
-      addToast(`Payment of Rs ${Math.round(amount).toLocaleString()} recorded for ${target.purchase_no}`, 'success');
+      addToast(`Payment of Rs ${(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} recorded for ${target.purchase_no}`, 'success');
       setTarget(null);
     } catch (err) {
       addToast(err?.data?.errors?.[0]?.message || err?.data?.message || err.message || 'Failed to record payment', 'error');
@@ -323,7 +323,7 @@ function PurchasePaymentsCard() {
         footer={target && (
           <button onClick={submit} disabled={pay.isPending}
             className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50">
-            <CheckCircle size={16} /> {pay.isPending ? 'Recording…' : `Record Payment — Rs ${Math.round(parseFloat(form.amount) || 0).toLocaleString()}`}
+            <CheckCircle size={16} /> {pay.isPending ? 'Recording…' : `Record Payment — Rs ${(parseFloat(form.amount) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
           </button>
         )}>
         {target && (

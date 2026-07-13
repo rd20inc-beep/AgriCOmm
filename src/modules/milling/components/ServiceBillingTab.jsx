@@ -8,7 +8,7 @@ import { CreateInvoiceDrawer, RecordPaymentDrawer } from './ServiceInvoiceDrawer
 import { printServiceInvoice } from '../utils/serviceInvoicePrint';
 
 const num = (v) => parseFloat(v) || 0;
-const pkr = (v) => `PKR ${Math.round(num(v)).toLocaleString()}`;
+const pkr = (v) => `PKR ${(num(v)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const BILLING_STYLE = {
   'Not Invoiced': 'bg-gray-100 text-gray-600',
@@ -40,7 +40,7 @@ export default function ServiceBillingTab({ routeId, batchDbId, onChanged }) {
     if (!invoiceId) return;
     const paid = invoice && num(invoice.received_amount) > 0;
     const msg = paid
-      ? `Void ${row?.invoice_no}? It has PKR ${Math.round(num(invoice.received_amount)).toLocaleString()} received — the payment(s) will be reversed (account balance + receipt undone) and the invoice removed so you can re-issue. Continue?`
+      ? `Void ${row?.invoice_no}? It has PKR ${(num(invoice.received_amount)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} received — the payment(s) will be reversed (account balance + receipt undone) and the invoice removed so you can re-issue. Continue?`
       : `Void ${row?.invoice_no}? The invoice and its revenue posting are reversed and removed so you can create a fresh one. Continue?`;
     if (!window.confirm(msg)) return;
     try {

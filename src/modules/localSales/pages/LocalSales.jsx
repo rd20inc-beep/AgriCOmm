@@ -21,7 +21,7 @@ import { toKg, fromKg, rateToPerKg, allEquivalents, allRateEquivalents, UNITS } 
 import { downloadCSV } from '../../../utils/csvExport';
 import { lotCategory, CAT_ORDER, CAT_COLOR } from '../../../utils/lotCategory';
 
-function fmtPKR(v) { return 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString(); }
+function fmtPKR(v) { return 'Rs ' + (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
 const INPUT = "w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white";
 const SELECT = INPUT;
@@ -661,7 +661,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
     <div className="flex items-center justify-between gap-3">
       <div className="text-xs text-gray-500 flex items-center gap-3 flex-wrap">
         {cart.length > 0 && <span><span className="font-medium text-gray-900">{cart.length}</span> item{cart.length > 1 ? 's' : ''}</span>}
-        {grandTotal > 0 && <span><span className="text-gray-400">Total</span> <span className="font-medium text-emerald-700">Rs {grandTotal.toLocaleString()}</span></span>}
+        {grandTotal > 0 && <span><span className="text-gray-400">Total</span> <span className="font-medium text-emerald-700">Rs {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>}
       </div>
       <div className="flex items-center gap-2">
         <button onClick={onClose} className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-900">Cancel</button>
@@ -678,7 +678,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
         ) : (
           <button onClick={handleSubmit} disabled={createMutation.isPending || cart.length === 0}
             className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:bg-gray-300">
-            {createMutation.isPending ? 'Creating…' : grandTotal > 0 ? `Create Sale — Rs ${grandTotal.toLocaleString()}` : 'Create Sale'}
+            {createMutation.isPending ? 'Creating…' : grandTotal > 0 ? `Create Sale — Rs ${grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'Create Sale'}
           </button>
         )}
       </div>
@@ -778,7 +778,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                   {pkgItems.map(i => {
                     const avail = Number(i.quantity_available) - cartCountForPkg(i.id);
                     const cost = Number(i.avg_cost_per_unit) || 0;
-                    return <option key={i.id} value={i.id} disabled={avail <= 0}>{i.name} ({Math.round(avail).toLocaleString()} {i.unit || 'pcs'}){cost > 0 ? ` · Rs ${Math.round(cost).toLocaleString()}/${i.unit || 'pc'} cost` : ''}</option>;
+                    return <option key={i.id} value={i.id} disabled={avail <= 0}>{i.name} ({(avail).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {i.unit || 'pcs'}){cost > 0 ? ` · Rs ${(cost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/${i.unit || 'pc'} cost` : ''}</option>;
                   })}
                 </select>
               ) : (
@@ -787,7 +787,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                   {filteredLots.map(l => {
                     const avail = (parseFloat(l.availableQty) || 0) - cartQtyForLot(l.id);
                     const costKg = parseFloat(l.landedCostPerKg) || parseFloat(l.ratePerKg) || (parseFloat(l.costPerUnit) || 0) / 1000;
-                    const costLabel = costKg > 0 ? ` · Rs ${Math.round(costKg).toLocaleString()}/kg cost` : '';
+                    const costLabel = costKg > 0 ? ` · Rs ${(costKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/kg cost` : '';
                     return <option key={l.id} value={l.id} disabled={avail <= 0}>{l.lotNo} — {l.itemName} ({Math.round(avail).toLocaleString()} KG){costLabel}</option>;
                   })}
                 </select>
@@ -846,9 +846,9 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                   const u = line.rate_unit;
                   const val = u === 'katta' ? eq.perKatta : u === 'maund' ? eq.perMaund : u === 'ton' ? ck * 1000 : ck;
                   const ul = u === 'katta' ? 'katta' : u === 'maund' ? 'maund' : u === 'ton' ? 'ton' : 'kg';
-                  return <span className="block text-gray-500">Cost: <span className="font-semibold text-gray-700">Rs {Math.round(val).toLocaleString()}/{ul}</span>{u !== 'kg' && <span className="text-gray-400"> (Rs {Math.round(ck).toLocaleString()}/kg)</span>}</span>;
+                  return <span className="block text-gray-500">Cost: <span className="font-semibold text-gray-700">Rs {(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/{ul}</span>{u !== 'kg' && <span className="text-gray-400"> (Rs {(ck).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/kg)</span>}</span>;
                 })()}
-                {lineTotal > 0 && <span className="block text-emerald-700 font-semibold mt-0.5">Line total: Rs {lineTotal.toLocaleString()}</span>}
+                {lineTotal > 0 && <span className="block text-emerald-700 font-semibold mt-0.5">Line total: Rs {lineTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
               </div>
               <button type="button" onClick={addLine} disabled={lineOverSell}
                 className="px-3 py-2.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 inline-flex items-center gap-1 shrink-0">
@@ -878,8 +878,8 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                         {c.lotNo && <div className="text-[11px] text-gray-400">{c.lotNo}</div>}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">{Math.round(c.qtyKg).toLocaleString()} {c.isMillItem ? 'pcs' : 'kg'}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">Rs {Math.round(c.ratePerKg).toLocaleString()}{c.isMillItem ? ' ea' : '/kg'}</td>
-                      <td className="px-3 py-2 text-right font-semibold tabular-nums">Rs {c.total.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">Rs {(c.ratePerKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{c.isMillItem ? ' ea' : '/kg'}</td>
+                      <td className="px-3 py-2 text-right font-semibold tabular-nums">Rs {c.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                       <td className="px-3 py-2 text-right"><button onClick={() => removeLine(i)} className="text-gray-300 hover:text-red-500"><X size={15} /></button></td>
                     </tr>
                   ))}
@@ -887,7 +887,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                 <tfoot>
                   <tr className="bg-gray-50 font-bold text-gray-900">
                     <td className="px-3 py-2" colSpan={3}>Total ({cart.length})</td>
-                    <td className="px-3 py-2 text-right text-emerald-700 tabular-nums">Rs {grandTotal.toLocaleString()}</td><td></td>
+                    <td className="px-3 py-2 text-right text-emerald-700 tabular-nums">Rs {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td><td></td>
                   </tr>
                 </tfoot>
               </table>
@@ -903,12 +903,12 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
           {cart.map((c, i) => (
             <div key={i} className="flex items-center justify-between px-3 py-2 border-t border-gray-100 text-sm">
               <span className="text-gray-700"><span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold mr-1.5 ${CAT_COLOR[c.category] || 'bg-gray-100 text-gray-600'}`}>{c.category}</span>{c.item_name} · {Math.round(c.qtyKg).toLocaleString()} {c.isMillItem ? 'pcs' : 'kg'}</span>
-              <span className="font-semibold tabular-nums">Rs {c.total.toLocaleString()}</span>
+              <span className="font-semibold tabular-nums">Rs {c.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
           ))}
           <div className="flex items-center justify-between px-3 py-2.5 border-t border-gray-200 bg-emerald-50">
             <span className="text-sm font-semibold text-emerald-800">Grand Total</span>
-            <span className="text-xl font-bold text-emerald-700">Rs {grandTotal.toLocaleString()}</span>
+            <span className="text-xl font-bold text-emerald-700">Rs {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
           </div>
         </div>
 
@@ -925,7 +925,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
             <div>
               <label className={LABEL}>Amount Received</label>
               <input type="number" value={form.paid_amount} onChange={e => set('paid_amount', e.target.value)} className={INPUT}
-                placeholder={grandTotal > 0 ? `Rs ${grandTotal.toLocaleString()} (full)` : 'Rs'} />
+                placeholder={grandTotal > 0 ? `Rs ${grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (full)` : 'Rs'} />
               {form.payment_mode === 'credit' && <p className="text-xs text-amber-600 mt-1">Leave empty or partial for credit sale</p>}
               {form.payment_mode === 'cash' && (form.paid_amount === '' || parseFloat(form.paid_amount) === 0) && <p className="text-xs text-amber-600 mt-1">Left empty → recorded as Credit (Udhaar)</p>}
             </div>

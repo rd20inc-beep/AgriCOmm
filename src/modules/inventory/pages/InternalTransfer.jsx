@@ -15,8 +15,8 @@ import StatusBadge from '../../../components/StatusBadge';
 import SlideDrawer from '../../../components/SlideDrawer';
 
 const PKR_RATE = 280; // PKR per USD
-const formatPKR = (value) => 'Rs ' + Math.round(parseFloat(value) || 0).toLocaleString('en-PK');
-const formatUSD = (value) => '$' + (parseFloat(value) || 0).toLocaleString('en-US');
+const formatPKR = (value) => 'Rs ' + (parseFloat(value) || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const formatUSD = (value) => '$' + (parseFloat(value) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function InternalTransfer() {
   const { millingBatches, exportOrders, addToast, settings } = useApp();
@@ -293,7 +293,7 @@ export default function InternalTransfer() {
                   {totalAmount > 0 ? `+${formatPKR(totalAmount)}` : 'Rs 0'}
                 </div>
                 <p className="text-xs text-blue-500 mt-1">
-                  Revenue: {qty > 0 ? `${Math.round(qty).toLocaleString()} kg` : '0 kg'} x {price > 0 ? formatPKR(price) : 'Rs 0'}/kg
+                  Revenue: {qty > 0 ? `${(qty).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg` : '0 kg'} x {price > 0 ? formatPKR(price) : 'Rs 0'}/kg
                 </p>
               </div>
 
