@@ -343,9 +343,11 @@ export default function LotDetail() {
             <CheckCircle2 className="w-4 h-4" /> {lot.exportReady ? 'Export-Ready' : 'Mark Ready for Export'}
           </button>
         )}
-        {/* Move finished/by-product stock from the mill entity to export. */}
+        {/* Move finished/by-product stock from the mill entity to export.
+            Never for client-owned Service Milling stock — that stays separate. */}
         {(lot.type === 'finished' || lot.type === 'byproduct')
           && lot.entity === 'mill'
+          && lot.ownership !== 'client'
           && (parseFloat(lot.availableQty) > 0) && (
           <button onClick={() => setShowTransfer(true)} className="btn btn-sm btn-secondary">
             <ArrowRightLeft className="w-4 h-4" /> Transfer to Export

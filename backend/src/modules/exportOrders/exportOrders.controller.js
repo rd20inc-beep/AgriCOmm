@@ -2506,6 +2506,13 @@ const exportOrderController = {
           throw err;
         }
 
+        // Client-owned service-milling stock is not ours to sell/export.
+        if (lot.ownership === 'client') {
+          const err = new Error('Client-owned Service Milling stock cannot be allocated to an export order.');
+          err.statusCode = 422;
+          throw err;
+        }
+
         // Only export-ready stock can be allocated to an export order (Batch 4).
         // Mill marks finished rice ready first; export then selects from the pool.
         if (!lot.export_ready) {
@@ -2880,6 +2887,8 @@ const exportOrderController = {
         .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
         .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
         .where('l.export_ready', true)
+        // Client-owned (service milling) stock never enters the export pool.
+        .whereNot('l.ownership', 'client')
         .whereIn('l.type', ['finished', 'byproduct'])
         .whereRaw('COALESCE(l.available_qty, 0) > 0')
         .select('l.id', 'l.lot_no', 'l.item_name', 'l.type', 'l.entity', 'l.variety', 'l.grade',
