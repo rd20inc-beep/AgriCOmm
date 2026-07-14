@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">AgriRice</string>
+    <string name="title_activity_main">AgriRice</string>
+    <string name="package_name">com.agricommodities.agrice</string>
+    <string name="custom_url_scheme">com.agricommodities.agrice</string>
+</resources>
