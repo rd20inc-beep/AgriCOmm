@@ -15,6 +15,7 @@ import { RouteErrorBoundary } from './ErrorBoundary';
 import ChatWidget from './ChatWidget';
 import OfflineBanner from './OfflineBanner';
 import PendingSyncTray from './PendingSyncTray';
+import OfflineExpiredGate from './OfflineExpiredGate';
 import { SkeletonPage } from '../shared/components/Skeleton';
 
 const sidebarNav = [
@@ -566,6 +567,7 @@ export default function Layout({ children }) {
       </div>
       <ChatWidget />
       <PendingSyncTray />
+      <OfflineExpiredGate />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { clearQueryCache } from '../offline/queryPersist';
 import { clearReadReplica } from '../data/readReplica';
 import { authRepo } from '../data/repositories/auth';
+import { markOnlineAuth, seedOnlineAuthIfMissing, isOfflineGraceValid } from '../auth/offlineGrace';
 
 const AuthContext = createContext(null);
 
@@ -36,6 +37,8 @@ export function AuthProvider({ children }) {
   });
   const [token, setToken] = useState(() => localStorage.getItem('riceflow_token'));
   const [isLoading, setIsLoading] = useState(true);
+  // True when we're offline AND the 72h offline grace has lapsed → force reconnect.
+  const [offlineExpired, setOfflineExpired] = useState(false);
 
   // Persist the user alongside the token so reloads can restore the session.
   const cacheUser = useCallback((u) => {
@@ -70,6 +73,8 @@ export function AuthProvider({ children }) {
         setUser(userData);
         setToken(storedToken);
         cacheUser(userData);
+        markOnlineAuth();          // successful ONLINE auth → reset the offline grace
+        setOfflineExpired(false);
       } else if (status === 401 || status === 403) {
         // Token genuinely rejected → log out.
         localStorage.removeItem('riceflow_token');
@@ -81,8 +86,11 @@ export function AuthProvider({ children }) {
       // still valid, the server just hiccuped. A real bad token is caught later by
       // the API client's 401 handler.
     } catch {
-      // Network error — DON'T log out (a reload offline/slow shouldn't end the
-      // session). Keep the cached user/token; dev mock fallback retained.
+      // Network error — offline. Keep the cached session ONLY within the 72h grace
+      // window; beyond it, force a reconnect (data is preserved, never wiped —
+      // grace expiry is not revocation). DON'T log out on a transient blip.
+      setOfflineExpired(!isOfflineGraceValid());
+      // dev mock fallback retained.
       if (import.meta.env.DEV && storedToken === MOCK_TOKEN) {
         setUser(MOCK_USER);
         setToken(MOCK_TOKEN);
@@ -93,7 +101,12 @@ export function AuthProvider({ children }) {
   }, []);
 
   // Initial token validation on mount
-  useEffect(() => { refreshAuth(); }, [refreshAuth]);
+  useEffect(() => {
+    // Grandfather an existing session so it gets a fresh grace window (not an
+    // instant lock-out) the first time this feature loads.
+    if (localStorage.getItem('riceflow_token')) seedOnlineAuthIfMissing();
+    refreshAuth();
+  }, [refreshAuth]);
 
   // Re-fetch permissions whenever the tab regains focus. Keeps the
   // cached perm list in sync with backend changes (RBAC edits, new
@@ -101,11 +114,13 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     function onFocus() { refreshAuth({ silent: true }); }
     window.addEventListener('focus', onFocus);
+    window.addEventListener('online', onFocus); // reconnect → re-validate → lift the offline-expired gate
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') refreshAuth({ silent: true });
     });
     return () => {
       window.removeEventListener('focus', onFocus);
+      window.removeEventListener('online', onFocus);
     };
   }, [refreshAuth]);
 
@@ -127,6 +142,8 @@ export function AuthProvider({ children }) {
           setToken(newToken);
           setUser(userData);
           cacheUser(userData);
+          markOnlineAuth();          // fresh online auth → grace window resets
+          setOfflineExpired(false);
           // Force all queries to re-evaluate enabled & refetch
           qc.invalidateQueries();
           return { success: true };
@@ -185,6 +202,8 @@ export function AuthProvider({ children }) {
     token,
     isAuthenticated,
     isLoading,
+    offlineExpired,
+    recheckAuth: () => refreshAuth({ silent: true }),
     login,
     logout,
     hasPermission,
