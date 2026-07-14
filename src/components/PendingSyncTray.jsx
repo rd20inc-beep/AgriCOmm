@@ -9,6 +9,9 @@ import { getFileOutbox, subscribeFileOutbox, removeFileItem, retryFileItem } fro
 import { flushNow } from '../offline/sync';
 import { CONFLICT_LABELS } from '../sync/conflicts';
 import { useOnline } from '../offline/useOnline';
+import { useAuth } from '../context/AuthContext';
+
+const MANAGER_ROLES = ['Super Admin', 'Owner', 'Mill Manager', 'Finance Manager'];
 
 function timeAgo(ts) {
   const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
@@ -22,6 +25,15 @@ export default function PendingSyncTray() {
   const [items, setItems] = useState([]);
   const [open, setOpen] = useState(false);
   const online = useOnline();
+  const { user } = useAuth();
+  const isManager = MANAGER_ROLES.includes(user?.role);
+
+  // Open when the header status chip is clicked.
+  useEffect(() => {
+    const onOpen = () => setOpen(true);
+    window.addEventListener('riceflow:open-sync-tray', onOpen);
+    return () => window.removeEventListener('riceflow:open-sync-tray', onOpen);
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -42,11 +54,13 @@ export default function PendingSyncTray() {
   const doRetry = (it) => (it._kind === 'file' ? retryFileItem(it.id) : retryItem(it.id)).then(() => flushNow());
   const doDismiss = (it) => (it._kind === 'file' ? removeFileItem(it.id) : removeItem(it.id));
 
-  if (items.length === 0) return null;
+  // Hidden unless there's something queued OR the user opened it from the chip.
+  if (items.length === 0 && !open) return null;
 
   const rejected = items.filter((i) => i.status === 'rejected');
   const waiting = items.length - rejected.length;
   const tone = rejected.length ? 'bg-red-600' : online ? 'bg-blue-600' : 'bg-amber-500';
+  const openConflicts = () => { try { window.dispatchEvent(new Event('riceflow:open-conflicts')); } catch { /* noop */ } };
 
   return (
     <div className="fixed bottom-4 left-4 z-[60] w-[19rem] max-w-[calc(100vw-2rem)]">
@@ -92,18 +106,28 @@ export default function PendingSyncTray() {
                 )}
               </div>
             ))}
+            {items.length === 0 && (
+              <div className="px-3 py-6 text-center text-xs text-gray-400">Everything is synced.</div>
+            )}
           </div>
+          {isManager && (
+            <button onClick={openConflicts} className="w-full border-t border-gray-100 px-3 py-2 text-left text-[11px] font-medium text-blue-600 hover:bg-blue-50">
+              Review all devices&rsquo; sync conflicts &rarr;
+            </button>
+          )}
         </div>
       )}
 
-      <button onClick={() => setOpen((o) => !o)}
-        className={`flex items-center gap-2 rounded-full px-3.5 py-2 text-white text-xs font-semibold shadow-lg ${tone}`}>
-        {rejected.length ? <AlertTriangle size={15} /> : <CloudUpload size={15} />}
-        <span>
-          {rejected.length ? `${rejected.length} need${rejected.length === 1 ? 's' : ''} attention` : `${waiting} pending sync`}
-        </span>
-        <ChevronUp size={14} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
-      </button>
+      {items.length > 0 && (
+        <button onClick={() => setOpen((o) => !o)}
+          className={`flex items-center gap-2 rounded-full px-3.5 py-2 text-white text-xs font-semibold shadow-lg ${tone}`}>
+          {rejected.length ? <AlertTriangle size={15} /> : <CloudUpload size={15} />}
+          <span>
+            {rejected.length ? `${rejected.length} need${rejected.length === 1 ? 's' : ''} attention` : `${waiting} pending sync`}
+          </span>
+          <ChevronUp size={14} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+        </button>
+      )}
     </div>
   );
 }

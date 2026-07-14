@@ -16,6 +16,8 @@ import ChatWidget from './ChatWidget';
 import OfflineBanner from './OfflineBanner';
 import PendingSyncTray from './PendingSyncTray';
 import OfflineExpiredGate from './OfflineExpiredGate';
+import SyncStatusChip from './SyncStatusChip';
+import SyncConflictsDrawer from './SyncConflictsDrawer';
 import { SkeletonPage } from '../shared/components/Skeleton';
 
 const sidebarNav = [
@@ -442,6 +444,9 @@ export default function Layout({ children }) {
 
           <div className="flex-1" />
 
+          {/* Always-visible offline/sync status */}
+          <SyncStatusChip />
+
           {/* Entity filter - desktop only */}
           <div className="hidden md:block">
             <select
@@ -567,6 +572,7 @@ export default function Layout({ children }) {
       </div>
       <ChatWidget />
       <PendingSyncTray />
+      <SyncConflictsDrawer />
       <OfflineExpiredGate />
     </div>
   );
