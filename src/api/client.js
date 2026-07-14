@@ -7,6 +7,7 @@ import { markServerOnline, markServerOffline, isOnline } from '../offline/useOnl
 import { enqueue } from '../offline/outbox';
 import { mirrorRead, getMirroredRead } from '../data/readReplica';
 import { getDeviceId } from '../sync/deviceId';
+import { wipeLocalReadData, clearSession } from '../auth/wipe';
 
 const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:3001');
 
@@ -143,6 +144,16 @@ async function request(endpoint, options = {}) {
     }
 
     const data = await res.json().catch(() => null);
+
+    // Device revoked → wipe local read data + session and force re-login.
+    if (res.status === 403 && data?.code === 'device_revoked') {
+      wipeLocalReadData();
+      clearSession();
+      if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+        window.location.href = '/login?revoked=1';
+      }
+      throw new ApiError(data?.message || 'This device has been revoked.', 403, data);
+    }
 
     if (!res.ok) {
       throw new ApiError(

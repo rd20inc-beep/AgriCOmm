@@ -23,7 +23,7 @@ export function markServerOnline() {
 
 // Plain (non-hook) connectivity read for imperative code (API client, sync).
 export function isOnline() {
-  const browserOnline = typeof navigator === 'undefined' ? true : navigator.onLine;
+  const browserOnline = typeof navigator === 'undefined' ? true : navigator.onLine !== false;
   return browserOnline && serverReachable;
 }
 
@@ -40,7 +40,9 @@ function subscribe(cb) {
 }
 
 function getSnapshot() {
-  const browserOnline = typeof navigator === 'undefined' ? true : navigator.onLine;
+  // navigator.onLine is only authoritative when it's explicitly false; if the
+  // property is missing (non-browser env), assume online.
+  const browserOnline = typeof navigator === 'undefined' ? true : navigator.onLine !== false;
   return browserOnline && serverReachable;
 }
 
