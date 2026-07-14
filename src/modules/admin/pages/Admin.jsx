@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Users, Truck, Package, Warehouse, Settings, ShoppingBag, Landmark, Tags, Factory, Files, UsersRound, MessageSquare, Shield, Building2, Inbox, ShieldAlert, Database, ChevronDown } from 'lucide-react';
+import { Users, Truck, Package, Warehouse, Settings, ShoppingBag, Landmark, Tags, Factory, Files, UsersRound, MessageSquare, Shield, Building2, Inbox, ShieldAlert, Database, ChevronDown, Smartphone } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 
 import CustomersTab from './admin/CustomersTab';
@@ -19,6 +19,7 @@ import PermissionsTab from './admin/PermissionsTab';
 import SettingsTab from './admin/SettingsTab';
 import MasterDataApprovalsTab from './admin/MasterDataApprovalsTab';
 import DangerZoneTab from './admin/DangerZoneTab';
+import DevicesTab from './admin/DevicesTab';
 import { adminApi } from '../api/services';
 
 const tabs = [
@@ -37,6 +38,7 @@ const tabs = [
   { key: 'whatsapp', label: 'WhatsApp', icon: MessageSquare },
   { key: 'users', label: 'Users & Roles', icon: UsersRound },
   { key: 'permissions', label: 'Permissions', icon: Shield },
+  { key: 'devices', label: 'Devices', icon: Smartphone, allowRoles: ['Super Admin', 'Owner', 'Mill Manager', 'Finance Manager'] },
   { key: 'settings', label: 'Settings', icon: Settings },
   { key: 'danger', label: 'Danger Zone', icon: ShieldAlert, superAdminOnly: true },
 ];
@@ -57,6 +59,7 @@ const tabComponents = {
   whatsapp: WhatsAppTemplatesTab,
   users: UsersRolesTab,
   permissions: PermissionsTab,
+  devices: DevicesTab,
   settings: SettingsTab,
   danger: DangerZoneTab,
 };
@@ -71,7 +74,7 @@ const NAV = [
   { label: 'Master Data', icon: Database,  keys: ['customers', 'suppliers', 'products', 'categories', 'bagTypes', 'costCategories', 'expenseVendors', 'bankAccounts'] },
   { label: 'Facilities',  icon: Warehouse, keys: ['warehouses', 'mills'] },
   { label: 'Documents',   icon: Files,     keys: ['docTemplates', 'whatsapp'] },
-  { label: 'Access',      icon: Shield,    keys: ['users', 'permissions'] },
+  { label: 'Access',      icon: Shield,    keys: ['users', 'permissions', 'devices'] },
   { key: 'settings' },
   { key: 'danger' },
 ];
@@ -81,7 +84,12 @@ export default function Admin() {
   const isSuperAdmin = user?.role === 'Super Admin';
   const [activeTab, setActiveTab] = useState('approvals');
   const [openGroup, setOpenGroup] = useState(null);
-  const canSee = (key) => !tabByKey[key]?.superAdminOnly || isSuperAdmin;
+  const canSee = (key) => {
+    const t = tabByKey[key];
+    if (t?.superAdminOnly && !isSuperAdmin) return false;
+    if (t?.allowRoles && !t.allowRoles.includes(user?.role)) return false;
+    return true;
+  };
   const [pendingCount, setPendingCount] = useState(0);
 
   // Poll the approvals count so the badge stays fresh while admins are
