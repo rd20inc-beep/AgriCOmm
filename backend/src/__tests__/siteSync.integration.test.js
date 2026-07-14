@@ -23,6 +23,8 @@ d('site-sync worker (DB-gated)', () => {
   });
 
   afterEach(async () => {
+    const keys = await db('site_outbox').where('path', 'like', '/api/ZZTEST%').pluck('idempotency_key').catch(() => []);
+    if (keys.length) await db('site_id_map').whereIn('idempotency_key', keys).del().catch(() => {});
     await db('site_outbox').where('path', 'like', '/api/ZZTEST%').del().catch(() => {});
   });
 
@@ -93,5 +95,49 @@ d('site-sync worker (DB-gated)', () => {
     expect(state.watermark).toBe('2026-06-01T00:00:00Z');
 
     await db('customers').where({ id }).del().catch(() => {});
+  });
+
+  // ── Stage 16b: transactional identity reconciliation ──────────────────────
+  test('a synced POST records the local→cloud id/doc-number map (no row mutation)', async () => {
+    const key = '55555555-5555-4555-8555-555555555555';
+    await db('site_outbox').insert({
+      idempotency_key: key, method: 'POST', path: '/api/ZZTEST/local-sales', body: null,
+      entity: 'local-sales', local_ref: '5', status: 'pending',
+    });
+    const fetchImpl = fakeFetch({
+      '/api/ZZTEST/local-sales': { status: 201, body: { success: true, data: { id: 9042, sale_no: 'LS-0042' } } },
+    });
+    const summary = await sync.pushOutbox({ db, cfg: CFG, token: 't', deviceUuid: DEV, fetchImpl });
+    expect(summary.synced).toBe(1);
+
+    const outbox = await db('site_outbox').where({ idempotency_key: key }).first();
+    expect(outbox.status).toBe('synced');
+    expect(outbox.cloud_ref).toBe('9042');
+    expect(outbox.cloud_doc_no).toBe('LS-0042');
+
+    const map = await db('site_id_map').where({ idempotency_key: key }).first();
+    expect(map).toBeTruthy();
+    expect(map.entity).toBe('local-sales');
+    expect(map.local_ref).toBe('5');
+    expect(map.cloud_ref).toBe('9042');
+    expect(map.cloud_doc_no).toBe('LS-0042');
+  });
+
+  test('a refused replay (split-brain: cloud already sold the stock) records NO map', async () => {
+    const key = '66666666-6666-4666-8666-666666666666';
+    await db('site_outbox').insert({
+      idempotency_key: key, method: 'POST', path: '/api/ZZTEST/local-sales', body: null,
+      entity: 'local-sales', local_ref: '6', status: 'pending',
+    });
+    const fetchImpl = fakeFetch({
+      '/api/ZZTEST/local-sales': { status: 409, body: { code: 'insufficient_stock' } },
+    });
+    await sync.pushOutbox({ db, cfg: CFG, token: 't', deviceUuid: DEV, fetchImpl });
+
+    const outbox = await db('site_outbox').where({ idempotency_key: key }).first();
+    expect(outbox.status).toBe('conflict');
+    expect(outbox.conflict_code).toBe('insufficient_stock');
+    const map = await db('site_id_map').where({ idempotency_key: key }).first();
+    expect(map).toBeFalsy();
   });
 });
