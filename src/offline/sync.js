@@ -5,8 +5,21 @@ import { flushOutbox } from './outbox';
 import { replayRequest } from '../api/client';
 import { isOnline } from './useOnline';
 import { bootstrapDevice } from '../sync/device';
+import { classifyConflict, reportConflict } from '../sync/conflicts';
 
 let running = false;
+
+// Replay a queued write; on a server refusal (4xx) classify + record the conflict
+// and tag the verdict so the outbox stores the conflict type.
+async function replayAndRecord(item) {
+  const verdict = await replayRequest(item);
+  if (verdict && verdict.ok === false) {
+    const code = classifyConflict(verdict.status, verdict.body);
+    reportConflict(item, verdict, code).catch(() => {});
+    return { ...verdict, code };
+  }
+  return verdict;
+}
 
 export async function flushNow() {
   if (running || !isOnline()) return;
@@ -14,7 +27,7 @@ export async function flushNow() {
   try {
     // Register/refresh this device (so it can be revoked) — best-effort.
     bootstrapDevice().catch(() => {});
-    await flushOutbox(replayRequest);
+    await flushOutbox(replayAndRecord);
   } finally {
     running = false;
   }
