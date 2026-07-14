@@ -21,9 +21,31 @@ const db = require('../config/database');
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
+// Keep keys well beyond any realistic offline hold, so a late replay still
+// de-dupes instead of re-posting. (An offline device syncing 60+ days later is
+// pathological; before that window a replay always finds its key.)
+const RETENTION_DAYS = 60;
+
+// Delete keys older than the retention window (both statuses — a key this old is
+// far past any device's sync window). Returns the count deleted.
+async function pruneOldKeys() {
+  return db('idempotency_keys')
+    .where('created_at', '<', db.raw(`now() - interval '${RETENTION_DAYS} days'`))
+    .del();
+}
+
+// Opportunistic prune on a small fraction of keyed requests — bounds the table
+// without a scheduler. Fire-and-forget; never blocks the request.
+function maybePrune() {
+  if (Math.random() > 0.02) return;
+  pruneOldKeys().catch((e) => console.error('idempotency prune error:', e.message));
+}
+
 module.exports = async function idempotency(req, res, next) {
   const key = req.get('Idempotency-Key');
   if (!key || key.length > 200 || !MUTATING.has(req.method)) return next();
+
+  maybePrune();
 
   const path = (req.originalUrl || req.url).split('?')[0];
   let requestHash = null;
@@ -80,3 +102,5 @@ module.exports = async function idempotency(req, res, next) {
 
   next();
 };
+
+module.exports.pruneOldKeys = pruneOldKeys;
