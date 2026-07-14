@@ -203,8 +203,42 @@ function denyRoles(...roles) {
   };
 }
 
+/**
+ * Programmatic (boolean) permission check — same logic as authorize(), but usable
+ * inside a handler when the module/action is dynamic (e.g. the sync pull domain).
+ * Loads + caches perms on req.user exactly like the middleware; Super Admin/Owner
+ * bypass. Returns a boolean; never sends a response.
+ */
+async function userHasPermission(req, module, action) {
+  if (!req.user) return false;
+  try {
+    let roleId = req.user.role_id;
+    if (!roleId) {
+      const dbUser = await db('users').where({ id: req.user.id }).select('role_id').first();
+      if (!dbUser) return false;
+      roleId = dbUser.role_id;
+      req.user.role_id = roleId;
+    }
+    if (!req.user._permissionsLoaded) {
+      const perms = await db('role_permissions as rp')
+        .join('permissions as p', 'rp.permission_id', 'p.id')
+        .where('rp.role_id', roleId)
+        .select('p.module', 'p.action');
+      req.user.permissions = new Set(perms.map((p) => `${p.module}.${p.action}`));
+      req.user._permissionsLoaded = true;
+    }
+    const role = await db('roles').where({ id: roleId }).select('name').first();
+    if (role && (role.name === 'Super Admin' || role.name === 'Owner')) return true;
+    return req.user.permissions.has(`${module}.${action}`);
+  } catch (err) {
+    console.error('userHasPermission error:', err);
+    return false;
+  }
+}
+
 module.exports = authorize;
 module.exports.authorize = authorize;
 module.exports.authorizeAny = authorizeAny;
 module.exports.authorizeRole = authorizeRole;
 module.exports.denyRoles = denyRoles;
+module.exports.userHasPermission = userHasPermission;
