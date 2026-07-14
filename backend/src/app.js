@@ -68,6 +68,13 @@ function createApp() {
   // client sends an Idempotency-Key; normal online traffic is unaffected).
   app.use('/api', require('./middleware/idempotency'));
 
+  // Site-server mode (offline Stage 16): capture the site's business mutations for
+  // replay up to the cloud. Mounted ONLY on a LAN box (SITE_MODE=true) — the cloud
+  // never sets this, so its request path is unchanged.
+  if (config.site?.enabled) {
+    app.use('/api', require('./middleware/siteOutbox'));
+  }
+
   // Mount routes
   const routes = require('./routes/index');
   app.use('/api', routes);

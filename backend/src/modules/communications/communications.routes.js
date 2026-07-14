@@ -35,6 +35,12 @@ router.get('/whatsapp/qr/status', async (_req, res) => {
   return res.json({ success: true, data: whatsappQr.getStatus() });
 });
 router.post('/whatsapp/qr/start', async (_req, res) => {
+  // R6 (offline Stage 16): the WhatsApp-QR session keeps in-memory, single-instance
+  // state. Only the cloud instance may own it — a LAN site box must not pair a second
+  // session against the same number. Site devices reach WhatsApp when the cloud is up.
+  if (require('../../config').site?.enabled) {
+    return res.status(409).json({ success: false, message: 'WhatsApp pairing is managed on the cloud server, not the site server.' });
+  }
   const status = await whatsappQr.start();
   return res.json({ success: true, data: status });
 });
