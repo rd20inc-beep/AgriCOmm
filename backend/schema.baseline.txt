@@ -2377,6 +2377,21 @@ COL suppliers.supplier_code:character varying:NULL
 COL suppliers.type:character varying:NOT NULL
 COL suppliers.uid:character varying:NULL
 COL suppliers.updated_at:timestamp with time zone:NOT NULL
+COL sync_conflicts.conflict_code:character varying:NULL
+COL sync_conflicts.created_at:timestamp with time zone:NULL
+COL sync_conflicts.device_uuid:uuid:NULL
+COL sync_conflicts.endpoint:text:NULL
+COL sync_conflicts.id:integer:NOT NULL
+COL sync_conflicts.item_uuid:uuid:NULL
+COL sync_conflicts.label:character varying:NULL
+COL sync_conflicts.message:text:NULL
+COL sync_conflicts.method:character varying:NULL
+COL sync_conflicts.payload:jsonb:NULL
+COL sync_conflicts.resolution:character varying:NOT NULL
+COL sync_conflicts.resolved_at:timestamp with time zone:NULL
+COL sync_conflicts.resolved_by:integer:NULL
+COL sync_conflicts.status_code:integer:NULL
+COL sync_conflicts.user_id:integer:NULL
 COL sync_state.device_id:integer:NULL
 COL sync_state.domain:character varying:NOT NULL
 COL sync_state.id:integer:NOT NULL
@@ -3386,6 +3401,7 @@ CON suppliers.suppliers_reviewed_by_foreign(f)
 CON suppliers.suppliers_submitted_by_foreign(f)
 CON suppliers.suppliers_supplier_code_unique(u)
 CON suppliers.suppliers_uid_unique(u)
+CON sync_conflicts.sync_conflicts_pkey(p)
 CON sync_state.sync_state_pkey(p)
 CON sync_state.uq_sync_state_device_domain(u)
 CON system_health.chk_system_health_status_valid(c)

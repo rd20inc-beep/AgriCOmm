@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { RefreshCw, X, AlertTriangle, CloudUpload, ChevronUp } from 'lucide-react';
 import { getOutbox, subscribeOutbox, removeItem, retryItem } from '../offline/outbox';
 import { flushNow } from '../offline/sync';
+import { CONFLICT_LABELS } from '../sync/conflicts';
 import { useOnline } from '../offline/useOnline';
 
 function timeAgo(ts) {
@@ -59,6 +60,11 @@ export default function PendingSyncTray() {
                 </div>
                 {it.status === 'rejected' ? (
                   <div className="mt-1">
+                    {it.conflictCode && (
+                      <span className="inline-block mb-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-red-50 text-red-700 border border-red-200">
+                        {CONFLICT_LABELS[it.conflictCode] || 'Rejected'}
+                      </span>
+                    )}
                     <p className="text-[11px] text-red-600 flex items-start gap-1"><AlertTriangle size={12} className="mt-0.5 shrink-0" />{it.lastError || 'Rejected by server'}</p>
                     <div className="flex gap-2 mt-1">
                       <button onClick={() => { retryItem(it.id).then(() => flushNow()); }} className="text-[11px] font-medium text-blue-600 hover:text-blue-800">Retry</button>

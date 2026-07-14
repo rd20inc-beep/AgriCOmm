@@ -101,4 +101,65 @@ async function pull(req, res) {
   }
 }
 
-module.exports = { bootstrap, pull, DOMAINS };
+// ── Conflicts (Stage 8) ──────────────────────────────────────────────────────
+
+// A device records a conflict when the server refused one of its replayed writes.
+async function recordConflict(req, res) {
+  try {
+    const { device_uuid, item_uuid, endpoint, method, conflict_code, status_code, message, label, payload } = req.body || {};
+    if (!isUuid(device_uuid)) return res.status(400).json({ success: false, message: 'A valid device_uuid is required' });
+    const dev = await db('devices').where({ device_uuid }).first();
+    if (!dev) return res.status(403).json({ success: false, message: 'Device not registered — bootstrap first.' });
+    if (dev.status === 'revoked') return res.status(403).json({ success: false, message: 'This device has been revoked.' });
+
+    await db('sync_conflicts').insert({
+      device_uuid,
+      user_id: req.user.id,
+      item_uuid: isUuid(item_uuid) ? item_uuid : null,
+      endpoint: endpoint ? String(endpoint).slice(0, 500) : null,
+      method: method ? String(method).slice(0, 10) : null,
+      conflict_code: conflict_code ? String(conflict_code).slice(0, 40) : 'rejected',
+      status_code: status_code || null,
+      message: message ? String(message).slice(0, 2000) : null,
+      label: label ? String(label).slice(0, 200) : null,
+      payload: payload ? JSON.stringify(payload) : null,
+      resolution: 'pending',
+      created_at: db.fn.now(),
+    });
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('sync.recordConflict error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to record conflict' });
+  }
+}
+
+// Managers review open conflicts across devices.
+async function listConflicts(req, res) {
+  try {
+    const status = req.query.status || 'pending';
+    let q = db('sync_conflicts').orderBy('created_at', 'desc').limit(200);
+    if (status !== 'all') q = q.where('resolution', status);
+    const conflicts = await q;
+    return res.json({ success: true, data: { conflicts } });
+  } catch (err) {
+    console.error('sync.listConflicts error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to list conflicts' });
+  }
+}
+
+async function resolveConflict(req, res) {
+  try {
+    const { id } = req.params;
+    const allowed = ['dismissed', 'resolved', 'retried'];
+    const resolution = allowed.includes(req.body?.resolution) ? req.body.resolution : 'resolved';
+    const row = await db('sync_conflicts').where({ id }).first();
+    if (!row) return res.status(404).json({ success: false, message: 'Conflict not found' });
+    await db('sync_conflicts').where({ id }).update({ resolution, resolved_by: req.user.id, resolved_at: db.fn.now() });
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('sync.resolveConflict error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to resolve conflict' });
+  }
+}
+
+module.exports = { bootstrap, pull, recordConflict, listConflicts, resolveConflict, DOMAINS };

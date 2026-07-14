@@ -100,6 +100,7 @@ export async function flushOutbox(replayFn) {
         await patchItem(item.id, {
           status: 'rejected',
           lastError: result.body?.message || `Rejected by server (${result.status})`,
+          conflictCode: result.code || 'rejected',
           attempts: (item.attempts || 0) + 1,
         });
       }
