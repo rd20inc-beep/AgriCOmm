@@ -170,17 +170,23 @@ COL bank_transactions.counterparty:character varying:NULL
 COL bank_transactions.created_at:timestamp with time zone:NOT NULL
 COL bank_transactions.created_by:integer:NULL
 COL bank_transactions.currency:character varying:NOT NULL
+COL bank_transactions.device_uuid:text:NULL
 COL bank_transactions.id:integer:NOT NULL
 COL bank_transactions.linked_payment_id:integer:NULL
+COL bank_transactions.local_ts:timestamp with time zone:NULL
 COL bank_transactions.notes:text:NULL
+COL bank_transactions.record_version:integer:NOT NULL
 COL bank_transactions.reference:character varying:NULL
 COL bank_transactions.running_balance:numeric:NULL
+COL bank_transactions.server_ts:timestamp with time zone:NULL
 COL bank_transactions.source:character varying:NULL
 COL bank_transactions.status:character varying:NOT NULL
+COL bank_transactions.sync_status:character varying:NOT NULL
 COL bank_transactions.transaction_date:date:NULL
 COL bank_transactions.transaction_no:character varying:NOT NULL
 COL bank_transactions.type:character varying:NULL
 COL bank_transactions.updated_at:timestamp with time zone:NOT NULL
+COL bank_transactions.uuid:uuid:NULL
 COL batch_source_lots.batch_id:integer:NOT NULL
 COL batch_source_lots.cost_total_pkr:numeric:NULL
 COL batch_source_lots.created_at:timestamp with time zone:NULL
@@ -202,6 +208,7 @@ COL business_expenses.created_at:timestamp with time zone:NOT NULL
 COL business_expenses.created_by:integer:NULL
 COL business_expenses.currency:character varying:NOT NULL
 COL business_expenses.description:text:NULL
+COL business_expenses.device_uuid:text:NULL
 COL business_expenses.due_date:date:NULL
 COL business_expenses.employee_id:integer:NULL
 COL business_expenses.expense_date:date:NOT NULL
@@ -211,6 +218,7 @@ COL business_expenses.fx_rate:numeric:NULL
 COL business_expenses.id:integer:NOT NULL
 COL business_expenses.invoice_reference:character varying:NULL
 COL business_expenses.is_recurring:boolean:NOT NULL
+COL business_expenses.local_ts:timestamp with time zone:NULL
 COL business_expenses.notes:text:NULL
 COL business_expenses.order_id:integer:NULL
 COL business_expenses.paid_amount:numeric:NOT NULL
@@ -218,10 +226,14 @@ COL business_expenses.paid_date:date:NULL
 COL business_expenses.payment_method:character varying:NULL
 COL business_expenses.payment_reference:character varying:NULL
 COL business_expenses.payment_status:character varying:NOT NULL
+COL business_expenses.record_version:integer:NOT NULL
 COL business_expenses.recurrence:character varying:NULL
+COL business_expenses.server_ts:timestamp with time zone:NULL
 COL business_expenses.subcategory:character varying:NULL
 COL business_expenses.supplier_id:integer:NULL
+COL business_expenses.sync_status:character varying:NOT NULL
 COL business_expenses.updated_at:timestamp with time zone:NOT NULL
+COL business_expenses.uuid:uuid:NULL
 COL business_expenses.vendor_name:character varying:NULL
 COL chart_of_accounts.code:character varying:NOT NULL
 COL chart_of_accounts.created_at:timestamp with time zone:NOT NULL
@@ -408,6 +420,19 @@ COL data_imports.job_id:integer:NULL
 COL data_imports.status:character varying:NOT NULL
 COL data_imports.total_rows:integer:NOT NULL
 COL data_imports.updated_at:timestamp with time zone:NOT NULL
+COL devices.app_version:character varying:NULL
+COL devices.created_at:timestamp with time zone:NULL
+COL devices.device_uuid:uuid:NOT NULL
+COL devices.id:integer:NOT NULL
+COL devices.label:character varying:NULL
+COL devices.last_seen_at:timestamp with time zone:NULL
+COL devices.platform:character varying:NULL
+COL devices.public_key:text:NULL
+COL devices.registered_at:timestamp with time zone:NULL
+COL devices.revoked_at:timestamp with time zone:NULL
+COL devices.revoked_by:integer:NULL
+COL devices.status:character varying:NOT NULL
+COL devices.user_id:integer:NULL
 COL document_approvals.action:character varying:NOT NULL
 COL document_approvals.approver_id:integer:NULL
 COL document_approvals.comments:text:NULL
@@ -620,6 +645,7 @@ COL export_orders.current_fx_value_pkr:numeric:NULL
 COL export_orders.current_step:integer:NULL
 COL export_orders.customer_id:integer:NOT NULL
 COL export_orders.destination_port:character varying:NULL
+COL export_orders.device_uuid:text:NULL
 COL export_orders.doc_address_mode:character varying:NOT NULL
 COL export_orders.eta:date:NULL
 COL export_orders.etd:date:NULL
@@ -643,6 +669,7 @@ COL export_orders.incoterm:character varying:NULL
 COL export_orders.inventory_cogs_per_mt_pkr:numeric:NULL
 COL export_orders.inventory_cogs_total_pkr:numeric:NULL
 COL export_orders.invoice_number:character varying:NULL
+COL export_orders.local_ts:timestamp with time zone:NULL
 COL export_orders.master_bag_size_kg:numeric:NULL
 COL export_orders.master_bag_type:character varying:NULL
 COL export_orders.milling_order_id:integer:NULL
@@ -666,7 +693,9 @@ COL export_orders.quality_description:text:NULL
 COL export_orders.quantity_input_value:numeric:NULL
 COL export_orders.quantity_unit:character varying:NULL
 COL export_orders.receiving_mode:character varying:NULL
+COL export_orders.record_version:integer:NOT NULL
 COL export_orders.revenue_posted:boolean:NOT NULL
+COL export_orders.server_ts:timestamp with time zone:NULL
 COL export_orders.shipment_eta:date:NULL
 COL export_orders.shipment_remarks:text:NULL
 COL export_orders.shipment_window_end:date:NULL
@@ -674,10 +703,12 @@ COL export_orders.shipment_window_start:date:NULL
 COL export_orders.shipping_line:character varying:NULL
 COL export_orders.source:character varying:NULL
 COL export_orders.status:character varying:NOT NULL
+COL export_orders.sync_status:character varying:NOT NULL
 COL export_orders.total_bags:integer:NULL
 COL export_orders.total_loose_weight_kg:numeric:NULL
 COL export_orders.units_per_bag:integer:NULL
 COL export_orders.updated_at:timestamp with time zone:NOT NULL
+COL export_orders.uuid:uuid:NULL
 COL export_orders.vessel_name:character varying:NULL
 COL export_orders.voyage_number:character varying:NULL
 COL export_packing_weights.approval_status:character varying:NOT NULL
@@ -726,9 +757,11 @@ COL export_quotations.created_by:integer:NULL
 COL export_quotations.currency:character varying:NOT NULL
 COL export_quotations.customer_id:integer:NULL
 COL export_quotations.destination_port:character varying:NULL
+COL export_quotations.device_uuid:text:NULL
 COL export_quotations.freight_cost:numeric:NOT NULL
 COL export_quotations.id:integer:NOT NULL
 COL export_quotations.incoterm:character varying:NULL
+COL export_quotations.local_ts:timestamp with time zone:NULL
 COL export_quotations.notes:text:NULL
 COL export_quotations.other_charges:numeric:NOT NULL
 COL export_quotations.packing_cost:numeric:NOT NULL
@@ -737,10 +770,14 @@ COL export_quotations.payment_terms:text:NULL
 COL export_quotations.port_of_loading:character varying:NULL
 COL export_quotations.quotation_no:character varying:NOT NULL
 COL export_quotations.quote_date:date:NULL
+COL export_quotations.record_version:integer:NOT NULL
+COL export_quotations.server_ts:timestamp with time zone:NULL
 COL export_quotations.status:character varying:NOT NULL
 COL export_quotations.subtotal:numeric:NOT NULL
+COL export_quotations.sync_status:character varying:NOT NULL
 COL export_quotations.total_amount:numeric:NOT NULL
 COL export_quotations.updated_at:timestamp with time zone:NOT NULL
+COL export_quotations.uuid:uuid:NULL
 COL export_quotations.valid_until:date:NULL
 COL follow_ups.created_at:timestamp with time zone:NULL
 COL follow_ups.follow_up_date:date:NOT NULL
@@ -797,12 +834,14 @@ COL goods_receipt_notes.batch_id:integer:NULL
 COL goods_receipt_notes.broken_actual:numeric:NULL
 COL goods_receipt_notes.created_at:timestamp with time zone:NOT NULL
 COL goods_receipt_notes.currency:character varying:NOT NULL
+COL goods_receipt_notes.device_uuid:text:NULL
 COL goods_receipt_notes.driver_name:character varying:NULL
 COL goods_receipt_notes.driver_phone:character varying:NULL
 COL goods_receipt_notes.grn_no:character varying:NOT NULL
 COL goods_receipt_notes.gross_weight_mt:numeric:NULL
 COL goods_receipt_notes.id:integer:NOT NULL
 COL goods_receipt_notes.inspected_by:integer:NULL
+COL goods_receipt_notes.local_ts:timestamp with time zone:NULL
 COL goods_receipt_notes.moisture_actual:numeric:NULL
 COL goods_receipt_notes.net_weight_mt:numeric:NULL
 COL goods_receipt_notes.po_id:integer:NOT NULL
@@ -810,13 +849,17 @@ COL goods_receipt_notes.price_per_mt:numeric:NULL
 COL goods_receipt_notes.quality_status:character varying:NOT NULL
 COL goods_receipt_notes.receipt_date:date:NOT NULL
 COL goods_receipt_notes.received_by:integer:NULL
+COL goods_receipt_notes.record_version:integer:NOT NULL
 COL goods_receipt_notes.rejected_qty_mt:numeric:NOT NULL
 COL goods_receipt_notes.rejection_reason:text:NULL
+COL goods_receipt_notes.server_ts:timestamp with time zone:NULL
 COL goods_receipt_notes.status:character varying:NOT NULL
 COL goods_receipt_notes.supplier_id:integer:NULL
+COL goods_receipt_notes.sync_status:character varying:NOT NULL
 COL goods_receipt_notes.tare_weight_mt:numeric:NULL
 COL goods_receipt_notes.total_value:numeric:NULL
 COL goods_receipt_notes.updated_at:timestamp with time zone:NOT NULL
+COL goods_receipt_notes.uuid:uuid:NULL
 COL goods_receipt_notes.vehicle_no:character varying:NULL
 COL goods_receipt_notes.warehouse_id:integer:NULL
 COL historical_cost_repair_log.batch_id:integer:NULL
@@ -847,18 +890,24 @@ COL internal_transfers.confirmed_at:timestamp with time zone:NULL
 COL internal_transfers.confirmed_by:integer:NULL
 COL internal_transfers.created_at:timestamp with time zone:NOT NULL
 COL internal_transfers.created_by:integer:NULL
+COL internal_transfers.device_uuid:text:NULL
 COL internal_transfers.dispatch_date:date:NULL
 COL internal_transfers.export_order_id:integer:NULL
 COL internal_transfers.id:integer:NOT NULL
+COL internal_transfers.local_ts:timestamp with time zone:NULL
 COL internal_transfers.pkr_rate:numeric:NULL
 COL internal_transfers.product_name:character varying:NULL
 COL internal_transfers.qty_kg:numeric:NULL
+COL internal_transfers.record_version:integer:NOT NULL
+COL internal_transfers.server_ts:timestamp with time zone:NULL
 COL internal_transfers.status:character varying:NOT NULL
+COL internal_transfers.sync_status:character varying:NOT NULL
 COL internal_transfers.total_value_pkr:numeric:NULL
 COL internal_transfers.transfer_no:character varying:NOT NULL
 COL internal_transfers.transfer_price_pkr:numeric:NULL
 COL internal_transfers.updated_at:timestamp with time zone:NOT NULL
 COL internal_transfers.usd_equivalent:numeric:NULL
+COL internal_transfers.uuid:uuid:NULL
 COL inventory_lots.available_qty:numeric:NOT NULL
 COL inventory_lots.bag_color:character varying:NULL
 COL inventory_lots.bag_cost_included:boolean:NOT NULL
@@ -881,6 +930,7 @@ COL inventory_lots.created_at:timestamp with time zone:NOT NULL
 COL inventory_lots.created_by:integer:NULL
 COL inventory_lots.crop_year:character varying:NULL
 COL inventory_lots.damaged_weight_kg:numeric:NOT NULL
+COL inventory_lots.device_uuid:text:NULL
 COL inventory_lots.due_amount:numeric:NOT NULL
 COL inventory_lots.entity:character varying:NOT NULL
 COL inventory_lots.expiry_date:date:NULL
@@ -893,6 +943,7 @@ COL inventory_lots.item_name:character varying:NOT NULL
 COL inventory_lots.labor_cost:numeric:NOT NULL
 COL inventory_lots.landed_cost_per_kg:numeric:NOT NULL
 COL inventory_lots.landed_cost_total:numeric:NOT NULL
+COL inventory_lots.local_ts:timestamp with time zone:NULL
 COL inventory_lots.lot_no:character varying:NOT NULL
 COL inventory_lots.milling_cost_component:numeric:NULL
 COL inventory_lots.milling_reserved_qty:numeric:NOT NULL
@@ -920,14 +971,17 @@ COL inventory_lots.rate_input_value:numeric:NULL
 COL inventory_lots.rate_per_kg:numeric:NOT NULL
 COL inventory_lots.raw_cost_component:numeric:NULL
 COL inventory_lots.received_net_weight_kg:numeric:NULL
+COL inventory_lots.record_version:integer:NOT NULL
 COL inventory_lots.reserved_against:character varying:NULL
 COL inventory_lots.reserved_qty:numeric:NOT NULL
+COL inventory_lots.server_ts:timestamp with time zone:NULL
 COL inventory_lots.service_batch_id:integer:NULL
 COL inventory_lots.sold_weight_kg:numeric:NOT NULL
 COL inventory_lots.sortex_status:character varying:NULL
 COL inventory_lots.standard_unit_type:character varying:NOT NULL
 COL inventory_lots.status:character varying:NOT NULL
 COL inventory_lots.supplier_id:integer:NULL
+COL inventory_lots.sync_status:character varying:NOT NULL
 COL inventory_lots.total_bag_cost:numeric:NOT NULL
 COL inventory_lots.total_bags:integer:NULL
 COL inventory_lots.total_value:numeric:NOT NULL
@@ -937,18 +991,25 @@ COL inventory_lots.type:character varying:NOT NULL
 COL inventory_lots.unit:character varying:NOT NULL
 COL inventory_lots.unloading_cost:numeric:NOT NULL
 COL inventory_lots.updated_at:timestamp with time zone:NOT NULL
+COL inventory_lots.uuid:uuid:NULL
 COL inventory_lots.variety:character varying:NULL
 COL inventory_lots.warehouse_id:integer:NOT NULL
 COL inventory_lots.whiteness:numeric:NULL
 COL inventory_reservations.created_at:timestamp with time zone:NOT NULL
 COL inventory_reservations.created_by:integer:NULL
+COL inventory_reservations.device_uuid:text:NULL
 COL inventory_reservations.id:integer:NOT NULL
 COL inventory_reservations.item_id:integer:NULL
+COL inventory_reservations.local_ts:timestamp with time zone:NULL
 COL inventory_reservations.lot_id:integer:NULL
 COL inventory_reservations.order_id:integer:NULL
+COL inventory_reservations.record_version:integer:NOT NULL
 COL inventory_reservations.reserved_qty:numeric:NOT NULL
+COL inventory_reservations.server_ts:timestamp with time zone:NULL
 COL inventory_reservations.status:character varying:NOT NULL
+COL inventory_reservations.sync_status:character varying:NOT NULL
 COL inventory_reservations.updated_at:timestamp with time zone:NOT NULL
+COL inventory_reservations.uuid:uuid:NULL
 COL inventory_valuation_snapshots.avg_value_per_kg:numeric:NULL
 COL inventory_valuation_snapshots.created_at:timestamp with time zone:NULL
 COL inventory_valuation_snapshots.entity:character varying:NULL
@@ -964,24 +1025,30 @@ COL journal_entries.created_by:integer:NULL
 COL journal_entries.currency:character varying:NOT NULL
 COL journal_entries.date:date:NOT NULL
 COL journal_entries.description:text:NULL
+COL journal_entries.device_uuid:text:NULL
 COL journal_entries.entity:character varying:NULL
 COL journal_entries.fx_rate:numeric:NOT NULL
 COL journal_entries.id:integer:NOT NULL
 COL journal_entries.is_auto:boolean:NOT NULL
 COL journal_entries.journal_no:character varying:NOT NULL
+COL journal_entries.local_ts:timestamp with time zone:NULL
 COL journal_entries.orig_currency:character varying:NULL
 COL journal_entries.orig_fx_rate:numeric:NULL
 COL journal_entries.party_id:integer:NULL
 COL journal_entries.party_type:character varying:NULL
 COL journal_entries.period_id:integer:NULL
 COL journal_entries.posting_rule_id:integer:NULL
+COL journal_entries.record_version:integer:NOT NULL
 COL journal_entries.ref_no:character varying:NULL
 COL journal_entries.ref_type:character varying:NULL
 COL journal_entries.reversal_of:integer:NULL
+COL journal_entries.server_ts:timestamp with time zone:NULL
 COL journal_entries.status:character varying:NOT NULL
+COL journal_entries.sync_status:character varying:NOT NULL
 COL journal_entries.total_credit:numeric:NOT NULL
 COL journal_entries.total_debit:numeric:NOT NULL
 COL journal_entries.updated_at:timestamp with time zone:NOT NULL
+COL journal_entries.uuid:uuid:NULL
 COL journal_lines.account:character varying:NOT NULL
 COL journal_lines.account_id:integer:NOT NULL
 COL journal_lines.created_at:timestamp with time zone:NULL
@@ -1017,6 +1084,7 @@ COL local_sales.created_at:timestamp with time zone:NOT NULL
 COL local_sales.created_by:integer:NULL
 COL local_sales.currency:character varying:NOT NULL
 COL local_sales.customer_id:integer:NULL
+COL local_sales.device_uuid:text:NULL
 COL local_sales.dispatch_date:date:NULL
 COL local_sales.dispatched:boolean:NOT NULL
 COL local_sales.driver_name:character varying:NULL
@@ -1029,6 +1097,7 @@ COL local_sales.id:integer:NOT NULL
 COL local_sales.item_name:character varying:NOT NULL
 COL local_sales.item_type:character varying:NULL
 COL local_sales.landed_cost_total:numeric:NULL
+COL local_sales.local_ts:timestamp with time zone:NULL
 COL local_sales.lot_id:integer:NULL
 COL local_sales.lot_no:character varying:NULL
 COL local_sales.margin_pct:numeric:NULL
@@ -1046,12 +1115,16 @@ COL local_sales.quantity_unit:character varying:NULL
 COL local_sales.rate_input:numeric:NOT NULL
 COL local_sales.rate_per_kg:numeric:NOT NULL
 COL local_sales.rate_unit:character varying:NULL
+COL local_sales.record_version:integer:NOT NULL
 COL local_sales.sale_date:date:NOT NULL
 COL local_sales.sale_group_no:character varying:NULL
 COL local_sales.sale_no:character varying:NOT NULL
+COL local_sales.server_ts:timestamp with time zone:NULL
 COL local_sales.status:character varying:NOT NULL
+COL local_sales.sync_status:character varying:NOT NULL
 COL local_sales.total_amount:numeric:NOT NULL
 COL local_sales.updated_at:timestamp with time zone:NOT NULL
+COL local_sales.uuid:uuid:NULL
 COL local_sales.vehicle_no:character varying:NULL
 COL lot_source_mapping.child_lot_id:integer:NOT NULL
 COL lot_source_mapping.cost_share_amount:numeric:NULL
@@ -1069,11 +1142,13 @@ COL lot_transactions.cost_impact:numeric:NULL
 COL lot_transactions.created_at:timestamp with time zone:NOT NULL
 COL lot_transactions.created_by:integer:NOT NULL
 COL lot_transactions.currency:character varying:NOT NULL
+COL lot_transactions.device_uuid:text:NULL
 COL lot_transactions.entity_from:character varying:NULL
 COL lot_transactions.entity_to:character varying:NULL
 COL lot_transactions.id:integer:NOT NULL
 COL lot_transactions.input_qty:numeric:NULL
 COL lot_transactions.input_unit:character varying:NULL
+COL lot_transactions.local_ts:timestamp with time zone:NULL
 COL lot_transactions.lot_id:integer:NOT NULL
 COL lot_transactions.performed_at:timestamp with time zone:NULL
 COL lot_transactions.performed_by:integer:NOT NULL
@@ -1082,17 +1157,21 @@ COL lot_transactions.quantity_kg:numeric:NOT NULL
 COL lot_transactions.rate_input_unit:character varying:NULL
 COL lot_transactions.rate_input_value:numeric:NULL
 COL lot_transactions.rate_per_kg:numeric:NULL
+COL lot_transactions.record_version:integer:NOT NULL
 COL lot_transactions.reference_id:integer:NULL
 COL lot_transactions.reference_module:character varying:NULL
 COL lot_transactions.reference_no:character varying:NULL
 COL lot_transactions.remarks:text:NULL
 COL lot_transactions.reservation_effect:numeric:NULL
+COL lot_transactions.server_ts:timestamp with time zone:NULL
+COL lot_transactions.sync_status:character varying:NOT NULL
 COL lot_transactions.total_cost:numeric:NULL
 COL lot_transactions.transaction_date:date:NOT NULL
 COL lot_transactions.transaction_no:character varying:NOT NULL
 COL lot_transactions.transaction_type:character varying:NOT NULL
 COL lot_transactions.unit_cost:numeric:NULL
 COL lot_transactions.updated_at:timestamp with time zone:NOT NULL
+COL lot_transactions.uuid:uuid:NULL
 COL lot_transactions.warehouse_from_id:integer:NULL
 COL lot_transactions.warehouse_to_id:integer:NULL
 COL machine_downtime.batch_id:integer:NULL
@@ -1158,14 +1237,20 @@ COL mill_expenses.created_at:timestamp with time zone:NOT NULL
 COL mill_expenses.created_by:integer:NULL
 COL mill_expenses.currency:character varying:NOT NULL
 COL mill_expenses.description:character varying:NULL
+COL mill_expenses.device_uuid:text:NULL
 COL mill_expenses.expense_date:date:NOT NULL
 COL mill_expenses.id:integer:NOT NULL
+COL mill_expenses.local_ts:timestamp with time zone:NULL
 COL mill_expenses.mill_id:integer:NULL
 COL mill_expenses.notes:text:NULL
 COL mill_expenses.payment_method:character varying:NULL
 COL mill_expenses.period:character varying:NULL
+COL mill_expenses.record_version:integer:NOT NULL
 COL mill_expenses.reference:character varying:NULL
+COL mill_expenses.server_ts:timestamp with time zone:NULL
+COL mill_expenses.sync_status:character varying:NOT NULL
 COL mill_expenses.updated_at:timestamp with time zone:NOT NULL
+COL mill_expenses.uuid:uuid:NULL
 COL mill_final_settlements.advances_deducted:numeric:NOT NULL
 COL mill_final_settlements.bank_account_id:integer:NULL
 COL mill_final_settlements.breakdown:jsonb:NULL
@@ -1536,6 +1621,7 @@ COL milling_batches.csr_kg:numeric:NOT NULL
 COL milling_batches.csr_price_per_kg:numeric:NULL
 COL milling_batches.custom_tags:jsonb:NOT NULL
 COL milling_batches.date_received:date:NULL
+COL milling_batches.device_uuid:text:NULL
 COL milling_batches.expected_output_kg:numeric:NULL
 COL milling_batches.finished_price_per_kg:numeric:NULL
 COL milling_batches.husk_kg:numeric:NOT NULL
@@ -1544,6 +1630,7 @@ COL milling_batches.id:integer:NOT NULL
 COL milling_batches.is_service_milling:boolean:NOT NULL
 COL milling_batches.katta_count:integer:NULL
 COL milling_batches.linked_export_order_id:integer:NULL
+COL milling_batches.local_ts:timestamp with time zone:NULL
 COL milling_batches.machine_line:character varying:NULL
 COL milling_batches.manual_milling_cost_pkr:numeric:NULL
 COL milling_batches.manual_other_expenses_pkr:numeric:NULL
@@ -1569,8 +1656,10 @@ COL milling_batches.purchase_price_per_kg:numeric:NULL
 COL milling_batches.raw_cost_per_kg_finished:numeric:NULL
 COL milling_batches.raw_cost_total:numeric:NULL
 COL milling_batches.raw_qty_kg:numeric:NULL
+COL milling_batches.record_version:integer:NOT NULL
 COL milling_batches.rejected_by:integer:NULL
 COL milling_batches.rejection_reason:text:NULL
+COL milling_batches.server_ts:timestamp with time zone:NULL
 COL milling_batches.service_labour_rate_per_katta:numeric:NULL
 COL milling_batches.service_lot_status:character varying:NULL
 COL milling_batches.service_milling_rate_per_kg:numeric:NULL
@@ -1587,9 +1676,11 @@ COL milling_batches.supplier_id:integer:NULL
 COL milling_batches.supplier_name:character varying:NULL
 COL milling_batches.sweeping_kg:numeric:NOT NULL
 COL milling_batches.sweeping_price_per_kg:numeric:NULL
+COL milling_batches.sync_status:character varying:NOT NULL
 COL milling_batches.total_cost_per_kg_finished:numeric:NULL
 COL milling_batches.transport_mode:character varying:NOT NULL
 COL milling_batches.updated_at:timestamp with time zone:NOT NULL
+COL milling_batches.uuid:uuid:NULL
 COL milling_batches.wastage_kg:numeric:NOT NULL
 COL milling_batches.yield_pct:numeric:NOT NULL
 COL milling_costs.amount:numeric:NOT NULL
@@ -1722,21 +1813,27 @@ COL payables.category:character varying:NULL
 COL payables.created_at:timestamp with time zone:NOT NULL
 COL payables.created_by:integer:NULL
 COL payables.currency:character varying:NOT NULL
+COL payables.device_uuid:text:NULL
 COL payables.due_date:date:NULL
 COL payables.entity:character varying:NOT NULL
 COL payables.id:integer:NOT NULL
 COL payables.linked_ref:character varying:NULL
+COL payables.local_ts:timestamp with time zone:NULL
 COL payables.notes:text:NULL
 COL payables.original_amount:numeric:NOT NULL
 COL payables.outstanding:numeric:NOT NULL
 COL payables.paid_amount:numeric:NOT NULL
 COL payables.pay_no:character varying:NOT NULL
 COL payables.payable_type:character varying:NOT NULL
+COL payables.record_version:integer:NOT NULL
+COL payables.server_ts:timestamp with time zone:NULL
 COL payables.source_id:integer:NULL
 COL payables.source_table:character varying:NULL
 COL payables.status:character varying:NOT NULL
 COL payables.supplier_id:integer:NULL
+COL payables.sync_status:character varying:NOT NULL
 COL payables.updated_at:timestamp with time zone:NOT NULL
+COL payables.uuid:uuid:NULL
 COL payments.amount:numeric:NOT NULL
 COL payments.bank_account_id:integer:NULL
 COL payments.bank_reference:character varying:NULL
@@ -1747,23 +1844,29 @@ COL payments.confirmed_by:integer:NULL
 COL payments.created_at:timestamp with time zone:NOT NULL
 COL payments.created_by:integer:NULL
 COL payments.currency:character varying:NOT NULL
+COL payments.device_uuid:text:NULL
 COL payments.due_date:date:NULL
 COL payments.fx_rate:numeric:NOT NULL
 COL payments.id:integer:NOT NULL
 COL payments.linked_payable_id:integer:NULL
 COL payments.linked_receivable_id:integer:NULL
 COL payments.local_sale_id:integer:NULL
+COL payments.local_ts:timestamp with time zone:NULL
 COL payments.notes:text:NULL
 COL payments.payment_date:date:NOT NULL
 COL payments.payment_method:character varying:NULL
 COL payments.payment_no:character varying:NOT NULL
+COL payments.record_version:integer:NOT NULL
 COL payments.reject_reason:text:NULL
+COL payments.server_ts:timestamp with time zone:NULL
 COL payments.service_invoice_id:integer:NULL
 COL payments.source_id:integer:NULL
 COL payments.source_table:character varying:NULL
 COL payments.status:character varying:NOT NULL
+COL payments.sync_status:character varying:NOT NULL
 COL payments.type:character varying:NOT NULL
 COL payments.updated_at:timestamp with time zone:NULL
+COL payments.uuid:uuid:NULL
 COL permissions.action:character varying:NOT NULL
 COL permissions.created_at:timestamp with time zone:NULL
 COL permissions.description:text:NULL
@@ -1969,21 +2072,27 @@ COL receivables.created_at:timestamp with time zone:NOT NULL
 COL receivables.created_by:integer:NULL
 COL receivables.currency:character varying:NOT NULL
 COL receivables.customer_id:integer:NOT NULL
+COL receivables.device_uuid:text:NULL
 COL receivables.due_date:date:NULL
 COL receivables.entity:character varying:NOT NULL
 COL receivables.expected_amount:numeric:NOT NULL
 COL receivables.fx_rate:numeric:NULL
 COL receivables.id:integer:NOT NULL
 COL receivables.local_sale_id:integer:NULL
+COL receivables.local_ts:timestamp with time zone:NULL
 COL receivables.notes:text:NULL
 COL receivables.order_id:integer:NULL
 COL receivables.outstanding:numeric:NOT NULL
 COL receivables.received_amount:numeric:NOT NULL
+COL receivables.record_version:integer:NOT NULL
 COL receivables.recv_no:character varying:NOT NULL
+COL receivables.server_ts:timestamp with time zone:NULL
 COL receivables.service_invoice_id:integer:NULL
 COL receivables.status:character varying:NOT NULL
+COL receivables.sync_status:character varying:NOT NULL
 COL receivables.type:character varying:NOT NULL
 COL receivables.updated_at:timestamp with time zone:NOT NULL
+COL receivables.uuid:uuid:NULL
 COL recovery_benchmarks.created_at:timestamp with time zone:NOT NULL
 COL recovery_benchmarks.expected_bran_pct:numeric:NULL
 COL recovery_benchmarks.expected_broken_pct:numeric:NULL
@@ -2099,20 +2208,27 @@ COL service_milling_dispatches.bag_count:integer:NULL
 COL service_milling_dispatches.client_customer_id:integer:NULL
 COL service_milling_dispatches.created_at:timestamp with time zone:NOT NULL
 COL service_milling_dispatches.created_by:integer:NULL
+COL service_milling_dispatches.device_uuid:text:NULL
 COL service_milling_dispatches.dispatch_date:date:NOT NULL
 COL service_milling_dispatches.dispatch_no:character varying:NOT NULL
 COL service_milling_dispatches.driver_name:character varying:NULL
 COL service_milling_dispatches.id:integer:NOT NULL
+COL service_milling_dispatches.local_ts:timestamp with time zone:NULL
 COL service_milling_dispatches.lot_id:integer:NOT NULL
 COL service_milling_dispatches.notes:text:NULL
 COL service_milling_dispatches.qty_kg:numeric:NOT NULL
+COL service_milling_dispatches.record_version:integer:NOT NULL
+COL service_milling_dispatches.server_ts:timestamp with time zone:NULL
 COL service_milling_dispatches.service_batch_id:integer:NOT NULL
+COL service_milling_dispatches.sync_status:character varying:NOT NULL
 COL service_milling_dispatches.updated_at:timestamp with time zone:NOT NULL
+COL service_milling_dispatches.uuid:uuid:NULL
 COL service_milling_dispatches.vehicle_no:character varying:NULL
 COL service_milling_invoices.balance_amount:numeric:NOT NULL
 COL service_milling_invoices.client_customer_id:integer:NULL
 COL service_milling_invoices.created_at:timestamp with time zone:NOT NULL
 COL service_milling_invoices.created_by:integer:NULL
+COL service_milling_invoices.device_uuid:text:NULL
 COL service_milling_invoices.discount:numeric:NULL
 COL service_milling_invoices.extra_charges:numeric:NULL
 COL service_milling_invoices.id:integer:NOT NULL
@@ -2121,23 +2237,28 @@ COL service_milling_invoices.invoice_no:character varying:NOT NULL
 COL service_milling_invoices.labour_amount:numeric:NULL
 COL service_milling_invoices.labour_kattas:integer:NULL
 COL service_milling_invoices.labour_rate_per_katta:numeric:NULL
+COL service_milling_invoices.local_ts:timestamp with time zone:NULL
 COL service_milling_invoices.milling_amount:numeric:NULL
 COL service_milling_invoices.milling_qty_kg:numeric:NULL
 COL service_milling_invoices.milling_rate_per_kg:numeric:NULL
 COL service_milling_invoices.notes:text:NULL
 COL service_milling_invoices.payment_status:character varying:NOT NULL
 COL service_milling_invoices.received_amount:numeric:NOT NULL
+COL service_milling_invoices.record_version:integer:NOT NULL
 COL service_milling_invoices.rental_amount:numeric:NULL
 COL service_milling_invoices.rental_from:date:NULL
 COL service_milling_invoices.rental_kattas:integer:NULL
 COL service_milling_invoices.rental_rate_per_katta:numeric:NULL
 COL service_milling_invoices.rental_to:date:NULL
+COL service_milling_invoices.server_ts:timestamp with time zone:NULL
 COL service_milling_invoices.service_batch_id:integer:NULL
 COL service_milling_invoices.subtotal:numeric:NULL
+COL service_milling_invoices.sync_status:character varying:NOT NULL
 COL service_milling_invoices.tax_amount:numeric:NULL
 COL service_milling_invoices.tax_pct:numeric:NULL
 COL service_milling_invoices.total_amount:numeric:NULL
 COL service_milling_invoices.updated_at:timestamp with time zone:NOT NULL
+COL service_milling_invoices.uuid:uuid:NULL
 COL shipment_containers.bags_count:integer:NULL
 COL shipment_containers.container_no:character varying:NOT NULL
 COL shipment_containers.container_type:character varying:NOT NULL
@@ -2256,6 +2377,11 @@ COL suppliers.supplier_code:character varying:NULL
 COL suppliers.type:character varying:NOT NULL
 COL suppliers.uid:character varying:NULL
 COL suppliers.updated_at:timestamp with time zone:NOT NULL
+COL sync_state.device_id:integer:NULL
+COL sync_state.domain:character varying:NOT NULL
+COL sync_state.id:integer:NOT NULL
+COL sync_state.updated_at:timestamp with time zone:NULL
+COL sync_state.watermark:character varying:NULL
 COL system_health.check_type:character varying:NULL
 COL system_health.checked_at:timestamp with time zone:NULL
 COL system_health.created_at:timestamp with time zone:NULL
@@ -2424,6 +2550,7 @@ CON bank_transactions.bank_transactions_pkey(p)
 CON bank_transactions.bank_transactions_status_check(c)
 CON bank_transactions.bank_transactions_transaction_no_unique(u)
 CON bank_transactions.bank_transactions_type_check(c)
+CON bank_transactions.uq_bank_transactions_uuid(u)
 CON batch_source_lots.batch_source_lots_batch_id_foreign(f)
 CON batch_source_lots.batch_source_lots_lot_id_foreign(f)
 CON batch_source_lots.batch_source_lots_pkey(p)
@@ -2445,6 +2572,7 @@ CON business_expenses.business_expenses_type_chk(c)
 CON business_expenses.chk_business_expenses_amount_nonneg(c)
 CON business_expenses.chk_business_expenses_amount_pkr_nn(c)
 CON business_expenses.chk_business_expenses_paid_amount_nn(c)
+CON business_expenses.uq_business_expenses_uuid(u)
 CON chart_of_accounts.chart_of_accounts_code_unique(u)
 CON chart_of_accounts.chart_of_accounts_parent_id_foreign(f)
 CON chart_of_accounts.chart_of_accounts_pkey(p)
@@ -2508,6 +2636,8 @@ CON data_imports.data_imports_created_by_foreign(f)
 CON data_imports.data_imports_job_id_foreign(f)
 CON data_imports.data_imports_pkey(p)
 CON data_imports.data_imports_status_check(c)
+CON devices.devices_device_uuid_unique(u)
+CON devices.devices_pkey(p)
 CON document_approvals.document_approvals_approver_id_foreign(f)
 CON document_approvals.document_approvals_document_id_foreign(f)
 CON document_approvals.document_approvals_pkey(p)
@@ -2588,6 +2718,7 @@ CON export_orders.export_orders_milling_order_id_foreign(f)
 CON export_orders.export_orders_order_no_unique(u)
 CON export_orders.export_orders_pkey(p)
 CON export_orders.export_orders_product_id_foreign(f)
+CON export_orders.uq_export_orders_uuid(u)
 CON export_packing_weights.export_packing_weights_order_id_foreign(f)
 CON export_packing_weights.export_packing_weights_order_id_unique(u)
 CON export_packing_weights.export_packing_weights_pkey(p)
@@ -2599,6 +2730,7 @@ CON export_quotations.export_quotations_created_by_foreign(f)
 CON export_quotations.export_quotations_customer_id_foreign(f)
 CON export_quotations.export_quotations_pkey(p)
 CON export_quotations.export_quotations_quotation_no_unique(u)
+CON export_quotations.uq_export_quotations_uuid(u)
 CON follow_ups.chk_follow_ups_status_valid(c)
 CON follow_ups.follow_ups_pkey(p)
 CON follow_ups.follow_ups_user_id_foreign(f)
@@ -2632,6 +2764,7 @@ CON goods_receipt_notes.goods_receipt_notes_received_by_foreign(f)
 CON goods_receipt_notes.goods_receipt_notes_status_check(c)
 CON goods_receipt_notes.goods_receipt_notes_supplier_id_foreign(f)
 CON goods_receipt_notes.goods_receipt_notes_warehouse_id_foreign(f)
+CON goods_receipt_notes.uq_goods_receipt_notes_uuid(u)
 CON historical_cost_repair_log.historical_cost_repair_log_batch_id_foreign(f)
 CON historical_cost_repair_log.historical_cost_repair_log_lot_id_foreign(f)
 CON historical_cost_repair_log.historical_cost_repair_log_order_id_foreign(f)
@@ -2649,6 +2782,7 @@ CON internal_transfers.internal_transfers_created_by_foreign(f)
 CON internal_transfers.internal_transfers_export_order_id_foreign(f)
 CON internal_transfers.internal_transfers_pkey(p)
 CON internal_transfers.internal_transfers_transfer_no_unique(u)
+CON internal_transfers.uq_internal_transfers_uuid(u)
 CON inventory_lots.chk_inventory_lots_bag_cost_per_bag_nn(c)
 CON inventory_lots.chk_inventory_lots_bag_size_kg_nn(c)
 CON inventory_lots.chk_inventory_lots_bag_weight_gm_nn(c)
@@ -2700,6 +2834,7 @@ CON inventory_lots.inventory_lots_supplier_id_foreign(f)
 CON inventory_lots.inventory_lots_transport_vendor_id_foreign(f)
 CON inventory_lots.inventory_lots_type_check(c)
 CON inventory_lots.inventory_lots_warehouse_id_foreign(f)
+CON inventory_lots.uq_inventory_lots_uuid(u)
 CON inventory_reservations.chk_inventory_reservations_reserved_qty_nn(c)
 CON inventory_reservations.chk_inventory_reservations_status_valid(c)
 CON inventory_reservations.inventory_reservations_created_by_foreign(f)
@@ -2707,6 +2842,7 @@ CON inventory_reservations.inventory_reservations_item_id_foreign(f)
 CON inventory_reservations.inventory_reservations_lot_id_foreign(f)
 CON inventory_reservations.inventory_reservations_order_id_foreign(f)
 CON inventory_reservations.inventory_reservations_pkey(p)
+CON inventory_reservations.uq_inventory_reservations_uuid(u)
 CON inventory_valuation_snapshots.chk_inventory_valuation_snapshots_avg_value_per_kg_nn(c)
 CON inventory_valuation_snapshots.chk_inventory_valuation_snapshots_total_qty_kg_nn(c)
 CON inventory_valuation_snapshots.chk_inventory_valuation_snapshots_total_value_nn(c)
@@ -2721,6 +2857,7 @@ CON journal_entries.journal_entries_period_id_foreign(f)
 CON journal_entries.journal_entries_pkey(p)
 CON journal_entries.journal_entries_posting_rule_id_foreign(f)
 CON journal_entries.journal_entries_reversal_of_foreign(f)
+CON journal_entries.uq_journal_entries_uuid(u)
 CON journal_lines.journal_lines_account_id_foreign(f)
 CON journal_lines.journal_lines_journal_id_foreign(f)
 CON journal_lines.journal_lines_pkey(p)
@@ -2747,6 +2884,7 @@ CON local_sales.local_sales_lot_id_foreign(f)
 CON local_sales.local_sales_mill_item_id_foreign(f)
 CON local_sales.local_sales_pkey(p)
 CON local_sales.local_sales_sale_no_unique(u)
+CON local_sales.uq_local_sales_uuid(u)
 CON lot_source_mapping.chk_lot_source_mapping_cost_share_amount_nn(c)
 CON lot_source_mapping.chk_lot_source_mapping_quantity_kg_nn(c)
 CON lot_source_mapping.lot_source_mapping_child_lot_id_foreign(f)
@@ -2763,6 +2901,7 @@ CON lot_transactions.lot_transactions_pkey(p)
 CON lot_transactions.lot_transactions_transaction_no_unique(u)
 CON lot_transactions.lot_transactions_warehouse_from_id_foreign(f)
 CON lot_transactions.lot_transactions_warehouse_to_id_foreign(f)
+CON lot_transactions.uq_lot_transactions_uuid(u)
 CON machine_downtime.chk_machine_downtime_daterange(c)
 CON machine_downtime.chk_machine_downtime_duration_minutes_nn(c)
 CON machine_downtime.machine_downtime_batch_id_foreign(f)
@@ -2793,6 +2932,7 @@ CON mill_expenses.chk_me_amount_nonneg(c)
 CON mill_expenses.mill_expenses_created_by_foreign(f)
 CON mill_expenses.mill_expenses_mill_id_foreign(f)
 CON mill_expenses.mill_expenses_pkey(p)
+CON mill_expenses.uq_mill_expenses_uuid(u)
 CON mill_final_settlements.mill_final_settlements_bank_account_id_fk(f)
 CON mill_final_settlements.mill_final_settlements_expense_id_fk(f)
 CON mill_final_settlements.mill_final_settlements_pkey(p)
@@ -2947,6 +3087,7 @@ CON milling_batches.milling_batches_pkey(p)
 CON milling_batches.milling_batches_product_id_foreign(f)
 CON milling_batches.milling_batches_rejected_by_foreign(f)
 CON milling_batches.milling_batches_supplier_id_foreign(f)
+CON milling_batches.uq_milling_batches_uuid(u)
 CON milling_costs.chk_mc_amount_nonneg(c)
 CON milling_costs.milling_costs_batch_id_foreign(f)
 CON milling_costs.milling_costs_created_by_fk(f)
@@ -3020,6 +3161,7 @@ CON payables.payables_created_by_foreign(f)
 CON payables.payables_pay_no_unique(u)
 CON payables.payables_pkey(p)
 CON payables.payables_supplier_id_foreign(f)
+CON payables.uq_payables_uuid(u)
 CON payments.chk_payments_amount_nonneg(c)
 CON payments.chk_payments_base_amount_pkr_nonneg(c)
 CON payments.chk_payments_currency_valid(c)
@@ -3035,6 +3177,7 @@ CON payments.payments_payment_no_unique(u)
 CON payments.payments_pkey(p)
 CON payments.payments_service_invoice_id_foreign(f)
 CON payments.payments_type_check(c)
+CON payments.uq_payments_uuid(u)
 CON permissions.permissions_module_action_unique(u)
 CON permissions.permissions_pkey(p)
 CON posting_rules.posting_rules_credit_account_id_foreign(f)
@@ -3137,6 +3280,7 @@ CON receivables.receivables_pkey(p)
 CON receivables.receivables_recv_no_unique(u)
 CON receivables.receivables_service_invoice_id_foreign(f)
 CON receivables.receivables_type_check(c)
+CON receivables.uq_receivables_uuid(u)
 CON recovery_benchmarks.chk_recovery_benchmarks_expected_bran_pct_range(c)
 CON recovery_benchmarks.chk_recovery_benchmarks_expected_broken_pct_range(c)
 CON recovery_benchmarks.chk_recovery_benchmarks_expected_husk_pct_range(c)
@@ -3180,11 +3324,13 @@ CON service_milling_dispatches.service_milling_dispatches_dispatch_no_unique(u)
 CON service_milling_dispatches.service_milling_dispatches_lot_id_foreign(f)
 CON service_milling_dispatches.service_milling_dispatches_pkey(p)
 CON service_milling_dispatches.service_milling_dispatches_service_batch_id_foreign(f)
+CON service_milling_dispatches.uq_service_milling_dispatches_uuid(u)
 CON service_milling_invoices.chk_service_milling_invoices_payment_status_valid(c)
 CON service_milling_invoices.service_milling_invoices_client_customer_id_foreign(f)
 CON service_milling_invoices.service_milling_invoices_invoice_no_unique(u)
 CON service_milling_invoices.service_milling_invoices_pkey(p)
 CON service_milling_invoices.service_milling_invoices_service_batch_id_foreign(f)
+CON service_milling_invoices.uq_service_milling_invoices_uuid(u)
 CON shipment_containers.chk_shipment_containers_bags_count_nn(c)
 CON shipment_containers.chk_shipment_containers_gross_weight_kg_nn(c)
 CON shipment_containers.chk_shipment_containers_sequence_no_nn(c)
@@ -3240,6 +3386,8 @@ CON suppliers.suppliers_reviewed_by_foreign(f)
 CON suppliers.suppliers_submitted_by_foreign(f)
 CON suppliers.suppliers_supplier_code_unique(u)
 CON suppliers.suppliers_uid_unique(u)
+CON sync_state.sync_state_pkey(p)
+CON sync_state.uq_sync_state_device_domain(u)
 CON system_health.chk_system_health_status_valid(c)
 CON system_health.system_health_pkey(p)
 CON system_settings.system_settings_key_unique(u)
