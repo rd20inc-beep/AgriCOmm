@@ -8,7 +8,7 @@
 --
 -- PRAGMA user_version tracks the applied schema version (mirrors LOCALDB_VERSION).
 
-PRAGMA user_version = 1;
+PRAGMA user_version = 2;
 
 -- Generic per-domain read cache. `id` is namespaced as '<collection>:<rowId>'.
 CREATE TABLE IF NOT EXISTS records (
@@ -34,8 +34,21 @@ CREATE TABLE IF NOT EXISTS outbox (
 );
 CREATE INDEX IF NOT EXISTS idx_outbox_status ON outbox (status);
 
--- Offline file/document metadata (Stage 10). Bytes live on the filesystem via
--- platform.fs; this row tracks the pointer + sync state.
+-- Offline file UPLOADS awaiting sync (Stage 10). The blob + form fields are
+-- captured offline and replayed as a multipart POST (idempotent) on reconnect.
+CREATE TABLE IF NOT EXISTS file_outbox (
+  id          TEXT PRIMARY KEY,   -- UUID, also the Idempotency-Key
+  endpoint    TEXT NOT NULL,
+  entries     BLOB NOT NULL,      -- serialized form fields + file blob(s)
+  label       TEXT,
+  status      TEXT NOT NULL DEFAULT 'pending',
+  attempts    INTEGER NOT NULL DEFAULT 0,
+  last_error  TEXT,
+  created_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_file_outbox_status ON file_outbox (status);
+
+-- Downloaded documents cached for offline access/print (Stage 10).
 CREATE TABLE IF NOT EXISTS file_cache (
   id          TEXT PRIMARY KEY,
   path        TEXT NOT NULL,

@@ -2,7 +2,8 @@
 // refreshes the query cache so synced records replace their pending placeholders.
 import { queryClient } from '../api/queryClient';
 import { flushOutbox } from './outbox';
-import { replayRequest } from '../api/client';
+import { flushFileOutbox } from './fileOutbox';
+import { replayRequest, uploadReplay } from '../api/client';
 import { isOnline } from './useOnline';
 import { bootstrapDevice } from '../sync/device';
 import { classifyConflict, reportConflict } from '../sync/conflicts';
@@ -28,6 +29,7 @@ export async function flushNow() {
     // Register/refresh this device (so it can be revoked) — best-effort.
     bootstrapDevice().catch(() => {});
     await flushOutbox(replayAndRecord);
+    await flushFileOutbox(uploadReplay); // sync queued offline file uploads
   } finally {
     running = false;
   }

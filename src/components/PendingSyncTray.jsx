@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react';
 import { RefreshCw, X, AlertTriangle, CloudUpload, ChevronUp } from 'lucide-react';
 import { getOutbox, subscribeOutbox, removeItem, retryItem } from '../offline/outbox';
+import { getFileOutbox, subscribeFileOutbox, removeFileItem, retryFileItem } from '../offline/fileOutbox';
 import { flushNow } from '../offline/sync';
 import { CONFLICT_LABELS } from '../sync/conflicts';
 import { useOnline } from '../offline/useOnline';
@@ -24,11 +25,22 @@ export default function PendingSyncTray() {
 
   useEffect(() => {
     let alive = true;
-    const load = () => getOutbox().then((l) => { if (alive) setItems(l); });
+    const load = () => Promise.all([getOutbox(), getFileOutbox()]).then(([w, f]) => {
+      if (!alive) return;
+      const merged = [
+        ...w.map((i) => ({ ...i, _kind: 'write' })),
+        ...f.map((i) => ({ ...i, _kind: 'file' })),
+      ].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+      setItems(merged);
+    });
     load();
-    const unsub = subscribeOutbox(load);
-    return () => { alive = false; unsub(); };
+    const unsub1 = subscribeOutbox(load);
+    const unsub2 = subscribeFileOutbox(load);
+    return () => { alive = false; unsub1(); unsub2(); };
   }, []);
+
+  const doRetry = (it) => (it._kind === 'file' ? retryFileItem(it.id) : retryItem(it.id)).then(() => flushNow());
+  const doDismiss = (it) => (it._kind === 'file' ? removeFileItem(it.id) : removeItem(it.id));
 
   if (items.length === 0) return null;
 
@@ -55,7 +67,9 @@ export default function PendingSyncTray() {
             {items.map((it) => (
               <div key={it.id} className="px-3 py-2 text-sm">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium text-gray-800 truncate">{it.label || `${it.method} ${it.endpoint}`}</span>
+                  <span className="font-medium text-gray-800 truncate">
+                    {it.label || `${it.method || ''} ${it.endpoint}`}{it._kind === 'file' ? <span className="text-gray-400 font-normal"> · file</span> : null}
+                  </span>
                   <span className="text-[10px] text-gray-400 whitespace-nowrap">{timeAgo(it.createdAt)}</span>
                 </div>
                 {it.status === 'rejected' ? (
@@ -67,8 +81,8 @@ export default function PendingSyncTray() {
                     )}
                     <p className="text-[11px] text-red-600 flex items-start gap-1"><AlertTriangle size={12} className="mt-0.5 shrink-0" />{it.lastError || 'Rejected by server'}</p>
                     <div className="flex gap-2 mt-1">
-                      <button onClick={() => { retryItem(it.id).then(() => flushNow()); }} className="text-[11px] font-medium text-blue-600 hover:text-blue-800">Retry</button>
-                      <button onClick={() => removeItem(it.id)} className="text-[11px] font-medium text-gray-500 hover:text-gray-700">Dismiss</button>
+                      <button onClick={() => doRetry(it)} className="text-[11px] font-medium text-blue-600 hover:text-blue-800">Retry</button>
+                      <button onClick={() => doDismiss(it)} className="text-[11px] font-medium text-gray-500 hover:text-gray-700">Dismiss</button>
                     </div>
                   </div>
                 ) : (
