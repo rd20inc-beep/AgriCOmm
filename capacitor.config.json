@@ -1,0 +1,8 @@
+{
+  "appId": "com.agricommodities.agrice",
+  "appName": "AgriRice",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  }
+}
