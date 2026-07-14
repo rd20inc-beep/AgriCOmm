@@ -7,6 +7,7 @@ import {
   ArrowRightLeft, FlaskConical, Menu, ShieldCheck, Shield,
   ChevronsLeft, ChevronsRight, Sun, Moon,
   Zap, Brain, Beaker, Printer, Boxes, ClipboardCheck, Sparkles, ShoppingCart,
+  ScanLine,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
@@ -18,6 +19,7 @@ import PendingSyncTray from './PendingSyncTray';
 import OfflineExpiredGate from './OfflineExpiredGate';
 import SyncStatusChip from './SyncStatusChip';
 import SyncConflictsDrawer from './SyncConflictsDrawer';
+import ScanDrawer from './ScanDrawer';
 import { SkeletonPage } from '../shared/components/Skeleton';
 
 const sidebarNav = [
@@ -447,6 +449,15 @@ export default function Layout({ children }) {
           {/* Always-visible offline/sync status */}
           <SyncStatusChip />
 
+          {/* Scan a lot/document QR or barcode */}
+          <button
+            onClick={() => window.dispatchEvent(new Event('riceflow:open-scanner'))}
+            title="Scan a code"
+            className="hidden sm:inline-flex items-center justify-center rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+          >
+            <ScanLine size={18} />
+          </button>
+
           {/* Entity filter - desktop only */}
           <div className="hidden md:block">
             <select
@@ -573,6 +584,7 @@ export default function Layout({ children }) {
       <ChatWidget />
       <PendingSyncTray />
       <SyncConflictsDrawer />
+      <ScanDrawer />
       <OfflineExpiredGate />
     </div>
   );
