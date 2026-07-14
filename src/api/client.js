@@ -17,7 +17,7 @@ const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 function isQueueable(method, endpoint, body) {
   if (!MUTATING.has(method)) return false;
   if (typeof FormData !== 'undefined' && body instanceof FormData) return false;
-  if (/^\/api\/(auth|portal|streams)\b/.test(endpoint)) return false;
+  if (/^\/api\/(auth|portal|streams|sync)\b/.test(endpoint)) return false;
   if (/^\/api\/(ai|smart|intelligence|reporting)\b/.test(endpoint)) return false;
   if (/(search|preview|export|download|login|refresh|logout)/i.test(endpoint)) return false;
   return true;
