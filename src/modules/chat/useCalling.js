@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { chatApi } from './api';
+import { realtimeRepo } from '../../data/repositories/realtime';
 import { ensureNotifyPermission, showNotify } from './notify';
 
 // 1:1 WebRTC audio/video calling. Signaling rides the per-user SSE channel
@@ -161,8 +162,7 @@ export function useCalling(user) {
   // Inbound signaling over SSE.
   useEffect(() => {
     if (!user) return undefined;
-    const es = new EventSource(chatApi.callStreamUrl());
-    es.onmessage = async (ev) => {
+    const close = realtimeRepo.subscribe(chatApi.callStreamUrl(), { onMessage: async (ev) => {
       let sig; try { sig = JSON.parse(ev.data); } catch { return; }
       if (!sig || !sig.type) return;
       const c = callRef.current;
@@ -184,9 +184,8 @@ export function useCalling(user) {
       } else if (['decline', 'busy', 'hangup', 'cancel'].includes(sig.type)) {
         cleanup();
       }
-    };
-    es.onerror = () => { /* EventSource auto-reconnects */ };
-    return () => es.close();
+    }, onError: () => { /* EventSource auto-reconnects */ } });
+    return () => close();
   }, [user?.id, signal, cleanup]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Attach media streams to their elements whenever the call UI (re)renders.

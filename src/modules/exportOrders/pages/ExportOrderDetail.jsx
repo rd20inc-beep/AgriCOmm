@@ -17,7 +17,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { useOwnerAuth } from '../../../context/OwnerAuthContext';
-import { API_BASE } from '../../../api/client';
+import { realtimeRepo } from '../../../data/repositories/realtime';
 import api from '../../../api/client';
 import { queryKeys } from '../../../api/queryClient';
 import {
@@ -161,14 +161,15 @@ export default function ExportOrderDetail() {
   useEffect(() => {
     if (!id || !token || token === 'mock-prototype-token') return undefined;
 
-    const source = new EventSource(`${API_BASE}/api/streams/export-orders/${id}?token=${encodeURIComponent(token)}`);
-    source.onmessage = () => {
-      if (sseTimer.current) clearTimeout(sseTimer.current);
-      sseTimer.current = setTimeout(() => invalidateOrder(), 500);
-    };
-    source.onerror = () => {};
+    const close = realtimeRepo.subscribeExportOrder(id, token, {
+      onMessage: () => {
+        if (sseTimer.current) clearTimeout(sseTimer.current);
+        sseTimer.current = setTimeout(() => invalidateOrder(), 500);
+      },
+      onError: () => {},
+    });
     return () => {
-      source.close();
+      close();
       if (sseTimer.current) clearTimeout(sseTimer.current);
     };
   }, [id, token, invalidateOrder]);
