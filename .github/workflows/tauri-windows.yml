@@ -1,0 +1,51 @@
+# Builds the AgriRice Windows desktop app (.msi) with Tauri. Runs ONLY on manual
+# dispatch or a `desktop-v*` tag — never on normal pushes — so it has zero impact
+# on the web CI/CD pipeline. Produces an (unsigned) installer artifact; code
+# signing needs a certificate (add WINDOWS_CERTIFICATE + password secrets and the
+# `tauri-action` signing inputs to produce a signed .msi).
+name: Build Windows Desktop (Tauri)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'desktop-v*'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    env:
+      # The desktop webview is not same-origin with the server, so the web bundle
+      # must be built pointing at the real API host.
+      VITE_API_URL: https://agricommodities.online
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+
+      - name: Install web dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Build desktop app (.msi)
+        uses: tauri-apps/tauri-action@v0
+        # beforeBuildCommand (`npm run build`) runs with VITE_API_URL from env above.
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: agrice-windows-msi
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: warn
