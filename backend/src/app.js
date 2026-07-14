@@ -15,9 +15,22 @@ function createApp() {
   // Security headers
   app.use(helmet());
 
-  // CORS
+  // CORS — allow the configured web origin(s) plus native app origins (Tauri
+  // desktop, Capacitor Android) and no-Origin requests (same-origin / native
+  // fetch / curl). A strict superset of the previous single-origin behaviour.
+  const NATIVE_ORIGINS = [
+    'tauri://localhost', 'http://tauri.localhost', 'https://tauri.localhost',
+    'capacitor://localhost', 'http://localhost', 'https://localhost',
+  ];
+  const configuredOrigins = String(config.corsOrigin || '').split(',').map((s) => s.trim()).filter(Boolean);
   app.use(cors({
-    origin: config.corsOrigin,
+    origin(origin, cb) {
+      if (!origin) return cb(null, true);
+      if (configuredOrigins.includes('*') || configuredOrigins.includes(origin) || NATIVE_ORIGINS.includes(origin)) {
+        return cb(null, true);
+      }
+      return cb(null, false);
+    },
     credentials: true,
   }));
 
