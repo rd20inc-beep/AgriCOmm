@@ -5,6 +5,7 @@
 
 import { markServerOnline, markServerOffline, isOnline } from '../offline/useOnline';
 import { enqueue } from '../offline/outbox';
+import { mirrorRead, getMirroredRead } from '../data/readReplica';
 
 const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:3001');
 
@@ -110,6 +111,13 @@ async function request(endpoint, options = {}) {
     return queueWrite(method, endpoint, body);
   }
 
+  // Known-offline reads: serve the durable local replica if we mirrored this GET.
+  if (!isOnline() && method === 'GET') {
+    const cached = await getMirroredRead(endpoint);
+    if (cached !== undefined) return cached;
+    // else fall through and attempt the network (fails fast → caller's cache).
+  }
+
   // Timeout via AbortController
   const controller = new AbortController();
   config.signal = controller.signal;
@@ -141,6 +149,9 @@ async function request(endpoint, options = {}) {
       );
     }
 
+    // Write-through the read replica (fire-and-forget — never blocks the response).
+    if (method === 'GET') mirrorRead(endpoint, data);
+
     return data;
   } catch (err) {
     clearTimeout(timer);
@@ -154,6 +165,11 @@ async function request(endpoint, options = {}) {
     // Capture eligible writes into the outbox instead of losing them.
     if (isQueueable(method, endpoint, body)) {
       return queueWrite(method, endpoint, body);
+    }
+    // Serve a mirrored read if the network dropped mid-GET.
+    if (method === 'GET') {
+      const cached = await getMirroredRead(endpoint);
+      if (cached !== undefined) return cached;
     }
     throw new ApiError(err.message || 'Network error', 0);
   }

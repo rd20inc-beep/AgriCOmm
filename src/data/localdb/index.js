@@ -22,4 +22,7 @@ export function getLocalDb() {
   return localDbPromise;
 }
 
+// Test seam — inject a specific (e.g. memory-backed) LocalDb instance.
+export function __setLocalDbForTests(db) { localDbPromise = db ? Promise.resolve(db) : null; }
+
 export { openLocalDb, createMemoryBackend, createIndexedDbBackend };
