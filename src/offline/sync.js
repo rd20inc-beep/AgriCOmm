@@ -5,10 +5,15 @@ import { flushOutbox } from './outbox';
 import { flushFileOutbox } from './fileOutbox';
 import { replayRequest, uploadReplay } from '../api/client';
 import { isOnline } from './useOnline';
-import { bootstrapDevice } from '../sync/device';
+import { bootstrapDevice, SyncOutdatedError } from '../sync/device';
 import { classifyConflict, reportConflict } from '../sync/conflicts';
 
 let running = false;
+// When the server refuses our sync protocol (426 / incompatible), pause pushing so we
+// never send an incompatible payload after a server schema migration. Cleared on the
+// next successful bootstrap (i.e. once the app has updated).
+let syncBlocked = false;
+export function isSyncBlocked() { return syncBlocked; }
 
 // Replay a queued write; on a server refusal (4xx) classify + record the conflict
 // and tag the verdict so the outbox stores the conflict type.
@@ -26,8 +31,19 @@ export async function flushNow() {
   if (running || !isOnline()) return;
   running = true;
   try {
-    // Register/refresh this device (so it can be revoked) — best-effort.
-    bootstrapDevice().catch(() => {});
+    // Version + revocation handshake BEFORE pushing. If the server refuses our sync
+    // protocol, pause — never push a payload an updated server can't accept.
+    try {
+      await bootstrapDevice();
+      syncBlocked = false;
+    } catch (err) {
+      if (err instanceof SyncOutdatedError) {
+        syncBlocked = true;
+        try { window.dispatchEvent(new CustomEvent('riceflow:sync-outdated', { detail: { message: err.message } })); } catch { /* ignore */ }
+        return; // hold the queue; writes stay durable until the app updates
+      }
+      // Any other bootstrap failure (offline/transient) — proceed best-effort as before.
+    }
     await flushOutbox(replayAndRecord);
     await flushFileOutbox(uploadReplay); // sync queued offline file uploads
   } finally {

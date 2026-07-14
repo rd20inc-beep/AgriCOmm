@@ -17,12 +17,34 @@ let enabled = true;
 export function setReadReplicaEnabled(v) { enabled = v; }
 
 // Write-through (fire-and-forget from the caller — never blocks the online path).
+// Cap on how many endpoint responses we keep mirrored. Bounds IndexedDB growth so
+// the read cache can't fill storage (§6: insufficient local storage). The write
+// outbox lives in a SEPARATE store, so eviction here NEVER drops a queued write.
+const MAX_REPLICA_ENTRIES = 400;
+let writesSincePrune = 0;
+
 export async function mirrorRead(endpoint, data) {
   if (!enabled || data === undefined || data === null) return;
   try {
     const db = await getLocalDb();
     await db.put(STORE, { id: key(endpoint), collection: COLLECTION, endpoint, data, updatedAt: new Date().toISOString() });
+    // Amortise the budget check — every ~25 writes, not on the hot path each time.
+    if (++writesSincePrune >= 25) { writesSincePrune = 0; pruneReadReplica().catch(() => {}); }
   } catch { /* best-effort */ }
+}
+
+// Evict the oldest mirrored reads when over the cap. Oldest-first (LRU by write time);
+// only touches the 'read' collection — the outbox is untouchable here by construction.
+export async function pruneReadReplica(max = MAX_REPLICA_ENTRIES) {
+  try {
+    const db = await getLocalDb();
+    const all = (await db.list(STORE)).filter((r) => r.collection === COLLECTION);
+    if (all.length <= max) return 0;
+    all.sort((a, b) => String(a.updatedAt || '').localeCompare(String(b.updatedAt || '')));
+    const toDrop = all.slice(0, all.length - max);
+    for (const r of toDrop) await db.delete(STORE, r.id);
+    return toDrop.length;
+  } catch { return 0; }
 }
 
 // Offline fallback — returns the last mirrored response for this endpoint, or
