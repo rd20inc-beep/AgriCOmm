@@ -220,7 +220,29 @@ async function reactivateDevice(req, res) {
   }
 }
 
+// ── Site-server reconciliation view (Stage 16b) ──────────────────────────────
+// Operators on a LAN site box see how their offline work reconciled to the cloud:
+// the local→cloud id/doc-number map, replays the cloud refused (conflicts), and how
+// many writes are still queued. On the cloud these tables are empty, so it returns
+// zeros — harmless.
+async function siteStatus(req, res) {
+  try {
+    const [idMap, conflicts, pendingRow] = await Promise.all([
+      db('site_id_map').orderBy('id', 'desc').limit(200).catch(() => []),
+      db('site_outbox').where({ status: 'conflict' }).orderBy('id', 'desc').limit(200).catch(() => []),
+      db('site_outbox').where({ status: 'pending' }).count('* as c').first().catch(() => ({ c: 0 })),
+    ]);
+    return res.json({
+      success: true,
+      data: { idMap, conflicts, pending: Number(pendingRow?.c || 0) },
+    });
+  } catch (err) {
+    console.error('sync.siteStatus error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to load site status' });
+  }
+}
+
 module.exports = {
   bootstrap, pull, recordConflict, listConflicts, resolveConflict,
-  listDevices, revokeDevice, reactivateDevice, DOMAINS,
+  listDevices, revokeDevice, reactivateDevice, siteStatus, DOMAINS,
 };

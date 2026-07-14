@@ -2274,14 +2274,25 @@ COL shipment_containers.seal_no:character varying:NULL
 COL shipment_containers.sequence_no:integer:NOT NULL
 COL shipment_containers.tare_weight_kg:numeric:NULL
 COL shipment_containers.updated_at:timestamp with time zone:NOT NULL
+COL site_id_map.cloud_doc_no:character varying:NULL
+COL site_id_map.cloud_ref:character varying:NULL
+COL site_id_map.created_at:timestamp with time zone:NULL
+COL site_id_map.entity:character varying:NOT NULL
+COL site_id_map.id:integer:NOT NULL
+COL site_id_map.idempotency_key:uuid:NOT NULL
+COL site_id_map.local_ref:character varying:NULL
 COL site_outbox.attempts:integer:NOT NULL
 COL site_outbox.body:jsonb:NULL
+COL site_outbox.cloud_doc_no:character varying:NULL
+COL site_outbox.cloud_ref:character varying:NULL
 COL site_outbox.cloud_status:integer:NULL
 COL site_outbox.conflict_code:character varying:NULL
 COL site_outbox.created_at:timestamp with time zone:NULL
+COL site_outbox.entity:character varying:NULL
 COL site_outbox.id:integer:NOT NULL
 COL site_outbox.idempotency_key:uuid:NOT NULL
 COL site_outbox.last_error:text:NULL
+COL site_outbox.local_ref:character varying:NULL
 COL site_outbox.method:character varying:NOT NULL
 COL site_outbox.path:character varying:NOT NULL
 COL site_outbox.status:character varying:NOT NULL
@@ -3372,6 +3383,8 @@ CON shipment_containers.shipment_containers_created_by_foreign(f)
 CON shipment_containers.shipment_containers_order_id_foreign(f)
 CON shipment_containers.shipment_containers_order_id_sequence_no_unique(u)
 CON shipment_containers.shipment_containers_pkey(p)
+CON site_id_map.site_id_map_idempotency_key_unique(u)
+CON site_id_map.site_id_map_pkey(p)
 CON site_outbox.site_outbox_idempotency_key_unique(u)
 CON site_outbox.site_outbox_pkey(p)
 CON site_sync_state.site_sync_state_domain_unique(u)

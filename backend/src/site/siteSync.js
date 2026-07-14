@@ -9,6 +9,7 @@
 // without a live cloud. The cloud is treated as globally authoritative; the site is
 // "a big offline device".
 const { classifyPushResult, shouldApplyPulledRow } = require('./reconcile');
+const { extractRef, extractDocNo } = require('./identity');
 
 // Domain → local table (mirror of the cloud sync controller's whitelist).
 const DOMAIN_TABLE = {
@@ -72,7 +73,8 @@ async function replayOne(cfg, token, deviceUuid, item, fetchImpl) {
     return { outcome: 'retry', code: 'unreachable', status: 0, error: err.message };
   }
   const body = await res.json().catch(() => ({}));
-  return { ...classifyPushResult(res.status, body), status: res.status };
+  // On success, surface the cloud's finalized identifiers for reconciliation (16b).
+  return { ...classifyPushResult(res.status, body), status: res.status, cloudBody: body };
 }
 
 // Drain pending site_outbox rows FIFO. Stops at the first transient failure to
@@ -83,7 +85,25 @@ async function pushOutbox({ db, cfg, token, deviceUuid, fetchImpl, limit = 200 }
   for (const item of pending) {
     const r = await replayOne(cfg, token, deviceUuid, item, fetchImpl);
     if (r.outcome === 'synced') {
-      await db('site_outbox').where({ id: item.id }).update({ status: 'synced', cloud_status: r.status, synced_at: db.fn.now() });
+      // 16b: record the local→cloud identity mapping (created rows only; a PUT/DELETE
+      // replay has no new identity). Never mutates business rows — audit trail only.
+      const cloudRef = item.method === 'POST' ? extractRef(r.cloudBody) : null;
+      const cloudDocNo = item.method === 'POST' ? extractDocNo(r.cloudBody) : null;
+      await db('site_outbox').where({ id: item.id }).update({
+        status: 'synced', cloud_status: r.status, synced_at: db.fn.now(),
+        cloud_ref: cloudRef !== null && cloudRef !== undefined ? String(cloudRef) : null,
+        cloud_doc_no: cloudDocNo || null,
+      });
+      if (item.entity && (cloudRef !== null || cloudDocNo)) {
+        await db('site_id_map').insert({
+          idempotency_key: item.idempotency_key,
+          entity: item.entity,
+          local_ref: item.local_ref || null,
+          cloud_ref: cloudRef !== null && cloudRef !== undefined ? String(cloudRef) : null,
+          cloud_doc_no: cloudDocNo || null,
+          created_at: db.fn.now(),
+        }).onConflict('idempotency_key').ignore();
+      }
       summary.synced += 1;
     } else if (r.outcome === 'conflict') {
       await db('site_outbox').where({ id: item.id }).update({ status: 'conflict', conflict_code: r.code, cloud_status: r.status });

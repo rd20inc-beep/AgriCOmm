@@ -21,4 +21,7 @@ router.get('/devices', authorizeRole(...MANAGER_ROLES), controller.listDevices);
 router.post('/devices/:id/revoke', authorizeRole('Super Admin', 'Owner'), controller.revokeDevice);
 router.post('/devices/:id/reactivate', authorizeRole('Super Admin', 'Owner'), controller.reactivateDevice);
 
+// Site-server reconciliation view (Stage 16b): local→cloud id map + refused replays.
+router.get('/site-status', authorizeRole(...MANAGER_ROLES), controller.siteStatus);
+
 module.exports = router;
