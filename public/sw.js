@@ -1,36 +1,38 @@
-// Service worker: (1) mobile notifications (Android Chrome needs
-// ServiceWorkerRegistration.showNotification; the page's `new Notification()` is
-// unsupported there), and (2) offline caching of the app shell + static assets
-// so the ERP still loads during an internet outage.
-//
-// Caching strategy:
-//   - Navigations (SPA routes)  → network-first, fall back to the cached shell.
-//   - Hashed build assets       → cache-first (names are content-hashed, immutable).
-//   - /api/* and everything else → network only (offline data is served by the
-//     app's React Query IndexedDB snapshot, not by caching API responses here).
-const CACHE = 'riceflow-shell-v1';
+// Service worker: (1) mobile notifications, and (2) FULL offline support — on
+// first online load it precaches the entire built app (index.html + every JS/CSS
+// chunk listed in /precache.json), so every route works offline even if you never
+// opened it before. `__BUILD__` is replaced at build time with a content hash so
+// the browser re-installs this SW (and re-precaches) on each deploy.
+const BUILD = '__BUILD__';
+const CACHE = 'riceflow-' + BUILD;
 const SHELL = '/index.html';
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE).then((c) => c.addAll(['/', SHELL]).catch(() => {}))
-  );
-  self.skipWaiting();
+  event.waitUntil((async () => {
+    try {
+      const res = await fetch('/precache.json', { cache: 'no-store' });
+      const { bundleUrls = [], extraUrls = [] } = await res.json();
+      const cache = await caches.open(CACHE);
+      // Built files are guaranteed to exist → addAll (atomic).
+      await cache.addAll(bundleUrls);
+      // Public files best-effort — a missing one must not fail the whole precache.
+      await Promise.allSettled(extraUrls.map((u) => cache.add(u)));
+    } catch { /* precache is best-effort; runtime caching still fills gaps */ }
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    (async () => {
-      const keys = await caches.keys();
-      await Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)));
-      await self.clients.claim();
-    })()
-  );
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)));
+    await self.clients.claim();
+  })());
 });
 
 function isAsset(url) {
   return url.pathname.startsWith('/assets/')
-    || /\.(?:js|css|woff2?|ttf|png|jpe?g|svg|gif|webp|ico)$/i.test(url.pathname);
+    || /\.(?:js|css|woff2?|ttf|png|jpe?g|svg|gif|webp|ico|json|webmanifest)$/i.test(url.pathname);
 }
 
 self.addEventListener('fetch', (event) => {
@@ -38,37 +40,31 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
 
   const url = new URL(request.url);
-  if (url.origin !== self.location.origin) return;   // don't touch cross-origin
-  if (url.pathname.startsWith('/api/')) return;        // API is network-only
+  if (url.origin !== self.location.origin) return; // don't touch cross-origin
+  if (url.pathname.startsWith('/api/')) return;      // API is network-only
 
-  // SPA navigations: network-first so a fresh deploy is picked up online; fall
-  // back to the cached shell when offline so routes still render.
+  // SPA navigations (full loads / reloads / launching the installed app):
+  // network-first so a fresh deploy is picked up online, fall back to the
+  // precached shell when offline so the app still opens and routes render.
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
-        .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(SHELL, copy)).catch(() => {});
-          return res;
-        })
+        .then((res) => { caches.open(CACHE).then((c) => c.put(SHELL, res.clone())).catch(() => {}); return res; })
         .catch(() => caches.match(SHELL).then((r) => r || caches.match('/')))
     );
     return;
   }
 
-  // Hashed static assets: cache-first, and populate the cache on first fetch so
-  // visited pages/chunks are available offline afterwards.
+  // Built assets + manifest/icons: cache-first (precached), so lazy-loaded page
+  // chunks resolve instantly and offline. Populate the cache on any miss.
   if (isAsset(url)) {
     event.respondWith(
       caches.match(request).then((cached) => {
         if (cached) return cached;
         return fetch(request).then((res) => {
-          if (res && res.ok) {
-            const copy = res.clone();
-            caches.open(CACHE).then((c) => c.put(request, copy)).catch(() => {});
-          }
+          if (res && res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(request, copy)).catch(() => {}); }
           return res;
-        });
+        }).catch(() => cached);
       })
     );
   }
