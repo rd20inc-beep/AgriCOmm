@@ -390,7 +390,21 @@ Per the working rules, these are flagged **before** any implementation:
 - **R6 — Single‑instance assumptions (SSE, WhatsApp‑QR in‑memory state).** These block a LAN site server and multi‑instance scale. **Decision:** required only if Stage 16 (site server) is pursued; must be addressed first there.
 - **R7 — Offline auth weakens security posture.** Cached permission snapshots + offline PIN mean a lost/stolen device retains access until grace expiry. **Decision:** approve the grace window length and device‑wipe‑on‑revoke policy.
 
-**Nothing in Stages 1–17 will be implemented until R1–R7 are reviewed and the model is approved.**
+### §7.1 — SIGN-OFF RECORD
+
+**Status: APPROVED (owner sign-off, 2026-07-14).** All recommended defaults accepted:
+
+| # | Decision | Approved outcome |
+|---|---|---|
+| R1 | Offline model | ✅ **Server-authoritative outbox** (not full replica). Offline entries are provisional until confirmed. |
+| R2 | Concurrent edits | ✅ Add `record_version` + field-merge prompt for master data. |
+| R3 | Doc numbers | ✅ Provisional device-scoped numbers offline → server assigns final official numbers on confirm. |
+| R4 | Bank balance | ✅ Build a `bank_movements` append ledger and derive the balance **before** enabling offline payments. |
+| R5 | Reservations | ✅ Formalize `inventory_reservations` as append-only. |
+| R6 | Single-instance features (SSE/WhatsApp-QR) | ✅ Deferred — addressed only if the local site server (Stage 16) is pursued. |
+| R7 | Offline auth | ✅ Offline login enabled with a **72-hour grace window** + wipe-on-revoke. |
+
+Implementation may now proceed, stage by stage (Stage 0 first), each on its own branch with lint/typecheck/tests and a separate commit. Any *new* data-loss-risk discovered during a stage must be raised and signed off before that stage merges.
 
 ---
 
