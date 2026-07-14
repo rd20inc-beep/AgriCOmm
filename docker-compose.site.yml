@@ -1,0 +1,110 @@
+# On-premises SITE SERVER (offline Stage 16).
+#
+# Runs the SAME backend + frontend images as the cloud, but on a LAN box (a mini-PC /
+# NUC at the mill) against a LOCAL Postgres. Devices at the site point their browser at
+# this box, so they keep working — with strong, shared, real-time stock consistency —
+# even with no internet. A background worker replays the site's writes up to the cloud
+# and pulls master data down when the link returns. The cloud stays globally
+# authoritative; this box is "a big offline device".
+#
+#   1. cp .env.site.example .env.site   and fill in the secrets (esp. CLOUD_API_URL,
+#      SYNC_USER, SYNC_PASSWORD, JWT_SECRET — the JWT_SECRET must match the cloud so
+#      replayed tokens verify).
+#   2. Initialise the local DB from a recent cloud snapshot (see SITE_SERVER.md) so ids
+#      align for master-data pulls.
+#   3. docker compose -f docker-compose.site.yml --env-file .env.site up -d --build
+#
+# Nginx in the frontend image proxies /api → backend:3001, and the app uses relative
+# URLs, so no per-site frontend rebuild is needed — devices just browse to this box.
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: riceflow-site-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-riceflow_site}
+      POSTGRES_USER: ${DB_USER:-riceflow}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-riceflow_site_2026}
+    volumes:
+      - site_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-riceflow} -d ${DB_NAME:-riceflow_site}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: riceflow-site-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 3001
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-riceflow_site}
+      DB_USER: ${DB_USER:-riceflow}
+      DB_PASSWORD: ${DB_PASSWORD:-riceflow_site_2026}
+      # MUST match the cloud secret so replayed/verified JWTs are compatible.
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-24h}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost}
+      # Site-server mode.
+      SITE_MODE: 'true'
+      SITE_ID: ${SITE_ID:-site-1}
+      CLOUD_API_URL: ${CLOUD_API_URL:-}
+    ports:
+      - "3001:3001"
+    volumes:
+      - site_uploads:/app/uploads
+
+  # Sync worker: same image, different command. Replays site_outbox → cloud and pulls
+  # master data cloud → local. Runs only in site mode.
+  sync-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: riceflow-site-sync
+    restart: unless-stopped
+    command: ["node", "src/site/worker.js"]
+    depends_on:
+      backend:
+        condition: service_started
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-riceflow_site}
+      DB_USER: ${DB_USER:-riceflow}
+      DB_PASSWORD: ${DB_PASSWORD:-riceflow_site_2026}
+      SITE_MODE: 'true'
+      SITE_ID: ${SITE_ID:-site-1}
+      CLOUD_API_URL: ${CLOUD_API_URL:-}
+      SYNC_USER: ${SYNC_USER:-}
+      SYNC_PASSWORD: ${SYNC_PASSWORD:-}
+      SITE_SYNC_INTERVAL_MS: ${SITE_SYNC_INTERVAL_MS:-60000}
+      SITE_PULL_DOMAINS: ${SITE_PULL_DOMAINS:-customers,suppliers,products,warehouses,bank_accounts}
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        VITE_TURNSTILE_SITE_KEY: ${VITE_TURNSTILE_SITE_KEY:-}
+    container_name: riceflow-site-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+volumes:
+  site_pgdata:
+  site_uploads:

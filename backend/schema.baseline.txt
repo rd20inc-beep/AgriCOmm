@@ -2274,6 +2274,24 @@ COL shipment_containers.seal_no:character varying:NULL
 COL shipment_containers.sequence_no:integer:NOT NULL
 COL shipment_containers.tare_weight_kg:numeric:NULL
 COL shipment_containers.updated_at:timestamp with time zone:NOT NULL
+COL site_outbox.attempts:integer:NOT NULL
+COL site_outbox.body:jsonb:NULL
+COL site_outbox.cloud_status:integer:NULL
+COL site_outbox.conflict_code:character varying:NULL
+COL site_outbox.created_at:timestamp with time zone:NULL
+COL site_outbox.id:integer:NOT NULL
+COL site_outbox.idempotency_key:uuid:NOT NULL
+COL site_outbox.last_error:text:NULL
+COL site_outbox.method:character varying:NOT NULL
+COL site_outbox.path:character varying:NOT NULL
+COL site_outbox.status:character varying:NOT NULL
+COL site_outbox.synced_at:timestamp with time zone:NULL
+COL site_outbox.user_id:integer:NULL
+COL site_sync_state.domain:character varying:NOT NULL
+COL site_sync_state.id:integer:NOT NULL
+COL site_sync_state.last_pull_at:timestamp with time zone:NULL
+COL site_sync_state.updated_at:timestamp with time zone:NULL
+COL site_sync_state.watermark:character varying:NULL
 COL stock_adjustments.adjustment_type:character varying:NOT NULL
 COL stock_adjustments.approval_status:character varying:NOT NULL
 COL stock_adjustments.approved_at:timestamp with time zone:NULL
@@ -3354,6 +3372,10 @@ CON shipment_containers.shipment_containers_created_by_foreign(f)
 CON shipment_containers.shipment_containers_order_id_foreign(f)
 CON shipment_containers.shipment_containers_order_id_sequence_no_unique(u)
 CON shipment_containers.shipment_containers_pkey(p)
+CON site_outbox.site_outbox_idempotency_key_unique(u)
+CON site_outbox.site_outbox_pkey(p)
+CON site_sync_state.site_sync_state_domain_unique(u)
+CON site_sync_state.site_sync_state_pkey(p)
 CON stock_adjustments.chk_stock_adjustments_unit_cost_nn(c)
 CON stock_adjustments.stock_adjustments_approval_status_check(c)
 CON stock_adjustments.stock_adjustments_approved_by_foreign(f)
