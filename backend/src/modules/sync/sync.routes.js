@@ -15,4 +15,10 @@ router.post('/conflicts', controller.recordConflict);
 router.get('/conflicts', authorizeRole(...MANAGER_ROLES), controller.listConflicts);
 router.post('/conflicts/:id/resolve', authorizeRole(...MANAGER_ROLES), controller.resolveConflict);
 
+// Device management (Stage 15): managers view the fleet; only owners can flip a
+// device's active/revoked state (revoking is a security kill-switch).
+router.get('/devices', authorizeRole(...MANAGER_ROLES), controller.listDevices);
+router.post('/devices/:id/revoke', authorizeRole('Super Admin', 'Owner'), controller.revokeDevice);
+router.post('/devices/:id/reactivate', authorizeRole('Super Admin', 'Owner'), controller.reactivateDevice);
+
 module.exports = router;

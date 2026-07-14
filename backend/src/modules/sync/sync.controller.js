@@ -162,4 +162,65 @@ async function resolveConflict(req, res) {
   }
 }
 
-module.exports = { bootstrap, pull, recordConflict, listConflicts, resolveConflict, DOMAINS };
+// ── Device management (Stage 15) ─────────────────────────────────────────────
+// Managers see every registered install; owners can revoke a lost/stolen or
+// decommissioned device (its next mutating request is refused by deviceGuard and
+// the client wipes its local cache) or reactivate one that was revoked in error.
+
+async function listDevices(req, res) {
+  try {
+    const devices = await db('devices as d')
+      .leftJoin('users as u', 'u.id', 'd.user_id')
+      .leftJoin('roles as r', 'r.id', 'u.role_id')
+      .select(
+        'd.*',
+        'u.full_name as user_name',
+        'u.email as user_email',
+        'r.name as role_name',
+      )
+      .orderBy('d.last_seen_at', 'desc');
+    // Let the UI flag the caller's own device so it isn't revoked by accident.
+    const current = req.headers['x-device-id'] || null;
+    return res.json({ success: true, data: { devices, current_device_uuid: current } });
+  } catch (err) {
+    console.error('sync.listDevices error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to list devices' });
+  }
+}
+
+async function revokeDevice(req, res) {
+  try {
+    const { id } = req.params;
+    const dev = await db('devices').where({ id }).first();
+    if (!dev) return res.status(404).json({ success: false, message: 'Device not found' });
+    await db('devices').where({ id }).update({
+      status: 'revoked', revoked_at: db.fn.now(), revoked_by: req.user.id,
+    });
+    const updated = await db('devices').where({ id }).first();
+    return res.json({ success: true, data: { device: updated } });
+  } catch (err) {
+    console.error('sync.revokeDevice error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to revoke device' });
+  }
+}
+
+async function reactivateDevice(req, res) {
+  try {
+    const { id } = req.params;
+    const dev = await db('devices').where({ id }).first();
+    if (!dev) return res.status(404).json({ success: false, message: 'Device not found' });
+    await db('devices').where({ id }).update({
+      status: 'active', revoked_at: null, revoked_by: null,
+    });
+    const updated = await db('devices').where({ id }).first();
+    return res.json({ success: true, data: { device: updated } });
+  } catch (err) {
+    console.error('sync.reactivateDevice error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to reactivate device' });
+  }
+}
+
+module.exports = {
+  bootstrap, pull, recordConflict, listConflicts, resolveConflict,
+  listDevices, revokeDevice, reactivateDevice, DOMAINS,
+};

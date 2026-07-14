@@ -54,6 +54,13 @@ export const adminApi = {
   dangerAdjustBalance: (id, data) => api.post(`/api/admin/danger/bank-accounts/${id}/balance`, data),
   dangerReset: (data) => api.post('/api/admin/danger/reset', data),
 };
+// Offline device management (Stage 15). Lives under /api/sync (the devices
+// registry), manager-gated on the server.
+export const devicesApi = {
+  list: () => api.get('/api/sync/devices'),
+  revoke: (id) => api.post(`/api/sync/devices/${id}/revoke`, {}),
+  reactivate: (id) => api.post(`/api/sync/devices/${id}/reactivate`, {}),
+};
 export const customersApi = {
   list: (params) => api.get('/api/customers', params),
   create: (data) => api.post('/api/customers', data),
