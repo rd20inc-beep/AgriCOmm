@@ -1,8 +1,8 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { API_BASE } from '../api/client';
 import { clearQueryCache } from '../offline/queryPersist';
+import { authRepo } from '../data/repositories/auth';
 
 const AuthContext = createContext(null);
 
@@ -59,12 +59,9 @@ export function AuthProvider({ children }) {
       return;
     }
     try {
-      const res = await fetch(`${API_BASE}/api/auth/me`, {
-        headers: { Authorization: `Bearer ${storedToken}` },
-      });
-      if (res.ok) {
-        const json = await res.json();
-        const payload = json.data || json;
+      const { ok, status, data } = await authRepo.me(storedToken);
+      if (ok && data) {
+        const payload = data.data || data;
         const userData = payload.user || payload;
         // Always overwrite permissions with the freshly-fetched list
         // (don't preserve stale cached perms on refresh).
@@ -72,7 +69,7 @@ export function AuthProvider({ children }) {
         setUser(userData);
         setToken(storedToken);
         cacheUser(userData);
-      } else if (res.status === 401 || res.status === 403) {
+      } else if (status === 401 || status === 403) {
         // Token genuinely rejected → log out.
         localStorage.removeItem('riceflow_token');
         setToken(null);
@@ -113,16 +110,11 @@ export function AuthProvider({ children }) {
 
   const login = useCallback(async (email, password) => {
     try {
-      const res = await fetch(`${API_BASE}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
+      const { ok, data } = await authRepo.login(email, password);
 
-      if (res.ok) {
-        const json = await res.json();
+      if (ok) {
         // Backend returns { success, data: { token, user, permissions } }
-        const payload = json.data || json;
+        const payload = data?.data || data || {};
         const newToken = payload.token;
         const userData = payload.user;
         // Merge permissions into user object so hasPermission() works immediately
@@ -140,8 +132,7 @@ export function AuthProvider({ children }) {
         }
         return { success: false, error: 'No token received' };
       } else {
-        const json = await res.json().catch(() => ({}));
-        return { success: false, error: json.message || 'Invalid credentials' };
+        return { success: false, error: (data && data.message) || 'Invalid credentials' };
       }
     } catch {
       // Network error — prototype mode fallback (dev only)

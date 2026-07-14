@@ -2,6 +2,7 @@
 // own token, no staff app shell). Workers view + print their payslips, tax
 // certificate and advance balance.
 import { useState, useEffect, useCallback } from 'react';
+import { portalRequest } from '../../data/repositories/portal';
 
 const TOKEN_KEY = 'rf_portal_token';
 const PKR = (v) => 'Rs ' + (parseFloat(v) || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -86,17 +87,10 @@ function printCertificate(emp, meta, co) {
     <div class="sign"><div><div class="l">Employee</div></div><div><div class="l">Authorized Signatory</div></div></div></div>`);
 }
 
-// ── API helper (own token, no staff client) ──
-async function portalApi(path, { method = 'GET', body, token } = {}) {
-  const res = await fetch(`/api/portal${path}`, {
-    method,
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const data = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(data?.message || 'Request failed');
-  return data;
-}
+// ── API helper (own token, no staff client) — now delegates to the shared portal
+// repository (src/data/repositories/portal) so the portal no longer bypasses the
+// data-access seam. Behaviour identical.
+const portalApi = (path, opts) => portalRequest(path, opts);
 
 export default function EmployeePortal() {
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || '');
