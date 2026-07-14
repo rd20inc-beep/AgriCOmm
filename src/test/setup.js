@@ -1,6 +1,17 @@
 // Vitest setup — provide a minimal in-memory IndexedDB so the offline modules
 // (src/offline/idb.js and outbox.js) can run under Node without a browser.
 // `globalThis.__resetIdb()` clears it between tests.
+
+// Minimal localStorage polyfill (client.js getToken / device id use it directly).
+if (typeof globalThis.localStorage === 'undefined') {
+  const store = new Map();
+  globalThis.localStorage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k),
+    clear: () => store.clear(),
+  };
+}
 const stores = {};
 class FakeReq {
   constructor() { this.onsuccess = null; this.onerror = null; this.onupgradeneeded = null; this.result = undefined; }

@@ -6,6 +6,7 @@
 import { markServerOnline, markServerOffline, isOnline } from '../offline/useOnline';
 import { enqueue } from '../offline/outbox';
 import { mirrorRead, getMirroredRead } from '../data/readReplica';
+import { getDeviceId } from '../sync/deviceId';
 
 const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:3001');
 
@@ -95,6 +96,8 @@ async function request(endpoint, options = {}) {
   if (token && token !== 'mock-prototype-token') {
     config.headers['Authorization'] = `Bearer ${token}`;
   }
+  // Bind every request to this device so a revoked device can be blocked server-side.
+  try { config.headers['X-Device-Id'] = getDeviceId(); } catch { /* noop */ }
 
   if (body && method !== 'GET') {
     if (typeof FormData !== 'undefined' && body instanceof FormData) {
@@ -260,6 +263,7 @@ async function replayRequest(item) {
   const token = getToken();
   const headers = { 'Content-Type': 'application/json', 'Idempotency-Key': item.id };
   if (token && token !== 'mock-prototype-token') headers['Authorization'] = `Bearer ${token}`;
+  try { headers['X-Device-Id'] = getDeviceId(); } catch { /* noop */ }
   let res;
   try {
     res = await fetch(`${API_BASE}${item.endpoint}`, {
