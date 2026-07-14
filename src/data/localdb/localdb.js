@@ -4,7 +4,24 @@
 import { LOCALDB_VERSION, STORES, META } from './schema';
 
 export async function openLocalDb(backend) {
-  await backend.open(LOCALDB_VERSION, STORES);
+  // Corruption resilience (§6: local DB corruption). A first open failure gets one
+  // retry (transient locks / interrupted upgrade). If the backend can recover a
+  // corrupt store it does so; if the second open still fails, flag it so the UI can
+  // warn — the app keeps working online (read replica + outbox callers swallow errors,
+  // and the store re-bootstraps from the cloud once reopened).
+  try {
+    await backend.open(LOCALDB_VERSION, STORES);
+  } catch (firstErr) {
+    try {
+      if (typeof backend.recover === 'function') await backend.recover();
+      await backend.open(LOCALDB_VERSION, STORES);
+    } catch (secondErr) {
+      if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+        try { window.dispatchEvent(new CustomEvent('riceflow:localdb-corrupt', { detail: { error: String(secondErr?.message || firstErr?.message || 'open failed') } })); } catch { /* ignore */ }
+      }
+      throw secondErr;
+    }
+  }
   // Stamp the schema version (idempotent — safe on every open).
   await backend.put(META, { id: 'schema_version', value: LOCALDB_VERSION });
 

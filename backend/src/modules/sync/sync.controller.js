@@ -26,6 +26,31 @@ const DOMAINS = {
 const DEFAULT_PAGE = 500;
 const MAX_PAGE = 1000;
 
+// Sync protocol version (Stage 17). The offline client sends its protocol via the
+// X-Sync-Protocol header. Bump SYNC_PROTOCOL_VERSION when the sync payload/contract
+// changes; raise MIN_CLIENT_PROTOCOL to force stale clients to update BEFORE they push
+// incompatible writes after a server schema migration (§6: schema-migration / app-
+// version-mismatch). A client below the minimum gets 426 and pauses its sync.
+const SYNC_PROTOCOL_VERSION = 1;
+const MIN_CLIENT_PROTOCOL = 1;
+
+// Returns a 426 response object when the client's protocol is too old, else null.
+function checkSyncProtocol(req, res) {
+  const raw = req.headers && req.headers['x-sync-protocol'];
+  if (raw === undefined || raw === null || raw === '') return null; // legacy client — allow (back-compat)
+  const client = parseInt(raw, 10);
+  if (Number.isFinite(client) && client < MIN_CLIENT_PROTOCOL) {
+    res.status(426).json({
+      success: false,
+      code: 'sync_outdated',
+      message: 'This app version is too old to sync. Please update.',
+      data: { serverProtocol: SYNC_PROTOCOL_VERSION, minClientProtocol: MIN_CLIENT_PROTOCOL },
+    });
+    return true;
+  }
+  return null;
+}
+
 // device_uuid is a Postgres uuid column — reject malformed input with a clean 400
 // (a bad string would otherwise error the uuid cast → 500). Clients generate a
 // valid UUID via crypto.randomUUID().
@@ -34,6 +59,8 @@ const isUuid = (v) => typeof v === 'string' && UUID_RE.test(v);
 
 async function bootstrap(req, res) {
   try {
+    // Version handshake first — a too-old client must update before it pushes.
+    if (checkSyncProtocol(req, res)) return undefined;
     const { device_uuid, platform, label, app_version } = req.body || {};
     if (!isUuid(device_uuid)) return res.status(400).json({ success: false, message: 'A valid device_uuid is required' });
 
@@ -58,7 +85,10 @@ async function bootstrap(req, res) {
     const device = await db('devices').where({ device_uuid }).first();
     return res.json({
       success: true,
-      data: { device, serverTime: new Date().toISOString(), domains: Object.keys(DOMAINS) },
+      data: {
+        device, serverTime: new Date().toISOString(), domains: Object.keys(DOMAINS),
+        syncProtocol: SYNC_PROTOCOL_VERSION, minClientProtocol: MIN_CLIENT_PROTOCOL,
+      },
     });
   } catch (err) {
     console.error('sync.bootstrap error:', err);
@@ -244,5 +274,6 @@ async function siteStatus(req, res) {
 
 module.exports = {
   bootstrap, pull, recordConflict, listConflicts, resolveConflict,
-  listDevices, revokeDevice, reactivateDevice, siteStatus, DOMAINS,
+  listDevices, revokeDevice, reactivateDevice, siteStatus,
+  checkSyncProtocol, SYNC_PROTOCOL_VERSION, MIN_CLIENT_PROTOCOL, DOMAINS,
 };
