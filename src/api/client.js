@@ -8,6 +8,8 @@ import { enqueue } from '../offline/outbox';
 import { mirrorRead, getMirroredRead } from '../data/readReplica';
 import { getDeviceId } from '../sync/deviceId';
 import { wipeLocalReadData, clearSession } from '../auth/wipe';
+import { enqueueFile } from '../offline/fileOutbox';
+import { cacheDownload, getCachedDownload } from '../offline/downloadCache';
 
 const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:3001');
 
@@ -189,50 +191,119 @@ async function request(endpoint, options = {}) {
   }
 }
 
-// File upload (multipart/form-data — no JSON content-type)
+// Serialize/rebuild a FormData for offline storage (blobs survive in IndexedDB).
+function serializeFormData(formData) {
+  const entries = [];
+  for (const [key, value] of formData.entries()) {
+    if (typeof Blob !== 'undefined' && value instanceof Blob) entries.push({ key, blob: value, filename: value.name || 'file' });
+    else entries.push({ key, value });
+  }
+  return entries;
+}
+function deserializeFormData(entries) {
+  const fd = new FormData();
+  for (const e of entries) {
+    if (e.blob) fd.append(e.key, e.blob, e.filename);
+    else fd.append(e.key, e.value);
+  }
+  return fd;
+}
+const newId = () => (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.round(Math.random() * 1e9)}`);
+
+async function queueUpload(endpoint, formData) {
+  const id = newId();
+  await enqueueFile({ id, endpoint, entries: serializeFormData(formData), label: describeRequest('POST', endpoint) });
+  return { success: true, _offlineQueued: true, message: 'File saved offline — it will upload when the connection returns.' };
+}
+
+// File upload (multipart/form-data — no JSON content-type). Offline → queued in the
+// file outbox and synced later; online → sent with an Idempotency-Key so a retry
+// never double-uploads.
 async function uploadFile(endpoint, formData) {
+  if (!isOnline()) return queueUpload(endpoint, formData);
+
   const token = getToken();
-  const config = {
-    method: 'POST',
-    body: formData,
-    headers: {},
-  };
+  const headers = { 'Idempotency-Key': newId() };
+  if (token && token !== 'mock-prototype-token') headers['Authorization'] = `Bearer ${token}`;
+  try { headers['X-Device-Id'] = getDeviceId(); } catch { /* noop */ }
 
-  if (token && token !== 'mock-prototype-token') {
-    config.headers['Authorization'] = `Bearer ${token}`;
+  try {
+    const res = await fetch(`${API_BASE}${endpoint}`, { method: 'POST', body: formData, headers });
+    markServerOnline();
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new ApiError(data?.message || 'Upload failed', res.status, data);
+    return data;
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    markServerOffline();
+    return queueUpload(endpoint, formData); // network dropped mid-upload → queue it
   }
+}
 
-  const res = await fetch(`${API_BASE}${endpoint}`, config);
-  const data = await res.json().catch(() => null);
-
-  if (!res.ok) {
-    throw new ApiError(data?.message || 'Upload failed', res.status, data);
+// Replay a queued upload (from the file outbox) with its stable Idempotency-Key.
+async function uploadReplay(item) {
+  const token = getToken();
+  const headers = { 'Idempotency-Key': item.id };
+  if (token && token !== 'mock-prototype-token') headers['Authorization'] = `Bearer ${token}`;
+  try { headers['X-Device-Id'] = getDeviceId(); } catch { /* noop */ }
+  let res;
+  try {
+    res = await fetch(`${API_BASE}${item.endpoint}`, { method: 'POST', body: deserializeFormData(item.entries), headers });
+  } catch {
+    markServerOffline();
+    return { retry: true };
   }
-
-  return data;
+  markServerOnline();
+  const body = await res.json().catch(() => null);
+  if (res.ok) return { ok: true, status: res.status, body };
+  if (res.status === 401 || res.status === 403 || res.status === 409 || res.status >= 500) return { retry: true, status: res.status };
+  return { ok: false, status: res.status, body };
 }
 
 // Authenticated file download — fetches the (token-protected) endpoint as a blob
 // and triggers a browser save. Plain <a href> can't be used because the download
 // route requires the Bearer token.
+function saveBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 async function downloadFile(endpoint, filename) {
+  const fallbackName = () => filename || (endpoint.split('/').pop() || 'document');
+
+  // Offline → serve from the local document cache if we've downloaded it before.
+  if (!isOnline()) {
+    const cached = await getCachedDownload(endpoint);
+    if (cached?.blob) { saveBlob(cached.blob, filename || cached.filename || fallbackName()); return; }
+    throw new ApiError('This document is not available offline. Open it once online first.', 0);
+  }
+
   const token = getToken();
   const headers = {};
   if (token && token !== 'mock-prototype-token') headers['Authorization'] = `Bearer ${token}`;
-  const res = await fetch(`${API_BASE}${endpoint}`, { headers });
+  let res;
+  try {
+    res = await fetch(`${API_BASE}${endpoint}`, { headers });
+  } catch {
+    markServerOffline();
+    const cached = await getCachedDownload(endpoint);
+    if (cached?.blob) { saveBlob(cached.blob, filename || cached.filename || fallbackName()); return; }
+    throw new ApiError('Download failed — no internet and not cached offline.', 0);
+  }
+  markServerOnline();
   if (!res.ok) {
     const data = await res.json().catch(() => null);
     throw new ApiError(data?.message || 'Download failed', res.status, data);
   }
   const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename || (endpoint.split('/').pop() || 'document');
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  cacheDownload(endpoint, blob, filename); // cache for offline print/access
+  saveBlob(blob, fallbackName());
 }
 
 // Strip null/undefined params before serialisation — URLSearchParams will
@@ -298,4 +369,4 @@ async function replayRequest(item) {
 }
 
 export default api;
-export { ApiError, API_BASE, replayRequest };
+export { ApiError, API_BASE, replayRequest, uploadReplay };
