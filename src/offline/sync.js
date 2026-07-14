@@ -4,6 +4,7 @@ import { queryClient } from '../api/queryClient';
 import { flushOutbox } from './outbox';
 import { replayRequest } from '../api/client';
 import { isOnline } from './useOnline';
+import { bootstrapDevice } from '../sync/device';
 
 let running = false;
 
@@ -11,6 +12,8 @@ export async function flushNow() {
   if (running || !isOnline()) return;
   running = true;
   try {
+    // Register/refresh this device (so it can be revoked) — best-effort.
+    bootstrapDevice().catch(() => {});
     await flushOutbox(replayRequest);
   } finally {
     running = false;

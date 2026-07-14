@@ -48,6 +48,9 @@ function createApp() {
   // Rate limiting (general only — login uses captcha guard per-IP)
   app.use('/api', apiLimiter);
 
+  // Block a revoked device's writes (offline-sync device binding via X-Device-Id).
+  app.use('/api', require('./middleware/deviceGuard'));
+
   // Idempotency for replay-safe writes (only activates when the offline-sync
   // client sends an Idempotency-Key; normal online traffic is unaffected).
   app.use('/api', require('./middleware/idempotency'));
