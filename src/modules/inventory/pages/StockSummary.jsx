@@ -135,14 +135,14 @@ export default function StockSummary() {
                           {r.isLow && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-700 inline-flex items-center gap-0.5"><AlertTriangle size={10} /> LOW</span>}
                         </button>
                       </td>
-                      <td data-label="Batches" className="px-4 py-2.5 text-right text-gray-500 tabular-nums">{n(r.lot_count)}</td>
+                      <td data-label="Batches" className="mob-hide px-4 py-2.5 text-right text-gray-500 tabular-nums">{n(r.lot_count)}</td>
                       <td data-label="On hand" className={`px-4 py-2.5 text-right font-medium tabular-nums ${r.isLow ? 'text-red-600' : 'text-gray-900'}`}>
                         {fmtMT(r.total_kg)}
                         {r.bags > 0 && <div className="text-[11px] font-normal text-gray-400">{r.bags.toLocaleString()} bags</div>}
                       </td>
                       <td data-label="Free to sell" className="px-4 py-2.5 text-right text-emerald-700 tabular-nums">{fmtMT(r.available_kg)}</td>
-                      <td data-label="Committed" className="px-4 py-2.5 text-right text-amber-700 tabular-nums">{n(r.reserved_kg) > 0 ? fmtMT(r.reserved_kg) : '—'}</td>
-                      <td data-label="Reorder at" className="px-4 py-2.5 text-right tabular-nums">
+                      <td data-label="Committed" className="mob-hide px-4 py-2.5 text-right text-amber-700 tabular-nums">{n(r.reserved_kg) > 0 ? fmtMT(r.reserved_kg) : '—'}</td>
+                      <td data-label="Reorder at" className="mob-hide px-4 py-2.5 text-right tabular-nums">
                         {editing ? (
                           <span className="inline-flex items-center gap-1">
                             <input autoFocus type="number" step="1" min="0" value={editVal} onChange={(e) => setEditVal(e.target.value)}
@@ -172,10 +172,10 @@ export default function StockSummary() {
               <tfoot>
                 <tr className="bg-gray-50 font-bold text-gray-900">
                   <td data-label="Total" className="px-4 py-2.5">Total ({rows.length})</td>
-                  <td data-label="Batches" className="px-4 py-2.5 text-right tabular-nums">{totals.lots}</td>
+                  <td data-label="Batches" className="mob-hide px-4 py-2.5 text-right tabular-nums">{totals.lots}</td>
                   <td data-label="On hand" className="px-4 py-2.5 text-right tabular-nums">{fmtMT(totals.onHand)}</td>
                   <td data-label="Free to sell" className="px-4 py-2.5 text-right tabular-nums">{fmtMT(totals.available)}</td>
-                  <td data-label="Committed" className="px-4 py-2.5 text-right tabular-nums">{totals.reserved > 0 ? fmtMT(totals.reserved) : '—'}</td>
+                  <td data-label="Committed" className="mob-hide px-4 py-2.5 text-right tabular-nums">{totals.reserved > 0 ? fmtMT(totals.reserved) : '—'}</td>
                   <td className="px-4 py-2.5"></td>
                   <td data-label="Stock value" className="px-4 py-2.5 text-right tabular-nums">{fmtPKR(totals.value)}</td>
                   <td></td>

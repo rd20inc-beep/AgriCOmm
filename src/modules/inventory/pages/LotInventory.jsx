@@ -143,7 +143,7 @@ function renderLotRow(lot, displayUnit, navigate, indented) {
       onClick={() => navigate(`/lot-inventory/${lot.lotNo || lot.id}`)}
     >
       <td data-label="Lot No" className={`font-medium text-blue-600 whitespace-nowrap ${indented ? 'pl-8' : ''}`}>{lot.lotNo}</td>
-      <td data-label="Subtype">
+      <td data-label="Subtype" className="mob-hide">
         <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium whitespace-nowrap ${subtypeBadgeClass(s)}`}>
           {subtypeLabel(s)}
         </span>
@@ -166,20 +166,20 @@ function renderLotRow(lot, displayUnit, navigate, indented) {
           </div>
         )}
       </td>
-      <td data-label="Supplier" className="text-gray-600 max-w-[10rem] truncate" title={lot.supplierName || ''}><PartyLink type="supplier" id={lot.supplierId} name={lot.supplierName} /></td>
-      <td data-label="Warehouse" className="text-gray-600 text-xs max-w-[8rem] truncate" title={lot.warehouseName || ''}>{lot.warehouseName || '—'}</td>
+      <td data-label="Supplier" className="mob-hide text-gray-600 max-w-[10rem] truncate" title={lot.supplierName || ''}><PartyLink type="supplier" id={lot.supplierId} name={lot.supplierName} /></td>
+      <td data-label="Warehouse" className="mob-hide text-gray-600 text-xs max-w-[8rem] truncate" title={lot.warehouseName || ''}>{lot.warehouseName || '—'}</td>
       <td data-label="Stock" className="text-right font-medium tabular-nums">{fromKg(netKg, displayUnit, bw).toLocaleString()}</td>
       <td data-label="Available" className="text-right tabular-nums text-emerald-600 font-medium">{fromKg(availKg, displayUnit, bw).toLocaleString()}</td>
-      <td data-label="Landed/KG" className="text-right tabular-nums text-xs font-medium">{fmtPKR(lot.landedCostPerKg)}</td>
+      <td data-label="Landed/KG" className="mob-hide text-right tabular-nums text-xs font-medium">{fmtPKR(lot.landedCostPerKg)}</td>
       <td data-label="Value" className="text-right tabular-nums font-medium">{fmtPKR(lot.landedCostTotal)}</td>
-      <td data-label="Quality" className="text-center">
+      <td data-label="Quality" className="mob-hide text-center">
         <div className="flex items-center justify-center gap-1 text-xs whitespace-nowrap">
           {lot.moisturePct && <span className="text-blue-600" title="Moisture">{lot.moisturePct}%M</span>}
           {lot.brokenPct && <span className="text-amber-600" title="Broken">{lot.brokenPct}%B</span>}
         </div>
       </td>
       <td data-label="Status" className="text-center"><StatusBadge status={lot.status} /></td>
-      <td className={`text-center sticky right-0 group-hover:bg-gray-50 shadow-[inset_1px_0_0_rgba(0,0,0,0.06)] z-10 ${indented ? 'bg-slate-50/40' : 'bg-white'}`}>
+      <td className={`mob-hide text-center sticky right-0 group-hover:bg-gray-50 shadow-[inset_1px_0_0_rgba(0,0,0,0.06)] z-10 ${indented ? 'bg-slate-50/40' : 'bg-white'}`}>
         <button onClick={e => { e.stopPropagation(); navigate(`/lot-inventory/${lot.lotNo || lot.id}`); }} className="btn btn-ghost btn-sm">
           <Eye className="w-4 h-4" />
         </button>
@@ -536,13 +536,13 @@ export default function LotInventory() {
                               className={`cursor-pointer hover:bg-blue-50 group bg-gradient-to-r from-slate-50 to-white border-l-4 ${open ? 'border-blue-500' : 'border-transparent'}`}
                               onClick={() => toggleGroup(g.key)}
                             >
-                              <td className="font-medium text-slate-700 whitespace-nowrap">
+                              <td data-label="Group" className="font-medium text-slate-700 whitespace-nowrap">
                                 <span className="inline-flex items-center gap-1">
                                   <span className="text-gray-400">{open ? '▾' : '▸'}</span>
                                   {g.lotCount} {g.lotCount === 1 ? 'lot' : 'lots'}
                                 </span>
                               </td>
-                              <td>
+                              <td data-label="Subtype" className="mob-hide">
                                 {g.subtype ? (
                                   <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold whitespace-nowrap ${subtypeBadgeClass(g.subtype)}`}>
                                     {subtypeLabel(g.subtype)}
@@ -553,7 +553,7 @@ export default function LotInventory() {
                                   </span>
                                 )}
                               </td>
-                              <td className="max-w-[16rem]">
+                              <td data-label="Rice type" className="max-w-[16rem]">
                                 <div className="text-gray-900 font-semibold truncate flex items-center gap-1.5" title={(g.variety || g.varieties.join(', '))}>
                                   {g.blended && (
                                     <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-700 shrink-0" title={g.blendBatchNo ? `Blended — ${g.blendBatchNo}` : 'Blended'}>
@@ -568,15 +568,15 @@ export default function LotInventory() {
                                   </div>
                                 )}
                               </td>
-                              <td className="text-gray-400 text-xs">—</td>
-                              <td className="text-gray-400 text-xs">—</td>
-                              <td className="text-right font-semibold tabular-nums">{fromKg(g.totalKg, displayUnit, bw).toLocaleString()}</td>
-                              <td className="text-right tabular-nums text-emerald-700 font-semibold">{fromKg(g.availKg, displayUnit, bw).toLocaleString()}</td>
-                              <td className="text-right tabular-nums text-xs">{g.weightedLanded ? fmtPKR(g.weightedLanded) : '—'}</td>
-                              <td className="text-right tabular-nums font-semibold">{fmtPKR(g.totalValue)}</td>
-                              <td className="text-center text-xs text-gray-400">—</td>
-                              <td className="text-center text-[11px] text-gray-500">{open ? 'expanded' : 'click to expand'}</td>
-                              <td className="text-center sticky right-0 bg-gradient-to-r from-slate-50 to-white group-hover:bg-blue-50 shadow-[inset_1px_0_0_rgba(0,0,0,0.06)] z-10">
+                              <td className="mob-hide text-gray-400 text-xs">—</td>
+                              <td className="mob-hide text-gray-400 text-xs">—</td>
+                              <td data-label="Stock" className="text-right font-semibold tabular-nums">{fromKg(g.totalKg, displayUnit, bw).toLocaleString()}</td>
+                              <td data-label="Available" className="text-right tabular-nums text-emerald-700 font-semibold">{fromKg(g.availKg, displayUnit, bw).toLocaleString()}</td>
+                              <td className="mob-hide text-right tabular-nums text-xs">{g.weightedLanded ? fmtPKR(g.weightedLanded) : '—'}</td>
+                              <td data-label="Value" className="text-right tabular-nums font-semibold">{fmtPKR(g.totalValue)}</td>
+                              <td className="mob-hide text-center text-xs text-gray-400">—</td>
+                              <td className="mob-hide text-center text-[11px] text-gray-500">{open ? 'expanded' : 'click to expand'}</td>
+                              <td className="mob-hide text-center sticky right-0 bg-gradient-to-r from-slate-50 to-white group-hover:bg-blue-50 shadow-[inset_1px_0_0_rgba(0,0,0,0.06)] z-10">
                                 <span className="text-gray-400 text-xs">{open ? '▾' : '▸'}</span>
                               </td>
                             </tr>

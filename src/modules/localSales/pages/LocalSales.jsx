@@ -257,11 +257,11 @@ export default function LocalSales() {
                         {s.saleNo}
                         {s.status === 'Pending' && <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700 align-middle">Pending</span>}
                       </td>
-                      <td data-label="Date" className="py-2.5 px-4 text-gray-600 text-xs">{s.saleDate ? new Date(s.saleDate).toLocaleDateString('en-GB', { day:'2-digit', month:'short' }) : '—'}</td>
+                      <td data-label="Date" className="mob-hide py-2.5 px-4 text-gray-600 text-xs">{s.saleDate ? new Date(s.saleDate).toLocaleDateString('en-GB', { day:'2-digit', month:'short' }) : '—'}</td>
                       <td data-label="Buyer" className="py-2.5 px-4 text-gray-900"><PartyLink type="customer" id={s.customerId} name={s.customerName || s.buyerName} /></td>
                       <td data-label="Item" className="py-2.5 px-4 text-gray-700">{s.itemName}</td>
-                      <td data-label="Qty" className="py-2.5 px-4 text-right font-medium tabular-nums">{rowQty(s)}</td>
-                      <td data-label="Rate" className="py-2.5 px-4 text-right text-xs tabular-nums">{fmtPKR(s.ratePerKg)}/kg</td>
+                      <td data-label="Qty" className="mob-hide py-2.5 px-4 text-right font-medium tabular-nums">{rowQty(s)}</td>
+                      <td data-label="Rate" className="mob-hide py-2.5 px-4 text-right text-xs tabular-nums">{fmtPKR(s.ratePerKg)}/kg</td>
                       <td data-label="Total" className="py-2.5 px-4 text-right font-bold tabular-nums">{fmtPKR(s.totalAmount)}</td>
                       <td data-label="Payment" className="py-2.5 px-4 text-center"><StatusBadge status={s.paymentStatus} /></td>
                       <td className="py-2.5 px-4 text-center">
@@ -292,11 +292,11 @@ export default function LocalSales() {
                           {head.status === 'Pending' && <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700">Pending</span>}
                         </span>
                       </td>
-                      <td data-label="Date" className="py-2.5 px-4 text-gray-600 text-xs">{head.saleDate ? new Date(head.saleDate).toLocaleDateString('en-GB', { day:'2-digit', month:'short' }) : '—'}</td>
+                      <td data-label="Date" className="mob-hide py-2.5 px-4 text-gray-600 text-xs">{head.saleDate ? new Date(head.saleDate).toLocaleDateString('en-GB', { day:'2-digit', month:'short' }) : '—'}</td>
                       <td data-label="Buyer" className="py-2.5 px-4 text-gray-900"><PartyLink type="customer" id={head.customerId} name={head.customerName || head.buyerName} /></td>
                       <td data-label="Items" className="py-2.5 px-4 text-gray-500 italic">{g.items.map(i => i.itemName).slice(0, 2).join(', ')}{g.items.length > 2 ? ` +${g.items.length - 2}` : ''}</td>
-                      <td data-label="Qty" className="py-2.5 px-4 text-right font-medium tabular-nums">{qtyCell(g.qtyKg)}</td>
-                      <td data-label="Rate" className="py-2.5 px-4 text-right text-xs text-gray-400">—</td>
+                      <td data-label="Qty" className="mob-hide py-2.5 px-4 text-right font-medium tabular-nums">{qtyCell(g.qtyKg)}</td>
+                      <td data-label="Rate" className="mob-hide py-2.5 px-4 text-right text-xs text-gray-400">—</td>
                       <td data-label="Total" className="py-2.5 px-4 text-right font-bold tabular-nums">{fmtPKR(g.total)}</td>
                       <td data-label="Payment" className="py-2.5 px-4 text-center"><StatusBadge status={g.status} /></td>
                       <td className="py-2.5 px-4"></td>
@@ -307,8 +307,8 @@ export default function LocalSales() {
                         <td className="py-2 px-4"></td>
                         <td className="py-2 px-4"></td>
                         <td data-label="Item" className="py-2 px-4 text-gray-700 text-sm">{s.itemName}</td>
-                        <td data-label="Qty" className="py-2 px-4 text-right text-sm tabular-nums">{rowQty(s)}</td>
-                        <td data-label="Rate" className="py-2 px-4 text-right text-xs tabular-nums">{fmtPKR(s.ratePerKg)}/kg</td>
+                        <td data-label="Qty" className="mob-hide py-2 px-4 text-right text-sm tabular-nums">{rowQty(s)}</td>
+                        <td data-label="Rate" className="mob-hide py-2 px-4 text-right text-xs tabular-nums">{fmtPKR(s.ratePerKg)}/kg</td>
                         <td data-label="Total" className="py-2 px-4 text-right font-semibold text-sm tabular-nums">{fmtPKR(s.totalAmount)}</td>
                         <td data-label="Payment" className="py-2 px-4 text-center"><StatusBadge status={s.paymentStatus} /></td>
                         <td className="py-2 px-4 text-center"><button onClick={(e) => { e.stopPropagation(); openSaleDetail(s); }} className="text-blue-600 hover:text-blue-800" title="View details"><Eye size={15} /></button></td>
