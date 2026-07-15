@@ -11,6 +11,8 @@ import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { RouteErrorBoundary } from './ErrorBoundary';
 import ChatWidget from './ChatWidget';
+import MobileBottomNav from './MobileBottomNav';
+import { cardifyTables, scheduleCardify } from '../lib/mobileCards';
 import { SkeletonPage } from '../shared/components/Skeleton';
 
 const exportNav = [
@@ -131,6 +133,18 @@ export default function ExportLayout({ children }) {
   });
   const userMenuRef = useRef(null);
   const notifRef = useRef(null);
+  const location = useLocation();
+
+  // Whole-app mobile responsiveness: auto-card data tables on phones (same as Layout).
+  useEffect(() => {
+    cardifyTables();
+    const main = typeof document !== 'undefined' ? document.querySelector('.page-content') : null;
+    const obs = main && typeof MutationObserver !== 'undefined' ? new MutationObserver(scheduleCardify) : null;
+    if (obs && main) obs.observe(main, { childList: true, subtree: true });
+    const t1 = setTimeout(cardifyTables, 400);
+    const t2 = setTimeout(cardifyTables, 1200);
+    return () => { if (obs) obs.disconnect(); clearTimeout(t1); clearTimeout(t2); };
+  }, [location.pathname]);
 
   const unreadAlerts = alerts ? alerts.filter(a => a.orderId || !a.batchId).length : 0;
 
@@ -384,6 +398,7 @@ export default function ExportLayout({ children }) {
           </RouteErrorBoundary>
         </main>
       </div>
+      <MobileBottomNav onMenu={() => setSidebarOpen(true)} />
       <ChatWidget />
     </div>
   );
