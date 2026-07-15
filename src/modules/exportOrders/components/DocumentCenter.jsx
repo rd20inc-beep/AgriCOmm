@@ -1701,6 +1701,10 @@ export default function DocumentCenter({ order }) {
     // portrait.
     const landscape = previewDoc?._docType === 'proforma-invoice';
     const pageRule = landscape ? '@page { size: A4 landscape; margin: 10mm; }' : '@page { size: A4; margin: 12mm; }';
+    // A4 printable width = paper width minus both @page margins. Portrait: 210-2*12,
+    // landscape: 297-2*10. We force the print body to EXACTLY this width so the doc
+    // fills the sheet (see the CSS below for why).
+    const printW = landscape ? '277mm' : '186mm';
     // Setting an explicit @page margin suppresses Chrome/Edge/Safari's
     // default print header (date, page title, URL) and footer (page numbers,
     // URL). Firefox honors the same rule. The margin keeps the document
@@ -1711,16 +1715,17 @@ export default function DocumentCenter({ order }) {
           <title>${previewDoc?.type || 'Document'} — ${order.id}</title>
           <style>
             ${pageRule}
-            html, body { margin: 0; padding: 0; }
-            /* Fill the full A4 printable width. The on-screen preview uses a fixed
-               max-width (800-1040px) to look like a page; when printed that fixed
-               width doesn't match A4 and the browser scales the sheet down, so the
-               document lands in a narrow column ("half the paper"). Override it so
-               the document always spans the whole printable width. */
+            /* THE FIX: the print window lays the page out at the WINDOW's width
+               (often ~1280px), not the A4 page width — so the document (capped at
+               ~860px, centered) sits in a wide layout that the browser then shrinks
+               to fit the paper, landing it in "half the page". Pin the print body to
+               the exact A4 printable width so the layout maps 1:1 to the sheet, and
+               force the document to fill it. */
+            html, body { margin: 0; padding: 0; width: ${printW}; }
             body .agri-doc { width: 100%; max-width: 100%; margin: 0; box-sizing: border-box; }
             body .agri-doc > div { width: 100% !important; max-width: 100% !important; margin: 0 !important; box-sizing: border-box; }
             @media print {
-              html, body { margin: 0; padding: 0; }
+              html, body { margin: 0; padding: 0; width: ${printW}; }
               body .agri-doc, body .agri-doc > div { width: 100% !important; max-width: 100% !important; margin: 0 !important; box-sizing: border-box; }
             }
           </style>
