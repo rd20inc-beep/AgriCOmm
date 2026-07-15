@@ -1717,11 +1717,11 @@ export default function DocumentCenter({ order }) {
                width doesn't match A4 and the browser scales the sheet down, so the
                document lands in a narrow column ("half the paper"). Override it so
                the document always spans the whole printable width. */
-            body .agri-doc { width: 100%; max-width: 100%; margin: 0; }
-            body .agri-doc > div { width: 100% !important; max-width: 100% !important; margin: 0 !important; }
+            body .agri-doc { width: 100%; max-width: 100%; margin: 0; box-sizing: border-box; }
+            body .agri-doc > div { width: 100% !important; max-width: 100% !important; margin: 0 !important; box-sizing: border-box; }
             @media print {
               html, body { margin: 0; padding: 0; }
-              body .agri-doc, body .agri-doc > div { width: 100% !important; max-width: 100% !important; margin: 0 !important; }
+              body .agri-doc, body .agri-doc > div { width: 100% !important; max-width: 100% !important; margin: 0 !important; box-sizing: border-box; }
             }
           </style>
         </head>
