@@ -233,6 +233,19 @@ input, select, textarea { font-size: 14px; }
   border-bottom: none;
 }
 
+/* Responsive fallback for EVERY table (offline/APK mobile pass): on phones a table
+   that hasn't been turned into cards must scroll horizontally rather than be clipped
+   by the page's overflow-x-hidden — so no columns are ever hidden. The more specific
+   .mobile-cards rules below override this for converted tables. */
+@media (max-width: 767px) {
+  .page-content table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    max-width: 100%;
+  }
+}
+
 /* Mobile card view for tables.
    Add the class "mobile-cards" to a table's wrapper (works with OR without
    .table-container) and data-label="Column" to each <td>. On phones (<=767px) the
