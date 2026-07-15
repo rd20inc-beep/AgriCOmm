@@ -194,14 +194,14 @@ export default function Dashboard() {
   return (
     <div className="space-y-5 pb-4">
       {/* ─── HERO BAND ────────────────────────────────────────────── */}
-      <div className="rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-blue-900 p-5 sm:p-6 text-white shadow-sm relative overflow-hidden">
+      <div className="rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-blue-900 p-4 sm:p-6 text-white shadow-sm relative overflow-hidden">
         <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'radial-gradient(circle at 80% 30%, white 0%, transparent 60%)' }} />
         <div className="relative flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 text-xs uppercase tracking-wider opacity-80 mb-1">
               <Activity size={14} /> {today}
             </div>
-            <h1 className="text-3xl font-bold leading-tight">
+            <h1 className="text-2xl sm:text-3xl font-bold leading-tight">
               {user?.fullName ? `Welcome back, ${user.fullName.split(' ')[0]}` : 'Operations Overview'}
             </h1>
             <p className="text-sm opacity-80 mt-1">
