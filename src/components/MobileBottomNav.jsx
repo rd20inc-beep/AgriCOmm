@@ -17,19 +17,25 @@ export default function MobileBottomNav({ onMenu }) {
   ].filter((i) => i.show);
 
   const cls = ({ isActive }) =>
-    `flex flex-col items-center justify-center gap-0.5 flex-1 h-full text-[10px] font-medium transition-colors ${
+    `flex flex-col items-center justify-center gap-0.5 flex-1 h-14 text-[10px] font-medium transition-colors ${
       isActive ? 'text-blue-600' : 'text-gray-500'
     }`;
 
+  // Height comes from the items (h-14); the extra bottom padding reserves the
+  // Android/iOS system navigation bar area (env safe-area, needs viewport-fit=cover)
+  // so the tabs sit ABOVE the phone's gesture/button bar instead of behind it.
   return (
-    <nav className="lg:hidden fixed bottom-0 inset-x-0 z-40 h-14 bg-white border-t border-gray-200 flex items-stretch pb-[env(safe-area-inset-bottom)] shadow-[0_-1px_3px_rgba(0,0,0,0.06)]">
+    <nav
+      className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-gray-200 flex items-stretch shadow-[0_-1px_3px_rgba(0,0,0,0.06)]"
+      style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+    >
       {items.map(({ to, icon: Icon, label, end }) => (
         <NavLink key={to} to={to} end={end} className={cls}>
           <Icon size={20} />
           <span>{label}</span>
         </NavLink>
       ))}
-      <button onClick={onMenu} className="flex flex-col items-center justify-center gap-0.5 flex-1 h-full text-[10px] font-medium text-gray-500">
+      <button onClick={onMenu} className="flex flex-col items-center justify-center gap-0.5 flex-1 h-14 text-[10px] font-medium text-gray-500">
         <Menu size={20} />
         <span>Menu</span>
       </button>
