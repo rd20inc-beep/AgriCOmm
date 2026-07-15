@@ -243,6 +243,20 @@ input, select, textarea { font-size: 14px; }
   .table-container.mobile-cards tr {
     display: block;
   }
+  /* The base table forces min-width:600px and lets .table-scroll scroll it — for
+     the card view that would keep each card ~600px wide, so justify-content:
+     space-between pushes the value off-screen. Constrain cards to the viewport and
+     stop the horizontal scroll so label + value sit on one readable row. */
+  .table-container.mobile-cards table {
+    min-width: 0;
+    width: 100%;
+  }
+  .table-container.mobile-cards .table-scroll {
+    overflow-x: visible;
+  }
+  .table-container.mobile-cards tbody td {
+    white-space: normal;
+  }
   .table-container.mobile-cards thead {
     position: absolute;
     width: 1px;
