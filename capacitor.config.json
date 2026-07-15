@@ -3,6 +3,8 @@
   "appName": "AgriRice",
   "webDir": "dist",
   "server": {
-    "androidScheme": "https"
+    "androidScheme": "https",
+    "url": "https://agricommodities.online",
+    "cleartext": false
   }
 }
