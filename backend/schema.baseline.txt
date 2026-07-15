@@ -128,15 +128,24 @@ COL bag_types.size_kg:numeric:NULL
 COL bag_types.unit:character varying:NULL
 COL bag_types.updated_at:timestamp with time zone:NOT NULL
 COL bank_accounts.account_number:character varying:NULL
+COL bank_accounts.account_title:character varying:NULL
+COL bank_accounts.approved_for_customer:boolean:NOT NULL
+COL bank_accounts.bank_address:text:NULL
 COL bank_accounts.bank_name:character varying:NULL
 COL bank_accounts.branch:character varying:NULL
+COL bank_accounts.correspondent_account:character varying:NULL
+COL bank_accounts.correspondent_bank_name:character varying:NULL
+COL bank_accounts.correspondent_swift:character varying:NULL
 COL bank_accounts.created_at:timestamp with time zone:NOT NULL
 COL bank_accounts.currency:character varying:NOT NULL
 COL bank_accounts.current_balance:numeric:NOT NULL
 COL bank_accounts.entity:character varying:NOT NULL
+COL bank_accounts.iban:character varying:NULL
 COL bank_accounts.id:integer:NOT NULL
 COL bank_accounts.is_active:boolean:NOT NULL
+COL bank_accounts.is_export_default:boolean:NOT NULL
 COL bank_accounts.name:character varying:NOT NULL
+COL bank_accounts.swift_bic:character varying:NULL
 COL bank_accounts.type:character varying:NULL
 COL bank_accounts.uid:character varying:NULL
 COL bank_accounts.updated_at:timestamp with time zone:NOT NULL
@@ -1968,6 +1977,7 @@ COL products.code:character varying:NULL
 COL products.created_at:timestamp with time zone:NOT NULL
 COL products.description:text:NULL
 COL products.grade:character varying:NULL
+COL products.hs_code:character varying:NULL
 COL products.id:integer:NOT NULL
 COL products.is_active:boolean:NOT NULL
 COL products.is_byproduct:boolean:NOT NULL
