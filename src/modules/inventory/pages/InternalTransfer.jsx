@@ -343,7 +343,7 @@ export default function InternalTransfer() {
       </div>
 
       {/* Recent Transfers Table */}
-      <div className="table-container">
+      <div className="table-container mobile-cards">
         <div className="px-6 py-4 border-b border-gray-200">
           <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
             <Calendar className="w-5 h-5 text-gray-500" />
@@ -374,15 +374,15 @@ export default function InternalTransfer() {
               ) : (
                 transfers.map(t => (
                   <tr key={t.id} onClick={() => setOpenId(t.id)} className="hover:bg-blue-50/50 transition-colors cursor-pointer">
-                    <td className="px-4 py-3 font-medium text-blue-600 hover:underline">{t.transferNo}</td>
-                    <td className="px-4 py-3 text-gray-900">{t.batchNo || `B-${t.batchId}`}</td>
-                    {canLinkOrder && <td className="px-4 py-3 text-gray-900">{t.exportOrderNo || `#${t.exportOrderId}`}</td>}
-                    <td className="px-4 py-3 text-gray-600">{t.productName}</td>
-                    <td className="px-4 py-3 text-right text-gray-900 font-medium">{Math.round((parseFloat(t.qtyMt) || 0) * 1000).toLocaleString()}</td>
-                    <td className="px-4 py-3 text-right text-gray-900">{formatPKR((parseFloat(t.transferPricePkr) || 0) / 1000)}</td>
-                    <td className="px-4 py-3 text-right text-gray-900 font-medium">{formatPKR(t.totalValuePkr)}</td>
-                    <td className="px-4 py-3 text-gray-600">{t.dispatchDate}</td>
-                    <td className="px-4 py-3 text-center">
+                    <td data-label="Transfer ID" className="px-4 py-3 font-medium text-blue-600 hover:underline">{t.transferNo}</td>
+                    <td data-label="Batch No" className="px-4 py-3 text-gray-900">{t.batchNo || `B-${t.batchId}`}</td>
+                    {canLinkOrder && <td data-label="Export Order" className="mob-hide px-4 py-3 text-gray-900">{t.exportOrderNo || `#${t.exportOrderId}`}</td>}
+                    <td data-label="Product" className="px-4 py-3 text-gray-600">{t.productName}</td>
+                    <td data-label="Qty kg" className="px-4 py-3 text-right text-gray-900 font-medium">{Math.round((parseFloat(t.qtyMt) || 0) * 1000).toLocaleString()}</td>
+                    <td data-label="Price/kg" className="mob-hide px-4 py-3 text-right text-gray-900">{formatPKR((parseFloat(t.transferPricePkr) || 0) / 1000)}</td>
+                    <td data-label="Total" className="px-4 py-3 text-right text-gray-900 font-medium">{formatPKR(t.totalValuePkr)}</td>
+                    <td data-label="Dispatch" className="mob-hide px-4 py-3 text-gray-600">{t.dispatchDate}</td>
+                    <td data-label="Status" className="px-4 py-3 text-center">
                       <StatusBadge status={t.status} />
                     </td>
                   </tr>

@@ -107,7 +107,7 @@ export default function StoreOverview() {
             </div>
             <span className="text-xs text-amber-700">{kattaItems.reduce((s, k) => s + (Number(k.on_hand) || 0), 0).toLocaleString()} total pcs</span>
           </div>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto mobile-cards">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-[11px] uppercase text-amber-700">
@@ -126,13 +126,13 @@ export default function StoreOverview() {
                   const low = onHand <= Number(k.reorder_level) && Number(k.reorder_level) > 0;
                   return (
                     <tr key={k.id} className="border-t border-amber-100">
-                      <td className="py-1.5 pr-3 font-medium text-gray-800">{k.size} kg</td>
-                      <td className="py-1.5 px-2 text-right text-blue-700">{k.purchased > 0 ? `+${Math.round(k.purchased).toLocaleString()}` : '—'}</td>
-                      <td className="py-1.5 px-2 text-right text-emerald-700">{k.freed > 0 ? `+${Math.round(k.freed).toLocaleString()}` : '—'}</td>
-                      <td className="py-1.5 px-2 text-right text-red-600">{k.packed > 0 ? `−${Math.round(k.packed).toLocaleString()}` : '—'}</td>
-                      <td className="py-1.5 px-2 text-right text-red-600">{k.sold > 0 ? `−${Math.round(k.sold).toLocaleString()}` : '—'}</td>
-                      <td className={`py-1.5 px-2 text-right font-bold ${low ? 'text-red-600' : 'text-gray-900'}`}>{Math.round(onHand).toLocaleString()}</td>
-                      <td className="py-1.5 pl-2 text-right text-gray-700">{k.avg_cost > 0 ? formatPKR(onHand * k.avg_cost) : '—'}</td>
+                      <td data-label="Katta" className="py-1.5 pr-3 font-medium text-gray-800">{k.size} kg</td>
+                      <td data-label="Purchased" className="mob-hide py-1.5 px-2 text-right text-blue-700">{k.purchased > 0 ? `+${Math.round(k.purchased).toLocaleString()}` : '—'}</td>
+                      <td data-label="Freed" className="mob-hide py-1.5 px-2 text-right text-emerald-700">{k.freed > 0 ? `+${Math.round(k.freed).toLocaleString()}` : '—'}</td>
+                      <td data-label="Used" className="mob-hide py-1.5 px-2 text-right text-red-600">{k.packed > 0 ? `−${Math.round(k.packed).toLocaleString()}` : '—'}</td>
+                      <td data-label="Sold" className="mob-hide py-1.5 px-2 text-right text-red-600">{k.sold > 0 ? `−${Math.round(k.sold).toLocaleString()}` : '—'}</td>
+                      <td data-label="On hand" className={`py-1.5 px-2 text-right font-bold ${low ? 'text-red-600' : 'text-gray-900'}`}>{Math.round(onHand).toLocaleString()}</td>
+                      <td data-label="Value" className="py-1.5 pl-2 text-right text-gray-700">{k.avg_cost > 0 ? formatPKR(onHand * k.avg_cost) : '—'}</td>
                     </tr>
                   );
                 })}
@@ -178,7 +178,7 @@ export default function StoreOverview() {
         ) : safeItems.length === 0 ? (
           <p className="text-sm text-gray-400 text-center py-8">No items found.</p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto mobile-cards">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200">
@@ -202,27 +202,27 @@ export default function StoreOverview() {
                   const isLow = qty <= reorder;
                   return (
                     <tr key={item.id} className={`hover:bg-gray-50 ${isLow ? 'bg-red-50/50' : ''}`}>
-                      <td className="py-2 px-3 font-mono text-xs text-gray-500">{item.code}</td>
-                      <td className="py-2 px-3 font-medium text-gray-900">{item.name}</td>
-                      <td className="py-2 px-3">
+                      <td data-label="Code" className="mob-hide py-2 px-3 font-mono text-xs text-gray-500">{item.code}</td>
+                      <td data-label="Item" className="py-2 px-3 font-medium text-gray-900">{item.name}</td>
+                      <td data-label="Category" className="py-2 px-3">
                         <span className="inline-block px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-700 capitalize">
                           {item.category}
                         </span>
                       </td>
-                      <td className={`py-2 px-3 text-right font-medium ${isLow ? 'text-red-600' : 'text-gray-900'}`}>
+                      <td data-label="On Hand" className={`py-2 px-3 text-right font-medium ${isLow ? 'text-red-600' : 'text-gray-900'}`}>
                         {qty} {item.unit}
                         {isLow && <AlertTriangle size={12} className="inline ml-1 text-red-500" />}
                       </td>
-                      <td className="py-2 px-3 text-right text-gray-700">
+                      <td data-label="Bag kg" className="mob-hide py-2 px-3 text-right text-gray-700">
                         {item.capacity_kg != null && item.capacity_kg !== '' ? Number(item.capacity_kg) : '—'}
                       </td>
-                      <td className="py-2 px-3 text-right text-gray-500">
+                      <td data-label="Tare kg" className="mob-hide py-2 px-3 text-right text-gray-500">
                         {item.tare_weight_kg != null && item.tare_weight_kg !== '' ? Number(item.tare_weight_kg) : '—'}
                       </td>
-                      <td className="py-2 px-3 text-right text-gray-500">{reorder}</td>
-                      <td className="py-2 px-3 text-right text-gray-700">{formatPKR(avg)}</td>
-                      <td className="py-2 px-3 text-right text-gray-900 font-medium">{formatPKR(qty * avg)}</td>
-                      <td className="py-2 px-3 text-right">
+                      <td data-label="Reorder" className="mob-hide py-2 px-3 text-right text-gray-500">{reorder}</td>
+                      <td data-label="Avg Cost" className="mob-hide py-2 px-3 text-right text-gray-700">{formatPKR(avg)}</td>
+                      <td data-label="Value" className="py-2 px-3 text-right text-gray-900 font-medium">{formatPKR(qty * avg)}</td>
+                      <td className="mob-hide py-2 px-3 text-right">
                         <button
                           onClick={() => setEditItem(item)}
                           className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
@@ -291,7 +291,7 @@ function PurchasePaymentsCard() {
         <Wallet size={16} className="text-blue-600" />
         <h2 className="text-sm font-semibold text-gray-900">Unpaid Purchases <span className="font-normal text-gray-500">({unpaid.length})</span></h2>
       </div>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto mobile-cards">
         <table className="w-full text-sm">
           <thead><tr className="text-left text-[11px] text-gray-500 uppercase border-b border-gray-200">
             <th className="py-2 px-2">Purchase</th><th className="py-2 px-2">Date</th>
@@ -301,12 +301,12 @@ function PurchasePaymentsCard() {
           <tbody className="divide-y divide-gray-100">
             {unpaid.map(p => (
               <tr key={p.id} className="hover:bg-gray-50">
-                <td className="py-2 px-2 font-medium text-gray-900">{p.purchase_no}</td>
-                <td className="py-2 px-2 text-gray-600 text-xs">{p.purchase_date ? new Date(p.purchase_date).toLocaleDateString('en-GB') : '—'}</td>
-                <td className="py-2 px-2 text-right tabular-nums">{formatPKR(p.total_amount)}</td>
-                <td className="py-2 px-2 text-right tabular-nums text-emerald-700">{formatPKR(p.paid_amount)}</td>
-                <td className="py-2 px-2 text-right tabular-nums text-red-600 font-medium">{formatPKR(due(p))}</td>
-                <td className="py-2 px-2"><span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">{p.payment_status || 'Pending'}</span></td>
+                <td data-label="Purchase" className="py-2 px-2 font-medium text-gray-900">{p.purchase_no}</td>
+                <td data-label="Date" className="mob-hide py-2 px-2 text-gray-600 text-xs">{p.purchase_date ? new Date(p.purchase_date).toLocaleDateString('en-GB') : '—'}</td>
+                <td data-label="Total" className="py-2 px-2 text-right tabular-nums">{formatPKR(p.total_amount)}</td>
+                <td data-label="Paid" className="mob-hide py-2 px-2 text-right tabular-nums text-emerald-700">{formatPKR(p.paid_amount)}</td>
+                <td data-label="Due" className="py-2 px-2 text-right tabular-nums text-red-600 font-medium">{formatPKR(due(p))}</td>
+                <td data-label="Status" className="mob-hide py-2 px-2"><span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">{p.payment_status || 'Pending'}</span></td>
                 <td className="py-2 px-2 text-right">
                   <button onClick={() => open(p)} className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded hover:bg-emerald-100 inline-flex items-center gap-1">
                     <DollarSign size={12} /> Pay

@@ -211,7 +211,7 @@ export default function QualityComparison() {
 
       {/* Table */}
       {!loading && (
-        <div className="table-container">
+        <div className="table-container mobile-cards">
           <div className="table-scroll">
             <table className="w-full">
               <thead>
@@ -232,29 +232,29 @@ export default function QualityComparison() {
                   <tr><td colSpan={9} className="text-center py-12 text-gray-400">No batches match the selected filter</td></tr>
                 ) : filteredBatches.map(batch => (
                   <tr key={batch.id} className={`cursor-pointer hover:bg-gray-50 ${batch.qualityVariance > 1.0 ? 'bg-red-50/50' : ''}`} onClick={() => openDetail(batch)}>
-                    <td className="font-semibold text-gray-900">{batch.id}{batch.batchName ? <span className="font-normal text-gray-400"> · {batch.batchName}</span> : ''}</td>
-                    <td className="text-gray-600"><PartyLink type="supplier" id={batch.supplierId} name={batch.supplierName} /></td>
-                    <td className="text-gray-600">{batch.linkedExportOrder || '—'}</td>
-                    <td className="text-right text-gray-600">{batch.rawQtyMT} MT</td>
-                    <td className="text-center">
+                    <td data-label="Batch" className="font-semibold text-gray-900">{batch.id}{batch.batchName ? <span className="font-normal text-gray-400"> · {batch.batchName}</span> : ''}</td>
+                    <td data-label="Supplier" className="text-gray-600"><PartyLink type="supplier" id={batch.supplierId} name={batch.supplierName} /></td>
+                    <td data-label="Linked Order" className="mob-hide text-gray-600">{batch.linkedExportOrder || '—'}</td>
+                    <td data-label="Raw Qty" className="text-right text-gray-600">{batch.rawQtyMT} MT</td>
+                    <td data-label="Sample" className="text-center">
                       {batch.sampleAnalysis ? (
                         <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200">Done</span>
                       ) : (
                         <span className="text-xs text-gray-400">—</span>
                       )}
                     </td>
-                    <td className="text-center">
+                    <td data-label="Arrival" className="mob-hide text-center">
                       {batch.arrivalAnalysis ? (
                         <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-200">Done</span>
                       ) : (
                         <span className="text-xs text-gray-400">—</span>
                       )}
                     </td>
-                    <td className={`text-right font-semibold ${batch.qualityVariance > 1.0 ? 'text-red-600' : batch.qualityVariance > 0 ? 'text-emerald-600' : 'text-gray-400'}`}>
+                    <td data-label="Variance %" className={`text-right font-semibold ${batch.qualityVariance > 1.0 ? 'text-red-600' : batch.qualityVariance > 0 ? 'text-emerald-600' : 'text-gray-400'}`}>
                       {batch.qualityVariance != null ? `${batch.qualityVariance}%` : '—'}
                     </td>
-                    <td className="text-center"><StatusBadge status={batch.status} /></td>
-                    <td className="text-center">
+                    <td data-label="Status" className="text-center"><StatusBadge status={batch.status} /></td>
+                    <td className="mob-hide text-center">
                       <div className="flex items-center justify-center gap-1">
                         <button onClick={e => { e.stopPropagation(); openDetail(batch); }} className="text-blue-600 hover:text-blue-800 text-xs font-medium flex items-center gap-1">
                           <Search size={13} /> Compare

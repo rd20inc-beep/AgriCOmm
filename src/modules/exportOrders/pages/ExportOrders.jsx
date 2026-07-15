@@ -186,7 +186,7 @@ export default function ExportOrders() {
         </div>
       </div>
 
-      <div className="table-container">
+      <div className="table-container mobile-cards">
         <div className="table-scroll">
           <table className="w-full">
             <thead>
@@ -218,13 +218,13 @@ export default function ExportOrders() {
                     onClick={() => navigate(`/export/${order.id}`)}
                     className="hover:bg-gray-50 cursor-pointer transition-colors"
                   >
-                    <td className="px-4 py-3 font-medium text-blue-600">{order.id}</td>
-                    <td className="px-4 py-3 text-gray-900"><PartyLink type="customer" id={order.customerId} name={order.customerName} /></td>
-                    <td className="px-4 py-3 text-gray-600">{order.country}</td>
-                    <td className="px-4 py-3 text-gray-600">{order.productName}</td>
-                    <td className="px-4 py-3 text-right text-gray-900 font-medium">{order.qtyMT}</td>
-                    <td className="px-4 py-3 text-right text-gray-900 font-medium">{formatCurrency(order.contractValue)}</td>
-                    <td className="px-4 py-3 text-center">
+                    <td data-label="Order No" className="px-4 py-3 font-medium text-blue-600">{order.id}</td>
+                    <td data-label="Customer" className="px-4 py-3 text-gray-900"><PartyLink type="customer" id={order.customerId} name={order.customerName} /></td>
+                    <td data-label="Country" className="mob-hide px-4 py-3 text-gray-600">{order.country}</td>
+                    <td data-label="Product" className="mob-hide px-4 py-3 text-gray-600">{order.productName}</td>
+                    <td data-label="Qty MT" className="px-4 py-3 text-right text-gray-900 font-medium">{order.qtyMT}</td>
+                    <td data-label="Value" className="px-4 py-3 text-right text-gray-900 font-medium">{formatCurrency(order.contractValue)}</td>
+                    <td data-label="Advance" className="mob-hide px-4 py-3 text-center">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                         advanceStatus === 'received'
                           ? 'bg-emerald-100 text-emerald-700'
@@ -233,7 +233,7 @@ export default function ExportOrders() {
                         {advanceStatus === 'received' ? 'Received' : 'Pending'}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-center">
+                    <td data-label="Balance" className="mob-hide px-4 py-3 text-center">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                         balanceStatus === 'received'
                           ? 'bg-emerald-100 text-emerald-700'
@@ -242,7 +242,7 @@ export default function ExportOrders() {
                         {balanceStatus === 'received' ? 'Received' : 'Pending'}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-center">
+                    <td data-label="Shipment" className="px-4 py-3 text-center">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                         shipmentStatus === 'Arrived' ? 'bg-emerald-100 text-emerald-700' :
                         shipmentStatus === 'In Transit' ? 'bg-blue-100 text-blue-700' :
@@ -252,11 +252,11 @@ export default function ExportOrders() {
                         {shipmentStatus}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right font-medium text-gray-700">{margin}</td>
-                    <td className="px-4 py-3 text-center">
+                    <td data-label="Margin %" className="mob-hide px-4 py-3 text-right font-medium text-gray-700">{margin}</td>
+                    <td data-label="Stage" className="px-4 py-3 text-center">
                       <StatusBadge status={order.status} />
                     </td>
-                    <td className="px-4 py-3 text-center">
+                    <td className="mob-hide px-4 py-3 text-center">
                       <div className="flex flex-col sm:flex-row items-center justify-center gap-2">
                         <button
                           onClick={(e) => {
