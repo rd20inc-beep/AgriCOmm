@@ -15,11 +15,11 @@ export default function KPICard({ icon: Icon, title, value, subtitle, trend, col
   const colors = colorMap[color] || colorMap.blue;
 
   return (
-    <div className="bg-white rounded-xl border border-gray-100 p-4 sm:p-5 hover:shadow-md transition-shadow group">
-      <div className="flex items-start gap-3">
+    <div className="bg-white rounded-xl border border-gray-100 p-3 sm:p-5 hover:shadow-md transition-shadow group">
+      <div className="flex items-start gap-2.5 sm:gap-3">
         {Icon && (
-          <div className={`flex items-center justify-center w-10 h-10 rounded-xl ${colors.bg} ring-1 ${colors.ring} flex-shrink-0 group-hover:scale-105 transition-transform`}>
-            <Icon size={20} className={colors.icon} />
+          <div className={`flex items-center justify-center w-8 h-8 sm:w-10 sm:h-10 rounded-xl ${colors.bg} ring-1 ${colors.ring} flex-shrink-0 group-hover:scale-105 transition-transform`}>
+            <Icon size={18} className={colors.icon} />
           </div>
         )}
         <div className="flex-1 min-w-0">
