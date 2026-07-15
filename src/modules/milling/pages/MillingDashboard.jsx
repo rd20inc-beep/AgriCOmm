@@ -560,7 +560,7 @@ export default function MillingDashboard() {
             )}
           </div>
         </div>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100">
@@ -575,17 +575,17 @@ export default function MillingDashboard() {
             <tbody>
               {productionBatches.map((batch) => (
                 <tr key={batch.id} className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer">
-                  <td className="py-2.5 px-2">
+                  <td data-label="Batch" className="py-2.5 px-2">
                     <Link to={`/milling/${batch.id}`} className="font-medium text-blue-600 hover:text-blue-800">{batch.id}</Link>{batch.batchName && <span className="text-gray-400"> · {batch.batchName}</span>}
                     {batch.linkedExportOrder && <p className="text-[10px] text-gray-400">→ {batch.linkedExportOrder}</p>}
                   </td>
-                  <td className="py-2.5 px-2 text-gray-600"><PartyLink type="supplier" id={batch.supplierId} name={batch.supplierName} /></td>
-                  <td className="py-2.5 px-2 text-right">{Math.round(batch.rawQtyKg).toLocaleString()}</td>
-                  <td className="py-2.5 px-2 text-right">{batch.actualFinishedKg ? Math.round(batch.actualFinishedKg).toLocaleString() : '—'}</td>
-                  <td className={`py-2.5 px-2 text-right font-medium ${batch.yieldPct >= 60 ? 'text-emerald-600' : batch.yieldPct > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
+                  <td data-label="Supplier" className="py-2.5 px-2 text-gray-600"><PartyLink type="supplier" id={batch.supplierId} name={batch.supplierName} /></td>
+                  <td data-label="Raw kg" className="py-2.5 px-2 text-right">{Math.round(batch.rawQtyKg).toLocaleString()}</td>
+                  <td data-label="Finished" className="py-2.5 px-2 text-right">{batch.actualFinishedKg ? Math.round(batch.actualFinishedKg).toLocaleString() : '—'}</td>
+                  <td data-label="Yield%" className={`py-2.5 px-2 text-right font-medium ${batch.yieldPct >= 60 ? 'text-emerald-600' : batch.yieldPct > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
                     {batch.yieldPct > 0 ? `${batch.yieldPct}%` : '—'}
                   </td>
-                  <td className="py-2.5 px-2"><StatusBadge status={batch.status} /></td>
+                  <td data-label="Status" className="py-2.5 px-2"><StatusBadge status={batch.status} /></td>
                 </tr>
               ))}
               {productionBatches.length === 0 && (
