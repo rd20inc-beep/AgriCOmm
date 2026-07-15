@@ -132,6 +132,31 @@ function amountInWords(amount, currency = 'USD') {
   return `${w} ONLY`;
 }
 
+// Shared "seller's bank" block, driven by the resolved + permission-masked
+// company.bank (Phase B). Used by the Proforma, Commercial Invoice and the
+// bank-processing documents so they all show the same complete banking details
+// and honour masking / withholding consistently.
+function bankDetailsBlock(company, opts = {}) {
+  const b = (company && company.bank) || {};
+  const label = opts.label || "Seller's Bank Detail";
+  if (b.withheld) {
+    return `<div><strong>${label}:</strong><br/>Available to authorised recipients on request.</div>`;
+  }
+  const rows = [
+    ['A/C Title', b.title || (company && company.name)],
+    ['Bank', [b.name, b.branch].filter(Boolean).join(', ')],
+    [(b.address || b.city) ? 'Bank Address' : '', b.address || b.city],
+    ['A/C #', b.account],
+    ['SWIFT / BIC', b.swift],
+    ['IBAN', b.iban],
+  ].filter(([k, v]) => k && v);
+  const corr = b.correspondent;
+  const corrLine = corr && (corr.name || corr.swift || corr.account)
+    ? `<br/>Correspondent: ${[corr.name, corr.swift, corr.account].filter(Boolean).join(' · ')}` : '';
+  const maskNote = b.masked ? '<br/><span style="font-size:9px;color:#888;">A/C &amp; IBAN partially masked — full details to authorised finance users.</span>' : '';
+  return `<div><strong>${label}:</strong><br/>${rows.map(([k, v]) => `${k}: ${v}`).join('<br/>')}${corrLine}${maskNote}</div>`;
+}
+
 function renderHeader(company) {
   return `
     <div style="text-align:center; margin-bottom:20px; border-bottom:2px solid #1e3a5f; padding-bottom:15px;">
@@ -168,13 +193,7 @@ function renderProformaInvoice(doc) {
               ${buyer.vatNumber ? `<br/>VAT Number: ${buyer.vatNumber}` : ''}
             </div>
             <div style="margin-top:10px;">
-              <strong>Seller's Bank Detail:</strong><br/>
-              A/C Title: ${company.name},<br/>
-              ${company.bank.name}, ${company.bank.branch},<br/>
-              ${company.bank.city}.<br/>
-              A/C # ${company.bank.account}<br/>
-              SWIFT: ${company.bank.swift}<br/>
-              IBAN # ${company.bank.iban}
+              ${bankDetailsBlock(company)}
             </div>
           </td>
           <td style="vertical-align:top; width:45%;">
@@ -590,6 +609,12 @@ function renderPackingList(doc) {
           <td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">BL Date</td>
           <td style="border:1px solid #333; padding:5px 8px;">${shipment.blDate || ''}</td>
         </tr>
+        <tr>
+          <td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">HS Code</td>
+          <td style="border:1px solid #333; padding:5px 8px;">${(() => { const h = order.hsCodes || {}; return h.multiple ? `Multiple (${(h.list || []).join(', ')})` : (h.single || order.hsCode || ''); })()}</td>
+          <td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">Total Packages</td>
+          <td style="border:1px solid #333; padding:5px 8px;">${(((totals && totals.totalPackages) || 0).toLocaleString())} Bags</td>
+        </tr>
       </table>
 
       <table style="width:100%; border-collapse:collapse; font-size:11px;">
@@ -877,10 +902,14 @@ function renderBankFIRequest(doc) {
       <table style="width:100%; font-size:12px; margin-bottom:15px;">
         <tr><td style="width:140px; font-weight:bold;">Name of Company</td><td style="text-align:center; border-bottom:1px solid #333;">${company.name}</td></tr>
         <tr><td style="font-weight:bold;">NTN</td><td style="text-align:center; border-bottom:1px solid #333;">${company.ntn}</td></tr>
-        <tr><td style="font-weight:bold;">IBAN</td><td style="text-align:center; border-bottom:1px solid #333;">${company.bank.iban}</td></tr>
+        <tr><td style="font-weight:bold;">IBAN</td><td style="text-align:center; border-bottom:1px solid #333;">${company.bank.iban || ''}</td></tr>
       </table>
 
-      <p style="font-size:11px;">We, hereby request ${company.bank.name} to issue Financial Instrument (hereinafter called "FI"), as below</p>
+      <div style="border:1px solid #333; padding:8px; margin-bottom:12px; font-size:11px; line-height:1.6;">
+        ${bankDetailsBlock(company, { label: 'Exporter Bank Details' })}
+      </div>
+
+      <p style="font-size:11px;">We, hereby request ${company.bank.name || 'our bank'} to issue Financial Instrument (hereinafter called "FI"), as below</p>
 
       <table style="width:100%; font-size:11px; margin:15px 0; line-height:1.8;">
         <tr><td style="width:140px; font-weight:bold;">Mode of Payment</td><td>Contract/Collection</td></tr>
