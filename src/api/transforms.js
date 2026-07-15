@@ -423,6 +423,7 @@ export function transformProduct(db) {
     category: db.category || 'Rice',
     description: db.description || '',
     isByproduct: db.is_byproduct || false,
+    hsCode: db.hs_code || '',
   };
 }
 
@@ -439,6 +440,16 @@ export function transformBankAccount(db) {
     currency: db.currency || 'PKR',
     currentBalance: parseFloat(db.current_balance) || 0,
     entity: db.entity || 'general',
+    // Export-document banking (mig 271)
+    accountTitle: db.account_title || '',
+    iban: db.iban || '',
+    swiftBic: db.swift_bic || '',
+    bankAddress: db.bank_address || '',
+    correspondentBankName: db.correspondent_bank_name || '',
+    correspondentSwift: db.correspondent_swift || '',
+    correspondentAccount: db.correspondent_account || '',
+    isExportDefault: db.is_export_default || false,
+    approvedForCustomer: db.approved_for_customer || false,
   };
 }
 

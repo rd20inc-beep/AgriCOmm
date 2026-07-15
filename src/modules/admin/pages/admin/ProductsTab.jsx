@@ -7,7 +7,7 @@ import Modal from '../../components/AdminDrawer';
 // Note: broken % is a per-order quality target (export_order_items.
 // broken_pct_target), not a product-level attribute, so it isn't on
 // this form. The products table holds name + code + grade + category.
-const EMPTY = { name: '', code: '', grade: 'Premium', category: '', description: '' };
+const EMPTY = { name: '', code: '', grade: 'Premium', category: '', description: '', hsCode: '' };
 
 export default function ProductsTab() {
   const { productsList, addToast } = useApp();
@@ -29,6 +29,7 @@ export default function ProductsTab() {
       grade: p.grade || 'Premium',
       category: p.category || '',
       description: p.description || '',
+      hsCode: p.hsCode || '',
     });
     setOpen(true);
   };
@@ -42,6 +43,7 @@ export default function ProductsTab() {
       grade: form.grade || null,
       category: form.category.trim() || null,
       description: form.description.trim() || null,
+      hs_code: form.hsCode.trim() || null,
     };
     try {
       if (editingId) {
@@ -155,9 +157,15 @@ export default function ProductsTab() {
               <option value="Specialty">Specialty</option>
             </select>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-            <input type="text" value={form.category} onChange={(e) => set('category', e.target.value)} placeholder="e.g. Rice, By-Product" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+              <input type="text" value={form.category} onChange={(e) => set('category', e.target.value)} placeholder="e.g. Rice, By-Product" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">HS Code</label>
+              <input type="text" value={form.hsCode} onChange={(e) => set('hsCode', e.target.value)} placeholder="e.g. 1006.30" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+            </div>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>

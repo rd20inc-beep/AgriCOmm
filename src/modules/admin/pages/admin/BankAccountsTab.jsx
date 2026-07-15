@@ -12,6 +12,8 @@ import Modal from '../../components/AdminDrawer';
 // columns are: name, type, account_number, bank_name, branch, currency,
 // current_balance. There is no `account_name` or `opening_balance` —
 // before this fix, both saves 500'd with "column does not exist".
+// Export-document fields (mig 271): account_title, iban, swift_bic,
+// bank_address, correspondent_*, is_export_default, approved_for_customer.
 const EMPTY = {
   name: '',
   bankName: '',
@@ -20,6 +22,15 @@ const EMPTY = {
   type: 'bank',
   currency: 'PKR',
   currentBalance: '',
+  accountTitle: '',
+  iban: '',
+  swiftBic: '',
+  bankAddress: '',
+  correspondentBankName: '',
+  correspondentSwift: '',
+  correspondentAccount: '',
+  isExportDefault: false,
+  approvedForCustomer: false,
 };
 
 export default function BankAccountsTab() {
@@ -47,6 +58,15 @@ export default function BankAccountsTab() {
       type: a.type || 'bank',
       currency: a.currency || 'PKR',
       currentBalance: !isNaN(balance) ? String(balance) : '',
+      accountTitle: a.accountTitle || '',
+      iban: a.iban || '',
+      swiftBic: a.swiftBic || '',
+      bankAddress: a.bankAddress || '',
+      correspondentBankName: a.correspondentBankName || '',
+      correspondentSwift: a.correspondentSwift || '',
+      correspondentAccount: a.correspondentAccount || '',
+      isExportDefault: !!a.isExportDefault,
+      approvedForCustomer: !!a.approvedForCustomer,
     });
     setOpen(true);
   };
@@ -63,6 +83,16 @@ export default function BankAccountsTab() {
       type: form.type,
       currency: form.currency,
       current_balance: parseFloat(form.currentBalance) || 0,
+      // Export-document banking (mig 271)
+      account_title: form.accountTitle.trim() || null,
+      iban: form.iban.trim() || null,
+      swift_bic: form.swiftBic.trim() || null,
+      bank_address: form.bankAddress.trim() || null,
+      correspondent_bank_name: form.correspondentBankName.trim() || null,
+      correspondent_swift: form.correspondentSwift.trim() || null,
+      correspondent_account: form.correspondentAccount.trim() || null,
+      is_export_default: !!form.isExportDefault,
+      approved_for_customer: !!form.approvedForCustomer,
     };
     try {
       if (editingId) {
@@ -131,7 +161,10 @@ export default function BankAccountsTab() {
               {accounts.map(a => (
                 <tr key={a.id || a.uid} className="hover:bg-gray-50 transition-colors">
                   <td className="px-4 py-3 text-gray-500 font-mono text-xs">{a.uid || a.id}</td>
-                  <td className="px-4 py-3 font-medium text-gray-900">{a.name || a.accountName}</td>
+                  <td className="px-4 py-3 font-medium text-gray-900">
+                    {a.name || a.accountName}
+                    {a.isExportDefault && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 align-middle">EXPORT DEFAULT</span>}
+                  </td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                       a.type === 'bank' ? 'bg-blue-100 text-blue-700' :
@@ -216,6 +249,57 @@ export default function BankAccountsTab() {
             <label className="block text-sm font-medium text-gray-700 mb-1">{editingId ? 'Current Balance' : 'Opening Balance'}</label>
             <input type="number" value={form.currentBalance} onChange={e => set('currentBalance', e.target.value)} placeholder="0.00" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
           </div>
+
+          {/* Documentary / SWIFT details — printed on the Commercial Invoice and
+              bank/Chamber documents. Only shown for bank/LC accounts. */}
+          {form.type !== 'cash' && (
+            <div className="pt-3 mt-1 border-t border-gray-200 space-y-4">
+              <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Export / SWIFT details (for documents)</div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Account Title / Beneficiary</label>
+                <input type="text" value={form.accountTitle} onChange={e => set('accountTitle', e.target.value)} placeholder="e.g. AGRI COMMODITIES" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">IBAN</label>
+                  <input type="text" value={form.iban} onChange={e => set('iban', e.target.value)} placeholder="PK.. .... ...." className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">SWIFT / BIC</label>
+                  <input type="text" value={form.swiftBic} onChange={e => set('swiftBic', e.target.value)} placeholder="e.g. BAHLPKKAXXX" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm font-mono uppercase focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Bank Address</label>
+                <input type="text" value={form.bankAddress} onChange={e => set('bankAddress', e.target.value)} placeholder="Full branch address" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-3 sm:col-span-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Correspondent Bank</label>
+                  <input type="text" value={form.correspondentBankName} onChange={e => set('correspondentBankName', e.target.value)} placeholder="Optional" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Corr. SWIFT</label>
+                  <input type="text" value={form.correspondentSwift} onChange={e => set('correspondentSwift', e.target.value)} placeholder="Optional" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm font-mono uppercase focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Corr. Account</label>
+                  <input type="text" value={form.correspondentAccount} onChange={e => set('correspondentAccount', e.target.value)} placeholder="Optional" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                </div>
+              </div>
+              <div className="flex flex-col gap-2 pt-1">
+                <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                  <input type="checkbox" checked={form.isExportDefault} onChange={e => set('isExportDefault', e.target.checked)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                  Default account for export documents
+                </label>
+                <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                  <input type="checkbox" checked={form.approvedForCustomer} onChange={e => set('approvedForCustomer', e.target.checked)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                  Approved to show on customer-facing documents
+                </label>
+              </div>
+            </div>
+          )}
+
           <div className="flex justify-end gap-2 pt-2 border-t border-gray-200">
             <button onClick={() => setOpen(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
             <button onClick={handleSave} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">{editingId ? 'Save Changes' : 'Add Account'}</button>
