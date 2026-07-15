@@ -1380,6 +1380,20 @@ const exportOrderController = {
         || Object.prototype.hasOwnProperty.call(req.body, 'container_no');
       const normalizedContainers = parseShipmentContainerRows(containers, container_no);
 
+      // Data-integrity guard: a container's gross weight can never be below its
+      // net weight (gross = net + packaging/tare). Reject with the offending row.
+      const badWeight = normalizedContainers.find((c) =>
+        Number.isFinite(c.gross_weight_kg) && Number.isFinite(c.net_weight_kg)
+        && c.gross_weight_kg > 0 && c.net_weight_kg > 0
+        && c.gross_weight_kg + 0.001 < c.net_weight_kg);
+      if (badWeight) {
+        return res.status(400).json({
+          success: false,
+          field: 'gross_weight_kg',
+          message: `Container ${badWeight.container_no}: gross weight (${badWeight.gross_weight_kg} kg) cannot be less than net weight (${badWeight.net_weight_kg} kg).`,
+        });
+      }
+
       await db.transaction(async (trx) => {
         if (hasContainerRows) {
           // Deleting the containers cascades their container_lots away.

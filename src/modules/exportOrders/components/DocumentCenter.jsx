@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { FileText, Download, Printer, Eye, CheckCircle, Clock, Loader2, Edit2 } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { FileText, Download, Printer, Eye, CheckCircle, Clock, Loader2, Edit2, AlertTriangle, AlertCircle } from 'lucide-react';
 import api from '../../../api/client';
 import { useApp } from '../../../context/AppContext';
 import Modal from '../../../components/Modal';
@@ -155,6 +155,64 @@ function bankDetailsBlock(company, opts = {}) {
     ? `<br/>Correspondent: ${[corr.name, corr.swift, corr.account].filter(Boolean).join(' · ')}` : '';
   const maskNote = b.masked ? '<br/><span style="font-size:9px;color:#888;">A/C &amp; IBAN partially masked — full details to authorised finance users.</span>' : '';
   return `<div><strong>${label}:</strong><br/>${rows.map(([k, v]) => `${k}: ${v}`).join('<br/>')}${corrLine}${maskNote}</div>`;
+}
+
+// Document validation (Phase D). Runs on the generated document JSON and
+// returns blocking errors + advisory warnings. Errors must be cleared before a
+// document is approved/finalised (enforced server-side in the approval flow);
+// here they surface in the preview so the user fixes them before issuing.
+function validateExportDoc(doc) {
+  const errors = [];
+  const warnings = [];
+  if (!doc) return { errors, warnings };
+  const INVOICE_TYPES = ['commercial-invoice', 'invoice', 'proforma-invoice', 'statement-of-origin', 'packing-list'];
+  const isInvoice = INVOICE_TYPES.includes(doc._docType);
+  const totals = doc.totals || {};
+  const net = parseFloat(totals.netWeightKg) || 0;
+  const gross = parseFloat(totals.grossWeightKg) || 0;
+
+  // Rule 1: gross weight must be ≥ net weight (applies to any doc carrying both).
+  if (net > 0 && gross > 0 && gross + 0.001 < net) {
+    errors.push(`Gross weight (${gross.toLocaleString()} kg) is less than net weight (${net.toLocaleString()} kg).`);
+  }
+  if (!isInvoice) return { errors, warnings };
+
+  // Rules 2-3: line amount = qty × unit price, and invoice total = Σ lines.
+  const lines = buildLineItems(doc);
+  let sum = 0;
+  lines.forEach((l, i) => {
+    const q = parseFloat(l.qtyMT) || 0;
+    const p = parseFloat(l.pricePerMT) || 0;
+    const a = parseFloat(l.amount) || 0;
+    sum += a;
+    if (q > 0 && p > 0 && Math.abs(a - q * p) > 0.5) {
+      errors.push(`Line ${i + 1}: amount ${a.toFixed(2)} ≠ quantity × unit price (${(q * p).toFixed(2)}).`);
+    }
+    // Rule 4: every invoice line must carry an HS code.
+    const lineHs = l.hsCode || (doc.order && doc.order.hsCodes && doc.order.hsCodes.single);
+    if (!lineHs) warnings.push(`Line ${i + 1}: HS code missing.`);
+  });
+  const stated = parseFloat(doc.order && doc.order.contractValue) || sum;
+  if (sum > 0 && stated > 0 && Math.abs(sum - stated) > 1 && !(parseFloat(doc.order && doc.order.advancePct) > 0)) {
+    warnings.push(`Invoice total (${sum.toFixed(2)}) differs from the order value (${stated.toFixed(2)}).`);
+  }
+
+  // Rule 2 (data): net / gross / packages should be recorded.
+  if (!net) warnings.push('Net weight is not recorded on the shipment.');
+  if (!gross) warnings.push('Gross weight is not recorded on the shipment.');
+  if (!(parseFloat(totals.totalPackages) || 0)) warnings.push('Total packages is not recorded.');
+
+  // Rule 7: the selected bank account must carry title, account, IBAN and SWIFT.
+  const b = (doc.company && doc.company.bank) || {};
+  if (!b.withheld) {
+    const miss = [];
+    if (!b.title) miss.push('account title');
+    if (!b.account) miss.push('account #');
+    if (!b.iban) miss.push('IBAN');
+    if (!b.swift) miss.push('SWIFT/BIC');
+    if (miss.length) warnings.push(`Bank account is missing ${miss.join(', ')} — complete it in Admin → Bank Accounts.`);
+  }
+  return { errors, warnings };
 }
 
 function renderHeader(company) {
@@ -1719,6 +1777,7 @@ export default function DocumentCenter({ order }) {
   const [previewHtml, setPreviewHtml] = useState('');
   const [generating, setGenerating] = useState(null);
   const printRef = useRef(null);
+  const validation = useMemo(() => validateExportDoc(previewDoc), [previewDoc]);
 
   useEffect(() => {
     if (!order?.dbId && !order?.id) return;
@@ -1888,6 +1947,30 @@ export default function DocumentCenter({ order }) {
                 </button>
               </div>
             </div>
+            {(validation.errors.length > 0 || validation.warnings.length > 0) && (
+              <div className="space-y-2">
+                {validation.errors.length > 0 && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+                    <div className="flex items-center gap-1.5 text-sm font-semibold text-red-700 mb-1">
+                      <AlertCircle className="w-4 h-4" /> {validation.errors.length} issue{validation.errors.length > 1 ? 's' : ''} to resolve before approval
+                    </div>
+                    <ul className="list-disc pl-6 text-xs text-red-700 space-y-0.5">
+                      {validation.errors.map((e, i) => <li key={i}>{e}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {validation.warnings.length > 0 && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                    <div className="flex items-center gap-1.5 text-sm font-semibold text-amber-700 mb-1">
+                      <AlertTriangle className="w-4 h-4" /> {validation.warnings.length} warning{validation.warnings.length > 1 ? 's' : ''}
+                    </div>
+                    <ul className="list-disc pl-6 text-xs text-amber-700 space-y-0.5">
+                      {validation.warnings.map((w, i) => <li key={i}>{w}</li>)}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
             <div
               ref={printRef}
               contentEditable
