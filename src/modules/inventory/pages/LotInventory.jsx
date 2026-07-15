@@ -142,13 +142,13 @@ function renderLotRow(lot, displayUnit, navigate, indented) {
       className={`cursor-pointer hover:bg-gray-50 group ${indented ? 'bg-slate-50/40' : ''}`}
       onClick={() => navigate(`/lot-inventory/${lot.lotNo || lot.id}`)}
     >
-      <td className={`font-medium text-blue-600 whitespace-nowrap ${indented ? 'pl-8' : ''}`}>{lot.lotNo}</td>
-      <td>
+      <td data-label="Lot No" className={`font-medium text-blue-600 whitespace-nowrap ${indented ? 'pl-8' : ''}`}>{lot.lotNo}</td>
+      <td data-label="Subtype">
         <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium whitespace-nowrap ${subtypeBadgeClass(s)}`}>
           {subtypeLabel(s)}
         </span>
       </td>
-      <td className="max-w-[16rem]">
+      <td data-label="Item / Variety" className="max-w-[16rem]">
         <div className="text-gray-900 font-medium truncate" title={displayName}>{displayName}</div>
         {(!varIsRedundant || grade || lot.processingType === 'blended') && (
           <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-1 flex-wrap">
@@ -166,19 +166,19 @@ function renderLotRow(lot, displayUnit, navigate, indented) {
           </div>
         )}
       </td>
-      <td className="text-gray-600 max-w-[10rem] truncate" title={lot.supplierName || ''}><PartyLink type="supplier" id={lot.supplierId} name={lot.supplierName} /></td>
-      <td className="text-gray-600 text-xs max-w-[8rem] truncate" title={lot.warehouseName || ''}>{lot.warehouseName || '—'}</td>
-      <td className="text-right font-medium tabular-nums">{fromKg(netKg, displayUnit, bw).toLocaleString()}</td>
-      <td className="text-right tabular-nums text-emerald-600 font-medium">{fromKg(availKg, displayUnit, bw).toLocaleString()}</td>
-      <td className="text-right tabular-nums text-xs font-medium">{fmtPKR(lot.landedCostPerKg)}</td>
-      <td className="text-right tabular-nums font-medium">{fmtPKR(lot.landedCostTotal)}</td>
-      <td className="text-center">
+      <td data-label="Supplier" className="text-gray-600 max-w-[10rem] truncate" title={lot.supplierName || ''}><PartyLink type="supplier" id={lot.supplierId} name={lot.supplierName} /></td>
+      <td data-label="Warehouse" className="text-gray-600 text-xs max-w-[8rem] truncate" title={lot.warehouseName || ''}>{lot.warehouseName || '—'}</td>
+      <td data-label="Stock" className="text-right font-medium tabular-nums">{fromKg(netKg, displayUnit, bw).toLocaleString()}</td>
+      <td data-label="Available" className="text-right tabular-nums text-emerald-600 font-medium">{fromKg(availKg, displayUnit, bw).toLocaleString()}</td>
+      <td data-label="Landed/KG" className="text-right tabular-nums text-xs font-medium">{fmtPKR(lot.landedCostPerKg)}</td>
+      <td data-label="Value" className="text-right tabular-nums font-medium">{fmtPKR(lot.landedCostTotal)}</td>
+      <td data-label="Quality" className="text-center">
         <div className="flex items-center justify-center gap-1 text-xs whitespace-nowrap">
           {lot.moisturePct && <span className="text-blue-600" title="Moisture">{lot.moisturePct}%M</span>}
           {lot.brokenPct && <span className="text-amber-600" title="Broken">{lot.brokenPct}%B</span>}
         </div>
       </td>
-      <td className="text-center"><StatusBadge status={lot.status} /></td>
+      <td data-label="Status" className="text-center"><StatusBadge status={lot.status} /></td>
       <td className={`text-center sticky right-0 group-hover:bg-gray-50 shadow-[inset_1px_0_0_rgba(0,0,0,0.06)] z-10 ${indented ? 'bg-slate-50/40' : 'bg-white'}`}>
         <button onClick={e => { e.stopPropagation(); navigate(`/lot-inventory/${lot.lotNo || lot.id}`); }} className="btn btn-ghost btn-sm">
           <Eye className="w-4 h-4" />
@@ -496,7 +496,7 @@ export default function LotInventory() {
       {filtered.length === 0 ? (
         <EmptyState icon={Package} title="No lots found" description="Create a purchase lot to get started." />
       ) : (
-        <div className="table-container">
+        <div className="table-container mobile-cards">
           <div className="table-scroll relative">
             <table className="w-full">
               <thead>
