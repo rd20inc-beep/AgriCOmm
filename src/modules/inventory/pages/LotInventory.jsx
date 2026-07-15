@@ -425,7 +425,7 @@ export default function LotInventory() {
           <div className="flex bg-gray-100 rounded-lg p-0.5">
             {TYPE_TABS.map(tab => (
               <button key={tab} onClick={() => setTypeFilter(tab)}
-                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors capitalize ${typeFilter === tab ? 'bg-white text-emerald-600 shadow-sm' : 'text-gray-600 hover:text-gray-800'}`}>
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors whitespace-nowrap capitalize ${typeFilter === tab ? 'bg-white text-emerald-600 shadow-sm' : 'text-gray-600 hover:text-gray-800'}`}>
                 {tab === 'All' ? 'All Types' : tab === 'raw' ? 'Raw Rice' : tab === 'finished' ? 'Finished Rice' : 'Byproducts'}
               </button>
             ))}
@@ -434,7 +434,7 @@ export default function LotInventory() {
           <div className="flex bg-gray-100 rounded-lg p-0.5">
             {[['All', 'All Stock'], ['single_variety', 'Pure'], ['blended', 'Blended']].map(([val, label]) => (
               <button key={val} onClick={() => setProcessingFilter(val)}
-                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${processingFilter === val ? (val === 'blended' ? 'bg-white text-purple-600 shadow-sm' : 'bg-white text-blue-600 shadow-sm') : 'text-gray-600 hover:text-gray-800'}`}>
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${processingFilter === val ? (val === 'blended' ? 'bg-white text-purple-600 shadow-sm' : 'bg-white text-blue-600 shadow-sm') : 'text-gray-600 hover:text-gray-800'}`}>
                 {label}
               </button>
             ))}
@@ -453,19 +453,19 @@ export default function LotInventory() {
           <div className="flex bg-gray-100 rounded-lg p-0.5">
             {ENTITY_TABS.map(tab => (
               <button key={tab} onClick={() => setEntityFilter(tab)}
-                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors capitalize ${entityFilter === tab ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-600 hover:text-gray-800'}`}>
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors whitespace-nowrap capitalize ${entityFilter === tab ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-600 hover:text-gray-800'}`}>
                 {tab === 'All' ? 'All Locations' : tab === 'mill' ? 'Mill' : 'Export Warehouse'}
               </button>
             ))}
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="relative flex-1 max-w-md">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative w-full sm:flex-1 sm:max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
               placeholder="Search lots, supplier, variety, warehouse..." className="form-input pl-9 py-1.5 text-sm w-full" />
           </div>
-          <span className="text-xs text-gray-400">{filtered.length} of {lots.length} lots</span>
+          <span className="text-xs text-gray-400 whitespace-nowrap">{filtered.length} of {lots.length} lots</span>
           {/* Grouping dimension: By Rice Type (one row per variety) or By
               Subtype (one row per category — all B1 together, …); each group
               expands to its underlying lots. "All lots" disables grouping. */}
@@ -476,7 +476,7 @@ export default function LotInventory() {
               { v: 'flat',      l: 'All lots' },
             ].map(o => (
               <button key={o.v} onClick={() => setViewMode(o.v)}
-                className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${viewMode === o.v ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}>
+                className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${viewMode === o.v ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}>
                 {o.l}
               </button>
             ))}
