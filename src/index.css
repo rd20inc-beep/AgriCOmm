@@ -395,6 +395,22 @@ input, select, textarea { font-size: 14px; }
 @media (max-width: 639px) {
   .mobile-full-btn { width: 100%; }
   .header-controls { flex-wrap: wrap; }
+
+  /* Mobile grid safety net (offline/APK responsive pass, phase 1).
+     Many card/field rows use a bare Tailwind grid-cols-3/4/5/6 with no
+     responsive breakpoint, so on a phone they squish to unreadable slivers.
+     Cap those to 2 columns on small screens. This ONLY affects the bare
+     utility classes — grids that already declare responsive variants use
+     different selectors (e.g. .md\:grid-cols-4) and 12-col span layouts are
+     untouched, so desktop is unchanged. Prefer .kpi-grid / .card-grid /
+     .form-grid for new code; phase 2 replaces the key pages with proper
+     mobile layouts. */
+  .grid-cols-3,
+  .grid-cols-4,
+  .grid-cols-5,
+  .grid-cols-6 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 /* ===== SIDEBAR ===== */
