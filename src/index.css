@@ -339,7 +339,7 @@ input, select, textarea { font-size: 14px; }
 /* Give scrollable content room to clear the floating chat button on phones. */
 @media (max-width: 767px) {
   .page-content {
-    padding-bottom: 5rem;
+    padding-bottom: calc(5rem + env(safe-area-inset-bottom));
   }
 }
 
