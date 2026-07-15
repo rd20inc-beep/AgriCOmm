@@ -579,8 +579,8 @@ export default function MillingDashboard() {
                     <Link to={`/milling/${batch.id}`} className="font-medium text-blue-600 hover:text-blue-800">{batch.id}</Link>{batch.batchName && <span className="text-gray-400"> · {batch.batchName}</span>}
                     {batch.linkedExportOrder && <p className="text-[10px] text-gray-400">→ {batch.linkedExportOrder}</p>}
                   </td>
-                  <td data-label="Supplier" className="py-2.5 px-2 text-gray-600"><PartyLink type="supplier" id={batch.supplierId} name={batch.supplierName} /></td>
-                  <td data-label="Raw kg" className="py-2.5 px-2 text-right">{Math.round(batch.rawQtyKg).toLocaleString()}</td>
+                  <td data-label="Supplier" className="mob-hide py-2.5 px-2 text-gray-600"><PartyLink type="supplier" id={batch.supplierId} name={batch.supplierName} /></td>
+                  <td data-label="Raw kg" className="mob-hide py-2.5 px-2 text-right">{Math.round(batch.rawQtyKg).toLocaleString()}</td>
                   <td data-label="Finished" className="py-2.5 px-2 text-right">{batch.actualFinishedKg ? Math.round(batch.actualFinishedKg).toLocaleString() : '—'}</td>
                   <td data-label="Yield%" className={`py-2.5 px-2 text-right font-medium ${batch.yieldPct >= 60 ? 'text-emerald-600' : batch.yieldPct > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
                     {batch.yieldPct > 0 ? `${batch.yieldPct}%` : '—'}

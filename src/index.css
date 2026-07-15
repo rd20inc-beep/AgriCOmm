@@ -297,13 +297,30 @@ input, select, textarea { font-size: 14px; }
   .mobile-cards tfoot td::before {
     content: attr(data-label);
     font-weight: 600;
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     color: var(--color-text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.03em;
-    flex-shrink: 0;
+    flex: 0 0 auto;
+    max-width: 45%;
     margin-right: 1rem;
     text-align: left;
+  }
+  /* Keep long values from colliding with the label — let them wrap/shrink. */
+  .mobile-cards tbody td > *,
+  .mobile-cards tfoot td > * {
+    min-width: 0;
+  }
+  /* Secondary columns: hidden on phones to keep cards compact, shown on desktop. */
+  .mobile-cards .mob-hide {
+    display: none;
+  }
+}
+
+/* Give scrollable content room to clear the floating chat button on phones. */
+@media (max-width: 767px) {
+  .page-content {
+    padding-bottom: 5rem;
   }
 }
 
