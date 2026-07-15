@@ -50,7 +50,7 @@ export default function PurchaseInvoiceView() {
   const Chip = ({ children }) => <span className="px-2.5 py-1 rounded-lg border bg-gray-50 border-gray-200 text-gray-600">{children}</span>;
 
   return (
-    <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-5">
+    <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-5 no-mobile-cards">
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>

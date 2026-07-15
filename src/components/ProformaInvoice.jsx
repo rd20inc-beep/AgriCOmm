@@ -186,7 +186,7 @@ export default function ProformaInvoice({ order, companyProfile, title, docNo, c
         </button>
       </div>
 
-      <div ref={invoiceRef} className="proforma-invoice bg-white max-w-6xl mx-auto shadow-lg" style={{ fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif" }}>
+      <div ref={invoiceRef} className="proforma-invoice no-mobile-cards bg-white max-w-6xl mx-auto shadow-lg" style={{ fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif" }}>
 
         {/* ===== 1. HEADER BAR ===== */}
         <div className="flex items-center justify-between px-8 py-5" style={{ backgroundColor: '#1e3a5f' }}>
