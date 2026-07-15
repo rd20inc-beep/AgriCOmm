@@ -21,6 +21,7 @@ import SyncStatusChip from './SyncStatusChip';
 import SyncConflictsDrawer from './SyncConflictsDrawer';
 import ScanDrawer from './ScanDrawer';
 import MobileBottomNav from './MobileBottomNav';
+import { cardifyTables, scheduleCardify } from '../lib/mobileCards';
 import { SkeletonPage } from '../shared/components/Skeleton';
 
 const sidebarNav = [
@@ -272,6 +273,19 @@ export default function Layout({ children }) {
   });
   const userMenuRef = useRef(null);
   const notifRef = useRef(null);
+  const location = useLocation();
+
+  // Whole-app mobile responsiveness: turn every data table into labeled cards on
+  // phones. Runs on navigation and as tables load in (async data), idempotent.
+  useEffect(() => {
+    cardifyTables();
+    const main = typeof document !== 'undefined' ? document.querySelector('.page-content') : null;
+    const obs = main && typeof MutationObserver !== 'undefined' ? new MutationObserver(scheduleCardify) : null;
+    if (obs && main) obs.observe(main, { childList: true, subtree: true });
+    const t1 = setTimeout(cardifyTables, 400);
+    const t2 = setTimeout(cardifyTables, 1200);
+    return () => { if (obs) obs.disconnect(); clearTimeout(t1); clearTimeout(t2); };
+  }, [location.pathname]);
 
   const unreadAlerts = alerts ? alerts.length : 0;
 

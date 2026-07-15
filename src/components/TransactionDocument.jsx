@@ -113,7 +113,7 @@ export default function TransactionDocument({ kind = 'receipt', data, companyPro
   };
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 no-mobile-cards">
       <div className="td-actions flex justify-end gap-2 print:hidden">
         <button onClick={openPrintable} className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
           <Download size={15} /> Download PDF
