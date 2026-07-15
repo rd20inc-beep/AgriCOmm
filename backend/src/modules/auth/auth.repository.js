@@ -38,6 +38,15 @@ const authRepository = {
     return role ? role.name : null;
   },
 
+  // The role's configured phone bottom-nav item keys (null = app default).
+  async getMobileNavForRole(roleId) {
+    const role = await db('roles').where({ id: roleId }).select('mobile_nav').first();
+    const v = role ? role.mobile_nav : null;
+    if (!v) return null;
+    // jsonb comes back parsed on pg, but be defensive if it's a string.
+    try { return Array.isArray(v) ? v : JSON.parse(v); } catch { return null; }
+  },
+
   async getRoleByName(name) {
     return db('roles').where({ name }).first();
   },

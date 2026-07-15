@@ -90,6 +90,14 @@ router.put(
   auditAction('update_role_permissions', 'role', (req) => req.params.id),
   controller.updateRolePermissions
 );
+// Per-role phone bottom-nav shortcuts — an admin config (not a security boundary),
+// so owners/managers can set it, not only Super Admin.
+router.put(
+  '/roles/:id/mobile-nav',
+  authorizeRole('Super Admin', 'Owner', 'Mill Manager', 'Finance Manager'),
+  auditAction('update_role_mobile_nav', 'role', (req) => req.params.id),
+  controller.updateRoleMobileNav
+);
 router.get('/settings', authorize('admin', 'view'), controller.getSettings);
 
 // Master data management

@@ -232,11 +232,16 @@ const adminController = {
         .groupBy('role_id');
       const userCountByRole = Object.fromEntries(userCounts.map(r => [r.role_id, parseInt(r.user_count, 10)]));
 
+      const parseNav = (v) => {
+        if (!v) return null;
+        try { return Array.isArray(v) ? v : JSON.parse(v); } catch { return null; }
+      };
       const data = roles.map(r => ({
         id: r.id,
         name: r.name,
         description: r.description,
         permission_ids: byRole.get(r.id) || [],
+        mobile_nav: parseNav(r.mobile_nav),
         user_count: userCountByRole[r.id] || 0,
       }));
       return res.json({ success: true, data: { roles: data } });
@@ -287,6 +292,33 @@ const adminController = {
       return res.json({ success: true, data: { role_id: roleId, permission_count: requested.length } });
     } catch (err) {
       console.error('Update role permissions error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  // Set the phone bottom-nav shortcuts for a role (ordered array of item keys).
+  // An empty array / null resets the role to the app's default set. The frontend
+  // registry validates the keys; here we just store the ordered list (capped).
+  async updateRoleMobileNav(req, res) {
+    try {
+      const roleId = parseInt(req.params.id, 10);
+      const { items } = req.body;
+      if (items != null && !Array.isArray(items)) {
+        return res.status(400).json({ success: false, message: 'items must be an array (or null to reset).' });
+      }
+      const role = await db('roles').where({ id: roleId }).first();
+      if (!role) return res.status(404).json({ success: false, message: 'Role not found.' });
+
+      // Store up to 4 shortcut keys (the bar shows those + a fixed "Menu"). null = default.
+      const clean = Array.isArray(items)
+        ? [...new Set(items.filter(k => typeof k === 'string' && k))].slice(0, 4)
+        : null;
+      const value = clean && clean.length ? JSON.stringify(clean) : null;
+
+      await db('roles').where({ id: roleId }).update({ mobile_nav: value });
+      return res.json({ success: true, data: { role_id: roleId, mobile_nav: clean && clean.length ? clean : null } });
+    } catch (err) {
+      console.error('Update role mobile nav error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
   },

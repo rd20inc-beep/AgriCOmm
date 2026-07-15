@@ -20,6 +20,7 @@ import SettingsTab from './admin/SettingsTab';
 import MasterDataApprovalsTab from './admin/MasterDataApprovalsTab';
 import DangerZoneTab from './admin/DangerZoneTab';
 import DevicesTab from './admin/DevicesTab';
+import MobileNavTab from './admin/MobileNavTab';
 import { adminApi } from '../api/services';
 
 const tabs = [
@@ -39,6 +40,7 @@ const tabs = [
   { key: 'users', label: 'Users & Roles', icon: UsersRound },
   { key: 'permissions', label: 'Permissions', icon: Shield },
   { key: 'devices', label: 'Devices', icon: Smartphone, allowRoles: ['Super Admin', 'Owner', 'Mill Manager', 'Finance Manager'] },
+  { key: 'mobileNav', label: 'Mobile Menu', icon: Smartphone, allowRoles: ['Super Admin', 'Owner', 'Mill Manager', 'Finance Manager'] },
   { key: 'settings', label: 'Settings', icon: Settings },
   { key: 'danger', label: 'Danger Zone', icon: ShieldAlert, superAdminOnly: true },
 ];
@@ -60,6 +62,7 @@ const tabComponents = {
   users: UsersRolesTab,
   permissions: PermissionsTab,
   devices: DevicesTab,
+  mobileNav: MobileNavTab,
   settings: SettingsTab,
   danger: DangerZoneTab,
 };
@@ -74,7 +77,7 @@ const NAV = [
   { label: 'Master Data', icon: Database,  keys: ['customers', 'suppliers', 'products', 'categories', 'bagTypes', 'costCategories', 'expenseVendors', 'bankAccounts'] },
   { label: 'Facilities',  icon: Warehouse, keys: ['warehouses', 'mills'] },
   { label: 'Documents',   icon: Files,     keys: ['docTemplates', 'whatsapp'] },
-  { label: 'Access',      icon: Shield,    keys: ['users', 'permissions', 'devices'] },
+  { label: 'Access',      icon: Shield,    keys: ['users', 'permissions', 'devices', 'mobileNav'] },
   { key: 'settings' },
   { key: 'danger' },
 ];
