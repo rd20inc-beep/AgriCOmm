@@ -110,7 +110,7 @@ export default function StockSummary() {
         ) : rows.length === 0 ? (
           <p className="text-sm text-gray-400 py-16 text-center">{lowOnly ? 'Nothing below reorder level.' : 'No stock for this filter.'}</p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto mobile-cards">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 text-left text-xs uppercase text-gray-500 bg-gray-50">
@@ -129,20 +129,20 @@ export default function StockSummary() {
                   const editing = editId === r.group_id;
                   return (
                     <tr key={r.group_id || r.group_name} className="border-b border-gray-50 last:border-0 hover:bg-blue-50/30">
-                      <td className="px-4 py-2.5 font-medium text-gray-900">
+                      <td data-label="Product" className="px-4 py-2.5 font-medium text-gray-900">
                         <button onClick={() => setDetailRow(r)} className="inline-flex items-center gap-2 text-left hover:text-blue-600 group/name">
                           <span className="group-hover/name:underline">{r.group_name || 'Unspecified'}</span>
                           {r.isLow && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-700 inline-flex items-center gap-0.5"><AlertTriangle size={10} /> LOW</span>}
                         </button>
                       </td>
-                      <td className="px-4 py-2.5 text-right text-gray-500 tabular-nums">{n(r.lot_count)}</td>
-                      <td className={`px-4 py-2.5 text-right font-medium tabular-nums ${r.isLow ? 'text-red-600' : 'text-gray-900'}`}>
+                      <td data-label="Batches" className="px-4 py-2.5 text-right text-gray-500 tabular-nums">{n(r.lot_count)}</td>
+                      <td data-label="On hand" className={`px-4 py-2.5 text-right font-medium tabular-nums ${r.isLow ? 'text-red-600' : 'text-gray-900'}`}>
                         {fmtMT(r.total_kg)}
                         {r.bags > 0 && <div className="text-[11px] font-normal text-gray-400">{r.bags.toLocaleString()} bags</div>}
                       </td>
-                      <td className="px-4 py-2.5 text-right text-emerald-700 tabular-nums">{fmtMT(r.available_kg)}</td>
-                      <td className="px-4 py-2.5 text-right text-amber-700 tabular-nums">{n(r.reserved_kg) > 0 ? fmtMT(r.reserved_kg) : '—'}</td>
-                      <td className="px-4 py-2.5 text-right tabular-nums">
+                      <td data-label="Free to sell" className="px-4 py-2.5 text-right text-emerald-700 tabular-nums">{fmtMT(r.available_kg)}</td>
+                      <td data-label="Committed" className="px-4 py-2.5 text-right text-amber-700 tabular-nums">{n(r.reserved_kg) > 0 ? fmtMT(r.reserved_kg) : '—'}</td>
+                      <td data-label="Reorder at" className="px-4 py-2.5 text-right tabular-nums">
                         {editing ? (
                           <span className="inline-flex items-center gap-1">
                             <input autoFocus type="number" step="1" min="0" value={editVal} onChange={(e) => setEditVal(e.target.value)}
@@ -161,7 +161,7 @@ export default function StockSummary() {
                           </button>
                         )}
                       </td>
-                      <td className="px-4 py-2.5 text-right font-semibold text-gray-900 tabular-nums">{fmtPKR(r.total_value)}</td>
+                      <td data-label="Stock value" className="px-4 py-2.5 text-right font-semibold text-gray-900 tabular-nums">{fmtPKR(r.total_value)}</td>
                       <td className="px-4 py-2.5 text-right">
                         <button onClick={() => setDetailRow(r)} title="See what's in stock"><ArrowRight className="w-4 h-4 text-gray-300 hover:text-blue-500 inline" /></button>
                       </td>
@@ -171,13 +171,13 @@ export default function StockSummary() {
               </tbody>
               <tfoot>
                 <tr className="bg-gray-50 font-bold text-gray-900">
-                  <td className="px-4 py-2.5">Total ({rows.length})</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">{totals.lots}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">{fmtMT(totals.onHand)}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">{fmtMT(totals.available)}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">{totals.reserved > 0 ? fmtMT(totals.reserved) : '—'}</td>
+                  <td data-label="Total" className="px-4 py-2.5">Total ({rows.length})</td>
+                  <td data-label="Batches" className="px-4 py-2.5 text-right tabular-nums">{totals.lots}</td>
+                  <td data-label="On hand" className="px-4 py-2.5 text-right tabular-nums">{fmtMT(totals.onHand)}</td>
+                  <td data-label="Free to sell" className="px-4 py-2.5 text-right tabular-nums">{fmtMT(totals.available)}</td>
+                  <td data-label="Committed" className="px-4 py-2.5 text-right tabular-nums">{totals.reserved > 0 ? fmtMT(totals.reserved) : '—'}</td>
                   <td className="px-4 py-2.5"></td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">{fmtPKR(totals.value)}</td>
+                  <td data-label="Stock value" className="px-4 py-2.5 text-right tabular-nums">{fmtPKR(totals.value)}</td>
                   <td></td>
                 </tr>
               </tfoot>

@@ -233,55 +233,68 @@ input, select, textarea { font-size: 14px; }
   border-bottom: none;
 }
 
-/* Mobile card view for tables */
+/* Mobile card view for tables.
+   Add the class "mobile-cards" to a table's wrapper (works with OR without
+   .table-container) and data-label="Column" to each <td>. On phones (<=767px) the
+   table reflows into stacked "Label: value" cards; desktop is unchanged (all rules
+   are media-scoped). Empty cells and cells without a data-label are hidden so a
+   card shows only meaningful rows. */
 @media (max-width: 767px) {
-  .table-container.mobile-cards table,
-  .table-container.mobile-cards thead,
-  .table-container.mobile-cards tbody,
-  .table-container.mobile-cards th,
-  .table-container.mobile-cards td,
-  .table-container.mobile-cards tr {
+  .mobile-cards table,
+  .mobile-cards thead,
+  .mobile-cards tbody,
+  .mobile-cards tfoot,
+  .mobile-cards th,
+  .mobile-cards td,
+  .mobile-cards tr {
     display: block;
   }
-  /* The base table forces min-width:600px and lets .table-scroll scroll it — for
-     the card view that would keep each card ~600px wide, so justify-content:
-     space-between pushes the value off-screen. Constrain cards to the viewport and
-     stop the horizontal scroll so label + value sit on one readable row. */
-  .table-container.mobile-cards table {
+  /* A base .table-container table forces min-width:600px + horizontal scroll — for
+     the card view that keeps each card ~600px wide, so justify-content:space-between
+     pushes the value off-screen. Constrain cards to the viewport and drop the scroll
+     so label + value sit on one readable row. Harmless on non-.table-container tables. */
+  .mobile-cards table {
     min-width: 0;
     width: 100%;
   }
-  .table-container.mobile-cards .table-scroll {
+  .mobile-cards .table-scroll {
     overflow-x: visible;
   }
-  .table-container.mobile-cards tbody td {
-    white-space: normal;
-  }
-  .table-container.mobile-cards thead {
+  .mobile-cards thead {
     position: absolute;
     width: 1px;
     height: 1px;
     overflow: hidden;
     clip: rect(0 0 0 0);
   }
-  .table-container.mobile-cards tbody tr {
+  .mobile-cards tbody tr,
+  .mobile-cards tfoot tr {
     margin-bottom: 0.75rem;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
     padding: 0.75rem;
   }
-  .table-container.mobile-cards tbody td {
+  .mobile-cards tbody td,
+  .mobile-cards tfoot td {
     display: flex;
     justify-content: space-between;
     align-items: center;
     padding: 0.375rem 0;
     border-bottom: 1px solid var(--color-border-subtle);
     white-space: normal;
+    text-align: right;
   }
-  .table-container.mobile-cards tbody td:last-child {
+  /* Hide spacer / empty value cells so they don't render as blank card rows. */
+  .mobile-cards tbody td:empty,
+  .mobile-cards tfoot td:empty {
+    display: none;
+  }
+  .mobile-cards tbody td:last-child,
+  .mobile-cards tfoot td:last-child {
     border-bottom: none;
   }
-  .table-container.mobile-cards tbody td::before {
+  .mobile-cards tbody td::before,
+  .mobile-cards tfoot td::before {
     content: attr(data-label);
     font-weight: 600;
     font-size: 0.75rem;
@@ -290,6 +303,7 @@ input, select, textarea { font-size: 14px; }
     letter-spacing: 0.03em;
     flex-shrink: 0;
     margin-right: 1rem;
+    text-align: left;
   }
 }
 
