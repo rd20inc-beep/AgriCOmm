@@ -36,6 +36,7 @@ export const adminApi = {
   permissions: () => api.get('/api/admin/permissions'),
   rolesWithPermissions: () => api.get('/api/admin/roles-with-permissions'),
   updateRolePermissions: (roleId, data) => api.put(`/api/admin/roles/${roleId}/permissions`, data),
+  updateRoleMobileNav: (roleId, items) => api.put(`/api/admin/roles/${roleId}/mobile-nav`, { items }),
   settings: () => api.get('/api/admin/settings'),
   updateSettings: (data) => api.put('/api/admin/settings', data),
   auditLogs: (params) => api.get('/api/admin/audit-logs', params),

@@ -41,6 +41,7 @@ const authService = {
 
     const token = generateToken(user);
     const permissions = await repo.getPermissionsForRole(user.role_id);
+    const mobileNav = await repo.getMobileNavForRole(user.role_id);
 
     await auditService.log({
       userId: user.id,
@@ -59,6 +60,7 @@ const authService = {
         full_name: user.full_name,
         role: user.role_name,
         role_id: user.role_id,
+        mobileNav,
       },
       permissions,
     };
@@ -152,6 +154,7 @@ const authService = {
     }
 
     const permissions = await repo.getPermissionsForRole(user.role_id);
+    user.mobileNav = await repo.getMobileNavForRole(user.role_id);
     return { user, permissions };
   },
 

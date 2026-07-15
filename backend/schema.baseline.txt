@@ -2146,6 +2146,7 @@ COL role_permissions.role_id:integer:NOT NULL
 COL roles.created_at:timestamp with time zone:NOT NULL
 COL roles.description:text:NULL
 COL roles.id:integer:NOT NULL
+COL roles.mobile_nav:jsonb:NULL
 COL roles.name:character varying:NOT NULL
 COL roles.updated_at:timestamp with time zone:NOT NULL
 COL root_cause_analyses.analysis_type:character varying:NOT NULL
