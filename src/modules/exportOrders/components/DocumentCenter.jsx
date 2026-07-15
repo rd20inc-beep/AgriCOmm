@@ -284,6 +284,7 @@ function commercialInvoiceHtml(doc, opts = {}) {
   const lines = buildLineItems(doc);
   const totalBags = lines.reduce((s, l) => s + (l.bagCount || 0), 0) || (totals && totals.totalBags) || order.totalBags || 0;
   const totalAmt = lines.reduce((s, l) => s + (l.amount || 0), 0);
+  const totalQtyMT = lines.reduce((s, l) => s + (parseFloat(l.qtyMT) || 0), 0);
 
   // Advance is conditional — the "ADVANCE PAID / SUB TOTAL" rows only appear
   // when the order actually carries an advance (per the in-house template note).
@@ -296,11 +297,6 @@ function commercialInvoiceHtml(doc, opts = {}) {
   // CFR/CIF/etc. → port of discharge. Header reads e.g. "FOB KARACHI".
   const inc = doc.incotermInfo || {};
   const term = inc.incoterm || order.incoterm || 'FOB';
-  // Discharge-side terms (CFR/CIF/…) label by the destination; loading-side
-  // terms (FOB/EXW/…) by the port of loading. When the discharge port is blank
-  // the backend leaves the placeholder "the port of discharge" — fall back to
-  // the order's destination port, then the buyer's country, so the header reads
-  // e.g. "CFR ROTTERDAM" / "CFR NETHERLANDS" rather than the placeholder.
   const dischargePort = order.destinationPort
     || (inc.portOfDischarge && !/port of discharge/i.test(inc.portOfDischarge) ? inc.portOfDischarge : '')
     || buyer.country || '';
@@ -311,78 +307,98 @@ function commercialInvoiceHtml(doc, opts = {}) {
   const cur = order.currency || 'USD';
   const curShort = cur === 'USD' ? 'US$' : cur;
 
+  // Weights (engine stores KG). Show KG with the MT equivalent for clarity.
+  const netKg = (totals && totals.netWeightKg) || (parseFloat(order.qtyMT) || 0) * 1000;
+  const grossKg = (totals && totals.grossWeightKg) || netKg;
+  const totalPackages = (totals && totals.totalPackages) || totalBags || 0;
+  const fmtKg = (kg) => `${(parseFloat(kg) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} KG (${((parseFloat(kg) || 0) / 1000).toFixed(3)} MT)`;
+
+  // HS codes — single value in the summary, or "Multiple HS Codes" + list.
+  const hs = order.hsCodes || { list: order.hsCode ? [order.hsCode] : [], multiple: false, single: order.hsCode || '' };
+  const hsSummary = hs.multiple
+    ? `Multiple HS Codes${hs.list.length ? ` <span style="font-weight:normal;">(${hs.list.join(', ')})</span>` : ''}`
+    : (hs.single || (hs.list && hs.list[0]) || order.hsCode || '');
+
+  // Shipment route (loading → discharge).
+  const routeFrom = order.portOfLoading || 'Karachi, Pakistan';
+  const routeTo = [order.destinationPort, buyer.country].filter(Boolean).join(', ') || dischargePort;
+
+  // Payment & banking — the resolved company account (already masked server-side).
+  const bank = company.bank || {};
+  const cellL = 'border:1px solid #333; padding:5px 8px; font-weight:bold; background:#f7f7f7; white-space:nowrap;';
+  const cellV = 'border:1px solid #333; padding:5px 8px;';
+  const infoRow = (l1, v1, l2, v2) => `
+    <tr>
+      <td style="${cellL} width:19%;">${l1}</td><td style="${cellV} width:31%;">${v1 || ''}</td>
+      <td style="${cellL} width:19%;">${l2}</td><td style="${cellV} width:31%;">${v2 || ''}</td>
+    </tr>`;
+
+  const bankingSection = bank.withheld ? `
+    <div style="border:1px solid #333; padding:8px; margin-top:10px; font-size:11px; color:#555;">
+      Banking details available to authorised recipients on request.
+    </div>` : `
+    <table style="width:100%; border-collapse:collapse; margin-top:12px; font-size:11px;">
+      <tr><td colspan="4" style="border:1px solid #333; padding:5px 8px; font-weight:bold; background:#eef2f7; text-transform:uppercase; letter-spacing:.3px;">Payment &amp; Banking Details</td></tr>
+      ${infoRow('Payment Term', order.paymentTerms, 'Payment Due', order.paymentDueDate)}
+      ${infoRow('Currency', cur, 'Beneficiary', bank.title || company.name)}
+      ${infoRow('Bank', bank.name, 'Branch', bank.branch)}
+      ${infoRow('Account #', bank.account, 'IBAN', bank.iban)}
+      ${infoRow('SWIFT / BIC', bank.swift, 'Bank Address', bank.address || bank.city)}
+      ${bank.correspondent ? infoRow('Correspondent Bank', bank.correspondent.name, 'Corr. SWIFT / A/C', [bank.correspondent.swift, bank.correspondent.account].filter(Boolean).join(' / ')) : ''}
+    </table>
+    ${bank.masked ? '<div style="font-size:9px; color:#888; margin-top:2px;">Account number / IBAN partially masked — full details visible to authorised finance users.</div>' : ''}`;
+
   return `
     <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px; color:#111;">
       ${renderComplianceHeader(company)}
-      <p style="text-align:center; font-weight:bold; text-decoration:underline; margin:0 0 6px;">ORIGINAL</p>
+      <p style="text-align:center; font-weight:bold; text-decoration:underline; margin:0 0 4px;">${opts.copyLabel || 'ORIGINAL'}</p>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
         <div style="flex:1;"></div>
-        <h2 style="font-size:15px; margin:0; text-decoration:underline;">COMMERCIAL INVOICE</h2>
+        <h2 style="font-size:18px; margin:0; text-decoration:underline; letter-spacing:.5px;">COMMERCIAL INVOICE</h2>
         <div style="flex:1; text-align:right; font-size:10px; font-style:italic;">REX # ${company.rexNumber}</div>
       </div>
 
       <table style="width:100%; margin:6px 0; border-collapse:collapse;">
         <tr>
-          <td style="vertical-align:top; width:56%; padding-right:10px;">
-            <div style="font-weight:bold; font-style:italic;">Name &amp; Address of Consignee:</div>
-            <div style="border:1px solid #333; padding:8px; margin-top:3px; min-height:60px;">
-              ${[buyer.name, buyer.address, buyer.country, buyer.port ? `Port: ${buyer.port}` : '', buyer.vatNumber ? `VAT NO: ${buyer.vatNumber}` : ''].filter(Boolean).join('<br/>')}
+          <td style="vertical-align:top; width:56%; padding-right:12px;">
+            <div style="font-weight:bold; font-size:15px; margin-bottom:3px;">Name &amp; Address of Consignee:</div>
+            <div style="border:1px solid #333; padding:10px; min-height:74px; font-size:14px; line-height:1.55;">
+              <div style="font-weight:bold; font-size:15px;">${buyer.name || ''}</div>
+              ${[buyer.address, buyer.country, buyer.port ? `Port: ${buyer.port}` : '', buyer.contact ? `Attn: ${buyer.contact}` : '', buyer.phone || '', buyer.vatNumber ? `VAT NO: ${buyer.vatNumber}` : ''].filter(Boolean).join('<br/>')}
             </div>
           </td>
           <td style="vertical-align:top; width:44%;">
-            <table style="border-collapse:collapse; width:100%;">
-              <tr><td style="border:1px solid #333; padding:4px 8px; font-weight:bold; width:44%;">INVOICE NO:</td><td style="border:1px solid #333; padding:4px 8px;">${order.invoiceNumber || ''}</td></tr>
-              <tr><td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">CONTRACT No.</td><td style="border:1px solid #333; padding:4px 8px;">${order.contractNumber || ''}</td></tr>
-              <tr><td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">INVOICE DT:</td><td style="border:1px solid #333; padding:4px 8px;">${order.date || ''}</td></tr>
+            <table style="border-collapse:collapse; width:100%; font-size:14px;">
+              <tr><td style="border:1px solid #333; padding:6px 8px; font-weight:bold; width:42%;">INVOICE NO:</td><td style="border:1px solid #333; padding:6px 8px; font-weight:bold;">${order.invoiceNumber || ''}</td></tr>
+              <tr><td style="border:1px solid #333; padding:6px 8px; font-weight:bold;">CONTRACT No.</td><td style="border:1px solid #333; padding:6px 8px; font-weight:bold;">${order.contractNumber || ''}</td></tr>
+              <tr><td style="border:1px solid #333; padding:6px 8px; font-weight:bold;">INVOICE DT:</td><td style="border:1px solid #333; padding:6px 8px; font-weight:bold;">${order.date || ''}</td></tr>
+              <tr><td style="border:1px solid #333; padding:6px 8px; font-weight:bold;">CURRENCY:</td><td style="border:1px solid #333; padding:6px 8px;">${cur}</td></tr>
+              <tr><td style="border:1px solid #333; padding:6px 8px; font-weight:bold;">PAYMENT TERM:</td><td style="border:1px solid #333; padding:6px 8px;">${order.paymentTerms || ''}</td></tr>
             </table>
           </td>
         </tr>
       </table>
 
-      <div style="font-weight:bold; font-style:italic; margin:4px 0 3px;">Shipper bank details:</div>
-      <div style="border:1px solid #333; padding:8px; margin-bottom:10px; font-size:10.5px; line-height:1.5;">
-        A/C Title: ${company.name},<br/>
-        ${company.bank.name}, ${company.bank.branch},<br/>
-        ${company.bank.city}.<br/>
-        A/C # ${company.bank.account}<br/>
-        SWIFT: ${company.bank.swift} &nbsp; IBAN # ${company.bank.iban}
-      </div>
-
-      <table style="width:100%; border-collapse:collapse; font-size:10.5px;">
-        <tr>
-          <td style="border:1px solid #333; padding:4px 8px; font-weight:bold; width:20%;">Shipment Ports</td>
-          <td style="border:1px solid #333; padding:4px 8px; width:30%;">${[order.portOfLoading, [order.destinationPort, buyer.country].filter(Boolean).join(', ')].filter(Boolean).join(' to ')}</td>
-          <td style="border:1px solid #333; padding:4px 8px; font-weight:bold; width:20%;">F.I. # 1.</td>
-          <td style="border:1px solid #333; padding:4px 8px; width:30%;">${[shipment.fiNumber, shipment.fiNumber2, shipment.fiNumber3].filter(Boolean).join(', ')}</td>
-        </tr>
-        <tr>
-          <td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">No. of Containers</td>
-          <td style="border:1px solid #333; padding:4px 8px;">${shipment.containerCount} X ${shipment.containerType === '40ft' ? "40'" : "20'"} Fcl</td>
-          <td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">F.I Dated</td>
-          <td style="border:1px solid #333; padding:4px 8px;">${shipment.fiDate || ''}</td>
-        </tr>
-        <tr>
-          <td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">Shipped by Sea as</td>
-          <td style="border:1px solid #333; padding:4px 8px;">${shipment.vesselName || ''}${shipment.voyageNumber ? ` / ${shipment.voyageNumber}` : ''}</td>
-          <td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">Payment Term</td>
-          <td style="border:1px solid #333; padding:4px 8px;">${order.paymentTerms || ''}</td>
-        </tr>
-        <tr>
-          <td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">Bill of Lading #</td>
-          <td style="border:1px solid #333; padding:4px 8px;">${shipment.blNumber || ''}</td>
-          <td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">BL Date</td>
-          <td style="border:1px solid #333; padding:4px 8px;">${shipment.blDate || ''}</td>
-        </tr>
+      <table style="width:100%; border-collapse:collapse; font-size:10.5px; margin-top:6px;">
+        ${infoRow('Port of Loading', routeFrom, 'Port of Discharge', routeTo)}
+        ${infoRow('Shipment Route', [routeFrom, routeTo].filter(Boolean).join(' → '), 'No. of Containers', `${shipment.containerCount} X ${shipment.containerType === '40ft' ? "40'" : "20'"} FCL`)}
+        ${infoRow('Vessel / Voyage', `${shipment.vesselName || ''}${shipment.voyageNumber ? ` / ${shipment.voyageNumber}` : ''}`, 'F.I. #', [shipment.fiNumber, shipment.fiNumber2, shipment.fiNumber3].filter(Boolean).join(', '))}
+        ${infoRow('F.I. Date', shipment.fiDate, 'Bill of Lading #', shipment.blNumber)}
+        ${infoRow('BL Date', shipment.blDate, 'HS Code', hsSummary)}
+        ${infoRow('Total Packages', `${(totalPackages || 0).toLocaleString()} Bags`, 'Net Weight', fmtKg(netKg))}
+        ${infoRow('Gross Weight', fmtKg(grossKg), '', '')}
       </table>
 
-      <table style="width:100%; border-collapse:collapse; margin-top:12px; font-size:10.5px;">
+      <table style="width:100%; border-collapse:collapse; margin-top:12px; font-size:10px;">
         <thead>
           <tr style="background:#f0f0f0;">
-            <th style="border:1px solid #333; padding:6px; width:15%;">MARKS &amp; NOS.</th>
-            <th style="border:1px solid #333; padding:6px; width:14%;">QUANTITY</th>
+            <th style="border:1px solid #333; padding:6px; width:12%;">MARKS &amp; NOS.</th>
+            <th style="border:1px solid #333; padding:6px; width:12%;">QUANTITY</th>
+            <th style="border:1px solid #333; padding:6px; width:16%;">PACKAGING</th>
             <th style="border:1px solid #333; padding:6px;">DESCRIPTION</th>
-            <th style="border:1px solid #333; padding:6px; width:15%;">UNIT PRICE<br/>${basisLabel}<br/>PMT(${curShort})</th>
-            <th style="border:1px solid #333; padding:6px; width:14%;">AMOUNT ${term}<br/>(${curShort})</th>
+            <th style="border:1px solid #333; padding:6px; width:10%;">HS CODE</th>
+            <th style="border:1px solid #333; padding:6px; width:12%;">UNIT PRICE<br/>${basisLabel}<br/>PMT(${curShort})</th>
+            <th style="border:1px solid #333; padding:6px; width:13%;">AMOUNT ${term}<br/>(${curShort})</th>
           </tr>
         </thead>
         <tbody>
@@ -390,22 +406,24 @@ function commercialInvoiceHtml(doc, opts = {}) {
             <tr>
               <td style="border:1px solid #333; padding:6px; text-align:center; font-weight:bold; font-style:italic; color:#c79a3a;">${l.brand}</td>
               <td style="border:1px solid #333; padding:6px; text-align:center;">${(l.bagCount || 0).toLocaleString()} Bags<br/><br/>${fmtMt(l.qtyMT)}<br/>MT</td>
-              <td style="border:1px solid #333; padding:6px;">${l.description}</td>
+              <td style="border:1px solid #333; padding:6px; font-size:9.5px;">${l.packing || ''}</td>
+              <td style="border:1px solid #333; padding:6px;">${String(l.description || '').replace(/<br\/?>\s*<strong>HS CODE[^<]*<\/strong>/i, '')}</td>
+              <td style="border:1px solid #333; padding:6px; text-align:center; white-space:nowrap;">${l.hsCode || hs.single || ''}</td>
               <td style="border:1px solid #333; padding:6px; text-align:center;">${fmtMoney(l.pricePerMT)}</td>
               <td style="border:1px solid #333; padding:6px; text-align:right;">${fmtMoney(l.amount)}</td>
             </tr>
           `).join('')}
-          <tr style="font-weight:bold;">
-            <td colspan="4" style="border:1px solid #333; padding:6px; text-align:right;">Total</td>
+          <tr style="font-weight:bold; background:#fafafa;">
+            <td colspan="6" style="border:1px solid #333; padding:6px; text-align:right;">Total</td>
             <td style="border:1px solid #333; padding:6px; text-align:right;">${fmtMoney(totalAmt)}</td>
           </tr>
           ${showAdvance ? `
           <tr style="font-weight:bold;">
-            <td colspan="4" style="border:1px solid #333; padding:6px; text-align:right;">ADVANCE PAID${advancePct ? ` ${advancePct}%` : ''}</td>
+            <td colspan="6" style="border:1px solid #333; padding:6px; text-align:right;">ADVANCE PAID${advancePct ? ` ${advancePct}%` : ''}</td>
             <td style="border:1px solid #333; padding:6px; text-align:right;">${fmtMoney(advanceAmt)}</td>
           </tr>
           <tr style="font-weight:bold;">
-            <td colspan="4" style="border:1px solid #333; padding:6px; text-align:right;">SUB TOTAL</td>
+            <td colspan="6" style="border:1px solid #333; padding:6px; text-align:right;">SUB TOTAL</td>
             <td style="border:1px solid #333; padding:6px; text-align:right;">${fmtMoney(subTotal)}</td>
           </tr>` : ''}
         </tbody>
@@ -413,19 +431,27 @@ function commercialInvoiceHtml(doc, opts = {}) {
 
       ${opts.originBox || ''}
 
-      <div style="margin-top:8px; font-weight:bold; font-style:italic;">Amount in ${curShort}: <span style="font-weight:normal; font-style:normal;">${amountInWords(subTotal, cur)}</span></div>
+      <table style="width:100%; border-collapse:collapse; margin-top:10px; font-size:10.5px;">
+        ${infoRow('Total Quantity', `${fmtMt(totalQtyMT)} MT`, 'Total Packages', `${(totalPackages || 0).toLocaleString()} Bags`)}
+        ${infoRow('Total Net Weight', fmtKg(netKg), 'Total Gross Weight', fmtKg(grossKg))}
+        <tr>
+          <td style="${cellL} width:19%;">Total Invoice Amount</td>
+          <td colspan="3" style="border:1px solid #333; padding:6px 8px; font-weight:bold; font-size:13px;">${curShort} ${fmtMoney(subTotal)}</td>
+        </tr>
+      </table>
+
+      <div style="margin-top:8px; font-weight:bold; font-style:italic;">Amount in ${curShort}: <span style="font-weight:bold; font-style:normal;">${amountInWords(subTotal, cur)}</span></div>
 
       ${containers && containers.length > 0 ? `
-        <div style="margin-top:8px; font-size:10.5px;">
-          Container # ${containers.map(c => c.containerNo).filter(Boolean).join(', ')}<br/>
-          TOTAL BAGS: ${totalBags.toLocaleString()} &nbsp;|&nbsp; GROSS: ${((totals && totals.grossWeightMT) || order.qtyMT || 0).toFixed(3)} MT &nbsp;|&nbsp; NET: ${((totals && totals.netWeightMT) || order.qtyMT || 0).toFixed(3)} MT
-        </div>` : ''}
+        <div style="margin-top:6px; font-size:10px; color:#333;">Container #: ${containers.map(c => c.containerNo).filter(Boolean).join(', ')}</div>` : ''}
+
+      ${bankingSection}
 
       <p style="font-style:italic; font-size:10.5px; margin-top:10px; text-decoration:underline;">Certification: Goods shipped under this invoice are from Pakistan origin</p>
 
-      <div style="margin-top:26px;">
+      <div style="margin-top:24px;">
         <p style="margin:0;">Name of Signing authority:</p>
-        <div style="margin-top:22px; font-weight:bold;">${company.proprietor}<br/>Proprietor<br/>${company.name}</div>
+        <div style="margin-top:22px; font-weight:bold;">${opts.signatory || company.proprietor}<br/>Proprietor<br/>${company.name}</div>
       </div>
       ${renderComplianceFooter(company)}
     </div>`;
