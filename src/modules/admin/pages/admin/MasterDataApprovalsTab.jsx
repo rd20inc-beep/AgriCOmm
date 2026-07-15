@@ -239,9 +239,9 @@ export default function MasterDataApprovalsTab() {
         </div>
       </div>
 
-      {statusFilter === 'pending' && (suppliers.length + products.length + customers.length) === 0 && !loading && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 text-sm text-emerald-800 flex items-center gap-2">
-          <CheckCircle2 size={16} /> All caught up — no pending submissions.
+      {(suppliers.length + products.length + customers.length) === 0 && !loading && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm text-emerald-800 flex items-center gap-2">
+          <CheckCircle2 size={16} /> {statusFilter === 'pending' ? 'All caught up — no pending submissions.' : 'Nothing to show for this filter.'}
         </div>
       )}
 
@@ -250,34 +250,21 @@ export default function MasterDataApprovalsTab() {
           <Loader2 size={16} className="animate-spin" /> Loading…
         </div>
       ) : (
-        <div className="space-y-4">
-          <Section
-            title="Rice types"
-            icon={Package}
-            color="bg-amber-50 text-amber-900"
-            rows={products}
-            busyId={busyId}
-            onApprove={approve}
-            onReject={(r) => setRejectTarget(r)}
-          />
-          <Section
-            title="Suppliers"
-            icon={Truck}
-            color="bg-blue-50 text-blue-900"
-            rows={suppliers}
-            busyId={busyId}
-            onApprove={approve}
-            onReject={(r) => setRejectTarget(r)}
-          />
-          <Section
-            title="Customers"
-            icon={Users}
-            color="bg-violet-50 text-violet-900"
-            rows={customers}
-            busyId={busyId}
-            onApprove={approve}
-            onReject={(r) => setRejectTarget(r)}
-          />
+        /* Only render a category card when it actually has rows — otherwise the page
+           is a wall of tall empty "Nothing to review" cards, especially on mobile. */
+        <div className="space-y-3">
+          {products.length > 0 && (
+            <Section title="Rice types" icon={Package} color="bg-amber-50 text-amber-900"
+              rows={products} busyId={busyId} onApprove={approve} onReject={(r) => setRejectTarget(r)} />
+          )}
+          {suppliers.length > 0 && (
+            <Section title="Suppliers" icon={Truck} color="bg-blue-50 text-blue-900"
+              rows={suppliers} busyId={busyId} onApprove={approve} onReject={(r) => setRejectTarget(r)} />
+          )}
+          {customers.length > 0 && (
+            <Section title="Customers" icon={Users} color="bg-violet-50 text-violet-900"
+              rows={customers} busyId={busyId} onApprove={approve} onReject={(r) => setRejectTarget(r)} />
+          )}
         </div>
       )}
 

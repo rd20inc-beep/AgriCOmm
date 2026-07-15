@@ -349,14 +349,14 @@ export default function LotInventory() {
   return (
     <div className="space-y-5 pb-4">
       {/* ─── HERO BAND ────────────────────────────────────────────── */}
-      <div className="rounded-2xl bg-gradient-to-r from-blue-700 via-blue-600 to-cyan-500 p-5 sm:p-6 text-white shadow-sm relative overflow-hidden">
+      <div className="rounded-2xl bg-gradient-to-r from-blue-700 via-blue-600 to-cyan-500 p-4 sm:p-6 text-white shadow-sm relative overflow-hidden">
         <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 30% 20%, white 0%, transparent 60%)' }} />
         <div className="relative flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-xs uppercase tracking-wider opacity-80 mb-1">
               <Package size={14} /> Lot inventory · Capital locked
             </div>
-            <div className="text-3xl sm:text-4xl font-bold leading-tight tabular-nums">
+            <div className="text-2xl sm:text-4xl font-bold leading-tight tabular-nums break-words">
               {fmtPKR(kpis.totalValue)}
             </div>
             <div className="text-xs opacity-90 mt-1">
@@ -379,8 +379,9 @@ export default function LotInventory() {
         </div>
       </div>
 
-      {/* KPI Summary */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+      {/* KPI Summary — hidden on phones (the hero band above already shows these
+          numbers); the extra 6 cards would just make the page scroll forever. */}
+      <div className="hidden sm:grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
         <div className="bg-white rounded-xl border border-gray-100 p-4">
           <p className="text-xs font-medium text-gray-500 uppercase">Total Lots</p>
           <p className="text-2xl font-bold text-gray-900 mt-1">{kpis.totalLots}</p>

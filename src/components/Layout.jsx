@@ -20,6 +20,7 @@ import OfflineExpiredGate from './OfflineExpiredGate';
 import SyncStatusChip from './SyncStatusChip';
 import SyncConflictsDrawer from './SyncConflictsDrawer';
 import ScanDrawer from './ScanDrawer';
+import MobileBottomNav from './MobileBottomNav';
 import { SkeletonPage } from '../shared/components/Skeleton';
 
 const sidebarNav = [
@@ -581,6 +582,7 @@ export default function Layout({ children }) {
           </RouteErrorBoundary>
         </main>
       </div>
+      <MobileBottomNav onMenu={() => setSidebarOpen(true)} />
       <ChatWidget />
       <PendingSyncTray />
       <SyncConflictsDrawer />

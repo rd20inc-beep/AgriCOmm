@@ -176,7 +176,7 @@ export default function ChatWidget() {
       {/* Floating button */}
       {!open && (
         <button onClick={() => { setOpen(true); setView('list'); }}
-          className="fixed bottom-5 right-5 z-[60] w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-700 text-white shadow-lg flex items-center justify-center transition-colors"
+          className="fixed bottom-[4.25rem] right-4 lg:bottom-5 lg:right-5 z-[60] w-12 h-12 lg:w-14 lg:h-14 rounded-full bg-blue-600 hover:bg-blue-700 text-white shadow-lg flex items-center justify-center transition-colors"
           title="Team chat">
           <MessageCircle className="w-6 h-6" />
           {totalBadge > 0 && (
@@ -189,7 +189,7 @@ export default function ChatWidget() {
 
       {/* Panel */}
       {open && (
-        <div className="fixed bottom-5 right-5 z-[60] w-[92vw] sm:w-96 h-[520px] max-h-[80vh] bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden">
+        <div className="fixed bottom-[4.25rem] right-4 lg:bottom-5 lg:right-5 z-[60] w-[92vw] sm:w-96 h-[520px] max-h-[75vh] bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden">
           {/* Header */}
           <div className="px-4 py-3 bg-blue-600 text-white flex items-center gap-2">
             {(view === 'thread' || view === 'new' || view === 'approvals') && (
