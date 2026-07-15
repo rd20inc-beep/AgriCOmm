@@ -1,4 +1,45 @@
 const db = require('../../config/database');
+const { maskBank } = require('../../utils/bankMasking');
+const { userHasPermission } = require('../../middleware/rbac');
+const auditService = require('../admin/audit.service');
+
+// Legacy hardcoded bank — used ONLY as a last resort when no bank account is
+// configured, so existing installs keep rendering a bank block until an admin
+// sets an export-default account (Admin → Bank Accounts).
+const LEGACY_BANK = {
+  title: 'AGRI COMMODITIES',
+  name: 'Bank Al Habib Limited',
+  branch: 'New Challi Branch',
+  city: 'Karachi - Pakistan',
+  address: '',
+  account: '0081 0046 0701',
+  swift: 'BAHLPKKAXXX',
+  iban: 'PK84 BAHL 1015-0081-0046-0701',
+  correspondent: null,
+};
+
+// Build the company bank block from a bank_accounts row (Phase A columns).
+function bankFromAccount(acct) {
+  if (!acct) return { ...LEGACY_BANK };
+  const corr = acct.correspondent_bank_name || acct.correspondent_swift || acct.correspondent_account;
+  return {
+    title: acct.account_title || acct.name || '',
+    name: acct.bank_name || '',
+    branch: acct.branch || '',
+    city: acct.bank_address || '',
+    address: acct.bank_address || '',
+    account: acct.account_number || '',
+    swift: acct.swift_bic || '',
+    iban: acct.iban || '',
+    currency: acct.currency || '',
+    approvedForCustomer: !!acct.approved_for_customer,
+    correspondent: corr ? {
+      name: acct.correspondent_bank_name || '',
+      swift: acct.correspondent_swift || '',
+      account: acct.correspondent_account || '',
+    } : null,
+  };
+}
 
 /**
  * Export Document Generator
@@ -45,11 +86,25 @@ async function gatherOrderData(orderId) {
   // every line rather than a single rolled-up product.
   const items = await db('export_order_items as i')
     .leftJoin('products as p', 'i.product_id', 'p.id')
-    .select('i.*', 'p.name as product_name_lookup')
+    .select('i.*', 'p.name as product_name_lookup', 'p.hs_code as product_hs_code')
     .where({ order_id: orderId })
     .orderBy('line_no', 'asc');
 
-  return { order, containers, settings, costs, items };
+  // Packed net/gross weight fallback when containers aren't captured yet.
+  const packingWeight = await db('export_packing_weights').where({ order_id: orderId }).first();
+
+  // Which company bank account this order's documents draw from: the order's
+  // explicit selection, else the single is_export_default account, else none
+  // (renderer falls back to LEGACY_BANK).
+  let bankAccount = null;
+  if (order.bank_account_id) {
+    bankAccount = await db('bank_accounts').where({ id: order.bank_account_id }).first();
+  }
+  if (!bankAccount) {
+    bankAccount = await db('bank_accounts').where({ is_export_default: true }).first();
+  }
+
+  return { order, containers, settings, costs, items, packingWeight, bankAccount };
 }
 
 function formatDate(d) {
@@ -128,7 +183,7 @@ const exportDocumentController = {
         return res.status(404).json({ success: false, message: 'Order not found.' });
       }
 
-      const { order, containers, settings, costs, items } = data;
+      const { order, containers, settings, costs, items, packingWeight, bankAccount } = data;
 
       // Single source of truth for HS code: first item → order (legacy) →
       // settings default. Item-level wins because that's where the user
@@ -137,8 +192,44 @@ const exportDocumentController = {
       // No hardcoded fallback — if none of these are set, the document shows
       // blank so the user can spot it rather than seeing a wrong number.
       const firstItem = items && items[0] ? items[0] : null;
-      const orderHsCode = (firstItem && firstItem.hs_code) || order.hs_code || settings.default_hs_code || '';
+      const orderHsCode = (firstItem && (firstItem.hs_code || firstItem.product_hs_code)) || order.hs_code || settings.default_hs_code || '';
       const orderQualityDescription = (firstItem && firstItem.quality_description) || order.quality_description || '';
+
+      // Distinct HS codes across the line items (item → product master), falling
+      // back to the order-level code. Drives the "single vs Multiple HS Codes"
+      // summary on the Commercial Invoice.
+      const hsList = [];
+      (items || []).forEach((it) => {
+        const code = it.hs_code || it.product_hs_code || '';
+        if (code && !hsList.includes(code)) hsList.push(code);
+      });
+      if (!hsList.length && orderHsCode) hsList.push(orderHsCode);
+      const hsCodes = { list: hsList, multiple: hsList.length > 1, single: hsList.length === 1 ? hsList[0] : '' };
+
+      // Weights & packages: prefer captured container weights, fall back to the
+      // packing-weight record, then to the ordered quantity. Engine stores KG.
+      const containerNetKg = containers.reduce((s, c) => s + (parseFloat(c.net_weight_kg) || 0), 0);
+      const containerGrossKg = containers.reduce((s, c) => s + (parseFloat(c.gross_weight_kg) || 0), 0);
+      const netWeightKg = containerNetKg
+        || (packingWeight && parseFloat(packingWeight.packed_net_rice_kg))
+        || (parseFloat(order.qty_mt) || 0) * 1000;
+      const grossWeightKg = containerGrossKg
+        || (packingWeight && parseFloat(packingWeight.gross_weight_kg))
+        || netWeightKg;
+      const totalPackages = containers.reduce((s, c) => s + (c.bags_count || 0), 0)
+        || order.total_bags
+        || (items || []).reduce((s, it) => s + (parseInt(it.bag_count) || 0), 0)
+        || 0;
+
+      // Company bank block from the resolved account, masked by the viewer's
+      // permission. (Audience gate binds in a later phase; internal here.)
+      const canSeeFull = await userHasPermission(req, 'finance', 'view_bank_details');
+      const rawBank = bankFromAccount(bankAccount);
+      const companyBank = maskBank(rawBank, {
+        canSeeFull,
+        audience: 'internal',
+        approvedForCustomer: rawBank.approvedForCustomer,
+      });
 
       // Common data shared across ALL documents
       const common = {
@@ -155,14 +246,8 @@ const exportDocumentController = {
           proprietor: 'AKMAL AMIN PARACHA',
           rexNumber: settings.rex_number || 'PKREXPK12517208',
           kcciMembership: settings.kcci_membership || '29463',
-          bank: {
-            name: 'Bank Al Habib Limited',
-            branch: 'New Challi Branch',
-            city: 'Karachi - Pakistan',
-            account: '0081 0046 0701',
-            swift: 'BAHLPKKAXXX',
-            iban: 'PK84 BAHL 1015-0081-0046-0701',
-          },
+          // Real, selectable bank account (Phase A/B) — masked per viewer.
+          bank: companyBank,
         },
 
         // Buyer
@@ -209,8 +294,12 @@ const exportDocumentController = {
             || order.customer_payment_terms
             || `${order.advance_pct}% advance, balance against documents`,
           origin: 'PAKISTAN',
-          portOfLoading: settings.port_of_loading || 'Karachi, Pakistan',
+          portOfLoading: order.port_of_loading || settings.port_of_loading || 'Karachi, Pakistan',
           destinationPort: order.destination_port || '',
+          // Expected balance-payment date (credit / against-documents terms).
+          paymentDueDate: formatDate(order.balance_date),
+          // HS codes: single value + full distinct list + multiple flag.
+          hsCodes: hsCodes,
           brokenPctTarget: order.broken_pct_target || 2,
           qualityDescription: orderQualityDescription || (orderHsCode
             ? `Pakistani ${order.product_name || 'Rice'} - ${order.broken_pct_target || 2}% Broken - Double (silky) polished & color sorted, Latest Crop - PACKED IN ${parseFloat(order.bag_size_kg) || 50} KGS ${order.bag_type || 'PP'} BAG - HS CODE: ${orderHsCode} - GMO FREE, FIT FOR HUMAN CONSUMPTION AT ANY STAGE, FREE FROM ALIVE AND DEAD WEEVILS/INSECTS`
@@ -269,8 +358,11 @@ const exportDocumentController = {
         // Totals
         totals: {
           totalBags: containers.reduce((s, c) => s + (c.bags_count || 0), 0) || order.total_bags || 0,
-          grossWeightMT: containers.reduce((s, c) => s + (parseFloat(c.gross_weight_kg) || 0), 0) / 1000 || parseFloat(order.qty_mt) || 0,
-          netWeightMT: containers.reduce((s, c) => s + (parseFloat(c.net_weight_kg) || 0), 0) / 1000 || parseFloat(order.qty_mt) || 0,
+          totalPackages,
+          netWeightKg,
+          grossWeightKg,
+          grossWeightMT: grossWeightKg / 1000,
+          netWeightMT: netWeightKg / 1000,
         },
 
         // Packing
@@ -494,6 +586,17 @@ const exportDocumentController = {
           return res.status(400).json({ success: false, message: `Unknown document type: ${docType}` });
         }
       }
+
+      // Audit the document view/generate — lightweight (no full payload or
+      // banking values), just who looked at which document on which order.
+      auditService.log({
+        userId: req.user ? req.user.id : null,
+        action: 'view_document',
+        entityType: 'export_document',
+        entityId: `${order.order_no}:${docType}`,
+        details: { docType, orderNo: order.order_no, bankMasked: !canSeeFull },
+        ipAddress: req.ip,
+      }).catch((e) => console.error('Doc audit log error:', e.message));
 
       return res.json({ success: true, data: { document } });
     } catch (err) {

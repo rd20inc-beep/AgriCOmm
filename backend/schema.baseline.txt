@@ -633,6 +633,7 @@ COL export_orders.balance_expected:numeric:NOT NULL
 COL export_orders.balance_fx_rate:numeric:NULL
 COL export_orders.balance_received:numeric:NOT NULL
 COL export_orders.balance_received_pkr:numeric:NULL
+COL export_orders.bank_account_id:integer:NULL
 COL export_orders.bl_date:date:NULL
 COL export_orders.bl_number:character varying:NULL
 COL export_orders.booked_fx_rate:numeric:NULL
@@ -692,6 +693,7 @@ COL export_orders.packing_notes:text:NULL
 COL export_orders.packing_type:character varying:NOT NULL
 COL export_orders.palletized:boolean:NOT NULL
 COL export_orders.payment_terms:text:NULL
+COL export_orders.port_of_loading:character varying:NULL
 COL export_orders.price_per_mt:numeric:NOT NULL
 COL export_orders.product_id:integer:NOT NULL
 COL export_orders.product_name:character varying:NULL
@@ -2767,6 +2769,7 @@ CON export_orders.chk_export_orders_quantity_input_value_nn(c)
 CON export_orders.chk_export_orders_status_valid(c)
 CON export_orders.chk_export_orders_total_bags_nn(c)
 CON export_orders.chk_export_orders_total_loose_weight_kg_nonneg(c)
+CON export_orders.export_orders_bank_account_id_foreign(f)
 CON export_orders.export_orders_created_by_foreign(f)
 CON export_orders.export_orders_customer_id_foreign(f)
 CON export_orders.export_orders_milling_order_id_foreign(f)
