@@ -403,8 +403,8 @@ function commercialInvoiceHtml(doc, opts = {}) {
 
   // Payment & banking — the resolved company account (already masked server-side).
   const bank = company.bank || {};
-  const cellL = 'border:1px solid #333; padding:5px 8px; font-weight:bold; background:#f7f7f7; white-space:nowrap;';
-  const cellV = 'border:1px solid #333; padding:5px 8px;';
+  const cellL = 'border:1px solid #333; padding:2.5px 6px; font-weight:bold; background:#f7f7f7; white-space:nowrap;';
+  const cellV = 'border:1px solid #333; padding:2.5px 6px;';
   const infoRow = (l1, v1, l2, v2) => `
     <tr>
       <td style="${cellL} width:19%;">${l1}</td><td style="${cellV} width:31%;">${v1 || ''}</td>
@@ -415,8 +415,8 @@ function commercialInvoiceHtml(doc, opts = {}) {
     <div style="border:1px solid #333; padding:8px; margin-top:10px; font-size:11px; color:#555;">
       Banking details available to authorised recipients on request.
     </div>` : `
-    <table style="width:100%; border-collapse:collapse; margin-top:12px; font-size:11px;">
-      <tr><td colspan="4" style="border:1px solid #333; padding:5px 8px; font-weight:bold; background:#eef2f7; text-transform:uppercase; letter-spacing:.3px;">Payment &amp; Banking Details</td></tr>
+    <table style="width:100%; border-collapse:collapse; margin-top:6px; font-size:10.5px;">
+      <tr><td colspan="4" style="border:1px solid #333; padding:3px 7px; font-weight:bold; background:#eef2f7; text-transform:uppercase; letter-spacing:.3px;">Payment &amp; Banking Details</td></tr>
       ${infoRow('Payment Term', order.paymentTerms, 'Payment Due', order.paymentDueDate)}
       ${infoRow('Currency', cur, 'Beneficiary', bank.title || company.name)}
       ${infoRow('Bank', bank.name, 'Branch', bank.branch)}
@@ -427,37 +427,37 @@ function commercialInvoiceHtml(doc, opts = {}) {
     ${bank.masked ? '<div style="font-size:9px; color:#888; margin-top:2px;">Account number / IBAN partially masked — full details visible to authorised finance users.</div>' : ''}`;
 
   return `
-    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px; color:#111;">
+    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:10px 16px; color:#111;">
       ${renderComplianceHeader(company)}
-      <p style="text-align:center; font-weight:bold; text-decoration:underline; margin:0 0 4px;">${opts.copyLabel || doc._copyLabel || 'ORIGINAL'}</p>
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+      <p style="text-align:center; font-weight:bold; text-decoration:underline; margin:0 0 2px;">${opts.copyLabel || doc._copyLabel || 'ORIGINAL'}</p>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
         <div style="flex:1;"></div>
-        <h2 style="font-size:18px; margin:0; text-decoration:underline; letter-spacing:.5px;">COMMERCIAL INVOICE</h2>
+        <h2 style="font-size:16px; margin:0; text-decoration:underline; letter-spacing:.5px;">COMMERCIAL INVOICE</h2>
         <div style="flex:1; text-align:right; font-size:10px; font-style:italic;">REX # ${company.rexNumber}</div>
       </div>
 
-      <table style="width:100%; margin:6px 0; border-collapse:collapse;">
+      <table style="width:100%; margin:4px 0; border-collapse:collapse;">
         <tr>
           <td style="vertical-align:top; width:56%; padding-right:12px;">
-            <div style="font-weight:bold; font-size:15px; margin-bottom:3px;">Name &amp; Address of Consignee:</div>
-            <div style="border:1px solid #333; padding:10px; min-height:74px; font-size:14px; line-height:1.55;">
-              <div style="font-weight:bold; font-size:15px;">${buyer.name || ''}</div>
+            <div style="font-weight:bold; font-size:14px; margin-bottom:2px;">Name &amp; Address of Consignee:</div>
+            <div style="border:1px solid #333; padding:7px; min-height:52px; font-size:13px; line-height:1.35;">
+              <div style="font-weight:bold; font-size:14px;">${buyer.name || ''}</div>
               ${[buyer.address, buyer.country, buyer.port ? `Port: ${buyer.port}` : '', buyer.contact ? `Attn: ${buyer.contact}` : '', buyer.phone || '', buyer.vatNumber ? `VAT NO: ${buyer.vatNumber}` : ''].filter(Boolean).join('<br/>')}
             </div>
           </td>
           <td style="vertical-align:top; width:44%;">
-            <table style="border-collapse:collapse; width:100%; font-size:14px;">
-              <tr><td style="border:1px solid #333; padding:6px 8px; font-weight:bold; width:42%;">INVOICE NO:</td><td style="border:1px solid #333; padding:6px 8px; font-weight:bold;">${order.invoiceNumber || ''}</td></tr>
-              <tr><td style="border:1px solid #333; padding:6px 8px; font-weight:bold;">CONTRACT No.</td><td style="border:1px solid #333; padding:6px 8px; font-weight:bold;">${order.contractNumber || ''}</td></tr>
-              <tr><td style="border:1px solid #333; padding:6px 8px; font-weight:bold;">INVOICE DT:</td><td style="border:1px solid #333; padding:6px 8px; font-weight:bold;">${order.date || ''}</td></tr>
-              <tr><td style="border:1px solid #333; padding:6px 8px; font-weight:bold;">CURRENCY:</td><td style="border:1px solid #333; padding:6px 8px;">${cur}</td></tr>
-              <tr><td style="border:1px solid #333; padding:6px 8px; font-weight:bold;">PAYMENT TERM:</td><td style="border:1px solid #333; padding:6px 8px;">${order.paymentTerms || ''}</td></tr>
+            <table style="border-collapse:collapse; width:100%; font-size:13px;">
+              <tr><td style="border:1px solid #333; padding:3.5px 7px; font-weight:bold; width:42%;">INVOICE NO:</td><td style="border:1px solid #333; padding:3.5px 7px; font-weight:bold;">${order.invoiceNumber || ''}</td></tr>
+              <tr><td style="border:1px solid #333; padding:3.5px 7px; font-weight:bold;">CONTRACT No.</td><td style="border:1px solid #333; padding:3.5px 7px; font-weight:bold;">${order.contractNumber || ''}</td></tr>
+              <tr><td style="border:1px solid #333; padding:3.5px 7px; font-weight:bold;">INVOICE DT:</td><td style="border:1px solid #333; padding:3.5px 7px; font-weight:bold;">${order.date || ''}</td></tr>
+              <tr><td style="border:1px solid #333; padding:3.5px 7px; font-weight:bold;">CURRENCY:</td><td style="border:1px solid #333; padding:3.5px 7px;">${cur}</td></tr>
+              <tr><td style="border:1px solid #333; padding:3.5px 7px; font-weight:bold;">PAYMENT TERM:</td><td style="border:1px solid #333; padding:3.5px 7px;">${order.paymentTerms || ''}</td></tr>
             </table>
           </td>
         </tr>
       </table>
 
-      <table style="width:100%; border-collapse:collapse; font-size:10.5px; margin-top:6px;">
+      <table style="width:100%; border-collapse:collapse; font-size:10.5px; margin-top:3px;">
         ${infoRow('Port of Loading', routeFrom, 'Port of Discharge', routeTo)}
         ${infoRow('Shipment Route', [routeFrom, routeTo].filter(Boolean).join(' → '), 'No. of Containers', `${shipment.containerCount} X ${shipment.containerType === '40ft' ? "40'" : "20'"} FCL`)}
         ${infoRow('Vessel / Voyage', `${shipment.vesselName || ''}${shipment.voyageNumber ? ` / ${shipment.voyageNumber}` : ''}`, 'F.I. #', [shipment.fiNumber, shipment.fiNumber2, shipment.fiNumber3].filter(Boolean).join(', '))}
@@ -467,7 +467,7 @@ function commercialInvoiceHtml(doc, opts = {}) {
         ${infoRow('Gross Weight', fmtKg(grossKg), '', '')}
       </table>
 
-      <table style="width:100%; border-collapse:collapse; margin-top:12px; font-size:10px;">
+      <table style="width:100%; border-collapse:collapse; margin-top:7px; font-size:10px;">
         <thead>
           <tr style="background:#f0f0f0;">
             <th style="border:1px solid #333; padding:6px; width:12%;">MARKS &amp; NOS.</th>
@@ -483,7 +483,7 @@ function commercialInvoiceHtml(doc, opts = {}) {
           ${lines.map((l) => `
             <tr>
               <td style="border:1px solid #333; padding:6px; text-align:center; font-weight:bold; font-style:italic; color:#c79a3a;">${l.brand}</td>
-              <td style="border:1px solid #333; padding:6px; text-align:center;">${(l.bagCount || 0).toLocaleString()} Bags<br/><br/>${fmtMt(l.qtyMT)}<br/>MT</td>
+              <td style="border:1px solid #333; padding:6px; text-align:center;">${(l.bagCount || 0).toLocaleString()} Bags<br/>${fmtMt(l.qtyMT)} MT</td>
               <td style="border:1px solid #333; padding:6px; font-size:9.5px;">${l.packing || ''}</td>
               <td style="border:1px solid #333; padding:6px;">${String(l.description || '').replace(/<br\/?>\s*<strong>HS CODE[^<]*<\/strong>/i, '')}</td>
               <td style="border:1px solid #333; padding:6px; text-align:center; white-space:nowrap;">${l.hsCode || hs.single || ''}</td>
@@ -509,29 +509,29 @@ function commercialInvoiceHtml(doc, opts = {}) {
 
       ${opts.originBox || ''}
 
-      <table style="width:100%; border-collapse:collapse; margin-top:10px; font-size:10.5px;">
+      <table style="width:100%; border-collapse:collapse; margin-top:6px; font-size:10.5px;">
         ${infoRow('Total Quantity', `${fmtMt(totalQtyMT)} MT`, 'Total Packages', `${(totalPackages || 0).toLocaleString()} Bags`)}
         ${infoRow('Total Net Weight', fmtKg(netKg), 'Total Gross Weight', fmtKg(grossKg))}
         <tr>
           <td style="${cellL} width:19%;">Total Invoice Amount</td>
-          <td colspan="3" style="border:1px solid #333; padding:6px 8px; font-weight:bold; font-size:13px;">${curShort} ${fmtMoney(subTotal)}</td>
+          <td colspan="3" style="border:1px solid #333; padding:3px 7px; font-weight:bold; font-size:13px;">${curShort} ${fmtMoney(subTotal)}</td>
         </tr>
       </table>
 
-      <div style="margin-top:8px; font-weight:bold; font-style:italic;">Amount in ${curShort}: <span style="font-weight:bold; font-style:normal;">${amountInWords(subTotal, cur)}</span></div>
+      <div style="margin-top:5px; font-weight:bold; font-style:italic;">Amount in ${curShort}: <span style="font-weight:bold; font-style:normal;">${amountInWords(subTotal, cur)}</span></div>
 
       ${containers && containers.length > 0 ? `
-        <div style="margin-top:6px; font-size:10px; color:#333;">Container #: ${containers.map(c => c.containerNo).filter(Boolean).join(', ')}</div>` : ''}
+        <div style="margin-top:4px; font-size:10px; color:#333;">Container #: ${containers.map(c => c.containerNo).filter(Boolean).join(', ')}</div>` : ''}
 
       ${bankingSection}
 
-      ${doc._notes ? `<div style="margin-top:8px; font-size:10.5px;"><strong>Notes:</strong> ${doc._notes}</div>` : ''}
+      ${doc._notes ? `<div style="margin-top:5px; font-size:10.5px;"><strong>Notes:</strong> ${doc._notes}</div>` : ''}
 
-      <p style="font-style:italic; font-size:10.5px; margin-top:10px; text-decoration:underline;">Certification: Goods shipped under this invoice are from Pakistan origin</p>
+      <p style="font-style:italic; font-size:10.5px; margin-top:6px; text-decoration:underline;">Certification: Goods shipped under this invoice are from Pakistan origin</p>
 
-      <div style="margin-top:24px;">
+      <div style="margin-top:12px;">
         <p style="margin:0;">Name of Signing authority:</p>
-        <div style="margin-top:22px; font-weight:bold;">${opts.signatory || doc._signatory || company.proprietor}<br/>Proprietor<br/>${company.name}</div>
+        <div style="margin-top:14px; font-weight:bold;">${opts.signatory || doc._signatory || company.proprietor}<br/>Proprietor<br/>${company.name}</div>
       </div>
       ${renderComplianceFooter(company)}
     </div>`;
@@ -1916,6 +1916,9 @@ export default function DocumentCenter({ order }) {
     // landscape: 297-2*10. We force the print body to EXACTLY this width so the doc
     // fills the sheet (see the CSS below for why).
     const printW = landscape ? '277mm' : '186mm';
+    // Printable page HEIGHT (px @96dpi) = paper height − both @page margins.
+    // Portrait A4: 297−24mm; landscape: 210−20mm. Used by the fit script below.
+    const pageHpx = Math.round((landscape ? (210 - 20) : (297 - 24)) * 96 / 25.4);
     // Setting an explicit @page margin suppresses Chrome/Edge/Safari's
     // default print header (date, page title, URL) and footer (page numbers,
     // URL). Firefox honors the same rule. The margin keeps the document
@@ -1942,8 +1945,27 @@ export default function DocumentCenter({ order }) {
           </style>
         </head>
         <body>
-          ${editedHtml}
-          <script>window.onload = function() { window.print(); }</script>
+          <div id="agri-fit">${editedHtml}</div>
+          <script>
+            window.onload = function() {
+              // Auto-fit: if the document overflows the page by only a MODEST
+              // amount (up to ~1.35 pages), zoom it down just enough to land on
+              // a single sheet, so a one-line invoice never spills a couple of
+              // rows onto a second page. Genuinely long documents (multi-page
+              // T&Cs) are left at full size to stay readable. zoom (not
+              // transform) is used because it reflows layout, so print
+              // pagination actually sees the reduced height.
+              try {
+                var el = document.getElementById('agri-fit');
+                var page = ${pageHpx};
+                var h = el.scrollHeight;
+                if (h > page && h <= page * 1.35) {
+                  el.style.zoom = Math.max(0.72, (page - 2) / h);
+                }
+              } catch (e) { /* fall back to native pagination */ }
+              window.print();
+            };
+          </script>
         </body>
       </html>
     `);
