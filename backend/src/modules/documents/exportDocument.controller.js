@@ -712,3 +712,4 @@ module.exports = exportDocumentController;
 module.exports.assembleDocument = assembleDocument;
 module.exports.maskDocumentForViewer = maskDocumentForViewer;
 module.exports.gatherOrderData = gatherOrderData;
+module.exports.bankFromAccount = bankFromAccount;

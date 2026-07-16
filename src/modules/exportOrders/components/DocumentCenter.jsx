@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { FileText, Download, Printer, Eye, CheckCircle, Clock, Loader2, Edit2, AlertTriangle, AlertCircle } from 'lucide-react';
 import api from '../../../api/client';
 import { useApp } from '../../../context/AppContext';
+import { useAuth } from '../../../context/AuthContext';
 import Modal from '../../../components/Modal';
 import { incotermLabel } from '../../../shared/constants/incoterms';
 
@@ -428,7 +429,7 @@ function commercialInvoiceHtml(doc, opts = {}) {
   return `
     <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px; color:#111;">
       ${renderComplianceHeader(company)}
-      <p style="text-align:center; font-weight:bold; text-decoration:underline; margin:0 0 4px;">${opts.copyLabel || 'ORIGINAL'}</p>
+      <p style="text-align:center; font-weight:bold; text-decoration:underline; margin:0 0 4px;">${opts.copyLabel || doc._copyLabel || 'ORIGINAL'}</p>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
         <div style="flex:1;"></div>
         <h2 style="font-size:18px; margin:0; text-decoration:underline; letter-spacing:.5px;">COMMERCIAL INVOICE</h2>
@@ -524,11 +525,13 @@ function commercialInvoiceHtml(doc, opts = {}) {
 
       ${bankingSection}
 
+      ${doc._notes ? `<div style="margin-top:8px; font-size:10.5px;"><strong>Notes:</strong> ${doc._notes}</div>` : ''}
+
       <p style="font-style:italic; font-size:10.5px; margin-top:10px; text-decoration:underline;">Certification: Goods shipped under this invoice are from Pakistan origin</p>
 
       <div style="margin-top:24px;">
         <p style="margin:0;">Name of Signing authority:</p>
-        <div style="margin-top:22px; font-weight:bold;">${opts.signatory || company.proprietor}<br/>Proprietor<br/>${company.name}</div>
+        <div style="margin-top:22px; font-weight:bold;">${opts.signatory || doc._signatory || company.proprietor}<br/>Proprietor<br/>${company.name}</div>
       </div>
       ${renderComplianceFooter(company)}
     </div>`;
@@ -1769,15 +1772,35 @@ function renderDocument(doc) {
 
 // ─── Document Center Component ───
 
+const wfBtn = 'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50';
+const STATUS_BADGE = {
+  'Draft': 'bg-gray-100 text-gray-600',
+  'Under Review': 'bg-blue-100 text-blue-700',
+  'Approved': 'bg-emerald-100 text-emerald-700',
+  'Sent to Bank': 'bg-indigo-100 text-indigo-700',
+  'Sent to Chamber': 'bg-purple-100 text-purple-700',
+  'Issued to Customer': 'bg-teal-100 text-teal-700',
+  'Revised': 'bg-amber-100 text-amber-700',
+  'Cancelled': 'bg-red-100 text-red-600',
+};
+
 export default function DocumentCenter({ order }) {
-  const { addToast } = useApp();
+  const { addToast, bankAccountsList } = useApp();
+  const { hasPermission } = useAuth();
   const [availableDocs, setAvailableDocs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [previewDoc, setPreviewDoc] = useState(null);
   const [previewHtml, setPreviewHtml] = useState('');
+  const [previewKey, setPreviewKey] = useState(null);   // docType currently open
+  const [version, setVersion] = useState(null);          // persisted version meta
+  const [versions, setVersions] = useState([]);          // version history
+  const [wfBusy, setWfBusy] = useState(false);           // workflow action in flight
   const [generating, setGenerating] = useState(null);
   const printRef = useRef(null);
   const validation = useMemo(() => validateExportDoc(previewDoc), [previewDoc]);
+  const canApprove = hasPermission('documents', 'approve');
+  const locked = !!(version && version.locked);
+  const bankOptions = (bankAccountsList || []).filter((b) => b.type !== 'cash');
 
   useEffect(() => {
     if (!order?.dbId && !order?.id) return;
@@ -1788,22 +1811,96 @@ export default function DocumentCenter({ order }) {
       .finally(() => setLoading(false));
   }, [order?.dbId, order?.id, order?.status]);
 
+  const oid = order.dbId || order.id;
+
+  // Apply a persisted version payload (from any draft/workflow endpoint) to the
+  // preview, keeping the rendered HTML + version meta in sync.
+  function applyVersion(payload, docKey) {
+    const doc = payload?.document;
+    const meta = payload?.version;
+    if (doc) {
+      doc._docType = docKey || meta?.doc_type || previewKey;
+      setPreviewDoc(doc);
+      setPreviewHtml(renderDocument(doc));
+    }
+    if (meta) setVersion(meta);
+  }
+
+  async function loadVersions(docKey) {
+    try {
+      const res = await api.get(`/api/export-orders/${oid}/documents/${docKey}/versions`);
+      setVersions(res?.data?.versions || []);
+    } catch { /* non-fatal */ }
+  }
+
   async function handleGenerate(docKey) {
     setGenerating(docKey);
+    setPreviewKey(docKey);
+    setVersion(null);
+    setVersions([]);
     try {
-      const oid = order.dbId || order.id;
-      const res = await api.get(`/api/export-orders/${oid}/documents/generate/${docKey}`);
-      const doc = res?.data?.document;
-      if (doc) {
-        doc._docType = docKey;
-        setPreviewDoc(doc);
-        setPreviewHtml(renderDocument(doc));
+      // Persist (or resume) a draft — this freezes a snapshot and returns the
+      // merged + masked document. Falls back to the stateless preview if the
+      // persistence layer is unavailable so the user can still print.
+      let payload;
+      try {
+        const res = await api.post(`/api/export-orders/${oid}/documents/${docKey}/draft`, {});
+        payload = res?.data;
+      } catch {
+        const res = await api.get(`/api/export-orders/${oid}/documents/generate/${docKey}`);
+        payload = { document: res?.data?.document };
       }
+      applyVersion(payload, docKey);
+      loadVersions(docKey);
     } catch (err) {
       addToast(`Failed to generate document: ${err.message}`, 'error');
     } finally {
       setGenerating(null);
     }
+  }
+
+  // Persist preview edits (inline HTML + structured signatory/notes) as an
+  // overrides patch — never touches the order/customer source record.
+  async function saveEdits(extraOverrides = {}) {
+    if (!version?.id) { addToast('Draft not persisted; edits are local only.', 'info'); return; }
+    setWfBusy(true);
+    try {
+      const editedHtml = printRef.current ? printRef.current.innerHTML : previewHtml;
+      const res = await api.put(`/api/export-orders/${oid}/documents/${version.id}/overrides`, {
+        overrides: extraOverrides, editedHtml,
+      });
+      applyVersion(res?.data);
+      addToast('Document edits saved', 'success');
+    } catch (err) {
+      addToast(err.message || 'Save failed', 'error');
+    } finally { setWfBusy(false); }
+  }
+
+  async function saveSettings(patch) {
+    if (!version?.id) return;
+    setWfBusy(true);
+    try {
+      const res = await api.put(`/api/export-orders/${oid}/documents/${version.id}/settings`, patch);
+      applyVersion(res?.data);
+    } catch (err) {
+      addToast(err.message || 'Update failed', 'error');
+    } finally { setWfBusy(false); }
+  }
+
+  // Run a workflow action (submit/approve/status/revise), refresh preview + list.
+  async function runWorkflow(kind, body = {}) {
+    if (!version?.id) return;
+    setWfBusy(true);
+    try {
+      const method = kind === 'revise' ? 'post' : 'put';
+      const res = await api[method](`/api/export-orders/${oid}/documents/${version.id}/${kind}`, body);
+      applyVersion(res?.data, previewKey);
+      loadVersions(previewKey);
+      addToast(`Document ${res?.data?.version?.status || 'updated'}`, 'success');
+    } catch (err) {
+      const list = err?.response?.data?.errors || err?.data?.errors;
+      addToast(list?.length ? `Cannot proceed: ${list[0]}` : (err.message || 'Action failed'), 'error');
+    } finally { setWfBusy(false); }
   }
 
   function handlePrint() {
@@ -1926,27 +2023,104 @@ export default function DocumentCenter({ order }) {
 
       {/* Preview Modal */}
       {previewDoc && (
-        <Modal isOpen={!!previewDoc} onClose={() => setPreviewDoc(null)} title={`${previewDoc.type} — ${order.id}`} size="xl">
+        <Modal isOpen={!!previewDoc} onClose={() => { setPreviewDoc(null); setVersion(null); setVersions([]); }} title={`${previewDoc.type} — ${order.id}`} size="xl">
           <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-gray-400 flex items-center gap-1">
-                <Edit2 className="w-3 h-3" /> Click any text to edit before printing
-              </p>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2 text-xs">
+                {version && (
+                  <>
+                    <span className={`px-2 py-1 rounded-full font-semibold ${STATUS_BADGE[version.status] || 'bg-gray-100 text-gray-600'}`}>{version.status}</span>
+                    <span className="text-gray-400">{version.doc_no} · v{version.version}</span>
+                    {locked && <span className="text-amber-600 font-medium">🔒 locked</span>}
+                  </>
+                )}
+                {!locked && (
+                  <span className="text-gray-400 flex items-center gap-1"><Edit2 className="w-3 h-3" /> Click text to edit</span>
+                )}
+              </div>
               <div className="flex items-center gap-2">
-                <button
-                  onClick={() => { setPreviewHtml(renderDocument(previewDoc)); addToast('Document reset to original', 'info'); }}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50"
-                >
-                  Reset
-                </button>
-                <button
-                  onClick={handlePrint}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
-                >
+                {!locked && version?.id && (
+                  <button onClick={() => saveEdits()} disabled={wfBusy}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-50">
+                    {wfBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Edit2 className="w-4 h-4" />} Save edits
+                  </button>
+                )}
+                <button onClick={handlePrint}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
                   <Printer className="w-4 h-4" /> Print / Save PDF
                 </button>
               </div>
             </div>
+
+            {/* Settings + workflow bar (persisted documents only) */}
+            {version?.id && (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <label className="text-xs text-gray-600">Bank account
+                    <select disabled={locked || wfBusy} value={version.bank_account_id || ''}
+                      onChange={(e) => saveSettings({ bankAccountId: e.target.value ? Number(e.target.value) : null })}
+                      className="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white disabled:opacity-60">
+                      <option value="">Export default</option>
+                      {bankOptions.map((b) => <option key={b.id} value={b.id}>{b.name}{b.bankName ? ` — ${b.bankName}` : ''}</option>)}
+                    </select>
+                  </label>
+                  <label className="text-xs text-gray-600">Copy
+                    <select disabled={locked || wfBusy} value={version.copy_label || 'ORIGINAL'}
+                      onChange={(e) => saveSettings({ copyLabel: e.target.value })}
+                      className="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white disabled:opacity-60">
+                      <option value="ORIGINAL">Original</option>
+                      <option value="COPY">Copy</option>
+                      <option value="DUPLICATE">Duplicate</option>
+                    </select>
+                  </label>
+                  <label className="text-xs text-gray-600">Audience
+                    <select disabled={locked || wfBusy} value={version.audience || 'internal'}
+                      onChange={(e) => saveSettings({ audience: e.target.value })}
+                      className="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white disabled:opacity-60">
+                      <option value="internal">Internal</option>
+                      <option value="bank">Bank</option>
+                      <option value="chamber">Chamber</option>
+                      <option value="customer">Customer</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {version.status === 'Draft' && (
+                    <button onClick={() => runWorkflow('submit')} disabled={wfBusy} className={wfBtn}>Submit for review</button>
+                  )}
+                  {version.status === 'Under Review' && (
+                    <>
+                      <button onClick={() => runWorkflow('approve')} disabled={wfBusy || !canApprove || validation.errors.length > 0}
+                        title={validation.errors.length ? 'Resolve validation issues first' : (!canApprove ? 'Requires document approval permission' : '')}
+                        className={`${wfBtn} bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-700`}>Approve &amp; lock</button>
+                      <button onClick={() => runWorkflow('status', { status: 'Draft' })} disabled={wfBusy} className={wfBtn}>Back to draft</button>
+                    </>
+                  )}
+                  {['Approved', 'Sent to Bank', 'Sent to Chamber'].includes(version.status) && (
+                    <>
+                      {version.status !== 'Sent to Bank' && <button onClick={() => runWorkflow('status', { status: 'Sent to Bank' })} disabled={wfBusy} className={wfBtn}>Sent to bank</button>}
+                      {version.status !== 'Sent to Chamber' && <button onClick={() => runWorkflow('status', { status: 'Sent to Chamber' })} disabled={wfBusy} className={wfBtn}>Sent to chamber</button>}
+                      <button onClick={() => runWorkflow('status', { status: 'Issued to Customer' })} disabled={wfBusy} className={wfBtn}>Issued to customer</button>
+                    </>
+                  )}
+                  {locked && version.is_latest !== false && (
+                    <button onClick={() => { const r = window.prompt('Reason for revision?'); if (r) runWorkflow('revise', { reason: r }); }} disabled={wfBusy}
+                      className={`${wfBtn} border-amber-300 text-amber-700`}>Revise (new version)</button>
+                  )}
+                  {!['Cancelled', 'Revised'].includes(version.status) && (
+                    <button onClick={() => { if (window.confirm('Cancel this document?')) runWorkflow('status', { status: 'Cancelled' }); }} disabled={wfBusy}
+                      className={`${wfBtn} border-red-200 text-red-600`}>Cancel</button>
+                  )}
+                  {versions.length > 1 && (
+                    <span className="text-xs text-gray-400 ml-auto">History: {versions.map((v) => `v${v.version} ${v.status}`).join(' · ')}</span>
+                  )}
+                </div>
+                <p className="text-[11px] text-gray-400">
+                  Edits here update <strong>this document only</strong> and never change the order, customer or shipment records.
+                  To correct the underlying data, edit the export order instead, then <em>Revise</em> to re-pull it.
+                </p>
+              </div>
+            )}
             {(validation.errors.length > 0 || validation.warnings.length > 0) && (
               <div className="space-y-2">
                 {validation.errors.length > 0 && (

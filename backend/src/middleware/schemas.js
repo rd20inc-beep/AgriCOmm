@@ -533,6 +533,19 @@ const saveDocumentOverrides = Joi.object({
   editedHtml: Joi.string().allow('', null),
 });
 
+// Generated-document workflow bodies (Phase F).
+const documentSettings = Joi.object({
+  bankAccountId: Joi.number().integer().positive().allow(null),
+  audience: Joi.string().valid('internal', 'bank', 'chamber', 'customer'),
+  copyLabel: Joi.string().valid('ORIGINAL', 'COPY', 'DUPLICATE').allow(null, ''),
+});
+const documentStatus = Joi.object({
+  status: Joi.string().valid('Sent to Bank', 'Sent to Chamber', 'Issued to Customer', 'Cancelled', 'Draft').required(),
+});
+const documentRevise = Joi.object({
+  reason: Joi.string().min(1).required(),
+});
+
 module.exports = {
   createExportOrder,
   updateExportShipment,
@@ -561,4 +574,7 @@ module.exports = {
   createBatch,
   recordYield,
   saveDocumentOverrides,
+  documentSettings,
+  documentStatus,
+  documentRevise,
 };
