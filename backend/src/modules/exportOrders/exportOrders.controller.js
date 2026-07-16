@@ -840,6 +840,8 @@ const exportOrderController = {
             packing_type: ['retail', 'jumbo', 'container'].includes(packing_type) ? packing_type : 'retail',
             palletized: !!palletized,
             payment_terms: payment_terms || null,
+            // Company bank account for this order's documents (optional).
+            bank_account_id: req.body.bank_account_id || null,
             // Which buyer location lines print on documents
             doc_address_mode: ['country', 'port', 'full', 'country_port'].includes(req.body.doc_address_mode)
               ? req.body.doc_address_mode : 'country',
@@ -1359,7 +1361,7 @@ const exportOrderController = {
         freight_terms, consignee_type,
         shipment_window_start, shipment_window_end,
         notify_party_name, notify_party_address, notify_party_phone, notify_party_email,
-        shipment_remarks,
+        shipment_remarks, bank_account_id,
       } = req.body;
 
       const order = await db('export_orders').where({ id }).first();
@@ -1476,6 +1478,8 @@ const exportOrderController = {
           notify_party_phone: notify_party_phone || order.notify_party_phone || null,
           notify_party_email: notify_party_email || order.notify_party_email || null,
           shipment_remarks: shipment_remarks || order.shipment_remarks || null,
+          // Preserve the existing bank when the field isn't sent; allow clearing.
+          bank_account_id: bank_account_id === undefined ? order.bank_account_id : (bank_account_id || null),
           updated_at: trx.fn.now(),
         });
 

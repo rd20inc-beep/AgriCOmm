@@ -383,10 +383,13 @@ export function ShipmentModal({
   shipNotifyEmail, setShipNotifyEmail,
   shipRemarks, setShipRemarks,
   shipGatePass, setShipGatePass,
+  shipBankAccountId, setShipBankAccountId,
+  bankAccountsList = [],
   shipmentContainers, setShipmentContainers,
   reservedLots = [],
   onConfirm,
 }) {
+  const bankOptions = (bankAccountsList || []).filter((b) => b.type !== 'cash');
   const rows = Array.isArray(shipmentContainers) ? shipmentContainers : [];
 
   const updateRow = (index, field, value) => {
@@ -698,6 +701,13 @@ export function ShipmentModal({
             <select value={shipConsigneeType || 'to_order_of_bank'} onChange={e => setShipConsigneeType(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
               <option value="to_order_of_bank">To Order of Bank</option>
               <option value="direct">Direct to Buyer</option>
+            </select>
+          </div>
+          <div className="md:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Company Bank Account <span className="text-gray-400 font-normal">— shown on this order's documents</span></label>
+            <select value={shipBankAccountId || ''} onChange={e => setShipBankAccountId(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white">
+              <option value="">Use export default</option>
+              {bankOptions.map((b) => <option key={b.id} value={b.id}>{b.name}{b.bankName ? ` — ${b.bankName}` : ''}{b.iban ? ` (${b.iban})` : ''}</option>)}
             </select>
           </div>
         </div>
