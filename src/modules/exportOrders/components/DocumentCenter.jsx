@@ -261,7 +261,7 @@ function renderHeader(company) {
 
 function renderCompanyFooter(company) {
   return `
-    <div style="text-align:center; margin-top:30px; padding-top:10px; border-top:1px solid #ccc; font-size:10px; color:#666;">
+    <div class="agri-ftr" style="text-align:center; margin-top:30px; padding-top:10px; border-top:1px solid #ccc; font-size:10px; color:#666;">
       ${company.address}<br/>
       Tel: ${company.phone} &nbsp; Fax: ${company.fax} &nbsp; Email: ${company.email} &nbsp; Website: ${company.website}
     </div>`;
@@ -1093,7 +1093,7 @@ function renderComplianceHeader(company) {
 function renderComplianceFooter(company) {
   const bits = [company.phone ? `Tel: ${company.phone}` : '', company.email ? `Email: ${company.email}` : '', company.website ? `Web: ${company.website}` : ''].filter(Boolean).join('  ·  ');
   return `
-    <div style="margin-top:36px; background:#1e3a5f; color:#fff; text-align:center; font-size:10px; padding:8px 10px; line-height:1.5;">
+    <div class="agri-ftr" style="margin-top:36px; background:#1e3a5f; color:#fff; text-align:center; font-size:10px; padding:8px 10px; line-height:1.5;">
       ${company.address}<br/>${bits}
     </div>`;
 }
@@ -1954,8 +1954,9 @@ export default function DocumentCenter({ order }) {
     // landscape: 297-2*10. We force the print body to EXACTLY this width so the doc
     // fills the sheet (see the CSS below for why).
     const printW = landscape ? '277mm' : '186mm';
-    // Printable page HEIGHT (px @96dpi) = paper height − both @page margins.
-    // Portrait A4: 297−24mm; landscape: 210−20mm. Used by the fit script below.
+    // Printable page HEIGHT — as mm (for the min-height that makes short
+    // documents fill the full page length) and as px @96dpi (for the fit script).
+    const printH = landscape ? '190mm' : '273mm';
     const pageHpx = Math.round((landscape ? (210 - 20) : (297 - 24)) * 96 / 25.4);
     // Setting an explicit @page margin suppresses Chrome/Edge/Safari's
     // default print header (date, page title, URL) and footer (page numbers,
@@ -1974,8 +1975,20 @@ export default function DocumentCenter({ order }) {
                the exact A4 printable width so the layout maps 1:1 to the sheet, and
                force the document to fill it. */
             html, body { margin: 0; padding: 0; width: ${printW}; }
+            #agri-fit { width: 100%; }
             body .agri-doc { width: 100%; max-width: 100%; margin: 0; box-sizing: border-box; }
-            body .agri-doc > div { width: 100% !important; max-width: 100% !important; margin: 0 !important; box-sizing: border-box; }
+            /* Fill the full A4 WIDTH, and the full LENGTH: the document body is
+               a flex column at least one page tall, and its trailing letterhead
+               footer is pushed to the bottom edge (margin-top:auto) so short
+               documents occupy the whole sheet instead of clustering at the top. */
+            body .agri-doc > div {
+              width: 100% !important; max-width: 100% !important; margin: 0 !important; box-sizing: border-box;
+              min-height: ${printH}; display: flex; flex-direction: column;
+            }
+            /* Push ONLY the letterhead footer to the bottom edge, so the sheet is
+               used top-to-bottom while documents without a footer just fill from
+               the top (no odd gaps). */
+            body .agri-doc > div > .agri-ftr { margin-top: auto; }
             @media print {
               html, body { margin: 0; padding: 0; width: ${printW}; }
               body .agri-doc, body .agri-doc > div { width: 100% !important; max-width: 100% !important; margin: 0 !important; box-sizing: border-box; }
@@ -1987,18 +2000,21 @@ export default function DocumentCenter({ order }) {
           <script>
             window.onload = function() {
               // Auto-fit: if the document overflows the page by only a MODEST
-              // amount (up to ~1.35 pages), zoom it down just enough to land on
-              // a single sheet, so a one-line invoice never spills a couple of
-              // rows onto a second page. Genuinely long documents (multi-page
-              // T&Cs) are left at full size to stay readable. zoom (not
-              // transform) is used because it reflows layout, so print
-              // pagination actually sees the reduced height.
+              // amount (up to ~1.35 pages), zoom it down just enough to land on a
+              // single sheet, so a one-line invoice never spills a couple of rows
+              // onto a second page. The width is compensated (100/zoom%) so the
+              // document keeps filling the FULL page width after zooming, not just
+              // its height. Genuinely long documents are left at full size and
+              // paginate normally. zoom (not transform) reflows layout so print
+              // pagination sees the reduced height.
               try {
                 var el = document.getElementById('agri-fit');
                 var page = ${pageHpx};
                 var h = el.scrollHeight;
                 if (h > page && h <= page * 1.35) {
-                  el.style.zoom = Math.max(0.72, (page - 2) / h);
+                  var z = Math.max(0.72, (page - 2) / h);
+                  el.style.zoom = z;
+                  el.style.width = (100 / z) + '%';
                 }
               } catch (e) { /* fall back to native pagination */ }
               window.print();
