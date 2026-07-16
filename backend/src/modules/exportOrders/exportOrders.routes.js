@@ -209,6 +209,7 @@ router.get('/:id/documents/generate/:docType', authorize('export_orders', 'view'
 
 // Persisted / versioned generated documents (Phase E).
 const genDocController = require('../../modules/documents/generatedDocument.controller');
+router.put('/:id/documents/customer-style', authorize('export_orders', 'edit'), validate(schemas.documentCustomerStyle), genDocController.saveCustomerStyle);
 router.post('/:id/documents/:docType/draft', authorize('export_orders', 'view'), genDocController.createDraft);
 router.get('/:id/documents/:docType/current', authorize('export_orders', 'view'), genDocController.getCurrent);
 router.get('/:id/documents/:docType/versions', authorize('export_orders', 'view'), genDocController.listVersions);

@@ -62,6 +62,7 @@ async function gatherOrderData(orderId) {
       'c.bank_name as customer_bank', 'c.bank_account as customer_account',
       'c.bank_swift as customer_swift', 'c.bank_iban as customer_iban',
       'c.payment_terms as customer_payment_terms',
+      'c.doc_font_family as customer_doc_font', 'c.doc_font_scale as customer_doc_scale',
       'p.name as product_full_name')
     .where('eo.id', orderId)
     .first();
@@ -244,6 +245,13 @@ const exportDocumentController = {
           kcciMembership: settings.kcci_membership || '29463',
           // Real, selectable bank account (Phase A/B) — masked per viewer.
           bank: companyBank,
+        },
+
+        // Per-customer document typography (family + size scale). Saved from the
+        // preview screen so every document for this consignee looks consistent.
+        style: {
+          fontFamily: order.customer_doc_font || 'Arial, sans-serif',
+          fontScale: parseFloat(order.customer_doc_scale) || 1,
         },
 
         // Buyer

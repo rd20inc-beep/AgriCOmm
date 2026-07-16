@@ -545,6 +545,10 @@ const documentStatus = Joi.object({
 const documentRevise = Joi.object({
   reason: Joi.string().min(1).required(),
 });
+const documentCustomerStyle = Joi.object({
+  fontFamily: Joi.string().max(80).allow('', null),
+  fontScale: Joi.number().min(0.7).max(1.5),
+});
 
 module.exports = {
   createExportOrder,
@@ -577,4 +581,5 @@ module.exports = {
   documentSettings,
   documentStatus,
   documentRevise,
+  documentCustomerStyle,
 };
