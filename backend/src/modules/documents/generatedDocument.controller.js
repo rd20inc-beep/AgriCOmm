@@ -17,14 +17,49 @@ function meta(row) {
   return rest;
 }
 
-// Merge snapshot+overrides and mask the banking block for the requesting user.
+// Merge snapshot+overrides, re-resolve the selected bank, and mask the banking
+// block for the requesting user + the document's audience.
 async function renderRow(row, req) {
-  const doc = service.mergedDocument(row);
+  const doc = await service._assembledForRow(row);
   const canSeeFull = await userHasPermission(req, 'finance', 'view_bank_details');
   maskDocumentForViewer(doc, { canSeeFull, audience: row.audience || 'internal' });
   doc._genId = row.id;
   doc._docType = row.doc_type;
+  doc._status = row.status;
+  doc._version = row.version;
+  doc._locked = row.locked;
+  doc._copyLabel = row.copy_label || 'ORIGINAL';
+  doc._audience = row.audience;
   return doc;
+}
+
+// Shared handler for the workflow transitions (submit / approve / setStatus /
+// revise). Runs the service method, audits it, and returns the fresh document.
+async function transition(req, res, action) {
+  try {
+    const genId = parseInt(req.params.genId, 10);
+    const userId = req.user && req.user.id;
+    let row;
+    let auditAction = action;
+    if (action === 'submit') row = await service.submit(genId, userId);
+    else if (action === 'approve') { row = await service.approve(genId, userId); auditAction = 'approve_document'; }
+    else if (action === 'setStatus') { row = await service.setStatus(genId, req.body.status, userId); auditAction = `status:${req.body.status}`; }
+    else if (action === 'revise') { row = await service.revise(genId, userId, req.body.reason); auditAction = 'revise_document'; }
+    const document = await renderRow(row, req);
+    auditService.log({
+      userId: userId || null,
+      action: auditAction,
+      entityType: 'generated_document',
+      entityId: row.doc_no,
+      details: { docType: row.doc_type, version: row.version, status: row.status },
+      ipAddress: req.ip,
+    }).catch(() => {});
+    return res.json({ success: true, data: { version: meta(row), document } });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ success: false, code: err.code, message: err.message, errors: err.errors });
+    console.error(`${action} error:`, err);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
 }
 
 const generatedDocumentController = {
@@ -103,6 +138,29 @@ const generatedDocumentController = {
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
   },
+
+  // PUT /documents/:genId/settings — bank account / audience / copy label.
+  async updateSettings(req, res) {
+    try {
+      const row = await service.updateSettings(parseInt(req.params.genId, 10), {
+        bankAccountId: req.body.bankAccountId,
+        audience: req.body.audience,
+        copyLabel: req.body.copyLabel,
+      }, req.user && req.user.id);
+      const document = await renderRow(row, req);
+      return res.json({ success: true, data: { version: meta(row), document } });
+    } catch (err) {
+      if (err.status) return res.status(err.status).json({ success: false, code: err.code, message: err.message });
+      console.error('updateSettings error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  // Workflow transitions. approve is gated on documents.approve at the route.
+  async submit(req, res) { return transition(req, res, 'submit'); },
+  async approve(req, res) { return transition(req, res, 'approve'); },
+  async setStatus(req, res) { return transition(req, res, 'setStatus'); },
+  async revise(req, res) { return transition(req, res, 'revise'); },
 
   // GET /documents/:genId — a specific version (merged + masked).
   async getVersion(req, res) {

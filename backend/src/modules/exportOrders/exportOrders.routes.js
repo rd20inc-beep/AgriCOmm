@@ -213,6 +213,11 @@ router.post('/:id/documents/:docType/draft', authorize('export_orders', 'view'),
 router.get('/:id/documents/:docType/current', authorize('export_orders', 'view'), genDocController.getCurrent);
 router.get('/:id/documents/:docType/versions', authorize('export_orders', 'view'), genDocController.listVersions);
 router.put('/documents/:genId/overrides', authorize('export_orders', 'edit'), validate(schemas.saveDocumentOverrides), genDocController.saveOverrides);
+router.put('/documents/:genId/settings', authorize('export_orders', 'edit'), validate(schemas.documentSettings), genDocController.updateSettings);
+router.put('/documents/:genId/submit', authorize('export_orders', 'edit'), genDocController.submit);
+router.put('/documents/:genId/approve', authorize('documents', 'approve'), genDocController.approve);
+router.put('/documents/:genId/status', authorize('export_orders', 'edit'), validate(schemas.documentStatus), genDocController.setStatus);
+router.post('/documents/:genId/revise', authorize('export_orders', 'edit'), validate(schemas.documentRevise), genDocController.revise);
 router.get('/documents/:genId', authorize('export_orders', 'view'), genDocController.getVersion);
 
 module.exports = router;
