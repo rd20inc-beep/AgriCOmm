@@ -1831,6 +1831,14 @@ function renderDocument(doc, style) {
 // ─── Document Center Component ───
 
 const wfBtn = 'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50';
+// Document types whose printed output actually shows the company bank account —
+// only these get the bank-account selector (and the audience/masking control)
+// in the preview. Others (Packing List, Certificate of Origin, …) don't.
+const BANK_DOC_TYPES = new Set([
+  'commercial-invoice', 'statement-of-origin', 'proforma-invoice',
+  'bank-fi-request', 'bank-covering-letter', 'export-undertaking', 'itrs',
+  'bill-of-lading', 'lab-test-request',
+]);
 const STATUS_BADGE = {
   'Draft': 'bg-gray-100 text-gray-600',
   'Under Review': 'bg-blue-100 text-blue-700',
@@ -1861,6 +1869,7 @@ export default function DocumentCenter({ order }) {
   const canApprove = hasPermission('documents', 'approve');
   const locked = !!(version && version.locked);
   const bankOptions = (bankAccountsList || []).filter((b) => b.type !== 'cash');
+  const showBank = BANK_DOC_TYPES.has(previewKey);
 
   useEffect(() => {
     if (!order?.dbId && !order?.id) return;
@@ -2275,14 +2284,16 @@ export default function DocumentCenter({ order }) {
             {version?.id && (
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <label className="text-xs text-gray-600">Bank account
-                    <select disabled={locked || wfBusy} value={version.bank_account_id || ''}
-                      onChange={(e) => saveSettings({ bankAccountId: e.target.value ? Number(e.target.value) : null })}
-                      className="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white disabled:opacity-60">
-                      <option value="">Export default</option>
-                      {bankOptions.map((b) => <option key={b.id} value={b.id}>{b.name}{b.bankName ? ` — ${b.bankName}` : ''}</option>)}
-                    </select>
-                  </label>
+                  {showBank && (
+                    <label className="text-xs text-gray-600">Bank account
+                      <select disabled={locked || wfBusy} value={version.bank_account_id || ''}
+                        onChange={(e) => saveSettings({ bankAccountId: e.target.value ? Number(e.target.value) : null })}
+                        className="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white disabled:opacity-60">
+                        <option value="">Export default</option>
+                        {bankOptions.map((b) => <option key={b.id} value={b.id}>{b.name}{b.bankName ? ` — ${b.bankName}` : ''}</option>)}
+                      </select>
+                    </label>
+                  )}
                   <label className="text-xs text-gray-600">Copy
                     <select disabled={locked || wfBusy} value={version.copy_label || 'ORIGINAL'}
                       onChange={(e) => saveSettings({ copyLabel: e.target.value })}
@@ -2292,16 +2303,18 @@ export default function DocumentCenter({ order }) {
                       <option value="DUPLICATE">Duplicate</option>
                     </select>
                   </label>
-                  <label className="text-xs text-gray-600">Audience
-                    <select disabled={locked || wfBusy} value={version.audience || 'internal'}
-                      onChange={(e) => saveSettings({ audience: e.target.value })}
-                      className="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white disabled:opacity-60">
-                      <option value="internal">Internal</option>
-                      <option value="bank">Bank</option>
-                      <option value="chamber">Chamber</option>
-                      <option value="customer">Customer</option>
-                    </select>
-                  </label>
+                  {showBank && (
+                    <label className="text-xs text-gray-600">Audience
+                      <select disabled={locked || wfBusy} value={version.audience || 'internal'}
+                        onChange={(e) => saveSettings({ audience: e.target.value })}
+                        className="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white disabled:opacity-60">
+                        <option value="internal">Internal</option>
+                        <option value="bank">Bank</option>
+                        <option value="chamber">Chamber</option>
+                        <option value="customer">Customer</option>
+                      </select>
+                    </label>
+                  )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   {version.status === 'Draft' && (
