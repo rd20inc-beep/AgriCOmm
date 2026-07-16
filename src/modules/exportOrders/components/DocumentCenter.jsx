@@ -1875,8 +1875,10 @@ export default function DocumentCenter({ order }) {
 
   // Apply a persisted version payload (from any draft/workflow endpoint) to the
   // preview, keeping the rendered HTML + version meta in sync. Uses the current
-  // font style; pass `style` to also (re)initialise it from the document.
-  function applyVersion(payload, docKey, style) {
+  // font style; pass `style` to also (re)initialise it from the document. When
+  // `preferEdited` is set and the draft has saved inline edits, show those (so
+  // per-word formatting survives reopen) instead of a fresh render.
+  function applyVersion(payload, docKey, style, preferEdited) {
     const doc = payload?.document;
     const meta = payload?.version;
     const useStyle = style || docStyle;
@@ -1884,10 +1886,38 @@ export default function DocumentCenter({ order }) {
     if (doc) {
       doc._docType = docKey || meta?.doc_type || previewKey;
       setPreviewDoc(doc);
-      setPreviewHtml(renderDocument(doc, useStyle));
+      setPreviewHtml(preferEdited && payload?.editedHtml ? payload.editedHtml : renderDocument(doc, useStyle));
     }
     if (meta) setVersion(meta);
   }
+
+  // Apply an inline style to the currently selected text in the preview — lets
+  // the user resize / bold individual words. Wrapping the selected range keeps
+  // it in the printable + savable DOM.
+  function styleSelection(apply) {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) { addToast('Select some text first', 'info'); return; }
+    const range = sel.getRangeAt(0);
+    if (!printRef.current || !printRef.current.contains(range.commonAncestorContainer)) {
+      addToast('Select text inside the document', 'info'); return;
+    }
+    let anchor = range.startContainer;
+    if (anchor.nodeType === 3) anchor = anchor.parentElement;
+    const span = document.createElement('span');
+    apply(span, anchor);
+    try {
+      span.appendChild(range.extractContents());
+      range.insertNode(span);
+      sel.removeAllRanges();
+    } catch { addToast('Could not format that selection — try selecting within one line', 'error'); }
+  }
+  const resizeSelection = (delta) => styleSelection((span, anchor) => {
+    const cur = parseFloat(getComputedStyle(anchor).fontSize) || 11;
+    span.style.fontSize = Math.max(6, Math.min(48, Math.round(cur + delta))) + 'px';
+  });
+  const setSelectionSize = (px) => styleSelection((span) => { span.style.fontSize = px + 'px'; });
+  const toggleSelectionWeight = () => styleSelection((span) => { span.style.fontWeight = 'bold'; });
+  const toggleSelectionItalic = () => styleSelection((span) => { span.style.fontStyle = 'italic'; });
 
   // Change the document font (family / size) live in the preview.
   function applyStyle(next) {
@@ -1939,7 +1969,7 @@ export default function DocumentCenter({ order }) {
         fontScale: Number(payload?.document?.style?.fontScale) || 1,
       };
       setStyleDirty(false);
-      applyVersion(payload, docKey, initStyle);
+      applyVersion(payload, docKey, initStyle, true);
       loadVersions(docKey);
     } catch (err) {
       addToast(`Failed to generate document: ${err.message}`, 'error');
@@ -1958,7 +1988,9 @@ export default function DocumentCenter({ order }) {
       const res = await api.put(`/api/export-orders/${oid}/documents/${version.id}/overrides`, {
         overrides: extraOverrides, editedHtml,
       });
-      applyVersion(res?.data);
+      // Keep the edited preview on screen (don't re-render from the snapshot,
+      // which would discard the just-made inline / per-word formatting).
+      if (res?.data?.version) setVersion(res.data.version);
       addToast('Document edits saved', 'success');
     } catch (err) {
       addToast(err.message || 'Save failed', 'error');
@@ -2214,6 +2246,30 @@ export default function DocumentCenter({ order }) {
                 <Save className="w-3.5 h-3.5" /> Save for this customer
               </button>
             </div>
+
+            {/* Per-selection formatting — resize / bold individual words. */}
+            {!locked && (
+              <div className="rounded-lg border border-gray-200 bg-white p-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+                <span className="text-xs font-semibold text-gray-500">Selected text</span>
+                <span className="text-[11px] text-gray-400">select word(s) in the document, then:</span>
+                <div className="inline-flex items-center border border-gray-300 rounded-lg overflow-hidden">
+                  <button onMouseDown={(e) => e.preventDefault()} onClick={() => resizeSelection(-1)} className="px-2 py-1 hover:bg-gray-100 text-gray-700 text-xs" title="Smaller">A−</button>
+                  <button onMouseDown={(e) => e.preventDefault()} onClick={() => resizeSelection(1)} className="px-2 py-1 hover:bg-gray-100 text-gray-700 text-sm font-semibold" title="Bigger">A+</button>
+                </div>
+                <select defaultValue="" onMouseDown={(e) => e.stopPropagation()} onChange={(e) => { if (e.target.value) { setSelectionSize(Number(e.target.value)); e.target.value = ''; } }}
+                  className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs bg-white">
+                  <option value="">Set size…</option>
+                  {[8, 9, 10, 11, 12, 14, 16, 18, 20, 24].map((s) => <option key={s} value={s}>{s} px</option>)}
+                </select>
+                <button onMouseDown={(e) => e.preventDefault()} onClick={toggleSelectionWeight} className="px-2 py-1 border border-gray-300 rounded-lg text-xs font-bold text-gray-700 hover:bg-gray-50" title="Bold">B</button>
+                <button onMouseDown={(e) => e.preventDefault()} onClick={toggleSelectionItalic} className="px-2 py-1 border border-gray-300 rounded-lg text-xs italic text-gray-700 hover:bg-gray-50" title="Italic">I</button>
+                {version?.id && (
+                  <button onClick={() => saveEdits()} disabled={wfBusy} className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+                    {wfBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} Save edits
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* Settings + workflow bar (persisted documents only) */}
             {version?.id && (
