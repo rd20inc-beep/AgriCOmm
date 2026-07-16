@@ -216,6 +216,41 @@ function validateExportDoc(doc) {
   return { errors, warnings };
 }
 
+// Shared shipment/commercial SUMMARY block — HS Code (multiple codes joined
+// with " & "), Total Packages, Net Weight (MT), Gross Weight (MT), Total Amount
+// and the amount in words. Added consistently to the Commercial Invoice, Packing
+// List, Statement of Origin, Bill of Lading and Certificate of Origin so every
+// document surfaces the same verified figures.
+function docSummaryBlock(doc, opts = {}) {
+  const { order, totals } = doc;
+  const cur = order.currency || 'USD';
+  const curShort = cur === 'USD' ? 'US$' : cur;
+  const hs = order.hsCodes || { list: order.hsCode ? [order.hsCode] : [] };
+  const hsText = (hs.list && hs.list.length) ? hs.list.join(' & ') : (hs.single || order.hsCode || '');
+  const net = (totals && totals.netWeightKg) || 0;
+  const gross = (totals && totals.grossWeightKg) || net;
+  const pkgs = (totals && totals.totalPackages) || 0;
+  const lines = buildLineItems(doc);
+  const totalAmt = opts.amount != null ? opts.amount
+    : (lines.reduce((s, l) => s + (l.amount || 0), 0) || parseFloat(order.contractValue) || 0);
+  const mt = (kg) => `${((parseFloat(kg) || 0) / 1000).toFixed(3)} MT`;
+  const showAmount = opts.showAmount !== false;
+  const packLabel = opts.packLabel || order.packagesLabel || 'Bags';
+  const L = 'border:1px solid #333;padding:3px 7px;font-weight:bold;white-space:nowrap;background:#f7f7f7;';
+  const V = 'border:1px solid #333;padding:3px 7px;';
+  return `
+    <table style="width:100%;border-collapse:collapse;margin-top:${opts.marginTop || 8}px;font-size:10.5px;">
+      <tr>
+        <td style="${L}width:20%;">HS Code</td><td style="${V}">${hsText}</td>
+        ${showAmount ? `<td rowspan="4" style="border:1px solid #333;padding:6px;text-align:right;vertical-align:middle;width:24%;font-weight:bold;font-size:13px;">${curShort} ${fmtMoney(totalAmt)}</td>` : ''}
+      </tr>
+      <tr><td style="${L}">Total Packages</td><td style="${V}">${pkgs.toLocaleString()} ${packLabel}</td></tr>
+      <tr><td style="${L}">Net Weight</td><td style="${V}">${mt(net)}</td></tr>
+      <tr><td style="${L}">Gross Weight</td><td style="${V}">${mt(gross)}</td></tr>
+    </table>
+    ${showAmount ? `<div style="margin-top:4px;font-style:italic;font-size:10.5px;"><strong>Total Amount in ${curShort}:</strong> ${amountInWords(totalAmt, cur)}</div>` : ''}`;
+}
+
 function renderHeader(company) {
   return `
     <div style="text-align:center; margin-bottom:20px; border-bottom:2px solid #1e3a5f; padding-bottom:15px;">
@@ -391,11 +426,11 @@ function commercialInvoiceHtml(doc, opts = {}) {
   const totalPackages = (totals && totals.totalPackages) || totalBags || 0;
   const fmtKg = (kg) => `${(parseFloat(kg) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} KG (${((parseFloat(kg) || 0) / 1000).toFixed(3)} MT)`;
 
-  // HS codes — single value in the summary, or "Multiple HS Codes" + list.
+  // HS codes — one or more codes joined with " & " (e.g. "1006.3010 & 1006.3090").
   const hs = order.hsCodes || { list: order.hsCode ? [order.hsCode] : [], multiple: false, single: order.hsCode || '' };
-  const hsSummary = hs.multiple
-    ? `Multiple HS Codes${hs.list.length ? ` <span style="font-weight:normal;">(${hs.list.join(', ')})</span>` : ''}`
-    : (hs.single || (hs.list && hs.list[0]) || order.hsCode || '');
+  const hsSummary = (hs.list && hs.list.length)
+    ? hs.list.join(' & ')
+    : (hs.single || order.hsCode || '');
 
   // Shipment route (loading → discharge).
   const routeFrom = order.portOfLoading || 'Karachi, Pakistan';
@@ -672,7 +707,7 @@ function renderPackingList(doc) {
         </tr>
         <tr>
           <td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">HS Code</td>
-          <td style="border:1px solid #333; padding:5px 8px;">${(() => { const h = order.hsCodes || {}; return h.multiple ? `Multiple (${(h.list || []).join(', ')})` : (h.single || order.hsCode || ''); })()}</td>
+          <td style="border:1px solid #333; padding:5px 8px;">${(() => { const h = order.hsCodes || {}; return (h.list && h.list.length) ? h.list.join(' & ') : (h.single || order.hsCode || ''); })()}</td>
           <td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">Total Packages</td>
           <td style="border:1px solid #333; padding:5px 8px;">${(((totals && totals.totalPackages) || 0).toLocaleString())} Bags</td>
         </tr>
@@ -714,7 +749,9 @@ function renderPackingList(doc) {
         </tbody>
       </table>
 
-      <p style="font-style:italic; font-size:11px; margin-top:18px; text-decoration:underline;">
+      ${docSummaryBlock(doc, { packLabel: 'Bags' })}
+
+      <p style="font-style:italic; font-size:11px; margin-top:12px; text-decoration:underline;">
         Certification: Goods are shipped from Pakistan origin
       </p>
 
@@ -1407,6 +1444,8 @@ function renderBillOfLading(doc) {
           <td style="border:1px solid #333; padding:4px;"><strong>Freight</strong></td>
         </tr>
       </table>
+
+      ${docSummaryBlock(doc, { showAmount: false, packLabel: 'Bags' })}
     </div>`;
 }
 
@@ -1598,12 +1637,11 @@ function renderCertificateOfOrigin(doc) {
         </tbody>
       </table>
 
-      <div style="margin-top:10px; padding-left:18%; line-height:1.7;">
+      <div style="margin-top:10px; line-height:1.7;">
         <div><strong>SALES CONTRACT #</strong> ${order.contractNumber || ''}${order.date ? ` Dated: ${order.date}` : ''}</div>
-        <div><strong>H.S CODE</strong> &nbsp;&nbsp; # ${hsLine}</div>
-        <div><strong>TOTAL BAGS</strong> &nbsp; : ${totalBags.toLocaleString()} BAGS.</div>
-        <div><strong>TOTAL NET WT</strong>: ${fmtKg(totalNetKg)} KGS.</div>
       </div>
+
+      ${docSummaryBlock(doc, { packLabel: 'Bags', marginTop: 6 })}
 
       <div style="margin-top:30px; text-align:center; font-weight:bold; font-size:13px; line-height:1.5;">
         CERTIFIED THAT THE ABOVE GOODS<br/>
