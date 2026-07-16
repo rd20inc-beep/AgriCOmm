@@ -221,15 +221,11 @@ const exportDocumentController = {
         || (items || []).reduce((s, it) => s + (parseInt(it.bag_count) || 0), 0)
         || 0;
 
-      // Company bank block from the resolved account, masked by the viewer's
-      // permission. (Audience gate binds in a later phase; internal here.)
-      const canSeeFull = await userHasPermission(req, 'finance', 'view_bank_details');
-      const rawBank = bankFromAccount(bankAccount);
-      const companyBank = maskBank(rawBank, {
-        canSeeFull,
-        audience: 'internal',
-        approvedForCustomer: rawBank.approvedForCustomer,
-      });
+      // Company bank block from the resolved account — UNMASKED here. Masking
+      // is applied per-viewer at response time (below) so a stored draft
+      // snapshot keeps the full data and each reader is masked on their own
+      // permission rather than baking one viewer's access into the document.
+      const companyBank = bankFromAccount(bankAccount);
 
       // Common data shared across ALL documents
       const common = {
@@ -587,16 +583,31 @@ const exportDocumentController = {
         }
       }
 
-      // Audit the document view/generate — lightweight (no full payload or
-      // banking values), just who looked at which document on which order.
-      auditService.log({
-        userId: req.user ? req.user.id : null,
-        action: 'view_document',
-        entityType: 'export_document',
-        entityId: `${order.order_no}:${docType}`,
-        details: { docType, orderNo: order.order_no, bankMasked: !canSeeFull },
-        ipAddress: req.ip,
-      }).catch((e) => console.error('Doc audit log error:', e.message));
+      // Per-viewer masking of the banking block. Skipped when the controller is
+      // invoked internally (req._skipMask) to build an unmasked draft snapshot.
+      let bankMasked = false;
+      if (!req._skipMask && document.company && document.company.bank) {
+        const canSeeFull = await userHasPermission(req, 'finance', 'view_bank_details');
+        bankMasked = !canSeeFull;
+        document.company.bank = maskBank(document.company.bank, {
+          canSeeFull,
+          audience: req._audience || 'internal',
+          approvedForCustomer: document.company.bank.approvedForCustomer,
+        });
+      }
+
+      // Audit the document view/generate — lightweight, and only for real
+      // (non-internal) requests.
+      if (!req._skipMask) {
+        auditService.log({
+          userId: req.user ? req.user.id : null,
+          action: 'view_document',
+          entityType: 'export_document',
+          entityId: `${order.order_no}:${docType}`,
+          details: { docType, orderNo: order.order_no, bankMasked },
+          ipAddress: req.ip,
+        }).catch((e) => console.error('Doc audit log error:', e.message));
+      }
 
       return res.json({ success: true, data: { document } });
     } catch (err) {
@@ -667,4 +678,37 @@ const exportDocumentController = {
   },
 };
 
+// Assemble the FULL (unmasked) document object for an order + docType, reusing
+// the exact HTTP generate logic. Used by the generated-document service to
+// freeze a draft snapshot. Returns the document object, or throws { status }.
+async function assembleDocument(orderId, docType) {
+  let captured = null;
+  let status = 200;
+  const fakeRes = {
+    status(c) { status = c; return this; },
+    json(payload) { captured = payload; return this; },
+  };
+  await exportDocumentController.generate({ params: { id: String(orderId), docType }, _skipMask: true }, fakeRes);
+  if (!captured || captured.success !== true) {
+    const err = new Error((captured && captured.message) || 'Failed to assemble document');
+    err.status = status >= 400 ? status : 400;
+    err.code = captured && captured.code;
+    throw err;
+  }
+  return captured.data.document;
+}
+
+// Apply per-viewer bank masking to an already-assembled / stored snapshot.
+function maskDocumentForViewer(document, { canSeeFull = false, audience = 'internal' } = {}) {
+  if (document && document.company && document.company.bank) {
+    document.company.bank = maskBank(document.company.bank, {
+      canSeeFull, audience, approvedForCustomer: document.company.bank.approvedForCustomer,
+    });
+  }
+  return document;
+}
+
 module.exports = exportDocumentController;
+module.exports.assembleDocument = assembleDocument;
+module.exports.maskDocumentForViewer = maskDocumentForViewer;
+module.exports.gatherOrderData = gatherOrderData;

@@ -525,6 +525,14 @@ const recordYield = Joi.object({
   wastage_kg: Joi.number().min(0).default(0),
 });
 
+// Generated-document preview edits (Phase E). `overrides` is a free-form patch
+// merged over the frozen snapshot at render time; unknown() keeps its nested
+// keys (stripUnknown would otherwise drop the arbitrary document fields).
+const saveDocumentOverrides = Joi.object({
+  overrides: Joi.object().unknown(true).default({}),
+  editedHtml: Joi.string().allow('', null),
+});
+
 module.exports = {
   createExportOrder,
   updateExportShipment,
@@ -552,4 +560,5 @@ module.exports = {
   rejectApproval,
   createBatch,
   recordYield,
+  saveDocumentOverrides,
 };

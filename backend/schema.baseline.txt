@@ -840,6 +840,28 @@ COL fx_rates.rate:numeric:NOT NULL
 COL fx_rates.source:character varying:NULL
 COL fx_rates.source_type:character varying:NOT NULL
 COL fx_rates.to_currency:character varying:NOT NULL
+COL generated_documents.approved_at:timestamp with time zone:NULL
+COL generated_documents.approved_by:integer:NULL
+COL generated_documents.audience:character varying:NOT NULL
+COL generated_documents.bank_account_id:integer:NULL
+COL generated_documents.copy_label:character varying:NULL
+COL generated_documents.created_at:timestamp with time zone:NOT NULL
+COL generated_documents.doc_no:character varying:NOT NULL
+COL generated_documents.doc_type:character varying:NOT NULL
+COL generated_documents.edited_html:text:NULL
+COL generated_documents.generated_at:timestamp with time zone:NULL
+COL generated_documents.generated_by:integer:NULL
+COL generated_documents.id:integer:NOT NULL
+COL generated_documents.is_latest:boolean:NOT NULL
+COL generated_documents.locked:boolean:NOT NULL
+COL generated_documents.order_id:integer:NOT NULL
+COL generated_documents.overrides_json:jsonb:NULL
+COL generated_documents.previous_version_id:integer:NULL
+COL generated_documents.revision_reason:text:NULL
+COL generated_documents.snapshot_json:jsonb:NULL
+COL generated_documents.status:character varying:NOT NULL
+COL generated_documents.updated_at:timestamp with time zone:NOT NULL
+COL generated_documents.version:integer:NOT NULL
 COL goods_receipt_notes.accepted_qty_mt:numeric:NULL
 COL goods_receipt_notes.batch_id:integer:NULL
 COL goods_receipt_notes.broken_actual:numeric:NULL
@@ -2804,6 +2826,15 @@ CON fx_gain_loss_ledger.fx_gain_loss_ledger_pkey(p)
 CON fx_rates.chk_fx_rates_rate_nonneg(c)
 CON fx_rates.fx_rates_created_by_foreign(f)
 CON fx_rates.fx_rates_pkey(p)
+CON generated_documents.chk_gendoc_audience(c)
+CON generated_documents.chk_gendoc_status(c)
+CON generated_documents.generated_documents_approved_by_foreign(f)
+CON generated_documents.generated_documents_bank_account_id_foreign(f)
+CON generated_documents.generated_documents_doc_no_unique(u)
+CON generated_documents.generated_documents_generated_by_foreign(f)
+CON generated_documents.generated_documents_order_id_foreign(f)
+CON generated_documents.generated_documents_pkey(p)
+CON generated_documents.generated_documents_previous_version_id_foreign(f)
 CON goods_receipt_notes.chk_goods_receipt_notes_accepted_qty_mt_nonneg(c)
 CON goods_receipt_notes.chk_goods_receipt_notes_broken_actual_range(c)
 CON goods_receipt_notes.chk_goods_receipt_notes_gross_weight_mt_nn(c)
