@@ -207,4 +207,12 @@ const docController = require('../../controllers/exportDocumentController');
 router.get('/:id/documents/available', authorize('export_orders', 'view'), docController.available);
 router.get('/:id/documents/generate/:docType', authorize('export_orders', 'view'), docController.generate);
 
+// Persisted / versioned generated documents (Phase E).
+const genDocController = require('../../modules/documents/generatedDocument.controller');
+router.post('/:id/documents/:docType/draft', authorize('export_orders', 'view'), genDocController.createDraft);
+router.get('/:id/documents/:docType/current', authorize('export_orders', 'view'), genDocController.getCurrent);
+router.get('/:id/documents/:docType/versions', authorize('export_orders', 'view'), genDocController.listVersions);
+router.put('/documents/:genId/overrides', authorize('export_orders', 'edit'), validate(schemas.saveDocumentOverrides), genDocController.saveOverrides);
+router.get('/documents/:genId', authorize('export_orders', 'view'), genDocController.getVersion);
+
 module.exports = router;
