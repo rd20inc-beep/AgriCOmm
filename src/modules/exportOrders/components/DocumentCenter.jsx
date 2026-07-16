@@ -467,7 +467,7 @@ function commercialInvoiceHtml(doc, opts = {}) {
       <p style="text-align:center; font-weight:bold; text-decoration:underline; margin:0 0 2px;">${opts.copyLabel || doc._copyLabel || 'ORIGINAL'}</p>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
         <div style="flex:1;"></div>
-        <h2 style="font-size:16px; margin:0; text-decoration:underline; letter-spacing:.5px;">COMMERCIAL INVOICE</h2>
+        <h2 style="font-size:16px; margin:0; text-decoration:underline; letter-spacing:.5px;">${opts.title || 'COMMERCIAL INVOICE'}</h2>
         <div style="flex:1; text-align:right; font-size:10px; font-style:italic;">REX # ${company.rexNumber}</div>
       </div>
 
@@ -1526,7 +1526,7 @@ function renderStatementOfOrigin(doc) {
       <div style="text-align:center; font-weight:bold; text-decoration:underline; margin-bottom:8px;">TEXT FOR STATEMENT OF ORIGIN</div>
       <p style="margin:0; text-align:justify; line-height:1.7;">${decl}</p>
     </div>`;
-  return commercialInvoiceHtml(doc, { originBox });
+  return commercialInvoiceHtml(doc, { originBox, title: 'STATEMENT OF ORIGIN' });
 }
 
 // ─── Certificate of Origin (data for KCCI form) ───
