@@ -553,6 +553,14 @@ const documentCustomerStyle = Joi.object({
   fontFamily: Joi.string().max(80).allow('', null),
   fontScale: Joi.number().min(0.7).max(1.5),
 });
+// Send a rendered document to the customer over WhatsApp (QR channel). `html`
+// is the print-ready markup the server converts to a PDF attachment.
+const sendDocumentWhatsApp = Joi.object({
+  html: Joi.string().required(),
+  to: Joi.string().max(30).allow('', null),
+  caption: Joi.string().max(1024).allow('', null),
+  filename: Joi.string().max(120).allow('', null),
+});
 
 module.exports = {
   createExportOrder,
@@ -586,4 +594,5 @@ module.exports = {
   documentStatus,
   documentRevise,
   documentCustomerStyle,
+  sendDocumentWhatsApp,
 };

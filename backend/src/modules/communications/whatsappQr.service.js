@@ -168,4 +168,29 @@ async function sendMessage(phone, text) {
   }
 }
 
-module.exports = { start, logout, getStatus, sendMessage };
+/**
+ * Send a document (file) attachment via the QR-paired session.
+ * @param {string} phone  digits only (E.164 without +)
+ * @param {Buffer} buffer file contents
+ * @param {object} opts   { fileName, mimetype='application/pdf', caption }
+ * Returns { ok, messageId?, error? }.
+ */
+async function sendDocument(phone, buffer, { fileName = 'document.pdf', mimetype = 'application/pdf', caption } = {}) {
+  if (state.status !== 'connected' || !state.sock) {
+    return { ok: false, error: 'WhatsApp QR session is not connected.' };
+  }
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (!digits) return { ok: false, error: 'Invalid phone number' };
+  if (!buffer || !buffer.length) return { ok: false, error: 'Empty document' };
+  const jid = `${digits}@s.whatsapp.net`;
+  try {
+    const res = await state.sock.sendMessage(jid, {
+      document: buffer, mimetype, fileName, caption: caption || undefined,
+    });
+    return { ok: true, messageId: res?.key?.id || null };
+  } catch (err) {
+    return { ok: false, error: err.message || 'sendDocument failed' };
+  }
+}
+
+module.exports = { start, logout, getStatus, sendMessage, sendDocument };

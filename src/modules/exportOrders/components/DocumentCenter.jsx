@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { FileText, Download, Printer, Eye, CheckCircle, Clock, Loader2, Edit2, AlertTriangle, AlertCircle, Type, Save } from 'lucide-react';
+import { FileText, Download, Printer, Eye, CheckCircle, Clock, Loader2, Edit2, AlertTriangle, AlertCircle, Type, Save, Send } from 'lucide-react';
 import api from '../../../api/client';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
@@ -1830,6 +1830,61 @@ function renderDocument(doc, style) {
 
 // ─── Document Center Component ───
 
+// Build the full print-ready HTML for a document (A4 page CSS + full-width /
+// full-length fill + one-page auto-fit). Shared by Print (autoPrint:true, opens
+// a window and prints) and Send (autoPrint:false, posted to the server which
+// renders it to a PDF with the identical layout).
+function buildDocHtml(editedHtml, docType, title, { autoPrint }) {
+  const landscape = docType === 'proforma-invoice';
+  const pageRule = landscape ? '@page { size: A4 landscape; margin: 10mm; }' : '@page { size: A4; margin: 12mm; }';
+  const printW = landscape ? '277mm' : '186mm';
+  const printH = landscape ? '190mm' : '273mm';
+  const pageHpx = Math.round((landscape ? (210 - 20) : (297 - 24)) * 96 / 25.4);
+  return `<!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <title>${title || 'Document'}</title>
+        <style>
+          ${pageRule}
+          html, body { margin: 0; padding: 0; width: ${printW}; }
+          #agri-fit { width: 100%; }
+          body .agri-doc { width: 100%; max-width: 100%; margin: 0; box-sizing: border-box; }
+          body .agri-doc > div {
+            width: 100% !important; max-width: 100% !important; margin: 0 !important; box-sizing: border-box;
+            min-height: ${printH}; display: flex; flex-direction: column;
+          }
+          body .agri-doc > div > .agri-ftr { margin-top: auto !important; }
+          @media print {
+            html, body { margin: 0; padding: 0; width: ${printW}; }
+            body .agri-doc, body .agri-doc > div { width: 100% !important; max-width: 100% !important; margin: 0 !important; box-sizing: border-box; }
+          }
+        </style>
+      </head>
+      <body>
+        <div id="agri-fit">${editedHtml}</div>
+        <script>
+          window.onload = function() {
+            try {
+              var el = document.getElementById('agri-fit');
+              var page = ${pageHpx};
+              var h = el.scrollHeight;
+              var z = 1;
+              if (h > page && h <= page * 1.35) {
+                z = Math.max(0.72, (page - 2) / h);
+                el.style.zoom = z;
+                el.style.width = (100 / z) + '%';
+              }
+              var body = el.querySelector('.agri-doc > div');
+              if (body) body.style.minHeight = (page / z) + 'px';
+            } catch (e) { /* fall back to native pagination */ }
+            ${autoPrint ? 'window.print();' : ''}
+          };
+        </script>
+      </body>
+    </html>`;
+}
+
 const wfBtn = 'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50';
 // Document types whose printed output actually shows the company bank account —
 // only these get the bank-account selector (and the audience/masking control)
@@ -1864,6 +1919,7 @@ export default function DocumentCenter({ order }) {
   const [generating, setGenerating] = useState(null);
   const [docStyle, setDocStyle] = useState({ fontFamily: DEFAULT_DOC_FONT, fontScale: 1 });
   const [styleDirty, setStyleDirty] = useState(false);   // unsaved font changes
+  const [waSending, setWaSending] = useState(false);     // WhatsApp send in flight
   const printRef = useRef(null);
   const validation = useMemo(() => validateExportDoc(previewDoc), [previewDoc]);
   const canApprove = hasPermission('documents', 'approve');
@@ -2032,95 +2088,44 @@ export default function DocumentCenter({ order }) {
     } finally { setWfBusy(false); }
   }
 
+  function currentEditedHtml() {
+    return printRef.current ? printRef.current.innerHTML : previewHtml;
+  }
+
   function handlePrint() {
-    // Use the edited DOM content (user may have edited text inline)
-    const editedHtml = printRef.current ? printRef.current.innerHTML : previewHtml;
+    const html = buildDocHtml(currentEditedHtml(), previewDoc?._docType, `${previewDoc?.type || 'Document'} — ${order.id}`, { autoPrint: true });
     const printWindow = window.open('', '_blank');
-    // The Proforma Invoice carries the most columns (incl. per-item packing),
-    // so it prints LANDSCAPE on A4 to use the full width; everything else stays
-    // portrait.
-    const landscape = previewDoc?._docType === 'proforma-invoice';
-    const pageRule = landscape ? '@page { size: A4 landscape; margin: 10mm; }' : '@page { size: A4; margin: 12mm; }';
-    // A4 printable width = paper width minus both @page margins. Portrait: 210-2*12,
-    // landscape: 297-2*10. We force the print body to EXACTLY this width so the doc
-    // fills the sheet (see the CSS below for why).
-    const printW = landscape ? '277mm' : '186mm';
-    // Printable page HEIGHT — as mm (for the min-height that makes short
-    // documents fill the full page length) and as px @96dpi (for the fit script).
-    const printH = landscape ? '190mm' : '273mm';
-    const pageHpx = Math.round((landscape ? (210 - 20) : (297 - 24)) * 96 / 25.4);
-    // Setting an explicit @page margin suppresses Chrome/Edge/Safari's
-    // default print header (date, page title, URL) and footer (page numbers,
-    // URL). Firefox honors the same rule. The margin keeps the document
-    // visually well-padded without the browser-rendered chrome.
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>${previewDoc?.type || 'Document'} — ${order.id}</title>
-          <style>
-            ${pageRule}
-            /* THE FIX: the print window lays the page out at the WINDOW's width
-               (often ~1280px), not the A4 page width — so the document (capped at
-               ~860px, centered) sits in a wide layout that the browser then shrinks
-               to fit the paper, landing it in "half the page". Pin the print body to
-               the exact A4 printable width so the layout maps 1:1 to the sheet, and
-               force the document to fill it. */
-            html, body { margin: 0; padding: 0; width: ${printW}; }
-            #agri-fit { width: 100%; }
-            body .agri-doc { width: 100%; max-width: 100%; margin: 0; box-sizing: border-box; }
-            /* Fill the full A4 WIDTH, and the full LENGTH: the document body is
-               a flex column at least one page tall, and its trailing letterhead
-               footer is pushed to the bottom edge (margin-top:auto) so short
-               documents occupy the whole sheet instead of clustering at the top. */
-            body .agri-doc > div {
-              width: 100% !important; max-width: 100% !important; margin: 0 !important; box-sizing: border-box;
-              min-height: ${printH}; display: flex; flex-direction: column;
-            }
-            /* Push ONLY the letterhead footer to the bottom edge, so the sheet is
-               used top-to-bottom while documents without a footer just fill from
-               the top (no odd gaps). */
-            body .agri-doc > div > .agri-ftr { margin-top: auto !important; }
-            @media print {
-              html, body { margin: 0; padding: 0; width: ${printW}; }
-              body .agri-doc, body .agri-doc > div { width: 100% !important; max-width: 100% !important; margin: 0 !important; box-sizing: border-box; }
-            }
-          </style>
-        </head>
-        <body>
-          <div id="agri-fit">${editedHtml}</div>
-          <script>
-            window.onload = function() {
-              // Auto-fit: if the document overflows the page by only a MODEST
-              // amount (up to ~1.35 pages), zoom it down just enough to land on a
-              // single sheet, so a one-line invoice never spills a couple of rows
-              // onto a second page. The width is compensated (100/zoom%) so the
-              // document keeps filling the FULL page width after zooming, not just
-              // its height. Genuinely long documents are left at full size and
-              // paginate normally. zoom (not transform) reflows layout so print
-              // pagination sees the reduced height.
-              try {
-                var el = document.getElementById('agri-fit');
-                var page = ${pageHpx};
-                var h = el.scrollHeight;
-                var z = 1;
-                if (h > page && h <= page * 1.35) {
-                  z = Math.max(0.72, (page - 2) / h);
-                  el.style.zoom = z;
-                  el.style.width = (100 / z) + '%';
-                }
-                // Pin the printable-page height in px so the footer reaches the
-                // very bottom edge. Divided by the zoom because zoom scales the
-                // min-height too — page/z then * z = one true printable page.
-                var body = el.querySelector('.agri-doc > div');
-                if (body) body.style.minHeight = (page / z) + 'px';
-              } catch (e) { /* fall back to native pagination */ }
-              window.print();
-            };
-          </script>
-        </body>
-      </html>
-    `);
+    printWindow.document.write(html);
     printWindow.document.close();
+  }
+
+  // Send the current document to the customer over WhatsApp: the server renders
+  // the same print HTML to a PDF and sends it through the QR-paired session.
+  async function sendWhatsApp() {
+    try {
+      const st = await api.get('/api/communications/whatsapp/qr/status');
+      const status = st?.data?.status || st?.status;
+      if (status !== 'connected') {
+        addToast('WhatsApp is not connected. Connect it in Admin → WhatsApp (scan the QR).', 'error');
+        return;
+      }
+    } catch { /* proceed; the send endpoint re-checks and reports clearly */ }
+
+    const defaultPhone = (previewDoc?.buyer?.phone || '').toString();
+    const to = window.prompt(`Send "${previewDoc?.type}" to the customer's WhatsApp number (with country code):`, defaultPhone);
+    if (to === null) return;                       // cancelled
+    if (!to.trim()) { addToast('Enter a WhatsApp number', 'info'); return; }
+
+    setWaSending(true);
+    try {
+      const html = buildDocHtml(currentEditedHtml(), previewDoc?._docType, previewDoc?.type, { autoPrint: false });
+      const filename = `${(previewDoc?.type || 'document').replace(/[^\w.\- ]+/g, '_')} — ${order.id}.pdf`;
+      const caption = `${previewDoc?.type} — ${order.orderNo || order.id}`;
+      const res = await api.post(`/api/export-orders/${oid}/documents/${previewKey}/send-whatsapp`, { html, to: to.trim(), caption, filename });
+      addToast(`Sent to ${res?.data?.to || to.trim()} on WhatsApp`, 'success');
+    } catch (err) {
+      addToast(err?.message || 'WhatsApp send failed', 'error');
+    } finally { setWaSending(false); }
   }
 
   if (loading) {
@@ -2218,6 +2223,11 @@ export default function DocumentCenter({ order }) {
                     {wfBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Edit2 className="w-4 h-4" />} Save edits
                   </button>
                 )}
+                <button onClick={sendWhatsApp} disabled={waSending}
+                  title="Render a PDF and send it to the customer on WhatsApp"
+                  className="inline-flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">
+                  {waSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} WhatsApp
+                </button>
                 <button onClick={handlePrint}
                   className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
                   <Printer className="w-4 h-4" /> Print / Save PDF
