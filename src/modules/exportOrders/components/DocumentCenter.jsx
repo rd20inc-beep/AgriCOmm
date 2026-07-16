@@ -1851,7 +1851,7 @@ const STATUS_BADGE = {
 };
 
 export default function DocumentCenter({ order }) {
-  const { addToast, bankAccountsList } = useApp();
+  const { addToast } = useApp();
   const { hasPermission } = useAuth();
   const [availableDocs, setAvailableDocs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1868,7 +1868,6 @@ export default function DocumentCenter({ order }) {
   const validation = useMemo(() => validateExportDoc(previewDoc), [previewDoc]);
   const canApprove = hasPermission('documents', 'approve');
   const locked = !!(version && version.locked);
-  const bankOptions = (bankAccountsList || []).filter((b) => b.type !== 'cash');
   const showBank = BANK_DOC_TYPES.has(previewKey);
 
   useEffect(() => {
@@ -2283,17 +2282,7 @@ export default function DocumentCenter({ order }) {
             {/* Settings + workflow bar (persisted documents only) */}
             {version?.id && (
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-3">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {showBank && (
-                    <label className="text-xs text-gray-600">Bank account
-                      <select disabled={locked || wfBusy} value={version.bank_account_id || ''}
-                        onChange={(e) => saveSettings({ bankAccountId: e.target.value ? Number(e.target.value) : null })}
-                        className="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white disabled:opacity-60">
-                        <option value="">Export default</option>
-                        {bankOptions.map((b) => <option key={b.id} value={b.id}>{b.name}{b.bankName ? ` — ${b.bankName}` : ''}</option>)}
-                      </select>
-                    </label>
-                  )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <label className="text-xs text-gray-600">Copy
                     <select disabled={locked || wfBusy} value={version.copy_label || 'ORIGINAL'}
                       onChange={(e) => saveSettings({ copyLabel: e.target.value })}
