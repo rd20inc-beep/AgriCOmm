@@ -140,6 +140,7 @@ export default function ExportOrderDetail() {
   const [shipNotifyEmail, setShipNotifyEmail] = useState('');
   const [shipRemarks, setShipRemarks] = useState('');
   const [shipGatePass, setShipGatePass] = useState('');
+  const [shipBankAccountId, setShipBankAccountId] = useState('');
 
   // Expense form state
   const [expenseCategory, setExpenseCategory] = useState('rice');
@@ -305,6 +306,7 @@ export default function ExportOrderDetail() {
     setShipNotifyEmail(order.notifyPartyEmail || '');
     setShipRemarks(order.shipmentRemarks || '');
     setShipGatePass(order.gatePassNo || '');
+    setShipBankAccountId(order.bankAccountId || order.bank_account_id || '');
     setShowShipmentModal(true);
   };
 
@@ -466,6 +468,7 @@ export default function ExportOrderDetail() {
           ata: shipATA || null,
           destination_port: shipDestPort || null,
           gate_pass_no: shipGatePass || null,
+          bank_account_id: shipBankAccountId ? Number(shipBankAccountId) : null,
           voyage_number: shipVoyage || null,
           gd_number: shipGD || null,
           gd_date: shipGDDate || null,
@@ -959,6 +962,8 @@ export default function ExportOrderDetail() {
         shipNotifyEmail={shipNotifyEmail} setShipNotifyEmail={setShipNotifyEmail}
         shipRemarks={shipRemarks} setShipRemarks={setShipRemarks}
         shipGatePass={shipGatePass} setShipGatePass={setShipGatePass}
+        shipBankAccountId={shipBankAccountId} setShipBankAccountId={setShipBankAccountId}
+        bankAccountsList={bankAccountsList}
         shipmentContainers={shipContainers}
         setShipmentContainers={setShipContainers}
         onConfirm={handleUpdateShipment}

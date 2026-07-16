@@ -66,7 +66,7 @@ const masterOptionsFor = (retailKg) => {
 };
 
 export default function CreateExportOrder() {
-  const { addToast, customersList: customers, productsList: products, exportCostCategories, bagTypesList, suppliersList } = useApp();
+  const { addToast, customersList: customers, productsList: products, exportCostCategories, bagTypesList, suppliersList, bankAccountsList } = useApp();
   const createOrderMut = useCreateExportOrder();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -265,6 +265,7 @@ export default function CreateExportOrder() {
       advance_expected: advExpected,
       balance_expected: contractValue - advExpected,
       payment_terms: form.paymentTerms || null,
+      bank_account_id: form.bankAccountId ? Number(form.bankAccountId) : null,
       shipment_eta: form.shipmentWindowEnd || form.shipmentWindowStart || null,
       source: form.source,
       notes: form.notes || null,
@@ -612,6 +613,15 @@ export default function CreateExportOrder() {
             <select value={form.paymentTerms} onChange={e => set('paymentTerms', e.target.value)} className="form-input">
               <option value="">Select…</option>
               {PAYMENT_TERMS.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Company Bank Account <span className="text-gray-400 font-normal text-xs">— on documents</span></label>
+            <select value={form.bankAccountId || ''} onChange={e => set('bankAccountId', e.target.value)} className="form-input">
+              <option value="">Use export default</option>
+              {(bankAccountsList || []).filter(b => b.type !== 'cash').map(b => (
+                <option key={b.id} value={b.id}>{b.name}{b.bankName ? ` — ${b.bankName}` : ''}</option>
+              ))}
             </select>
           </div>
           <div className="form-group">

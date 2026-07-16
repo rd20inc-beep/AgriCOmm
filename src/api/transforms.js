@@ -155,6 +155,7 @@ export function transformOrder(dbOrder) {
     ata: dbOrder.ata,
     destinationPort: dbOrder.destination_port || '',
     gatePassNo: dbOrder.gate_pass_no || '',
+    bankAccountId: dbOrder.bank_account_id || null,
     voyageNumber: dbOrder.voyage_number || '',
     gdNumber: dbOrder.gd_number || '',
     gdDate: dbOrder.gd_date || '',
