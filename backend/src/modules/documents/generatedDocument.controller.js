@@ -78,7 +78,7 @@ const generatedDocumentController = {
         details: { docType: row.doc_type, version: row.version },
         ipAddress: req.ip,
       }).catch(() => {});
-      return res.status(201).json({ success: true, data: { version: meta(row), document } });
+      return res.status(201).json({ success: true, data: { version: meta(row), document, editedHtml: row.edited_html || null } });
     } catch (err) {
       if (err.status) return res.status(err.status).json({ success: false, code: err.code, message: err.message });
       console.error('createDraft error:', err);
@@ -94,7 +94,7 @@ const generatedDocumentController = {
       const row = await service.getLatest(orderId, req.params.docType);
       if (!row) return res.json({ success: true, data: { exists: false } });
       const document = await renderRow(row, req);
-      return res.json({ success: true, data: { exists: true, version: meta(row), document } });
+      return res.json({ success: true, data: { exists: true, version: meta(row), document, editedHtml: row.edited_html || null } });
     } catch (err) {
       console.error('getCurrent error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
