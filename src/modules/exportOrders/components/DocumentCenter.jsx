@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { FileText, Download, Printer, Eye, CheckCircle, Clock, Loader2, Edit2, AlertTriangle, AlertCircle } from 'lucide-react';
+import { FileText, Download, Printer, Eye, CheckCircle, Clock, Loader2, Edit2, AlertTriangle, AlertCircle, Type, Save } from 'lucide-react';
 import api from '../../../api/client';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
@@ -274,7 +274,7 @@ function renderProformaInvoice(doc) {
   const totalQty = lines.reduce((s, l) => s + (l.qtyMT || 0), 0);
   const totalAmt = lines.reduce((s, l) => s + (l.amount || 0), 0);
   return `
-    <div style="font-family: Arial, sans-serif; font-size:12px; width:100%; max-width:1040px; margin:0 auto; padding:16px;">
+    <div style="font-family: Arial, sans-serif; font-size:11px; width:100%; max-width:1040px; margin:0 auto; padding:16px;">
       ${renderHeader(company)}
       <h2 style="text-align:center; font-size:16px; margin:10px 0;">PROFORMA INVOICE</h2>
 
@@ -656,7 +656,7 @@ function renderPackingList(doc) {
     : (shipment && shipment.containerCount ? `${String(shipment.containerCount).padStart(2, '0')} X 20' Fcl` : '');
 
   return `
-    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px;">
+    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px;">
       ${renderComplianceHeader(company)}
       <p style="text-align:center; font-weight:bold; text-decoration:underline; margin:0 0 6px;">ORIGINAL</p>
       <h2 style="text-align:center; font-size:16px; margin:6px 0 16px; letter-spacing:1px; text-decoration:underline;">PACKING LIST</h2>
@@ -767,7 +767,7 @@ function renderGenericDocument(doc) {
   const distinctHs = [...new Set(lines.map((l) => l.hsCode).filter(Boolean))];
   const isMulti = lines.length > 1;
   return `
-    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:800px; margin:0 auto; padding:20px;">
+    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px;">
       ${renderHeader(company)}
       <h2 style="text-align:center; font-size:16px; margin:10px 0;">${doc.type.toUpperCase()}</h2>
       <table style="width:100%; font-size:12px; margin:15px 0;">
@@ -847,7 +847,7 @@ function renderSalesContract(doc) {
     : `${lines[0]?.description || ''}<br/>Packed in ${lines[0]?.bagSizeKg || order.bagSizeKg || 50} kg Strong PP bags. Sound, loyal and merchantable, fit for human consumption at any stage. Free from alive and dead weevils/insects. GMO Free. Latest crop.`;
 
   return `
-    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:800px; margin:0 auto; padding:20px;">
+    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px;">
       ${renderHeader(company)}
       <h2 style="text-align:center; font-size:18px; font-style:italic; margin:10px 0;">Sales Contract</h2>
 
@@ -902,7 +902,7 @@ function renderProductionPlan(doc) {
   const totalQty = lines.reduce((s, l) => s + (l.qtyMT || 0), 0);
   const totalBags = lines.reduce((s, l) => s + (l.bagCount || 0), 0);
   return `
-    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:800px; margin:0 auto; padding:20px;">
+    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px;">
       ${renderHeader(company)}
       <h2 style="text-align:center; font-size:14px; text-decoration:underline; margin:10px 0;">PRODUCTION PLAN - ${containers.length > 0 ? containers.length : '—'}X${containers[0]?.containerType === '40ft' ? '40' : '20'} FCL</h2>
 
@@ -991,7 +991,7 @@ function renderProductionPlan(doc) {
 function renderBankFIRequest(doc) {
   const { company, buyer, order, shipment } = doc;
   return `
-    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:800px; margin:0 auto; padding:20px;">
+    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px;">
       ${renderHeader(company)}
       <h3 style="text-align:center; font-size:13px; margin:10px 0;">REQUEST FOR GENERATION OF FINANCIAL INSTRUMENT<br/>(FOR EXPORT TRANSACTION)</h3>
 
@@ -1267,7 +1267,7 @@ function renderInvoice(doc) {
   const totalBags = lines.reduce((s, l) => s + (l.bagCount || 0), 0);
   const totalQty = lines.reduce((s, l) => s + (l.qtyMT || 0), 0);
   return `
-    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:800px; margin:0 auto; padding:20px;">
+    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px;">
       ${renderHeader(company)}
       <h2 style="text-align:center; font-size:16px; text-decoration:underline; margin:10px 0;">INVOICE</h2>
 
@@ -1367,7 +1367,7 @@ function renderBillOfLading(doc) {
     : `${buyer.name || ''}<br/>${buyer.country || ''}${buyer.phone ? `<br/>TEL: ${buyer.phone}` : ''}${buyer.email ? ` EMAIL: ${buyer.email}` : ''}`;
 
   return `
-    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:800px; margin:0 auto; padding:10px;">
+    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:10px;">
       <table style="width:100%; border-collapse:collapse;">
         <tr>
           <td style="border:2px solid #333; padding:10px; width:50%; vertical-align:top;">
@@ -1454,7 +1454,7 @@ function renderPackingCertificate(doc) {
   const { company, buyer, order, shipment, containers, totals, packing } = doc;
   const totalBags = totals?.totalBags || order.totalBags;
   return `
-    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:800px; margin:0 auto; padding:20px;">
+    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px;">
       ${renderComplianceHeader(company)}
       <p style="text-align:center; font-weight:bold; text-decoration:underline;">ORIGINAL</p>
       <h2 style="text-align:center; font-size:16px; margin:5px 0; text-decoration:underline;">PACKING CERTIFICATE</h2>
@@ -1586,7 +1586,7 @@ function renderCertificateOfOrigin(doc) {
   const refNo = company.kcciMembership || '';
 
   return `
-    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:780px; margin:0 auto; padding:18px;">
+    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:18px;">
 
       <table style="width:100%; border-collapse:collapse;">
         <tr>
@@ -1663,7 +1663,7 @@ function renderBankCoveringLetter(doc) {
   const { company, buyer, order, shipment, containers, notifyParty } = doc;
   const fiNumbers = [shipment.fiNumber, shipment.fiNumber2, shipment.fiNumber3].filter(Boolean);
   return `
-    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:800px; margin:0 auto; padding:20px;">
+    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px;">
       ${renderHeader(company)}
       <p>Date: ${order.date}</p>
       <p style="margin-top:15px;">${company.bank.name}<br/>${company.bank.branch}<br/>Karachi</p>
@@ -1701,7 +1701,7 @@ function renderBankCoveringLetter(doc) {
 function renderBuyerCoveringLetter(doc) {
   const { company, buyer, order, shipment, containers, notifyParty } = doc;
   return `
-    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:800px; margin:0 auto; padding:20px;">
+    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px;">
       ${renderComplianceHeader(company)}
       <p>Date: ${order.date}</p>
       <p style="margin-top:15px;">${[buyer.name, buyer.address, buyer.country, buyer.vatNumber ? `VAT NO: ${buyer.vatNumber}` : ''].filter(Boolean).join('<br/>')}</p>
@@ -1742,7 +1742,7 @@ function renderBuyerCoveringLetter(doc) {
 function renderLabTestRequest(doc) {
   const { company, order } = doc;
   return `
-    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:800px; margin:0 auto; padding:20px;">
+    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px;">
       ${renderHeader(company)}
       <p style="text-align:right;">Date: ${order.date}</p>
       <p>INVOICE NO: ${order.invoiceNumber}</p>
@@ -1799,13 +1799,33 @@ const RENDERERS = {
   'lab-test-request': renderLabTestRequest,
 };
 
-function renderDocument(doc) {
+// Curated document fonts offered in the preview. Each is a full CSS stack.
+const DOC_FONT_OPTIONS = [
+  { label: 'Arial', value: 'Arial, Helvetica, sans-serif' },
+  { label: 'Helvetica', value: 'Helvetica, Arial, sans-serif' },
+  { label: 'Times New Roman', value: '"Times New Roman", Times, serif' },
+  { label: 'Georgia', value: 'Georgia, "Times New Roman", serif' },
+  { label: 'Calibri', value: 'Calibri, Arial, sans-serif' },
+  { label: 'Verdana', value: 'Verdana, Geneva, sans-serif' },
+  { label: 'Tahoma', value: 'Tahoma, Geneva, sans-serif' },
+];
+const DEFAULT_DOC_FONT = 'Arial, Helvetica, sans-serif';
+
+function renderDocument(doc, style) {
   const renderer = RENDERERS[doc._docType];
   const inner = renderer ? renderer(doc) : renderGenericDocument(doc);
+  const s = style || (doc && doc.style) || {};
+  const fam = s.fontFamily || DEFAULT_DOC_FONT;
+  const scale = Number(s.fontScale) || 1;
+  // Force ONE font family across the whole document — so every document, and
+  // every document TYPE, looks consistent — and apply the per-customer size
+  // scale via zoom (proportional; composes with the print one-page fit).
+  const famRule = `<style>.agri-doc.agri-styled, .agri-doc.agri-styled * { font-family: ${fam} !important; }</style>`;
+  const zoomAttr = (scale && scale !== 1) ? ` style="zoom:${scale}"` : '';
   // Wrap EVERY document in the .agri-doc scope so the professional typography
   // (paragraph spacing, list numbering/bullets, heading spacing) applies to all
   // documents uniformly — the app's Tailwind reset would otherwise flatten them.
-  return `${DOC_CSS}<div class="agri-doc">${inner}</div>`;
+  return `${DOC_CSS}${famRule}<div class="agri-doc agri-styled"${zoomAttr}>${inner}</div>`;
 }
 
 // ─── Document Center Component ───
@@ -1834,6 +1854,8 @@ export default function DocumentCenter({ order }) {
   const [versions, setVersions] = useState([]);          // version history
   const [wfBusy, setWfBusy] = useState(false);           // workflow action in flight
   const [generating, setGenerating] = useState(null);
+  const [docStyle, setDocStyle] = useState({ fontFamily: DEFAULT_DOC_FONT, fontScale: 1 });
+  const [styleDirty, setStyleDirty] = useState(false);   // unsaved font changes
   const printRef = useRef(null);
   const validation = useMemo(() => validateExportDoc(previewDoc), [previewDoc]);
   const canApprove = hasPermission('documents', 'approve');
@@ -1852,16 +1874,39 @@ export default function DocumentCenter({ order }) {
   const oid = order.dbId || order.id;
 
   // Apply a persisted version payload (from any draft/workflow endpoint) to the
-  // preview, keeping the rendered HTML + version meta in sync.
-  function applyVersion(payload, docKey) {
+  // preview, keeping the rendered HTML + version meta in sync. Uses the current
+  // font style; pass `style` to also (re)initialise it from the document.
+  function applyVersion(payload, docKey, style) {
     const doc = payload?.document;
     const meta = payload?.version;
+    const useStyle = style || docStyle;
+    if (style) setDocStyle(style);
     if (doc) {
       doc._docType = docKey || meta?.doc_type || previewKey;
       setPreviewDoc(doc);
-      setPreviewHtml(renderDocument(doc));
+      setPreviewHtml(renderDocument(doc, useStyle));
     }
     if (meta) setVersion(meta);
+  }
+
+  // Change the document font (family / size) live in the preview.
+  function applyStyle(next) {
+    const merged = { ...docStyle, ...next };
+    setDocStyle(merged);
+    setStyleDirty(true);
+    if (previewDoc) setPreviewHtml(renderDocument(previewDoc, merged));
+  }
+
+  // Save the font as the consignee's default for all future documents.
+  async function saveCustomerStyle() {
+    setWfBusy(true);
+    try {
+      await api.put(`/api/export-orders/${oid}/documents/customer-style`, docStyle);
+      setStyleDirty(false);
+      addToast('Font saved for this customer', 'success');
+    } catch (err) {
+      addToast(err.message || 'Save failed', 'error');
+    } finally { setWfBusy(false); }
   }
 
   async function loadVersions(docKey) {
@@ -1888,7 +1933,13 @@ export default function DocumentCenter({ order }) {
         const res = await api.get(`/api/export-orders/${oid}/documents/generate/${docKey}`);
         payload = { document: res?.data?.document };
       }
-      applyVersion(payload, docKey);
+      // Initialise the font controls from the customer's saved style.
+      const initStyle = {
+        fontFamily: payload?.document?.style?.fontFamily || DEFAULT_DOC_FONT,
+        fontScale: Number(payload?.document?.style?.fontScale) || 1,
+      };
+      setStyleDirty(false);
+      applyVersion(payload, docKey, initStyle);
       loadVersions(docKey);
     } catch (err) {
       addToast(`Failed to generate document: ${err.message}`, 'error');
@@ -2132,6 +2183,36 @@ export default function DocumentCenter({ order }) {
                   <Printer className="w-4 h-4" /> Print / Save PDF
                 </button>
               </div>
+            </div>
+
+            {/* Font controls — apply live to the preview and can be saved as the
+                consignee's default for all future documents. */}
+            <div className="rounded-lg border border-gray-200 bg-white p-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+              <span className="text-xs font-semibold text-gray-500 flex items-center gap-1"><Type className="w-3.5 h-3.5" /> Font</span>
+              <label className="text-xs text-gray-600 flex items-center gap-1.5">
+                Family
+                <select value={docStyle.fontFamily} onChange={(e) => applyStyle({ fontFamily: e.target.value })}
+                  className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white" style={{ fontFamily: docStyle.fontFamily }}>
+                  {DOC_FONT_OPTIONS.map((f) => <option key={f.label} value={f.value} style={{ fontFamily: f.value }}>{f.label}</option>)}
+                </select>
+              </label>
+              <div className="text-xs text-gray-600 flex items-center gap-1.5">
+                Size
+                <div className="inline-flex items-center border border-gray-300 rounded-lg overflow-hidden">
+                  <button onClick={() => applyStyle({ fontScale: Math.max(0.7, Math.round((docStyle.fontScale - 0.05) * 100) / 100) })}
+                    className="px-2 py-1 hover:bg-gray-100 text-gray-700" title="Smaller">−</button>
+                  <span className="px-2 py-1 tabular-nums text-gray-700 min-w-[48px] text-center">{Math.round(docStyle.fontScale * 100)}%</span>
+                  <button onClick={() => applyStyle({ fontScale: Math.min(1.5, Math.round((docStyle.fontScale + 0.05) * 100) / 100) })}
+                    className="px-2 py-1 hover:bg-gray-100 text-gray-700" title="Larger">+</button>
+                </div>
+              </div>
+              <button onClick={() => applyStyle({ fontFamily: DEFAULT_DOC_FONT, fontScale: 1 })}
+                className="text-xs text-gray-500 hover:text-gray-700 underline">Reset</button>
+              <button onClick={saveCustomerStyle} disabled={wfBusy || !styleDirty}
+                className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                title="Use this font on all future documents for this customer">
+                <Save className="w-3.5 h-3.5" /> Save for this customer
+              </button>
             </div>
 
             {/* Settings + workflow bar (persisted documents only) */}

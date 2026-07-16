@@ -395,6 +395,8 @@ COL customers.created_at:timestamp with time zone:NOT NULL
 COL customers.credit_limit:numeric:NOT NULL
 COL customers.currency:character varying:NOT NULL
 COL customers.customer_type:character varying:NOT NULL
+COL customers.doc_font_family:character varying:NULL
+COL customers.doc_font_scale:numeric:NOT NULL
 COL customers.email:character varying:NULL
 COL customers.id:integer:NOT NULL
 COL customers.is_active:boolean:NOT NULL

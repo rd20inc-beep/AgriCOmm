@@ -162,6 +162,33 @@ const generatedDocumentController = {
   async setStatus(req, res) { return transition(req, res, 'setStatus'); },
   async revise(req, res) { return transition(req, res, 'revise'); },
 
+  // PUT /:id/documents/customer-style — save the consignee's preferred document
+  // font (family + size scale) so future documents for this customer use it.
+  async saveCustomerStyle(req, res) {
+    try {
+      const orderId = await resolveOrderId(req.params.id);
+      if (!orderId) return res.status(404).json({ success: false, message: 'Order not found.' });
+      const order = await db('export_orders').where({ id: orderId }).select('customer_id').first();
+      if (!order || !order.customer_id) return res.status(404).json({ success: false, message: 'Order has no customer.' });
+      const patch = { updated_at: db.fn.now() };
+      if (req.body.fontFamily !== undefined) patch.doc_font_family = req.body.fontFamily || null;
+      if (req.body.fontScale !== undefined) patch.doc_font_scale = req.body.fontScale || 1;
+      await db('customers').where({ id: order.customer_id }).update(patch);
+      auditService.log({
+        userId: req.user ? req.user.id : null,
+        action: 'save_document_style',
+        entityType: 'customer',
+        entityId: order.customer_id,
+        details: { fontFamily: patch.doc_font_family, fontScale: patch.doc_font_scale },
+        ipAddress: req.ip,
+      }).catch(() => {});
+      return res.json({ success: true, data: { customerId: order.customer_id, style: { fontFamily: patch.doc_font_family, fontScale: patch.doc_font_scale } } });
+    } catch (err) {
+      console.error('saveCustomerStyle error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
   // GET /documents/:genId — a specific version (merged + masked).
   async getVersion(req, res) {
     try {
