@@ -1988,7 +1988,7 @@ export default function DocumentCenter({ order }) {
             /* Push ONLY the letterhead footer to the bottom edge, so the sheet is
                used top-to-bottom while documents without a footer just fill from
                the top (no odd gaps). */
-            body .agri-doc > div > .agri-ftr { margin-top: auto; }
+            body .agri-doc > div > .agri-ftr { margin-top: auto !important; }
             @media print {
               html, body { margin: 0; padding: 0; width: ${printW}; }
               body .agri-doc, body .agri-doc > div { width: 100% !important; max-width: 100% !important; margin: 0 !important; box-sizing: border-box; }
@@ -2011,11 +2011,17 @@ export default function DocumentCenter({ order }) {
                 var el = document.getElementById('agri-fit');
                 var page = ${pageHpx};
                 var h = el.scrollHeight;
+                var z = 1;
                 if (h > page && h <= page * 1.35) {
-                  var z = Math.max(0.72, (page - 2) / h);
+                  z = Math.max(0.72, (page - 2) / h);
                   el.style.zoom = z;
                   el.style.width = (100 / z) + '%';
                 }
+                // Pin the printable-page height in px so the footer reaches the
+                // very bottom edge. Divided by the zoom because zoom scales the
+                // min-height too — page/z then * z = one true printable page.
+                var body = el.querySelector('.agri-doc > div');
+                if (body) body.style.minHeight = (page / z) + 'px';
               } catch (e) { /* fall back to native pagination */ }
               window.print();
             };
