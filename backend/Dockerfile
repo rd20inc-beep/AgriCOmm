@@ -2,6 +2,19 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+# Chromium + fonts for server-side PDF rendering of export documents
+# (puppeteer-core drives this system browser; it does not bundle its own).
+RUN apk add --no-cache \
+      chromium \
+      nss \
+      freetype \
+      harfbuzz \
+      ca-certificates \
+      ttf-freefont \
+      font-noto
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser \
+    PUPPETEER_SKIP_DOWNLOAD=true
+
 # Copy package files
 COPY package.json package-lock.json ./
 

@@ -3,6 +3,9 @@ const service = require('./generatedDocument.service');
 const { maskDocumentForViewer } = require('./exportDocument.controller');
 const { userHasPermission } = require('../../middleware/rbac');
 const auditService = require('../admin/audit.service');
+const pdfService = require('./pdf.service');
+const whatsappQr = require('../communications/whatsappQr.service');
+const whatsappService = require('../communications/whatsapp.service');
 
 async function resolveOrderId(id) {
   if (/^\d+$/.test(id)) return parseInt(id, 10);
@@ -185,6 +188,59 @@ const generatedDocumentController = {
       return res.json({ success: true, data: { customerId: order.customer_id, style: { fontFamily: patch.doc_font_family, fontScale: patch.doc_font_scale } } });
     } catch (err) {
       console.error('saveCustomerStyle error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  // POST /:id/documents/:docType/send-whatsapp — render the posted document HTML
+  // to a PDF and send it to the customer's WhatsApp via the QR-paired session.
+  async sendWhatsApp(req, res) {
+    try {
+      const orderId = await resolveOrderId(req.params.id);
+      if (!orderId) return res.status(404).json({ success: false, message: 'Order not found.' });
+      const { html, to, caption, filename } = req.body;
+      if (!html || !String(html).trim()) return res.status(400).json({ success: false, message: 'Document content is required.' });
+
+      // Recipient: explicit number, else the order's customer phone.
+      let phone = to;
+      let toName = null;
+      const cust = await db('export_orders as eo').leftJoin('customers as c', 'eo.customer_id', 'c.id')
+        .where('eo.id', orderId).select('c.phone as phone', 'c.name as name').first();
+      if (!phone) phone = cust && cust.phone;
+      toName = cust && cust.name;
+      if (!phone) return res.status(400).json({ success: false, code: 'NO_PHONE', message: 'No WhatsApp number for this customer. Add a phone on the customer record, or enter one to send.' });
+
+      const wa = whatsappQr.getStatus();
+      if (wa.status !== 'connected') {
+        return res.status(409).json({ success: false, code: 'WA_NOT_CONNECTED', message: 'WhatsApp is not connected. Connect it in Admin → WhatsApp by scanning the QR code.' });
+      }
+
+      let pdf;
+      try {
+        pdf = await pdfService.htmlToPdf(html);
+      } catch (e) {
+        return res.status(e.status || 500).json({ success: false, message: e.message || 'Failed to render the document PDF.' });
+      }
+
+      const safeName = String(filename || `${req.params.docType}.pdf`).replace(/[^\w.\- ]+/g, '_');
+      const result = await whatsappQr.sendDocument(phone, pdf, { fileName: safeName, caption });
+
+      whatsappService.logMessage({
+        to_phone: phone, to_name: toName, body: caption || `Document: ${req.params.docType}`,
+        linked_type: 'export_order', linked_id: orderId,
+        status: result.ok ? 'Sent' : 'Failed', error_message: result.ok ? null : result.error,
+        sent_by: req.user ? req.user.id : null, sent_at: result.ok ? new Date() : null,
+      }).catch(() => {});
+      auditService.log({
+        userId: req.user ? req.user.id : null, action: 'send_document_whatsapp',
+        entityType: 'export_order', entityId: orderId,
+        details: { docType: req.params.docType, to: phone, ok: result.ok }, ipAddress: req.ip,
+      }).catch(() => {});
+
+      if (!result.ok) return res.status(502).json({ success: false, message: result.error || 'WhatsApp send failed.' });
+      return res.json({ success: true, data: { to: phone, messageId: result.messageId } });
+    } catch (err) {
+      console.error('sendWhatsApp error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
   },
