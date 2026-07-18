@@ -3,6 +3,8 @@ const emailService = require('../../services/emailService');
 const whatsappService = require('../../services/whatsappService');
 const notificationService = require('../../services/notificationService');
 const automationService = require('../../services/automationService');
+const pdfService = require('../documents/pdf.service');
+const whatsappQr = require('./whatsappQr.service');
 
 async function generateTaskNo(trx) {
   const last = await (trx || db)('tasks_assignments')
@@ -21,6 +23,47 @@ async function generateTaskNo(trx) {
 }
 
 const communicationController = {
+  // Render posted print-ready HTML to a PDF and send it to a customer's
+  // WhatsApp via the QR-paired session. Generic — used by any document viewer
+  // (local-sales invoice, receipt, voucher, …) that can produce its own HTML.
+  async sendWhatsAppDocument(req, res) {
+    try {
+      const { to, html, caption, filename, linked_type, linked_id } = req.body;
+      if (!to || !String(to).trim()) return res.status(400).json({ success: false, message: 'Recipient WhatsApp number is required.' });
+      if (!html || !String(html).trim()) return res.status(400).json({ success: false, message: 'Document content is required.' });
+
+      const wa = whatsappQr.getStatus();
+      if (wa.status !== 'connected') {
+        return res.status(409).json({ success: false, code: 'WA_NOT_CONNECTED', message: 'WhatsApp is not connected. Connect it in Admin → WhatsApp by scanning the QR code.' });
+      }
+
+      let pdf;
+      try {
+        pdf = await pdfService.htmlToPdf(html);
+      } catch (e) {
+        return res.status(e.status || 500).json({ success: false, message: e.message || 'Failed to render the document PDF.' });
+      }
+
+      const safeName = String(filename || 'document.pdf').replace(/[^\w.\- ]+/g, '_');
+      const result = await whatsappQr.sendDocument(String(to).trim(), pdf, { fileName: safeName, caption });
+
+      try {
+        await db('whatsapp_logs').insert({
+          to_phone: String(to).trim(), body: caption || safeName,
+          linked_type: linked_type || null, linked_id: linked_id || null,
+          status: result.ok ? 'Sent' : 'Failed', error_message: result.ok ? null : result.error,
+          sent_by: req.user ? req.user.id : null, sent_at: result.ok ? new Date() : null,
+        });
+      } catch (_) { /* logging best-effort */ }
+
+      if (!result.ok) return res.status(502).json({ success: false, message: result.error || 'WhatsApp send failed.' });
+      return res.json({ success: true, data: { to: String(to).trim(), messageId: result.messageId } });
+    } catch (err) {
+      console.error('sendWhatsAppDocument error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
   // ============================================================
   // Email
   // ============================================================
