@@ -49,20 +49,35 @@ function wipeSession() {
   } catch (_) { /* ignore */ }
 }
 
+// Detach + close any existing socket so a fresh one can be created without the
+// old one's listeners firing (which would otherwise trigger a reconnect).
+function teardown() {
+  const old = state.sock;
+  state.sock = null;
+  if (!old) return;
+  try { old.ev.removeAllListeners('connection.update'); } catch (_) { /* ignore */ }
+  try { old.ev.removeAllListeners('creds.update'); } catch (_) { /* ignore */ }
+  try { old.end(new Error('restart')); } catch (_) { /* ignore */ }
+  try { old.ws && old.ws.close(); } catch (_) { /* ignore */ }
+}
+
 function ensureDir() {
   if (!fs.existsSync(SESSION_DIR)) fs.mkdirSync(SESSION_DIR, { recursive: true });
 }
 
 async function start(force = false) {
-  // Ignore duplicate user-triggered starts while a session is already live.
-  // Internal reconnects pass force=true — otherwise the post-scan "restart
-  // required" would be swallowed here (status is 'connecting') and pairing
-  // would hang forever on "connecting".
-  if (!force && (state.sock || state.status === 'connecting' || state.status === 'connected')) {
+  // Already linked — nothing to pair. Use Disconnect to re-pair.
+  if (!force && state.status === 'connected' && state.sock) {
     return getStatus();
   }
   if (!force) {
-    // Fresh, user-initiated pairing attempt — reset the self-heal counters.
+    // User clicked "Generate QR Code": tear down any stale / stuck session and
+    // start fresh so a NEW QR is produced on EVERY click. (The old guard made a
+    // click while status was 'connecting' a no-op, so the QR never appeared.)
+    teardown();
+    state.qrString = null;
+    state.qrDataUrl = null;
+    state.error = null;
     state.qrShown = false;
     state.everOpen = false;
     state.failCount = 0;
