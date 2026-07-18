@@ -43,9 +43,14 @@ const state = {
 };
 
 function wipeSession() {
+  // SESSION_DIR is a Docker volume MOUNT POINT — rmSync on the dir itself fails
+  // (can't remove a mountpoint) and, with force:true, the error is swallowed, so
+  // the credentials never actually clear. Delete the CONTENTS instead.
+  ensureDir();
   try {
-    fs.rmSync(SESSION_DIR, { recursive: true, force: true });
-    ensureDir();
+    for (const entry of fs.readdirSync(SESSION_DIR)) {
+      fs.rmSync(path.join(SESSION_DIR, entry), { recursive: true, force: true });
+    }
   } catch (_) { /* ignore */ }
 }
 
@@ -202,16 +207,12 @@ async function logout() {
       try { await state.sock.logout(); } catch (_) { /* ignore */ }
     }
   } finally {
-    state.sock = null;
+    teardown();
     state.status = 'disconnected';
     state.qrString = null;
     state.qrDataUrl = null;
     state.phone = null;
-    try {
-      if (fs.existsSync(SESSION_DIR)) {
-        fs.rmSync(SESSION_DIR, { recursive: true, force: true });
-      }
-    } catch (_) { /* ignore */ }
+    wipeSession(); // delete the volume CONTENTS (see wipeSession)
   }
   return getStatus();
 }
