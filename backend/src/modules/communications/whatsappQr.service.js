@@ -70,6 +70,23 @@ function ensureDir() {
   if (!fs.existsSync(SESSION_DIR)) fs.mkdirSync(SESSION_DIR, { recursive: true });
 }
 
+// Baileys expects a pino-style logger (it calls .child()). Build one lazily at
+// 'silent' so its internal chatter never floods the container logs, while still
+// giving the library the real logger interface it needs to run cleanly.
+let _waLogger = null;
+function getWaLogger() {
+  if (_waLogger) return _waLogger;
+  try {
+    _waLogger = require('pino')({ level: 'silent' });
+  } catch (_) {
+    // Fallback shim if pino is somehow unavailable.
+    const noop = () => {};
+    const shim = { level: 'silent', trace: noop, debug: noop, info: noop, warn: noop, error: noop, fatal: noop, child: () => shim };
+    _waLogger = shim;
+  }
+  return _waLogger;
+}
+
 async function start(force = false) {
   // Already linked — nothing to pair. Use Disconnect to re-pair.
   if (!force && state.status === 'connected' && state.sock) {
@@ -104,9 +121,14 @@ async function start(force = false) {
     const {
       default: makeWASocket,
       useMultiFileAuthState,
+      makeCacheableSignalKeyStore,
       DisconnectReason,
       fetchLatestBaileysVersion,
     } = baileys;
+
+    // A quiet logger keeps Baileys' internals happy (it calls logger.child();
+    // the default console shim can misbehave) without flooding container logs.
+    const logger = getWaLogger();
 
     // WhatsApp rejects an outdated WA-Web protocol version with a bare
     // "Connection Failure" and never issues a QR (pairing appears to hang).
@@ -121,8 +143,26 @@ async function start(force = false) {
 
     const sock = makeWASocket({
       version,
-      auth: authState,
+      logger,
+      // Cache the signal keys. Without this, the burst of app-state / history
+      // notifications right after a fresh scan can fail to decrypt ("error in
+      // handling message"), which drops the just-opened session — exactly the
+      // post-pairing crash we were seeing.
+      auth: {
+        creds: authState.creds,
+        keys: makeCacheableSignalKeyStore(authState.keys, logger),
+      },
       browser: ['AgriCOmm ERP', 'Chrome', '1.0.0'],
+      // This is a send-only channel — we never need the phone's chat history or
+      // to appear "online". Skipping both avoids the heavy post-pair sync that
+      // the release-candidate build chokes on.
+      syncFullHistory: false,
+      shouldSyncHistoryMessage: () => false,
+      markOnlineOnConnect: false,
+      generateHighQualityLinkPreview: false,
+      // Incoming messages we don't store — return undefined so Baileys doesn't
+      // block on a lookup it can't satisfy.
+      getMessage: async () => undefined,
     });
     state.sock = sock;
 
@@ -130,7 +170,7 @@ async function start(force = false) {
     // socket (e.g. an in-flight reconnect from before the user hit "Generate QR
     // Code") must not resurrect old credentials on disk after a wipe, nor fire
     // its own reconnects — otherwise a stale registration keeps coming back.
-    sock.ev.on('creds.update', () => { if (state.sock === sock) saveCreds(); });
+    sock.ev.on('creds.update', async () => { if (state.sock === sock) { try { await saveCreds(); } catch (_) { /* ignore */ } } });
 
     sock.ev.on('connection.update', async (update) => {
       if (state.sock !== sock) return; // ignore events from a superseded socket
