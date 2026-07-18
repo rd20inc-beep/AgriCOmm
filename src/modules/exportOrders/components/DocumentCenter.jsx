@@ -2099,6 +2099,30 @@ export default function DocumentCenter({ order }) {
     printWindow.document.close();
   }
 
+  // Plain-text summary sent WITH the PDF as its WhatsApp caption, so the key
+  // shipment/invoice details read clearly in the chat itself. WhatsApp renders
+  // *text* as bold. Missing fields are simply skipped.
+  function buildExportCaption() {
+    const b = previewDoc?.buyer || {};
+    const cur = order.currency || 'USD';
+    const amt = parseFloat(order.contractValue) || 0;
+    const qty = parseFloat(order.qtyMT) || 0;
+    const L = [];
+    if (previewDoc?.company?.name) L.push(`*${previewDoc.company.name}*`);
+    L.push(`*${previewDoc?.type || 'Document'}*${order.invoiceNumber ? ` — ${order.invoiceNumber}` : (order.orderNo ? ` — ${order.orderNo}` : '')}`);
+    if (order.date) L.push(`Date: ${order.date}`);
+    if (b.name) L.push(`Consignee: ${[b.name, b.country].filter(Boolean).join(', ')}`);
+    if (order.product || qty) L.push(`Goods: ${[order.product, qty ? `${qty} MT` : ''].filter(Boolean).join(' — ')}`);
+    if (order.contractNumber) L.push(`Contract: ${order.contractNumber}`);
+    const ports = [order.portOfLoading, order.destinationPort].filter(Boolean);
+    if (ports.length) L.push(`Shipment: ${ports.join(' → ')}`);
+    if (amt) L.push(`*Total: ${cur} ${Math.round(amt).toLocaleString()}*`);
+    if (order.paymentTerms) L.push(`Payment Terms: ${order.paymentTerms}`);
+    L.push('');
+    L.push(`Please find the attached ${previewDoc?.type || 'document'}. Thank you for your business.`);
+    return L.join('\n');
+  }
+
   // Send the current document to the customer over WhatsApp: the server renders
   // the same print HTML to a PDF and sends it through the QR-paired session.
   async function sendWhatsApp() {
@@ -2120,7 +2144,7 @@ export default function DocumentCenter({ order }) {
     try {
       const html = buildDocHtml(currentEditedHtml(), previewDoc?._docType, previewDoc?.type, { autoPrint: false });
       const filename = `${(previewDoc?.type || 'document').replace(/[^\w.\- ]+/g, '_')} — ${order.id}.pdf`;
-      const caption = `${previewDoc?.type} — ${order.orderNo || order.id}`;
+      const caption = buildExportCaption();
       const res = await api.post(`/api/export-orders/${oid}/documents/${previewKey}/send-whatsapp`, { html, to: to.trim(), caption, filename });
       addToast(`Sent to ${res?.data?.to || to.trim()} on WhatsApp`, 'success');
     } catch (err) {

@@ -108,6 +108,34 @@ export default function TransactionDocument({ kind = 'receipt', data, companyPro
       + `<div>${node.outerHTML}</div></body></html>`;
   };
 
+  // A plain-text summary that rides WITH the PDF as its WhatsApp caption, so the
+  // key details are legible right in the chat (not everyone opens the file).
+  // WhatsApp renders *text* as bold.
+  const buildCaption = () => {
+    const cur = m.currency;
+    const L = [];
+    L.push(`*${companyName}*`);
+    L.push(`*${m.title}*${m.refNo ? ` — ${m.refNo}` : ''}`);
+    L.push(`Date: ${dt(m.date)}`);
+    if (m.party) L.push(`${m.partyLabel}: ${m.party}`);
+    // Itemised lines (sales invoice carries a real line list).
+    if (kind === 'invoice' && Array.isArray(m.items) && m.items.length) {
+      L.push('');
+      m.items.slice(0, 12).forEach((it) => {
+        L.push(`• ${it.desc}${it.qty && it.qty !== '—' ? ` (${it.qty})` : ''} — ${money(it.amount, cur)}`);
+      });
+      if (m.items.length > 12) L.push(`…and ${m.items.length - 12} more item(s)`);
+    }
+    L.push('');
+    L.push(`Total: ${money(m.total, cur)}`);
+    if (m.paid > 0) L.push(`Paid: ${money(m.paid, cur)}`);
+    if (m.balance > 0) L.push(`*Balance Due: ${money(m.balance, cur)}*`);
+    if (m.status) L.push(`Status: ${m.status}`);
+    L.push('');
+    L.push(`Please find the attached ${m.title}. Thank you for your business.`);
+    return L.join('\n');
+  };
+
   // Send this document to the customer over WhatsApp (server renders the PDF).
   const sendWhatsApp = async () => {
     try {
@@ -133,7 +161,7 @@ export default function TransactionDocument({ kind = 'receipt', data, companyPro
     try {
       const html = buildSendHtml();
       const filename = `${m.title} ${m.refNo || ''}`.trim().replace(/[^\w.\- ]+/g, '_') + '.pdf';
-      const caption = `${m.title}${m.refNo ? ` ${m.refNo}` : ''}`;
+      const caption = buildCaption();
       const res = await api.post('/api/communication/whatsapp/send-document', {
         to: to.trim(), html, caption, filename, linked_type: kind, linked_id: data.id,
       });
