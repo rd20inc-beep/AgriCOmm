@@ -34,7 +34,20 @@ const state = {
   error: null,
   phone: null, // E.164 of paired number once known
   startedAt: null,
+  // Self-heal a corrupt persisted session: if the handshake keeps failing
+  // before we ever show a QR or open, the saved creds are bad — wipe + re-pair.
+  qrShown: false,
+  everOpen: false,
+  failCount: 0,
+  wiped: false, // only auto-wipe a corrupt session once per pairing attempt
 };
+
+function wipeSession() {
+  try {
+    fs.rmSync(SESSION_DIR, { recursive: true, force: true });
+    ensureDir();
+  } catch (_) { /* ignore */ }
+}
 
 function ensureDir() {
   if (!fs.existsSync(SESSION_DIR)) fs.mkdirSync(SESSION_DIR, { recursive: true });
@@ -47,6 +60,13 @@ async function start(force = false) {
   // would hang forever on "connecting".
   if (!force && (state.sock || state.status === 'connecting' || state.status === 'connected')) {
     return getStatus();
+  }
+  if (!force) {
+    // Fresh, user-initiated pairing attempt — reset the self-heal counters.
+    state.qrShown = false;
+    state.everOpen = false;
+    state.failCount = 0;
+    state.wiped = false;
   }
   state.status = 'connecting';
   state.error = null;
@@ -90,6 +110,8 @@ async function start(force = false) {
         state.qrString = qr;
         state.qrDataUrl = await QRCode.toDataURL(qr, { width: 320, margin: 1 });
         state.status = 'qr';
+        state.qrShown = true;      // reached the QR stage — session isn't corrupt
+        state.failCount = 0;
       }
 
       if (connection === 'open') {
@@ -97,30 +119,45 @@ async function start(force = false) {
         state.qrString = null;
         state.qrDataUrl = null;
         state.error = null;
+        state.everOpen = true;
+        state.failCount = 0;
         state.phone = sock.user?.id ? String(sock.user.id).split(':')[0].split('@')[0] : null;
       }
 
       if (connection === 'close') {
         const code = lastDisconnect?.error?.output?.statusCode;
         const loggedOut = code === DisconnectReason.loggedOut;
+        state.sock = null;
+        state.failCount += 1;
+
+        // Self-heal: the handshake keeps failing BEFORE we ever showed a QR or
+        // connected → the persisted creds are stale/corrupt (a common leftover
+        // of earlier failed attempts). Wipe the session and re-pair from clean,
+        // which forces a fresh QR instead of an endless "Connection Failure".
+        const corruptSession = !loggedOut && !state.everOpen && !state.qrShown && state.failCount >= 2 && !state.wiped;
+
         if (loggedOut) {
           // Phone unlinked us or banned. Clear the auth folder so the
           // next start() generates a fresh QR.
-          state.sock = null;
           state.status = 'disconnected';
           state.qrString = null;
           state.qrDataUrl = null;
           state.error = 'Logged out from WhatsApp. Scan a fresh QR to reconnect.';
           state.phone = null;
-          try {
-            fs.rmSync(SESSION_DIR, { recursive: true, force: true });
-            ensureDir();
-          } catch (_) { /* ignore */ }
+          wipeSession();
+        } else if (corruptSession) {
+          state.status = 'connecting';
+          state.qrString = null;
+          state.qrDataUrl = null;
+          state.error = null;
+          state.failCount = 0;
+          state.wiped = true;
+          wipeSession();
+          setTimeout(() => start(true).catch(() => {}), 300);
         } else {
           // Transient (incl. the expected post-scan "restart required", 515) —
           // reconnect. force=true so the guard in start() doesn't swallow it.
           state.status = 'connecting';
-          state.sock = null;
           const restartRequired = code === DisconnectReason.restartRequired;
           setTimeout(() => start(true).catch(() => {}), restartRequired ? 200 : 2500);
         }
