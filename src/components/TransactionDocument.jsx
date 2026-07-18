@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { Printer, Download, Send, Loader2 } from 'lucide-react';
 import api from '../api/client';
 import { useApp } from '../context/AppContext';
+import WhatsAppSendModal from './WhatsAppSendModal';
 
 // One printable/downloadable document for the three transaction kinds:
 //   kind='receipt' → Payment Receipt (Money In / a receivable)
@@ -86,6 +87,7 @@ export default function TransactionDocument({ kind = 'receipt', data, companyPro
   const ref = useRef(null);
   const { addToast, customersList } = useApp();
   const [waSending, setWaSending] = useState(false);
+  const [waModal, setWaModal] = useState(null); // { defaultNumber, who } while the send dialog is open
   if (!data) return null;
   const m = model(kind, data);
   const cur = m.currency;
@@ -136,8 +138,8 @@ export default function TransactionDocument({ kind = 'receipt', data, companyPro
     return L.join('\n');
   };
 
-  // Send this document to the customer over WhatsApp (server renders the PDF).
-  const sendWhatsApp = async () => {
+  // Open the send dialog — check the connection, then prefill the party's number.
+  const openWhatsApp = async () => {
     try {
       const st = await api.get('/api/communication/whatsapp/qr/status');
       const status = st?.data?.status || st?.status;
@@ -146,26 +148,23 @@ export default function TransactionDocument({ kind = 'receipt', data, companyPro
 
     // Prefer a number on file — from the record, else the customer master.
     const customer = (customersList || []).find((c) => String(c.id) === String(data.customerId));
-    const onFile = String(data.customerPhone || data.phone || data.buyerPhone || (customer && customer.phone) || '').trim();
-    const who = (customer && customer.name) || data.customerName || data.buyerName || m.party || 'the customer';
-    const to = window.prompt(
-      onFile
-        ? `Send "${m.title}" to ${who} on WhatsApp.\n\nNumber on file: ${onFile}\nConfirm or edit below (include country code, e.g. 923001234567):`
-        : `No WhatsApp number on file for ${who}. Enter one (with country code, e.g. 923001234567):`,
-      onFile,
-    );
-    if (to === null) return;
-    if (!to.trim()) { addToast('Enter a WhatsApp number', 'info'); return; }
+    const onFile = String(data.customerPhone || data.phone || data.buyerPhone || (customer && customer.phone) || '').replace(/[^\d]/g, '');
+    const who = (customer && customer.name) || data.customerName || data.buyerName || m.party || null;
+    setWaModal({ defaultNumber: onFile, who });
+  };
 
+  // Actually send this document over WhatsApp (server renders the PDF).
+  const sendWhatsApp = async (digits) => {
     setWaSending(true);
     try {
       const html = buildSendHtml();
       const filename = `${m.title} ${m.refNo || ''}`.trim().replace(/[^\w.\- ]+/g, '_') + '.pdf';
       const caption = buildCaption();
       const res = await api.post('/api/communication/whatsapp/send-document', {
-        to: to.trim(), html, caption, filename, linked_type: kind, linked_id: data.id,
+        to: digits, html, caption, filename, linked_type: kind, linked_id: data.id,
       });
-      addToast(`Sent to ${res?.data?.to || to.trim()} on WhatsApp`, 'success');
+      addToast(`Sent to ${res?.data?.to || digits} on WhatsApp`, 'success');
+      setWaModal(null);
     } catch (err) {
       addToast(err?.message || 'WhatsApp send failed', 'error');
     } finally { setWaSending(false); }
@@ -198,7 +197,7 @@ export default function TransactionDocument({ kind = 'receipt', data, companyPro
   return (
     <div className="space-y-3 no-mobile-cards">
       <div className="td-actions flex justify-end gap-2 print:hidden">
-        <button onClick={sendWhatsApp} disabled={waSending} title="Send this document to the customer on WhatsApp"
+        <button onClick={openWhatsApp} disabled={waSending} title="Send this document to the customer on WhatsApp"
           className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">
           {waSending ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />} WhatsApp
         </button>
@@ -209,6 +208,17 @@ export default function TransactionDocument({ kind = 'receipt', data, companyPro
           <Printer size={15} /> Print
         </button>
       </div>
+
+      <WhatsAppSendModal
+        isOpen={!!waModal}
+        onClose={() => setWaModal(null)}
+        onConfirm={sendWhatsApp}
+        sending={waSending}
+        docTitle={m.title}
+        partyName={waModal?.who}
+        partyLabel={m.partyLabel}
+        defaultNumber={waModal?.defaultNumber || ''}
+      />
 
       <div id="td-doc" ref={ref} className="bg-white border border-gray-200 rounded-lg p-6" style={{ fontFamily: "'Segoe UI', Tahoma, sans-serif", color: '#1f2937' }}>
         {/* Header */}

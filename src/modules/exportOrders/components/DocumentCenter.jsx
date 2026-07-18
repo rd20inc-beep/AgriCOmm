@@ -4,6 +4,7 @@ import api from '../../../api/client';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import Modal from '../../../components/Modal';
+import WhatsAppSendModal from '../../../components/WhatsAppSendModal';
 import { incotermLabel } from '../../../shared/constants/incoterms';
 
 // ─── Document Templates ───
@@ -1920,6 +1921,7 @@ export default function DocumentCenter({ order }) {
   const [docStyle, setDocStyle] = useState({ fontFamily: DEFAULT_DOC_FONT, fontScale: 1 });
   const [styleDirty, setStyleDirty] = useState(false);   // unsaved font changes
   const [waSending, setWaSending] = useState(false);     // WhatsApp send in flight
+  const [waModal, setWaModal] = useState(null);          // { defaultNumber, who } while the send dialog is open
   const printRef = useRef(null);
   const validation = useMemo(() => validateExportDoc(previewDoc), [previewDoc]);
   const canApprove = hasPermission('documents', 'approve');
@@ -2123,11 +2125,10 @@ export default function DocumentCenter({ order }) {
     return L.join('\n');
   }
 
-  // Send the current document to the customer over WhatsApp: the server renders
-  // the same print HTML to a PDF and sends it through the QR-paired session.
-  async function sendWhatsApp() {
+  // Open the send dialog — check the connection, then prefill the consignee's number.
+  async function openWhatsApp() {
     try {
-      const st = await api.get('/api/communications/whatsapp/qr/status');
+      const st = await api.get('/api/communication/whatsapp/qr/status');
       const status = st?.data?.status || st?.status;
       if (status !== 'connected') {
         addToast('WhatsApp is not connected. Connect it in Admin → WhatsApp (scan the QR).', 'error');
@@ -2135,18 +2136,22 @@ export default function DocumentCenter({ order }) {
       }
     } catch { /* proceed; the send endpoint re-checks and reports clearly */ }
 
-    const defaultPhone = (previewDoc?.buyer?.phone || '').toString();
-    const to = window.prompt(`Send "${previewDoc?.type}" to the customer's WhatsApp number (with country code):`, defaultPhone);
-    if (to === null) return;                       // cancelled
-    if (!to.trim()) { addToast('Enter a WhatsApp number', 'info'); return; }
+    const defaultNumber = (previewDoc?.buyer?.phone || '').toString().replace(/[^\d]/g, '');
+    const who = previewDoc?.buyer?.name || order.customerName || null;
+    setWaModal({ defaultNumber, who });
+  }
 
+  // Send the current document to the customer over WhatsApp: the server renders
+  // the same print HTML to a PDF and sends it through the QR-paired session.
+  async function sendWhatsApp(digits) {
     setWaSending(true);
     try {
       const html = buildDocHtml(currentEditedHtml(), previewDoc?._docType, previewDoc?.type, { autoPrint: false });
       const filename = `${(previewDoc?.type || 'document').replace(/[^\w.\- ]+/g, '_')} — ${order.id}.pdf`;
       const caption = buildExportCaption();
-      const res = await api.post(`/api/export-orders/${oid}/documents/${previewKey}/send-whatsapp`, { html, to: to.trim(), caption, filename });
-      addToast(`Sent to ${res?.data?.to || to.trim()} on WhatsApp`, 'success');
+      const res = await api.post(`/api/export-orders/${oid}/documents/${previewKey}/send-whatsapp`, { html, to: digits, caption, filename });
+      addToast(`Sent to ${res?.data?.to || digits} on WhatsApp`, 'success');
+      setWaModal(null);
     } catch (err) {
       addToast(err?.message || 'WhatsApp send failed', 'error');
     } finally { setWaSending(false); }
@@ -2247,7 +2252,7 @@ export default function DocumentCenter({ order }) {
                     {wfBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Edit2 className="w-4 h-4" />} Save edits
                   </button>
                 )}
-                <button onClick={sendWhatsApp} disabled={waSending}
+                <button onClick={openWhatsApp} disabled={waSending}
                   title="Render a PDF and send it to the customer on WhatsApp"
                   className="inline-flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">
                   {waSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} WhatsApp
@@ -2410,6 +2415,17 @@ export default function DocumentCenter({ order }) {
           </div>
         </Modal>
       )}
+
+      <WhatsAppSendModal
+        isOpen={!!waModal}
+        onClose={() => setWaModal(null)}
+        onConfirm={sendWhatsApp}
+        sending={waSending}
+        docTitle={previewDoc?.type || 'document'}
+        partyName={waModal?.who}
+        partyLabel="Consignee"
+        defaultNumber={waModal?.defaultNumber || ''}
+      />
     </div>
   );
 }
