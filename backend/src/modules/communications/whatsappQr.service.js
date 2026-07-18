@@ -40,8 +40,12 @@ function ensureDir() {
   if (!fs.existsSync(SESSION_DIR)) fs.mkdirSync(SESSION_DIR, { recursive: true });
 }
 
-async function start() {
-  if (state.sock || state.status === 'connecting' || state.status === 'connected') {
+async function start(force = false) {
+  // Ignore duplicate user-triggered starts while a session is already live.
+  // Internal reconnects pass force=true — otherwise the post-scan "restart
+  // required" would be swallowed here (status is 'connecting') and pairing
+  // would hang forever on "connecting".
+  if (!force && (state.sock || state.status === 'connecting' || state.status === 'connected')) {
     return getStatus();
   }
   state.status = 'connecting';
@@ -113,10 +117,12 @@ async function start() {
             ensureDir();
           } catch (_) { /* ignore */ }
         } else {
-          // Transient — try again.
+          // Transient (incl. the expected post-scan "restart required", 515) —
+          // reconnect. force=true so the guard in start() doesn't swallow it.
           state.status = 'connecting';
           state.sock = null;
-          setTimeout(() => start().catch(() => {}), 2500);
+          const restartRequired = code === DisconnectReason.restartRequired;
+          setTimeout(() => start(true).catch(() => {}), restartRequired ? 200 : 2500);
         }
       }
     });
