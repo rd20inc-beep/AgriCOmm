@@ -121,9 +121,14 @@ async function start(force = false) {
     });
     state.sock = sock;
 
-    sock.ev.on('creds.update', saveCreds);
+    // Only the CURRENT socket may write creds or drive state. A superseded
+    // socket (e.g. an in-flight reconnect from before the user hit "Generate QR
+    // Code") must not resurrect old credentials on disk after a wipe, nor fire
+    // its own reconnects — otherwise a stale registration keeps coming back.
+    sock.ev.on('creds.update', () => { if (state.sock === sock) saveCreds(); });
 
     sock.ev.on('connection.update', async (update) => {
+      if (state.sock !== sock) return; // ignore events from a superseded socket
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
