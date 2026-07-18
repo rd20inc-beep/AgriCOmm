@@ -37,6 +37,20 @@ function startScheduler() {
 
 startScheduler();
 
+// Reconnect an already-linked WhatsApp session after a restart/deploy so it
+// doesn't sit "disconnected" until someone re-scans a QR. No-op (beyond a log)
+// if there's no registered session on the volume. Deferred so it never blocks
+// or crashes boot.
+if (config.env !== 'test') {
+  setTimeout(() => {
+    try {
+      require('./modules/communications/whatsappQr.service').resumeOnBoot();
+    } catch (err) {
+      console.error('[RiceFlow ERP] WhatsApp resume-on-boot error:', err && err.message);
+    }
+  }, 8 * 1000);
+}
+
 // Handle uncaught exceptions
 process.on('uncaughtException', (err) => {
   console.error('UNCAUGHT EXCEPTION! Shutting down...');

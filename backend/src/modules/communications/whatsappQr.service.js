@@ -257,6 +257,42 @@ async function logout() {
   return getStatus();
 }
 
+/**
+ * Reconnect an already-linked session on server boot — WITHOUT showing a QR.
+ *
+ * A WhatsApp multi-device link survives server restarts: the credentials on the
+ * volume stay valid, so we just need to re-open the socket. Without this, every
+ * container restart/deploy leaves WhatsApp stuck "disconnected" until someone
+ * manually re-scans — which is exactly the "keeps getting disconnected" symptom.
+ *
+ * Only auto-resume a REGISTERED session (creds.json.registered === true). If the
+ * saved creds are unregistered (a half-finished pairing), do nothing and wait
+ * for the user to scan a QR from the UI — booting into QR churn would be worse.
+ */
+async function resumeOnBoot() {
+  try {
+    // A LAN site box must never own the single WhatsApp session (see routes).
+    if (require('../../config').site?.enabled) return;
+    const credsFile = path.join(SESSION_DIR, 'creds.json');
+    if (!fs.existsSync(credsFile)) {
+      console.log('[WhatsApp] No saved session; awaiting QR pairing.');
+      return;
+    }
+    let registered = false;
+    try { registered = !!JSON.parse(fs.readFileSync(credsFile, 'utf8')).registered; } catch (_) { /* corrupt */ }
+    if (!registered) {
+      console.log('[WhatsApp] Saved session is not registered; awaiting a fresh QR scan.');
+      return;
+    }
+    console.log('[WhatsApp] Resuming linked session from saved credentials…');
+    // force=true → connect with the existing creds (no wipe, no QR). A registered
+    // session re-opens; a transient failure hits the normal auto-reconnect path.
+    await start(true);
+  } catch (err) {
+    console.error('[WhatsApp] resumeOnBoot failed:', err && err.message);
+  }
+}
+
 function getStatus() {
   return {
     status: state.status,
@@ -316,4 +352,4 @@ async function sendDocument(phone, buffer, { fileName = 'document.pdf', mimetype
   }
 }
 
-module.exports = { start, logout, getStatus, sendMessage, sendDocument };
+module.exports = { start, logout, getStatus, sendMessage, sendDocument, resumeOnBoot };
