@@ -75,6 +75,11 @@ async function start(force = false) {
     // start fresh so a NEW QR is produced on EVERY click. (The old guard made a
     // click while status was 'connecting' a no-op, so the QR never appeared.)
     teardown();
+    // A QR is only ever for a FRESH pairing, so clear any persisted credentials
+    // first. This is decisive: leftover/corrupt creds make Baileys try to RESUME
+    // (→ "Connection Failure", no QR); with none on disk it registers fresh and
+    // emits a QR immediately. (To relink, the user is scanning anyway.)
+    wipeSession();
     state.qrString = null;
     state.qrDataUrl = null;
     state.error = null;
