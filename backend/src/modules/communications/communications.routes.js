@@ -25,6 +25,7 @@ router.post('/whatsapp/templates', communicationController.createWhatsAppTemplat
 router.put('/whatsapp/templates/:id', communicationController.updateWhatsAppTemplate);
 router.delete('/whatsapp/templates/:id', communicationController.deleteWhatsAppTemplate);
 router.post('/whatsapp/send', communicationController.sendWhatsAppMessage);
+router.post('/whatsapp/send-document', communicationController.sendWhatsAppDocument);
 router.post('/whatsapp/preview', communicationController.previewWhatsAppTemplate);
 router.get('/whatsapp/logs', communicationController.getWhatsAppLogs);
 

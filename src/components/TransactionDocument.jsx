@@ -1,5 +1,7 @@
-import { useRef } from 'react';
-import { Printer, Download } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { Printer, Download, Send, Loader2 } from 'lucide-react';
+import api from '../api/client';
+import { useApp } from '../context/AppContext';
 
 // One printable/downloadable document for the three transaction kinds:
 //   kind='receipt' → Payment Receipt (Money In / a receivable)
@@ -82,11 +84,56 @@ function model(kind, d) {
 
 export default function TransactionDocument({ kind = 'receipt', data, companyProfile }) {
   const ref = useRef(null);
+  const { addToast } = useApp();
+  const [waSending, setWaSending] = useState(false);
   if (!data) return null;
   const m = model(kind, data);
   const cur = m.currency;
   const co = companyProfile || {};
   const companyName = co.legalName || co.name || 'AGRI COMMODITIES';
+
+  // Full print-ready HTML for the server to render to a PDF. Stylesheet hrefs
+  // are made ABSOLUTE (l.href) so headless Chromium on the server can fetch the
+  // app's CSS and render the document exactly as it prints in the browser.
+  const buildSendHtml = () => {
+    const node = ref.current;
+    if (!node) return null;
+    const links = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).map((l) => `<link rel="stylesheet" href="${l.href}">`).join('');
+    const styles = Array.from(document.querySelectorAll('style')).map((s) => s.outerHTML).join('');
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${m.title} ${m.refNo || ''}</title>${links}${styles}`
+      + '<style>@page{size:A4 portrait;margin:12mm}html,body{margin:0;padding:0;background:#fff}'
+      + '*{-webkit-print-color-adjust:exact;print-color-adjust:exact}'
+      + '#td-doc{box-shadow:none!important;border:0!important;width:100%!important;max-width:none!important}'
+      + '.td-actions{display:none!important}</style></head><body>'
+      + `<div>${node.outerHTML}</div></body></html>`;
+  };
+
+  // Send this document to the customer over WhatsApp (server renders the PDF).
+  const sendWhatsApp = async () => {
+    try {
+      const st = await api.get('/api/communication/whatsapp/qr/status');
+      const status = st?.data?.status || st?.status;
+      if (status !== 'connected') { addToast('WhatsApp is not connected. Connect it in Admin → WhatsApp (scan the QR).', 'error'); return; }
+    } catch { /* the send endpoint re-checks and reports clearly */ }
+
+    const defaultPhone = (data.customerPhone || data.phone || data.buyerPhone || '').toString();
+    const to = window.prompt(`Send "${m.title}" to the customer's WhatsApp number (with country code):`, defaultPhone);
+    if (to === null) return;
+    if (!to.trim()) { addToast('Enter a WhatsApp number', 'info'); return; }
+
+    setWaSending(true);
+    try {
+      const html = buildSendHtml();
+      const filename = `${m.title} ${m.refNo || ''}`.trim().replace(/[^\w.\- ]+/g, '_') + '.pdf';
+      const caption = `${m.title}${m.refNo ? ` ${m.refNo}` : ''}`;
+      const res = await api.post('/api/communication/whatsapp/send-document', {
+        to: to.trim(), html, caption, filename, linked_type: kind, linked_id: data.id,
+      });
+      addToast(`Sent to ${res?.data?.to || to.trim()} on WhatsApp`, 'success');
+    } catch (err) {
+      addToast(err?.message || 'WhatsApp send failed', 'error');
+    } finally { setWaSending(false); }
+  };
 
   const openPrintable = () => {
     const node = ref.current;
@@ -115,6 +162,10 @@ export default function TransactionDocument({ kind = 'receipt', data, companyPro
   return (
     <div className="space-y-3 no-mobile-cards">
       <div className="td-actions flex justify-end gap-2 print:hidden">
+        <button onClick={sendWhatsApp} disabled={waSending} title="Send this document to the customer on WhatsApp"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">
+          {waSending ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />} WhatsApp
+        </button>
         <button onClick={openPrintable} className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
           <Download size={15} /> Download PDF
         </button>
