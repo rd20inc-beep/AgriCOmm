@@ -84,7 +84,7 @@ function model(kind, d) {
 
 export default function TransactionDocument({ kind = 'receipt', data, companyProfile }) {
   const ref = useRef(null);
-  const { addToast } = useApp();
+  const { addToast, customersList } = useApp();
   const [waSending, setWaSending] = useState(false);
   if (!data) return null;
   const m = model(kind, data);
@@ -116,8 +116,16 @@ export default function TransactionDocument({ kind = 'receipt', data, companyPro
       if (status !== 'connected') { addToast('WhatsApp is not connected. Connect it in Admin → WhatsApp (scan the QR).', 'error'); return; }
     } catch { /* the send endpoint re-checks and reports clearly */ }
 
-    const defaultPhone = (data.customerPhone || data.phone || data.buyerPhone || '').toString();
-    const to = window.prompt(`Send "${m.title}" to the customer's WhatsApp number (with country code):`, defaultPhone);
+    // Prefer a number on file — from the record, else the customer master.
+    const customer = (customersList || []).find((c) => String(c.id) === String(data.customerId));
+    const onFile = String(data.customerPhone || data.phone || data.buyerPhone || (customer && customer.phone) || '').trim();
+    const who = (customer && customer.name) || data.customerName || data.buyerName || m.party || 'the customer';
+    const to = window.prompt(
+      onFile
+        ? `Send "${m.title}" to ${who} on WhatsApp.\n\nNumber on file: ${onFile}\nConfirm or edit below (include country code, e.g. 923001234567):`
+        : `No WhatsApp number on file for ${who}. Enter one (with country code, e.g. 923001234567):`,
+      onFile,
+    );
     if (to === null) return;
     if (!to.trim()) { addToast('Enter a WhatsApp number', 'info'); return; }
 
