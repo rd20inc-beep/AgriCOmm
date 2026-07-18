@@ -260,11 +260,15 @@ async function sendDocument(phone, buffer, { fileName = 'document.pdf', mimetype
   }
   const digits = String(phone || '').replace(/\D/g, '');
   if (!digits) return { ok: false, error: 'Invalid phone number' };
-  if (!buffer || !buffer.length) return { ok: false, error: 'Empty document' };
+  // page.pdf() returns a Uint8Array; Baileys' media pipeline expects a Node
+  // Buffer and throws deep inside ("...reading 'toString'") on a bare typed
+  // array — so coerce it here.
+  const buf = Buffer.isBuffer(buffer) ? buffer : (buffer ? Buffer.from(buffer) : null);
+  if (!buf || !buf.length) return { ok: false, error: 'Empty document' };
   const jid = `${digits}@s.whatsapp.net`;
   try {
     const res = await state.sock.sendMessage(jid, {
-      document: buffer, mimetype, fileName, caption: caption || undefined,
+      document: buf, mimetype, fileName, caption: caption || undefined,
     });
     return { ok: true, messageId: res?.key?.id || null };
   } catch (err) {
