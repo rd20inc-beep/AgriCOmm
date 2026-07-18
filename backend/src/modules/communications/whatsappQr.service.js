@@ -56,13 +56,23 @@ async function start() {
       default: makeWASocket,
       useMultiFileAuthState,
       DisconnectReason,
+      fetchLatestBaileysVersion,
     } = baileys;
+
+    // WhatsApp rejects an outdated WA-Web protocol version with a bare
+    // "Connection Failure" and never issues a QR (pairing appears to hang).
+    // Always negotiate against the current version instead of the bundled one.
+    let version;
+    try {
+      const info = await fetchLatestBaileysVersion();
+      version = info && info.version;
+    } catch (_) { /* fall back to the library's bundled version */ }
 
     const { state: authState, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
 
     const sock = makeWASocket({
+      version,
       auth: authState,
-      printQRInTerminal: false,
       browser: ['AgriCOmm ERP', 'Chrome', '1.0.0'],
     });
     state.sock = sock;
