@@ -283,10 +283,17 @@ async function resumeOnBoot() {
       console.log('[WhatsApp] No saved session; awaiting QR pairing.');
       return;
     }
-    let registered = false;
-    try { registered = !!JSON.parse(fs.readFileSync(credsFile, 'utf8')).registered; } catch (_) { /* corrupt */ }
-    if (!registered) {
-      console.log('[WhatsApp] Saved session is not registered; awaiting a fresh QR scan.');
+    // A session is LINKED once it has a paired account identity (creds.me). Some
+    // Baileys flows leave the `registered` boolean false even on a fully paired,
+    // stable connection — so `me` is the authoritative signal. Resume when either
+    // is present; skip only a truly half-finished pairing (creds but no account).
+    let linked = false;
+    try {
+      const c = JSON.parse(fs.readFileSync(credsFile, 'utf8'));
+      linked = c.registered === true || !!(c.me && c.me.id);
+    } catch (_) { /* corrupt */ }
+    if (!linked) {
+      console.log('[WhatsApp] Saved session is not linked; awaiting a fresh QR scan.');
       return;
     }
     console.log('[WhatsApp] Resuming linked session from saved credentials…');
