@@ -226,7 +226,10 @@ function WarehouseDetail({ id }) {
                 ? <tr><td colSpan={10} className="px-3 py-6 text-center text-gray-400">No on-hand lots in this warehouse.</td></tr>
                 : lots.map(l => (
                   <tr key={l.lotId} className="hover:bg-gray-50">
-                    <td className="px-3 py-2"><Link to={l.href} className="font-mono text-blue-600 hover:underline">{l.lotNo}</Link></td>
+                    <td className="px-3 py-2">
+                      <Link to={l.href} className="font-mono text-blue-600 hover:underline">{l.lotNo}</Link>
+                      {l.isServiceMilling && <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 align-middle">Service Milling</span>}
+                    </td>
                     <td className="px-3 py-2">{l.riceType || '—'}{l.label && l.label !== l.riceType ? <span className="text-gray-400"> · {l.label}</span> : ''}</td>
                     <td className="px-3 py-2">{typeLabel(l.type)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{kg(l.inKg)}</td>

@@ -1402,7 +1402,7 @@ const reportingService = {
       .where('l.type', 'raw')
       .select('l.id', 'l.lot_no', 'l.variety', 'l.grade', 'l.item_name', 'l.purchase_date', 'l.created_at',
         'l.received_net_weight_kg', 'l.net_weight_kg', 'l.landed_cost_per_kg', 'l.rate_per_kg',
-        'l.moisture_pct', 'p.name as product_name', 'w.name as warehouse_name')
+        'l.moisture_pct', 'l.ownership', 'p.name as product_name', 'w.name as warehouse_name')
       .orderBy('l.purchase_date', 'asc').orderBy('l.id', 'asc');
 
     const agg = {
@@ -1432,6 +1432,7 @@ const reportingService = {
         purchaseValue: num(fs.purchaseValue), stockValue: num(fs.remainingStockValue),
         revenue: num(fs.totalRevenue), realizedProfit: num(fs.realizedProfit),
         expectedProfitRemaining: num(fs.expectedProfitRemaining),
+        isServiceMilling: lot.ownership === 'client',
       });
       agg.purchasedKg += purchasedKg; agg.milledKg += milledKg; agg.soldKg += soldKg;
       agg.remainingKg += remainingKg; agg.reservedKg += num(qs.reservedKg); agg.lossKg += num(qs.processingLossKg);
@@ -1535,7 +1536,7 @@ const reportingService = {
       .where('l.product_id', id)
       .select('l.id', 'l.lot_no', 'l.type', 'l.entity', 'l.item_name', 'l.grade', 'l.variety', 'l.batch_ref',
         'l.received_net_weight_kg', 'l.net_weight_kg', 'l.reserved_qty', 'l.landed_cost_per_kg', 'l.rate_per_kg',
-        'l.supplier_id', 's.name as supplier_name', 'w.name as warehouse_name', 'l.purchase_date', 'l.created_at')
+        'l.supplier_id', 'l.ownership', 's.name as supplier_name', 'w.name as warehouse_name', 'l.purchase_date', 'l.created_at')
       .orderBy('l.type', 'asc').orderBy('l.id', 'asc');
 
     const cpkOf = (l) => num(l.landed_cost_per_kg) || num(l.rate_per_kg);
@@ -1604,6 +1605,7 @@ const reportingService = {
       remainingKg: num(l.net_weight_kg), reservedKg: num(l.reserved_qty),
       costPerKg: cpkOf(l), value: num(l.net_weight_kg) * cpkOf(l),
       date: l.purchase_date || l.created_at,
+      isServiceMilling: l.ownership === 'client',
     }));
 
     return {
@@ -1680,7 +1682,7 @@ const reportingService = {
       .where('l.warehouse_id', id).where('l.net_weight_kg', '>', 0)
       .select('l.id', 'l.lot_no', 'l.type', 'l.entity', 'l.item_name', 'l.grade', 'l.variety', 'l.batch_ref',
         'l.received_net_weight_kg', 'l.net_weight_kg', 'l.reserved_qty', 'l.landed_cost_per_kg', 'l.rate_per_kg',
-        'p.name as product_name', 'l.supplier_id', 's.name as supplier_name', 'l.purchase_date', 'l.created_at')
+        'p.name as product_name', 'l.supplier_id', 'l.ownership', 's.name as supplier_name', 'l.purchase_date', 'l.created_at')
       .orderBy('l.type', 'asc').orderBy('l.id', 'asc');
 
     const cpkOf = (l) => num(l.landed_cost_per_kg) || num(l.rate_per_kg);
@@ -1706,6 +1708,7 @@ const reportingService = {
         batchRef: l.batch_ref || null, supplier: l.supplier_name || null, supplierId: l.supplier_id || null,
         inKg: recv, outKg, reservedKg: res, availableKg: Math.max(0, net - res), closingKg: net,
         costPerKg: cpk, value: val, date: l.purchase_date || l.created_at,
+        isServiceMilling: l.ownership === 'client',
       };
     });
 
