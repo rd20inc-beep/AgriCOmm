@@ -1672,6 +1672,9 @@ const inventoryService = {
       .sum('il.available_qty as total_available')
       .sum('il.total_value as total_value')
       .where('il.status', '!=', 'Depleted')
+      // Company-owned only — client-owned Service Milling stock is physically in
+      // our warehouse but must never inflate company stock counts or valuation.
+      .where('il.ownership', 'company')
       .groupBy('il.type', 'il.entity', 'w.name', 'il.warehouse_id')
       .orderBy(['il.entity', 'il.type']);
 
