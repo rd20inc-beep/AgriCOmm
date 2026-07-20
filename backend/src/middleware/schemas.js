@@ -562,6 +562,14 @@ const sendDocumentWhatsApp = Joi.object({
   filename: Joi.string().max(120).allow('', null),
 });
 
+const sendDocumentEmail = Joi.object({
+  html: Joi.string().required(),
+  to: Joi.string().max(200).allow('', null),
+  subject: Joi.string().max(255).allow('', null),
+  message: Joi.string().max(4000).allow('', null),
+  filename: Joi.string().max(120).allow('', null),
+});
+
 module.exports = {
   createExportOrder,
   updateExportShipment,
@@ -595,4 +603,5 @@ module.exports = {
   documentRevise,
   documentCustomerStyle,
   sendDocumentWhatsApp,
+  sendDocumentEmail,
 };

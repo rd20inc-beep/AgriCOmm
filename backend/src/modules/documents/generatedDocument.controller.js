@@ -6,6 +6,7 @@ const auditService = require('../admin/audit.service');
 const pdfService = require('./pdf.service');
 const whatsappQr = require('../communications/whatsappQr.service');
 const whatsappService = require('../communications/whatsapp.service');
+const emailService = require('../communications/email.service');
 
 async function resolveOrderId(id) {
   if (/^\d+$/.test(id)) return parseInt(id, 10);
@@ -241,6 +242,57 @@ const generatedDocumentController = {
       return res.json({ success: true, data: { to: phone, messageId: result.messageId } });
     } catch (err) {
       console.error('sendWhatsApp error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  // POST /:id/documents/:docType/send-email — render the posted document HTML to
+  // a PDF and email it to the customer as an attachment.
+  async sendEmail(req, res) {
+    try {
+      const orderId = await resolveOrderId(req.params.id);
+      if (!orderId) return res.status(404).json({ success: false, message: 'Order not found.' });
+      const { html, to, subject, message, filename } = req.body;
+      if (!html || !String(html).trim()) return res.status(400).json({ success: false, message: 'Document content is required.' });
+
+      // Recipient: explicit email, else the order's customer email.
+      let email = to && String(to).trim();
+      const cust = await db('export_orders as eo').leftJoin('customers as c', 'eo.customer_id', 'c.id')
+        .where('eo.id', orderId).select('c.email as email', 'c.name as name').first();
+      if (!email) email = cust && cust.email;
+      const toName = cust && cust.name;
+      if (!email) return res.status(400).json({ success: false, code: 'NO_EMAIL', message: 'No email for this customer. Add one on the customer record, or enter an address to send.' });
+
+      let pdf;
+      try {
+        pdf = await pdfService.htmlToPdf(html);
+      } catch (e) {
+        return res.status(e.status || 500).json({ success: false, message: e.message || 'Failed to render the document PDF.' });
+      }
+
+      const docLabel = req.params.docType;
+      const safeName = String(filename || `${docLabel}.pdf`).replace(/[^\w.\- ]+/g, '_');
+      const finalSubject = (subject && String(subject).trim()) || `${docLabel} — ${req.params.id}`;
+      const bodyHtml = (message && String(message).trim())
+        ? String(message).replace(/\n/g, '<br/>')
+        : `<p>Dear ${toName || 'Customer'},</p><p>Please find the attached ${docLabel}.</p><p>Regards,<br/>Agri Commodities</p>`;
+
+      const result = await emailService.sendEmail({
+        to: email, subject: finalSubject, body: bodyHtml,
+        attachments: [{ filename: safeName, content: pdf, contentType: 'application/pdf' }],
+        linkedType: 'export_order', linkedId: orderId, userId: req.user ? req.user.id : null,
+      });
+
+      auditService.log({
+        userId: req.user ? req.user.id : null, action: 'send_document_email',
+        entityType: 'export_order', entityId: orderId,
+        details: { docType: docLabel, to: email, ok: result.status === 'Sent' }, ipAddress: req.ip,
+      }).catch(() => {});
+
+      if (result.status !== 'Sent') return res.status(502).json({ success: false, message: result.error_message || 'Email send failed.' });
+      return res.json({ success: true, data: { to: email } });
+    } catch (err) {
+      console.error('sendEmail error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
   },
