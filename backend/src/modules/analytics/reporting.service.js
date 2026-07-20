@@ -1354,6 +1354,7 @@ const reportingService = {
     const rows = await db('inventory_lots as l')
       .join('suppliers as s', 'l.supplier_id', 's.id')
       .where('l.type', 'raw')
+      .whereNot('l.ownership', 'client') // exclude client-owned Service Milling stock
       .groupBy('s.id', 's.name')
       .select('s.id as supplierId', 's.name as supplier',
         db.raw('COUNT(l.id) as lot_count'),
@@ -1406,7 +1407,10 @@ const reportingService = {
       .orderBy('l.purchase_date', 'asc').orderBy('l.id', 'asc');
 
     const agg = {
-      lotCount: lots.length, purchasedKg: 0, milledKg: 0, soldKg: 0, remainingKg: 0,
+      // Client-owned Service Milling lots are shown (tagged) but excluded from
+      // the supplier's company totals.
+      lotCount: lots.filter((l) => l.ownership !== 'client').length,
+      purchasedKg: 0, milledKg: 0, soldKg: 0, remainingKg: 0,
       reservedKg: 0, lossKg: 0, stockValue: 0, purchaseValue: 0, revenue: 0, cogs: 0,
       realizedProfit: 0, expectedProfitRemaining: 0, paymentReceived: 0, outstandingSales: 0,
     };
@@ -1434,6 +1438,7 @@ const reportingService = {
         expectedProfitRemaining: num(fs.expectedProfitRemaining),
         isServiceMilling: lot.ownership === 'client',
       });
+      if (lot.ownership === 'client') continue; // tagged in the list, out of the totals
       agg.purchasedKg += purchasedKg; agg.milledKg += milledKg; agg.soldKg += soldKg;
       agg.remainingKg += remainingKg; agg.reservedKg += num(qs.reservedKg); agg.lossKg += num(qs.processingLossKg);
       agg.stockValue += num(fs.remainingStockValue); agg.purchaseValue += num(fs.purchaseValue);
@@ -1494,6 +1499,7 @@ const reportingService = {
     const rows = await db('inventory_lots as l')
       .join('products as p', 'l.product_id', 'p.id')
       .where('p.is_byproduct', false)
+      .whereNot('l.ownership', 'client') // exclude client-owned Service Milling stock
       .groupBy('p.id', 'p.name')
       .select('p.id as productId', 'p.name as riceType',
         db.raw('COUNT(l.id) as lot_count'),
@@ -1540,8 +1546,11 @@ const reportingService = {
       .orderBy('l.type', 'asc').orderBy('l.id', 'asc');
 
     const cpkOf = (l) => num(l.landed_cost_per_kg) || num(l.rate_per_kg);
-    const lotIds = lots.map(l => l.id);
-    const rawIds = lots.filter(l => l.type === 'raw').map(l => l.id);
+    // Company totals exclude client-owned Service Milling lots (the client's
+    // stock, not ours). The lot LIST below still shows them, tagged.
+    const companyLots = lots.filter(l => l.ownership !== 'client');
+    const lotIds = companyLots.map(l => l.id);
+    const rawIds = companyLots.filter(l => l.type === 'raw').map(l => l.id);
 
     // Milled — raw lots of this type that were sent to milling.
     let milledKg = 0;
@@ -1571,11 +1580,11 @@ const reportingService = {
       exportedKg = Math.abs(num(ex && ex.q));
     }
 
-    const purchasedKg = lots.filter(l => l.type === 'raw').reduce((a, l) => a + (num(l.received_net_weight_kg) || num(l.net_weight_kg)), 0);
-    const producedKg = lots.filter(l => l.type === 'finished').reduce((a, l) => a + (num(l.received_net_weight_kg) || num(l.net_weight_kg)), 0);
-    const remainingKg = lots.reduce((a, l) => a + num(l.net_weight_kg), 0);
-    const reservedKg = lots.reduce((a, l) => a + num(l.reserved_qty), 0);
-    const stockValue = lots.reduce((a, l) => a + num(l.net_weight_kg) * cpkOf(l), 0);
+    const purchasedKg = companyLots.filter(l => l.type === 'raw').reduce((a, l) => a + (num(l.received_net_weight_kg) || num(l.net_weight_kg)), 0);
+    const producedKg = companyLots.filter(l => l.type === 'finished').reduce((a, l) => a + (num(l.received_net_weight_kg) || num(l.net_weight_kg)), 0);
+    const remainingKg = companyLots.reduce((a, l) => a + num(l.net_weight_kg), 0);
+    const reservedKg = companyLots.reduce((a, l) => a + num(l.reserved_qty), 0);
+    const stockValue = companyLots.reduce((a, l) => a + num(l.net_weight_kg) * cpkOf(l), 0);
     const realizedProfit = revenue - cogs;
     const avgSaleRate = soldKg > 0 ? revenue / soldKg : 0;
     const avgCost = remainingKg > 0 ? stockValue / remainingKg : 0;
@@ -1583,7 +1592,7 @@ const reportingService = {
 
     // Supplier (raw side) + warehouse breakdowns.
     const bySupplierMap = {}, byWarehouseMap = {};
-    for (const l of lots) {
+    for (const l of companyLots) {
       const sv = num(l.net_weight_kg) * cpkOf(l);
       if (l.type === 'raw') {
         const k = l.supplier_id || 0;
@@ -1639,6 +1648,7 @@ const reportingService = {
       .select('id', 'name', 'entity', 'type');
     const agg = await db('inventory_lots as l')
       .whereNotNull('l.warehouse_id').where('l.net_weight_kg', '>', 0)
+      .whereNot('l.ownership', 'client') // exclude client-owned Service Milling stock
       .groupBy('l.warehouse_id')
       .select('l.warehouse_id',
         db.raw('COUNT(l.id) as lot_count'),
@@ -1695,13 +1705,18 @@ const reportingService = {
       const cpk = cpkOf(l);
       const val = net * cpk;
       const outKg = Math.max(0, recv - net);
-      onHand += net; reserved += res; value += val; totalIn += recv; totalOut += outKg;
-      const t = l.type || 'other';
-      const bt = byType[t] || (byType[t] = { type: t, onHandKg: 0, value: 0 });
-      bt.onHandKg += net; bt.value += val;
-      const rk = l.product_name || l.variety || l.item_name || '—';
-      const br = byRice[rk] || (byRice[rk] = { riceType: rk, lots: 0, onHandKg: 0, reservedKg: 0, value: 0 });
-      br.lots += 1; br.onHandKg += net; br.reservedKg += res; br.value += val;
+      // Client-owned Service Milling lots are shown (tagged) but excluded from
+      // the warehouse's company totals + breakdowns.
+      const isClient = l.ownership === 'client';
+      if (!isClient) {
+        onHand += net; reserved += res; value += val; totalIn += recv; totalOut += outKg;
+        const t = l.type || 'other';
+        const bt = byType[t] || (byType[t] = { type: t, onHandKg: 0, value: 0 });
+        bt.onHandKg += net; bt.value += val;
+        const rk = l.product_name || l.variety || l.item_name || '—';
+        const br = byRice[rk] || (byRice[rk] = { riceType: rk, lots: 0, onHandKg: 0, reservedKg: 0, value: 0 });
+        br.lots += 1; br.onHandKg += net; br.reservedKg += res; br.value += val;
+      }
       return {
         lotId: l.id, lotNo: l.lot_no, href: `/reports/lot-ledger/${l.id}`, type: l.type, entity: l.entity,
         riceType: l.product_name || l.variety || l.item_name || '—', label: l.grade || l.item_name || '—',
@@ -1712,10 +1727,11 @@ const reportingService = {
       };
     });
 
+    const companyLotCount = lots.filter((l) => l.ownership !== 'client').length;
     return {
-      warehouse: { id: w.id, name: w.name, entity: w.entity, type: w.type, lotCount: lots.length },
+      warehouse: { id: w.id, name: w.name, entity: w.entity, type: w.type, lotCount: companyLotCount },
       summary: {
-        lotCount: lots.length, onHandKg: onHand, reservedKg: reserved,
+        lotCount: companyLotCount, onHandKg: onHand, reservedKg: reserved,
         availableKg: Math.max(0, onHand - reserved), stockValue: value,
         totalInKg: totalIn, totalOutKg: totalOut,
         byType: Object.values(byType).sort((a, b) => b.onHandKg - a.onHandKg),
