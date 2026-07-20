@@ -118,7 +118,7 @@ export default function ServiceMilling() {
                 <th className="px-4 py-2.5 font-semibold">Lot</th>
                 <th className="px-4 py-2.5 font-semibold">Client</th>
                 <th className="px-4 py-2.5 font-semibold text-right">Kattas / Bags</th>
-                <th className="px-4 py-2.5 font-semibold text-right">Raw Rice</th>
+                <th className="px-4 py-2.5 font-semibold text-right">Raw / Milled</th>
                 <th className="px-4 py-2.5 font-semibold text-right">Finished</th>
                 <th className="px-4 py-2.5 font-semibold text-right">By-product</th>
                 <th className="px-4 py-2.5 font-semibold text-right">In Stock</th>
@@ -134,7 +134,13 @@ export default function ServiceMilling() {
               ) : rows.length === 0 ? (
                 <tr><td colSpan={11} className="px-4 py-10 text-center text-gray-400">No service-milling lots yet. Create one from Mill → New Batch → Service Milling.</td></tr>
               ) : rows.map((b) => {
-                const raw = num(b.raw_qty_kg) || num(b.quantities?.receivedKg);
+                const received = num(b.raw_qty_kg) || num(b.quantities?.receivedKg);
+                // "Raw Rice" = the raw still UNMILLED (received − milled), NOT the
+                // received intake — otherwise a partial mill shows the full 25,000
+                // as raw even after 20,000 was milled, and the row doesn't add up.
+                // With raw-left, Raw + Finished + By-product reconciles to In Stock.
+                const rawLeft = b.quantities?.unmilledKg != null ? num(b.quantities.unmilledKg) : received;
+                const milled = b.quantities?.milledKg != null ? num(b.quantities.milledKg) : num(b.milled_kg);
                 const finished = num(b.actual_finished_kg);
                 const byproduct = ['broken_kg', 'sortex_rejects_kg', 'powder_kg', 'sweeping_kg', 'choba_kg', 'ov_kg', 'stone_kg', 'wastage_kg', 'bran_kg', 'husk_kg']
                   .reduce((s, k) => s + num(b[k]), 0);
@@ -154,7 +160,10 @@ export default function ServiceMilling() {
                         ? <span>{num(b.bag_count).toLocaleString()} <span className="text-gray-400 text-xs">bags</span></span>
                         : '—'}
                   </td>
-                  <td className="px-4 py-2.5 text-right text-gray-700">{kg(raw)}</td>
+                  <td className="px-4 py-2.5 text-right text-gray-700">
+                    {kg(rawLeft)}
+                    {milled > 0 && <div className="text-[11px] text-gray-400">{kg(milled)} milled</div>}
+                  </td>
                   <td className="px-4 py-2.5 text-right font-medium text-indigo-700">{kg(finished)}</td>
                   <td className="px-4 py-2.5 text-right text-gray-600">{byproduct > 0 ? kg(byproduct) : '—'}</td>
                   <td className="px-4 py-2.5 text-right font-medium text-emerald-700">{kg(inStock)}</td>
