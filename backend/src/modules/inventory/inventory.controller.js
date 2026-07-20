@@ -15,6 +15,7 @@ const inventoryController = {
         warehouse_id,
         status,
         search,
+        ownership,
       } = req.query;
 
       const offset = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
@@ -42,6 +43,12 @@ const inventoryController = {
       if (entity) query = query.where('il.entity', entity);
       if (warehouse_id) query = query.where('il.warehouse_id', warehouse_id);
       if (status) query = query.where('il.status', status);
+      // Client-owned Service Milling stock physically sits in our warehouse but
+      // belongs to the client — it must NEVER count as company inventory (mill
+      // stock lists, valuation, availability). Default to company-owned only;
+      // ?ownership=client for the Service view, ?ownership=all for an admin view.
+      if (ownership === 'client') query = query.where('il.ownership', 'client');
+      else if (ownership !== 'all') query = query.where('il.ownership', 'company');
       if (search) {
         query = query.where(function () {
           this.where('il.lot_no', 'ilike', `%${search}%`)
