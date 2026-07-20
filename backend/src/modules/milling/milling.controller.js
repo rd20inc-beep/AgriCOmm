@@ -1186,10 +1186,20 @@ const millingController = {
         // costing nothing). Refresh from the updated row so costing is correct.
         Object.assign(batch, result);
 
-        // Consume raw material
+        // Consume raw material. For a PARTIAL mill the operator declared how much
+        // of the received rice is actually being milled (milled_qty_kg); consume
+        // only that so the unmilled remainder stays as raw stock. This matters
+        // most for Service Milling, where the leftover is still the client's raw
+        // rice (and can be milled later or dispatched back). When milled_qty_kg is
+        // unset (a full mill), fall back to the full received qty — unchanged.
+        // (Blend batches consume per source-lot inside consumeForMilling and
+        // ignore this qty, so their behaviour is untouched.)
+        const consumeQtyKg = batch.milled_qty_kg != null
+          ? parseFloat(batch.milled_qty_kg)
+          : batch.raw_qty_kg;
         await inventoryService.consumeForMilling(trx, {
           batchId: batch.id,
-          qtyKg: batch.raw_qty_kg,
+          qtyKg: consumeQtyKg,
           userId: req.user?.id,
         });
 
