@@ -439,7 +439,10 @@ export default function ServiceMillingBatchDetail() {
 
       {/* Quick stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Stat icon={Package} tone="text-amber-500" label="Raw Received" value={kg(batch.rawQtyKg)} sub={unit ? `${unitCount.toLocaleString()} ${unit}` : null} />
+        <Stat icon={Package} tone="text-amber-500" label="Raw Received" value={kg(batch.rawQtyKg)}
+          sub={milledKg > 0 && unmilledKg > 0
+            ? `${kg(unmilledKg)} still unmilled`
+            : (unit ? `${unitCount.toLocaleString()} ${unit}` : null)} />
         <Stat icon={Factory} tone="text-indigo-500" label="Produced (client)" value={kg(producedKg)} sub={producedKg > 0 ? `Yield ${batch.yieldPct || 0}%` : 'Not milled yet'} />
         <Stat icon={Truck} tone="text-blue-500" label="Vehicles" value={safeVehicles.length} sub="arrivals recorded" />
         <Stat icon={Calendar} tone="text-gray-400" label="Received" value={batch.dateReceived ? new Date(batch.dateReceived).toLocaleDateString('en-GB') : '—'} />
