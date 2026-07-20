@@ -124,6 +124,7 @@ async function start(force = false) {
       makeCacheableSignalKeyStore,
       DisconnectReason,
       fetchLatestBaileysVersion,
+      Browsers,
     } = baileys;
 
     // A quiet logger keeps Baileys' internals happy (it calls logger.child();
@@ -152,7 +153,11 @@ async function start(force = false) {
         creds: authState.creds,
         keys: makeCacheableSignalKeyStore(authState.keys, logger),
       },
-      browser: ['AgriCOmm ERP', 'Chrome', '1.0.0'],
+      // Present as an ordinary WhatsApp Web desktop login. A custom browser name
+      // (e.g. 'AgriCOmm ERP') is a tell that flags the session as an unofficial
+      // client and gets it logged out (401) shortly after connecting. A standard
+      // fingerprint (Ubuntu/Chrome) looks like a normal linked device.
+      browser: Browsers.ubuntu('Chrome'),
       // This is a send-only channel — we never need the phone's chat history or
       // to appear "online". Skipping both avoids the heavy post-pair sync that
       // the release-candidate build chokes on.
