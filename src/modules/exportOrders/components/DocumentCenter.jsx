@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { FileText, Download, Printer, Eye, CheckCircle, Clock, Loader2, Edit2, AlertTriangle, AlertCircle, Type, Save, Send } from 'lucide-react';
+import { FileText, Download, Printer, Eye, CheckCircle, Clock, Loader2, Edit2, AlertTriangle, AlertCircle, Type, Save, Send, Mail } from 'lucide-react';
 import api from '../../../api/client';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import Modal from '../../../components/Modal';
 import WhatsAppSendModal from '../../../components/WhatsAppSendModal';
+import EmailSendModal from '../../../components/EmailSendModal';
 import { incotermLabel } from '../../../shared/constants/incoterms';
 
 // ─── Document Templates ───
@@ -1922,6 +1923,8 @@ export default function DocumentCenter({ order }) {
   const [styleDirty, setStyleDirty] = useState(false);   // unsaved font changes
   const [waSending, setWaSending] = useState(false);     // WhatsApp send in flight
   const [waModal, setWaModal] = useState(null);          // { defaultNumber, who } while the send dialog is open
+  const [emailSending, setEmailSending] = useState(false); // email send in flight
+  const [emailModal, setEmailModal] = useState(null);    // { defaultEmail, who } while the email dialog is open
   const printRef = useRef(null);
   const validation = useMemo(() => validateExportDoc(previewDoc), [previewDoc]);
   const canApprove = hasPermission('documents', 'approve');
@@ -2125,6 +2128,28 @@ export default function DocumentCenter({ order }) {
     return L.join('\n');
   }
 
+  // Open the email dialog — prefill the consignee's email + a subject.
+  function openEmail() {
+    const defaultEmail = (previewDoc?.buyer?.email || '').toString().trim();
+    const who = previewDoc?.buyer?.name || order.customerName || null;
+    setEmailModal({ defaultEmail, who });
+  }
+
+  // Email the current document: the server renders the same print HTML to a PDF
+  // and emails it to the customer as an attachment.
+  async function sendEmail({ email, subject }) {
+    setEmailSending(true);
+    try {
+      const html = buildDocHtml(currentEditedHtml(), previewDoc?._docType, previewDoc?.type, { autoPrint: false });
+      const filename = `${(previewDoc?.type || 'document').replace(/[^\w.\- ]+/g, '_')} — ${order.id}.pdf`;
+      const res = await api.post(`/api/export-orders/${oid}/documents/${previewKey}/send-email`, { html, to: email, subject, filename });
+      addToast(`Emailed to ${res?.data?.to || email}`, 'success');
+      setEmailModal(null);
+    } catch (err) {
+      addToast(err?.message || 'Email send failed', 'error');
+    } finally { setEmailSending(false); }
+  }
+
   // Open the send dialog — check the connection, then prefill the consignee's number.
   async function openWhatsApp() {
     try {
@@ -2252,14 +2277,19 @@ export default function DocumentCenter({ order }) {
                     {wfBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Edit2 className="w-4 h-4" />} Save edits
                   </button>
                 )}
-                <button onClick={openWhatsApp} disabled={waSending}
-                  title="Render a PDF and send it to the customer on WhatsApp"
-                  className="inline-flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">
-                  {waSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} WhatsApp
+                <button onClick={openEmail} disabled={emailSending}
+                  title="Email this document to the customer as a PDF"
+                  className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+                  {emailSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />} Email
                 </button>
                 <button onClick={handlePrint}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+                  className="inline-flex items-center gap-2 px-3 py-2 bg-slate-700 text-white rounded-lg text-sm font-medium hover:bg-slate-800">
                   <Printer className="w-4 h-4" /> Print / Save PDF
+                </button>
+                <button onClick={openWhatsApp} disabled={waSending}
+                  title="Send on WhatsApp" aria-label="Send on WhatsApp"
+                  className="inline-flex items-center justify-center w-9 h-9 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">
+                  {waSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 </button>
               </div>
             </div>
@@ -2297,7 +2327,7 @@ export default function DocumentCenter({ order }) {
             {/* Per-selection formatting — resize / bold individual words. */}
             {!locked && (
               <div className="rounded-lg border border-gray-200 bg-white p-3 flex flex-wrap items-center gap-x-3 gap-y-2">
-                <span className="text-xs font-semibold text-gray-500">Selected text</span>
+                <span className="text-xs font-semibold text-gray-500 flex items-center gap-1"><Type className="w-3.5 h-3.5" /> Bold / Italic / Size</span>
                 <span className="text-[11px] text-gray-400">select word(s) in the document, then:</span>
                 <div className="inline-flex items-center border border-gray-300 rounded-lg overflow-hidden">
                   <button onMouseDown={(e) => e.preventDefault()} onClick={() => resizeSelection(-1)} className="px-2 py-1 hover:bg-gray-100 text-gray-700 text-xs" title="Smaller">A−</button>
@@ -2425,6 +2455,17 @@ export default function DocumentCenter({ order }) {
         partyName={waModal?.who}
         partyLabel="Consignee"
         defaultNumber={waModal?.defaultNumber || ''}
+      />
+
+      <EmailSendModal
+        isOpen={!!emailModal}
+        onClose={() => setEmailModal(null)}
+        onConfirm={sendEmail}
+        sending={emailSending}
+        docTitle={previewDoc?.type || 'document'}
+        partyName={emailModal?.who}
+        defaultEmail={emailModal?.defaultEmail || ''}
+        defaultSubject={previewDoc ? `${previewDoc.type} — ${order.orderNo || order.id}` : ''}
       />
     </div>
   );

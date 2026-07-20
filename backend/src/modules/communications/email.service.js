@@ -52,7 +52,7 @@ const emailService = {
   // ============================================================
   // Send Email
   // ============================================================
-  async sendEmail({ to, cc, subject, body, templateSlug, variables, linkedType, linkedId, userId }) {
+  async sendEmail({ to, cc, subject, body, templateSlug, variables, linkedType, linkedId, userId, attachments }) {
     let finalSubject = subject;
     let finalBody = body;
     let templateUsed = null;
@@ -83,6 +83,12 @@ const emailService = {
 
       if (cc) {
         mailOptions.cc = cc;
+      }
+
+      // Optional attachments — nodemailer format: [{ filename, content: Buffer,
+      // contentType }]. Used to attach a rendered document PDF.
+      if (Array.isArray(attachments) && attachments.length) {
+        mailOptions.attachments = attachments;
       }
 
       await transporter.sendMail(mailOptions);
