@@ -66,25 +66,39 @@ async function htmlToPdf(html) {
     // with CSS `zoom`, but page.pdf() does NOT honour `zoom` in pagination — the
     // result is shrunk text + blank space / overflow (the "not A4-appropriate"
     // bug). So neutralise that and use puppeteer's NATIVE `scale`, which IS
-    // honoured. A short doc keeps its footer pinned to the page bottom (flex fill,
-    // which page.pdf does honour); a doc a bit over one page is scaled to fit
-    // exactly one; a genuinely multi-page doc (> ~1.45 pages) flows normally.
-    const A4_PRINTABLE_PX = Math.round((297 - 24) * 96 / 25.4); // A4 height − 12mm margins
+    // honoured. To also fill the WIDTH (uniform scale alone would leave side
+    // margins), widen the layout by 1/scale first, so after scaling it lands at
+    // full width AND one page height. Widening reduces height (less wrapping), so
+    // iterate to converge. Short docs pin the footer to the page bottom via the
+    // flex fill; genuinely multi-page docs (> ~1.45 pages) flow normally.
+    const A4_H_PX = Math.round((297 - 24) * 96 / 25.4); // printable height (− 12mm margins)
+    const A4_W_MM = 186;                                // printable width  (210 − 2×12mm)
     let scale = 1;
     try {
-      const contentPx = await page.evaluate((pagePx) => {
-        const fit = document.getElementById('agri-fit');
-        if (fit) { fit.style.zoom = '1'; fit.style.width = ''; }
-        const doc = document.querySelector('.agri-doc > div');
-        if (doc) doc.style.minHeight = '';
-        const el = fit || document.body;
-        const natural = el.scrollHeight;
-        // Short export doc → pin footer to the page bottom via the flex fill.
-        if (doc && natural <= pagePx) doc.style.minHeight = pagePx + 'px';
-        return natural;
-      }, A4_PRINTABLE_PX);
-      if (contentPx > A4_PRINTABLE_PX && contentPx <= A4_PRINTABLE_PX * 1.45) {
-        scale = Math.max(0.55, (A4_PRINTABLE_PX - 8) / contentPx); // 8px safety so it can't tip onto a 2nd page
+      let h = await page.evaluate(() => {
+        const fit = document.getElementById('agri-fit'); if (fit) { fit.style.zoom = '1'; fit.style.width = '100%'; }
+        const doc = document.querySelector('.agri-doc > div'); if (doc) doc.style.minHeight = '';
+        return (fit || document.body).scrollHeight;
+      });
+      if (h > A4_H_PX && h <= A4_H_PX * 1.45) {
+        let s = 1;
+        for (let i = 0; i < 6; i++) {
+          h = await page.evaluate((sc, mm) => {
+            const w = (mm / sc) + 'mm';
+            document.documentElement.style.width = w; document.body.style.width = w;
+            const fit = document.getElementById('agri-fit'); if (fit) { fit.style.zoom = '1'; fit.style.width = '100%'; }
+            const doc = document.querySelector('.agri-doc > div'); if (doc) doc.style.minHeight = '';
+            return (fit || document.body).scrollHeight;
+          }, s, A4_W_MM);
+          const ns = Math.max(0.55, Math.min(1, (A4_H_PX - 8) / h)); // 8px safety vs a 2nd page
+          if (Math.abs(ns - s) < 0.004) { s = ns; break; }
+          s = ns;
+        }
+        scale = s;
+      } else if (h <= A4_H_PX) {
+        await page.evaluate((pagePx) => {
+          const doc = document.querySelector('.agri-doc > div'); if (doc) doc.style.minHeight = pagePx + 'px';
+        }, A4_H_PX);
       }
     } catch (_) { /* fall back to unscaled */ }
 
