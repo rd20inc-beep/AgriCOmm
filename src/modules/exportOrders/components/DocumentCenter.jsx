@@ -1932,6 +1932,7 @@ export default function DocumentCenter({ order }) {
   const [waModal, setWaModal] = useState(null);          // { defaultNumber, who } while the send dialog is open
   const [emailSending, setEmailSending] = useState(false); // email send in flight
   const [emailModal, setEmailModal] = useState(null);    // { defaultEmail, who } while the email dialog is open
+  const [pdfBusy, setPdfBusy] = useState(false);         // server-side PDF download in flight
   const printRef = useRef(null);
   const validation = useMemo(() => validateExportDoc(previewDoc), [previewDoc]);
   const canApprove = hasPermission('documents', 'approve');
@@ -2109,6 +2110,20 @@ export default function DocumentCenter({ order }) {
     const printWindow = window.open('', '_blank');
     printWindow.document.write(html);
     printWindow.document.close();
+  }
+
+  // Render the document to a PDF on the SERVER (headless Chromium) and download
+  // it. Unlike the browser Print dialog — whose scale/margins vary per machine
+  // and can leave the page short — this produces a consistent, full-length A4.
+  async function downloadServerPdf() {
+    setPdfBusy(true);
+    try {
+      const html = buildDocHtml(currentEditedHtml(), previewDoc?._docType, `${previewDoc?.type || 'Document'} — ${order.id}`, { autoPrint: false });
+      const filename = `${(previewDoc?.type || 'document').replace(/[^\w.\- ]+/g, '_')} — ${order.id}.pdf`;
+      await api.downloadPost(`/api/export-orders/${oid}/documents/${previewKey}/pdf`, { html, filename }, filename);
+    } catch (err) {
+      addToast(err?.message || 'PDF download failed', 'error');
+    } finally { setPdfBusy(false); }
   }
 
   // Plain-text summary sent WITH the PDF as its WhatsApp caption, so the key
@@ -2289,9 +2304,15 @@ export default function DocumentCenter({ order }) {
                   className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
                   {emailSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />} Email
                 </button>
+                <button onClick={downloadServerPdf} disabled={pdfBusy}
+                  title="Download a consistent full-length A4 PDF (rendered on the server)"
+                  className="inline-flex items-center gap-2 px-3 py-2 bg-slate-700 text-white rounded-lg text-sm font-medium hover:bg-slate-800 disabled:opacity-50">
+                  {pdfBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Download PDF
+                </button>
                 <button onClick={handlePrint}
-                  className="inline-flex items-center gap-2 px-3 py-2 bg-slate-700 text-white rounded-lg text-sm font-medium hover:bg-slate-800">
-                  <Printer className="w-4 h-4" /> Print / Save PDF
+                  title="Open the browser print dialog"
+                  className="inline-flex items-center gap-2 px-3 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50">
+                  <Printer className="w-4 h-4" /> Print
                 </button>
                 <button onClick={openWhatsApp} disabled={waSending}
                   title="Send on WhatsApp" aria-label="Send on WhatsApp"
