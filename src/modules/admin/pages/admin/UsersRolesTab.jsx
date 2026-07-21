@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { UsersRound, Plus, Shield, XCircle, CheckCircle } from 'lucide-react';
+import { UsersRound, Plus, XCircle, CheckCircle, KeyRound, Trash2 } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
-import { useUsers, useCreateUser, useDeactivateUser, useActivateUser } from '../../../../api/queries';
+import { useUsers, useCreateUser, useDeactivateUser, useActivateUser, useSetUserPassword, useDeleteUser } from '../../../../api/queries';
 import Modal from '../../components/AdminDrawer';
 
 const ROLES = [
@@ -25,10 +25,36 @@ export default function UsersRolesTab() {
   const createUserMut = useCreateUser();
   const deactivateMut = useDeactivateUser();
   const activateMut = useActivateUser();
+  const setPasswordMut = useSetUserPassword();
+  const deleteUserMut = useDeleteUser();
 
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ fullName: '', email: '', password: '', roleId: '2' });
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+
+  const [pwUser, setPwUser] = useState(null);   // user whose password is being set
+  const [pwValue, setPwValue] = useState('');
+
+  const handleSetPassword = async () => {
+    if (!pwValue || pwValue.length < 8) { addToast('Password must be at least 8 characters', 'error'); return; }
+    try {
+      await setPasswordMut.mutateAsync({ id: pwUser.id, password: pwValue });
+      addToast(`Password updated for ${pwUser.fullName}`, 'success');
+      setPwUser(null); setPwValue('');
+    } catch (err) {
+      addToast(`Failed to update password: ${err.message}`, 'error');
+    }
+  };
+
+  const handleDelete = async (user) => {
+    if (!window.confirm(`Permanently delete ${user.fullName}? This can't be undone. (If they have activity in the system, deactivate them instead.)`)) return;
+    try {
+      await deleteUserMut.mutateAsync(user.id);
+      addToast(`${user.fullName} deleted`, 'success');
+    } catch (err) {
+      addToast(err.message || 'Failed to delete user', 'error');
+    }
+  };
 
   const resetForm = () => setForm({ fullName: '', email: '', password: '', roleId: '2' });
 
@@ -118,17 +144,33 @@ export default function UsersRolesTab() {
                   <td className="py-3 px-4 text-gray-500 text-xs">
                     {user.lastLogin ? new Date(user.lastLogin).toLocaleDateString() : 'Never'}
                   </td>
-                  <td className="py-3 px-4 text-center">
-                    <button
-                      onClick={() => handleToggleActive(user)}
-                      className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg transition-colors ${
-                        user.isActive
-                          ? 'text-red-600 bg-red-50 hover:bg-red-100'
-                          : 'text-emerald-600 bg-emerald-50 hover:bg-emerald-100'
-                      }`}
-                    >
-                      {user.isActive ? <><XCircle className="w-3.5 h-3.5" /> Deactivate</> : <><CheckCircle className="w-3.5 h-3.5" /> Activate</>}
-                    </button>
+                  <td className="py-3 px-4">
+                    <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                      <button
+                        onClick={() => { setPwUser(user); setPwValue(''); }}
+                        title="Set / reset this user's password"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg text-blue-600 bg-blue-50 hover:bg-blue-100 transition-colors"
+                      >
+                        <KeyRound className="w-3.5 h-3.5" /> Password
+                      </button>
+                      <button
+                        onClick={() => handleToggleActive(user)}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg transition-colors ${
+                          user.isActive
+                            ? 'text-amber-600 bg-amber-50 hover:bg-amber-100'
+                            : 'text-emerald-600 bg-emerald-50 hover:bg-emerald-100'
+                        }`}
+                      >
+                        {user.isActive ? <><XCircle className="w-3.5 h-3.5" /> Deactivate</> : <><CheckCircle className="w-3.5 h-3.5" /> Activate</>}
+                      </button>
+                      <button
+                        onClick={() => handleDelete(user)}
+                        title="Permanently delete this user"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg text-red-600 bg-red-50 hover:bg-red-100 transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" /> Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -160,6 +202,26 @@ export default function UsersRolesTab() {
           <div className="flex justify-end gap-2 pt-2 border-t border-gray-200">
             <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
             <button onClick={handleCreate} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">Create User</button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={!!pwUser} onClose={() => setPwUser(null)} title={`Set password — ${pwUser?.fullName || ''}`} size="sm">
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">Set a new password for <span className="font-semibold text-gray-900">{pwUser?.email}</span>. They'll use it on their next login.</p>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">New Password *</label>
+            <input
+              type="password" value={pwValue} autoFocus
+              onChange={e => setPwValue(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleSetPassword(); }}
+              placeholder="Minimum 8 characters"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-2 border-t border-gray-200">
+            <button onClick={() => setPwUser(null)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
+            <button onClick={handleSetPassword} disabled={setPasswordMut.isPending || pwValue.length < 8} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">Update Password</button>
           </div>
         </div>
       </Modal>
