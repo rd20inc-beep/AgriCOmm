@@ -61,7 +61,34 @@ async function htmlToPdf(html) {
     await page.setContent(html || '<html><body></body></html>', { waitUntil: 'networkidle0', timeout: 25000 });
     // Let the on-load fit script settle before capturing.
     await page.evaluate(() => new Promise((r) => setTimeout(r, 200)));
-    const pdf = await page.pdf({ preferCSSPageSize: true, printBackground: true });
+
+    // Fit-to-one-page. The frontend print HTML tries to fit oversized content
+    // with CSS `zoom`, but page.pdf() does NOT honour `zoom` in pagination — the
+    // result is shrunk text + blank space / overflow (the "not A4-appropriate"
+    // bug). So neutralise that and use puppeteer's NATIVE `scale`, which IS
+    // honoured. A short doc keeps its footer pinned to the page bottom (flex fill,
+    // which page.pdf does honour); a doc a bit over one page is scaled to fit
+    // exactly one; a genuinely multi-page doc (> ~1.45 pages) flows normally.
+    const A4_PRINTABLE_PX = Math.round((297 - 24) * 96 / 25.4); // A4 height − 12mm margins
+    let scale = 1;
+    try {
+      const contentPx = await page.evaluate((pagePx) => {
+        const fit = document.getElementById('agri-fit');
+        if (fit) { fit.style.zoom = '1'; fit.style.width = ''; }
+        const doc = document.querySelector('.agri-doc > div');
+        if (doc) doc.style.minHeight = '';
+        const el = fit || document.body;
+        const natural = el.scrollHeight;
+        // Short export doc → pin footer to the page bottom via the flex fill.
+        if (doc && natural <= pagePx) doc.style.minHeight = pagePx + 'px';
+        return natural;
+      }, A4_PRINTABLE_PX);
+      if (contentPx > A4_PRINTABLE_PX && contentPx <= A4_PRINTABLE_PX * 1.45) {
+        scale = Math.max(0.55, (A4_PRINTABLE_PX - 8) / contentPx); // 8px safety so it can't tip onto a 2nd page
+      }
+    } catch (_) { /* fall back to unscaled */ }
+
+    const pdf = await page.pdf({ preferCSSPageSize: true, printBackground: true, scale });
     return pdf;
   } finally {
     await browser.close().catch(() => {});

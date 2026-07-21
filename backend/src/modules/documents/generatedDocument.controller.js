@@ -307,9 +307,6 @@ const generatedDocumentController = {
       const { html, filename } = req.body;
       if (!html || !String(html).trim()) return res.status(400).json({ success: false, message: 'Document content is required.' });
 
-      // TEMP DEBUG (remove after diagnosis): capture exactly what the browser sends.
-      try { require('fs').writeFileSync('/tmp/pdf_debug_last.html', String(html || '')); } catch (_) { /* ignore */ }
-
       let pdf;
       try {
         pdf = await pdfService.htmlToPdf(html);
