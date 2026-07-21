@@ -1870,6 +1870,13 @@ function buildDocHtml(editedHtml, docType, title, { autoPrint }) {
             try {
               var el = document.getElementById('agri-fit');
               var page = ${pageHpx};
+              // The per-customer font scale is applied as zoom on .agri-doc, which
+              // ALSO scales the page-fill min-height below — so a <1 scale would
+              // leave blank space at the bottom of the page. Read that zoom and
+              // divide it out of the fill height so the doc fills A4 at any scale.
+              var agri = el.querySelector('.agri-doc');
+              var az = agri ? (parseFloat(getComputedStyle(agri).zoom) || parseFloat(agri.style.zoom) || 1) : 1;
+              if (!(az > 0)) az = 1;
               var h = el.scrollHeight;
               var z = 1;
               if (h > page && h <= page * 1.35) {
@@ -1878,7 +1885,7 @@ function buildDocHtml(editedHtml, docType, title, { autoPrint }) {
                 el.style.width = (100 / z) + '%';
               }
               var body = el.querySelector('.agri-doc > div');
-              if (body) body.style.minHeight = (page / z) + 'px';
+              if (body) body.style.minHeight = (page / (z * az)) + 'px';
             } catch (e) { /* fall back to native pagination */ }
             ${autoPrint ? 'window.print();' : ''}
           };
