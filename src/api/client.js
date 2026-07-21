@@ -306,6 +306,22 @@ async function downloadFile(endpoint, filename) {
   saveBlob(blob, fallbackName());
 }
 
+// Authenticated download via POST (the request carries a large body — e.g. the
+// document HTML to render server-side to a PDF — so it can't be a GET link).
+// Fetches the response as a blob and triggers a browser save.
+async function downloadFilePost(endpoint, body, filename) {
+  const token = getToken();
+  const headers = { 'Content-Type': 'application/json' };
+  if (token && token !== 'mock-prototype-token') headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(`${API_BASE}${endpoint}`, { method: 'POST', headers, body: JSON.stringify(body) });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new ApiError(data?.message || 'Download failed', res.status, data);
+  }
+  const blob = await res.blob();
+  saveBlob(blob, filename || 'document.pdf');
+}
+
 // Strip null/undefined params before serialisation — URLSearchParams will
 // happily stringify `undefined` as the literal "undefined", which any
 // backend `if (x && x !== 'all')` then treats as a real filter and
@@ -333,6 +349,7 @@ const api = {
   delete: (endpoint) => request(endpoint, { method: 'DELETE' }),
   upload: uploadFile,
   download: downloadFile,
+  downloadPost: downloadFilePost,
 };
 
 // Replay a queued write from the outbox. Sends the stored request with its

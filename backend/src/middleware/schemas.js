@@ -570,6 +570,11 @@ const sendDocumentEmail = Joi.object({
   filename: Joi.string().max(120).allow('', null),
 });
 
+const downloadDocumentPdf = Joi.object({
+  html: Joi.string().required(),
+  filename: Joi.string().max(160).allow('', null),
+});
+
 module.exports = {
   createExportOrder,
   updateExportShipment,
@@ -604,4 +609,5 @@ module.exports = {
   documentCustomerStyle,
   sendDocumentWhatsApp,
   sendDocumentEmail,
+  downloadDocumentPdf,
 };

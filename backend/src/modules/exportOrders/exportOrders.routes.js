@@ -214,6 +214,7 @@ router.post('/:id/documents/:docType/draft', authorize('export_orders', 'view'),
 router.get('/:id/documents/:docType/current', authorize('export_orders', 'view'), genDocController.getCurrent);
 router.post('/:id/documents/:docType/send-whatsapp', authorize('export_orders', 'send_email'), validate(schemas.sendDocumentWhatsApp), genDocController.sendWhatsApp);
 router.post('/:id/documents/:docType/send-email', authorize('export_orders', 'send_email'), validate(schemas.sendDocumentEmail), genDocController.sendEmail);
+router.post('/:id/documents/:docType/pdf', authorize('export_orders', 'view'), validate(schemas.downloadDocumentPdf), genDocController.downloadPdf);
 router.get('/:id/documents/:docType/versions', authorize('export_orders', 'view'), genDocController.listVersions);
 router.put('/documents/:genId/overrides', authorize('export_orders', 'edit'), validate(schemas.saveDocumentOverrides), genDocController.saveOverrides);
 router.put('/documents/:genId/settings', authorize('export_orders', 'edit'), validate(schemas.documentSettings), genDocController.updateSettings);

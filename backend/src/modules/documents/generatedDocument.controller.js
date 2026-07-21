@@ -297,6 +297,41 @@ const generatedDocumentController = {
     }
   },
 
+  // POST /:id/documents/:docType/pdf — render the posted document HTML to a PDF
+  // on the SERVER (consistent A4, independent of the browser print dialog) and
+  // return it as a download.
+  async downloadPdf(req, res) {
+    try {
+      const orderId = await resolveOrderId(req.params.id);
+      if (!orderId) return res.status(404).json({ success: false, message: 'Order not found.' });
+      const { html, filename } = req.body;
+      if (!html || !String(html).trim()) return res.status(400).json({ success: false, message: 'Document content is required.' });
+
+      let pdf;
+      try {
+        pdf = await pdfService.htmlToPdf(html);
+      } catch (e) {
+        return res.status(e.status || 503).json({ success: false, message: e.message || 'Failed to render the document PDF.' });
+      }
+      const buf = Buffer.isBuffer(pdf) ? pdf : Buffer.from(pdf);
+      const safeName = String(filename || `${req.params.docType}.pdf`).replace(/[^\w.\- ]+/g, '_');
+
+      auditService.log({
+        userId: req.user ? req.user.id : null, action: 'download_document_pdf',
+        entityType: 'export_order', entityId: orderId,
+        details: { docType: req.params.docType }, ipAddress: req.ip,
+      }).catch(() => {});
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${safeName}"`);
+      res.setHeader('Content-Length', buf.length);
+      return res.end(buf);
+    } catch (err) {
+      console.error('downloadPdf error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
   // GET /documents/:genId — a specific version (merged + masked).
   async getVersion(req, res) {
     try {
