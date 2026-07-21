@@ -354,6 +354,65 @@ router.put('/:id/activate', authorize('admin', 'manage_users'), async (req, res)
   }
 });
 
+// PUT /api/users/:id/password — admin sets/resets a user's password
+router.put('/:id/password', authorize('admin', 'manage_users'), async (req, res) => {
+  try {
+    const { password } = req.body;
+    if (!password || String(password).length < 8) {
+      return res.status(400).json({ success: false, message: 'Password must be at least 8 characters.' });
+    }
+    const user = await db('users').where({ id: req.params.id }).first();
+    if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
+
+    const salt = await bcrypt.genSalt(10);
+    const password_hash = await bcrypt.hash(String(password), salt);
+    await db('users').where({ id: req.params.id }).update({ password_hash, updated_at: db.fn.now() });
+
+    await auditService.log({
+      userId: req.user.id, action: 'reset_user_password', entityType: 'user',
+      entityId: req.params.id, details: { email: user.email }, ipAddress: req.ip,
+    });
+    return res.json({ success: true, message: `Password updated for ${user.full_name}.` });
+  } catch (err) {
+    console.error('Reset password error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+});
+
+// DELETE /api/users/:id — permanently remove a user (admin). Blocked for your own
+// account, and for a user referenced by activity elsewhere (FK) — deactivate then.
+router.delete('/:id', authorize('admin', 'manage_users'), async (req, res) => {
+  try {
+    if (parseInt(req.params.id) === req.user.id) {
+      return res.status(400).json({ success: false, message: 'You cannot delete your own account.' });
+    }
+    const user = await db('users').where({ id: req.params.id }).first();
+    if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
+
+    try {
+      await db('users').where({ id: req.params.id }).del();
+    } catch (e) {
+      // Postgres FK violation — the user is referenced (created_by, approvals, …).
+      if (e.code === '23503') {
+        return res.status(409).json({
+          success: false,
+          message: 'This user has activity recorded in the system and cannot be permanently deleted. Deactivate the account instead.',
+        });
+      }
+      throw e;
+    }
+
+    await auditService.log({
+      userId: req.user.id, action: 'delete_user', entityType: 'user',
+      entityId: req.params.id, details: { email: user.email, full_name: user.full_name }, ipAddress: req.ip,
+    });
+    return res.json({ success: true, message: `User ${user.full_name} has been deleted.` });
+  } catch (err) {
+    console.error('Delete user error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+});
+
 // GET /api/users/:id/activity — get audit logs for this user
 router.get('/:id/activity', authorize('admin', 'view'), async (req, res) => {
   try {

@@ -1278,6 +1278,20 @@ export function useChangeUserRole() {
   });
 }
 
+export function useSetUserPassword() {
+  return useMutation({
+    mutationFn: ({ id, password }) => usersApi.setPassword(id, password),
+  });
+}
+
+export function useDeleteUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => usersApi.remove(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+  });
+}
+
 // ===================== MILLS =====================
 
 export function useMillExpenses(params = {}) {

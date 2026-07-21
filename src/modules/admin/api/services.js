@@ -76,6 +76,8 @@ export const usersApi = {
   changeRole: (id, data) => api.put(`/api/users/${id}/role`, data),
   deactivate: (id) => api.put(`/api/users/${id}/deactivate`),
   activate: (id) => api.put(`/api/users/${id}/activate`),
+  setPassword: (id, password) => api.put(`/api/users/${id}/password`, { password }),
+  remove: (id) => api.delete(`/api/users/${id}`),
 };
 export const auditApi = {
   list: (params) => api.get('/api/audit-logs', params),
