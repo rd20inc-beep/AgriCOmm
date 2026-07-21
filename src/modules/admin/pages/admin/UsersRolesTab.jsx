@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { UsersRound, Plus, XCircle, CheckCircle, KeyRound, Trash2 } from 'lucide-react';
+import { UsersRound, Plus, XCircle, CheckCircle, KeyRound, Trash2, Pencil } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
-import { useUsers, useCreateUser, useDeactivateUser, useActivateUser, useSetUserPassword, useDeleteUser } from '../../../../api/queries';
+import { useUsers, useCreateUser, useDeactivateUser, useActivateUser, useSetUserPassword, useDeleteUser, useUpdateUser } from '../../../../api/queries';
 import Modal from '../../components/AdminDrawer';
 
 const ROLES = [
@@ -27,6 +27,7 @@ export default function UsersRolesTab() {
   const activateMut = useActivateUser();
   const setPasswordMut = useSetUserPassword();
   const deleteUserMut = useDeleteUser();
+  const updateUserMut = useUpdateUser();
 
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ fullName: '', email: '', password: '', roleId: '2' });
@@ -34,6 +35,27 @@ export default function UsersRolesTab() {
 
   const [pwUser, setPwUser] = useState(null);   // user whose password is being set
   const [pwValue, setPwValue] = useState('');
+
+  const [editUser, setEditUser] = useState(null);  // user being edited
+  const [editForm, setEditForm] = useState({ fullName: '', email: '', roleId: '2' });
+  const openEdit = (user) => {
+    setEditUser(user);
+    setEditForm({ fullName: user.fullName || '', email: user.email || '', roleId: String(user.roleId || 2) });
+  };
+  const handleUpdate = async () => {
+    if (!editForm.fullName.trim() || !editForm.email.trim()) { addToast('Name and email are required', 'error'); return; }
+    try {
+      await updateUserMut.mutateAsync({ id: editUser.id, data: {
+        full_name: editForm.fullName.trim(),
+        email: editForm.email.trim().toLowerCase(),
+        role_id: parseInt(editForm.roleId),
+      } });
+      addToast(`${editForm.fullName.trim()} updated`, 'success');
+      setEditUser(null);
+    } catch (err) {
+      addToast(`Failed to update user: ${err.message}`, 'error');
+    }
+  };
 
   const handleSetPassword = async () => {
     if (!pwValue || pwValue.length < 8) { addToast('Password must be at least 8 characters', 'error'); return; }
@@ -147,6 +169,13 @@ export default function UsersRolesTab() {
                   <td className="py-3 px-4">
                     <div className="flex items-center justify-center gap-1.5 flex-wrap">
                       <button
+                        onClick={() => openEdit(user)}
+                        title="Edit name, email or role"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors"
+                      >
+                        <Pencil className="w-3.5 h-3.5" /> Edit
+                      </button>
+                      <button
                         onClick={() => { setPwUser(user); setPwValue(''); }}
                         title="Set / reset this user's password"
                         className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg text-blue-600 bg-blue-50 hover:bg-blue-100 transition-colors"
@@ -202,6 +231,29 @@ export default function UsersRolesTab() {
           <div className="flex justify-end gap-2 pt-2 border-t border-gray-200">
             <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
             <button onClick={handleCreate} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">Create User</button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={!!editUser} onClose={() => setEditUser(null)} title={`Edit user — ${editUser?.fullName || ''}`} size="md">
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
+            <input type="text" value={editForm.fullName} onChange={e => setEditForm(p => ({ ...p, fullName: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Email *</label>
+            <input type="email" value={editForm.email} onChange={e => setEditForm(p => ({ ...p, email: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+            <select value={editForm.roleId} onChange={e => setEditForm(p => ({ ...p, roleId: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+              {ROLES.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          </div>
+          <div className="flex justify-end gap-2 pt-2 border-t border-gray-200">
+            <button onClick={() => setEditUser(null)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
+            <button onClick={handleUpdate} disabled={updateUserMut.isPending} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">Save Changes</button>
           </div>
         </div>
       </Modal>
