@@ -82,6 +82,9 @@ const WarehouseLedger = lazyWithReload(() => import('./modules/analytics/pages/W
 const ProcessingLossLedger = lazyWithReload(() => import('./modules/analytics/pages/ProcessingLossLedger'));
 const FinishedGoodsLedger = lazyWithReload(() => import('./modules/analytics/pages/FinishedGoodsLedger'));
 const ServiceMillingStock = lazyWithReload(() => import('./modules/analytics/pages/ServiceMillingStock'));
+const ServiceMillingAgeing = lazyWithReload(() => import('./modules/analytics/pages/ServiceMillingAgeing'));
+const ServiceMillingPendingDispatch = lazyWithReload(() => import('./modules/analytics/pages/ServiceMillingPendingDispatch'));
+const ServiceMillingReconciliation = lazyWithReload(() => import('./modules/analytics/pages/ServiceMillingReconciliation'));
 const InventoryMovementLedger = lazyWithReload(() => import('./modules/analytics/pages/InventoryMovementLedger'));
 const StockLedger = lazyWithReload(() => import('./modules/analytics/pages/StockLedger'));
 const StandalonePrintReport = lazyWithReload(() => import('./modules/analytics/pages/StandalonePrintReport'));
@@ -181,6 +184,9 @@ function ExportRoutes() {
         <Route path="/reports/processing-loss-ledger" element={<ProcessingLossLedger />} />
         <Route path="/reports/finished-goods-ledger" element={<FinishedGoodsLedger />} />
         <Route path="/reports/service-milling-stock" element={<ServiceMillingStock />} />
+        <Route path="/reports/service-milling-ageing" element={<ServiceMillingAgeing />} />
+        <Route path="/reports/service-milling-pending-dispatch" element={<ServiceMillingPendingDispatch />} />
+        <Route path="/reports/service-milling-reconciliation" element={<ServiceMillingReconciliation />} />
         <Route path="/reports/inventory-movement-ledger" element={<InventoryMovementLedger />} />
         <Route path="/reports/stock-ledger" element={<StockLedger />} />
         <Route path="*" element={<Navigate to="/" replace />} />
@@ -239,6 +245,9 @@ function MillRoutes() {
         <Route path="/reports/processing-loss-ledger" element={<ProcessingLossLedger />} />
         <Route path="/reports/finished-goods-ledger" element={<FinishedGoodsLedger />} />
         <Route path="/reports/service-milling-stock" element={<ServiceMillingStock />} />
+        <Route path="/reports/service-milling-ageing" element={<ServiceMillingAgeing />} />
+        <Route path="/reports/service-milling-pending-dispatch" element={<ServiceMillingPendingDispatch />} />
+        <Route path="/reports/service-milling-reconciliation" element={<ServiceMillingReconciliation />} />
         <Route path="/reports/inventory-movement-ledger" element={<InventoryMovementLedger />} />
         <Route path="/reports/stock-ledger" element={<StockLedger />} />
         <Route path="*" element={<Navigate to="/" replace />} />
@@ -303,6 +312,9 @@ function StandardRoutes() {
         <Route path="/reports/processing-loss-ledger" element={<ProtectedRoute module="reports" action="view"><ProcessingLossLedger /></ProtectedRoute>} />
         <Route path="/reports/finished-goods-ledger" element={<ProtectedRoute module="reports" action="view"><FinishedGoodsLedger /></ProtectedRoute>} />
         <Route path="/reports/service-milling-stock" element={<ProtectedRoute module="reports" action="view"><ServiceMillingStock /></ProtectedRoute>} />
+        <Route path="/reports/service-milling-ageing" element={<ProtectedRoute module="reports" action="view"><ServiceMillingAgeing /></ProtectedRoute>} />
+        <Route path="/reports/service-milling-pending-dispatch" element={<ProtectedRoute module="reports" action="view"><ServiceMillingPendingDispatch /></ProtectedRoute>} />
+        <Route path="/reports/service-milling-reconciliation" element={<ProtectedRoute module="reports" action="view"><ServiceMillingReconciliation /></ProtectedRoute>} />
         <Route path="/reports/inventory-movement-ledger" element={<ProtectedRoute module="reports" action="view"><InventoryMovementLedger /></ProtectedRoute>} />
         <Route path="/reports/stock-ledger" element={<ProtectedRoute module="reports" action="view"><StockLedger /></ProtectedRoute>} />
         <Route path="/exceptions" element={<ProtectedRoute module="admin" action="view"><ExceptionDashboard /></ProtectedRoute>} />

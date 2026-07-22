@@ -310,12 +310,14 @@ module.exports = {
         .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
         .leftJoin('products as p', 'l.product_id', 'p.id')
         .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
+        .leftJoin('customers as oc', 'l.owner_customer_id', 'oc.id')
         .select(
           'l.*',
           'w.name as warehouse_name',
           'p.name as product_name',
           'p.code as product_code',
-          's.name as supplier_name'
+          's.name as supplier_name',
+          'oc.name as owner_customer_name'
         );
 
       // Ownership scope: default to COMPANY-owned lots so client-owned

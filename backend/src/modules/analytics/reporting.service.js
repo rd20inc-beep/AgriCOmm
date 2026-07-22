@@ -2500,48 +2500,174 @@ const reportingService = {
     return { rows, grand };
   },
 
-  // Service Milling stock register — CLIENT-owned output (finished + by-product)
-  // grouped by client, each expandable to its lots. Quantity-only (the rice is
-  // the client's — no company cost/value). Produced vs dispatched vs on-hand so
-  // the mill can maintain + print the client's stock position.
-  async getServiceMillingStock() {
+  // Shared fetch: every CLIENT-owned lot (finished + by-product) enriched with
+  // client, service batch, warehouse, produced / dispatched / on-hand quantities
+  // and days-on-hand. Quantity-only (the rice belongs to the client — no company
+  // cost/value). Every Service Milling report below is built off this one query.
+  async _fetchServiceMillingLots() {
     const num = (v) => parseFloat(v) || 0;
-    const lots = await db('inventory_lots as l')
+    const rows = await db('inventory_lots as l')
       .leftJoin('milling_batches as mb', 'l.service_batch_id', 'mb.id')
       .leftJoin('customers as c1', 'l.owner_customer_id', 'c1.id')
       .leftJoin('customers as c2', 'mb.client_customer_id', 'c2.id')
+      .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
       .where('l.ownership', 'client')
       .select(
         'l.id', 'l.lot_no', 'l.item_name', 'l.type', 'l.grade', 'l.variety', 'l.unit',
-        'l.available_qty', 'l.net_weight_kg', 'l.received_net_weight_kg', 'l.qty',
-        'mb.batch_no', 'mb.batch_name',
+        'l.available_qty', 'l.net_weight_kg', 'l.received_net_weight_kg', 'l.qty', 'l.created_at',
+        'l.warehouse_id', 'w.name as warehouse_name',
+        'mb.id as batch_id', 'mb.batch_no', 'mb.batch_name', 'mb.date_received',
         db.raw('COALESCE(c1.name, c2.name) as client_name'),
         db.raw('COALESCE(l.owner_customer_id, mb.client_customer_id) as client_id'),
         db.raw('(SELECT COALESCE(SUM(d.qty_kg), 0) FROM service_milling_dispatches d WHERE d.lot_id = l.id) as dispatched_kg'),
+        db.raw("GREATEST(0, DATE_PART('day', NOW() - COALESCE(mb.date_received, l.created_at))) as age_days"),
       )
       .orderBy('l.lot_no', 'asc');
+    return rows.map((l) => ({
+      lotId: l.id,
+      lotNo: l.lot_no,
+      type: l.type,
+      item: l.grade || l.variety || l.item_name || (l.type === 'byproduct' ? 'By-product' : 'Finished'),
+      clientId: l.client_id || null,
+      clientName: l.client_name || 'Unassigned client',
+      batchId: l.batch_id || null,
+      batchNo: l.batch_no || null,
+      batchName: l.batch_name || null,
+      warehouseId: l.warehouse_id || null,
+      warehouseName: l.warehouse_name || 'Unassigned warehouse',
+      producedKg: num(l.received_net_weight_kg) || num(l.net_weight_kg) || num(l.qty),
+      dispatchedKg: num(l.dispatched_kg),
+      onHandKg: num(l.available_qty),
+      ageDays: Math.round(num(l.age_days)),
+      href: `/lot-inventory/${l.id}`,
+    }));
+  },
+
+  // Service Milling stock register — CLIENT-owned output grouped by client
+  // (default), batch or warehouse; each group expandable to its lots.
+  // Quantity-only. Produced vs dispatched vs on-hand so the mill can maintain +
+  // print the client's stock position.
+  async getServiceMillingStock(opts = {}) {
+    const groupBy = ['client', 'batch', 'warehouse'].includes(opts.groupBy) ? opts.groupBy : 'client';
+    const lots = await this._fetchServiceMillingLots();
+    const keyOf = (l) => groupBy === 'batch'
+      ? (l.batchName ? `${l.batchNo || '—'} — ${l.batchName}` : (l.batchNo || 'Unassigned batch'))
+      : groupBy === 'warehouse' ? l.warehouseName : l.clientName;
+    const idOf = (l) => groupBy === 'batch' ? l.batchId : groupBy === 'warehouse' ? l.warehouseId : l.clientId;
 
     const groups = {};
     for (const l of lots) {
-      const produced = num(l.received_net_weight_kg) || num(l.net_weight_kg) || num(l.qty);
-      const onHand = num(l.available_qty);
-      const dispatched = num(l.dispatched_kg);
-      const key = l.client_name || 'Unassigned client';
-      const g = groups[key] || (groups[key] = { key, clientId: l.client_id || null, producedKg: 0, dispatchedKg: 0, onHandKg: 0, lots: [] });
-      g.producedKg += produced; g.dispatchedKg += dispatched; g.onHandKg += onHand;
+      const key = keyOf(l);
+      const g = groups[key] || (groups[key] = { key, groupId: idOf(l) || null, producedKg: 0, dispatchedKg: 0, onHandKg: 0, lots: [] });
+      g.producedKg += l.producedKg; g.dispatchedKg += l.dispatchedKg; g.onHandKg += l.onHandKg;
       g.lots.push({
-        lotId: l.id, lotNo: l.lot_no, batchNo: l.batch_no || null, batchName: l.batch_name || null,
-        type: l.type, item: l.grade || l.variety || l.item_name || (l.type === 'byproduct' ? 'By-product' : 'Finished'),
-        producedKg: produced, dispatchedKg: dispatched, onHandKg: onHand,
-        href: `/lot-inventory/${l.id}`,
+        lotId: l.lotId, lotNo: l.lotNo, batchNo: l.batchNo, batchName: l.batchName,
+        clientName: l.clientName, warehouseName: l.warehouseName,
+        type: l.type, item: l.item,
+        producedKg: l.producedKg, dispatchedKg: l.dispatchedKg, onHandKg: l.onHandKg,
+        href: l.href,
       });
     }
     const rows = Object.values(groups).sort((a, b) => a.key.localeCompare(b.key));
     const grand = rows.reduce((s, g) => ({
       producedKg: s.producedKg + g.producedKg, dispatchedKg: s.dispatchedKg + g.dispatchedKg, onHandKg: s.onHandKg + g.onHandKg,
-      clients: s.clients, lots: s.lots + g.lots.length,
-    }), { producedKg: 0, dispatchedKg: 0, onHandKg: 0, clients: 0, lots: 0 });
+      groups: s.groups, lots: s.lots + g.lots.length,
+    }), { producedKg: 0, dispatchedKg: 0, onHandKg: 0, groups: 0, lots: 0 });
+    grand.groups = rows.length;
+    grand.clients = rows.length; // back-compat: existing register KPI reads grand.clients
+    return { rows, grand, groupBy };
+  },
+
+  // Service Milling Stock Ageing — on-hand client stock bucketed by days held
+  // (anchored on the batch receive date, falling back to lot creation). Grouped
+  // by client so the mill can chase stale client stock for dispatch.
+  async getServiceMillingAgeing() {
+    const lots = (await this._fetchServiceMillingLots()).filter((l) => l.onHandKg > 0);
+    const BUCKETS = ['0–30', '31–60', '61–90', '90+'];
+    const bucketOf = (d) => (d <= 30 ? '0–30' : d <= 60 ? '31–60' : d <= 90 ? '61–90' : '90+');
+    const groups = {};
+    for (const l of lots) {
+      const key = l.clientName;
+      const g = groups[key] || (groups[key] = { key, clientId: l.clientId, onHandKg: 0, buckets: { '0–30': 0, '31–60': 0, '61–90': 0, '90+': 0 }, lots: [] });
+      const b = bucketOf(l.ageDays);
+      g.onHandKg += l.onHandKg; g.buckets[b] += l.onHandKg;
+      g.lots.push({ lotId: l.lotId, lotNo: l.lotNo, batchNo: l.batchNo, item: l.item, onHandKg: l.onHandKg, ageDays: l.ageDays, bucket: b, href: l.href });
+    }
+    const rows = Object.values(groups).sort((a, b) => a.key.localeCompare(b.key));
+    const grand = { onHandKg: 0, buckets: { '0–30': 0, '31–60': 0, '61–90': 0, '90+': 0 }, clients: rows.length, lots: lots.length };
+    for (const g of rows) { grand.onHandKg += g.onHandKg; for (const bk of BUCKETS) grand.buckets[bk] += g.buckets[bk]; }
+    return { rows, grand, buckets: BUCKETS };
+  },
+
+  // Pending Client Dispatch — client-owned lots still on hand (owed back to the
+  // client), grouped by client, most-aged first, so the mill can plan handovers.
+  async getServiceMillingPendingDispatch() {
+    const lots = (await this._fetchServiceMillingLots()).filter((l) => l.onHandKg > 0);
+    const groups = {};
+    for (const l of lots) {
+      const key = l.clientName;
+      const g = groups[key] || (groups[key] = { key, clientId: l.clientId, pendingKg: 0, lots: [] });
+      g.pendingKg += l.onHandKg;
+      g.lots.push({ lotId: l.lotId, lotNo: l.lotNo, batchNo: l.batchNo, batchName: l.batchName, warehouseName: l.warehouseName, item: l.item, pendingKg: l.onHandKg, ageDays: l.ageDays, href: l.href });
+    }
+    const rows = Object.values(groups)
+      .map((g) => ({ ...g, lots: g.lots.sort((a, b) => b.ageDays - a.ageDays) }))
+      .sort((a, b) => b.pendingKg - a.pendingKg);
+    const grand = rows.reduce((s, g) => ({ pendingKg: s.pendingKg + g.pendingKg, clients: s.clients, lots: s.lots + g.lots.length }), { pendingKg: 0, clients: 0, lots: 0 });
     grand.clients = rows.length;
+    return { rows, grand };
+  },
+
+  // Service Milling Stock Reconciliation — per service batch, the physical
+  // balance: raw received → milled → produced (finished + by-product) →
+  // dispatched → on-hand. Flags any batch where produced ≠ dispatched + on-hand
+  // (a stock leak) so client stock can be reconciled before hand-over.
+  async getServiceMillingReconciliation() {
+    const num = (v) => parseFloat(v) || 0;
+    const round2 = (v) => Math.round((num(v)) * 100) / 100;
+    const batches = await db('milling_batches as mb')
+      .leftJoin('customers as c', 'mb.client_customer_id', 'c.id')
+      .where('mb.is_service_milling', true)
+      .select('mb.id', 'mb.batch_no', 'mb.batch_name', 'mb.raw_qty_kg', 'mb.milled_qty_kg', db.raw('c.name as client_name'))
+      .orderBy('mb.batch_no', 'asc');
+    const ids = batches.map((b) => b.id);
+
+    const lotAgg = ids.length
+      ? await db('inventory_lots').whereIn('service_batch_id', ids).where('ownership', 'client')
+          .select('service_batch_id')
+          .sum({ produced: db.raw('COALESCE(received_net_weight_kg, net_weight_kg, qty)') })
+          .sum({ onhand: 'available_qty' })
+          .groupBy('service_batch_id')
+      : [];
+    const dispAgg = ids.length
+      ? await db('service_milling_dispatches').whereIn('service_batch_id', ids).select('service_batch_id').sum({ d: 'qty_kg' }).groupBy('service_batch_id')
+      : [];
+    const producedBy = Object.fromEntries(lotAgg.map((r) => [r.service_batch_id, r]));
+    const dispBy = Object.fromEntries(dispAgg.map((r) => [r.service_batch_id, num(r.d)]));
+
+    const rows = batches.map((b) => {
+      const rawKg = round2(b.raw_qty_kg);
+      const producedKg = round2(producedBy[b.id]?.produced);
+      const milledKg = b.milled_qty_kg != null ? round2(b.milled_qty_kg) : producedKg;
+      const dispatchedKg = round2(dispBy[b.id]);
+      const onHandKg = round2(producedBy[b.id]?.onhand);
+      const balanceKg = round2(producedKg - dispatchedKg - onHandKg); // should be ~0
+      const millingLossKg = round2(milledKg - producedKg); // process loss (bran/husk/wastage)
+      return {
+        batchId: b.id, batchNo: b.batch_no, batchName: b.batch_name || null, clientName: b.client_name || 'Unassigned client',
+        rawKg, milledKg, producedKg, dispatchedKg, onHandKg, balanceKg, millingLossKg,
+        reconciled: Math.abs(balanceKg) < 0.5,
+        href: `/service-milling/${b.id}`,
+      };
+    });
+    const grand = rows.reduce((s, r) => ({
+      rawKg: s.rawKg + r.rawKg, milledKg: s.milledKg + r.milledKg, producedKg: s.producedKg + r.producedKg,
+      dispatchedKg: s.dispatchedKg + r.dispatchedKg, onHandKg: s.onHandKg + r.onHandKg,
+      batches: s.batches, unreconciled: s.unreconciled + (r.reconciled ? 0 : 1),
+    }), { rawKg: 0, milledKg: 0, producedKg: 0, dispatchedKg: 0, onHandKg: 0, batches: 0, unreconciled: 0 });
+    grand.rawKg = round2(grand.rawKg); grand.milledKg = round2(grand.milledKg); grand.producedKg = round2(grand.producedKg);
+    grand.dispatchedKg = round2(grand.dispatchedKg); grand.onHandKg = round2(grand.onHandKg);
+    grand.batches = rows.length;
     return { rows, grand };
   },
 
