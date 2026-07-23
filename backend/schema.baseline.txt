@@ -2604,6 +2604,12 @@ COL user_preferences.theme:character varying:NULL
 COL user_preferences.timezone:character varying:NULL
 COL user_preferences.updated_at:timestamp with time zone:NOT NULL
 COL user_preferences.user_id:integer:NULL
+COL user_scopes.created_at:timestamp with time zone:NULL
+COL user_scopes.created_by:integer:NULL
+COL user_scopes.id:integer:NOT NULL
+COL user_scopes.scope_type:character varying:NOT NULL
+COL user_scopes.scope_value:character varying:NOT NULL
+COL user_scopes.user_id:integer:NOT NULL
 COL users.created_at:timestamp with time zone:NOT NULL
 COL users.email:character varying:NOT NULL
 COL users.failed_login_count:integer:NOT NULL
@@ -3626,6 +3632,11 @@ CON tasks_assignments.tasks_assignments_task_no_unique(u)
 CON user_preferences.user_preferences_pkey(p)
 CON user_preferences.user_preferences_user_id_foreign(f)
 CON user_preferences.user_preferences_user_id_unique(u)
+CON user_scopes.chk_user_scopes_type_valid(c)
+CON user_scopes.user_scopes_created_by_foreign(f)
+CON user_scopes.user_scopes_pkey(p)
+CON user_scopes.user_scopes_user_id_foreign(f)
+CON user_scopes.user_scopes_user_id_scope_type_scope_value_unique(u)
 CON users.chk_users_status_valid(c)
 CON users.users_email_unique(u)
 CON users.users_pkey(p)

@@ -542,4 +542,60 @@ router.post('/:id/revoke-sessions', authorize('admin', 'manage_users'), async (r
   }
 });
 
+// ── #9-scoping: per-user module + warehouse access scopes ────────────────────
+const SCOPE_MODULES = ['export_orders', 'milling', 'inventory', 'finance', 'reports', 'mill_store', 'service_milling', 'payroll', 'admin', 'quality'];
+
+// GET /api/users/:id/scopes — the user's module + warehouse allow-lists, plus the
+// pickable options. Empty lists = unrestricted for that type.
+router.get('/:id/scopes', authorize('admin', 'view'), async (req, res) => {
+  try {
+    const rows = await db('user_scopes').where({ user_id: req.params.id }).select('scope_type', 'scope_value');
+    const modules = rows.filter((r) => r.scope_type === 'module').map((r) => r.scope_value);
+    const warehouses = rows.filter((r) => r.scope_type === 'warehouse').map((r) => parseInt(r.scope_value, 10));
+    const availableWarehouses = await db('warehouses').select('id', 'name', 'entity', 'type').orderBy('name');
+    return res.json({ success: true, data: { modules, warehouses, availableModules: SCOPE_MODULES, availableWarehouses } });
+  } catch (err) {
+    console.error('Get user scopes error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+});
+
+// PUT /api/users/:id/scopes — replace the user's scopes. Body: { modules:[], warehouses:[] }.
+// Empty array clears that scope type (→ unrestricted). Cannot scope your own account.
+router.put('/:id/scopes', authorize('admin', 'manage_users'), async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id, 10);
+    if (userId === req.user.id) {
+      return res.status(400).json({ success: false, message: 'You cannot restrict your own account scope.' });
+    }
+    const user = await db('users').where({ id: userId }).first();
+    if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
+    const modules = Array.isArray(req.body.modules) ? req.body.modules.filter((m) => SCOPE_MODULES.includes(m)) : [];
+    const warehouses = Array.isArray(req.body.warehouses) ? req.body.warehouses.map((w) => parseInt(w, 10)).filter(Number.isFinite) : [];
+
+    await db.transaction(async (trx) => {
+      await trx('user_scopes').where({ user_id: userId }).del();
+      const rows = [
+        ...modules.map((m) => ({ user_id: userId, scope_type: 'module', scope_value: String(m), created_by: req.user.id })),
+        ...[...new Set(warehouses)].map((w) => ({ user_id: userId, scope_type: 'warehouse', scope_value: String(w), created_by: req.user.id })),
+      ];
+      if (rows.length) await trx('user_scopes').insert(rows);
+    });
+
+    await auditService.log({
+      userId: req.user.id, action: 'set_user_scopes', entityType: 'user',
+      entityId: userId, details: { email: user.email, modules, warehouses }, ipAddress: req.ip,
+    });
+    return res.json({
+      success: true,
+      message: (modules.length || warehouses.length)
+        ? `Access scope updated for ${user.full_name}.`
+        : `Access scope cleared for ${user.full_name} (full access).`,
+    });
+  } catch (err) {
+    console.error('Set user scopes error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+});
+
 module.exports = router;

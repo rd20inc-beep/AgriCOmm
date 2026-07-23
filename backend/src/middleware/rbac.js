@@ -40,13 +40,26 @@ function authorize(module, action) {
 
         // Store as a Set of "module.action" strings for fast lookup
         req.user.permissions = new Set(perms.map((p) => `${p.module}.${p.action}`));
+        // #9-scoping: per-user module allow-list (empty = unrestricted).
+        const modScopes = await db('user_scopes')
+          .where({ user_id: req.user.id, scope_type: 'module' }).pluck('scope_value');
+        req.user.moduleScopes = new Set(modScopes);
         req.user._permissionsLoaded = true;
       }
 
-      // Super Admin and Owner bypass — always allowed
+      // Super Admin and Owner bypass — always allowed (never scoped).
       const role = await db('roles').where({ id: req.user.role_id }).select('name').first();
       if (role && (role.name === 'Super Admin' || role.name === 'Owner')) {
         return next();
+      }
+
+      // #9-scoping: if the user has a module allow-list, the requested module
+      // must be in it (on top of the permission check below).
+      if (req.user.moduleScopes && req.user.moduleScopes.size > 0 && !req.user.moduleScopes.has(module)) {
+        return res.status(403).json({
+          success: false,
+          message: `Access restricted — your account is not scoped to the ${module} area.`,
+        });
       }
 
       const permKey = `${module}.${action}`;
@@ -96,12 +109,17 @@ function authorizeAny(...pairs) {
           .where('rp.role_id', roleId)
           .select('p.module', 'p.action');
         req.user.permissions = new Set(perms.map((p) => `${p.module}.${p.action}`));
+        const modScopes = await db('user_scopes').where({ user_id: req.user.id, scope_type: 'module' }).pluck('scope_value');
+        req.user.moduleScopes = new Set(modScopes);
         req.user._permissionsLoaded = true;
       }
       const role = await db('roles').where({ id: req.user.role_id }).select('name').first();
       if (role && (role.name === 'Super Admin' || role.name === 'Owner')) return next();
 
-      const ok = pairs.some(([m, a]) => req.user.permissions.has(`${m}.${a}`));
+      // #9-scoping: allow if any pair's permission is held AND (no module scope,
+      // or that pair's module is in the user's allow-list).
+      const scoped = req.user.moduleScopes && req.user.moduleScopes.size > 0;
+      const ok = pairs.some(([m, a]) => req.user.permissions.has(`${m}.${a}`) && (!scoped || req.user.moduleScopes.has(m)));
       if (!ok) {
         return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission to perform this action.' });
       }
@@ -236,9 +254,27 @@ async function userHasPermission(req, module, action) {
   }
 }
 
+// #9-scoping: the warehouse ids a user is restricted to, or null when
+// unrestricted (no warehouse scope rows, or a bypass role). Inventory listings
+// pass this to filter results. Owner/Super Admin are never scoped.
+async function getScopedWarehouseIds(user) {
+  if (!user || !user.id) return null;
+  try {
+    const roleId = user.role_id || (await db('users').where({ id: user.id }).first('role_id'))?.role_id;
+    const role = roleId && await db('roles').where({ id: roleId }).first('name');
+    if (role && (role.name === 'Super Admin' || role.name === 'Owner')) return null;
+    const rows = await db('user_scopes').where({ user_id: user.id, scope_type: 'warehouse' }).pluck('scope_value');
+    if (!rows.length) return null; // unrestricted
+    return rows.map((v) => parseInt(v, 10)).filter(Number.isFinite);
+  } catch (e) {
+    return null; // fail-open: never hide data on an infra error
+  }
+}
+
 module.exports = authorize;
 module.exports.authorize = authorize;
 module.exports.authorizeAny = authorizeAny;
 module.exports.authorizeRole = authorizeRole;
 module.exports.denyRoles = denyRoles;
 module.exports.userHasPermission = userHasPermission;
+module.exports.getScopedWarehouseIds = getScopedWarehouseIds;

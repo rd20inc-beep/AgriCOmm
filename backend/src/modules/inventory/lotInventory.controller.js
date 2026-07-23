@@ -330,6 +330,9 @@ module.exports = {
       if (type) query = query.where('l.type', type);
       if (entity) query = query.where('l.entity', entity);
       if (warehouse_id) query = query.where('l.warehouse_id', warehouse_id);
+      // #9-scoping: restrict a warehouse-scoped user to their allowed warehouses.
+      const scopedWh = await require('../../middleware/rbac').getScopedWarehouseIds(req.user);
+      if (scopedWh) query = query.whereIn('l.warehouse_id', scopedWh.length ? scopedWh : [-1]);
       if (status) query = query.where('l.status', status);
       if (supplier_id) query = query.where('l.supplier_id', supplier_id);
       if (product_id) query = query.where('l.product_id', product_id);

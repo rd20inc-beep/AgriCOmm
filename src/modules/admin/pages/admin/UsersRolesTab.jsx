@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { UsersRound, Plus, XCircle, CheckCircle, KeyRound, Trash2, Pencil, Shield, ChevronDown, Lock, Unlock, RotateCcw, Link2, Ban } from 'lucide-react';
+import { UsersRound, Plus, XCircle, CheckCircle, KeyRound, Trash2, Pencil, Shield, ChevronDown, Lock, Unlock, RotateCcw, Link2, Ban, SlidersHorizontal } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
-import { useUsers, useCreateUser, useDeactivateUser, useActivateUser, useSetUserPassword, useDeleteUser, useUpdateUser, useSetUserStatus, useForceUserPasswordChange, useUserResetLink, useRevokeUserSessions } from '../../../../api/queries';
+import { useUsers, useCreateUser, useDeactivateUser, useActivateUser, useSetUserPassword, useDeleteUser, useUpdateUser, useSetUserStatus, useForceUserPasswordChange, useUserResetLink, useRevokeUserSessions, useUserScopes, useSetUserScopes } from '../../../../api/queries';
 import Modal from '../../components/AdminDrawer';
 
 // #9 Account lifecycle status badge colours.
@@ -138,6 +138,7 @@ export default function UsersRolesTab() {
   const resetLinkMut = useUserResetLink();
   const revokeMut = useRevokeUserSessions();
   const [menuFor, setMenuFor] = useState(null); // user id whose security menu is open
+  const [scopeUser, setScopeUser] = useState(null); // #9-scoping: user whose access scope is being edited
 
   const run = async (fn, ok) => { try { const r = await fn(); addToast(typeof ok === 'function' ? ok(r) : ok, 'success'); setMenuFor(null); } catch (e) { addToast(e?.data?.message || e?.message || 'Action failed', 'error'); } };
   const setStatus = (user, status) => run(() => statusMut.mutateAsync({ id: user.id, status }), `${user.fullName} is now ${status}.`);
@@ -248,6 +249,7 @@ export default function UsersRolesTab() {
                               : <MenuItem icon={Unlock} label="Unlock account" onClick={() => setStatus(user, 'active')} tone="emerald" />}
                             <MenuItem icon={RotateCcw} label="Force password change" onClick={() => forcePw(user)} />
                             <MenuItem icon={Link2} label="Send password-reset link" onClick={() => resetLink(user)} />
+                            <MenuItem icon={SlidersHorizontal} label="Access scope (modules / warehouses)" onClick={() => { setScopeUser(user); setMenuFor(null); }} />
                             <MenuItem icon={XCircle} label="Revoke all sessions" onClick={() => revoke(user)} tone="red" />
                           </div>
                         )}
@@ -337,6 +339,70 @@ export default function UsersRolesTab() {
           </div>
         </div>
       </Modal>
+
+      {scopeUser && <ScopeModal user={scopeUser} onClose={() => setScopeUser(null)} addToast={addToast} />}
     </div>
+  );
+}
+
+// #9-scoping: assign a user's module + warehouse access scopes. Empty = full access.
+const MODULE_LABELS = {
+  export_orders: 'Export Orders', milling: 'Mill / Production', inventory: 'Inventory',
+  finance: 'Finance', reports: 'Reports', mill_store: 'Mill Store', service_milling: 'Service Milling',
+  payroll: 'Payroll', admin: 'Administration', quality: 'Quality',
+};
+function ScopeModal({ user, onClose, addToast }) {
+  const { data, isLoading } = useUserScopes(user.id);
+  const saveMut = useSetUserScopes();
+  const [mods, setMods] = useState(null);
+  const [whs, setWhs] = useState(null);
+  const modules = mods ?? data?.modules ?? [];
+  const warehouses = whs ?? data?.warehouses ?? [];
+  const availableModules = data?.availableModules || [];
+  const availableWarehouses = data?.availableWarehouses || [];
+  const toggle = (list, setList, val) => setList((list ?? []).includes(val) ? list.filter((x) => x !== val) : [...(list ?? []), val]);
+
+  const save = async () => {
+    try {
+      await saveMut.mutateAsync({ id: user.id, data: { modules, warehouses } });
+      addToast(`Access scope saved for ${user.fullName}.`, 'success');
+      onClose();
+    } catch (e) { addToast(e?.data?.message || e?.message || 'Failed to save scope', 'error'); }
+  };
+
+  return (
+    <Modal isOpen onClose={onClose} title={`Access scope — ${user.fullName}`} size="md">
+      {isLoading ? <p className="text-sm text-gray-400">Loading…</p> : (
+        <div className="space-y-4">
+          <p className="text-xs text-gray-500">Restrict this user to specific areas and warehouses. Leaving a section empty means <b>full access</b> to it. (Super Admin / Owner are never restricted.)</p>
+          <div>
+            <p className="text-sm font-semibold text-gray-800 mb-1">Modules {modules.length === 0 && <span className="text-[11px] font-normal text-emerald-600">— all modules</span>}</p>
+            <div className="grid grid-cols-2 gap-1.5">
+              {(availableModules).map((m) => (
+                <label key={m} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                  <input type="checkbox" checked={modules.includes(m)} onChange={() => toggle(modules, setMods, m)} />
+                  {MODULE_LABELS[m] || m}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-gray-800 mb-1">Warehouses {warehouses.length === 0 && <span className="text-[11px] font-normal text-emerald-600">— all warehouses</span>}</p>
+            <div className="grid grid-cols-2 gap-1.5 max-h-40 overflow-y-auto">
+              {availableWarehouses.length === 0 ? <p className="text-xs text-gray-400">No warehouses.</p> : availableWarehouses.map((w) => (
+                <label key={w.id} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                  <input type="checkbox" checked={warehouses.includes(w.id)} onChange={() => toggle(warehouses, setWhs, w.id)} />
+                  <span className="truncate">{w.name} <span className="text-[10px] text-gray-400">({w.entity || '—'})</span></span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-2 border-t border-gray-200">
+            <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+            <button onClick={save} disabled={saveMut.isPending} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">Save Scope</button>
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }
