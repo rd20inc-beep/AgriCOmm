@@ -105,6 +105,7 @@ export function printCustomerInvoice(data, company, opts = {}) {
       <span><span class="k">Due date</span><br/><span class="v">${dt(sale.dueDate)}${sale.overdue ? ' (overdue)' : ''}</span></span>
       <span><span class="k">Address</span><br/><span class="v">${esc(sale.customerAddress || '—')}</span></span>
       <span><span class="k">Salesperson</span><br/><span class="v">${esc(sale.createdByName || '—')}</span></span>
+      ${sale.gatePassNo ? `<span><span class="k">Gate Pass No</span><br/><span class="v">${esc(sale.gatePassNo)}</span></span>` : ''}
     </div>
     <table>
       <thead><tr><th>Rice Type</th><th>Grade / Product</th><th class="r">Quantity</th><th class="r">Bags</th><th class="r">Rate</th><th class="r">Amount</th></tr></thead>
@@ -136,6 +137,39 @@ export function printCustomerInvoice(data, company, opts = {}) {
     <div class="note">Computer-generated sales invoice.</div>
   `;
   return openPrint(`Invoice ${sale.invoiceNo}`, inner);
+}
+
+// #6 A dedicated gate pass — the outbound release document that travels with the
+// goods. Shows the gate pass number, sale ref, customer, vehicle and item lines.
+export function printGatePass(data, company) {
+  const { sale, items = [], dispatch = {}, totals = {} } = data;
+  const rows = items.map(it => `<tr>
+    <td>${esc(it.riceType)}${it.gradeProduct ? ` <span class="muted">${esc(it.gradeProduct)}</span>` : ''}</td>
+    <td class="r">${n0(it.quantityKg)} kg</td>
+    <td class="r">${it.bags != null ? n0(it.bags) : '—'}</td>
+  </tr>`).join('');
+  const inner = `
+    <div class="row">
+      <div>${companyBlock(company)}</div>
+      <div><div class="doc-title">GATE PASS</div><div class="doc-sub">${esc(sale.gatePassNo || '—')}</div><div class="doc-sub">${dt(sale.date)}</div></div>
+    </div>
+    <hr class="hr"/>
+    <div class="meta">
+      <span><span class="k">Gate Pass No</span><br/><span class="v">${esc(sale.gatePassNo || '—')}</span></span>
+      <span><span class="k">Sale / Invoice</span><br/><span class="v">${esc(sale.invoiceNo)}${sale.saleGroupNo && sale.saleGroupNo !== sale.invoiceNo ? ` · ${esc(sale.saleGroupNo)}` : ''}</span></span>
+      <span><span class="k">Customer</span><br/><span class="v">${esc(sale.customer)}</span></span>
+      <span><span class="k">Vehicle / Driver</span><br/><span class="v">${esc(dispatch.vehicleNo || '—')}${dispatch.driverName ? ' · ' + esc(dispatch.driverName) : ''}</span></span>
+      <span><span class="k">Dispatch date</span><br/><span class="v">${dt(dispatch.dispatchDate || sale.date)}</span></span>
+      <span><span class="k">Total quantity</span><br/><span class="v">${n0(totals.quantityKg)} kg${totals.bags ? ` · ${n0(totals.bags)} bags` : ''}</span></span>
+    </div>
+    <table>
+      <thead><tr><th>Item</th><th class="r">Quantity</th><th class="r">Bags</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="sign"><div>Store / Gate Keeper</div><div>Driver</div><div>Authorized By</div></div>
+    <div class="note">This gate pass authorizes the release of the goods listed above. Computer-generated.</div>
+  `;
+  return openPrint(`Gate Pass ${sale.gatePassNo || sale.invoiceNo}`, inner);
 }
 
 export function printAdminInvoice(data, company) {

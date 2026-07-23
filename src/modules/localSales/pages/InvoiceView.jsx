@@ -15,7 +15,7 @@ import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { useAcceptLocalSalePayment } from '../../../api/queries';
 import SlideDrawer from '../../../components/SlideDrawer';
-import { printCustomerInvoice, printAdminInvoice } from '../utils/invoicePrint';
+import { printCustomerInvoice, printAdminInvoice, printGatePass } from '../utils/invoicePrint';
 
 // Roles allowed to view the admin invoice copy (mirrors the backend route gate).
 const ADMIN_INVOICE_ROLES = ['Super Admin', 'Owner', 'Finance Manager', 'Mill Manager'];
@@ -156,6 +156,7 @@ export default function InvoiceView() {
             <option value="compact">Compact template</option>
           </select>
           <ActionBtn icon={Printer} label="Print customer invoice" tone="primary" onClick={onPrintCustomer} />
+          {sale.gatePassNo && <ActionBtn icon={FileText} label="Print gate pass" onClick={() => { if (!printGatePass(data, companyProfileData)) addToast?.('Pop-up blocked — allow pop-ups to print.', 'error'); }} />}
           {canSeeAdminCopy && <ActionBtn icon={ShieldCheck} label={adminBusy ? 'Preparing…' : 'Print admin copy'} onClick={onPrintAdmin} disabled={adminBusy} />}
           <ActionBtn icon={Mail} label="Email invoice" onClick={() => { setEmailTo(sale.customerEmail || ''); setEmailOpen(true); }} />
           <ActionBtn icon={MessageCircle} label="WhatsApp" onClick={onWhatsApp} />
@@ -294,6 +295,7 @@ export default function InvoiceView() {
         <p className="text-[11px] uppercase tracking-wider text-gray-400 mb-1">Outbound (sold / dispatch)</p>
         <div className="flex flex-wrap gap-2 text-xs mb-3">
           <Chip tone={dispatch.dispatched ? 'emerald' : 'gray'}>{dispatch.deliveryStatus}</Chip>
+          {sale.gatePassNo && <Chip tone="blue">Gate Pass {sale.gatePassNo}</Chip>}
           {dispatch.dispatchDate && <Chip>{dt(dispatch.dispatchDate)}</Chip>}
           {dispatch.vehicleNo && <Chip>Truck {dispatch.vehicleNo}</Chip>}
           {dispatch.driverName && <Chip>Driver {dispatch.driverName}</Chip>}
@@ -426,7 +428,9 @@ function Field({ label, value, sub, tone = 'gray' }) {
 }
 
 function Chip({ children, tone = 'gray' }) {
-  const cls = tone === 'emerald' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-gray-50 border-gray-200 text-gray-600';
+  const cls = tone === 'emerald' ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+    : tone === 'blue' ? 'bg-blue-50 border-blue-200 text-blue-700'
+      : 'bg-gray-50 border-gray-200 text-gray-600';
   return <span className={`px-2.5 py-1 rounded-lg border ${cls}`}>{children}</span>;
 }
 

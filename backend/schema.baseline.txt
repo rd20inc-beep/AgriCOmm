@@ -1126,6 +1126,7 @@ COL local_sales.driver_name:character varying:NULL
 COL local_sales.due_amount:numeric:NOT NULL
 COL local_sales.due_date:date:NULL
 COL local_sales.entity:character varying:NOT NULL
+COL local_sales.gate_pass_no:character varying:NULL
 COL local_sales.gross_profit:numeric:NULL
 COL local_sales.gross_profit_pkr:numeric:NULL
 COL local_sales.id:integer:NOT NULL
