@@ -319,6 +319,25 @@ async function assembleInvoice(id, includeAdmin = false) {
     },
   };
 
+  // #5 Repacking summary for the sale group (bag source / bag change / labour /
+  // packing loss). The packaging + labour amounts already appear as line items;
+  // this block adds the who-supplied-bags note + the packing details.
+  const rp = base.sale_group_no
+    ? await db('local_sale_repacking').where({ sale_group_no: base.sale_group_no }).first()
+    : await db('local_sale_repacking').where({ local_sale_id: base.id }).first();
+  if (rp) {
+    data.repacking = {
+      bagSource: rp.bag_source,
+      bagSourceLabel: rp.bag_source === 'customer' ? 'Customer-provided bags'
+        : rp.bag_source === 'company' ? 'Company inventory bags' : 'No bag change',
+      originalBagSizeKg: num(rp.original_bag_size_kg), originalBagCount: rp.original_bag_count != null ? Number(rp.original_bag_count) : null,
+      newBagSizeKg: num(rp.new_bag_size_kg), newBagCount: rp.new_bag_count != null ? Number(rp.new_bag_count) : null,
+      packagingCharge: num(rp.packaging_charge), labourMode: rp.labour_mode, labourTotal: num(rp.labour_total),
+      packingLossKg: num(rp.packing_loss_kg), finalDispatchedKg: num(rp.final_dispatched_kg),
+      notes: rp.notes || null,
+    };
+  }
+
   if (includeAdmin) {
     const saleNos = [...new Set(rows.map(r => r.sale_no).filter(Boolean))];
     const cogsTotal = items.reduce((s, i) => s + (i.cogs || 0), 0);
@@ -664,6 +683,35 @@ module.exports = {
           }).returning('*');
 
           created.push(sale);
+        }
+
+        // #5 Repacking metadata for the sale group (bag source / bag change /
+        // labour / packing loss). The money lines (company bags, labour) are
+        // already recorded above as normal sale lines; this row keeps the
+        // repacking detail + a back-link so it's traceable + printable.
+        const rp = req.body.repacking;
+        if (rp && (rp.required || rp.bag_source)) {
+          const numOrNull = (v) => (v == null || v === '' ? null : parseFloat(v));
+          const intOrNull = (v) => (v == null || v === '' ? null : parseInt(v, 10));
+          await trx('local_sale_repacking').insert({
+            local_sale_id: created[0].id,
+            sale_group_no: groupNo,
+            bag_source: ['customer', 'company', 'none'].includes(rp.bag_source) ? rp.bag_source : 'none',
+            packaging_item_id: intOrNull(rp.packaging_item_id),
+            original_bag_size_kg: numOrNull(rp.original_bag_size_kg),
+            original_bag_count: intOrNull(rp.original_bag_count),
+            new_bag_size_kg: numOrNull(rp.new_bag_size_kg),
+            new_bag_count: intOrNull(rp.new_bag_count),
+            bag_rate: numOrNull(rp.bag_rate),
+            packaging_charge: numOrNull(rp.packaging_charge),
+            labour_mode: ['per_bag', 'per_kg', 'fixed'].includes(rp.labour_mode) ? rp.labour_mode : null,
+            labour_rate: numOrNull(rp.labour_rate),
+            labour_total: numOrNull(rp.labour_total),
+            packing_loss_kg: numOrNull(rp.packing_loss_kg),
+            final_dispatched_kg: numOrNull(rp.final_dispatched_kg),
+            notes: rp.notes || null,
+            created_by: req.user?.id || null,
+          });
         }
 
         // Only a confirmed sale moves stock/money. Pending sits inert until a Mill

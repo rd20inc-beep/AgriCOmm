@@ -23,6 +23,17 @@ import { lotCategory, CAT_ORDER, CAT_COLOR } from '../../../utils/lotCategory';
 
 function fmtPKR(v) { return 'Rs ' + (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
+// Small labelled number input used by the repacking section (#5).
+function RpNum({ label, value, onChange }) {
+  return (
+    <div>
+      <label className="block text-[11px] text-gray-500 mb-0.5">{label}</label>
+      <input type="number" step="0.01" value={value} onChange={e => onChange(e.target.value)}
+        className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+    </div>
+  );
+}
+
 const INPUT = "w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white";
 const SELECT = INPUT;
 const LABEL = "block text-xs font-semibold text-gray-600 uppercase mb-1";
@@ -531,6 +542,17 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   const setL = (k, v) => setLine(p => ({ ...p, [k]: v }));
   const [tag, setTag] = useState('All');
 
+  // #5 Repacking: bag source (customer / company inventory / none) + optional
+  // labour charge + packing loss. Company bags become a packaging sale line;
+  // labour becomes a charge line; both fold into the sale total + invoice.
+  const [repack, setRepack] = useState({
+    enabled: false, bag_source: 'none', packaging_item_id: '',
+    original_bag_size_kg: '', original_bag_count: '', new_bag_size_kg: '', new_bag_count: '',
+    bag_rate: '', labour_enabled: false, labour_mode: 'per_bag', labour_rate: '',
+    packing_loss_kg: '', final_dispatched_kg: '', notes: '',
+  });
+  const setRp = (k, v) => setRepack(p => ({ ...p, [k]: v }));
+
   // Tags = product categories in stock, plus "Packaging" for sellable mill-store
   // items (empty katta) when any are on hand.
   const tags = useMemo(() => {
@@ -580,11 +602,34 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   }
   const removeLine = (i) => setCart(c => c.filter((_, idx) => idx !== i));
 
-  const grandTotal = cart.reduce((s, c) => s + c.total, 0);
+  // #5 Repacking-derived charges. Company bags = new_bag_count × bag_rate;
+  // labour = per-bag / per-kg (over rice sold) / fixed.
+  const cartRiceKg = cart.filter(c => !c.isMillItem).reduce((s, c) => s + (c.qtyKg || 0), 0);
+  const rpNewBags = parseInt(repack.new_bag_count, 10) || 0;
+  const rpPackagingCharge = repack.enabled && repack.bag_source === 'company'
+    ? Math.round(rpNewBags * (parseFloat(repack.bag_rate) || 0)) : 0;
+  const rpLabourTotal = repack.enabled && repack.labour_enabled
+    ? Math.round((repack.labour_mode === 'per_bag' ? rpNewBags
+      : repack.labour_mode === 'per_kg' ? cartRiceKg : 1) * (parseFloat(repack.labour_rate) || 0))
+    : 0;
+  const repackItems = () => {
+    const out = [];
+    if (repack.enabled && repack.bag_source === 'company' && repack.packaging_item_id && rpNewBags > 0 && (parseFloat(repack.bag_rate) || 0) > 0) {
+      const pkg = pkgItems.find(i => String(i.id) === String(repack.packaging_item_id));
+      out.push({ mill_item_id: Number(repack.packaging_item_id), item_name: `Repack bags — ${pkg?.name || 'Packaging'}`, quantity_input: rpNewBags, rate_input: parseFloat(repack.bag_rate) || 0 });
+    }
+    if (repack.enabled && repack.labour_enabled && rpLabourTotal > 0) {
+      out.push({ item_name: 'Repacking labour', item_type: 'labour', quantity_input: 1, quantity_unit: 'kg', bag_weight_kg: 1, rate_input: rpLabourTotal, rate_unit: 'kg' });
+    }
+    return out;
+  };
+
+  const grandTotal = cart.reduce((s, c) => s + c.total, 0) + rpPackagingCharge + rpLabourTotal;
 
   function reset() {
     setForm({ customer_id: '', buyer_name: '', buyer_phone: '', payment_mode: 'cash', paid_amount: '', collection_location: 'Mill', bank_account_id: '', cheque_no: '', due_date: '', vehicle_no: '', driver_name: '', notes: '' });
     setCart([]); setLine(EMPTY_LINE); setTag('All'); setStep(1);
+    setRepack({ enabled: false, bag_source: 'none', packaging_item_id: '', original_bag_size_kg: '', original_bag_count: '', new_bag_size_kg: '', new_bag_count: '', bag_rate: '', labour_enabled: false, labour_mode: 'per_bag', labour_rate: '', packing_loss_kg: '', final_dispatched_kg: '', notes: '' });
   }
 
   async function handleSubmit() {
@@ -606,14 +651,33 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
         payment_reference: effectiveMode === 'cheque' ? (form.cheque_no.trim() || null) : null,
         due_date: (effectiveMode === 'cheque' || effectiveMode === 'credit') ? (form.due_date || null) : null,
         vehicle_no: form.vehicle_no || null, driver_name: form.driver_name || null, notes: form.notes || null,
-        items: cart.map(c => c.isMillItem ? ({
-          mill_item_id: Number(c.mill_item_id), item_name: c.item_name,
-          quantity_input: c.count, rate_input: parseFloat(c.rate_input),
-        }) : ({
-          lot_id: c.lot_id || null, item_name: c.item_name, item_type: c.item_type,
-          quantity_input: parseFloat(c.quantity_input), quantity_unit: c.quantity_unit, bag_weight_kg: parseFloat(c.bag_weight_kg),
-          rate_input: parseFloat(c.rate_input), rate_unit: c.rate_unit,
-        })),
+        items: [
+          ...cart.map(c => c.isMillItem ? ({
+            mill_item_id: Number(c.mill_item_id), item_name: c.item_name,
+            quantity_input: c.count, rate_input: parseFloat(c.rate_input),
+          }) : ({
+            lot_id: c.lot_id || null, item_name: c.item_name, item_type: c.item_type,
+            quantity_input: parseFloat(c.quantity_input), quantity_unit: c.quantity_unit, bag_weight_kg: parseFloat(c.bag_weight_kg),
+            rate_input: parseFloat(c.rate_input), rate_unit: c.rate_unit,
+          })),
+          ...repackItems(), // #5 company-bag + labour charge lines
+        ],
+        // #5 repacking metadata (bag source / bag change / labour / packing loss).
+        ...(repack.enabled ? {
+          repacking: {
+            required: true, bag_source: repack.bag_source,
+            packaging_item_id: repack.bag_source === 'company' ? (repack.packaging_item_id || null) : null,
+            original_bag_size_kg: repack.original_bag_size_kg || null, original_bag_count: repack.original_bag_count || null,
+            new_bag_size_kg: repack.new_bag_size_kg || null, new_bag_count: repack.new_bag_count || null,
+            bag_rate: repack.bag_source === 'company' ? (repack.bag_rate || null) : null,
+            packaging_charge: rpPackagingCharge || null,
+            labour_mode: repack.labour_enabled ? repack.labour_mode : null,
+            labour_rate: repack.labour_enabled ? (repack.labour_rate || null) : null,
+            labour_total: rpLabourTotal || null,
+            packing_loss_kg: repack.packing_loss_kg || null, final_dispatched_kg: repack.final_dispatched_kg || null,
+            notes: repack.notes || null,
+          },
+        } : {}),
       };
       const res = await createMutation.mutateAsync(payload);
       const cnt = res?.data?.item_count || cart.length;
@@ -893,6 +957,72 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
               </table>
             </div>
           )}
+
+          {/* #5 Repacking */}
+          <div className="border border-gray-200 rounded-xl p-3">
+            <label className="flex items-center gap-2 text-sm font-semibold text-gray-800 cursor-pointer">
+              <input type="checkbox" checked={repack.enabled} onChange={e => setRp('enabled', e.target.checked)} />
+              <Package size={15} className="text-gray-400" /> Repacking required
+            </label>
+            {repack.enabled && (
+              <div className="mt-3 space-y-3">
+                <div>
+                  <p className="text-xs font-medium text-gray-500 mb-1">Bag source</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[{ v: 'customer', l: 'Customer-provided' }, { v: 'company', l: 'Company inventory' }, { v: 'none', l: 'No bag change' }].map(o => (
+                      <button key={o.v} type="button" onClick={() => setRp('bag_source', o.v)}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-lg border ${repack.bag_source === o.v ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{o.l}</button>
+                    ))}
+                  </div>
+                  {repack.bag_source === 'customer' && <p className="text-[11px] text-amber-700 mt-1">No packaging stock deducted; the invoice notes the customer supplied the bags.</p>}
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <RpNum label="Old bag kg" value={repack.original_bag_size_kg} onChange={v => setRp('original_bag_size_kg', v)} />
+                  <RpNum label="Old bags" value={repack.original_bag_count} onChange={v => setRp('original_bag_count', v)} />
+                  <RpNum label="New bag kg" value={repack.new_bag_size_kg} onChange={v => setRp('new_bag_size_kg', v)} />
+                  <RpNum label="New bags" value={repack.new_bag_count} onChange={v => setRp('new_bag_count', v)} />
+                </div>
+                {repack.bag_source === 'company' && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] text-gray-500 mb-0.5">Packaging item (from stock)</label>
+                      <select value={repack.packaging_item_id} onChange={e => setRp('packaging_item_id', e.target.value)} className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm">
+                        <option value="">Select bag…</option>
+                        {pkgItems.map(i => <option key={i.id} value={i.id}>{i.name} ({Math.round(Number(i.quantity_available)).toLocaleString()} in stock)</option>)}
+                      </select>
+                    </div>
+                    <RpNum label="Bag rate (Rs each)" value={repack.bag_rate} onChange={v => setRp('bag_rate', v)} />
+                  </div>
+                )}
+                <div className="border-t border-gray-100 pt-2">
+                  <label className="flex items-center gap-2 text-xs font-medium text-gray-600 cursor-pointer">
+                    <input type="checkbox" checked={repack.labour_enabled} onChange={e => setRp('labour_enabled', e.target.checked)} /> Charge repacking labour
+                  </label>
+                  {repack.labour_enabled && (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-2">
+                      <div>
+                        <label className="block text-[11px] text-gray-500 mb-0.5">Method</label>
+                        <select value={repack.labour_mode} onChange={e => setRp('labour_mode', e.target.value)} className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm">
+                          <option value="per_bag">Per bag</option><option value="per_kg">Per kg</option><option value="fixed">Fixed</option>
+                        </select>
+                      </div>
+                      <RpNum label={repack.labour_mode === 'fixed' ? 'Amount (Rs)' : `Rate (Rs/${repack.labour_mode === 'per_kg' ? 'kg' : 'bag'})`} value={repack.labour_rate} onChange={v => setRp('labour_rate', v)} />
+                      <div className="flex items-end"><p className="text-xs text-gray-500">Labour: <span className="font-semibold text-gray-800">{fmtPKR(rpLabourTotal)}</span></p></div>
+                    </div>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <RpNum label="Packing loss (kg)" value={repack.packing_loss_kg} onChange={v => setRp('packing_loss_kg', v)} />
+                  <RpNum label="Final dispatched (kg)" value={repack.final_dispatched_kg} onChange={v => setRp('final_dispatched_kg', v)} />
+                </div>
+                {(rpPackagingCharge > 0 || rpLabourTotal > 0) && (
+                  <div className="text-[11px] text-gray-500 bg-blue-50/50 rounded-lg p-2">
+                    Adds to sale: {rpPackagingCharge > 0 && <span>packaging {fmtPKR(rpPackagingCharge)}</span>}{rpPackagingCharge > 0 && rpLabourTotal > 0 && ' + '}{rpLabourTotal > 0 && <span>labour {fmtPKR(rpLabourTotal)}</span>} (shown separately on the invoice).
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
         </>}
 
