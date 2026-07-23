@@ -3,7 +3,7 @@ import { NavLink, useSearchParams, useLocation } from 'react-router-dom';
 import { RouteErrorBoundary } from '../../../components/ErrorBoundary';
 import {
   LayoutDashboard, ArrowDownLeft, ArrowUpRight, DollarSign,
-  TrendingUp, Landmark, BookOpen, BookUser, Bell, Clock, Settings, ShoppingCart, Store, Printer, CalendarClock, Users, CheckCircle, ChevronDown, FileText,
+  TrendingUp, Landmark, BookOpen, BookUser, Bell, Clock, Settings, ShoppingCart, Store, Printer, CalendarClock, Users, CheckCircle, ChevronDown, FileText, HelpCircle,
 } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 import { usePendingExportReceipts } from '../../../api/queries';
@@ -32,6 +32,7 @@ const NAV = [
   { label: 'More', icon: Settings, children: [
     { label: 'Cash',      path: '/finance/cash',      icon: Landmark },
     { label: 'Due Dates', path: '/finance/due-dates', icon: CalendarClock },
+    { label: 'Suspense',  path: '/finance/suspense',  icon: HelpCircle },
     { label: 'Rates',     path: '/finance/rates',     icon: Settings },
     { label: 'Alerts',    path: '/finance/alerts',    icon: Bell },
   ] },

@@ -310,12 +310,14 @@ module.exports = {
         .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
         .leftJoin('products as p', 'l.product_id', 'p.id')
         .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
+        .leftJoin('customers as oc', 'l.owner_customer_id', 'oc.id')
         .select(
           'l.*',
           'w.name as warehouse_name',
           'p.name as product_name',
           'p.code as product_code',
-          's.name as supplier_name'
+          's.name as supplier_name',
+          'oc.name as owner_customer_name'
         );
 
       // Ownership scope: default to COMPANY-owned lots so client-owned
@@ -806,6 +808,8 @@ module.exports = {
           qty: netWeightKg, // legacy field in MT
           unit: 'MT',
           status: 'Available',
+          // #7 back-link to the originating rice sample (when converted).
+          sample_id: req.body.sample_id || null,
           // Supplier
           supplier_id: supplier_id || null,
           broker_id: broker_id || null,

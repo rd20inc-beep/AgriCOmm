@@ -49,6 +49,7 @@ const MillingDashboard = lazyWithReload(() => import('./modules/milling/pages/Mi
 const ServiceMilling = lazyWithReload(() => import('./modules/milling/pages/ServiceMilling'));
 const ServiceInvoices = lazyWithReload(() => import('./modules/milling/pages/ServiceInvoices'));
 const PurchaseRequirements = lazyWithReload(() => import('./modules/purchaseRequirements/pages/PurchaseRequirements'));
+const SampleAnalysis = lazyWithReload(() => import('./modules/sampleAnalysis/pages/SampleAnalysis'));
 const MillHomeDashboard = lazyWithReload(() => import('./modules/milling/pages/MillHomeDashboard'));
 const StoreOverview = lazyWithReload(() => import('./modules/millStore/pages/StoreOverview'));
 const NewPurchase = lazyWithReload(() => import('./modules/millStore/pages/NewPurchase'));
@@ -82,6 +83,9 @@ const WarehouseLedger = lazyWithReload(() => import('./modules/analytics/pages/W
 const ProcessingLossLedger = lazyWithReload(() => import('./modules/analytics/pages/ProcessingLossLedger'));
 const FinishedGoodsLedger = lazyWithReload(() => import('./modules/analytics/pages/FinishedGoodsLedger'));
 const ServiceMillingStock = lazyWithReload(() => import('./modules/analytics/pages/ServiceMillingStock'));
+const ServiceMillingAgeing = lazyWithReload(() => import('./modules/analytics/pages/ServiceMillingAgeing'));
+const ServiceMillingPendingDispatch = lazyWithReload(() => import('./modules/analytics/pages/ServiceMillingPendingDispatch'));
+const ServiceMillingReconciliation = lazyWithReload(() => import('./modules/analytics/pages/ServiceMillingReconciliation'));
 const InventoryMovementLedger = lazyWithReload(() => import('./modules/analytics/pages/InventoryMovementLedger'));
 const StockLedger = lazyWithReload(() => import('./modules/analytics/pages/StockLedger'));
 const StandalonePrintReport = lazyWithReload(() => import('./modules/analytics/pages/StandalonePrintReport'));
@@ -120,6 +124,7 @@ const Expenses = lazyWithReload(() => import('./modules/finance/pages/Expenses')
 const Purchases = lazyWithReload(() => import('./modules/finance/pages/Purchases'));
 const LocalSalesFinance = lazyWithReload(() => import('./modules/finance/pages/LocalSalesFinance'));
 const FinancePayroll = lazyWithReload(() => import('./modules/finance/pages/FinancePayroll'));
+const FinanceSuspense = lazyWithReload(() => import('./modules/finance/pages/Suspense'));
 
 function FinanceRoutes() {
   return (
@@ -149,6 +154,7 @@ function FinanceRoutes() {
         <Route path="profitability" element={<Profit />} />
         <Route path="ledger" element={<Accounting />} />
         <Route path="reconciliation" element={<Reconciliation />} />
+        <Route path="suspense" element={<FinanceSuspense />} />
       </Routes>
     </FinanceLayout>
   );
@@ -181,6 +187,9 @@ function ExportRoutes() {
         <Route path="/reports/processing-loss-ledger" element={<ProcessingLossLedger />} />
         <Route path="/reports/finished-goods-ledger" element={<FinishedGoodsLedger />} />
         <Route path="/reports/service-milling-stock" element={<ServiceMillingStock />} />
+        <Route path="/reports/service-milling-ageing" element={<ServiceMillingAgeing />} />
+        <Route path="/reports/service-milling-pending-dispatch" element={<ServiceMillingPendingDispatch />} />
+        <Route path="/reports/service-milling-reconciliation" element={<ServiceMillingReconciliation />} />
         <Route path="/reports/inventory-movement-ledger" element={<InventoryMovementLedger />} />
         <Route path="/reports/stock-ledger" element={<StockLedger />} />
         <Route path="*" element={<Navigate to="/" replace />} />
@@ -215,6 +224,7 @@ function MillRoutes() {
         <Route path="/lot-inventory" element={<LotInventory />} />
         <Route path="/stock-summary" element={<StockSummary />} />
         <Route path="/purchase-requirements" element={<PurchaseRequirements />} />
+        <Route path="/sample-analysis" element={<SampleAnalysis />} />
         <Route path="/stock-count" element={<StockCount />} />
         <Route path="/lot-inventory/:id/purchase-invoice" element={<PurchaseInvoiceView />} />
         <Route path="/lot-inventory/:id" element={<LotDetail />} />
@@ -239,6 +249,9 @@ function MillRoutes() {
         <Route path="/reports/processing-loss-ledger" element={<ProcessingLossLedger />} />
         <Route path="/reports/finished-goods-ledger" element={<FinishedGoodsLedger />} />
         <Route path="/reports/service-milling-stock" element={<ServiceMillingStock />} />
+        <Route path="/reports/service-milling-ageing" element={<ServiceMillingAgeing />} />
+        <Route path="/reports/service-milling-pending-dispatch" element={<ServiceMillingPendingDispatch />} />
+        <Route path="/reports/service-milling-reconciliation" element={<ServiceMillingReconciliation />} />
         <Route path="/reports/inventory-movement-ledger" element={<InventoryMovementLedger />} />
         <Route path="/reports/stock-ledger" element={<StockLedger />} />
         <Route path="*" element={<Navigate to="/" replace />} />
@@ -266,6 +279,7 @@ function StandardRoutes() {
         <Route path="/stock-adjustments" element={<ProtectedRoute module="inventory" action="view"><StockAdjustments /></ProtectedRoute>} />
         <Route path="/milling/:id" element={<ProtectedRoute module="milling" action="view"><MillingBatchDetail /></ProtectedRoute>} />
         <Route path="/quality" element={<ProtectedRoute module="milling" action="view"><QualityComparison /></ProtectedRoute>} />
+        <Route path="/sample-analysis" element={<ProtectedRoute anyOf={[{ module: 'inventory', action: 'view' }, { module: 'milling', action: 'view' }]}><SampleAnalysis /></ProtectedRoute>} />
         <Route path="/transfer" element={<ProtectedRoute module="inventory" action="view"><InternalTransfer /></ProtectedRoute>} />
         <Route path="/inventory" element={<ProtectedRoute module="inventory" action="view"><Inventory /></ProtectedRoute>} />
         <Route path="/lot-inventory" element={<ProtectedRoute module="inventory" action="view"><LotInventory /></ProtectedRoute>} />
@@ -303,6 +317,9 @@ function StandardRoutes() {
         <Route path="/reports/processing-loss-ledger" element={<ProtectedRoute module="reports" action="view"><ProcessingLossLedger /></ProtectedRoute>} />
         <Route path="/reports/finished-goods-ledger" element={<ProtectedRoute module="reports" action="view"><FinishedGoodsLedger /></ProtectedRoute>} />
         <Route path="/reports/service-milling-stock" element={<ProtectedRoute module="reports" action="view"><ServiceMillingStock /></ProtectedRoute>} />
+        <Route path="/reports/service-milling-ageing" element={<ProtectedRoute module="reports" action="view"><ServiceMillingAgeing /></ProtectedRoute>} />
+        <Route path="/reports/service-milling-pending-dispatch" element={<ProtectedRoute module="reports" action="view"><ServiceMillingPendingDispatch /></ProtectedRoute>} />
+        <Route path="/reports/service-milling-reconciliation" element={<ProtectedRoute module="reports" action="view"><ServiceMillingReconciliation /></ProtectedRoute>} />
         <Route path="/reports/inventory-movement-ledger" element={<ProtectedRoute module="reports" action="view"><InventoryMovementLedger /></ProtectedRoute>} />
         <Route path="/reports/stock-ledger" element={<ProtectedRoute module="reports" action="view"><StockLedger /></ProtectedRoute>} />
         <Route path="/exceptions" element={<ProtectedRoute module="admin" action="view"><ExceptionDashboard /></ProtectedRoute>} />
