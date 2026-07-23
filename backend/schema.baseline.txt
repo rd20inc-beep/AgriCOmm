@@ -2444,6 +2444,40 @@ COL suppliers.supplier_code:character varying:NULL
 COL suppliers.type:character varying:NOT NULL
 COL suppliers.uid:character varying:NULL
 COL suppliers.updated_at:timestamp with time zone:NOT NULL
+COL suspense_entries.amount:numeric:NOT NULL
+COL suspense_entries.attachment_url:text:NULL
+COL suspense_entries.bank_account_id:integer:NULL
+COL suspense_entries.bank_transaction_id:integer:NULL
+COL suspense_entries.created_at:timestamp with time zone:NOT NULL
+COL suspense_entries.currency:character varying:NOT NULL
+COL suspense_entries.date:date:NOT NULL
+COL suspense_entries.direction:character varying:NOT NULL
+COL suspense_entries.entered_by:integer:NULL
+COL suspense_entries.entity:character varying:NULL
+COL suspense_entries.entry_no:character varying:NOT NULL
+COL suspense_entries.id:integer:NOT NULL
+COL suspense_entries.notes:text:NULL
+COL suspense_entries.origin_journal_id:integer:NULL
+COL suspense_entries.party_details:character varying:NULL
+COL suspense_entries.payment_method:character varying:NULL
+COL suspense_entries.reason:text:NULL
+COL suspense_entries.reference_no:character varying:NULL
+COL suspense_entries.resolved_amount:numeric:NOT NULL
+COL suspense_entries.resolved_at:timestamp with time zone:NULL
+COL suspense_entries.resolved_by:integer:NULL
+COL suspense_entries.status:character varying:NOT NULL
+COL suspense_entries.updated_at:timestamp with time zone:NOT NULL
+COL suspense_resolutions.account_id:integer:NOT NULL
+COL suspense_resolutions.amount:numeric:NOT NULL
+COL suspense_resolutions.created_at:timestamp with time zone:NULL
+COL suspense_resolutions.created_by:integer:NULL
+COL suspense_resolutions.id:integer:NOT NULL
+COL suspense_resolutions.narration:text:NULL
+COL suspense_resolutions.reclass_journal_id:integer:NULL
+COL suspense_resolutions.suspense_entry_id:integer:NOT NULL
+COL suspense_resolutions.target_id:character varying:NULL
+COL suspense_resolutions.target_ref:character varying:NULL
+COL suspense_resolutions.target_type:character varying:NULL
 COL sync_conflicts.conflict_code:character varying:NULL
 COL sync_conflicts.created_at:timestamp with time zone:NULL
 COL sync_conflicts.device_uuid:uuid:NULL
@@ -3485,6 +3519,20 @@ CON suppliers.suppliers_reviewed_by_foreign(f)
 CON suppliers.suppliers_submitted_by_foreign(f)
 CON suppliers.suppliers_supplier_code_unique(u)
 CON suppliers.suppliers_uid_unique(u)
+CON suspense_entries.chk_suspense_entries_direction_valid(c)
+CON suspense_entries.chk_suspense_entries_status_valid(c)
+CON suspense_entries.suspense_entries_bank_account_id_foreign(f)
+CON suspense_entries.suspense_entries_bank_transaction_id_foreign(f)
+CON suspense_entries.suspense_entries_entered_by_foreign(f)
+CON suspense_entries.suspense_entries_entry_no_unique(u)
+CON suspense_entries.suspense_entries_origin_journal_id_foreign(f)
+CON suspense_entries.suspense_entries_pkey(p)
+CON suspense_entries.suspense_entries_resolved_by_foreign(f)
+CON suspense_resolutions.suspense_resolutions_account_id_foreign(f)
+CON suspense_resolutions.suspense_resolutions_created_by_foreign(f)
+CON suspense_resolutions.suspense_resolutions_pkey(p)
+CON suspense_resolutions.suspense_resolutions_reclass_journal_id_foreign(f)
+CON suspense_resolutions.suspense_resolutions_suspense_entry_id_foreign(f)
 CON sync_conflicts.sync_conflicts_pkey(p)
 CON sync_state.sync_state_pkey(p)
 CON sync_state.uq_sync_state_device_domain(u)

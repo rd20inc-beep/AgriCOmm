@@ -200,4 +200,28 @@ router.post('/commodity-rates', authorize('finance', 'confirm_payment'), async (
   }
 });
 
+// ── Suspense Account (#8): unidentified money → resolve/reclassify later ──
+const suspenseService = require('./suspense.service');
+const wrapSuspense = (fn) => async (req, res) => {
+  try { return res.json({ success: true, data: await fn(req) }); }
+  catch (e) { return res.status(e.statusCode || 400).json({ success: false, message: e.message }); }
+};
+router.get('/suspense', authorize('finance', 'view'), wrapSuspense((req) => suspenseService.list(req.query)));
+router.get('/suspense/summary', authorize('finance', 'view'), wrapSuspense(() => suspenseService.summary()));
+router.get('/suspense/:id', authorize('finance', 'view'), wrapSuspense((req) => suspenseService.get(req.params.id)));
+router.post('/suspense', authorize('finance', 'confirm_payment'),
+  auditAction('create_suspense', 'suspense_entries', (req, data) => data?.data?.id || null),
+  wrapSuspense((req) => suspenseService.create(req.body, req.user?.id)));
+// Resolve + reverse post reclassification journals → gated on post_journal
+// (Finance Manager + Owner/Super Admin only, per "only Finance/Admin resolve").
+router.post('/suspense/:id/resolve', authorize('finance', 'post_journal'),
+  auditAction('resolve_suspense', 'suspense_entries', (req) => req.params.id),
+  wrapSuspense((req) => suspenseService.resolve(req.params.id, req.body, req.user?.id)));
+router.post('/suspense/:id/reverse', authorize('finance', 'post_journal'),
+  auditAction('reverse_suspense', 'suspense_entries', (req) => req.params.id),
+  wrapSuspense((req) => suspenseService.reverse(req.params.id, req.body?.reason, req.user?.id)));
+router.post('/suspense/:id/review', authorize('finance', 'view'),
+  auditAction('review_suspense', 'suspense_entries', (req) => req.params.id),
+  wrapSuspense((req) => suspenseService.setUnderReview(req.params.id, req.user?.id)));
+
 module.exports = router;
