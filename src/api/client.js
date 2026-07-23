@@ -147,14 +147,15 @@ async function request(endpoint, options = {}) {
 
     const data = await res.json().catch(() => null);
 
-    // Device revoked → wipe local read data + session and force re-login.
-    if (res.status === 403 && data?.code === 'device_revoked') {
+    // Device revoked OR account suspended/locked/deactivated mid-session (#9) →
+    // wipe local read data + session and force re-login.
+    if (res.status === 403 && (data?.code === 'device_revoked' || data?.code === 'account_inactive')) {
       wipeLocalReadData();
       clearSession();
       if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
         window.location.href = '/login?revoked=1';
       }
-      throw new ApiError(data?.message || 'This device has been revoked.', 403, data);
+      throw new ApiError(data?.message || (data?.code === 'account_inactive' ? 'Your account is no longer active.' : 'This device has been revoked.'), 403, data);
     }
 
     if (!res.ok) {
