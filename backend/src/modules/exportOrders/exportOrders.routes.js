@@ -173,6 +173,14 @@ router.post(
   auditAction('allocate_stock', 'export_order', (req) => req.params.id),
   controller.allocateStock
 );
+// #3 Fully-sourced-from-stock: skip milling and go straight to Documentation
+// when active reservations cover the whole order (guarded server-side).
+router.post(
+  '/:id/source-from-stock',
+  authorizeAny(['export_orders', 'edit'], ['milling', 'edit']),
+  auditAction('source_from_stock', 'export_order', (req) => req.params.id),
+  controller.sourceFromStock
+);
 
 // Packed-weight variance (Phase 1). The mill records the actual packed net rice +
 // packing-material weight; the system computes gross + variance vs the order qty.

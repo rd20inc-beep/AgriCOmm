@@ -65,7 +65,7 @@ const defaultForm = () => ({
   vehicles: [],
 });
 
-const emptyVehicle = () => ({ vehicle_no: '', driver_name: '', driver_phone: '', weight_kg: '', total_bags: '', arrival_date: new Date().toISOString().slice(0, 10), notes: '', quality: {} });
+const emptyVehicle = () => ({ vehicle_no: '', driver_name: '', driver_phone: '', weight_kg: '', total_bags: '', weighbridge_kg: '', accepted_kg: '', arrival_date: new Date().toISOString().slice(0, 10), notes: '', quality: {} });
 
 // Per-truck quality fields captured at intake (stored in the arrival's quality_json).
 const VEHICLE_QUALITY_FIELDS = [
@@ -340,6 +340,9 @@ export default function PurchaseLotDrawer({
               driver_phone: v.driver_phone || null,
               weight_kg: v.weight_kg !== '' ? parseFloat(v.weight_kg) : null,
               total_bags: v.total_bags !== '' ? parseInt(v.total_bags, 10) : null,
+              // #4 declared → weighbridge → accepted checkpoints.
+              weighbridge_kg: v.weighbridge_kg !== '' && v.weighbridge_kg != null ? parseFloat(v.weighbridge_kg) : null,
+              accepted_kg: v.accepted_kg !== '' && v.accepted_kg != null ? parseFloat(v.accepted_kg) : null,
               // Per-truck sack size = the lot's chosen nominal size (backend snaps).
               bag_size_kg: bagSize > 0 ? bagSize : null,
               arrival_date: v.arrival_date || form.purchase_date || null,
@@ -888,11 +891,30 @@ export default function PurchaseLotDrawer({
                         onChange={(val) => setV('driver_name', val)} placeholder="Optional" />
                       <Input label="Driver phone" value={v.driver_phone}
                         onChange={(val) => setV('driver_phone', val)} placeholder="Optional" />
-                      <Input label="Weight (kg)" type="number" value={v.weight_kg}
-                        onChange={(val) => setV('weight_kg', val)} placeholder="Optional" />
+                      <Input label="Vehicle / declared (kg)" type="number" value={v.weight_kg}
+                        onChange={(val) => setV('weight_kg', val)} placeholder="Prefilled from purchase" />
                       <Input label="Bags" type="number" value={v.total_bags}
-                        onChange={(val) => setV('total_bags', val)} placeholder="Optional" />
+                        onChange={(val) => setV('total_bags', val)} placeholder="Prefilled from purchase" />
+                      <Input label="Weighbridge (kg)" type="number" value={v.weighbridge_kg}
+                        onChange={(val) => setV('weighbridge_kg', val)} placeholder="Actual weighed" />
+                      <Input label="Accepted (kg)" type="number" value={v.accepted_kg}
+                        onChange={(val) => setV('accepted_kg', val)} placeholder="Final accepted" />
                     </div>
+                    {/* Per-truck deltas: declared → weighbridge → accepted */}
+                    {(() => {
+                      const dcl = parseFloat(v.weight_kg) || 0;
+                      const wb = v.weighbridge_kg !== '' && v.weighbridge_kg != null ? parseFloat(v.weighbridge_kg) : null;
+                      const acc = v.accepted_kg !== '' && v.accepted_kg != null ? parseFloat(v.accepted_kg) : null;
+                      const wbD = wb != null ? Math.round((wb - dcl) * 100) / 100 : null;
+                      const accD = acc != null && wb != null ? Math.round((acc - wb) * 100) / 100 : (acc != null ? Math.round((acc - dcl) * 100) / 100 : null);
+                      if (wbD == null && accD == null) return null;
+                      const chip = (label, d) => d == null ? null : (
+                        <span className={`px-1.5 py-0.5 rounded ${Math.abs(d) < 0.01 ? 'bg-gray-100 text-gray-500' : d < 0 ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-700'}`}>
+                          {label} {d > 0 ? '+' : ''}{d.toLocaleString()} kg
+                        </span>
+                      );
+                      return <div className="flex flex-wrap gap-1.5 text-[11px]">{chip('vs declared', wbD)}{chip('accepted vs weighbridge', accD)}</div>;
+                    })()}
                     <Input label="Notes" value={v.notes}
                       onChange={(val) => setV('notes', val)} placeholder="Optional" />
 
@@ -919,8 +941,57 @@ export default function PurchaseLotDrawer({
                   </div>
                 );
               })}
+              {/* #4 reconciliation: purchase vs the trucks' declared / weighbridge / accepted totals */}
+              {(() => {
+                const rows = (form.vehicles || []).filter(v => String(v.vehicle_no || '').trim() || v.weight_kg);
+                if (!rows.length) return null;
+                const sum = (f) => rows.reduce((s, r) => s + (parseFloat(r[f]) || 0), 0);
+                const purchaseKg = parseFloat(form.weight_kg) || 0;
+                const declared = Math.round(sum('weight_kg') * 100) / 100;
+                const weighed = Math.round(sum('weighbridge_kg') * 100) / 100;
+                const accepted = Math.round(sum('accepted_kg') * 100) / 100;
+                const purchaseBags = parseInt(form.total_bags, 10) || 0;
+                const declaredBags = rows.reduce((s, r) => s + (parseInt(r.total_bags, 10) || 0), 0);
+                const cell = (label, val, ref) => {
+                  const d = ref != null && val != null ? Math.round((val - ref) * 100) / 100 : null;
+                  return (
+                    <div className="text-center">
+                      <p className="text-[10px] uppercase tracking-wide text-gray-400">{label}</p>
+                      <p className="text-sm font-semibold text-gray-900 tabular-nums">{val ? val.toLocaleString() : '—'}</p>
+                      {d != null && Math.abs(d) >= 0.01 && <p className={`text-[10px] font-medium ${d < 0 ? 'text-red-600' : 'text-amber-700'}`}>{d > 0 ? '+' : ''}{d.toLocaleString()}</p>}
+                    </div>
+                  );
+                };
+                return (
+                  <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-3">
+                    <p className="text-[11px] font-semibold text-gray-600 mb-2">Quantity reconciliation (kg)</p>
+                    <div className="grid grid-cols-4 gap-2">
+                      {cell('Purchase', purchaseKg, null)}
+                      {cell('Vehicle declared', declared, purchaseKg)}
+                      {cell('Weighbridge', weighed || null, weighed ? purchaseKg : null)}
+                      {cell('Accepted', accepted || null, accepted ? purchaseKg : null)}
+                    </div>
+                    {purchaseBags > 0 && declaredBags > 0 && declaredBags !== purchaseBags && (
+                      <p className="text-[11px] text-amber-700 mt-2">Bags: purchase {purchaseBags.toLocaleString()} vs vehicles {declaredBags.toLocaleString()} ({declaredBags > purchaseBags ? '+' : ''}{(declaredBags - purchaseBags).toLocaleString()}).</p>
+                    )}
+                    <p className="text-[10px] text-gray-400 mt-1">The lot is recorded at the Purchase weight above; the accepted figures are kept per-vehicle on the lot ledger.</p>
+                  </div>
+                );
+              })()}
               <button type="button"
-                onClick={() => setForm(prev => ({ ...prev, vehicles: [...(prev.vehicles || []), emptyVehicle()] }))}
+                onClick={() => setForm(prev => {
+                  // #4 prefill the new truck from the purchase figures entered above:
+                  // fill with whatever qty is not yet accounted for by existing rows
+                  // (so a single truck gets the full lot; a 2nd gets the remainder).
+                  const usedKg = (prev.vehicles || []).reduce((s, r) => s + (parseFloat(r.weight_kg) || 0), 0);
+                  const usedBags = (prev.vehicles || []).reduce((s, r) => s + (parseInt(r.total_bags, 10) || 0), 0);
+                  const remKg = Math.max(0, Math.round(((parseFloat(prev.weight_kg) || 0) - usedKg) * 100) / 100);
+                  const remBags = Math.max(0, (parseInt(prev.total_bags, 10) || 0) - usedBags);
+                  const row = emptyVehicle();
+                  if (remKg > 0) { row.weight_kg = String(remKg); row.accepted_kg = String(remKg); }
+                  if (remBags > 0) row.total_bags = String(remBags);
+                  return { ...prev, vehicles: [...(prev.vehicles || []), row] };
+                })}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100"
               >
                 <Plus size={14} /> Add vehicle

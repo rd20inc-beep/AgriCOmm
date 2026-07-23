@@ -1,6 +1,7 @@
 import React from 'react';
 import StatusBadge from '../../../components/StatusBadge';
 import PartyLink from '../../../shared/components/PartyLink';
+import { financialStatusMeta } from './constants';
 import {
   ArrowLeft, ChevronDown, FileText, DollarSign,
   Package, User, Globe, Mail, Copy,
@@ -39,9 +40,17 @@ export default function OrderHeader({
           <ArrowLeft className="w-5 h-5 text-gray-600" />
         </button>
         <div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-2xl font-bold text-gray-900">{order.id}</h1>
             <StatusBadge status={order.status} />
+            {order.financialStatus && financialStatusMeta[order.financialStatus] && (
+              <span
+                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${financialStatusMeta[order.financialStatus].cls}`}
+                title="Advance / financial confirmation status — independent of the operational workflow."
+              >
+                {financialStatusMeta[order.financialStatus].label}
+              </span>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 text-sm text-gray-500">
             <span className="flex items-center gap-1"><User className="w-3.5 h-3.5" /><PartyLink type="customer" id={order.customerId} name={order.customerName} /></span>

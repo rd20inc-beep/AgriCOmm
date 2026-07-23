@@ -13,6 +13,19 @@ export const workflowSteps = [
   { step: 11, label: 'Closed', status: 'Closed' },
 ];
 
+// #2 Financial status track — the advance-confirmation lifecycle, shown as a
+// separate pill from the operational status. Mirrors export_orders.financial_status
+// (migration 276) and the client's Financial Status list.
+export const financialStatusMeta = {
+  'Not Required':        { label: 'No Advance', cls: 'bg-gray-100 text-gray-600 border-gray-200' },
+  'Advance Not Entered': { label: 'Advance Not Entered', cls: 'bg-slate-100 text-slate-700 border-slate-200' },
+  'Advance Entered':     { label: 'Advance Entered', cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+  'Pending Confirmation':{ label: 'Pending Finance Confirmation', cls: 'bg-amber-100 text-amber-800 border-amber-200' },
+  'Partially Confirmed': { label: 'Advance Partially Confirmed', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+  'Confirmed':           { label: 'Advance Confirmed', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+  'Rejected':            { label: 'Advance Rejected', cls: 'bg-red-100 text-red-700 border-red-200' },
+};
+
 export const documentLabels = {
   phyto: 'Phytosanitary Certificate',
   blDraft: 'Bill of Lading (Draft)',
@@ -49,8 +62,9 @@ export function getVisibleTabs(status) {
     'Shipped', 'Arrived', 'Closed'];
   if (financialsFrom.includes(status)) visible.push('financials');
 
-  // Procurement: visible from Advance Received onwards (milling / sourcing)
-  const procurementFrom = ['Advance Received', 'Procurement Pending', 'In Milling',
+  // Procurement: visible from Awaiting Advance onwards (#2 decouple — operational
+  // milling / sourcing can proceed while the advance is pending confirmation).
+  const procurementFrom = ['Awaiting Advance', 'Advance Received', 'Procurement Pending', 'In Milling',
     'Docs In Preparation', 'Awaiting Balance', 'Ready to Ship', 'Shipped', 'Arrived', 'Closed'];
   if (procurementFrom.includes(status)) visible.push('procurement');
 

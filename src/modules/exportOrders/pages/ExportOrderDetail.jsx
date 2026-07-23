@@ -26,6 +26,7 @@ import {
   useStartDocs, useUploadDocument, useApproveDocument,
 } from '../../../api/queries';
 import { useCreateMillingBatch } from '../../../api/queries';
+import { exportOrdersApi } from '../api/services';
 import {
   OrderHeader,
   WorkflowTimeline,
@@ -224,6 +225,14 @@ export default function ExportOrderDetail() {
   const formatPKR = (value) => 'Rs ' + (parseFloat(value) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const backendActions = order.allowedActions || {};
 
+  // #3 How much finished demand is already reserved from existing stock (mirrors
+  // ProcurementTab). Drives the milling modal's shortfall + the source-from-stock path.
+  const allocatedMT = (order.purchaseLots || [])
+    .filter((l) => (l.type === 'finished' || l.source === 'reservation' || l.source === 'allocation' || l.source === 'both')
+      && (parseFloat(l.allocated_qty_kg) > 0 || l.source === 'reservation'))
+    .reduce((sum, lot) => sum + (parseFloat(lot.allocated_qty_kg) || (lot.source === 'reservation' ? (parseFloat(lot.reserved_qty) || 0) : 0)) / 1000, 0);
+  const fullySourcedFromStock = allocatedMT + 0.0001 >= (parseFloat(order.qtyMT) || 0);
+
   // --- Modal openers (reset form state then show) ---
   const buildShipmentContainerRow = (container = {}, sequenceNo = 1) => ({
     sequenceNo,
@@ -265,9 +274,24 @@ export default function ExportOrderDetail() {
   };
 
   const openMillingModal = () => {
-    setMillingRawQty(Math.ceil(order.qtyMT / 0.75));
+    // The modal defaults raw qty to the SHORTFALL (order − already reserved); this
+    // is just a sensible initial value before it mounts.
+    const remaining = Math.max(0, (parseFloat(order.qtyMT) || 0) - allocatedMT);
+    setMillingRawQty(remaining > 0 ? Math.ceil(remaining / 0.75) : 0);
     setMillingSupplier('');
     setShowMillingModal(true);
+  };
+
+  // #3 Fully sourced from stock → skip milling, advance straight to Documentation.
+  const handleSourceFromStock = async () => {
+    try {
+      await exportOrdersApi.sourceFromStock(order.dbId || order.id);
+      addToast('Order fully sourced from stock — moved to Documentation', 'success');
+      setShowMillingModal(false);
+      invalidateOrder();
+    } catch (err) {
+      addToast(err?.data?.message || err?.message || 'Could not source from stock', 'error');
+    }
   };
 
   const openShipmentModal = () => {
@@ -398,7 +422,9 @@ export default function ExportOrderDetail() {
       addToast('A milling order already exists for this export order', 'error');
       return;
     }
-    const rawQty = parseFloat(millingRawQty) || Math.ceil(order.qtyMT / 0.75);
+    // #3 Only the SHORTFALL is milled — stock already reserved covers the rest.
+    const remainingFinishedMT = Math.max(0, (parseFloat(order.qtyMT) || 0) - allocatedMT);
+    const rawQty = parseFloat(millingRawQty) || Math.ceil((remainingFinishedMT || order.qtyMT) / 0.75);
     const supplierId = parseInt(millingSupplier) || null;
 
     try {
@@ -407,7 +433,7 @@ export default function ExportOrderDetail() {
         linked_export_order_id: orderId || null,
         product_id: order.productId ? parseInt(order.productId) : null,
         raw_qty_kg: rawQty * 1000, // createBatch expects KG (Phase 5c); rawQty/order.qtyMT are MT
-        planned_finished_kg: (parseFloat(order.qtyMT) || 0) * 1000,
+        planned_finished_kg: Math.round((remainingFinishedMT || (parseFloat(order.qtyMT) || 0)) * 1000),
       });
       const batchNo = res?.data?.batch?.batch_no || res?.data?.batch?.id || 'New';
       addToast(`Milling batch ${batchNo} created successfully`);
@@ -581,7 +607,8 @@ export default function ExportOrderDetail() {
   const canConfirmAdvance = backendActions.canConfirmAdvance ?? (order.advanceReceived < order.advanceExpected && ['Awaiting Advance', 'Draft'].includes(order.status));
   const canStartDocs = backendActions.canStartDocs ?? (order.status === 'In Milling');
   const canRequestBalance = backendActions.canRequestBalance ?? (order.status === 'Awaiting Balance' && order.balanceReceived < order.balanceExpected);
-  const canCreateMilling = backendActions.canCreateMilling ?? (order.advanceReceived >= order.advanceExpected && !order.millingOrderId && !['Draft', 'Closed', 'Cancelled'].includes(order.status));
+  // #2 decouple: milling no longer waits for the advance (tracked on financialStatus); allowed once the order is confirmed (out of Draft).
+  const canCreateMilling = backendActions.canCreateMilling ?? (!order.millingOrderId && !['Draft', 'Closed', 'Cancelled'].includes(order.status));
   const canUpdateShipment = backendActions.canUpdateShipment ?? ['Ready to Ship', 'Shipped'].includes(order.status);
   // Lots reserved/allocated to this order — offered as the container lot picker
   // in the shipment editor (P4c). Deduped by lot id.
@@ -683,12 +710,18 @@ export default function ExportOrderDetail() {
         </div>
       )}
       {canConfirmAdvance && order.status === 'Awaiting Advance' && (
-        <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex items-center justify-between">
+        <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-semibold text-amber-800">Waiting for Advance Payment</p>
+            <p className="text-sm font-semibold text-amber-800">Advance Pending — operational work can proceed</p>
             <p className="text-xs text-amber-600">Expected: {formatCurrency(order.advanceExpected)} | Received: {formatCurrency(order.advanceReceived)} | Outstanding: {formatCurrency(order.advanceExpected - order.advanceReceived)}</p>
+            <p className="text-xs text-amber-700 mt-1">You can start milling, documentation and packing now. The advance still needs Finance/Owner confirmation before final dispatch.</p>
           </div>
-          <button onClick={openAdvanceModal} className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700">Confirm Advance Received</button>
+          <div className="flex items-center gap-2 shrink-0">
+            {canCreateMilling && !order.millingOrderId && (
+              <button onClick={openMillingModal} className="px-4 py-2 bg-white border border-amber-400 text-amber-800 rounded-lg text-sm font-medium hover:bg-amber-100">Create Milling Batch</button>
+            )}
+            <button onClick={openAdvanceModal} className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700">Confirm Advance Received</button>
+          </div>
         </div>
       )}
       {order.status === 'Advance Received' && canCreateMilling && (
@@ -920,6 +953,10 @@ export default function ExportOrderDetail() {
         setMillingSupplier={setMillingSupplier}
         suppliersList={suppliersList || []}
         onConfirm={handleCreateMilling}
+        allocatedMT={allocatedMT}
+        onAllocated={invalidateOrder}
+        onSourceFromStock={handleSourceFromStock}
+        addToast={addToast}
       />
 
       <ShipmentModal

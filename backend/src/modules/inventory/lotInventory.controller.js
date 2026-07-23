@@ -310,12 +310,14 @@ module.exports = {
         .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
         .leftJoin('products as p', 'l.product_id', 'p.id')
         .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
+        .leftJoin('customers as oc', 'l.owner_customer_id', 'oc.id')
         .select(
           'l.*',
           'w.name as warehouse_name',
           'p.name as product_name',
           'p.code as product_code',
-          's.name as supplier_name'
+          's.name as supplier_name',
+          'oc.name as owner_customer_name'
         );
 
       // Ownership scope: default to COMPANY-owned lots so client-owned
@@ -402,7 +404,7 @@ module.exports = {
       }
 
       const vehs = await db('milling_vehicle_arrivals').where('lot_id', lot.id)
-        .select('vehicle_no', 'driver_name', 'driver_phone', 'weight_kg', 'total_bags', 'arrival_date')
+        .select('vehicle_no', 'driver_name', 'driver_phone', 'weight_kg', 'weighbridge_kg', 'accepted_kg', 'total_bags', 'arrival_date')
         .orderBy('id', 'asc');
 
       // Supplier payable for this lot (auto-created with linked_ref = lot_no).
@@ -541,7 +543,7 @@ module.exports = {
             packing: num(lot.packing_cost), other: num(lot.other_cost),
             landedTotal: landed,
           },
-          intakeVehicles: vehs.map(v => ({ vehicleNo: v.vehicle_no, driverName: v.driver_name || null, driverPhone: v.driver_phone || null, weightKg: num(v.weight_kg), totalBags: v.total_bags != null ? Number(v.total_bags) : null, arrivalDate: v.arrival_date || null })),
+          intakeVehicles: vehs.map(v => ({ vehicleNo: v.vehicle_no, driverName: v.driver_name || null, driverPhone: v.driver_phone || null, weightKg: num(v.weight_kg), weighbridgeKg: num(v.weighbridge_kg), acceptedKg: num(v.accepted_kg), totalBags: v.total_bags != null ? Number(v.total_bags) : null, arrivalDate: v.arrival_date || null })),
           payments: timeline,
           payable: payable ? { payNo: payable.pay_no, outstanding: num(payable.outstanding), status: payable.status } : null,
           producedByproducts, // INTERNAL/ADMIN ONLY — empty for non-admin viewers
@@ -806,6 +808,8 @@ module.exports = {
           qty: netWeightKg, // legacy field in MT
           unit: 'MT',
           status: 'Available',
+          // #7 back-link to the originating rice sample (when converted).
+          sample_id: req.body.sample_id || null,
           // Supplier
           supplier_id: supplier_id || null,
           broker_id: broker_id || null,
@@ -969,6 +973,8 @@ module.exports = {
           if (!vBagSize && vWeightKg && vBags && vBags > 0) vBagSize = vWeightKg / vBags;
           // Snap to the nearest standard sack size (nominal, not the shrunk avg).
           if (vBagSize) vBagSize = uc.snapBagSizeKg(vBagSize) || null;
+          const vWeighbridgeKg = v.weighbridge_kg != null && v.weighbridge_kg !== '' ? parseFloat(v.weighbridge_kg) : null;
+          const vAcceptedKg = v.accepted_kg != null && v.accepted_kg !== '' ? parseFloat(v.accepted_kg) : null;
           await trx('milling_vehicle_arrivals').insert({
             lot_id: lot.id,
             batch_id: null,
@@ -976,6 +982,9 @@ module.exports = {
             driver_name: v.driver_name || null,
             driver_phone: v.driver_phone || null,
             weight_kg: vWeightKg,
+            // #4 intake checkpoints (declared → weighbridge → accepted).
+            weighbridge_kg: vWeighbridgeKg,
+            accepted_kg: vAcceptedKg,
             bag_size_kg: vBagSize,
             total_bags: vBags,
             // Per-truck quality captured at intake (moisture/broken/purity/price…).

@@ -29,8 +29,13 @@ router.get('/inventory-ledger', authorize('reports', 'view'), controller.invento
 // Stock movement ledger by dimension (variety|grade|byproduct|product) — Batch 5.
 router.get('/stock-ledger', authorize('reports', 'view'), controller.stockLedger);
 router.get('/finished-goods-ledger', authorize('reports', 'view'), controller.finishedGoodsLedger);
-// Client-owned service-milling stock register (qty-only) — no finance data.
+// Client-owned service-milling stock reports (qty-only) — no finance data.
+// Register supports ?group_by=client|batch|warehouse; ageing / pending-dispatch /
+// reconciliation are dedicated views over the same client-owned lot set.
 router.get('/service-milling-stock', authorize('reports', 'view'), controller.serviceMillingStock);
+router.get('/service-milling-ageing', authorize('reports', 'view'), controller.serviceMillingAgeing);
+router.get('/service-milling-pending-dispatch', authorize('reports', 'view'), controller.serviceMillingPendingDispatch);
+router.get('/service-milling-reconciliation', authorize('reports', 'view'), controller.serviceMillingReconciliation);
 router.get('/executive/summary', authorize('reports', 'view'), noFinanceForOperator, controller.executiveSummary);
 router.get('/executive/pipeline', authorize('reports', 'view'), noFinanceForOperator, controller.orderPipeline);
 router.get('/executive/advance-funnel', authorize('reports', 'view'), noFinanceForOperator, controller.advanceFunnel);

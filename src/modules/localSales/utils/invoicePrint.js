@@ -111,6 +111,7 @@ export function printCustomerInvoice(data, company, opts = {}) {
       <thead><tr><th>Rice Type</th><th>Grade / Product</th><th class="r">Quantity</th><th class="r">Bags</th><th class="r">Rate</th><th class="r">Amount</th></tr></thead>
       <tbody>${itemsRows(items, false)}</tbody>
     </table>
+    ${data.repacking ? `<div class="note"><b>Repacking:</b> ${esc(data.repacking.bagSourceLabel)}${data.repacking.newBagCount != null ? ` &middot; ${data.repacking.newBagCount} × ${data.repacking.newBagSizeKg || '?'} kg bags` : ''}${data.repacking.packingLossKg > 0 ? ` &middot; packing loss ${data.repacking.packingLossKg} kg` : ''}${data.repacking.finalDispatchedKg > 0 ? ` &middot; dispatched ${data.repacking.finalDispatchedKg} kg` : ''}${data.repacking.bagSource === 'customer' ? ' (bags supplied by customer)' : ''}</div>` : ''}
     <table class="totals">
       <tr><td>Subtotal</td><td class="r">${pkr(totals.total)}</td></tr>
       <tr class="grand"><td>Total</td><td class="r">${pkr(totals.total)}</td></tr>

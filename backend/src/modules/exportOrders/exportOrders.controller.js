@@ -817,6 +817,9 @@ const exportOrderController = {
             balance_expected: balanceExpected,
             advance_received: 0,
             balance_received: 0,
+            // #2 financial track (separate from operational status): 0%-advance
+            // orders need no confirmation; otherwise the advance starts unentered.
+            financial_status: advanceExpected === 0 ? 'Not Required' : 'Advance Not Entered',
             shipment_eta: shipment_eta || null,
             source: source || 'Internal Mill',
             status: effectiveStatus,
@@ -1983,6 +1986,10 @@ const exportOrderController = {
           advance_date: payment_date || trx.fn.now(),
           advance_fx_rate: isPkrOrder ? null : effectiveFxRate,
           advance_received_pkr: totalAdvancePkr,
+          // #2 financial track: a posted advance confirmation resolves the
+          // financial_status — fully received → Confirmed (dispatch unlocked),
+          // otherwise Partially Confirmed. (Operational status is untouched.)
+          financial_status: newAdvanceReceived >= expectedAdvance - MONEY_EPSILON ? 'Confirmed' : 'Partially Confirmed',
           updated_at: trx.fn.now(),
         });
 
@@ -2381,6 +2388,17 @@ const exportOrderController = {
           notes: notes || `${isAdvance ? 'Advance' : 'Balance'} receipt for ${order.order_no} — pending Finance confirmation`,
           created_by: req.user?.id || null,
         }).returning('*');
+
+        // #2 financial track: an advance receipt awaiting Finance confirmation
+        // moves the order's financial_status to 'Pending Confirmation' (visible to
+        // Finance/Owner) WITHOUT touching the operational status — operational work
+        // keeps flowing. Balance receipts don't affect the advance track.
+        if (isAdvance) {
+          await trx('export_orders').where({ id: order.id }).update({
+            financial_status: 'Pending Confirmation',
+            updated_at: trx.fn.now(),
+          });
+        }
         return { order, row };
       });
 
@@ -2454,6 +2472,19 @@ const exportOrderController = {
         confirmed_at: db.fn.now(),
         updated_at: db.fn.now(),
       });
+
+      // #2 financial track: a rejected ADVANCE receipt marks the order's
+      // financial_status 'Rejected' (visible + audited; keeps dispatch blocked).
+      // Resolve the order via the receivable; balance rejections don't touch it.
+      const recv = pending.linked_receivable_id
+        ? await db('receivables').where({ id: pending.linked_receivable_id }).first()
+        : null;
+      if (recv && recv.order_id && recv.type !== 'Balance') {
+        await db('export_orders').where({ id: recv.order_id }).update({
+          financial_status: 'Rejected',
+          updated_at: db.fn.now(),
+        });
+      }
       return res.json({ success: true, message: 'Receipt marked as not received.' });
     } catch (err) {
       console.error('rejectExportReceipt error:', err);
@@ -2619,6 +2650,63 @@ const exportOrderController = {
       }
       console.error('Export order allocateStock error:', err);
       return res.status(500).json({ success: false, message: err.message || 'Internal server error.' });
+    }
+  },
+
+  // #3 Fully-sourced-from-stock: when existing finished inventory covers the
+  // whole order, there is no milling to do — advance the order straight to
+  // Documentation without a milling batch. Guarded so it only fires when active
+  // reservations actually cover the order demand and no batch is linked yet.
+  async sourceFromStock(req, res) {
+    try {
+      const id = await resolveExportOrderId(req.params.id);
+      if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
+
+      const result = await db.transaction(async (trx) => {
+        const order = await lockRow(trx('export_orders').where({ id })).first();
+        if (!order) { const e = new Error('Export order not found.'); e.statusCode = 404; throw e; }
+        if (order.milling_order_id) {
+          const e = new Error('This order already has a milling batch. It follows the milling workflow.'); e.statusCode = 400; throw e;
+        }
+        if (['Docs In Preparation', 'Awaiting Balance', 'Ready to Ship', 'Shipped', 'Arrived', 'Closed', 'Cancelled'].includes(order.status)) {
+          const e = new Error(`Cannot source from stock for an order already in '${order.status}'.`); e.statusCode = 400; throw e;
+        }
+
+        const demandKg = settledAmount((parseFloat(order.qty_mt) || 0) * 1000);
+        const resRow = await trx('inventory_reservations').where({ order_id: id, status: 'Active' }).sum('reserved_qty as s').first();
+        const reservedKg = settledAmount(resRow && resRow.s);
+        if (reservedKg + MONEY_EPSILON < demandKg) {
+          const e = new Error(`Order is not fully sourced from stock: ${(reservedKg / 1000).toFixed(2)} MT reserved of ${(demandKg / 1000).toFixed(2)} MT required. Allocate the remainder or create a milling demand for it.`);
+          e.statusCode = 400; throw e;
+        }
+
+        // Skip the milling stage and go straight to Documentation. Validation is
+        // bypassed deliberately (this is the sanctioned no-milling shortcut); the
+        // reservation coverage above is the real guard.
+        const updated = await workflowService.transitionOrder(trx, {
+          order,
+          toStatus: 'Docs In Preparation',
+          userId: req.user?.id,
+          reason: `Fully sourced from existing finished stock (${(reservedKg / 1000).toFixed(2)} MT reserved) — milling skipped`,
+          skipValidation: true,
+        });
+
+        await notificationService.createForRole(trx, {
+          roleName: 'Export Manager',
+          title: 'Order sourced from existing stock',
+          message: `Order ${order.order_no} is fully covered by finished stock — moved to Documentation without milling.`,
+          type: 'info',
+          linkedRef: order.order_no,
+        });
+        return updated;
+      });
+
+      emitExportOrderUpdate(id, 'sourced_from_stock', { status: result.status });
+      return res.json({ success: true, data: { order: await db('export_orders').where({ id }).first() } });
+    } catch (err) {
+      if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
+      console.error('sourceFromStock error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
   },
 
@@ -2910,6 +2998,10 @@ const exportOrderController = {
         .leftJoin('products as p', 'l.product_id', 'p.id')
         .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
         .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
+        // Producing milling batch (finished lots carry batch_ref = 'batch-<id>')
+        // — surfaces batch no / name / custom tags so the stock pool is searchable
+        // by batch + tag (#3 fulfil-from-inventory search filters).
+        .leftJoin('milling_batches as mb', db.raw("l.batch_ref = 'batch-' || mb.id"))
         // Available = mill stock explicitly marked export-ready, OR anything
         // already sitting in the export entity (transferred lots are ready by
         // definition), so a transferred lot is pickable on the order.
@@ -2921,11 +3013,16 @@ const exportOrderController = {
         .select('l.id', 'l.lot_no', 'l.item_name', 'l.type', 'l.entity', 'l.variety', 'l.grade',
           'l.available_qty', 'l.net_weight_kg', 'l.total_bags', 'l.bag_size_kg', 'l.export_display_name',
           'l.landed_cost_per_kg', 'l.supplier_id', 's.name as supplier_name', 's.supplier_code as supplier_code',
-          'p.name as product_name', 'w.name as warehouse_name')
+          'p.name as product_name', 'w.name as warehouse_name',
+          'mb.batch_no', 'mb.batch_name', 'mb.custom_tags')
         .orderBy('l.id', 'desc');
 
       const rows = lots.map((l) => {
         const availKg = parseFloat(l.available_qty) || 0;
+        // Descriptive, non-sensitive attributes (variety/grade/warehouse/batch/tags)
+        // are exposed to ALL roles so the pool is searchable by them (#3). Only
+        // supplier / lot no / cost stay redacted from export users.
+        const tags = Array.isArray(l.custom_tags) ? l.custom_tags : [];
         const base = {
           id: l.id,
           export_display_name: l.export_display_name || l.variety || l.product_name || l.item_name || 'Export Rice',
@@ -2933,14 +3030,17 @@ const exportOrderController = {
           available_mt: availKg / 1000,
           packing_status: (parseFloat(l.total_bags) || 0) > 0 ? 'Packed' : 'Loose',
           transfer_status: l.entity === 'export' ? 'Transferred' : 'At mill',
+          variety: l.variety, grade: l.grade, type: l.type,
+          warehouse_name: l.warehouse_name,
+          batch_no: l.batch_no || null, batch_name: l.batch_name || null,
+          custom_tags: tags,
         };
-        if (!full) return base; // Export users: redacted view only
+        if (!full) return base; // Export users: descriptive fields only, no supplier/lot/cost
         return {
           ...base,
-          lot_no: l.lot_no, item_name: l.item_name, type: l.type, entity: l.entity,
-          variety: l.variety, grade: l.grade, product_name: l.product_name,
+          lot_no: l.lot_no, item_name: l.item_name, entity: l.entity, product_name: l.product_name,
           supplier_id: l.supplier_id, supplier_name: l.supplier_name, supplier_code: l.supplier_code,
-          warehouse_name: l.warehouse_name, landed_cost_per_kg: l.landed_cost_per_kg,
+          landed_cost_per_kg: l.landed_cost_per_kg,
           net_weight_kg: l.net_weight_kg, total_bags: l.total_bags,
         };
       });

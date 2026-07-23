@@ -666,6 +666,7 @@ COL export_orders.fi_date:date:NULL
 COL export_orders.fi_number:character varying:NULL
 COL export_orders.fi_number_2:character varying:NULL
 COL export_orders.fi_number_3:character varying:NULL
+COL export_orders.financial_status:character varying:NOT NULL
 COL export_orders.freight_terms:character varying:NULL
 COL export_orders.fx_gain_loss_pkr:numeric:NOT NULL
 COL export_orders.fx_rate_locked_at:timestamp with time zone:NULL
@@ -1009,6 +1010,7 @@ COL inventory_lots.received_net_weight_kg:numeric:NULL
 COL inventory_lots.record_version:integer:NOT NULL
 COL inventory_lots.reserved_against:character varying:NULL
 COL inventory_lots.reserved_qty:numeric:NOT NULL
+COL inventory_lots.sample_id:integer:NULL
 COL inventory_lots.server_ts:timestamp with time zone:NULL
 COL inventory_lots.service_batch_id:integer:NULL
 COL inventory_lots.sold_weight_kg:numeric:NOT NULL
@@ -1103,6 +1105,26 @@ COL kpi_benchmarks.period:character varying:NULL
 COL kpi_benchmarks.target_value:numeric:NULL
 COL kpi_benchmarks.unit:character varying:NULL
 COL kpi_benchmarks.updated_at:timestamp with time zone:NOT NULL
+COL local_sale_repacking.bag_rate:numeric:NULL
+COL local_sale_repacking.bag_source:character varying:NOT NULL
+COL local_sale_repacking.created_at:timestamp with time zone:NOT NULL
+COL local_sale_repacking.created_by:integer:NULL
+COL local_sale_repacking.final_dispatched_kg:numeric:NULL
+COL local_sale_repacking.id:integer:NOT NULL
+COL local_sale_repacking.labour_mode:character varying:NULL
+COL local_sale_repacking.labour_rate:numeric:NULL
+COL local_sale_repacking.labour_total:numeric:NULL
+COL local_sale_repacking.local_sale_id:integer:NULL
+COL local_sale_repacking.new_bag_count:integer:NULL
+COL local_sale_repacking.new_bag_size_kg:numeric:NULL
+COL local_sale_repacking.notes:text:NULL
+COL local_sale_repacking.original_bag_count:integer:NULL
+COL local_sale_repacking.original_bag_size_kg:numeric:NULL
+COL local_sale_repacking.packaging_charge:numeric:NULL
+COL local_sale_repacking.packaging_item_id:integer:NULL
+COL local_sale_repacking.packing_loss_kg:numeric:NULL
+COL local_sale_repacking.sale_group_no:character varying:NOT NULL
+COL local_sale_repacking.updated_at:timestamp with time zone:NOT NULL
 COL local_sales.bag_weight_kg:numeric:NULL
 COL local_sales.bank_account_id:integer:NULL
 COL local_sales.buyer_address:character varying:NULL
@@ -1778,6 +1800,7 @@ COL milling_quality_samples.price_per_mt:numeric:NULL
 COL milling_quality_samples.purity:numeric:NULL
 COL milling_quality_samples.short_grain_pct:numeric:NULL
 COL milling_quality_samples.updated_at:timestamp with time zone:NULL
+COL milling_vehicle_arrivals.accepted_kg:numeric:NULL
 COL milling_vehicle_arrivals.arrival_date:date:NULL
 COL milling_vehicle_arrivals.bag_size_kg:numeric:NULL
 COL milling_vehicle_arrivals.batch_id:integer:NULL
@@ -1791,6 +1814,7 @@ COL milling_vehicle_arrivals.notes:text:NULL
 COL milling_vehicle_arrivals.quality_json:jsonb:NULL
 COL milling_vehicle_arrivals.total_bags:integer:NULL
 COL milling_vehicle_arrivals.vehicle_no:character varying:NOT NULL
+COL milling_vehicle_arrivals.weighbridge_kg:numeric:NULL
 COL milling_vehicle_arrivals.weight_kg:numeric:NULL
 COL mills.capacity_mt_per_day:numeric:NULL
 COL mills.contact_person:character varying:NULL
@@ -2164,6 +2188,34 @@ COL reprocessing_batches.reprocess_no:character varying:NOT NULL
 COL reprocessing_batches.status:character varying:NOT NULL
 COL reprocessing_batches.updated_at:timestamp with time zone:NOT NULL
 COL reprocessing_batches.wastage_mt:numeric:NOT NULL
+COL rice_samples.analysis_json:jsonb:NULL
+COL rice_samples.analyzed_at:timestamp with time zone:NULL
+COL rice_samples.attachment_url:text:NULL
+COL rice_samples.bag_weight_kg:numeric:NULL
+COL rice_samples.bags:integer:NULL
+COL rice_samples.claimed_grade:character varying:NULL
+COL rice_samples.converted_at:timestamp with time zone:NULL
+COL rice_samples.converted_lot_id:integer:NULL
+COL rice_samples.created_at:timestamp with time zone:NOT NULL
+COL rice_samples.created_by:integer:NULL
+COL rice_samples.crop_year:character varying:NULL
+COL rice_samples.decided_by:integer:NULL
+COL rice_samples.decision_notes:text:NULL
+COL rice_samples.final_analysis_json:jsonb:NULL
+COL rice_samples.final_analyzed_at:timestamp with time zone:NULL
+COL rice_samples.id:integer:NOT NULL
+COL rice_samples.offered_qty_kg:numeric:NULL
+COL rice_samples.offered_rate_per_kg:numeric:NULL
+COL rice_samples.origin_area:character varying:NULL
+COL rice_samples.product_id:integer:NULL
+COL rice_samples.remarks:text:NULL
+COL rice_samples.sample_date:date:NOT NULL
+COL rice_samples.sample_no:character varying:NOT NULL
+COL rice_samples.status:character varying:NOT NULL
+COL rice_samples.supplier_id:integer:NULL
+COL rice_samples.supplier_sample_ref:character varying:NULL
+COL rice_samples.updated_at:timestamp with time zone:NOT NULL
+COL rice_samples.variety:character varying:NULL
 COL risk_scores.calculated_at:timestamp with time zone:NULL
 COL risk_scores.created_at:timestamp with time zone:NULL
 COL risk_scores.currency:character varying:NULL
@@ -2444,6 +2496,40 @@ COL suppliers.supplier_code:character varying:NULL
 COL suppliers.type:character varying:NOT NULL
 COL suppliers.uid:character varying:NULL
 COL suppliers.updated_at:timestamp with time zone:NOT NULL
+COL suspense_entries.amount:numeric:NOT NULL
+COL suspense_entries.attachment_url:text:NULL
+COL suspense_entries.bank_account_id:integer:NULL
+COL suspense_entries.bank_transaction_id:integer:NULL
+COL suspense_entries.created_at:timestamp with time zone:NOT NULL
+COL suspense_entries.currency:character varying:NOT NULL
+COL suspense_entries.date:date:NOT NULL
+COL suspense_entries.direction:character varying:NOT NULL
+COL suspense_entries.entered_by:integer:NULL
+COL suspense_entries.entity:character varying:NULL
+COL suspense_entries.entry_no:character varying:NOT NULL
+COL suspense_entries.id:integer:NOT NULL
+COL suspense_entries.notes:text:NULL
+COL suspense_entries.origin_journal_id:integer:NULL
+COL suspense_entries.party_details:character varying:NULL
+COL suspense_entries.payment_method:character varying:NULL
+COL suspense_entries.reason:text:NULL
+COL suspense_entries.reference_no:character varying:NULL
+COL suspense_entries.resolved_amount:numeric:NOT NULL
+COL suspense_entries.resolved_at:timestamp with time zone:NULL
+COL suspense_entries.resolved_by:integer:NULL
+COL suspense_entries.status:character varying:NOT NULL
+COL suspense_entries.updated_at:timestamp with time zone:NOT NULL
+COL suspense_resolutions.account_id:integer:NOT NULL
+COL suspense_resolutions.amount:numeric:NOT NULL
+COL suspense_resolutions.created_at:timestamp with time zone:NULL
+COL suspense_resolutions.created_by:integer:NULL
+COL suspense_resolutions.id:integer:NOT NULL
+COL suspense_resolutions.narration:text:NULL
+COL suspense_resolutions.reclass_journal_id:integer:NULL
+COL suspense_resolutions.suspense_entry_id:integer:NOT NULL
+COL suspense_resolutions.target_id:character varying:NULL
+COL suspense_resolutions.target_ref:character varying:NULL
+COL suspense_resolutions.target_type:character varying:NULL
 COL sync_conflicts.conflict_code:character varying:NULL
 COL sync_conflicts.created_at:timestamp with time zone:NULL
 COL sync_conflicts.device_uuid:uuid:NULL
@@ -2787,6 +2873,7 @@ CON export_orders.chk_export_orders_balance_received_nonneg(c)
 CON export_orders.chk_export_orders_broken_pct_target_range(c)
 CON export_orders.chk_export_orders_currency_valid(c)
 CON export_orders.chk_export_orders_daterange(c)
+CON export_orders.chk_export_orders_financial_status_valid(c)
 CON export_orders.chk_export_orders_inventory_cogs_per_mt_pkr_nn(c)
 CON export_orders.chk_export_orders_inventory_cogs_total_pkr_nonneg(c)
 CON export_orders.chk_export_orders_master_bag_size_kg_nn(c)
@@ -2920,6 +3007,7 @@ CON inventory_lots.inventory_lots_product_id_foreign(f)
 CON inventory_lots.inventory_lots_purchase_invoice_id_foreign(f)
 CON inventory_lots.inventory_lots_qty_nonneg_chk(c)
 CON inventory_lots.inventory_lots_reserved_nonneg_chk(c)
+CON inventory_lots.inventory_lots_sample_id_foreign(f)
 CON inventory_lots.inventory_lots_service_batch_id_foreign(f)
 CON inventory_lots.inventory_lots_status_chk(c)
 CON inventory_lots.inventory_lots_supplier_id_foreign(f)
@@ -2955,6 +3043,12 @@ CON journal_lines.journal_lines_journal_id_foreign(f)
 CON journal_lines.journal_lines_pkey(p)
 CON kpi_benchmarks.kpi_benchmarks_kpi_name_unique(u)
 CON kpi_benchmarks.kpi_benchmarks_pkey(p)
+CON local_sale_repacking.chk_local_sale_repacking_bag_source(c)
+CON local_sale_repacking.chk_local_sale_repacking_labour_mode(c)
+CON local_sale_repacking.local_sale_repacking_created_by_foreign(f)
+CON local_sale_repacking.local_sale_repacking_local_sale_id_foreign(f)
+CON local_sale_repacking.local_sale_repacking_packaging_item_id_foreign(f)
+CON local_sale_repacking.local_sale_repacking_pkey(p)
 CON local_sales.chk_local_sales_bag_weight_kg_nn(c)
 CON local_sales.chk_local_sales_cogs_per_kg_nn(c)
 CON local_sales.chk_local_sales_cogs_total_pkr_nonneg(c)
@@ -3392,6 +3486,14 @@ CON reprocessing_batches.reprocessing_batches_original_batch_id_foreign(f)
 CON reprocessing_batches.reprocessing_batches_pkey(p)
 CON reprocessing_batches.reprocessing_batches_reprocess_no_unique(u)
 CON reprocessing_batches.reprocessing_batches_status_check(c)
+CON rice_samples.chk_rice_samples_status_valid(c)
+CON rice_samples.rice_samples_converted_lot_id_foreign(f)
+CON rice_samples.rice_samples_created_by_foreign(f)
+CON rice_samples.rice_samples_decided_by_foreign(f)
+CON rice_samples.rice_samples_pkey(p)
+CON rice_samples.rice_samples_product_id_foreign(f)
+CON rice_samples.rice_samples_sample_no_unique(u)
+CON rice_samples.rice_samples_supplier_id_foreign(f)
 CON risk_scores.chk_risk_scores_risk_score_range(c)
 CON risk_scores.risk_scores_pkey(p)
 CON role_permissions.role_permissions_permission_id_foreign(f)
@@ -3484,6 +3586,20 @@ CON suppliers.suppliers_reviewed_by_foreign(f)
 CON suppliers.suppliers_submitted_by_foreign(f)
 CON suppliers.suppliers_supplier_code_unique(u)
 CON suppliers.suppliers_uid_unique(u)
+CON suspense_entries.chk_suspense_entries_direction_valid(c)
+CON suspense_entries.chk_suspense_entries_status_valid(c)
+CON suspense_entries.suspense_entries_bank_account_id_foreign(f)
+CON suspense_entries.suspense_entries_bank_transaction_id_foreign(f)
+CON suspense_entries.suspense_entries_entered_by_foreign(f)
+CON suspense_entries.suspense_entries_entry_no_unique(u)
+CON suspense_entries.suspense_entries_origin_journal_id_foreign(f)
+CON suspense_entries.suspense_entries_pkey(p)
+CON suspense_entries.suspense_entries_resolved_by_foreign(f)
+CON suspense_resolutions.suspense_resolutions_account_id_foreign(f)
+CON suspense_resolutions.suspense_resolutions_created_by_foreign(f)
+CON suspense_resolutions.suspense_resolutions_pkey(p)
+CON suspense_resolutions.suspense_resolutions_reclass_journal_id_foreign(f)
+CON suspense_resolutions.suspense_resolutions_suspense_entry_id_foreign(f)
 CON sync_conflicts.sync_conflicts_pkey(p)
 CON sync_state.sync_state_pkey(p)
 CON sync_state.uq_sync_state_device_domain(u)

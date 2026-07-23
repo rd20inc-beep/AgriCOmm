@@ -21,6 +21,7 @@ export const exportOrdersApi = {
   uploadDocument: (id, data) => api.post(`/api/export-orders/${id}/documents/upload`, data),
   approveDocument: (id, data) => api.post(`/api/export-orders/${id}/documents/approve`, data),
   allocateStock: (id, data) => api.post(`/api/export-orders/${id}/allocate-stock`, data),
+  sourceFromStock: (id) => api.post(`/api/export-orders/${id}/source-from-stock`, {}),
 };
 
 // Export quotations — pre-order price quotes that convert into an export order.

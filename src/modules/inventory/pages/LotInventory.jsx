@@ -149,7 +149,17 @@ function renderLotRow(lot, displayUnit, navigate, indented) {
         </span>
       </td>
       <td data-label="Item / Variety" className="max-w-[16rem]">
-        <div className="text-gray-900 font-medium truncate" title={displayName}>{displayName}</div>
+        <div className="text-gray-900 font-medium truncate flex items-center gap-1.5" title={displayName}>
+          <span className="truncate">{displayName}</span>
+          {lot.ownership === 'client' && (
+            <span
+              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 whitespace-nowrap shrink-0"
+              title={`Service Milling — client-owned stock${lot.ownerCustomerName ? ` (${lot.ownerCustomerName})` : ''}. Not company inventory.`}
+            >
+              SERVICE{lot.ownerCustomerName ? ` · ${lot.ownerCustomerName}` : ''}
+            </span>
+          )}
+        </div>
         {(!varIsRedundant || grade || lot.processingType === 'blended') && (
           <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-1 flex-wrap">
             {lot.processingType === 'blended' && (
@@ -195,6 +205,10 @@ export default function LotInventory() {
   const [typeFilter, setTypeFilter] = useState('All');
   const [subtypeFilter, setSubtypeFilter] = useState('All');
   const [entityFilter, setEntityFilter] = useState('All');
+  // Ownership scope: 'company' (default — company-owned only), 'client'
+  // (service-milling client stock only), 'all'. Sent to the API so client-owned
+  // stock never mixes into the default company inventory view.
+  const [ownershipFilter, setOwnershipFilter] = useState('company');
   const [processingFilter, setProcessingFilter] = useState('All'); // All | single_variety | blended
   const [searchTerm, setSearchTerm] = useState('');
   // Grouped vs flat view. Grouped collapses output lots (finished /
@@ -223,6 +237,7 @@ export default function LotInventory() {
 
   const { data: lots = [], isLoading, error, refetch } = useLotInventory({
     ...(statusFilter !== 'All' && { status: statusFilter }),
+    ...(ownershipFilter !== 'company' && { ownership: ownershipFilter }),
   });
 
   function toggleGroup(key) {
@@ -455,6 +470,20 @@ export default function LotInventory() {
               <button key={tab} onClick={() => setEntityFilter(tab)}
                 className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors whitespace-nowrap capitalize ${entityFilter === tab ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-600 hover:text-gray-800'}`}>
                 {tab === 'All' ? 'All Locations' : tab === 'mill' ? 'Mill' : 'Export Warehouse'}
+              </button>
+            ))}
+          </div>
+          {/* Ownership scope — keep client-owned Service Milling stock out of the
+              default company view; switch to see client stock or everything. */}
+          <div className="flex bg-gray-100 rounded-lg p-0.5">
+            {[
+              { v: 'company', l: 'Company' },
+              { v: 'client', l: 'Service (Client)' },
+              { v: 'all', l: 'All' },
+            ].map(o => (
+              <button key={o.v} onClick={() => setOwnershipFilter(o.v)}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${ownershipFilter === o.v ? 'bg-white text-amber-700 shadow-sm' : 'text-gray-600 hover:text-gray-800'}`}>
+                {o.l}
               </button>
             ))}
           </div>

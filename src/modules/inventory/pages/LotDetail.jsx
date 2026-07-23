@@ -257,6 +257,14 @@ export default function LotDetail() {
             <span className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold ${lot.entity === 'mill' ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'}`}>
               {lot.entity === 'mill' ? 'Mill' : 'Export'}
             </span>
+            {lot.ownership === 'client' && (
+              <span
+                className="inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold bg-amber-100 text-amber-800"
+                title={`Service Milling — client-owned stock${lot.ownerCustomerName ? ` (${lot.ownerCustomerName})` : ''}. Not company inventory; excluded from valuation, sale and export.`}
+              >
+                Service · Client-owned{lot.ownerCustomerName ? ` (${lot.ownerCustomerName})` : ''}
+              </span>
+            )}
             <span className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold bg-gray-100 text-gray-600`}>
               {typeLabel}
             </span>

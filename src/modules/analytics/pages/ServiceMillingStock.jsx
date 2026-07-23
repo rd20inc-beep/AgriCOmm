@@ -17,12 +17,19 @@ export default function ServiceMillingStock() {
   const { companyProfileData } = useApp();
   const { user } = useAuth();
   const [exp, setExp] = useState({});
+  const [groupBy, setGroupBy] = useState('client'); // client | batch | warehouse
 
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ['reporting', 'service-milling-stock'],
-    queryFn: async () => { const res = await reportingApi.serviceMillingStock(); return res?.rows ? res : (res?.data || res); },
+    queryKey: ['reporting', 'service-milling-stock', groupBy],
+    queryFn: async () => { const res = await reportingApi.serviceMillingStock({ group_by: groupBy }); return res?.rows ? res : (res?.data || res); },
     retry: false,
   });
+
+  const GROUP_META = {
+    client: { label: 'Client', kpi: 'Clients', col: 'Client / Lot' },
+    batch: { label: 'Batch', kpi: 'Batches', col: 'Batch / Lot' },
+    warehouse: { label: 'Warehouse', kpi: 'Warehouses', col: 'Warehouse / Lot' },
+  }[groupBy];
 
   const rows = data?.rows || [];
   const grand = data?.grand || {};
@@ -39,7 +46,7 @@ export default function ServiceMillingStock() {
   }, [rows]);
 
   const columns = [
-    { label: 'Client', key: 'client' },
+    { label: GROUP_META.label, key: 'client' },
     { label: 'Lot', key: 'lot' },
     { label: 'Batch', key: 'batch' },
     { label: 'Item', key: 'item' },
@@ -55,7 +62,7 @@ export default function ServiceMillingStock() {
     subtitle: 'Client-owned output — produced, dispatched, on-hand',
     generatedBy: user?.name || user?.email,
     meta: [
-      `Clients: ${grand.clients || 0}`,
+      `${GROUP_META.kpi}: ${grand.groups ?? grand.clients ?? 0}`,
       `Produced: ${kg(grand.producedKg)}`,
       `Dispatched: ${kg(grand.dispatchedKg)}`,
       `On hand: ${kg(grand.onHandKg)}`,
@@ -83,7 +90,19 @@ export default function ServiceMillingStock() {
           <h1 className="text-2xl font-bold text-gray-900 inline-flex items-center gap-2"><Boxes size={20} /> Service Milling Stock</h1>
           <p className="text-xs text-gray-400">Client-owned service-milling output (finished &amp; by-products), grouped by client. Produced, dispatched to the client, and still on hand. Kept separate from company inventory.</p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex bg-gray-100 rounded-lg p-0.5">
+            {[
+              { v: 'client', l: 'By Client' },
+              { v: 'batch', l: 'By Batch' },
+              { v: 'warehouse', l: 'By Warehouse' },
+            ].map(o => (
+              <button key={o.v} onClick={() => { setGroupBy(o.v); setExp({}); }}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${groupBy === o.v ? 'bg-white text-amber-700 shadow-sm' : 'text-gray-600 hover:text-gray-800'}`}>
+                {o.l}
+              </button>
+            ))}
+          </div>
           <button onClick={onPrint} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700"><Printer size={14} /> Print / PDF</button>
           <button onClick={onCsv} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-white text-gray-700 border border-gray-200 hover:bg-gray-50"><Download size={14} /> CSV</button>
         </div>
@@ -94,7 +113,7 @@ export default function ServiceMillingStock() {
           : (
             <>
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                <Kpi label="Clients" value={grand.clients || 0} />
+                <Kpi label={GROUP_META.kpi} value={grand.groups ?? grand.clients ?? 0} />
                 <Kpi label="Produced" value={kg(grand.producedKg)} />
                 <Kpi label="Dispatched" value={kg(grand.dispatchedKg)} />
                 <Kpi label="On hand" value={kg(grand.onHandKg)} tone="emerald" />
@@ -105,7 +124,7 @@ export default function ServiceMillingStock() {
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 text-gray-500 text-xs">
                       <tr>
-                        <th className="px-3 py-2 text-left font-medium">Client / Lot</th>
+                        <th className="px-3 py-2 text-left font-medium">{GROUP_META.col}</th>
                         <th className="px-3 py-2 text-right font-medium">Produced</th>
                         <th className="px-3 py-2 text-right font-medium">Dispatched</th>
                         <th className="px-3 py-2 text-right font-medium">On hand</th>

@@ -210,6 +210,23 @@ export default function InvoiceView() {
         <p className="px-4 py-2 text-[11px] text-gray-400">Expand a row to trace its source lot, batch, warehouse and source purchased rice lots.</p>
       </div>
 
+      {/* #5 Repacking summary */}
+      {data.repacking && (
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <h3 className="text-sm font-semibold text-gray-700 mb-2 inline-flex items-center gap-1.5"><Package size={15} /> Repacking</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+            <Field label="Bag source" value={data.repacking.bagSourceLabel} />
+            {data.repacking.originalBagCount != null && <Field label="Original bags" value={`${data.repacking.originalBagCount} × ${data.repacking.originalBagSizeKg || '?'} kg`} />}
+            {data.repacking.newBagCount != null && <Field label="New bags" value={`${data.repacking.newBagCount} × ${data.repacking.newBagSizeKg || '?'} kg`} />}
+            {data.repacking.packagingCharge > 0 && <Field label="Packaging charge" value={pkr(data.repacking.packagingCharge)} />}
+            {data.repacking.labourTotal > 0 && <Field label="Labour charge" value={pkr(data.repacking.labourTotal)} />}
+            {data.repacking.packingLossKg > 0 && <Field label="Packing loss" value={`${data.repacking.packingLossKg} kg`} tone="rose" />}
+            {data.repacking.finalDispatchedKg > 0 && <Field label="Final dispatched" value={`${data.repacking.finalDispatchedKg} kg`} />}
+          </div>
+          {data.repacking.bagSource === 'customer' && <p className="text-[11px] text-gray-400 mt-2">Bags supplied by the customer — no packaging stock deducted.</p>}
+        </div>
+      )}
+
       {/* Source-batch by-product pricing — INTERNAL/ADMIN ONLY (never on the customer copy) */}
       {canSeeAdminCopy && (adminData?.batchByproducts || []).length > 0 && (
         <div className="bg-white rounded-xl border border-amber-200 overflow-hidden">

@@ -26,6 +26,7 @@ const millNav = [
       { label: 'Service Milling', to: '/milling/service', icon: Package },
       { label: 'Service Invoices', to: '/service-milling/invoices', icon: FileText },
       { label: 'Rice Purchases', to: '/milling/rice-purchases', icon: Truck },
+      { label: 'Sample Analysis', to: '/sample-analysis', icon: FlaskConical },
       { label: 'Quality Control', to: '/quality', icon: FlaskConical },
     ],
   },
