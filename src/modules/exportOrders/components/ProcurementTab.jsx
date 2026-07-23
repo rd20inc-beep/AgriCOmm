@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import StatusBadge from '../../../components/StatusBadge';
 import PartyLink from '../../../shared/components/PartyLink';
-import { exportOrdersApi, financeApi } from '../../../api/services';
+import { financeApi } from '../../../api/services';
 import { useApp } from '../../../context/AppContext';
 import { Package, Plus, ExternalLink, Warehouse, Scale, FileText, Truck, ArrowRight } from 'lucide-react';
+import StockAllocationPicker from './StockAllocationPicker';
 
 export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], onCreateMilling, onStartDocsPreparation, onLinkExternalPurchase, canCreateMilling, canStartDocs, onStockAllocated }) {
   // Supplier privacy: Export users see the Supplier Code, not the name/ledger link.
@@ -27,14 +28,6 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
   }, 0);
   const fulfillmentPct = order.qtyMT > 0 ? Math.min(100, (totalAllocatedMT / order.qtyMT) * 100) : 0;
 
-  // Available lots for allocation
-  const [availableLots, setAvailableLots] = useState([]);
-  const [lotsLoading, setLotsLoading] = useState(false);
-  const [allocatingLotId, setAllocatingLotId] = useState(null);
-  const [showAllLots, setShowAllLots] = useState(false);
-  const [customQty, setCustomQty] = useState({});
-  const [fetchTrigger, setFetchTrigger] = useState(0);
-
   // Order lines — for multi-product proformas, an allocation can target a
   // specific line. Handles either casing (raw snake_case or transformed camel).
   const orderItems = (order.items || []).map((it) => ({
@@ -50,68 +43,6 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
   }, [orderItems.length]);
 
   const remainingNeeded = Math.max(0, order.qtyMT - totalAllocatedMT);
-
-  // Batch 4: only EXPORT-READY stock is selectable, and export users see a
-  // redacted view (display name + qty + status). Mill marks stock ready first.
-  useEffect(() => {
-    if (remainingNeeded <= 0) { setAvailableLots([]); return; }
-    setLotsLoading(true);
-    exportOrdersApi.listExportReadyStock()
-      .then(res => {
-        const lots = res?.data?.lots || res?.lots || [];
-        setAvailableLots(lots.filter(l => parseFloat(l.available_qty) > 0));
-      })
-      .catch(() => setAvailableLots([]))
-      .finally(() => setLotsLoading(false));
-  }, [fetchTrigger, remainingNeeded]);
-
-  // Filter lots by product match — use multiple strategies
-  const orderProduct = (order.productName || '').toLowerCase();
-  const orderProductId = order.productId;
-
-  const matchingLots = availableLots.filter(l => {
-    // Strategy 1: product_id FK match
-    if (orderProductId && l.product_id && String(l.product_id) === String(orderProductId)) return true;
-
-    // Strategy 2: name word matching (export users only have export_display_name)
-    const lotName = (l.item_name || l.product_name || l.export_display_name || '').toLowerCase();
-    if (!orderProduct || !lotName) return false;
-
-    // "Finished Rice" is a generic name from milling — match it if the lot came from this order's batch
-    if (lotName.includes('finished rice')) return true;
-
-    const orderWords = orderProduct.split(/\s+/).filter(w => w.length > 2 && w !== 'rice');
-    if (orderWords.length === 0) return true; // no distinguishing words, show all
-    const matchCount = orderWords.filter(w => lotName.includes(w)).length;
-    return matchCount >= 1; // at least 1 significant word matches
-  });
-  const otherLots = availableLots.filter(l => !matchingLots.includes(l));
-
-  async function handleQuickAllocate(lot) {
-    const availableKg = parseFloat(lot.available_qty) || 0; // available_qty is KG (post-5c)
-    const remainingNeededKg = remainingNeeded * 1000;        // order qty is MT
-    const enteredKg = parseFloat(customQty[lot.id]);
-    const qtyToAllocateKg = enteredKg > 0 ? Math.min(enteredKg, availableKg, remainingNeededKg) : Math.min(availableKg, remainingNeededKg);
-    if (qtyToAllocateKg <= 0) return;
-
-    setAllocatingLotId(lot.id);
-    try {
-      await exportOrdersApi.allocateStock(order.dbId || order.id, {
-        lot_id: lot.id,
-        qty_mt: qtyToAllocateKg / 1000, // KG → MT for the export doc boundary
-        item_id: lineId || undefined,
-        notes: `Reserved ${Math.round(qtyToAllocateKg).toLocaleString()} kg from ${lot.lot_no || lot.export_display_name || `lot ${lot.id}`}`,
-      });
-      addToast(`${Math.round(qtyToAllocateKg).toLocaleString()} kg reserved from ${lot.export_display_name || lot.lot_no || `lot ${lot.id}`}`, 'success');
-      setCustomQty(prev => ({ ...prev, [lot.id]: '' }));
-      setFetchTrigger(t => t + 1); // refresh available lots
-      if (onStockAllocated) onStockAllocated();
-    } catch (err) {
-      addToast(err.message || 'Allocation failed', 'error');
-    } finally {
-      setAllocatingLotId(null);
-    }
-  }
 
   return (
     <div className="space-y-6">
@@ -280,19 +211,13 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
         />
       )}
 
-      {/* Available Stock for Allocation — only when order needs more */}
-      {remainingNeeded > 0 && !lotsLoading && availableLots.length > 0 && (
+      {/* Fulfil from Existing Inventory — only when the order still needs more */}
+      {remainingNeeded > 0 && (
         <div className="bg-white rounded-xl shadow-sm border border-emerald-200 p-6">
-          <div className="flex items-center justify-between mb-1">
-            <h3 className="text-sm font-semibold text-emerald-700 uppercase tracking-wide">Reserve Finished Stock</h3>
-            <button onClick={() => setFetchTrigger(t => t + 1)} className="text-xs text-gray-400 hover:text-gray-600">Refresh</button>
-          </div>
+          <h3 className="text-sm font-semibold text-emerald-700 uppercase tracking-wide mb-1">Fulfil from Existing Inventory</h3>
           <p className="text-[11px] text-gray-400 mb-1">Reserving holds this stock for the order (it stays in the mill and is deducted when the order ships). To physically move a lot to the export entity, use “Transfer to Export” on the lot.</p>
           <p className="text-xs text-gray-400 mb-4">
-            {remainingNeeded > 0
-              ? <>Need <span className="font-semibold text-emerald-700">{Math.round(remainingNeeded * 1000).toLocaleString()} kg</span> more. Enter qty or click Reserve for the full amount.</>
-              : <span className="text-emerald-600 font-medium">Fully reserved!</span>
-            }
+            Need <span className="font-semibold text-emerald-700">{Math.round(remainingNeeded * 1000).toLocaleString()} kg</span> more. Reserve available finished stock, or use “Create Milling Demand” above to mill the remainder.
           </p>
 
           {orderItems.length > 1 && (
@@ -309,94 +234,15 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
             </div>
           )}
 
-          <div className="space-y-3">
-            {[...matchingLots, ...(showAllLots ? otherLots : [])].map(lot => {
-              const availableKg = parseFloat(lot.available_qty) || 0; // KG (post-5c)
-              const remainingNeededKg = remainingNeeded * 1000;
-              const defaultKg = Math.min(availableKg, remainingNeededKg);
-              const enteredQty = customQty[lot.id];
-              const willAllocateKg = enteredQty ? Math.min(parseFloat(enteredQty) || 0, availableKg, remainingNeededKg) : defaultKg;
-              const isAllocating = allocatingLotId === lot.id;
-              const isMatch = matchingLots.includes(lot);
-
-              return (
-                <div
-                  key={lot.id}
-                  className={`rounded-lg border-2 p-4 transition-all ${
-                    isMatch ? 'border-emerald-200 bg-emerald-50/30' : 'border-gray-200 bg-white'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <p className="text-sm font-bold text-gray-900">{lot.export_display_name || lot.item_name || lot.product_name || 'Export Rice'}</p>
-                        {lot.lot_no && <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">{lot.lot_no}</span>}
-                      </div>
-                      <div className="grid grid-cols-4 gap-2 text-xs">
-                        <div><span className="text-gray-400">Available</span><br/><span className="font-bold text-emerald-700">{Math.round(availableKg).toLocaleString()} kg</span></div>
-                        <div><span className="text-gray-400">Packing</span><br/><span className="font-semibold text-gray-900">{lot.packing_status || '—'}</span></div>
-                        <div><span className="text-gray-400">Transfer</span><br/><span className="font-semibold text-gray-900">{lot.transfer_status || '—'}</span></div>
-                        {lot.supplier_name || lot.supplier_code
-                          ? <div><span className="text-gray-400">Supplier</span><br/><span className="font-semibold text-gray-900">{lot.supplier_name || lot.supplier_code}</span></div>
-                          : <div><span className="text-gray-400">Warehouse</span><br/><span className="font-semibold text-gray-900">{lot.warehouse_name || '—'}</span></div>}
-                      </div>
-                    </div>
-                    <div className="flex flex-col items-end gap-2 flex-shrink-0">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="number"
-                          value={enteredQty ?? ''}
-                          onChange={e => setCustomQty(prev => ({ ...prev, [lot.id]: e.target.value }))}
-                          placeholder={Math.round(defaultKg).toString()}
-                          className="w-24 border border-gray-300 rounded-lg px-2 py-1.5 text-sm text-right focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
-                          min="1"
-                          max={Math.min(availableKg, remainingNeededKg)}
-                          step="1"
-                          onClick={e => e.stopPropagation()}
-                        />
-                        <span className="text-xs text-gray-400">kg</span>
-                      </div>
-                      <button
-                        onClick={() => handleQuickAllocate(lot)}
-                        disabled={isAllocating || remainingNeeded <= 0 || willAllocateKg <= 0}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        {isAllocating ? (
-                          <><span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Allocating...</>
-                        ) : (
-                          <><Plus className="w-3 h-3" /> Reserve {Math.round(willAllocateKg).toLocaleString()} kg</>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {otherLots.length > 0 && !showAllLots && (
-            <button
-              onClick={() => setShowAllLots(true)}
-              className="mt-3 text-xs text-blue-600 hover:text-blue-800 font-medium"
-            >
-              Show {otherLots.length} more lot{otherLots.length !== 1 ? 's' : ''} (other products)
-            </button>
-          )}
-          {showAllLots && otherLots.length > 0 && (
-            <button
-              onClick={() => setShowAllLots(false)}
-              className="mt-3 text-xs text-gray-500 hover:text-gray-700 font-medium"
-            >
-              Hide other products
-            </button>
-          )}
-        </div>
-      )}
-
-      {lotsLoading && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 text-center">
-          <div className="w-6 h-6 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-2" />
-          <p className="text-xs text-gray-400">Loading available stock...</p>
+          <StockAllocationPicker
+            orderId={order.dbId || order.id}
+            orderProductId={order.productId}
+            orderProductName={order.productName}
+            remainingNeededKg={remainingNeeded * 1000}
+            lineId={lineId}
+            onAllocated={() => { if (onStockAllocated) onStockAllocated(); }}
+            addToast={addToast}
+          />
         </div>
       )}
 
@@ -529,6 +375,8 @@ function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
   const [transferring, setTransferring] = useState(false);
   const [expanded, setExpanded] = useState(true);
 
+  // Supplier privacy: Export users see the Supplier Code, not the name/ledger link.
+  const canSeeSupplierName = order?.canSeeSupplierName !== false;
   const finishedMT = parseFloat(linkedBatch.actualFinishedMT) || 0;
   const batchId = linkedBatch.dbId || linkedBatch.id;
   const orderId = order.dbId || order.id;

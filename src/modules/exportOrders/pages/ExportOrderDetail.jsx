@@ -26,6 +26,7 @@ import {
   useStartDocs, useUploadDocument, useApproveDocument,
 } from '../../../api/queries';
 import { useCreateMillingBatch } from '../../../api/queries';
+import { exportOrdersApi } from '../api/services';
 import {
   OrderHeader,
   WorkflowTimeline,
@@ -224,6 +225,14 @@ export default function ExportOrderDetail() {
   const formatPKR = (value) => 'Rs ' + (parseFloat(value) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const backendActions = order.allowedActions || {};
 
+  // #3 How much finished demand is already reserved from existing stock (mirrors
+  // ProcurementTab). Drives the milling modal's shortfall + the source-from-stock path.
+  const allocatedMT = (order.purchaseLots || [])
+    .filter((l) => (l.type === 'finished' || l.source === 'reservation' || l.source === 'allocation' || l.source === 'both')
+      && (parseFloat(l.allocated_qty_kg) > 0 || l.source === 'reservation'))
+    .reduce((sum, lot) => sum + (parseFloat(lot.allocated_qty_kg) || (lot.source === 'reservation' ? (parseFloat(lot.reserved_qty) || 0) : 0)) / 1000, 0);
+  const fullySourcedFromStock = allocatedMT + 0.0001 >= (parseFloat(order.qtyMT) || 0);
+
   // --- Modal openers (reset form state then show) ---
   const buildShipmentContainerRow = (container = {}, sequenceNo = 1) => ({
     sequenceNo,
@@ -265,9 +274,24 @@ export default function ExportOrderDetail() {
   };
 
   const openMillingModal = () => {
-    setMillingRawQty(Math.ceil(order.qtyMT / 0.75));
+    // The modal defaults raw qty to the SHORTFALL (order − already reserved); this
+    // is just a sensible initial value before it mounts.
+    const remaining = Math.max(0, (parseFloat(order.qtyMT) || 0) - allocatedMT);
+    setMillingRawQty(remaining > 0 ? Math.ceil(remaining / 0.75) : 0);
     setMillingSupplier('');
     setShowMillingModal(true);
+  };
+
+  // #3 Fully sourced from stock → skip milling, advance straight to Documentation.
+  const handleSourceFromStock = async () => {
+    try {
+      await exportOrdersApi.sourceFromStock(order.dbId || order.id);
+      addToast('Order fully sourced from stock — moved to Documentation', 'success');
+      setShowMillingModal(false);
+      invalidateOrder();
+    } catch (err) {
+      addToast(err?.data?.message || err?.message || 'Could not source from stock', 'error');
+    }
   };
 
   const openShipmentModal = () => {
@@ -398,7 +422,9 @@ export default function ExportOrderDetail() {
       addToast('A milling order already exists for this export order', 'error');
       return;
     }
-    const rawQty = parseFloat(millingRawQty) || Math.ceil(order.qtyMT / 0.75);
+    // #3 Only the SHORTFALL is milled — stock already reserved covers the rest.
+    const remainingFinishedMT = Math.max(0, (parseFloat(order.qtyMT) || 0) - allocatedMT);
+    const rawQty = parseFloat(millingRawQty) || Math.ceil((remainingFinishedMT || order.qtyMT) / 0.75);
     const supplierId = parseInt(millingSupplier) || null;
 
     try {
@@ -407,7 +433,7 @@ export default function ExportOrderDetail() {
         linked_export_order_id: orderId || null,
         product_id: order.productId ? parseInt(order.productId) : null,
         raw_qty_kg: rawQty * 1000, // createBatch expects KG (Phase 5c); rawQty/order.qtyMT are MT
-        planned_finished_kg: (parseFloat(order.qtyMT) || 0) * 1000,
+        planned_finished_kg: Math.round((remainingFinishedMT || (parseFloat(order.qtyMT) || 0)) * 1000),
       });
       const batchNo = res?.data?.batch?.batch_no || res?.data?.batch?.id || 'New';
       addToast(`Milling batch ${batchNo} created successfully`);
@@ -927,6 +953,10 @@ export default function ExportOrderDetail() {
         setMillingSupplier={setMillingSupplier}
         suppliersList={suppliersList || []}
         onConfirm={handleCreateMilling}
+        allocatedMT={allocatedMT}
+        onAllocated={invalidateOrder}
+        onSourceFromStock={handleSourceFromStock}
+        addToast={addToast}
       />
 
       <ShipmentModal

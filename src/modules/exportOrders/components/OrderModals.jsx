@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import Modal from '../../../components/Modal';
 import ProformaInvoice from '../../../components/ProformaInvoice';
 import EmailComposer from '../../../components/EmailComposer';
 import SearchSelect from '../../../components/SearchSelect';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Boxes, Factory, CheckCircle } from 'lucide-react';
+import StockAllocationPicker from './StockAllocationPicker';
 
 export function AdvancePaymentModal({
   isOpen, onClose, order, formatCurrency,
@@ -284,71 +285,132 @@ export function BalancePaymentModal({
   );
 }
 
+// #3 Fulfil Milling Demand — two options in one modal: reserve existing finished
+// stock (Option 1) and/or create a milling order for whatever's left (Option 2).
+// The milling raw qty auto-targets the SHORTFALL (order − already reserved); when
+// stock fully covers the order, Option 2 is replaced by "Proceed to Documentation".
+const YIELD = 0.75;
+function FulfilStat({ label, value, tone }) {
+  return (
+    <div className="text-center">
+      <p className="text-[11px] uppercase tracking-wide text-gray-400">{label}</p>
+      <p className={`text-sm font-bold ${tone || 'text-gray-900'}`}>{value}</p>
+    </div>
+  );
+}
 export function MillingDemandModal({
   isOpen, onClose, order,
   millingRawQty, setMillingRawQty,
   millingSupplier, setMillingSupplier,
   suppliersList,
   onConfirm,
+  allocatedMT = 0,          // finished MT already reserved from stock
+  onAllocated,              // called after a reservation (parent refetches)
+  onSourceFromStock,        // called to skip milling when fully covered
+  addToast,
 }) {
+  const requiredMT = parseFloat(order.qtyMT) || 0;
+  const remainingMT = Math.max(0, Math.round((requiredMT - (parseFloat(allocatedMT) || 0)) * 1000) / 1000);
+  const fullyCovered = remainingMT <= 0.0001;
+  const rawTouched = useRef(false);
+
+  // Keep the milling raw-qty defaulted to the shortfall (grossed up for yield)
+  // until the user manually edits it, so "only the remaining qty is milled".
+  useEffect(() => {
+    if (!isOpen) { rawTouched.current = false; return; }
+    if (!rawTouched.current) {
+      setMillingRawQty(remainingMT > 0 ? Math.ceil((remainingMT / YIELD) * 100) / 100 : 0);
+    }
+  }, [isOpen, remainingMT]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Create Milling Demand" size="md">
-      <div className="space-y-4">
-        <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm text-gray-600">
-          Export Order: <span className="font-medium text-gray-900">{order.id}</span> &mdash; {order.qtyMT} MT finished rice required
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Rice Type</label>
-          <div className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-900">
-            {order.productName || '—'}
+    <Modal isOpen={isOpen} onClose={onClose} title="Fulfil Milling Demand" size="lg">
+      <div className="space-y-5">
+        {/* Fulfilment summary */}
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+          <p className="text-sm text-gray-600 mb-2">
+            Export Order <span className="font-medium text-gray-900">{order.id}</span> — {requiredMT} MT {order.productName || 'finished rice'} required
+          </p>
+          <div className="grid grid-cols-3 gap-2">
+            <FulfilStat label="Required" value={`${requiredMT} MT`} />
+            <FulfilStat label="From stock" value={`${(parseFloat(allocatedMT) || 0).toFixed(2)} MT`} tone="text-emerald-700" />
+            <FulfilStat label="To mill" value={`${remainingMT.toFixed(2)} MT`} tone={fullyCovered ? 'text-emerald-700' : 'text-amber-600'} />
           </div>
-          <p className="text-xs text-gray-400 mt-1">From this export order — the batch and its output lots inherit this variety.</p>
         </div>
+
+        {/* Option 1 — Fulfil from Existing Inventory */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Required Packing</label>
-          <div className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-900">
-            {order.packingType === 'container'
-              ? 'Bulk container — no bags'
-              : order.packingType === 'jumbo'
-                ? `1,200 kg jumbo FIBC${order.bagMaterial ? ` · ${order.bagMaterial}` : ''}${order.palletized ? ' · palletized' : ''}`
-                : `${order.bagSizeKg ? `${order.bagSizeKg} kg` : 'Retail'} bags${order.bagMaterial ? ` · ${order.bagMaterial}` : ''}${order.masterBagSizeKg ? ` · ${order.masterBagSizeKg} kg master` : ''}${order.palletized ? ' · palletized' : ''}`}
+          <div className="flex items-center gap-2 mb-2">
+            <Boxes className="w-4 h-4 text-emerald-600" />
+            <h4 className="text-sm font-semibold text-gray-800">Option 1 — Fulfil from Existing Inventory</h4>
           </div>
-          <p className="text-xs text-gray-400 mt-1">What the export customer requires — the mill packs the finished rice to this spec.</p>
+          <p className="text-xs text-gray-400 mb-2">Reserve available finished stock against this order. Reserved stock is held (deducted when the order ships) and reduces what needs milling.</p>
+          {fullyCovered ? (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 flex items-center gap-2">
+              <CheckCircle className="w-4 h-4" /> Order is fully covered by reserved stock — no milling needed.
+            </div>
+          ) : (
+            <StockAllocationPicker
+              orderId={order.dbId || order.id}
+              orderProductId={order.productId}
+              orderProductName={order.productName}
+              remainingNeededKg={remainingMT * 1000}
+              onAllocated={onAllocated}
+              addToast={addToast}
+              compact
+            />
+          )}
         </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Raw Qty Required (MT)</label>
-          <input
-            type="number"
-            value={millingRawQty}
-            onChange={e => setMillingRawQty(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-          />
-          <p className="text-xs text-gray-400 mt-1">Estimated at 75% milling yield</p>
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Supplier</label>
-          <SearchSelect
-            value={millingSupplier}
-            onChange={setMillingSupplier}
-            options={(suppliersList || []).map(s => ({ value: s.id, label: s.name, sub: s.location || s.type || '' }))}
-            placeholder="Type to search supplier or leave for mill to decide..."
-          />
-          <p className="text-xs text-gray-400 mt-1">Optional — mill can assign the supplier later</p>
-        </div>
-        <div className="flex items-center justify-end gap-3 pt-2">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            Create Milling Batch
-          </button>
-        </div>
+
+        {/* Option 2 — Create New Milling Order (or proceed, if fully covered) */}
+        {fullyCovered ? (
+          <div className="border-t border-gray-100 pt-4 flex items-center justify-between gap-3">
+            <p className="text-xs text-gray-500">Nothing left to mill. Move the order straight to documentation.</p>
+            <div className="flex items-center gap-3">
+              <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">Close</button>
+              <button onClick={onSourceFromStock} className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700">
+                <CheckCircle className="w-4 h-4" /> Proceed to Documentation
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="border-t border-gray-100 pt-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Factory className="w-4 h-4 text-blue-600" />
+              <h4 className="text-sm font-semibold text-gray-800">Option 2 — Create Milling Order for the remaining {remainingMT.toFixed(2)} MT</h4>
+            </div>
+            <div className="grid sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Rice Type</label>
+                <div className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-900">{order.productName || '—'}</div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Raw Qty Required (MT)</label>
+                <input
+                  type="number"
+                  value={millingRawQty}
+                  onChange={e => { rawTouched.current = true; setMillingRawQty(e.target.value); }}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                />
+                <p className="text-xs text-gray-400 mt-1">Defaults to the {remainingMT.toFixed(2)} MT shortfall at 75% yield</p>
+              </div>
+            </div>
+            <div className="mt-3">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Supplier</label>
+              <SearchSelect
+                value={millingSupplier}
+                onChange={setMillingSupplier}
+                options={(suppliersList || []).map(s => ({ value: s.id, label: s.name, sub: s.location || s.type || '' }))}
+                placeholder="Type to search supplier or leave for mill to decide..."
+              />
+              <p className="text-xs text-gray-400 mt-1">Optional — mill can assign the supplier later</p>
+            </div>
+            <div className="flex items-center justify-end gap-3 pt-4">
+              <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+              <button onClick={onConfirm} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">Create Milling Batch</button>
+            </div>
+          </div>
+        )}
       </div>
     </Modal>
   );
