@@ -528,7 +528,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   const [form, setForm] = useState({
     customer_id: '', buyer_name: '', buyer_phone: '',
     payment_mode: 'cash', paid_amount: '', collection_location: 'Mill', bank_account_id: '', cheque_no: '', due_date: '',
-    vehicle_no: '', driver_name: '', notes: '',
+    vehicle_no: '', driver_name: '', notes: '', gate_pass_no: '',
   });
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
   const [step, setStep] = useState(1); // 1=Buyer & Items, 2=Payment
@@ -627,7 +627,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   const grandTotal = cart.reduce((s, c) => s + c.total, 0) + rpPackagingCharge + rpLabourTotal;
 
   function reset() {
-    setForm({ customer_id: '', buyer_name: '', buyer_phone: '', payment_mode: 'cash', paid_amount: '', collection_location: 'Mill', bank_account_id: '', cheque_no: '', due_date: '', vehicle_no: '', driver_name: '', notes: '' });
+    setForm({ customer_id: '', buyer_name: '', buyer_phone: '', payment_mode: 'cash', paid_amount: '', collection_location: 'Mill', bank_account_id: '', cheque_no: '', due_date: '', vehicle_no: '', driver_name: '', notes: '', gate_pass_no: '' });
     setCart([]); setLine(EMPTY_LINE); setTag('All'); setStep(1);
     setRepack({ enabled: false, bag_source: 'none', packaging_item_id: '', original_bag_size_kg: '', original_bag_count: '', new_bag_size_kg: '', new_bag_count: '', bag_rate: '', labour_enabled: false, labour_mode: 'per_bag', labour_rate: '', packing_loss_kg: '', final_dispatched_kg: '', notes: '' });
   }
@@ -651,6 +651,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
         payment_reference: effectiveMode === 'cheque' ? (form.cheque_no.trim() || null) : null,
         due_date: (effectiveMode === 'cheque' || effectiveMode === 'credit') ? (form.due_date || null) : null,
         vehicle_no: form.vehicle_no || null, driver_name: form.driver_name || null, notes: form.notes || null,
+        gate_pass_no: form.gate_pass_no?.trim() || null, // #6
         items: [
           ...cart.map(c => c.isMillItem ? ({
             mill_item_id: Number(c.mill_item_id), item_name: c.item_name,
@@ -685,6 +686,8 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
       addToast(pending
         ? `Sale ${res?.data?.group_no || ''} recorded — pending Mill Manager/Owner confirmation before stock & revenue post`
         : `Sale ${res?.data?.group_no || ''} created — ${cnt} item${cnt > 1 ? 's' : ''}, ${fmtPKR(grandTotal)}`, 'success');
+      // #6 warn (non-blocking) if the gate pass number is already used elsewhere.
+      if (res?.data?.gate_pass_duplicate) addToast(`Gate Pass ${res?.data?.gate_pass_no} is already used on another sale.`, 'warning');
       if (isWalkIn && registerCustomer && form.buyer_name.trim()) {
         try {
           const r = await adminApi.customersQuickAdd({ name: form.buyer_name.trim(), phone: form.buyer_phone || null });
@@ -1111,8 +1114,13 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
               <input value={form.driver_name} onChange={e => set('driver_name', e.target.value)} className={INPUT} placeholder="Driver name" />
             </div>
             <div>
-              <label className={LABEL}>Notes</label>
-              <input value={form.notes} onChange={e => set('notes', e.target.value)} className={INPUT} placeholder="Sale notes" />
+              <label className={LABEL}>Gate Pass No</label>
+              <input value={form.gate_pass_no} onChange={e => set('gate_pass_no', e.target.value)} className={INPUT} placeholder="e.g. GP-00123" />
+              <p className="text-[11px] text-gray-400 mt-1">Prints on the invoice + gate pass; tags the inventory movement &amp; customer ledger.</p>
+            </div>
+            <div>
+              <label className={LABEL}>Internal Notes</label>
+              <input value={form.notes} onChange={e => set('notes', e.target.value)} className={INPUT} placeholder="Internal notes (not on invoice)" />
             </div>
           </div>
         </div>

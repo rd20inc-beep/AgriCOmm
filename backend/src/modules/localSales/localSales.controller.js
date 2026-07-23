@@ -91,7 +91,7 @@ async function postSaleSideEffects(trx, saleRows, { userId } = {}) {
       await inventoryService.postMovement(trx, {
         movementType: 'local_sale', lotId: lot.id, qty: qtyKg,
         fromWarehouseId: lot.warehouse_id, sourceEntity: lot.entity, linkedRef: sale.sale_no,
-        notes: `Local sale ${sale.sale_no} to ${sale.buyer_name || 'customer'}`,
+        notes: `Local sale ${sale.sale_no} to ${sale.buyer_name || 'customer'}${sale.gate_pass_no ? ` · Gate Pass ${sale.gate_pass_no}` : ''}`,
         costPerUnit: parseFloat(lot.cost_per_unit) || 0, currency: 'PKR', userId,
       });
       await trx('inventory_lots').where({ id: sale.lot_id }).update({ sold_weight_kg: (parseFloat(lot.sold_weight_kg) || 0) + qtyKg });
@@ -121,7 +121,7 @@ async function postSaleSideEffects(trx, saleRows, { userId } = {}) {
         expected_amount: sale.total_amount, received_amount: paid, outstanding: dueAmt,
         due_date: sale.due_date || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         status: paid > 0 ? 'Partial' : 'Pending', currency: 'PKR', aging: 0,
-        notes: `Local sale ${sale.sale_no} — ${sale.buyer_name || 'walk-in'} — ${sale.item_name}`,
+        notes: `Local sale ${sale.sale_no} — ${sale.buyer_name || 'walk-in'} — ${sale.item_name}${sale.gate_pass_no ? ` · Gate Pass ${sale.gate_pass_no}` : ''}`,
       });
     }
 
@@ -301,6 +301,7 @@ async function assembleInvoice(id, includeAdmin = false) {
       total: grandTotal, received: groupReceived, outstanding,
       dueDate: base.due_date || null, overdue,
       createdByName: base.created_by_name || null, notes: base.notes || null,
+      gatePassNo: base.gate_pass_no || null,
     },
     items,
     payments: timeline,
@@ -483,6 +484,7 @@ module.exports = {
           this.where('ls.sale_no', 'ilike', `%${search}%`)
             .orWhere('ls.item_name', 'ilike', `%${search}%`)
             .orWhere('ls.buyer_name', 'ilike', `%${search}%`)
+            .orWhere('ls.gate_pass_no', 'ilike', `%${search}%`) // #6 searchable by gate pass
             .orWhere('c.name', 'ilike', `%${search}%`);
         });
       }
@@ -531,7 +533,9 @@ module.exports = {
         payment_mode = 'cash', paid_amount, payment_reference,
         collection_location, bank_account_id, due_date,
         vehicle_no, driver_name, dispatched = true, notes,
+        gate_pass_no, // #6 dedicated gate pass number (separate from Internal Notes)
       } = req.body;
+      const gatePassNo = gate_pass_no != null && String(gate_pass_no).trim() ? String(gate_pass_no).trim() : null;
 
       // One sale can carry several inventory items (multi-item). Accept items[]
       // or fall back to the legacy single top-level item fields (backward compat).
@@ -673,6 +677,7 @@ module.exports = {
             vehicle_no: vehicle_no || null, driver_name: driver_name || null,
             dispatched: !!dispatched, dispatch_date: dispatched ? (sale_date || new Date().toISOString().split('T')[0]) : null,
             notes: notes || null,
+            gate_pass_no: gatePassNo,
             status: autoConfirm ? 'Completed' : 'Pending',
             confirmed_by: autoConfirm ? (req.user?.id || null) : null,
             confirmed_at: autoConfirm ? trx.fn.now() : null,
@@ -721,11 +726,23 @@ module.exports = {
         return { groupNo, sales: created, autoConfirm };
       });
 
+      // #6 Duplicate gate-pass warning (non-blocking): flag if this number is
+      // already on another sale group so the caller can surface a warning.
+      let gatePassDuplicate = false;
+      if (gatePassNo) {
+        const dup = await db('local_sales')
+          .where('gate_pass_no', gatePassNo)
+          .whereNot('sale_group_no', result.groupNo)
+          .first('id');
+        gatePassDuplicate = !!dup;
+      }
+
       return res.status(201).json({
         success: true,
         data: {
           sale: result.sales[0], sales: result.sales, group_no: result.groupNo, item_count: result.sales.length,
           status: result.autoConfirm ? 'Completed' : 'Pending', pending: !result.autoConfirm,
+          gate_pass_no: gatePassNo, gate_pass_duplicate: gatePassDuplicate,
         },
       });
     } catch (err) {
