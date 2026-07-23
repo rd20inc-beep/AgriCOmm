@@ -1010,6 +1010,7 @@ COL inventory_lots.received_net_weight_kg:numeric:NULL
 COL inventory_lots.record_version:integer:NOT NULL
 COL inventory_lots.reserved_against:character varying:NULL
 COL inventory_lots.reserved_qty:numeric:NOT NULL
+COL inventory_lots.sample_id:integer:NULL
 COL inventory_lots.server_ts:timestamp with time zone:NULL
 COL inventory_lots.service_batch_id:integer:NULL
 COL inventory_lots.sold_weight_kg:numeric:NOT NULL
@@ -2164,6 +2165,34 @@ COL reprocessing_batches.reprocess_no:character varying:NOT NULL
 COL reprocessing_batches.status:character varying:NOT NULL
 COL reprocessing_batches.updated_at:timestamp with time zone:NOT NULL
 COL reprocessing_batches.wastage_mt:numeric:NOT NULL
+COL rice_samples.analysis_json:jsonb:NULL
+COL rice_samples.analyzed_at:timestamp with time zone:NULL
+COL rice_samples.attachment_url:text:NULL
+COL rice_samples.bag_weight_kg:numeric:NULL
+COL rice_samples.bags:integer:NULL
+COL rice_samples.claimed_grade:character varying:NULL
+COL rice_samples.converted_at:timestamp with time zone:NULL
+COL rice_samples.converted_lot_id:integer:NULL
+COL rice_samples.created_at:timestamp with time zone:NOT NULL
+COL rice_samples.created_by:integer:NULL
+COL rice_samples.crop_year:character varying:NULL
+COL rice_samples.decided_by:integer:NULL
+COL rice_samples.decision_notes:text:NULL
+COL rice_samples.final_analysis_json:jsonb:NULL
+COL rice_samples.final_analyzed_at:timestamp with time zone:NULL
+COL rice_samples.id:integer:NOT NULL
+COL rice_samples.offered_qty_kg:numeric:NULL
+COL rice_samples.offered_rate_per_kg:numeric:NULL
+COL rice_samples.origin_area:character varying:NULL
+COL rice_samples.product_id:integer:NULL
+COL rice_samples.remarks:text:NULL
+COL rice_samples.sample_date:date:NOT NULL
+COL rice_samples.sample_no:character varying:NOT NULL
+COL rice_samples.status:character varying:NOT NULL
+COL rice_samples.supplier_id:integer:NULL
+COL rice_samples.supplier_sample_ref:character varying:NULL
+COL rice_samples.updated_at:timestamp with time zone:NOT NULL
+COL rice_samples.variety:character varying:NULL
 COL risk_scores.calculated_at:timestamp with time zone:NULL
 COL risk_scores.created_at:timestamp with time zone:NULL
 COL risk_scores.currency:character varying:NULL
@@ -2955,6 +2984,7 @@ CON inventory_lots.inventory_lots_product_id_foreign(f)
 CON inventory_lots.inventory_lots_purchase_invoice_id_foreign(f)
 CON inventory_lots.inventory_lots_qty_nonneg_chk(c)
 CON inventory_lots.inventory_lots_reserved_nonneg_chk(c)
+CON inventory_lots.inventory_lots_sample_id_foreign(f)
 CON inventory_lots.inventory_lots_service_batch_id_foreign(f)
 CON inventory_lots.inventory_lots_status_chk(c)
 CON inventory_lots.inventory_lots_supplier_id_foreign(f)
@@ -3427,6 +3457,14 @@ CON reprocessing_batches.reprocessing_batches_original_batch_id_foreign(f)
 CON reprocessing_batches.reprocessing_batches_pkey(p)
 CON reprocessing_batches.reprocessing_batches_reprocess_no_unique(u)
 CON reprocessing_batches.reprocessing_batches_status_check(c)
+CON rice_samples.chk_rice_samples_status_valid(c)
+CON rice_samples.rice_samples_converted_lot_id_foreign(f)
+CON rice_samples.rice_samples_created_by_foreign(f)
+CON rice_samples.rice_samples_decided_by_foreign(f)
+CON rice_samples.rice_samples_pkey(p)
+CON rice_samples.rice_samples_product_id_foreign(f)
+CON rice_samples.rice_samples_sample_no_unique(u)
+CON rice_samples.rice_samples_supplier_id_foreign(f)
 CON risk_scores.chk_risk_scores_risk_score_range(c)
 CON risk_scores.risk_scores_pkey(p)
 CON role_permissions.role_permissions_permission_id_foreign(f)

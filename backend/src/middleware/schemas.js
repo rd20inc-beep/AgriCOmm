@@ -223,6 +223,8 @@ const createPurchaseLot = Joi.object({
   warehouse_id: Joi.number().integer().positive().allow(null),
   product_id: Joi.number().integer().positive().allow(null),
   lot_no: Joi.string().max(50).allow('', null),
+  // #7: back-link to the rice sample this lot was converted from (optional).
+  sample_id: Joi.number().integer().positive().allow(null),
   supplier_id: Joi.number().integer().positive().allow(null),
   broker_id: Joi.number().integer().positive().allow(null),
   transport_vendor_id: Joi.number().integer().positive().allow(null, ''),

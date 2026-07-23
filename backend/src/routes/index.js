@@ -17,6 +17,7 @@ router.use('/export-orders', authenticate, require('./exportOrders'));
 router.use('/quotations', authenticate, require('../modules/quotations/quotations.routes'));
 router.use('/printed-bag-orders', authenticate, require('../modules/exportOrders/printedBags.routes'));
 router.use('/purchase-requirements', authenticate, require('../modules/purchaseRequirements/purchaseRequirements.routes'));
+router.use('/sample-analysis', authenticate, require('../modules/sampleAnalysis/sampleAnalysis.routes'));
 router.use('/milling', authenticate, require('./milling'));
 router.use('/mill-store', authenticate, require('./millStore'));
 router.use('/inventory', authenticate, require('./inventory'));

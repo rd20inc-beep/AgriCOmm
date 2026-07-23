@@ -49,6 +49,7 @@ const MillingDashboard = lazyWithReload(() => import('./modules/milling/pages/Mi
 const ServiceMilling = lazyWithReload(() => import('./modules/milling/pages/ServiceMilling'));
 const ServiceInvoices = lazyWithReload(() => import('./modules/milling/pages/ServiceInvoices'));
 const PurchaseRequirements = lazyWithReload(() => import('./modules/purchaseRequirements/pages/PurchaseRequirements'));
+const SampleAnalysis = lazyWithReload(() => import('./modules/sampleAnalysis/pages/SampleAnalysis'));
 const MillHomeDashboard = lazyWithReload(() => import('./modules/milling/pages/MillHomeDashboard'));
 const StoreOverview = lazyWithReload(() => import('./modules/millStore/pages/StoreOverview'));
 const NewPurchase = lazyWithReload(() => import('./modules/millStore/pages/NewPurchase'));
@@ -223,6 +224,7 @@ function MillRoutes() {
         <Route path="/lot-inventory" element={<LotInventory />} />
         <Route path="/stock-summary" element={<StockSummary />} />
         <Route path="/purchase-requirements" element={<PurchaseRequirements />} />
+        <Route path="/sample-analysis" element={<SampleAnalysis />} />
         <Route path="/stock-count" element={<StockCount />} />
         <Route path="/lot-inventory/:id/purchase-invoice" element={<PurchaseInvoiceView />} />
         <Route path="/lot-inventory/:id" element={<LotDetail />} />
@@ -277,6 +279,7 @@ function StandardRoutes() {
         <Route path="/stock-adjustments" element={<ProtectedRoute module="inventory" action="view"><StockAdjustments /></ProtectedRoute>} />
         <Route path="/milling/:id" element={<ProtectedRoute module="milling" action="view"><MillingBatchDetail /></ProtectedRoute>} />
         <Route path="/quality" element={<ProtectedRoute module="milling" action="view"><QualityComparison /></ProtectedRoute>} />
+        <Route path="/sample-analysis" element={<ProtectedRoute anyOf={[{ module: 'inventory', action: 'view' }, { module: 'milling', action: 'view' }]}><SampleAnalysis /></ProtectedRoute>} />
         <Route path="/transfer" element={<ProtectedRoute module="inventory" action="view"><InternalTransfer /></ProtectedRoute>} />
         <Route path="/inventory" element={<ProtectedRoute module="inventory" action="view"><Inventory /></ProtectedRoute>} />
         <Route path="/lot-inventory" element={<ProtectedRoute module="inventory" action="view"><LotInventory /></ProtectedRoute>} />

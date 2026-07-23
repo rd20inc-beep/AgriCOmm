@@ -808,6 +808,8 @@ module.exports = {
           qty: netWeightKg, // legacy field in MT
           unit: 'MT',
           status: 'Available',
+          // #7 back-link to the originating rice sample (when converted).
+          sample_id: req.body.sample_id || null,
           // Supplier
           supplier_id: supplier_id || null,
           broker_id: broker_id || null,
