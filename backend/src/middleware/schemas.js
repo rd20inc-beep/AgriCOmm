@@ -274,6 +274,9 @@ const createPurchaseLot = Joi.object({
     weight_kg: Joi.number().min(0).allow(null, ''),
     total_bags: Joi.number().integer().min(0).allow(null, ''),
     bag_size_kg: Joi.number().min(0).allow(null, ''),
+    // #4 intake checkpoints: declared weight_kg → weighbridge → accepted.
+    weighbridge_kg: Joi.number().min(0).allow(null, ''),
+    accepted_kg: Joi.number().min(0).allow(null, ''),
     arrival_date: Joi.date().iso().allow(null, ''),
     notes: Joi.string().allow(null, ''),
     // Per-truck quality at intake — free-form object, whitelisted server-side.

@@ -1777,6 +1777,7 @@ COL milling_quality_samples.price_per_mt:numeric:NULL
 COL milling_quality_samples.purity:numeric:NULL
 COL milling_quality_samples.short_grain_pct:numeric:NULL
 COL milling_quality_samples.updated_at:timestamp with time zone:NULL
+COL milling_vehicle_arrivals.accepted_kg:numeric:NULL
 COL milling_vehicle_arrivals.arrival_date:date:NULL
 COL milling_vehicle_arrivals.bag_size_kg:numeric:NULL
 COL milling_vehicle_arrivals.batch_id:integer:NULL
@@ -1790,6 +1791,7 @@ COL milling_vehicle_arrivals.notes:text:NULL
 COL milling_vehicle_arrivals.quality_json:jsonb:NULL
 COL milling_vehicle_arrivals.total_bags:integer:NULL
 COL milling_vehicle_arrivals.vehicle_no:character varying:NOT NULL
+COL milling_vehicle_arrivals.weighbridge_kg:numeric:NULL
 COL milling_vehicle_arrivals.weight_kg:numeric:NULL
 COL mills.capacity_mt_per_day:numeric:NULL
 COL mills.contact_person:character varying:NULL
