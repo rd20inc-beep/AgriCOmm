@@ -276,8 +276,8 @@ function renderProformaInvoice(doc) {
   const totalQty = lines.reduce((s, l) => s + (l.qtyMT || 0), 0);
   const totalAmt = lines.reduce((s, l) => s + (l.amount || 0), 0);
   return `
-    <div style="font-family: Arial, sans-serif; font-size:11px; width:100%; max-width:1040px; margin:0 auto; padding:16px;">
-      ${renderHeader(company)}
+    <div style="font-family: Arial, sans-serif; font-size:11px; width:100%; max-width:1040px; margin:0 auto; padding:20px; color:#111;">
+      ${renderComplianceHeader(company)}
       <h2 style="text-align:center; font-size:16px; margin:10px 0;">PROFORMA INVOICE</h2>
 
       <table style="width:100%; margin-bottom:15px;">
@@ -374,20 +374,16 @@ function renderProformaInvoice(doc) {
       </div>`;
       })()}
 
-      <div style="margin-top:30px; display:flex; justify-content:space-between;">
-        <div>
-          <div style="border-top:1px solid #333; width:200px; margin-top:40px; padding-top:4px; text-align:center;">
-            ${company.name}<br/>Proprietor
-          </div>
+      <div style="margin-top:48px; display:flex; justify-content:space-between; gap:24px;">
+        <div style="text-align:center; width:240px;">
+          <div style="border-top:1px solid #333; padding-top:4px; font-size:11px;"><b>${company.name}</b><br/>Proprietor<br/><span style="color:#666;">(Authorised Signature &amp; Stamp)</span></div>
         </div>
-        <div>
-          <div style="border-top:1px solid #333; width:200px; margin-top:40px; padding-top:4px; text-align:center;">
-            ${buyer.name}
-          </div>
+        <div style="text-align:center; width:240px;">
+          <div style="border-top:1px solid #333; padding-top:4px; font-size:11px;"><b>${buyer.name}</b><br/>Buyer / Consignee<br/><span style="color:#666;">(Authorised Signature &amp; Stamp)</span></div>
         </div>
       </div>
 
-      ${renderCompanyFooter(company)}
+      ${renderComplianceFooter(company)}
     </div>`;
 }
 
@@ -849,8 +845,8 @@ function renderSalesContract(doc) {
     : `${lines[0]?.description || ''}<br/>Packed in ${lines[0]?.bagSizeKg || order.bagSizeKg || 50} kg Strong PP bags. Sound, loyal and merchantable, fit for human consumption at any stage. Free from alive and dead weevils/insects. GMO Free. Latest crop.`;
 
   return `
-    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px;">
-      ${renderHeader(company)}
+    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px; color:#111;">
+      ${renderComplianceHeader(company)}
       <h2 style="text-align:center; font-size:18px; font-style:italic; margin:10px 0;">Sales Contract</h2>
 
       <table style="width:100%; font-size:12px; line-height:1.8;">
@@ -885,15 +881,15 @@ function renderSalesContract(doc) {
 
       <p style="margin-top:15px; font-size:11px;">This contract shall be signed by the buyer and returned. Failure to do so and buyer's retention of the contract shall constitute in acceptance of terms and conditions hereof.</p>
 
-      <div style="margin-top:40px; display:flex; justify-content:space-between;">
-        <div style="text-align:center; width:200px;">
-          <div style="border-top:1px solid #333; padding-top:8px;">${company.name}</div>
+      <div style="margin-top:48px; display:flex; justify-content:space-between; gap:24px;">
+        <div style="text-align:center; width:240px;">
+          <div style="border-top:1px solid #333; padding-top:4px; font-size:11px;"><b>${company.name}</b><br/>Proprietor<br/><span style="color:#666;">(Authorised Signature &amp; Stamp)</span></div>
         </div>
-        <div style="text-align:center; width:200px;">
-          <div style="border-top:1px solid #333; padding-top:8px;">${buyer.name}</div>
+        <div style="text-align:center; width:240px;">
+          <div style="border-top:1px solid #333; padding-top:4px; font-size:11px;"><b>${buyer.name}</b><br/>Buyer / Consignee<br/><span style="color:#666;">(Authorised Signature &amp; Stamp)</span></div>
         </div>
       </div>
-      ${renderCompanyFooter(company)}
+      ${renderComplianceFooter(company)}
     </div>`;
 }
 
