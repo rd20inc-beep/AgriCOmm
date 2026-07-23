@@ -581,7 +581,8 @@ export default function ExportOrderDetail() {
   const canConfirmAdvance = backendActions.canConfirmAdvance ?? (order.advanceReceived < order.advanceExpected && ['Awaiting Advance', 'Draft'].includes(order.status));
   const canStartDocs = backendActions.canStartDocs ?? (order.status === 'In Milling');
   const canRequestBalance = backendActions.canRequestBalance ?? (order.status === 'Awaiting Balance' && order.balanceReceived < order.balanceExpected);
-  const canCreateMilling = backendActions.canCreateMilling ?? (order.advanceReceived >= order.advanceExpected && !order.millingOrderId && !['Draft', 'Closed', 'Cancelled'].includes(order.status));
+  // #2 decouple: milling no longer waits for the advance (tracked on financialStatus); allowed once the order is confirmed (out of Draft).
+  const canCreateMilling = backendActions.canCreateMilling ?? (!order.millingOrderId && !['Draft', 'Closed', 'Cancelled'].includes(order.status));
   const canUpdateShipment = backendActions.canUpdateShipment ?? ['Ready to Ship', 'Shipped'].includes(order.status);
   // Lots reserved/allocated to this order — offered as the container lot picker
   // in the shipment editor (P4c). Deduped by lot id.
@@ -683,12 +684,18 @@ export default function ExportOrderDetail() {
         </div>
       )}
       {canConfirmAdvance && order.status === 'Awaiting Advance' && (
-        <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex items-center justify-between">
+        <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-semibold text-amber-800">Waiting for Advance Payment</p>
+            <p className="text-sm font-semibold text-amber-800">Advance Pending — operational work can proceed</p>
             <p className="text-xs text-amber-600">Expected: {formatCurrency(order.advanceExpected)} | Received: {formatCurrency(order.advanceReceived)} | Outstanding: {formatCurrency(order.advanceExpected - order.advanceReceived)}</p>
+            <p className="text-xs text-amber-700 mt-1">You can start milling, documentation and packing now. The advance still needs Finance/Owner confirmation before final dispatch.</p>
           </div>
-          <button onClick={openAdvanceModal} className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700">Confirm Advance Received</button>
+          <div className="flex items-center gap-2 shrink-0">
+            {canCreateMilling && !order.millingOrderId && (
+              <button onClick={openMillingModal} className="px-4 py-2 bg-white border border-amber-400 text-amber-800 rounded-lg text-sm font-medium hover:bg-amber-100">Create Milling Batch</button>
+            )}
+            <button onClick={openAdvanceModal} className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700">Confirm Advance Received</button>
+          </div>
         </div>
       )}
       {order.status === 'Advance Received' && canCreateMilling && (

@@ -817,6 +817,9 @@ const exportOrderController = {
             balance_expected: balanceExpected,
             advance_received: 0,
             balance_received: 0,
+            // #2 financial track (separate from operational status): 0%-advance
+            // orders need no confirmation; otherwise the advance starts unentered.
+            financial_status: advanceExpected === 0 ? 'Not Required' : 'Advance Not Entered',
             shipment_eta: shipment_eta || null,
             source: source || 'Internal Mill',
             status: effectiveStatus,
@@ -1983,6 +1986,10 @@ const exportOrderController = {
           advance_date: payment_date || trx.fn.now(),
           advance_fx_rate: isPkrOrder ? null : effectiveFxRate,
           advance_received_pkr: totalAdvancePkr,
+          // #2 financial track: a posted advance confirmation resolves the
+          // financial_status — fully received → Confirmed (dispatch unlocked),
+          // otherwise Partially Confirmed. (Operational status is untouched.)
+          financial_status: newAdvanceReceived >= expectedAdvance - MONEY_EPSILON ? 'Confirmed' : 'Partially Confirmed',
           updated_at: trx.fn.now(),
         });
 
@@ -2381,6 +2388,17 @@ const exportOrderController = {
           notes: notes || `${isAdvance ? 'Advance' : 'Balance'} receipt for ${order.order_no} — pending Finance confirmation`,
           created_by: req.user?.id || null,
         }).returning('*');
+
+        // #2 financial track: an advance receipt awaiting Finance confirmation
+        // moves the order's financial_status to 'Pending Confirmation' (visible to
+        // Finance/Owner) WITHOUT touching the operational status — operational work
+        // keeps flowing. Balance receipts don't affect the advance track.
+        if (isAdvance) {
+          await trx('export_orders').where({ id: order.id }).update({
+            financial_status: 'Pending Confirmation',
+            updated_at: trx.fn.now(),
+          });
+        }
         return { order, row };
       });
 
@@ -2454,6 +2472,19 @@ const exportOrderController = {
         confirmed_at: db.fn.now(),
         updated_at: db.fn.now(),
       });
+
+      // #2 financial track: a rejected ADVANCE receipt marks the order's
+      // financial_status 'Rejected' (visible + audited; keeps dispatch blocked).
+      // Resolve the order via the receivable; balance rejections don't touch it.
+      const recv = pending.linked_receivable_id
+        ? await db('receivables').where({ id: pending.linked_receivable_id }).first()
+        : null;
+      if (recv && recv.order_id && recv.type !== 'Balance') {
+        await db('export_orders').where({ id: recv.order_id }).update({
+          financial_status: 'Rejected',
+          updated_at: db.fn.now(),
+        });
+      }
       return res.json({ success: true, message: 'Receipt marked as not received.' });
     } catch (err) {
       console.error('rejectExportReceipt error:', err);

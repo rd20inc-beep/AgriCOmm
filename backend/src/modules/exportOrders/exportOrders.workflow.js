@@ -5,7 +5,11 @@ const accountingService = require('../accounting/accounting.service');
 
 const STATUS_TRANSITIONS = {
   'Draft': ['Awaiting Advance', 'Advance Received'],
-  'Awaiting Advance': ['Advance Received'],
+  // #2 decouple: an order awaiting its advance may proceed with OPERATIONAL work
+  // (procurement / milling) while the advance sits pending Finance confirmation.
+  // The financial track lives on `financial_status`; only final dispatch (Shipped)
+  // is gated on it (see ensureTransitionAllowed).
+  'Awaiting Advance': ['Advance Received', 'Procurement Pending', 'In Milling'],
   'Advance Received': ['Procurement Pending', 'In Milling'],
   'Procurement Pending': ['In Milling'],
   'In Milling': ['Docs In Preparation'],
@@ -61,7 +65,11 @@ function getAllowedActions(order) {
     canConfirmAdvance: ['Draft', 'Awaiting Advance'].includes(order.status) && advanceReceived < advanceExpected,
     canStartDocs: order.status === 'In Milling',
     canRequestBalance: order.status === 'Awaiting Balance' && balanceReceived < balanceExpected,
-    canCreateMilling: advanceReceived >= advanceExpected && !order.milling_order_id && !isTerminal,
+    // #2 decouple: milling no longer waits for the advance to be fully received.
+    // Once the order is out of Draft (i.e. confirmed) and not terminal / already
+    // milling, operational milling can start. The advance is tracked separately on
+    // financial_status and only blocks final dispatch.
+    canCreateMilling: !isTerminal && !order.milling_order_id && order.status !== 'Draft',
     canUpdateShipment: ['Ready to Ship', 'Shipped'].includes(order.status),
     canPutOnHold: !isTerminal,
     canCloseOrder: order.status === 'Arrived' || (order.status === 'Shipped' && balanceReceived >= balanceExpected),
@@ -86,6 +94,21 @@ async function ensureTransitionAllowed(trx, order, toStatus) {
   }
 
   if (toStatus === 'Shipped') {
+    // #2 final-dispatch financial gate: operational prep runs free while the
+    // advance is pending, but the export can't SHIP until Finance confirms the
+    // advance (or the order needs no advance). Falls back to the received-vs-
+    // expected amount for any row that predates the financial_status backfill.
+    const finOk = order.financial_status
+      ? ['Confirmed', 'Not Required'].includes(order.financial_status)
+      : settledAmount(order.advance_received) >= settledAmount(order.advance_expected);
+    if (!finOk) {
+      const err = new Error(
+        `Cannot ship: the advance payment is not yet confirmed by Finance (financial status: ${order.financial_status || 'pending'}).`
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+
     const docsComplete = await documentService.isDocumentationComplete('export_order', order.id);
     if (!docsComplete) {
       const err = new Error('Cannot ship: required export documents are not all approved. Check document checklist.');
@@ -356,6 +379,20 @@ async function maybePromoteAfterBalance(trx, { order, newBalanceReceived, userId
   return { changed: true, order: updatedOrder, balanceFull };
 }
 
+// #2 financial-status track. Resolve the advance-confirmation state of an order
+// from its amounts. Used to backfill / recompute after a confirm; the explicit
+// 'Pending Confirmation' state is stamped by recordExportReceipt (it can't be
+// derived from the order alone — it lives on the pending payments row).
+// Values mirror the CHECK in migration 276 + the client's Financial Status list.
+function deriveFinancialStatus(order) {
+  const expected = settledAmount(order.advance_expected);
+  const received = settledAmount(order.advance_received);
+  if (expected <= 0) return 'Not Required';
+  if (received >= expected) return 'Confirmed';
+  if (received > 0) return 'Partially Confirmed';
+  return 'Advance Not Entered';
+}
+
 module.exports = {
   STATUS_TRANSITIONS,
   STATUS_STEP,
@@ -366,6 +403,7 @@ module.exports = {
   getStepForStatus,
   canTransition,
   transitionOrder,
+  deriveFinancialStatus,
   maybePromoteAfterDocuments,
   maybePromoteAfterAdvance,
   maybePromoteAfterBalance,

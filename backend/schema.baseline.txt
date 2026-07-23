@@ -666,6 +666,7 @@ COL export_orders.fi_date:date:NULL
 COL export_orders.fi_number:character varying:NULL
 COL export_orders.fi_number_2:character varying:NULL
 COL export_orders.fi_number_3:character varying:NULL
+COL export_orders.financial_status:character varying:NOT NULL
 COL export_orders.freight_terms:character varying:NULL
 COL export_orders.fx_gain_loss_pkr:numeric:NOT NULL
 COL export_orders.fx_rate_locked_at:timestamp with time zone:NULL
@@ -2786,6 +2787,7 @@ CON export_orders.chk_export_orders_balance_received_nonneg(c)
 CON export_orders.chk_export_orders_broken_pct_target_range(c)
 CON export_orders.chk_export_orders_currency_valid(c)
 CON export_orders.chk_export_orders_daterange(c)
+CON export_orders.chk_export_orders_financial_status_valid(c)
 CON export_orders.chk_export_orders_inventory_cogs_per_mt_pkr_nn(c)
 CON export_orders.chk_export_orders_inventory_cogs_total_pkr_nonneg(c)
 CON export_orders.chk_export_orders_master_bag_size_kg_nn(c)

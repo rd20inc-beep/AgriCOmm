@@ -178,5 +178,52 @@ describe('Workflow State Machine', () => {
         expect(actions.canPutOnHold).toBe(true);
       });
     });
+
+    // #2 decouple: operational milling no longer waits for the advance.
+    it('Awaiting Advance with UNRECEIVED advance can still create milling', () => {
+      const actions = getAllowedActions({
+        status: 'Awaiting Advance',
+        advance_received: 0,
+        advance_expected: 10000,
+        milling_order_id: null,
+      });
+      expect(actions.canCreateMilling).toBe(true);
+    });
+
+    it('Draft cannot create milling (order not yet confirmed)', () => {
+      const actions = getAllowedActions({
+        status: 'Draft', advance_received: 0, advance_expected: 10000, milling_order_id: null,
+      });
+      expect(actions.canCreateMilling).toBe(false);
+    });
+  });
+
+  // #2 decouple: an order awaiting its advance may proceed operationally.
+  describe('advance/operational decoupling', () => {
+    it('allows Awaiting Advance → In Milling', () => {
+      expect(canTransition('Awaiting Advance', 'In Milling')).toBe(true);
+    });
+    it('allows Awaiting Advance → Procurement Pending', () => {
+      expect(canTransition('Awaiting Advance', 'Procurement Pending')).toBe(true);
+    });
+    it('still rejects Awaiting Advance → Shipped (dispatch stays gated)', () => {
+      expect(canTransition('Awaiting Advance', 'Shipped')).toBe(false);
+    });
+  });
+
+  describe('deriveFinancialStatus', () => {
+    const { deriveFinancialStatus } = workflowService;
+    it('0% advance → Not Required', () => {
+      expect(deriveFinancialStatus({ advance_expected: 0, advance_received: 0 })).toBe('Not Required');
+    });
+    it('nothing received → Advance Not Entered', () => {
+      expect(deriveFinancialStatus({ advance_expected: 10000, advance_received: 0 })).toBe('Advance Not Entered');
+    });
+    it('partial received → Partially Confirmed', () => {
+      expect(deriveFinancialStatus({ advance_expected: 10000, advance_received: 4000 })).toBe('Partially Confirmed');
+    });
+    it('fully received → Confirmed', () => {
+      expect(deriveFinancialStatus({ advance_expected: 10000, advance_received: 10000 })).toBe('Confirmed');
+    });
   });
 });
