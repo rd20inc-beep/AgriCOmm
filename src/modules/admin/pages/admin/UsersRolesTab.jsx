@@ -1,8 +1,26 @@
 import { useState } from 'react';
-import { UsersRound, Plus, XCircle, CheckCircle, KeyRound, Trash2, Pencil } from 'lucide-react';
+import { UsersRound, Plus, XCircle, CheckCircle, KeyRound, Trash2, Pencil, Shield, ChevronDown, Lock, Unlock, RotateCcw, Link2, Ban } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
-import { useUsers, useCreateUser, useDeactivateUser, useActivateUser, useSetUserPassword, useDeleteUser, useUpdateUser } from '../../../../api/queries';
+import { useUsers, useCreateUser, useDeactivateUser, useActivateUser, useSetUserPassword, useDeleteUser, useUpdateUser, useSetUserStatus, useForceUserPasswordChange, useUserResetLink, useRevokeUserSessions } from '../../../../api/queries';
 import Modal from '../../components/AdminDrawer';
+
+// #9 Account lifecycle status badge colours.
+const STATUS_BADGE = {
+  active: 'bg-emerald-100 text-emerald-700',
+  invited: 'bg-blue-100 text-blue-700',
+  suspended: 'bg-amber-100 text-amber-700',
+  locked: 'bg-orange-100 text-orange-700',
+  deactivated: 'bg-red-100 text-red-700',
+};
+
+function MenuItem({ icon: Icon, label, onClick, tone }) {
+  const t = tone === 'red' ? 'text-red-600 hover:bg-red-50' : tone === 'emerald' ? 'text-emerald-700 hover:bg-emerald-50' : 'text-gray-700 hover:bg-gray-50';
+  return (
+    <button onClick={onClick} className={`w-full flex items-center gap-2 px-3 py-2 text-xs font-medium ${t}`}>
+      <Icon className="w-3.5 h-3.5" /> {label}
+    </button>
+  );
+}
 
 const ROLES = [
   { id: 1, name: 'Super Admin', color: 'bg-purple-100 text-purple-700' },
@@ -114,6 +132,24 @@ export default function UsersRolesTab() {
     }
   };
 
+  // #9 lifecycle + security
+  const statusMut = useSetUserStatus();
+  const forcePwMut = useForceUserPasswordChange();
+  const resetLinkMut = useUserResetLink();
+  const revokeMut = useRevokeUserSessions();
+  const [menuFor, setMenuFor] = useState(null); // user id whose security menu is open
+
+  const run = async (fn, ok) => { try { const r = await fn(); addToast(typeof ok === 'function' ? ok(r) : ok, 'success'); setMenuFor(null); } catch (e) { addToast(e?.data?.message || e?.message || 'Action failed', 'error'); } };
+  const setStatus = (user, status) => run(() => statusMut.mutateAsync({ id: user.id, status }), `${user.fullName} is now ${status}.`);
+  const forcePw = (user) => run(() => forcePwMut.mutateAsync({ id: user.id, force: true }), `${user.fullName} must reset their password at next sign-in.`);
+  const revoke = (user) => run(() => revokeMut.mutateAsync(user.id), `Signed out all active sessions for ${user.fullName}.`);
+  const resetLink = (user) => run(async () => {
+    const r = await resetLinkMut.mutateAsync(user.id);
+    const link = r?.data?.link ? `${window.location.origin}${r.data.link}` : '';
+    if (link && navigator.clipboard) { try { await navigator.clipboard.writeText(link); } catch { /* ignore */ } }
+    return r;
+  }, `Reset link generated for ${user.fullName} (copied to clipboard, valid 24h).`);
+
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
@@ -157,11 +193,12 @@ export default function UsersRolesTab() {
                     </span>
                   </td>
                   <td className="py-3 px-4">
-                    <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
-                      user.isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
-                    }`}>
-                      {user.isActive ? 'Active' : 'Inactive'}
-                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className={`px-2.5 py-1 rounded-full text-xs font-medium capitalize ${STATUS_BADGE[user.status] || (user.isActive ? STATUS_BADGE.active : STATUS_BADGE.deactivated)}`}>
+                        {user.status || (user.isActive ? 'active' : 'deactivated')}
+                      </span>
+                      {user.forcePasswordChange && <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-50 text-purple-700" title="Must reset password at next sign-in">pw reset</span>}
+                    </div>
                   </td>
                   <td className="py-3 px-4 text-gray-500 text-xs">
                     {user.lastLogin ? new Date(user.lastLogin).toLocaleDateString() : 'Never'}
@@ -192,6 +229,29 @@ export default function UsersRolesTab() {
                       >
                         {user.isActive ? <><XCircle className="w-3.5 h-3.5" /> Deactivate</> : <><CheckCircle className="w-3.5 h-3.5" /> Activate</>}
                       </button>
+                      {/* #9 Security menu */}
+                      <div className="relative">
+                        <button
+                          onClick={() => setMenuFor(menuFor === user.id ? null : user.id)}
+                          title="Account security"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors"
+                        >
+                          <Shield className="w-3.5 h-3.5" /> Security <ChevronDown className="w-3 h-3" />
+                        </button>
+                        {menuFor === user.id && (
+                          <div className="absolute right-0 mt-1 w-56 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1 text-left">
+                            {user.status !== 'suspended'
+                              ? <MenuItem icon={Ban} label="Suspend account" onClick={() => setStatus(user, 'suspended')} />
+                              : <MenuItem icon={CheckCircle} label="Reactivate account" onClick={() => setStatus(user, 'active')} tone="emerald" />}
+                            {user.status !== 'locked'
+                              ? <MenuItem icon={Lock} label="Lock account" onClick={() => setStatus(user, 'locked')} />
+                              : <MenuItem icon={Unlock} label="Unlock account" onClick={() => setStatus(user, 'active')} tone="emerald" />}
+                            <MenuItem icon={RotateCcw} label="Force password change" onClick={() => forcePw(user)} />
+                            <MenuItem icon={Link2} label="Send password-reset link" onClick={() => resetLink(user)} />
+                            <MenuItem icon={XCircle} label="Revoke all sessions" onClick={() => revoke(user)} tone="red" />
+                          </div>
+                        )}
+                      </div>
                       <button
                         onClick={() => handleDelete(user)}
                         title="Permanently delete this user"

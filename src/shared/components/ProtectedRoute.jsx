@@ -39,10 +39,16 @@ function AccessDenied() {
 }
 
 export default function ProtectedRoute({ children, module, action, anyOf = [] }) {
-  const { isAuthenticated, isLoading, hasPermission } = useAuth();
+  const { isAuthenticated, isLoading, hasPermission, user } = useAuth();
 
   if (isLoading) return <LoadingSpinner />;
   if (!isAuthenticated) return <Navigate to="/login" replace />;
+  // #9 A user flagged force_password_change is confined to the change-password
+  // screen until they set a new password (backend clears the flag on success).
+  const mustChangePw = !!(user?.force_password_change || user?.forcePasswordChange);
+  if (mustChangePw && typeof window !== 'undefined' && window.location.pathname !== '/change-password') {
+    return <Navigate to="/change-password" replace />;
+  }
   if (module && action && !hasPermission(module, action)) return <AccessDenied />;
   if (anyOf.length > 0 && !anyOf.some((perm) => hasPermission(perm.module, perm.action))) {
     return <AccessDenied />;

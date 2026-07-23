@@ -38,6 +38,7 @@ function lazyWithReload(factory) {
 
 // Lazy-loaded page components (pointing at modular locations)
 const Login = lazyWithReload(() => import('./modules/admin/pages/Login'));
+const ChangePassword = lazyWithReload(() => import('./modules/admin/pages/ChangePassword'));
 const EmployeePortal = lazyWithReload(() => import('./modules/portal/EmployeePortal'));
 const Dashboard = lazyWithReload(() => import('./modules/dashboard/pages/Dashboard'));
 const Buyers = lazyWithReload(() => import('./modules/exportOrders/pages/Buyers'));
@@ -336,6 +337,9 @@ function App() {
           <Suspense fallback={<LoadingSpinner message="Loading page..." />}>
             <Routes>
               <Route path="/login" element={<Login />} />
+              {/* #9 Forced/self-service password change — auth-gated, standalone
+                  (outside the app shell) so a force_password_change user lands here. */}
+              <Route path="/change-password" element={<ProtectedRoute><ChangePassword /></ProtectedRoute>} />
               {/* Employee self-service portal — fully public (own CNIC+PIN auth),
                   mounted OUTSIDE the staff app shell / ProtectedRoute. */}
               <Route path="/portal" element={<EmployeePortal />} />

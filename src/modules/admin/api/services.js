@@ -76,8 +76,13 @@ export const usersApi = {
   changeRole: (id, data) => api.put(`/api/users/${id}/role`, data),
   deactivate: (id) => api.put(`/api/users/${id}/deactivate`),
   activate: (id) => api.put(`/api/users/${id}/activate`),
-  setPassword: (id, password) => api.put(`/api/users/${id}/password`, { password }),
+  setPassword: (id, password, force) => api.put(`/api/users/${id}/password`, { password, force_password_change: force }),
   remove: (id) => api.delete(`/api/users/${id}`),
+  // #9 lifecycle + security
+  setStatus: (id, status) => api.put(`/api/users/${id}/status`, { status }),
+  forcePasswordChange: (id, force = true) => api.put(`/api/users/${id}/force-password-change`, { force }),
+  resetLink: (id) => api.post(`/api/users/${id}/reset-link`, {}),
+  revokeSessions: (id) => api.post(`/api/users/${id}/revoke-sessions`, {}),
 };
 export const auditApi = {
   list: (params) => api.get('/api/audit-logs', params),

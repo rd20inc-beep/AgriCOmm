@@ -2519,12 +2519,18 @@ COL user_preferences.updated_at:timestamp with time zone:NOT NULL
 COL user_preferences.user_id:integer:NULL
 COL users.created_at:timestamp with time zone:NOT NULL
 COL users.email:character varying:NOT NULL
+COL users.failed_login_count:integer:NOT NULL
+COL users.force_password_change:boolean:NOT NULL
 COL users.full_name:character varying:NOT NULL
 COL users.id:integer:NOT NULL
 COL users.is_active:boolean:NOT NULL
 COL users.last_login:timestamp with time zone:NULL
+COL users.locked_at:timestamp with time zone:NULL
+COL users.password_changed_at:timestamp with time zone:NULL
 COL users.password_hash:character varying:NOT NULL
 COL users.role_id:integer:NULL
+COL users.status:character varying:NOT NULL
+COL users.token_version:integer:NOT NULL
 COL users.uid:uuid:NULL
 COL users.updated_at:timestamp with time zone:NOT NULL
 COL utility_consumption.batch_id:integer:NULL
@@ -3503,6 +3509,7 @@ CON tasks_assignments.tasks_assignments_task_no_unique(u)
 CON user_preferences.user_preferences_pkey(p)
 CON user_preferences.user_preferences_user_id_foreign(f)
 CON user_preferences.user_preferences_user_id_unique(u)
+CON users.chk_users_status_valid(c)
 CON users.users_email_unique(u)
 CON users.users_pkey(p)
 CON users.users_role_id_foreign(f)

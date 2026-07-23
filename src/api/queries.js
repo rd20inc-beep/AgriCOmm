@@ -1280,8 +1280,30 @@ export function useChangeUserRole() {
 
 export function useSetUserPassword() {
   return useMutation({
-    mutationFn: ({ id, password }) => usersApi.setPassword(id, password),
+    mutationFn: ({ id, password, force }) => usersApi.setPassword(id, password, force),
   });
+}
+
+// #9 lifecycle + security actions
+export function useSetUserStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, status }) => usersApi.setStatus(id, status),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+  });
+}
+export function useForceUserPasswordChange() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, force }) => usersApi.forcePasswordChange(id, force),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+  });
+}
+export function useUserResetLink() {
+  return useMutation({ mutationFn: (id) => usersApi.resetLink(id) });
+}
+export function useRevokeUserSessions() {
+  return useMutation({ mutationFn: (id) => usersApi.revokeSessions(id) });
 }
 
 export function useUpdateUser() {

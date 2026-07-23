@@ -21,7 +21,8 @@ const authRepository = {
     return db('users as u')
       .leftJoin('roles as r', 'u.role_id', 'r.id')
       .where({ 'u.id': id })
-      .select('u.id', 'u.email', 'u.full_name', 'u.role_id', 'r.name as role', 'u.is_active', 'u.last_login', 'u.created_at')
+      .select('u.id', 'u.email', 'u.full_name', 'u.role_id', 'r.name as role', 'u.is_active', 'u.last_login', 'u.created_at',
+        'u.status', 'u.force_password_change')
       .first();
   },
 
