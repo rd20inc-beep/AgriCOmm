@@ -1305,6 +1305,21 @@ export function useUserResetLink() {
 export function useRevokeUserSessions() {
   return useMutation({ mutationFn: (id) => usersApi.revokeSessions(id) });
 }
+// #9-scoping
+export function useUserScopes(id, enabled = true) {
+  return useQuery({
+    queryKey: ['user-scopes', id],
+    enabled: !!id && enabled,
+    queryFn: async () => (await usersApi.getScopes(id))?.data || {},
+  });
+}
+export function useSetUserScopes() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => usersApi.setScopes(id, data),
+    onSuccess: (_r, v) => { qc.invalidateQueries({ queryKey: ['user-scopes', v.id] }); qc.invalidateQueries({ queryKey: ['users'] }); },
+  });
+}
 
 export function useUpdateUser() {
   const qc = useQueryClient();

@@ -83,6 +83,8 @@ export const usersApi = {
   forcePasswordChange: (id, force = true) => api.put(`/api/users/${id}/force-password-change`, { force }),
   resetLink: (id) => api.post(`/api/users/${id}/reset-link`, {}),
   revokeSessions: (id) => api.post(`/api/users/${id}/revoke-sessions`, {}),
+  getScopes: (id) => api.get(`/api/users/${id}/scopes`),
+  setScopes: (id, data) => api.put(`/api/users/${id}/scopes`, data),
 };
 export const auditApi = {
   list: (params) => api.get('/api/audit-logs', params),
