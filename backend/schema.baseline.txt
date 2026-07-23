@@ -1105,6 +1105,26 @@ COL kpi_benchmarks.period:character varying:NULL
 COL kpi_benchmarks.target_value:numeric:NULL
 COL kpi_benchmarks.unit:character varying:NULL
 COL kpi_benchmarks.updated_at:timestamp with time zone:NOT NULL
+COL local_sale_repacking.bag_rate:numeric:NULL
+COL local_sale_repacking.bag_source:character varying:NOT NULL
+COL local_sale_repacking.created_at:timestamp with time zone:NOT NULL
+COL local_sale_repacking.created_by:integer:NULL
+COL local_sale_repacking.final_dispatched_kg:numeric:NULL
+COL local_sale_repacking.id:integer:NOT NULL
+COL local_sale_repacking.labour_mode:character varying:NULL
+COL local_sale_repacking.labour_rate:numeric:NULL
+COL local_sale_repacking.labour_total:numeric:NULL
+COL local_sale_repacking.local_sale_id:integer:NULL
+COL local_sale_repacking.new_bag_count:integer:NULL
+COL local_sale_repacking.new_bag_size_kg:numeric:NULL
+COL local_sale_repacking.notes:text:NULL
+COL local_sale_repacking.original_bag_count:integer:NULL
+COL local_sale_repacking.original_bag_size_kg:numeric:NULL
+COL local_sale_repacking.packaging_charge:numeric:NULL
+COL local_sale_repacking.packaging_item_id:integer:NULL
+COL local_sale_repacking.packing_loss_kg:numeric:NULL
+COL local_sale_repacking.sale_group_no:character varying:NOT NULL
+COL local_sale_repacking.updated_at:timestamp with time zone:NOT NULL
 COL local_sales.bag_weight_kg:numeric:NULL
 COL local_sales.bank_account_id:integer:NULL
 COL local_sales.buyer_address:character varying:NULL
@@ -3022,6 +3042,12 @@ CON journal_lines.journal_lines_journal_id_foreign(f)
 CON journal_lines.journal_lines_pkey(p)
 CON kpi_benchmarks.kpi_benchmarks_kpi_name_unique(u)
 CON kpi_benchmarks.kpi_benchmarks_pkey(p)
+CON local_sale_repacking.chk_local_sale_repacking_bag_source(c)
+CON local_sale_repacking.chk_local_sale_repacking_labour_mode(c)
+CON local_sale_repacking.local_sale_repacking_created_by_foreign(f)
+CON local_sale_repacking.local_sale_repacking_local_sale_id_foreign(f)
+CON local_sale_repacking.local_sale_repacking_packaging_item_id_foreign(f)
+CON local_sale_repacking.local_sale_repacking_pkey(p)
 CON local_sales.chk_local_sales_bag_weight_kg_nn(c)
 CON local_sales.chk_local_sales_cogs_per_kg_nn(c)
 CON local_sales.chk_local_sales_cogs_total_pkr_nonneg(c)
