@@ -1,5 +1,7 @@
 const db = require('../../config/database');
 const inventoryService = require('./inventory.service');
+// #9-scoping: per-user warehouse restriction, applied to READ paths only.
+const whScope = require('../../utils/warehouseScope');
 
 const inventoryController = {
   /**
@@ -42,6 +44,8 @@ const inventoryController = {
       if (type) query = query.where('il.type', type);
       if (entity) query = query.where('il.entity', entity);
       if (warehouse_id) query = query.where('il.warehouse_id', warehouse_id);
+      // #9-scoping: restrict a warehouse-scoped user to their allowed warehouses.
+      query = whScope.applyWarehouseScope(query, await whScope.resolveWarehouseScope(req), 'il.warehouse_id');
       if (status) query = query.where('il.status', status);
       // Client-owned Service Milling stock physically sits in our warehouse but
       // belongs to the client — it must NEVER count as company inventory (mill
@@ -94,7 +98,7 @@ const inventoryController = {
    */
   async getSummary(req, res) {
     try {
-      const summary = await inventoryService.getStockSummary();
+      const summary = await inventoryService.getStockSummary(await whScope.resolveWarehouseScope(req));
       return res.json({ success: true, data: summary });
     } catch (err) {
       console.error('Inventory getSummary error:', err);
@@ -113,6 +117,9 @@ const inventoryController = {
       if (!lot) {
         return res.status(404).json({ success: false, message: 'Lot not found.' });
       }
+      // #9-scoping: don't serve by direct id what the list view hides.
+      const scope = await whScope.resolveWarehouseScope(req);
+      if (whScope.denyOutOfScope(res, scope, lot.warehouse_id)) return undefined;
 
       const movements = await inventoryService.getMovementsByLot(id);
 
@@ -143,6 +150,9 @@ const inventoryController = {
       if (!lot) {
         return res.status(404).json({ success: false, message: 'Lot not found.' });
       }
+      // #9-scoping: movement history follows the lot's visibility.
+      const scope = await whScope.resolveWarehouseScope(req);
+      if (whScope.denyOutOfScope(res, scope, lot.warehouse_id)) return undefined;
 
       const movements = await inventoryService.getMovementsByLot(id);
 
@@ -199,6 +209,8 @@ const inventoryController = {
       if (order_id) query = query.where('lt.reference_id', order_id);
       if (date_from) query = query.where('lt.transaction_date', '>=', date_from);
       if (date_to) query = query.where('lt.transaction_date', '<=', date_to);
+      // #9-scoping: a movement is visible only if its lot's warehouse is.
+      query = whScope.applyWarehouseScope(query, await whScope.resolveWarehouseScope(req), 'il.warehouse_id');
 
       const countQuery = query
         .clone()
@@ -457,6 +469,8 @@ const inventoryController = {
       if (status) {
         query = query.where('ir.status', status);
       }
+      // #9-scoping: a reservation is only visible if its lot's warehouse is.
+      query = whScope.applyWarehouseScope(query, await whScope.resolveWarehouseScope(req), 'il.warehouse_id');
 
       const countQuery = query
         .clone()

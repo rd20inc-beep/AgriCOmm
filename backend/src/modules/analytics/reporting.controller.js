@@ -1,4 +1,16 @@
 const reportingService = require('../../services/reportingService');
+// #9-scoping: per-user warehouse restriction.
+//
+// Applied to STOCK reports — anything whose rows are lots or whose quantities
+// come from lots (stock ledger/detail/valuation/aging/turnover, warehouse +
+// supplier + rice-type inventory ledgers, lot tracker, purchase ledger).
+//
+// Deliberately NOT applied to the financial statements (P&L, cashflow, AR/AP
+// aging, invoice + payroll ledgers): those are company-level and consolidate
+// sales, expenses and payroll that carry no warehouse at all — filtering only
+// their inventory legs would produce numbers that don't foot. They stay gated
+// by role (noFinanceForOperator) instead.
+const whScope = require('../../utils/warehouseScope');
 
 // Parse a milling_batches.custom_tags jsonb value into a plain array. The pg
 // driver usually returns jsonb already parsed (array/object), but a string may
@@ -116,7 +128,7 @@ const reportingController = {
 
   async lotLedger(req, res) {
     try {
-      const data = redactReport(req, await reportingService.getLotLedger(req.params.id));
+      const data = redactReport(req, await reportingService.getLotLedger(req.params.id, await whScope.resolveWarehouseScope(req)));
       if (!data) return res.status(404).json({ success: false, message: 'Lot not found.' });
       return res.json({ success: true, ...data });
     } catch (err) {
@@ -199,7 +211,7 @@ const reportingController = {
 
   async inventoryLedger(req, res) {
     try {
-      const data = redactReport(req, await reportingService.getInventoryLedger(req.query || {}));
+      const data = redactReport(req, await reportingService.getInventoryLedger({ ...(req.query || {}), warehouseScope: await whScope.resolveWarehouseScope(req) }));
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Inventory ledger error:', err);
@@ -209,7 +221,7 @@ const reportingController = {
 
   async stockLedger(req, res) {
     try {
-      const data = redactReport(req, await reportingService.getStockLedger(req.query || {}));
+      const data = redactReport(req, await reportingService.getStockLedger({ ...(req.query || {}), warehouseScope: await whScope.resolveWarehouseScope(req) }));
       return res.json({ success: true, data });
     } catch (err) {
       console.error('Stock ledger error:', err);
@@ -219,7 +231,7 @@ const reportingController = {
 
   async finishedGoodsLedger(req, res) {
     try {
-      const data = redactReport(req, await reportingService.getFinishedGoodsLedger(req.query || {}));
+      const data = redactReport(req, await reportingService.getFinishedGoodsLedger({ ...(req.query || {}), warehouseScope: await whScope.resolveWarehouseScope(req) }));
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Finished goods ledger error:', err);
@@ -229,7 +241,7 @@ const reportingController = {
 
   async serviceMillingStock(req, res) {
     try {
-      const data = await reportingService.getServiceMillingStock({ groupBy: req.query.group_by });
+      const data = await reportingService.getServiceMillingStock({ groupBy: req.query.group_by, warehouseScope: await whScope.resolveWarehouseScope(req) });
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Service milling stock error:', err);
@@ -239,7 +251,7 @@ const reportingController = {
 
   async serviceMillingAgeing(req, res) {
     try {
-      const data = await reportingService.getServiceMillingAgeing();
+      const data = await reportingService.getServiceMillingAgeing(await whScope.resolveWarehouseScope(req));
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Service milling ageing error:', err);
@@ -249,7 +261,7 @@ const reportingController = {
 
   async serviceMillingPendingDispatch(req, res) {
     try {
-      const data = await reportingService.getServiceMillingPendingDispatch();
+      const data = await reportingService.getServiceMillingPendingDispatch(await whScope.resolveWarehouseScope(req));
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Service milling pending dispatch error:', err);
@@ -259,7 +271,7 @@ const reportingController = {
 
   async serviceMillingReconciliation(req, res) {
     try {
-      const data = await reportingService.getServiceMillingReconciliation();
+      const data = await reportingService.getServiceMillingReconciliation(await whScope.resolveWarehouseScope(req));
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Service milling reconciliation error:', err);
@@ -269,7 +281,7 @@ const reportingController = {
 
   async supplierInventoryIndex(req, res) {
     try {
-      const data = redactReport(req, await reportingService.getSupplierInventoryIndex());
+      const data = redactReport(req, await reportingService.getSupplierInventoryIndex(await whScope.resolveWarehouseScope(req)));
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Supplier inventory index error:', err);
@@ -279,7 +291,7 @@ const reportingController = {
 
   async supplierInventoryLedger(req, res) {
     try {
-      const data = redactReport(req, await reportingService.getSupplierInventoryLedger(req.params.id));
+      const data = redactReport(req, await reportingService.getSupplierInventoryLedger(req.params.id, await whScope.resolveWarehouseScope(req)));
       if (!data) return res.status(404).json({ success: false, message: 'Supplier not found.' });
       return res.json({ success: true, ...data });
     } catch (err) {
@@ -290,7 +302,7 @@ const reportingController = {
 
   async riceTypeIndex(req, res) {
     try {
-      const data = redactReport(req, await reportingService.getRiceTypeIndex());
+      const data = redactReport(req, await reportingService.getRiceTypeIndex(await whScope.resolveWarehouseScope(req)));
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Rice type index error:', err);
@@ -300,7 +312,7 @@ const reportingController = {
 
   async riceTypeLedger(req, res) {
     try {
-      const data = redactReport(req, await reportingService.getRiceTypeLedger(req.params.id));
+      const data = redactReport(req, await reportingService.getRiceTypeLedger(req.params.id, await whScope.resolveWarehouseScope(req)));
       if (!data) return res.status(404).json({ success: false, message: 'Rice type not found.' });
       return res.json({ success: true, ...data });
     } catch (err) {
@@ -311,7 +323,7 @@ const reportingController = {
 
   async warehouseIndex(req, res) {
     try {
-      const data = redactReport(req, await reportingService.getWarehouseIndex());
+      const data = redactReport(req, await reportingService.getWarehouseIndex(await whScope.resolveWarehouseScope(req)));
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Warehouse index error:', err);
@@ -321,7 +333,7 @@ const reportingController = {
 
   async warehouseLedger(req, res) {
     try {
-      const data = redactReport(req, await reportingService.getWarehouseLedger(req.params.id));
+      const data = redactReport(req, await reportingService.getWarehouseLedger(req.params.id, await whScope.resolveWarehouseScope(req)));
       if (!data) return res.status(404).json({ success: false, message: 'Warehouse not found.' });
       return res.json({ success: true, ...data });
     } catch (err) {
@@ -385,7 +397,7 @@ const reportingController = {
   async globalSearch(req, res) {
     try {
       const { q, entity, limit } = req.query;
-      const data = await reportingService.globalSearch({ q, entity, limit });
+      const data = await reportingService.globalSearch({ q, entity, limit, warehouseScope: await whScope.resolveWarehouseScope(req) });
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Global search error:', err);
@@ -567,7 +579,7 @@ const reportingController = {
 
   async stockAging(req, res) {
     try {
-      const data = await reportingService.getStockAgingReport();
+      const data = await reportingService.getStockAgingReport(await whScope.resolveWarehouseScope(req));
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Stock aging error:', err);
@@ -578,7 +590,7 @@ const reportingController = {
   async stockTurnover(req, res) {
     try {
       const { entity } = req.query;
-      const data = await reportingService.getStockTurnoverDays({ entity });
+      const data = await reportingService.getStockTurnoverDays({ entity, warehouseScope: await whScope.resolveWarehouseScope(req) });
       return res.json({ success: true, data });
     } catch (err) {
       console.error('Stock turnover error:', err);
@@ -589,7 +601,7 @@ const reportingController = {
   async stockValuation(req, res) {
     try {
       const { entity, asOfDate } = req.query;
-      const data = await reportingService.getStockValuation({ entity, asOfDate });
+      const data = await reportingService.getStockValuation({ entity, asOfDate, warehouseScope: await whScope.resolveWarehouseScope(req) });
       return res.json({ success: true, data });
     } catch (err) {
       console.error('Stock valuation error:', err);
@@ -737,6 +749,13 @@ const reportingController = {
         return res.status(400).json({ success: false, message: 'Supported formats: csv, json.' });
       }
 
+      // #9-scoping: the export path runs the same report bodies, so it must
+      // carry the same warehouse restriction — otherwise "Export" is a bypass.
+      // Resolved from the session and spread LAST so a caller can't override it
+      // by putting `warehouseScope` in the request body.
+      const scope = await whScope.resolveWarehouseScope(req);
+      const stockFilters = { ...(filters || {}), warehouseScope: scope };
+
       // Execute the report to get data
       const methodMap = {
         order_pipeline: () => reportingService.getOrderPipeline(filters || {}),
@@ -745,7 +764,7 @@ const reportingController = {
         receivable_aging: () => reportingService.getReceivableRecoveryEfficiency(filters || {}),
         supplier_quality: () => reportingService.getSupplierQualityRanking(filters || {}),
         customer_ranking: () => reportingService.getCustomerProfitability(filters || {}),
-        stock_aging: () => reportingService.getStockAgingReport(),
+        stock_aging: () => reportingService.getStockAgingReport(scope),
         cash_forecast: () => reportingService.getCashForecastVsCommitments(filters || {}),
         production_efficiency: () => reportingService.getProductionEfficiencyByMill(filters || {}),
         country_analysis: () => reportingService.getCountryAnalysis(filters || {}),
@@ -754,8 +773,8 @@ const reportingController = {
         kpi_benchmarks: () => reportingService.getKpiBenchmarkComparison(filters || {}),
         payable_analysis: () => reportingService.getPayableAnalysis(filters || {}),
         fx_exposure: () => reportingService.getFxExposureDashboard(),
-        stock_turnover: () => reportingService.getStockTurnoverDays(filters || {}),
-        stock_valuation: () => reportingService.getStockValuation(filters || {}),
+        stock_turnover: () => reportingService.getStockTurnoverDays(stockFilters),
+        stock_valuation: () => reportingService.getStockValuation(stockFilters),
         mill_efficiency: () => reportingService.getProductionEfficiencyByMill(filters || {}),
         operator_productivity: () => reportingService.getOperatorProductivityReport(filters || {}),
         utility_consumption: () => reportingService.getUtilityConsumptionReport(filters || {}),
@@ -1356,12 +1375,15 @@ const reportingController = {
       else                              { groupCol = 'l.product_id';  nameCol = 'p.name'; }
       const isRawExpr = group_by === 'subtype' || group_by === 'byproduct';
 
+      // #9-scoping: the printable stock report only totals the caller's warehouses.
+      const scope = await whScope.resolveWarehouseScope(req);
       let q = db('inventory_lots as l')
         .leftJoin('suppliers as s',  'l.supplier_id',  's.id')
         .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
         .leftJoin('products as p',   'l.product_id',   'p.id');
       if (status && status !== 'all') q = q.where('l.status', status);
       if (group_by === 'byproduct') q = q.where('l.type', 'byproduct');
+      q = whScope.applyWarehouseScope(q, scope, 'l.warehouse_id');
 
       const rows = await q
         .select(
@@ -1398,6 +1420,7 @@ const reportingController = {
         .leftJoin('products as p',   'l.product_id',   'p.id');
       if (status && status !== 'all') lotsQ = lotsQ.where('l.status', status);
       if (group_by === 'byproduct') lotsQ = lotsQ.where('l.type', 'byproduct');
+      lotsQ = whScope.applyWarehouseScope(lotsQ, scope, 'l.warehouse_id');
       const lotRows = await lotsQ.select(
         db.raw(`COALESCE(${nameCol}, '—') as group_name`),
         'l.id as lot_id', 'l.lot_no',
@@ -1474,6 +1497,8 @@ const reportingController = {
         .where('l.type', 'raw');
       if (from) q = q.where('l.created_at', '>=', from);
       if (to) q = q.where('l.created_at', '<=', to);
+      // #9-scoping: only purchases landed into the caller's warehouses.
+      q = whScope.applyWarehouseScope(q, await whScope.resolveWarehouseScope(req), 'l.warehouse_id');
       const rows = await q.select(
         'l.id', 'l.lot_no', 'l.created_at', 'l.item_name', 'l.variety', 'l.grade',
         'l.rate_per_kg', 'l.total_bags', 'l.supplier_id', 'l.payment_status', 'l.net_weight_kg',
@@ -1600,6 +1625,8 @@ const reportingController = {
       if (entity) q = q.where('l.entity', entity);
       if (from) q = q.where('l.created_at', '>=', from);
       if (to) q = q.where('l.created_at', '<=', to);
+      // #9-scoping: the lot tracker only follows the caller's warehouses.
+      q = whScope.applyWarehouseScope(q, await whScope.resolveWarehouseScope(req), 'l.warehouse_id');
       const lots = await q.select(
         'l.id', 'l.lot_no', 'l.created_at', 'l.purchase_date', 'l.item_name', 'l.variety', 'l.grade',
         'l.rate_per_kg', 'l.landed_cost_per_kg', 'l.landed_cost_total', 'l.total_bags', 'l.bag_weight_kg',
@@ -1844,6 +1871,8 @@ const reportingController = {
         .leftJoin('products as p', 'l.product_id', 'p.id')
         .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id');
       if (status && status !== 'all') q = q.where('l.status', status);
+      // #9-scoping: printable stock detail lists only the caller's warehouses.
+      q = whScope.applyWarehouseScope(q, await whScope.resolveWarehouseScope(req), 'l.warehouse_id');
       const lots = await q.select(
         'l.id', 'l.lot_no', 'l.type', 'l.item_name', 'l.variety', 'l.grade', 'l.processing_type',
         'l.blend_batch_no', 'l.batch_ref', 'l.supplier_id', 'l.status', 'l.total_bags',
@@ -1904,6 +1933,8 @@ const reportingController = {
       let q = db('inventory_lots as l').leftJoin('suppliers as s', 'l.supplier_id', 's.id')
         .where((b) => b.where('l.item_name', 'ilike', '%sweeping%').orWhere('l.grade', 'ilike', '%sweeping%'));
       if (status && status !== 'all') q = q.where('l.status', status);
+      // #9-scoping: sweeping stock is stock — restrict to the caller's warehouses.
+      q = whScope.applyWarehouseScope(q, await whScope.resolveWarehouseScope(req), 'l.warehouse_id');
       const lots = await q.select(
         'l.id', 'l.lot_no', 'l.item_name', 'l.grade', 'l.variety', 'l.batch_ref', 'l.blend_batch_no',
         'l.status', 'l.supplier_id', 'l.total_bags', 'l.available_qty', 's.name as supplier_name',

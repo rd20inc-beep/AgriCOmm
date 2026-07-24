@@ -7,6 +7,9 @@ const emailService = require('../../services/emailService');
 const { publishExportOrderUpdate } = require('../../services/exportOrderEventBus');
 const workflowService = require('../../services/exportOrderWorkflowService');
 const notificationService = require('../../services/notificationService');
+// #9-scoping: per-user warehouse restriction, applied to stock READ paths only
+// (the dispatch/reservation engine is never scoped).
+const whScope = require('../../utils/warehouseScope');
 const { MONEY_EPSILON, settledAmount, getStepForStatus, getAllowedActions } = workflowService;
 
 /**
@@ -2994,10 +2997,12 @@ const exportOrderController = {
       const SUPPLIER_NAME_ROLES = ['Super Admin', 'Owner', 'Mill Manager', 'Mill Operator'];
       const full = SUPPLIER_NAME_ROLES.includes(roleName); // export role → redacted
 
-      const lots = await db('inventory_lots as l')
+      // #9-scoping: a warehouse-scoped user can only source from their warehouses.
+      const stockScope = await whScope.resolveWarehouseScope(req);
+      const lots = await whScope.applyWarehouseScope(db('inventory_lots as l')
         .leftJoin('products as p', 'l.product_id', 'p.id')
         .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
-        .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
+        .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id'), stockScope, 'l.warehouse_id')
         // Producing milling batch (finished lots carry batch_ref = 'batch-<id>')
         // — surfaces batch no / name / custom tags so the stock pool is searchable
         // by batch + tag (#3 fulfil-from-inventory search filters).

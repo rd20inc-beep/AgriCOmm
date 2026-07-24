@@ -1,5 +1,8 @@
 const db = require('../../config/database');
 const uc = require('../../services/unitConversion');
+// #9-scoping: READ-path warehouse restriction. Deliberately NOT applied to any
+// movement/posting function in this file — scoping a write would corrupt stock.
+const { applyWarehouseScope } = require('../../utils/warehouseScope');
 
 // =============================================================================
 // CANONICAL MOVEMENT TAXONOMY — Single source of truth for all stock movements
@@ -1658,8 +1661,10 @@ const inventoryService = {
   // =========================================================================
   // Stock summary
   // =========================================================================
-  async getStockSummary() {
-    const rows = await db('inventory_lots as il')
+  // `warehouseScope` (#9-scoping) = array of allowed warehouse ids, or null when
+  // the caller is unrestricted. Read path only — the movement engine never scopes.
+  async getStockSummary(warehouseScope = null) {
+    let q = db('inventory_lots as il')
       .leftJoin('warehouses as w', 'il.warehouse_id', 'w.id')
       .select(
         'il.type',
@@ -1674,7 +1679,9 @@ const inventoryService = {
       .where('il.status', '!=', 'Depleted')
       // Company-owned only — client-owned Service Milling stock is physically in
       // our warehouse but must never inflate company stock counts or valuation.
-      .where('il.ownership', 'company')
+      .where('il.ownership', 'company');
+    q = applyWarehouseScope(q, warehouseScope, 'il.warehouse_id');
+    const rows = await q
       .groupBy('il.type', 'il.entity', 'w.name', 'il.warehouse_id')
       .orderBy(['il.entity', 'il.type']);
 
