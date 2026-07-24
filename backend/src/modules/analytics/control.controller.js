@@ -1,5 +1,7 @@
 const controlService = require('../../services/controlService');
 const db = require('../../config/database');
+// #9-scoping: per-user warehouse restriction (stock take reads).
+const whScope = require('../../utils/warehouseScope');
 
 /**
  * Control Systems Controller — Phase 11
@@ -363,6 +365,7 @@ const controlController = {
       const result = await controlService.getStockCounts({
         status,
         warehouseId: warehouse_id ? parseInt(warehouse_id, 10) : undefined,
+        warehouseScope: await whScope.resolveWarehouseScope(req),
         page: parseInt(page, 10) || 1,
         limit: parseInt(limit, 10) || 20,
       });
@@ -375,7 +378,7 @@ const controlController = {
 
   async getStockCountDetail(req, res) {
     try {
-      const result = await controlService.getStockCountDetail(parseInt(req.params.id, 10));
+      const result = await controlService.getStockCountDetail(parseInt(req.params.id, 10), await whScope.resolveWarehouseScope(req));
       if (!result) return res.status(404).json({ success: false, message: 'Stock count not found.' });
       return res.json({ success: true, data: result });
     } catch (err) {

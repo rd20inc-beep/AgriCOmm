@@ -12,6 +12,8 @@ const accountingService = require('../../services/accountingService');
 const inventoryService = require('./inventory.service');
 const { blendPurchaseIntoLot } = require('./lotCosting');
 const { nextDocNo } = require('../../utils/docNumber');
+// #9-scoping: per-user warehouse restriction, applied to READ paths only.
+const whScope = require('../../utils/warehouseScope');
 
 async function generateTxnNo(trx) {
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -331,8 +333,7 @@ module.exports = {
       if (entity) query = query.where('l.entity', entity);
       if (warehouse_id) query = query.where('l.warehouse_id', warehouse_id);
       // #9-scoping: restrict a warehouse-scoped user to their allowed warehouses.
-      const scopedWh = await require('../../middleware/rbac').getScopedWarehouseIds(req.user);
-      if (scopedWh) query = query.whereIn('l.warehouse_id', scopedWh.length ? scopedWh : [-1]);
+      query = whScope.applyWarehouseScope(query, await whScope.resolveWarehouseScope(req), 'l.warehouse_id');
       if (status) query = query.where('l.status', status);
       if (supplier_id) query = query.where('l.supplier_id', supplier_id);
       if (product_id) query = query.where('l.product_id', product_id);
@@ -374,6 +375,9 @@ module.exports = {
 
       const lot = await lotRowQuery().where(where).first();
       if (!lot) return res.status(404).json({ success: false, message: 'Lot not found.' });
+      // #9-scoping: a lot the list view hides must not be reachable by direct id.
+      const scope = await whScope.resolveWarehouseScope(req);
+      if (whScope.denyOutOfScope(res, scope, lot.warehouse_id)) return undefined;
 
       return res.json({ success: true, data: await buildLotDetail(lot) });
     } catch (err) {
@@ -402,6 +406,9 @@ module.exports = {
           'tv.name as transport_vendor_name')
         .first();
       if (!lot) return res.status(404).json({ success: false, message: 'Lot not found.' });
+      // #9-scoping: same guard as the lot detail — no out-of-scope lot by direct id.
+      const invScope = await whScope.resolveWarehouseScope(req);
+      if (whScope.denyOutOfScope(res, invScope, lot.warehouse_id)) return undefined;
       if (lot.type !== 'raw') {
         return res.status(400).json({ success: false, message: 'A purchase invoice is only available for purchased rice lots.' });
       }
@@ -567,17 +574,21 @@ module.exports = {
     try {
       const { ids, type, entity, warehouse_id, status, supplier_id, variety, search, limit = 100 } = req.query;
       const cap = Math.min(parseInt(limit, 10) || 100, 200);
+      // #9-scoping: applies to BOTH the explicit-ids and the filtered form, so a
+      // scoped user can't print lots they can't list.
+      const scope = await whScope.resolveWarehouseScope(req);
 
       let rows;
       if (ids) {
         const idList = String(ids).split(',').map(s => parseInt(s.trim(), 10)).filter(Number.isFinite);
         if (!idList.length) return res.json({ success: true, data: { lots: [], generatedAt: new Date().toISOString() } });
         // Preserve the caller's id order so the printed report matches selection.
-        const fetched = await lotRowQuery().whereIn('l.id', idList.slice(0, cap));
+        const fetched = await whScope.applyWarehouseScope(
+          lotRowQuery().whereIn('l.id', idList.slice(0, cap)), scope, 'l.warehouse_id');
         const byId = new Map(fetched.map(l => [l.id, l]));
         rows = idList.map(id => byId.get(id)).filter(Boolean);
       } else {
-        let q = lotRowQuery();
+        let q = whScope.applyWarehouseScope(lotRowQuery(), scope, 'l.warehouse_id');
         if (type) q = q.where('l.type', type);
         if (entity) q = q.where('l.entity', entity);
         if (warehouse_id) q = q.where('l.warehouse_id', warehouse_id);
@@ -1539,6 +1550,8 @@ module.exports = {
       if (status && status !== 'all') query = query.where('l.status', status);
       if (entity) query = query.where('l.entity', entity);
       if (type) query = query.where('l.type', type);
+      // #9-scoping: the Stock Summary must only total the caller's warehouses.
+      query = whScope.applyWarehouseScope(query, await whScope.resolveWarehouseScope(req), 'l.warehouse_id');
 
       let groupCol, nameCol;
       if (group_by === 'supplier') { groupCol = 'l.supplier_id'; nameCol = 's.name'; }

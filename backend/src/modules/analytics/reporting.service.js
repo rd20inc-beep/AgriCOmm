@@ -1,4 +1,9 @@
 const db = require('../../config/database');
+// #9-scoping: stock-report functions take a `warehouseScope` argument — an array
+// of allowed warehouse ids, or null when the caller is unrestricted. The
+// controller resolves it once per request and passes it down; the service never
+// touches req/rbac itself.
+const { applyWarehouseScope, isWarehouseInScope } = require('../../utils/warehouseScope');
 
 // Parse a milling_batches.custom_tags jsonb value into a plain array. The pg
 // driver usually returns jsonb already parsed (array/object), but a string may
@@ -1063,12 +1068,12 @@ const reportingService = {
    * counterparty + a link target so the report can drill through to the
    * purchase, batch, sale, order or warehouse behind it. Read-only.
    */
-  async getLotLedger(lotId) {
+  async getLotLedger(lotId, warehouseScope = null) {
     const id = parseInt(lotId, 10);
     if (!id) return null;
     const num = (v) => parseFloat(v) || 0;
 
-    const lot = await db('inventory_lots as l')
+    const lot = await applyWarehouseScope(db('inventory_lots as l'), warehouseScope, 'l.warehouse_id')
       .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
       .leftJoin('products as p', 'l.product_id', 'p.id')
       .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
@@ -1349,12 +1354,13 @@ const reportingService = {
    * outstanding). Deliberately SQL-only (no per-lot 360) so it stays fast; the
    * full profit picture is computed on the detail page. Finance-gated upstream.
    */
-  async getSupplierInventoryIndex() {
+  async getSupplierInventoryIndex(warehouseScope = null) {
     const num = (v) => parseFloat(v) || 0;
-    const rows = await db('inventory_lots as l')
+    const rows = await applyWarehouseScope(db('inventory_lots as l')
       .join('suppliers as s', 'l.supplier_id', 's.id')
       .where('l.type', 'raw')
-      .whereNot('l.ownership', 'client') // exclude client-owned Service Milling stock
+      // exclude client-owned Service Milling stock
+      .whereNot('l.ownership', 'client'), warehouseScope, 'l.warehouse_id')
       .groupBy('s.id', 's.name')
       .select('s.id as supplierId', 's.name as supplier',
         db.raw('COUNT(l.id) as lot_count'),
@@ -1388,7 +1394,7 @@ const reportingService = {
    * financials reuse getLotLedger so the numbers reconcile exactly with Lot 360.
    * Read-only. Finance-gated upstream (denyRoles Mill Operator).
    */
-  async getSupplierInventoryLedger(supplierId) {
+  async getSupplierInventoryLedger(supplierId, warehouseScope = null) {
     const id = parseInt(supplierId, 10);
     if (!id) return null;
     const num = (v) => parseFloat(v) || 0;
@@ -1396,11 +1402,11 @@ const reportingService = {
     const supplier = await db('suppliers').where('id', id).first();
     if (!supplier) return null;
 
-    const lots = await db('inventory_lots as l')
+    const lots = await applyWarehouseScope(db('inventory_lots as l')
       .leftJoin('products as p', 'l.product_id', 'p.id')
       .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
       .where('l.supplier_id', id)
-      .where('l.type', 'raw')
+      .where('l.type', 'raw'), warehouseScope, 'l.warehouse_id')
       .select('l.id', 'l.lot_no', 'l.variety', 'l.grade', 'l.item_name', 'l.purchase_date', 'l.created_at',
         'l.received_net_weight_kg', 'l.net_weight_kg', 'l.landed_cost_per_kg', 'l.rate_per_kg',
         'l.moisture_pct', 'l.ownership', 'p.name as product_name', 'w.name as warehouse_name')
@@ -1494,12 +1500,13 @@ const reportingService = {
    * excluded — they live in the Finished Goods Ledger. Keyed by product_id
    * (the reliable rice-type key; free-text variety is often blank).
    */
-  async getRiceTypeIndex() {
+  async getRiceTypeIndex(warehouseScope = null) {
     const num = (v) => parseFloat(v) || 0;
-    const rows = await db('inventory_lots as l')
+    const rows = await applyWarehouseScope(db('inventory_lots as l')
       .join('products as p', 'l.product_id', 'p.id')
       .where('p.is_byproduct', false)
-      .whereNot('l.ownership', 'client') // exclude client-owned Service Milling stock
+      // exclude client-owned Service Milling stock
+      .whereNot('l.ownership', 'client'), warehouseScope, 'l.warehouse_id')
       .groupBy('p.id', 'p.name')
       .select('p.id as productId', 'p.name as riceType',
         db.raw('COUNT(l.id) as lot_count'),
@@ -1528,7 +1535,7 @@ const reportingService = {
    * valued at landed cost/kg; sales/COGS come from local sales of this type's
    * lots (export shows as dispatched quantity). Read-only; finance-gated.
    */
-  async getRiceTypeLedger(productId) {
+  async getRiceTypeLedger(productId, warehouseScope = null) {
     const id = parseInt(productId, 10);
     if (!id) return null;
     const num = (v) => parseFloat(v) || 0;
@@ -1536,10 +1543,10 @@ const reportingService = {
     const product = await db('products').where('id', id).first();
     if (!product) return null;
 
-    const lots = await db('inventory_lots as l')
+    const lots = await applyWarehouseScope(db('inventory_lots as l')
       .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
       .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
-      .where('l.product_id', id)
+      .where('l.product_id', id), warehouseScope, 'l.warehouse_id')
       .select('l.id', 'l.lot_no', 'l.type', 'l.entity', 'l.item_name', 'l.grade', 'l.variety', 'l.batch_ref',
         'l.received_net_weight_kg', 'l.net_weight_kg', 'l.reserved_qty', 'l.landed_cost_per_kg', 'l.rate_per_kg',
         'l.supplier_id', 'l.ownership', 's.name as supplier_name', 'w.name as warehouse_name', 'l.purchase_date', 'l.created_at')
@@ -1641,14 +1648,17 @@ const reportingService = {
    * and stock value. Empty warehouses are shown too (0s). NULLIF on the cost
    * so a 0 landed cost falls back to rate_per_kg (matches the detail / Lot 360).
    */
-  async getWarehouseIndex() {
+  async getWarehouseIndex(warehouseScope = null) {
     const num = (v) => parseFloat(v) || 0;
-    const whs = await db('warehouses').where('is_active', true)
+    // #9-scoping: hide the warehouses themselves, not just their stock — an
+    // out-of-scope warehouse must not appear even as a zero row.
+    const whs = await applyWarehouseScope(db('warehouses').where('is_active', true), warehouseScope, 'id')
       .orderBy('entity', 'asc').orderBy('name', 'asc')
       .select('id', 'name', 'entity', 'type');
-    const agg = await db('inventory_lots as l')
+    const agg = await applyWarehouseScope(db('inventory_lots as l')
       .whereNotNull('l.warehouse_id').where('l.net_weight_kg', '>', 0)
-      .whereNot('l.ownership', 'client') // exclude client-owned Service Milling stock
+      // exclude client-owned Service Milling stock
+      .whereNot('l.ownership', 'client'), warehouseScope, 'l.warehouse_id')
       .groupBy('l.warehouse_id')
       .select('l.warehouse_id',
         db.raw('COUNT(l.id) as lot_count'),
@@ -1678,10 +1688,13 @@ const reportingService = {
    * uses the warehouse transfer columns, so the lot's location is authoritative).
    * Stock valued at landed cost/kg. Read-only; finance-gated.
    */
-  async getWarehouseLedger(warehouseId) {
+  async getWarehouseLedger(warehouseId, warehouseScope = null) {
     const id = parseInt(warehouseId, 10);
     if (!id) return null;
     const num = (v) => parseFloat(v) || 0;
+    // #9-scoping: a warehouse outside the caller's scope reads as "not found"
+    // — the ledger is keyed on this one id, so there is nothing left to filter.
+    if (!isWarehouseInScope(warehouseScope, id)) return null;
 
     const w = await db('warehouses').where('id', id).first();
     if (!w) return null;
@@ -2254,7 +2267,7 @@ const reportingService = {
    * legacy movement_type values so the API shape + the FE filter are unchanged.
    * Read-only. Filters: dateFrom, dateTo, movementType, entity, lotId, warehouseId.
    */
-  async getInventoryLedger({ dateFrom, dateTo, movementType, entity, lotId, warehouseId, limit = 300 } = {}) {
+  async getInventoryLedger({ dateFrom, dateTo, movementType, entity, lotId, warehouseId, warehouseScope = null, limit = 300 } = {}) {
     const num = (v) => parseFloat(v) || 0;
     const cap = Math.min(parseInt(limit, 10) || 300, 1000);
 
@@ -2293,6 +2306,17 @@ const reportingService = {
     if (entity) q = q.where(function () { this.where('t.entity_from', entity).orWhere('t.entity_to', entity).orWhere('l.entity', entity); });
     if (lotId) q = q.where('t.lot_id', parseInt(lotId, 10));
     if (warehouseId) { const w = parseInt(warehouseId, 10); q = q.where(function () { this.where('t.warehouse_from_id', w).orWhere('t.warehouse_to_id', w).orWhere('l.warehouse_id', w); }); }
+    // #9-scoping: keep a movement if ANY of its warehouses is in scope — a
+    // transfer OUT of a scoped warehouse is the caller's business even though
+    // the lot now lives somewhere they can't see.
+    if (warehouseScope) {
+      const ids = warehouseScope.length ? warehouseScope : [-1];
+      q = q.where(function () {
+        this.whereIn('l.warehouse_id', ids)
+          .orWhereIn('t.warehouse_from_id', ids)
+          .orWhereIn('t.warehouse_to_id', ids);
+      });
+    }
 
     const rows = await q.select(
       't.id', 't.transaction_date', 't.created_at', 't.transaction_type', 't.quantity_kg', 't.cost_impact', 't.total_cost',
@@ -2339,7 +2363,7 @@ const reportingService = {
   // Opening/Inward/Outward/Packing/Transfer/Sales columns + running Balance +
   // Source Lot / Date / User / Reference (Batch 5, item 5). Packing is derived
   // from mill_packing_logs (no rice-lot packing movement exists).
-  async getStockLedger({ dimension = 'variety', key, variety, dateFrom, dateTo, limit = 2000 } = {}) {
+  async getStockLedger({ dimension = 'variety', key, variety, dateFrom, dateTo, warehouseScope = null, limit = 2000 } = {}) {
     const num = (v) => parseFloat(v) || 0;
     const cap = Math.min(parseInt(limit, 10) || 2000, 5000);
     if (!key && dimension !== 'variety') { /* allow empty variety */ }
@@ -2383,6 +2407,9 @@ const reportingService = {
       else if (dimension === 'grade') qb.where('l.grade', key);
       else if (dimension === 'product') qb.where('l.product_id', parseInt(key, 10) || -1);
       else if (dimension === 'byproduct') { qb.where('l.type', 'byproduct').whereRaw(`(${TAG_CASE}) = ?`, [key]); if (variety) qb.where('l.variety', variety); }
+      // #9-scoping: applied here so it reaches BOTH the movement query and the
+      // packing-log whereExists subquery, which share this predicate.
+      applyWarehouseScope(qb, warehouseScope, 'l.warehouse_id');
       return qb;
     };
     const label = dimension === 'byproduct'
@@ -2463,7 +2490,7 @@ const reportingService = {
    * by grade/output, with produced (original intake), sold, on-hand,
    * reserved and on-hand value. Read-only.
    */
-  async getFinishedGoodsLedger({ entity, type } = {}) {
+  async getFinishedGoodsLedger({ entity, type, warehouseScope = null } = {}) {
     const num = (v) => parseFloat(v) || 0;
     let q = db('inventory_lots as l')
       .leftJoin('products as p', 'l.product_id', 'p.id')
@@ -2472,6 +2499,7 @@ const reportingService = {
       .whereNot('l.ownership', 'client')
       .whereIn('l.type', (type === 'finished' || type === 'byproduct') ? [type] : ['finished', 'byproduct']);
     if (entity) q = q.where('l.entity', entity);
+    q = applyWarehouseScope(q, warehouseScope, 'l.warehouse_id');
     const lots = await q.select(
       'l.id', 'l.lot_no', 'l.type', 'l.item_name', 'l.grade', 'l.variety', 'l.processing_type',
       'l.net_weight_kg', 'l.received_net_weight_kg', 'l.available_qty', 'l.reserved_qty', 'l.sold_weight_kg',
@@ -2504,14 +2532,16 @@ const reportingService = {
   // client, service batch, warehouse, produced / dispatched / on-hand quantities
   // and days-on-hand. Quantity-only (the rice belongs to the client — no company
   // cost/value). Every Service Milling report below is built off this one query.
-  async _fetchServiceMillingLots() {
+  // #9-scoping: scoping the ONE shared fetch covers all four Service Milling
+  // reports (stock register, ageing, pending dispatch, reconciliation) at once.
+  async _fetchServiceMillingLots(warehouseScope = null) {
     const num = (v) => parseFloat(v) || 0;
-    const rows = await db('inventory_lots as l')
+    const rows = await applyWarehouseScope(db('inventory_lots as l')
       .leftJoin('milling_batches as mb', 'l.service_batch_id', 'mb.id')
       .leftJoin('customers as c1', 'l.owner_customer_id', 'c1.id')
       .leftJoin('customers as c2', 'mb.client_customer_id', 'c2.id')
       .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
-      .where('l.ownership', 'client')
+      .where('l.ownership', 'client'), warehouseScope, 'l.warehouse_id')
       .select(
         'l.id', 'l.lot_no', 'l.item_name', 'l.type', 'l.grade', 'l.variety', 'l.unit',
         'l.available_qty', 'l.net_weight_kg', 'l.received_net_weight_kg', 'l.qty', 'l.created_at',
@@ -2549,7 +2579,7 @@ const reportingService = {
   // print the client's stock position.
   async getServiceMillingStock(opts = {}) {
     const groupBy = ['client', 'batch', 'warehouse'].includes(opts.groupBy) ? opts.groupBy : 'client';
-    const lots = await this._fetchServiceMillingLots();
+    const lots = await this._fetchServiceMillingLots(opts.warehouseScope || null);
     const keyOf = (l) => groupBy === 'batch'
       ? (l.batchName ? `${l.batchNo || '—'} — ${l.batchName}` : (l.batchNo || 'Unassigned batch'))
       : groupBy === 'warehouse' ? l.warehouseName : l.clientName;
@@ -2581,8 +2611,8 @@ const reportingService = {
   // Service Milling Stock Ageing — on-hand client stock bucketed by days held
   // (anchored on the batch receive date, falling back to lot creation). Grouped
   // by client so the mill can chase stale client stock for dispatch.
-  async getServiceMillingAgeing() {
-    const lots = (await this._fetchServiceMillingLots()).filter((l) => l.onHandKg > 0);
+  async getServiceMillingAgeing(warehouseScope = null) {
+    const lots = (await this._fetchServiceMillingLots(warehouseScope)).filter((l) => l.onHandKg > 0);
     const BUCKETS = ['0–30', '31–60', '61–90', '90+'];
     const bucketOf = (d) => (d <= 30 ? '0–30' : d <= 60 ? '31–60' : d <= 90 ? '61–90' : '90+');
     const groups = {};
@@ -2601,8 +2631,8 @@ const reportingService = {
 
   // Pending Client Dispatch — client-owned lots still on hand (owed back to the
   // client), grouped by client, most-aged first, so the mill can plan handovers.
-  async getServiceMillingPendingDispatch() {
-    const lots = (await this._fetchServiceMillingLots()).filter((l) => l.onHandKg > 0);
+  async getServiceMillingPendingDispatch(warehouseScope = null) {
+    const lots = (await this._fetchServiceMillingLots(warehouseScope)).filter((l) => l.onHandKg > 0);
     const groups = {};
     for (const l of lots) {
       const key = l.clientName;
@@ -2622,7 +2652,7 @@ const reportingService = {
   // balance: raw received → milled → produced (finished + by-product) →
   // dispatched → on-hand. Flags any batch where produced ≠ dispatched + on-hand
   // (a stock leak) so client stock can be reconciled before hand-over.
-  async getServiceMillingReconciliation() {
+  async getServiceMillingReconciliation(warehouseScope = null) {
     const num = (v) => parseFloat(v) || 0;
     const round2 = (v) => Math.round((num(v)) * 100) / 100;
     const batches = await db('milling_batches as mb')
@@ -2633,7 +2663,11 @@ const reportingService = {
     const ids = batches.map((b) => b.id);
 
     const lotAgg = ids.length
-      ? await db('inventory_lots').whereIn('service_batch_id', ids).where('ownership', 'client')
+      // #9-scoping: reconcile only the client stock the caller can see, so the
+      // produced/on-hand legs match the other Service Milling reports.
+      ? await applyWarehouseScope(
+          db('inventory_lots').whereIn('service_batch_id', ids).where('ownership', 'client'),
+          warehouseScope, 'warehouse_id')
           .select('service_batch_id')
           .sum({ produced: db.raw('COALESCE(received_net_weight_kg, net_weight_kg, qty)') })
           .sum({ onhand: 'available_qty' })
@@ -2684,12 +2718,15 @@ const reportingService = {
     recovery_by_variety: 'Recovery by Variety',
   },
 
-  async buildScheduledReport(reportType, filters = {}) {
+  // `warehouseScope` (#9-scoping) is null for the cron/email path — an
+  // admin-configured digest is company-wide. It is supplied only when a user
+  // triggers "Run now", so a manual run can't return more than that user may see.
+  async buildScheduledReport(reportType, filters = {}, warehouseScope = null) {
     const num = (v) => parseFloat(v) || 0;
     const fmtKg = (v) => `${Math.round(num(v)).toLocaleString()} kg`;
     const fmtPkr = (v) => `Rs ${Math.round(num(v)).toLocaleString()}`;
     if (reportType === 'finished_goods') {
-      const d = await this.getFinishedGoodsLedger(filters);
+      const d = await this.getFinishedGoodsLedger({ ...filters, warehouseScope });
       return {
         title: 'Finished Goods Ledger',
         columns: ['Output', 'Type', 'Produced', 'Sold', 'On hand', 'Reserved', 'Value'],
@@ -2698,7 +2735,7 @@ const reportingService = {
       };
     }
     if (reportType === 'inventory_movement') {
-      const d = await this.getInventoryLedger({ ...filters, limit: 500 });
+      const d = await this.getInventoryLedger({ ...filters, warehouseScope, limit: 500 });
       return {
         title: 'Inventory Movement Ledger',
         columns: ['Date', 'Movement', 'Lot', 'Where', 'Qty (kg)', 'Cost'],
@@ -2706,7 +2743,7 @@ const reportingService = {
       };
     }
     if (reportType === 'stock_aging') {
-      const lots = await this.getStockAgingReport();
+      const lots = await this.getStockAgingReport(warehouseScope);
       const arr = Array.isArray(lots) ? lots : (lots?.data || []);
       return {
         title: 'Stock Aging',
@@ -2796,7 +2833,7 @@ const reportingService = {
    * `entity === 'mill'` hides export orders (mill role has no export view).
    * Read-only; no flow/permission changes.
    */
-  async globalSearch({ q, entity, limit = 8 }) {
+  async globalSearch({ q, entity, limit = 8, warehouseScope = null }) {
     const term = String(q || '').trim();
     if (term.length < 2) return { query: term, groups: [] };
     const like = `%${term}%`;
@@ -2804,8 +2841,9 @@ const reportingService = {
     const isMill = entity === 'mill';
 
     const [lots, batches, sales, orders, suppliers, customers] = await Promise.all([
-      db('inventory_lots as l')
-        .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
+      // #9-scoping: quick search must not surface a lot the user can't open.
+      applyWarehouseScope(db('inventory_lots as l')
+        .leftJoin('suppliers as s', 'l.supplier_id', 's.id'), warehouseScope, 'l.warehouse_id')
         .where(function () { this.where('l.lot_no', 'ilike', like).orWhere('l.item_name', 'ilike', like); })
         .select('l.id', 'l.lot_no', 'l.item_name', 'l.type', db.raw("COALESCE(s.name,'—') as supplier"))
         .orderBy('l.id', 'desc').limit(cap),
@@ -3202,10 +3240,10 @@ const reportingService = {
   /**
    * Stock aging: per lot, days since created, flag dead stock (>90 days).
    */
-  async getStockAgingReport() {
-    const lots = await db('inventory_lots as il')
+  async getStockAgingReport(warehouseScope = null) {
+    const lots = await applyWarehouseScope(db('inventory_lots as il')
       .leftJoin('warehouses as w', 'il.warehouse_id', 'w.id')
-      .where('il.qty', '>', 0)
+      .where('il.qty', '>', 0), warehouseScope, 'il.warehouse_id')
       .select(
         'il.id',
         'il.lot_no',
@@ -3263,9 +3301,9 @@ const reportingService = {
   /**
    * Avg days inventory sits before being consumed/sold. By product type.
    */
-  async getStockTurnoverDays({ entity }) {
-    const query = db('inventory_lots')
-      .where('qty', '>', 0)
+  async getStockTurnoverDays({ entity, warehouseScope = null }) {
+    const query = applyWarehouseScope(db('inventory_lots')
+      .where('qty', '>', 0), warehouseScope, 'warehouse_id')
       .select(
         'type',
         db.raw("AVG(EXTRACT(DAY FROM NOW() - created_at))::numeric(10,1) as avg_days"),
@@ -3283,6 +3321,7 @@ const reportingService = {
     const overall = await db('inventory_lots')
       .where('qty', '>', 0)
       .modify((qb) => { if (entity) qb.where('entity', entity); })
+      .modify((qb) => applyWarehouseScope(qb, warehouseScope, 'warehouse_id'))
       .select(db.raw("AVG(EXTRACT(DAY FROM NOW() - created_at))::numeric(10,1) as avg_days"))
       .first();
 
@@ -3300,13 +3339,14 @@ const reportingService = {
   /**
    * Total value of all inventory by type and warehouse.
    */
-  async getStockValuation({ entity, asOfDate }) {
+  async getStockValuation({ entity, asOfDate, warehouseScope = null }) {
     const query = db('inventory_lots as il')
       .leftJoin('warehouses as w', 'il.warehouse_id', 'w.id')
       .where('il.qty', '>', 0);
 
     if (entity) query.where('il.entity', entity);
     if (asOfDate) query.where('il.created_at', '<=', asOfDate);
+    applyWarehouseScope(query, warehouseScope, 'il.warehouse_id');
 
     // By type
     const byType = await query.clone()

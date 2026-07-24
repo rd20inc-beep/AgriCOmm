@@ -1,8 +1,14 @@
 const db = require('../../config/database');
 const { nextDocNo } = require('../../utils/docNumber');
+const whScope = require('../../utils/warehouseScope');
 
 // Generic CRUD factory
-function createCrud(tableName, entityName) {
+//
+// `opts.warehouseScoped` marks a table whose PRIMARY KEY *is* a warehouse id
+// (i.e. `warehouses` itself), so #9-scoping filters the list + single-record
+// read to the caller's warehouses. Every other CRUD table is unaffected.
+function createCrud(tableName, entityName, opts = {}) {
+  const scopeCol = opts.warehouseScoped ? 'id' : null;
   return {
     async list(req, res) {
       try {
@@ -10,6 +16,7 @@ function createCrud(tableName, entityName) {
         const offset = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
 
         let query = db(tableName);
+        if (scopeCol) query = whScope.applyWarehouseScope(query, await whScope.resolveWarehouseScope(req), scopeCol);
 
         if (search) {
           query = query.where(function () {
@@ -46,6 +53,10 @@ function createCrud(tableName, entityName) {
 
     async getById(req, res) {
       try {
+        if (scopeCol) {
+          const scope = await whScope.resolveWarehouseScope(req);
+          if (whScope.denyOutOfScope(res, scope, req.params.id)) return undefined;
+        }
         const row = await db(tableName).where({ id: req.params.id }).first();
         if (!row) {
           return res.status(404).json({ success: false, message: `${entityName} not found.` });
@@ -125,7 +136,7 @@ const customersCrud = createCrud('customers', 'customer');
 const suppliersCrud = createCrud('suppliers', 'supplier');
 const productsCrud = createCrud('products', 'product');
 const bagTypesCrud = createCrud('bag_types', 'bag_type');
-const warehousesCrud = createCrud('warehouses', 'warehouse');
+const warehousesCrud = createCrud('warehouses', 'warehouse', { warehouseScoped: true });
 const bankAccountsCrud = createCrud('bank_accounts', 'bank_account');
 const documentTemplatesCrud = createCrud('document_templates', 'document_template');
 const productCategoriesCrud = createCrud('product_categories', 'product_category');

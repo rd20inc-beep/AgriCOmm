@@ -259,13 +259,21 @@ async function userHasPermission(req, module, action) {
 // pass this to filter results. Owner/Super Admin are never scoped.
 async function getScopedWarehouseIds(user) {
   if (!user || !user.id) return null;
+  // Cached on the per-request user object: a single report can apply the scope
+  // at a dozen query sites and must not re-query user_scopes each time.
+  if (user._warehouseScopeLoaded) return user._warehouseScopeIds;
   try {
     const roleId = user.role_id || (await db('users').where({ id: user.id }).first('role_id'))?.role_id;
     const role = roleId && await db('roles').where({ id: roleId }).first('name');
-    if (role && (role.name === 'Super Admin' || role.name === 'Owner')) return null;
-    const rows = await db('user_scopes').where({ user_id: user.id, scope_type: 'warehouse' }).pluck('scope_value');
-    if (!rows.length) return null; // unrestricted
-    return rows.map((v) => parseInt(v, 10)).filter(Number.isFinite);
+    let ids = null;
+    if (!(role && (role.name === 'Super Admin' || role.name === 'Owner'))) {
+      const rows = await db('user_scopes').where({ user_id: user.id, scope_type: 'warehouse' }).pluck('scope_value');
+      // no rows = unrestricted
+      if (rows.length) ids = rows.map((v) => parseInt(v, 10)).filter(Number.isFinite);
+    }
+    user._warehouseScopeIds = ids;
+    user._warehouseScopeLoaded = true;
+    return ids;
   } catch (e) {
     return null; // fail-open: never hide data on an infra error
   }

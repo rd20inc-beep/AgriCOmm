@@ -1,4 +1,6 @@
 const db = require('../../config/database');
+// #9-scoping: READ-path warehouse restriction (stock take lists).
+const { applyWarehouseScope } = require('../../utils/warehouseScope');
 const auditService = require('../admin/audit.service');
 const inventoryService = require('../inventory/inventory.service');
 
@@ -1266,7 +1268,10 @@ const controlService = {
     return { ...updated, items: finalItems };
   },
 
-  async getStockCounts({ status, warehouseId, page = 1, limit = 20 }) {
+  // #9-scoping: `warehouseScope` (ids, or null = unrestricted). A count with a
+  // NULL warehouse_id is an ALL-warehouse count, so it is correctly excluded for
+  // a scoped user — it spans warehouses they cannot see.
+  async getStockCounts({ status, warehouseId, warehouseScope = null, page = 1, limit = 20 }) {
     const offset = (page - 1) * limit;
 
     const query = db('stock_counts as sc')
@@ -1277,6 +1282,7 @@ const controlService = {
 
     if (status) query.where('sc.status', status);
     if (warehouseId) query.where('sc.warehouse_id', warehouseId);
+    applyWarehouseScope(query, warehouseScope, 'sc.warehouse_id');
 
     const [{ count }] = await query.clone().count('sc.id as count');
     const rows = await query
@@ -1303,8 +1309,8 @@ const controlService = {
     };
   },
 
-  async getStockCountDetail(countId) {
-    const stockCount = await db('stock_counts as sc')
+  async getStockCountDetail(countId, warehouseScope = null) {
+    const stockCount = await applyWarehouseScope(db('stock_counts as sc'), warehouseScope, 'sc.warehouse_id')
       .leftJoin('warehouses as w', 'sc.warehouse_id', 'w.id')
       .leftJoin('users as cb', 'sc.created_by', 'cb.id')
       .leftJoin('users as cby', 'sc.counted_by', 'cby.id')
