@@ -72,8 +72,24 @@ router.get('/products', authorize('admin', 'view'), controller.listProducts);
 router.get('/products/:id', authorize('admin', 'view'), controller.getProduct);
 router.get('/bag-types', authorize('admin', 'view'), controller.listBagTypes);
 router.get('/bag-types/:id', authorize('admin', 'view'), controller.getBagType);
-router.get('/warehouses', authorize('admin', 'view'), controller.listWarehouses);
-router.get('/warehouses/:id', authorize('admin', 'view'), controller.getWarehouse);
+// Warehouses are READ by every operational area that shows a warehouse picker
+// (Stock Take, Inventory Movement Ledger, Reports filters, and the global
+// AppContext lookup) — not just by admins. Gating the read on admin.view left a
+// warehouse-scoped operator, the exact user #9-scoping exists for, with an empty
+// dropdown. The payload is low-sensitivity master data (id / name / entity /
+// type) and is itself warehouse-scoped per user by createCrud, so widen the READ
+// to any area that needs the picker. WRITES below stay admin-only.
+//
+// Note this must be authorizeAny with each area's OWN module, not just
+// admin.view: a user with a module allow-list that excludes 'admin' is denied on
+// an admin-module route regardless of permissions, so listing 'admin' alone
+// would not have fixed the gap.
+const WAREHOUSE_READ = authorizeAny(
+  ['admin', 'view'], ['inventory', 'view'], ['reports', 'view'], ['milling', 'view'],
+  ['mill_store', 'view'], ['service_milling', 'view'], ['export_orders', 'view'],
+);
+router.get('/warehouses', WAREHOUSE_READ, controller.listWarehouses);
+router.get('/warehouses/:id', WAREHOUSE_READ, controller.getWarehouse);
 router.get('/bank-accounts', authorize('admin', 'view'), controller.listBankAccounts);
 router.get('/bank-accounts/:id', authorize('admin', 'view'), controller.getBankAccount);
 router.get('/document-templates', authorize('admin', 'view'), controller.listDocumentTemplates);
