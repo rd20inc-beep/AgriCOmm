@@ -40,7 +40,7 @@ export default function StoreAlerts() {
             </p>
           </div>
 
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mobile-cards">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 bg-gray-50">
@@ -59,21 +59,21 @@ export default function StoreAlerts() {
                   const isOut = onHand === 0;
                   return (
                     <tr key={i} className={isOut ? 'bg-red-50' : 'hover:bg-gray-50'}>
-                      <td className="py-2.5 px-4">
+                      <td data-label="Item" className="py-2.5 px-4">
                         <p className="font-medium text-gray-900">{a.item_name}</p>
                         <p className="text-xs text-gray-500 font-mono">{a.item_code}</p>
                       </td>
-                      <td className="py-2.5 px-4">
+                      <td data-label="Category" className="mob-hide py-2.5 px-4">
                         <span className="inline-block px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-700 capitalize">
                           {a.category}
                         </span>
                       </td>
-                      <td className={`py-2.5 px-4 text-right font-bold ${isOut ? 'text-red-600' : 'text-amber-600'}`}>
+                      <td data-label="On hand" className={`py-2.5 px-4 text-right font-bold ${isOut ? 'text-red-600' : 'text-amber-600'}`}>
                         {onHand} {a.unit}
                         {isOut && <span className="ml-1 text-[10px] font-semibold uppercase text-red-500">OUT</span>}
                       </td>
-                      <td className="py-2.5 px-4 text-right text-gray-500">{reorder} {a.unit}</td>
-                      <td className="py-2.5 px-4 text-right text-red-600 font-medium">−{deficit}</td>
+                      <td data-label="Reorder level" className="py-2.5 px-4 text-right text-gray-500">{reorder} {a.unit}</td>
+                      <td data-label="Deficit" className="py-2.5 px-4 text-right text-red-600 font-medium">−{deficit}</td>
                     </tr>
                   );
                 })}

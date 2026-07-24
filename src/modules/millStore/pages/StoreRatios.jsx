@@ -152,7 +152,7 @@ export default function StoreRatios() {
           <p className="text-xs text-gray-400 mt-1">Add ratios so the system can auto-suggest materials when recording batch consumption.</p>
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mobile-cards">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-200 bg-gray-50">
@@ -167,17 +167,17 @@ export default function StoreRatios() {
             <tbody className="divide-y divide-gray-100">
               {safeRatios.map(r => (
                 <tr key={r.id} className="hover:bg-gray-50">
-                  <td className="py-2.5 px-4">
+                  <td data-label="Item" className="py-2.5 px-4">
                     <p className="font-medium text-gray-900">{r.item_name}</p>
                     <p className="text-xs text-gray-500 font-mono">{r.item_code || '—'}</p>
                   </td>
-                  <td className="py-2.5 px-4 text-gray-600 capitalize">{r.item_category || '—'}</td>
-                  <td className="py-2.5 px-4 text-right font-bold text-gray-900">
+                  <td data-label="Category" className="mob-hide py-2.5 px-4 text-gray-600 capitalize">{r.item_category || '—'}</td>
+                  <td data-label="Per MT" className="py-2.5 px-4 text-right font-bold text-gray-900">
                     {Number(r.unit_per_mt)} {r.item_unit}
                   </td>
-                  <td className="py-2.5 px-4 text-gray-600">{r.product_name || 'All products'}</td>
-                  <td className="py-2.5 px-4 text-gray-500 text-xs max-w-xs truncate">{r.notes || '—'}</td>
-                  <td className="py-2.5 px-4 text-right">
+                  <td data-label="Product" className="py-2.5 px-4 text-gray-600">{r.product_name || 'All products'}</td>
+                  <td data-label="Notes" className="mob-hide py-2.5 px-4 text-gray-500 text-xs max-w-xs truncate">{r.notes || '—'}</td>
+                  <td data-label="Actions" className="py-2.5 px-4 text-right">
                     <button onClick={() => startEdit(r)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Edit">
                       <Edit3 size={14} />
                     </button>
