@@ -145,7 +145,7 @@ export default function Buyers() {
 
       {/* Table */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
@@ -168,30 +168,30 @@ export default function Buyers() {
                 </td></tr>
               ) : filtered.map(b => (
                 <tr key={b.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-4 py-3">
+                  <td data-label="Buyer" className="px-4 py-3">
                     <div className="font-medium"><PartyLink type="customer" id={b.id} name={b.name} /></div>
                     {b.email && <div className="text-xs text-gray-500 flex items-center gap-1 mt-0.5"><Mail className="w-3 h-3" />{b.email}</div>}
                   </td>
-                  <td className="px-4 py-3">
+                  <td data-label="Country" className="px-4 py-3">
                     {b.country ? (
                       <span className="inline-flex items-center gap-1 text-gray-700"><Globe className="w-3.5 h-3.5 text-gray-400" />{b.country}</span>
                     ) : <span className="text-gray-400">—</span>}
                     {b.port && <div className="text-xs text-gray-500 mt-0.5">Port: {b.port}</div>}
                   </td>
-                  <td className="px-4 py-3">
+                  <td data-label="Contact" className="mob-hide px-4 py-3">
                     <div className="text-gray-900">{b.contact_person || '—'}</div>
                     {b.phone && <div className="text-xs text-gray-500 flex items-center gap-1 mt-0.5"><Phone className="w-3 h-3" />{b.phone}</div>}
                   </td>
-                  <td className="px-4 py-3 text-gray-700">{b.payment_terms || '—'}</td>
-                  <td className="px-4 py-3 text-center">
+                  <td data-label="Payment terms" className="mob-hide px-4 py-3 text-gray-700">{b.payment_terms || '—'}</td>
+                  <td data-label="Currency" className="px-4 py-3 text-center">
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-gray-700 rounded text-xs font-medium">
                       <DollarSign className="w-3 h-3" />{b.currency || 'USD'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-center">
+                  <td data-label="Status" className="px-4 py-3 text-center">
                     <StatusBadge status={b.is_active ? 'Active' : 'Inactive'} />
                   </td>
-                  <td className="px-4 py-3 text-center">
+                  <td data-label="Actions" className="px-4 py-3 text-center">
                     <div className="flex items-center justify-center gap-1">
                       <button onClick={() => navigate(`/finance/statements?type=customer&id=${b.id}`)} className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" title="View ledger">
                         <BookOpen className="w-4 h-4" />
