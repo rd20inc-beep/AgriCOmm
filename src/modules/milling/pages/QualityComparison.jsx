@@ -293,7 +293,7 @@ export default function QualityComparison() {
 
             {/* Side-by-side Table */}
             {(selectedBatch.sampleAnalysis || selectedBatch.arrivalAnalysis) ? (
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto mobile-cards">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-gray-200">
@@ -313,11 +313,11 @@ export default function QualityComparison() {
                       const isFail = variance !== null && parseFloat(variance) > 1.0;
                       return (
                         <tr key={param.key} className={`border-b border-gray-50 ${isFail ? 'bg-red-50' : ''}`}>
-                          <td className="py-2.5 px-3 font-medium text-gray-900">{param.label}</td>
-                          <td className="py-2.5 px-3 text-right text-gray-600">{sv != null ? `${sv}${param.unit}` : '—'}</td>
-                          <td className="py-2.5 px-3 text-right text-gray-600">{av != null ? `${av}${param.unit}` : '—'}</td>
-                          <td className={`py-2.5 px-3 text-right font-medium ${isFail ? 'text-red-600' : 'text-gray-600'}`}>{variance ?? '—'}</td>
-                          <td className="py-2.5 px-3 text-center">
+                          <td data-label="Parameter" className="py-2.5 px-3 font-medium text-gray-900">{param.label}</td>
+                          <td data-label="Sample" className="py-2.5 px-3 text-right text-gray-600">{sv != null ? `${sv}${param.unit}` : '—'}</td>
+                          <td data-label="Arrival" className="py-2.5 px-3 text-right text-gray-600">{av != null ? `${av}${param.unit}` : '—'}</td>
+                          <td data-label="Variance" className={`py-2.5 px-3 text-right font-medium ${isFail ? 'text-red-600' : 'text-gray-600'}`}>{variance ?? '—'}</td>
+                          <td data-label="Result" className="py-2.5 px-3 text-center">
                             {variance === null ? <span className="text-xs text-gray-400">—</span>
                               : isFail ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">Fail</span>
                               : <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">Pass</span>}
