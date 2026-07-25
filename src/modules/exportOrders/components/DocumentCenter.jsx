@@ -156,7 +156,7 @@ function bankDetailsBlock(company, opts = {}) {
   const corr = b.correspondent;
   const corrLine = corr && (corr.name || corr.swift || corr.account)
     ? `<br/>Correspondent: ${[corr.name, corr.swift, corr.account].filter(Boolean).join(' · ')}` : '';
-  const maskNote = b.masked ? '<br/><span style="font-size:9px;color:#888;">A/C &amp; IBAN partially masked — full details to authorised finance users.</span>' : '';
+  const maskNote = b.masked ? '<br/><span style="font-size:12px;color:#888;">A/C &amp; IBAN partially masked — full details to authorised finance users.</span>' : '';
   return `<div><strong>${label}:</strong><br/>${rows.map(([k, v]) => `${k}: ${v}`).join('<br/>')}${corrLine}${maskNote}</div>`;
 }
 
@@ -241,7 +241,7 @@ function docSummaryBlock(doc, opts = {}) {
   const L = 'border:1px solid #333;padding:3px 7px;font-weight:bold;white-space:nowrap;background:#f7f7f7;';
   const V = 'border:1px solid #333;padding:3px 7px;';
   return `
-    <table style="width:100%;border-collapse:collapse;margin-top:${opts.marginTop || 8}px;font-size:10.5px;">
+    <table style="width:100%;border-collapse:collapse;margin-top:${opts.marginTop || 8}px;font-size:12px;">
       <tr>
         <td style="${L}width:20%;">HS Code</td><td style="${V}">${hsText}</td>
         ${showAmount ? `<td rowspan="4" style="border:1px solid #333;padding:6px;text-align:right;vertical-align:middle;width:24%;font-weight:bold;font-size:13px;">${curShort} ${fmtMoney(totalAmt)}</td>` : ''}
@@ -250,7 +250,7 @@ function docSummaryBlock(doc, opts = {}) {
       <tr><td style="${L}">Net Weight</td><td style="${V}">${mt(net)}</td></tr>
       <tr><td style="${L}">Gross Weight</td><td style="${V}">${mt(gross)}</td></tr>
     </table>
-    ${showAmount ? `<div style="margin-top:4px;font-style:italic;font-size:10.5px;"><strong>Total Amount in ${curShort}:</strong> ${amountInWords(totalAmt, cur)}</div>` : ''}`;
+    ${showAmount ? `<div style="margin-top:4px;font-style:italic;font-size:12px;"><strong>Total Amount in ${curShort}:</strong> ${amountInWords(totalAmt, cur)}</div>` : ''}`;
 }
 
 function renderHeader(company) {
@@ -263,7 +263,7 @@ function renderHeader(company) {
 
 function renderCompanyFooter(company) {
   return `
-    <div class="agri-ftr" style="text-align:center; margin-top:30px; padding-top:10px; border-top:1px solid #ccc; font-size:10px; color:#666;">
+    <div class="agri-ftr" style="text-align:center; margin-top:30px; padding-top:10px; border-top:1px solid #ccc; font-size:12px; color:#666;">
       ${company.address}<br/>
       Tel: ${company.phone} &nbsp; Fax: ${company.fax} &nbsp; Email: ${company.email} &nbsp; Website: ${company.website}
     </div>`;
@@ -276,7 +276,7 @@ function renderProformaInvoice(doc) {
   const totalQty = lines.reduce((s, l) => s + (l.qtyMT || 0), 0);
   const totalAmt = lines.reduce((s, l) => s + (l.amount || 0), 0);
   return `
-    <div style="font-family: Arial, sans-serif; font-size:11px; width:100%; max-width:1040px; margin:0 auto; padding:20px; color:#111;">
+    <div style="font-family: Arial, sans-serif; font-size:12px; width:100%; max-width:1040px; margin:0 auto; padding:20px; color:#111;">
       ${renderComplianceHeader(company)}
       <h2 style="text-align:center; font-size:16px; margin:10px 0;">PROFORMA INVOICE</h2>
 
@@ -345,7 +345,7 @@ function renderProformaInvoice(doc) {
         </tbody>
       </table>
 
-      <p style="margin-top:10px; font-style:italic; font-size:11px;">
+      <p style="margin-top:10px; font-style:italic; font-size:12px;">
         <em>Certification: Goods shipped under this Proforma Invoice are of Pakistan Origin.</em>
       </p>
 
@@ -356,7 +356,7 @@ function renderProformaInvoice(doc) {
         const bagSize = (buildLineItems(doc)[0] && buildLineItems(doc)[0].bagSizeKg) || order.bagSizeKg || 50;
         const bagType = (buildLineItems(doc)[0] && buildLineItems(doc)[0].bagType) || order.bagType || 'PP';
         return `
-      <div style="margin-top:16px; font-size:10.5px;">
+      <div style="margin-top:16px; font-size:12px;">
         <div style="font-weight:bold; text-decoration:underline; margin-bottom:6px;">Terms &amp; Conditions</div>
         <ol>
           <li><b>Price Basis:</b> All prices are in ${order.currency} per Metric Ton on <b>${inc.incoterm || order.incoterm || 'FOB'}</b> ${inc.sellerPaysFreight ? pod : pol} basis.</li>
@@ -376,10 +376,10 @@ function renderProformaInvoice(doc) {
 
       <div style="margin-top:48px; display:flex; justify-content:space-between; gap:24px;">
         <div style="text-align:center; width:240px;">
-          <div style="border-top:1px solid #333; padding-top:4px; font-size:11px;"><b>${company.name}</b><br/>Proprietor<br/><span style="color:#666;">(Authorised Signature &amp; Stamp)</span></div>
+          <div style="border-top:1px solid #333; padding-top:4px; font-size:12px;"><b>${company.name}</b><br/>Proprietor<br/><span style="color:#666;">(Authorised Signature &amp; Stamp)</span></div>
         </div>
         <div style="text-align:center; width:240px;">
-          <div style="border-top:1px solid #333; padding-top:4px; font-size:11px;"><b>${buyer.name}</b><br/>Buyer / Consignee<br/><span style="color:#666;">(Authorised Signature &amp; Stamp)</span></div>
+          <div style="border-top:1px solid #333; padding-top:4px; font-size:12px;"><b>${buyer.name}</b><br/>Buyer / Consignee<br/><span style="color:#666;">(Authorised Signature &amp; Stamp)</span></div>
         </div>
       </div>
 
@@ -445,10 +445,10 @@ function commercialInvoiceHtml(doc, opts = {}) {
     </tr>`;
 
   const bankingSection = bank.withheld ? `
-    <div style="border:1px solid #333; padding:8px; margin-top:10px; font-size:11px; color:#555;">
+    <div style="border:1px solid #333; padding:8px; margin-top:10px; font-size:12px; color:#555;">
       Banking details available to authorised recipients on request.
     </div>` : `
-    <table style="width:100%; border-collapse:collapse; margin-top:6px; font-size:10.5px;">
+    <table style="width:100%; border-collapse:collapse; margin-top:6px; font-size:12px;">
       <tr><td colspan="4" style="border:1px solid #333; padding:3px 7px; font-weight:bold; background:#eef2f7; text-transform:uppercase; letter-spacing:.3px;">Payment &amp; Banking Details</td></tr>
       ${infoRow('Payment Term', order.paymentTerms, 'Payment Due', order.paymentDueDate)}
       ${infoRow('Currency', cur, 'Beneficiary', bank.title || company.name)}
@@ -457,16 +457,16 @@ function commercialInvoiceHtml(doc, opts = {}) {
       ${infoRow('SWIFT / BIC', bank.swift, 'Bank Address', bank.address || bank.city)}
       ${bank.correspondent ? infoRow('Correspondent Bank', bank.correspondent.name, 'Corr. SWIFT / A/C', [bank.correspondent.swift, bank.correspondent.account].filter(Boolean).join(' / ')) : ''}
     </table>
-    ${bank.masked ? '<div style="font-size:9px; color:#888; margin-top:2px;">Account number / IBAN partially masked — full details visible to authorised finance users.</div>' : ''}`;
+    ${bank.masked ? '<div style="font-size:12px; color:#888; margin-top:2px;">Account number / IBAN partially masked — full details visible to authorised finance users.</div>' : ''}`;
 
   return `
-    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:10px 16px; color:#111;">
+    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:10px 16px; color:#111;">
       ${renderComplianceHeader(company)}
       <p style="text-align:center; font-weight:bold; text-decoration:underline; margin:0 0 2px;">${opts.copyLabel || doc._copyLabel || 'ORIGINAL'}</p>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
         <div style="flex:1;"></div>
         <h2 style="font-size:16px; margin:0; text-decoration:underline; letter-spacing:.5px;">${opts.title || 'COMMERCIAL INVOICE'}</h2>
-        <div style="flex:1; text-align:right; font-size:10px; font-style:italic;">REX # ${company.rexNumber}</div>
+        <div style="flex:1; text-align:right; font-size:12px; font-style:italic;">REX # ${company.rexNumber}</div>
       </div>
 
       <table style="width:100%; margin:4px 0; border-collapse:collapse;">
@@ -490,7 +490,7 @@ function commercialInvoiceHtml(doc, opts = {}) {
         </tr>
       </table>
 
-      <table style="width:100%; border-collapse:collapse; font-size:10.5px; margin-top:3px;">
+      <table style="width:100%; border-collapse:collapse; font-size:12px; margin-top:3px;">
         ${infoRow('Port of Loading', routeFrom, 'Port of Discharge', routeTo)}
         ${infoRow('Shipment Route', [routeFrom, routeTo].filter(Boolean).join(' → '), 'No. of Containers', `${shipment.containerCount} X ${shipment.containerType === '40ft' ? "40'" : "20'"} FCL`)}
         ${infoRow('Vessel / Voyage', `${shipment.vesselName || ''}${shipment.voyageNumber ? ` / ${shipment.voyageNumber}` : ''}`, 'F.I. #', [shipment.fiNumber, shipment.fiNumber2, shipment.fiNumber3].filter(Boolean).join(', '))}
@@ -500,7 +500,7 @@ function commercialInvoiceHtml(doc, opts = {}) {
         ${infoRow('Gross Weight', fmtKg(grossKg), '', '')}
       </table>
 
-      <table style="width:100%; border-collapse:collapse; margin-top:7px; font-size:10px;">
+      <table style="width:100%; border-collapse:collapse; margin-top:7px; font-size:12px;">
         <thead>
           <tr style="background:#f0f0f0;">
             <th style="border:1px solid #333; padding:6px; width:12%;">MARKS &amp; NOS.</th>
@@ -517,7 +517,7 @@ function commercialInvoiceHtml(doc, opts = {}) {
             <tr>
               <td style="border:1px solid #333; padding:6px; text-align:center; font-weight:bold; font-style:italic; color:#c79a3a;">${l.brand}</td>
               <td style="border:1px solid #333; padding:6px; text-align:center;">${(l.bagCount || 0).toLocaleString()} Bags<br/>${fmtMt(l.qtyMT)} MT</td>
-              <td style="border:1px solid #333; padding:6px; font-size:9.5px;">${l.packing || ''}</td>
+              <td style="border:1px solid #333; padding:6px; font-size:12px;">${l.packing || ''}</td>
               <td style="border:1px solid #333; padding:6px;">${String(l.description || '').replace(/<br\/?>\s*<strong>HS CODE[^<]*<\/strong>/i, '')}</td>
               <td style="border:1px solid #333; padding:6px; text-align:center; white-space:nowrap;">${l.hsCode || hs.single || ''}</td>
               <td style="border:1px solid #333; padding:6px; text-align:center;">${fmtMoney(l.pricePerMT)}</td>
@@ -542,7 +542,7 @@ function commercialInvoiceHtml(doc, opts = {}) {
 
       ${opts.originBox || ''}
 
-      <table style="width:100%; border-collapse:collapse; margin-top:6px; font-size:10.5px;">
+      <table style="width:100%; border-collapse:collapse; margin-top:6px; font-size:12px;">
         ${infoRow('Total Quantity', `${fmtMt(totalQtyMT)} MT`, 'Total Packages', `${(totalPackages || 0).toLocaleString()} Bags`)}
         ${infoRow('Total Net Weight', fmtKg(netKg), 'Total Gross Weight', fmtKg(grossKg))}
         <tr>
@@ -554,13 +554,13 @@ function commercialInvoiceHtml(doc, opts = {}) {
       <div style="margin-top:5px; font-weight:bold; font-style:italic;">Amount in ${curShort}: <span style="font-weight:bold; font-style:normal;">${amountInWords(subTotal, cur)}</span></div>
 
       ${containers && containers.length > 0 ? `
-        <div style="margin-top:4px; font-size:10px; color:#333;">Container #: ${containers.map(c => c.containerNo).filter(Boolean).join(', ')}</div>` : ''}
+        <div style="margin-top:4px; font-size:12px; color:#333;">Container #: ${containers.map(c => c.containerNo).filter(Boolean).join(', ')}</div>` : ''}
 
       ${bankingSection}
 
-      ${doc._notes ? `<div style="margin-top:5px; font-size:10.5px;"><strong>Notes:</strong> ${doc._notes}</div>` : ''}
+      ${doc._notes ? `<div style="margin-top:5px; font-size:12px;"><strong>Notes:</strong> ${doc._notes}</div>` : ''}
 
-      <p style="font-style:italic; font-size:10.5px; margin-top:6px; text-decoration:underline;">Certification: Goods shipped under this invoice are from Pakistan origin</p>
+      <p style="font-style:italic; font-size:12px; margin-top:6px; text-decoration:underline;">Certification: Goods shipped under this invoice are from Pakistan origin</p>
 
       <div style="margin-top:12px;">
         <p style="margin:0;">Name of Signing authority:</p>
@@ -654,7 +654,7 @@ function renderPackingList(doc) {
     : (shipment && shipment.containerCount ? `${String(shipment.containerCount).padStart(2, '0')} X 20' Fcl` : '');
 
   return `
-    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px;">
+    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px;">
       ${renderComplianceHeader(company)}
       <p style="text-align:center; font-weight:bold; text-decoration:underline; margin:0 0 6px;">ORIGINAL</p>
       <h2 style="text-align:center; font-size:16px; margin:6px 0 16px; letter-spacing:1px; text-decoration:underline;">PACKING LIST</h2>
@@ -678,7 +678,7 @@ function renderPackingList(doc) {
         </tr>
       </table>
 
-      <table style="width:100%; border-collapse:collapse; font-size:11px; margin-bottom:15px;">
+      <table style="width:100%; border-collapse:collapse; font-size:12px; margin-bottom:15px;">
         <tr>
           <td style="border:1px solid #333; padding:5px 8px; font-weight:bold; width:18%;">Shipment Ports</td>
           <td style="border:1px solid #333; padding:5px 8px; width:32%;">${order.portOfLoading || ''}${buyer.country ? `, ${buyer.country}` : ''}</td>
@@ -711,21 +711,21 @@ function renderPackingList(doc) {
         </tr>
       </table>
 
-      <table style="width:100%; border-collapse:collapse; font-size:11px;">
+      <table style="width:100%; border-collapse:collapse; font-size:12px;">
         <thead>
           <tr style="background:#f5f5f5;">
             <th style="border:1px solid #333; padding:6px;">Container No.</th>
             <th style="border:1px solid #333; padding:6px;">DESCRIPTION</th>
             <th style="border:1px solid #333; padding:6px;">PACKING</th>
             <th style="border:1px solid #333; padding:6px;">QUANTITY</th>
-            <th style="border:1px solid #333; padding:6px;" colspan="2">WEIGHT (IN KGS)<br/><span style="font-weight:normal; font-size:10px;">Gross &nbsp;|&nbsp; Net</span></th>
+            <th style="border:1px solid #333; padding:6px;" colspan="2">WEIGHT (IN KGS)<br/><span style="font-weight:normal; font-size:12px;">Gross &nbsp;|&nbsp; Net</span></th>
           </tr>
         </thead>
         <tbody>
           ${rows.map((r) => `
             <tr>
               <td style="border:1px solid #333; padding:8px; vertical-align:top; font-weight:bold; font-style:italic; text-align:center;">${r.label}</td>
-              <td style="border:1px solid #333; padding:8px; vertical-align:top; font-size:10.5px; line-height:1.4;">${r.description}</td>
+              <td style="border:1px solid #333; padding:8px; vertical-align:top; font-size:12px; line-height:1.4;">${r.description}</td>
               <td style="border:1px solid #333; padding:8px; vertical-align:top; text-align:center;">${r.packing}</td>
               <td style="border:1px solid #333; padding:8px; vertical-align:top; text-align:center;">${r.quantity}</td>
               <td style="border:1px solid #333; padding:8px; vertical-align:top; text-align:right;">${fmtKg(r.grossKg)}</td>
@@ -749,7 +749,7 @@ function renderPackingList(doc) {
 
       ${docSummaryBlock(doc, { packLabel: 'Bags' })}
 
-      <p style="font-style:italic; font-size:11px; margin-top:12px; text-decoration:underline;">
+      <p style="font-style:italic; font-size:12px; margin-top:12px; text-decoration:underline;">
         Certification: Goods are shipped from Pakistan origin
       </p>
 
@@ -765,7 +765,7 @@ function renderGenericDocument(doc) {
   const distinctHs = [...new Set(lines.map((l) => l.hsCode).filter(Boolean))];
   const isMulti = lines.length > 1;
   return `
-    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px;">
+    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px;">
       ${renderHeader(company)}
       <h2 style="text-align:center; font-size:16px; margin:10px 0;">${doc.type.toUpperCase()}</h2>
       <table style="width:100%; font-size:12px; margin:15px 0;">
@@ -803,7 +803,7 @@ function renderGenericDocument(doc) {
             ${containers.map(c => `<tr>
               <td style="border:1px solid #ccc; padding:4px; text-align:center;">${c.sequenceNo}</td>
               <td style="border:1px solid #ccc; padding:4px;">${c.containerNo || '—'}</td>
-              <td style="border:1px solid #ccc; padding:4px; font-size:10px;">${c.lotNumber || '—'}</td>
+              <td style="border:1px solid #ccc; padding:4px; font-size:12px;">${c.lotNumber || '—'}</td>
               <td style="border:1px solid #ccc; padding:4px; text-align:center;">${c.bagsCount || '—'}</td>
               <td style="border:1px solid #ccc; padding:4px; text-align:right;">${c.netWeightKg || '—'}</td>
               <td style="border:1px solid #ccc; padding:4px; text-align:right;">${c.grossWeightKg || '—'}</td>
@@ -813,7 +813,7 @@ function renderGenericDocument(doc) {
       ` : ''}
 
       ${doc.specific?.originDeclaration ? `
-        <div style="margin-top:20px; padding:10px; border:1px solid #333; font-size:11px;">
+        <div style="margin-top:20px; padding:10px; border:1px solid #333; font-size:12px;">
           <strong>TEXT FOR STATEMENT OF ORIGIN</strong><br/><br/>
           ${doc.specific.originDeclaration}
         </div>
@@ -841,11 +841,11 @@ function renderSalesContract(doc) {
           <li style="margin-bottom:6px;">
             <strong>${l.productName || `Item ${l.sno}`}</strong> — ${fmtMt(l.qtyMT)} MT @ ${order.currency} ${fmtMoney(l.pricePerMT)}/MT · packed in ${l.bagSizeKg} kg ${l.bagType} bags${l.hsCode ? ` · HS code <strong>${l.hsCode}</strong>` : ''}
           </li>`).join('')}</ul>
-        <p style="margin-top:8px; font-size:11px; color:#555;">Sound, loyal and merchantable, fit for human consumption at any stage. Free from alive and dead weevils/insects. GMO Free. Latest crop.</p>`
+        <p style="margin-top:8px; font-size:12px; color:#555;">Sound, loyal and merchantable, fit for human consumption at any stage. Free from alive and dead weevils/insects. GMO Free. Latest crop.</p>`
     : `${lines[0]?.description || ''}<br/>Packed in ${lines[0]?.bagSizeKg || order.bagSizeKg || 50} kg Strong PP bags. Sound, loyal and merchantable, fit for human consumption at any stage. Free from alive and dead weevils/insects. GMO Free. Latest crop.`;
 
   return `
-    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px; color:#111;">
+    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px; color:#111;">
       ${renderComplianceHeader(company)}
       <h2 style="text-align:center; font-size:18px; font-style:italic; margin:10px 0;">Sales Contract</h2>
 
@@ -867,7 +867,7 @@ function renderSalesContract(doc) {
 
       <div style="margin-top:15px;">
         <strong>Documents:</strong>
-        <ul style="font-size:11px; line-height:1.8; margin-top:5px;">
+        <ul style="font-size:12px; line-height:1.8; margin-top:5px;">
           <li>Original full set of documents to be couriered to buyer's bank as soon as they are issued.</li>
           <li>Full set clean board Bill of Lading. Consignee 'to order'. Blank endorsed, marked 'Freight Collect'.</li>
           <li>Signed Commercial Invoice (Attested by Karachi Chamber of Commerce)</li>
@@ -879,14 +879,14 @@ function renderSalesContract(doc) {
         </ul>
       </div>
 
-      <p style="margin-top:15px; font-size:11px;">This contract shall be signed by the buyer and returned. Failure to do so and buyer's retention of the contract shall constitute in acceptance of terms and conditions hereof.</p>
+      <p style="margin-top:15px; font-size:12px;">This contract shall be signed by the buyer and returned. Failure to do so and buyer's retention of the contract shall constitute in acceptance of terms and conditions hereof.</p>
 
       <div style="margin-top:48px; display:flex; justify-content:space-between; gap:24px;">
         <div style="text-align:center; width:240px;">
-          <div style="border-top:1px solid #333; padding-top:4px; font-size:11px;"><b>${company.name}</b><br/>Proprietor<br/><span style="color:#666;">(Authorised Signature &amp; Stamp)</span></div>
+          <div style="border-top:1px solid #333; padding-top:4px; font-size:12px;"><b>${company.name}</b><br/>Proprietor<br/><span style="color:#666;">(Authorised Signature &amp; Stamp)</span></div>
         </div>
         <div style="text-align:center; width:240px;">
-          <div style="border-top:1px solid #333; padding-top:4px; font-size:11px;"><b>${buyer.name}</b><br/>Buyer / Consignee<br/><span style="color:#666;">(Authorised Signature &amp; Stamp)</span></div>
+          <div style="border-top:1px solid #333; padding-top:4px; font-size:12px;"><b>${buyer.name}</b><br/>Buyer / Consignee<br/><span style="color:#666;">(Authorised Signature &amp; Stamp)</span></div>
         </div>
       </div>
       ${renderComplianceFooter(company)}
@@ -900,7 +900,7 @@ function renderProductionPlan(doc) {
   const totalQty = lines.reduce((s, l) => s + (l.qtyMT || 0), 0);
   const totalBags = lines.reduce((s, l) => s + (l.bagCount || 0), 0);
   return `
-    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px;">
+    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px;">
       ${renderHeader(company)}
       <h2 style="text-align:center; font-size:14px; text-decoration:underline; margin:10px 0;">PRODUCTION PLAN - ${containers.length > 0 ? containers.length : '—'}X${containers[0]?.containerType === '40ft' ? '40' : '20'} FCL</h2>
 
@@ -908,12 +908,12 @@ function renderProductionPlan(doc) {
         SGS SAMPLE FOR PESTICIDE<br/>INV # ${order.invoiceNumber}
       </div>
 
-      <table style="width:100%; font-size:11px; margin-bottom:10px;">
+      <table style="width:100%; font-size:12px; margin-bottom:10px;">
         <tr><td style="width:120px;">DATE:</td><td>${order.date}</td></tr>
         <tr><td>PARTY NAME.</td><td>${buyer.name}</td></tr>
       </table>
 
-      <table style="width:100%; border-collapse:collapse; font-size:11px;">
+      <table style="width:100%; border-collapse:collapse; font-size:12px;">
         <thead>
           <tr style="background:#f5f5f5;">
             <th style="border:1px solid #333; padding:6px;">Container #</th>
@@ -947,14 +947,14 @@ function renderProductionPlan(doc) {
       </table>
 
       ${containers.length > 0 ? `
-        <p style="color:green; font-size:11px; margin-top:10px;">
+        <p style="color:green; font-size:12px; margin-top:10px;">
           ${containers.map((c, i) => `CONTAINER # ${i + 1} : LOT NUMBER : ${c.lotNumber || `RM/${String(i + 1).padStart(2, '0')}/${new Date().getFullYear()}`}`).join(', ')}
         </p>
       ` : ''}
 
       <div style="margin-top:15px;">
         <strong style="text-decoration:underline;">REMARKS.</strong>
-        <ol style="font-size:11px; line-height:2;">
+        <ol style="font-size:12px; line-height:2;">
           <li>SILKY POLISHED</li>
           <li>BROKEN PERCENTAGE CONFIRM WITH AAP.</li>
           <li><u>PLS. COUNT EMPTY BAGS BEFORE START OF PRODUCTION TO AVOID SHORTAGE.</u></li>
@@ -968,7 +968,7 @@ function renderProductionPlan(doc) {
       ${containers.length > 0 ? `
         <div style="margin-top:20px; display:grid; grid-template-columns:1fr 1fr; gap:15px;">
           ${containers.map((c, i) => `
-            <div style="border:1px solid #333; padding:12px; font-size:11px;">
+            <div style="border:1px solid #333; padding:12px; font-size:12px;">
               <h4 style="text-align:center; font-weight:bold; margin:0 0 8px 0;">${lines.map((l) => l.productName).filter(Boolean).join(' / ') || order.product || 'BASMATI WHITE RICE'}</h4>
               <table style="width:100%;">
                 <tr><td style="font-weight:bold; width:55%;">WEIGHT</td><td>: ${order.bagSizeKg || 50}KG</td></tr>
@@ -977,7 +977,7 @@ function renderProductionPlan(doc) {
                 <tr><td style="font-weight:bold;">DATE OF EXPIRY</td><td>: ${packing?.expiryDate || '—'}</td></tr>
                 <tr><td style="font-weight:bold;">BATCH NUMBER</td><td>: ${c.lotNumber || `RM/${String(i + 1).padStart(2, '0')}/${new Date().getFullYear()}`}</td></tr>
               </table>
-              <p style="text-align:center; margin-top:8px; font-size:10px;">PRODUCT OF PAKISTAN</p>
+              <p style="text-align:center; margin-top:8px; font-size:12px;">PRODUCT OF PAKISTAN</p>
             </div>
           `).join('')}
         </div>
@@ -989,7 +989,7 @@ function renderProductionPlan(doc) {
 function renderBankFIRequest(doc) {
   const { company, buyer, order, shipment } = doc;
   return `
-    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px;">
+    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px;">
       ${renderHeader(company)}
       <h3 style="text-align:center; font-size:13px; margin:10px 0;">REQUEST FOR GENERATION OF FINANCIAL INSTRUMENT<br/>(FOR EXPORT TRANSACTION)</h3>
 
@@ -1001,13 +1001,13 @@ function renderBankFIRequest(doc) {
         <tr><td style="font-weight:bold;">IBAN</td><td style="text-align:center; border-bottom:1px solid #333;">${company.bank.iban || ''}</td></tr>
       </table>
 
-      <div style="border:1px solid #333; padding:8px; margin-bottom:12px; font-size:11px; line-height:1.6;">
+      <div style="border:1px solid #333; padding:8px; margin-bottom:12px; font-size:12px; line-height:1.6;">
         ${bankDetailsBlock(company, { label: 'Exporter Bank Details' })}
       </div>
 
-      <p style="font-size:11px;">We, hereby request ${company.bank.name || 'our bank'} to issue Financial Instrument (hereinafter called "FI"), as below</p>
+      <p style="font-size:12px;">We, hereby request ${company.bank.name || 'our bank'} to issue Financial Instrument (hereinafter called "FI"), as below</p>
 
-      <table style="width:100%; font-size:11px; margin:15px 0; line-height:1.8;">
+      <table style="width:100%; font-size:12px; margin:15px 0; line-height:1.8;">
         <tr><td style="width:140px; font-weight:bold;">Mode of Payment</td><td>Contract/Collection</td></tr>
         <tr><td style="font-weight:bold;">Consignee Name</td><td>${buyer.name}</td></tr>
         <tr><td style="font-weight:bold;">Consignee Address</td><td>${buyer.address || buyer.country}</td></tr>
@@ -1030,13 +1030,13 @@ function renderBankFIRequest(doc) {
       </table>
 
       <h4 style="margin-top:15px;">DETAILS OF LC / CONTRACT / ADVANCE PAYMENT</h4>
-      <table style="border-collapse:collapse; width:50%; font-size:11px;">
+      <table style="border-collapse:collapse; width:50%; font-size:12px;">
         <tr><td style="border:1px solid #333; padding:4px;">TOTAL VALUE</td><td style="border:1px solid #333; padding:4px;">${order.currency} ${order.contractValue.toLocaleString('en-US', {minimumFractionDigits:2})}</td></tr>
         <tr><td style="border:1px solid #333; padding:4px;">CURRENT REQUEST</td><td style="border:1px solid #333; padding:4px;">${order.currency} ${order.contractValue.toLocaleString('en-US', {minimumFractionDigits:2})}</td></tr>
       </table>
 
       <h4 style="margin-top:15px;">GOODS DETAILS</h4>
-      <table style="width:100%; border-collapse:collapse; font-size:11px;">
+      <table style="width:100%; border-collapse:collapse; font-size:12px;">
         <thead><tr style="background:#f5f5f5;">
           <th style="border:1px solid #333; padding:6px;">HS CODE</th>
           <th style="border:1px solid #333; padding:6px;">GOODS DESCRIPTION</th>
@@ -1059,7 +1059,7 @@ function renderBankFIRequest(doc) {
         </tbody>
       </table>
 
-      <div style="margin-top:20px; font-size:9px; line-height:1.6; color:#444;">
+      <div style="margin-top:20px; font-size:12px; line-height:1.6; color:#444;">
         Declaration to be furnished by exporters pursuant to section 12(1) of the Foreign Exchange Regulation Act, 1947 read with government notifications. Documents covering the goods in the Financial Instrument including full set of bills of lading must be passed through an Authorised Dealer in Foreign Exchange.
       </div>
 
@@ -1091,14 +1091,14 @@ function renderComplianceHeader(company) {
 function renderComplianceFooter(company) {
   const bits = [company.phone ? `Tel: ${company.phone}` : '', company.email ? `Email: ${company.email}` : '', company.website ? `Web: ${company.website}` : ''].filter(Boolean).join('  ·  ');
   return `
-    <div class="agri-ftr" style="margin-top:36px; background:#1e3a5f; color:#fff; text-align:center; font-size:10px; padding:8px 10px; line-height:1.5;">
+    <div class="agri-ftr" style="margin-top:36px; background:#1e3a5f; color:#fff; text-align:center; font-size:12px; padding:8px 10px; line-height:1.5;">
       ${company.address}<br/>${bits}
     </div>`;
 }
 function signatureBlock(company) {
   return `
     <div style="margin-top:48px;">
-      <div style="border-top:1px solid #333; width:240px; padding-top:4px; font-size:11px;">
+      <div style="border-top:1px solid #333; width:240px; padding-top:4px; font-size:12px;">
         <b>${company.name}</b><br/>Proprietor<br/><span style="color:#666;">(Authorised Signature &amp; Stamp)</span>
       </div>
     </div>`;
@@ -1141,7 +1141,7 @@ function renderExportUndertaking(doc) {
   const pod = [order.destinationPort, buyer.country].filter(Boolean).join(', ') || '—';
   const inc = doc.specific && doc.specific.incotermTerms;
   return `
-    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px; color:#111;">
+    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px; color:#111;">
       ${renderComplianceHeader(company)}
       <p style="margin:0 0 12px;">The Manager<br/>${company.bank.name} - ${company.bank.branch},<br/>Karachi.</p>
       <p style="margin:0 0 6px;">Dear Sir,</p>
@@ -1179,7 +1179,7 @@ function renderExportUndertaking(doc) {
 function renderAppendixV10A(doc) {
   const { company } = doc;
   return `
-    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px; color:#111;">
+    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px; color:#111;">
       ${renderComplianceHeader(company)}
       <div style="text-align:right; font-weight:bold; margin-bottom:6px;">Appendix V-10A</div>
       <p style="font-weight:bold;">[Declaration to be furnished by exporters pursuant to section 12(1) of the Foreign Exchange Regulation Act, 1947 read with government notifications No. 1(6)-ECS/48 and No. 1(7)-ECS/48 both dated the 1st July, 1948.]</p>
@@ -1204,7 +1204,7 @@ function renderIndemnity(doc) {
   const { company } = doc;
   const counterParty = (doc.specific && doc.specific.counterParty) || (doc.buyer && doc.buyer.name) || '';
   return `
-    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px; color:#111;">
+    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px; color:#111;">
       ${renderComplianceHeader(company)}
       <div style="text-align:right; font-weight:bold; text-decoration:underline; margin-bottom:6px;">Annexure IV</div>
       <h3 style="text-align:center; text-decoration:underline; margin:6px 0 12px; font-size:13px;">Customer Indemnity for Related Party Transaction</h3>
@@ -1226,7 +1226,7 @@ function renderITRS(doc) {
   const CHK = (on) => `<span style="font-family:monospace;">${on ? '☑' : '☐'}</span>`;
   const row = (label, val) => `<tr><td style="padding:4px 6px; font-weight:bold; white-space:nowrap; vertical-align:top;">${label}</td><td style="padding:4px 6px; border-bottom:1px solid #999;">${val || ''}</td></tr>`;
   return `
-    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px; color:#111;">
+    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px; color:#111;">
       ${renderComplianceHeader(company)}
       <div style="background:#2e7d32; color:#fff; text-align:center; font-weight:bold; padding:6px; margin-bottom:12px;">SBP C-ITRS Reporting Variables &mdash; Import/Export</div>
       <table style="width:100%; border-collapse:collapse;">
@@ -1248,12 +1248,12 @@ function renderITRS(doc) {
       <div style="margin:6px 0;"><b>Currency:</b> <u>${order.currency || 'USD'}</u></div>
       <div style="border:1px solid #333; padding:6px; margin:8px 0; color:#666;"><b>For Only Imports:</b> Freight Currency: __________ &nbsp; Freight Amount: __________ &nbsp; <i>(not applicable — this is an export)</i></div>
       <div style="margin:6px 0;">Reference of SBP's Approval (if applicable): __________________ &nbsp; SBP's Approval Date: ______________</div>
-      <div style="display:flex; justify-content:space-between; margin-top:40px; font-size:10px;">
+      <div style="display:flex; justify-content:space-between; margin-top:40px; font-size:12px;">
         <div style="border-top:1px solid #333; width:44%; padding-top:4px; text-align:center;">Applicant's Authorized Signature with Stamp</div>
         <div style="border-top:1px solid #333; width:44%; padding-top:4px; text-align:center;">Applicant's Authorized Signature with Stamp</div>
       </div>
       <div style="background:#2e7d32; color:#fff; text-align:center; font-weight:bold; padding:5px; margin:18px 0 8px;">For Bank use only</div>
-      <div style="font-size:10px; color:#555;">Transaction reference No: ____________________ &nbsp; Transaction Date: ____________<br/><br/>Scan Reference No: ____________________<br/><br/><br/>Reviewed by (Name &amp; Signature): ________________ &nbsp;&nbsp; Approved by (Name &amp; Signature): ________________</div>
+      <div style="font-size:12px; color:#555;">Transaction reference No: ____________________ &nbsp; Transaction Date: ____________<br/><br/>Scan Reference No: ____________________<br/><br/><br/>Reviewed by (Name &amp; Signature): ________________ &nbsp;&nbsp; Approved by (Name &amp; Signature): ________________</div>
       ${renderComplianceFooter(company)}
     </div>`;
 }
@@ -1265,7 +1265,7 @@ function renderInvoice(doc) {
   const totalBags = lines.reduce((s, l) => s + (l.bagCount || 0), 0);
   const totalQty = lines.reduce((s, l) => s + (l.qtyMT || 0), 0);
   return `
-    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px;">
+    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px;">
       ${renderHeader(company)}
       <h2 style="text-align:center; font-size:16px; text-decoration:underline; margin:10px 0;">INVOICE</h2>
 
@@ -1287,7 +1287,7 @@ function renderInvoice(doc) {
         </tr>
       </table>
 
-      <table style="width:100%; border-collapse:collapse; font-size:11px; margin-bottom:15px;">
+      <table style="width:100%; border-collapse:collapse; font-size:12px; margin-bottom:15px;">
         <tr>
           <td style="border:1px solid #333; padding:4px; font-weight:bold;">Shipment Port</td>
           <td style="border:1px solid #333; padding:4px;">${order.portOfLoading} to ${order.destinationPort}, ${buyer.country}</td>
@@ -1319,7 +1319,7 @@ function renderInvoice(doc) {
         </tbody>
       </table>
 
-      <p style="font-style:italic; font-size:11px; margin-top:15px;">
+      <p style="font-style:italic; font-size:12px; margin-top:15px;">
         <em>Certification: Goods shipped under this invoice are from Pakistan origin</em>
       </p>
 
@@ -1365,7 +1365,7 @@ function renderBillOfLading(doc) {
     : `${buyer.name || ''}<br/>${buyer.country || ''}${buyer.phone ? `<br/>TEL: ${buyer.phone}` : ''}${buyer.email ? ` EMAIL: ${buyer.email}` : ''}`;
 
   return `
-    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:10px;">
+    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:10px;">
       <table style="width:100%; border-collapse:collapse;">
         <tr>
           <td style="border:2px solid #333; padding:10px; width:50%; vertical-align:top;">
@@ -1432,10 +1432,10 @@ function renderBillOfLading(doc) {
 
       <div style="text-align:center; margin:15px 0; font-size:16px; font-weight:bold;">
         14 DAYS FREE AT DESTINATION PORT<br/>
-        <span style="font-size:11px;">${shipment.freightTerms || 'COLLECT'}</span>
+        <span style="font-size:12px;">${shipment.freightTerms || 'COLLECT'}</span>
       </div>
 
-      <table style="width:100%; border-collapse:collapse; font-size:10px;">
+      <table style="width:100%; border-collapse:collapse; font-size:12px;">
         <tr>
           <td style="border:1px solid #333; padding:4px;"><strong>Total No of Containers</strong><br/>${containerCount} x ${containerType === '40' ? "40'" : "20'"}HC</td>
           <td style="border:1px solid #333; padding:4px;"><strong>Movement</strong></td>
@@ -1452,12 +1452,12 @@ function renderPackingCertificate(doc) {
   const { company, buyer, order, shipment, containers, totals, packing } = doc;
   const totalBags = totals?.totalBags || order.totalBags;
   return `
-    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px;">
+    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px;">
       ${renderComplianceHeader(company)}
       <p style="text-align:center; font-weight:bold; text-decoration:underline;">ORIGINAL</p>
       <h2 style="text-align:center; font-size:16px; margin:5px 0; text-decoration:underline;">PACKING CERTIFICATE</h2>
 
-      <table style="width:100%; font-size:11px; line-height:1.8; margin:15px 0;">
+      <table style="width:100%; font-size:12px; line-height:1.8; margin:15px 0;">
         <tr><td style="width:130px; font-weight:bold;">DATE:</td><td>${order.date}</td></tr>
         <tr><td style="font-weight:bold;">SHIPPER:</td><td>${company.name}</td></tr>
         <tr><td style="font-weight:bold;">SHIPPER ADD:</td><td>${company.address}</td></tr>
@@ -1466,7 +1466,7 @@ function renderPackingCertificate(doc) {
         <tr><td style="font-weight:bold; vertical-align:top;">QUALITY:</td><td>${order.qualityDescription} - HS CODE: ${order.hsCode}</td></tr>
       </table>
 
-      <table style="width:100%; font-size:11px; line-height:1.8;">
+      <table style="width:100%; font-size:12px; line-height:1.8;">
         ${containers.map(c => `<tr><td style="width:130px;"></td><td>${c.lotNumber || '—'},</td></tr>`).join('')}
         <tr><td style="font-weight:bold;">BUYER</td><td>${buyer.name}<br/>${buyer.address}, ${buyer.country}</td></tr>
         <tr><td style="font-weight:bold;">PACKING:</td><td>PACKED IN ${order.bagSizeKg || 50} KG IN NEW DOUBLE WOVEN (OUTER) POLYPROPYLENE BAGS OF ${order.bagSizeKg || 50} KG NET EACH</td></tr>
@@ -1476,14 +1476,14 @@ function renderPackingCertificate(doc) {
         <tr><td style="font-weight:bold;">PLACE OF DESTINATION:</td><td>${order.destinationPort}, ${buyer.country}</td></tr>
       </table>
 
-      <p style="margin-top:10px; font-size:11px;">
+      <p style="margin-top:10px; font-size:12px;">
         TARE WEIGHT OF BAGS PER CONTAINER: ${containers.length > 0 ? ((containers[0].grossWeightKg - containers[0].netWeightKg) / 1000).toFixed(3) : '0.025'} M/TONS<br/>
         NET WEIGHT PER CONTAINER: ${containers.length > 0 ? (containers[0].netWeightKg / 1000).toFixed(3) : (order.qtyMT / (containers.length || 1)).toFixed(3)} M/TONS<br/>
         GROSS WEIGHT PER CONTAINER: ${containers.length > 0 ? (containers[0].grossWeightKg / 1000).toFixed(3) : ((order.qtyMT / (containers.length || 1)) + 0.025).toFixed(3)} M/TONS
       </p>
 
       ${containers.length > 0 ? `
-        <table style="width:80%; border-collapse:collapse; margin:15px 0; font-size:11px;">
+        <table style="width:80%; border-collapse:collapse; margin:15px 0; font-size:12px;">
           <thead><tr style="background:#f5f5f5;">
             <th style="border:1px solid #333; padding:4px;">S.NO</th>
             <th style="border:1px solid #333; padding:4px;">CONTAINER #</th>
@@ -1503,7 +1503,7 @@ function renderPackingCertificate(doc) {
         </table>
       ` : ''}
 
-      <p style="font-size:11px; margin-top:15px;">WITH REFERENCE TO ABOVE, WE HEREBY CONFIRM THAT THE GROSS, NET AND TARE WEIGHT OF THE CONTAINER IS CORRECT AS MENTIONED ON THE ABOVE BL AND PACKING LIST.</p>
+      <p style="font-size:12px; margin-top:15px;">WITH REFERENCE TO ABOVE, WE HEREBY CONFIRM THAT THE GROSS, NET AND TARE WEIGHT OF THE CONTAINER IS CORRECT AS MENTIONED ON THE ABOVE BL AND PACKING LIST.</p>
 
       <div style="margin-top:30px;">
         <p>Name of Signing authority:</p>
@@ -1584,7 +1584,7 @@ function renderCertificateOfOrigin(doc) {
   const refNo = company.kcciMembership || '';
 
   return `
-    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:18px;">
+    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:18px;">
 
       <table style="width:100%; border-collapse:collapse;">
         <tr>
@@ -1618,7 +1618,7 @@ function renderCertificateOfOrigin(doc) {
         ${containerCount} X 20' FCL
       </div>
 
-      <table style="width:100%; border-collapse:collapse; font-size:11px;">
+      <table style="width:100%; border-collapse:collapse; font-size:12px;">
         <tbody>
           ${rows.map((r) => `
             <tr>
@@ -1661,7 +1661,7 @@ function renderBankCoveringLetter(doc) {
   const { company, buyer, order, shipment, containers, notifyParty } = doc;
   const fiNumbers = [shipment.fiNumber, shipment.fiNumber2, shipment.fiNumber3].filter(Boolean);
   return `
-    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px;">
+    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px;">
       ${renderHeader(company)}
       <p>Date: ${order.date}</p>
       <p style="margin-top:15px;">${company.bank.name}<br/>${company.bank.branch}<br/>Karachi</p>
@@ -1671,7 +1671,7 @@ function renderBankCoveringLetter(doc) {
       <p>Dear Sir,</p>
       <p>Pleased to send you following documents of our consignment against FI # ${fiNumbers.join(' & ')} against ${order.paymentTerms} Basis.</p>
 
-      <table style="width:100%; border-collapse:collapse; margin:20px 0; font-size:11px;">
+      <table style="width:100%; border-collapse:collapse; margin:20px 0; font-size:12px;">
         <thead><tr style="background:#f5f5f5;">
           <th style="border:1px solid #333; padding:6px;">S.No.</th>
           <th style="border:1px solid #333; padding:6px;">Documents</th>
@@ -1699,7 +1699,7 @@ function renderBankCoveringLetter(doc) {
 function renderBuyerCoveringLetter(doc) {
   const { company, buyer, order, shipment, containers, notifyParty } = doc;
   return `
-    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px;">
+    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px;">
       ${renderComplianceHeader(company)}
       <p>Date: ${order.date}</p>
       <p style="margin-top:15px;">${[buyer.name, buyer.address, buyer.country, buyer.vatNumber ? `VAT NO: ${buyer.vatNumber}` : ''].filter(Boolean).join('<br/>')}</p>
@@ -1708,7 +1708,7 @@ function renderBuyerCoveringLetter(doc) {
       <p>Dear Sir,</p>
       <p>Pleased to send you following documents of our consignment against Sales Contract # ${order.contractNumber}</p>
 
-      <table style="width:100%; border-collapse:collapse; margin:20px 0; font-size:11px;">
+      <table style="width:100%; border-collapse:collapse; margin:20px 0; font-size:12px;">
         <thead><tr style="background:#f5f5f5;">
           <th style="border:1px solid #333; padding:6px;">S.No.</th>
           <th style="border:1px solid #333; padding:6px;">Documents</th>
@@ -1740,7 +1740,7 @@ function renderBuyerCoveringLetter(doc) {
 function renderLabTestRequest(doc) {
   const { company, order } = doc;
   return `
-    <div style="font-family: Arial, sans-serif; font-size:11px; max-width:820px; margin:0 auto; padding:20px;">
+    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px;">
       ${renderHeader(company)}
       <p style="text-align:right;">Date: ${order.date}</p>
       <p>INVOICE NO: ${order.invoiceNumber}</p>
@@ -1833,17 +1833,13 @@ function renderDocument(doc, style) {
 // a window and prints) and Send (autoPrint:false, posted to the server which
 // renders it to a PDF with the identical layout).
 function buildDocHtml(editedHtml, docType, title, { autoPrint }) {
-  // Proforma is the only landscape document; every other export document is A4
-  // portrait. Uniform 10mm margins on all four sides (matches the PDF service).
-  const landscape = docType === 'proforma-invoice';
-  const pageRule = landscape ? '@page { size: A4 landscape; margin: 10mm; }' : '@page { size: A4 portrait; margin: 10mm; }';
-  // Printable area = A4 (210×297) minus 2×10mm margins → 190×277 (portrait),
-  // 277×190 (landscape). The body is pinned to the printable WIDTH so the print
-  // layout matches A4 regardless of the (print-)window width — otherwise the
-  // browser lays out at the window width and shrinks/offsets the page.
-  const printW = landscape ? '277mm' : '190mm';
-  const printH = landscape ? '190mm' : '277mm';
-  const pageHpx = Math.round((landscape ? (210 - 20) : (297 - 20)) * 96 / 25.4);
+  // Every export document prints A4 LANDSCAPE (297×210) with 8mm margins, so the
+  // wide invoice/contract/packing tables get the full 281mm printable width and
+  // stay readable at a 12px floor. Printable area = 281×194mm.
+  const pageRule = '@page { size: A4 landscape; margin: 8mm; }';
+  const printW = '281mm';   // 297 − 2×8mm
+  const printH = '194mm';   // 210 − 2×8mm
+  const pageHpx = Math.round((210 - 16) * 96 / 25.4);
   return `<!doctype html>
     <html>
       <head>
@@ -1851,20 +1847,30 @@ function buildDocHtml(editedHtml, docType, title, { autoPrint }) {
         <title>${title || 'Document'}</title>
         <style>
           ${pageRule}
-          html, body { margin: 0; padding: 0; width: ${printW}; }
+          *, *::before, *::after { box-sizing: border-box; }
+          /* Pin the body to the printable WIDTH so the layout matches A4
+             regardless of the (print-)window width (else the browser lays out at
+             the window width and shrinks/offsets the page). 12px readable floor. */
+          html, body { margin: 0; padding: 0; width: ${printW}; font-size: 12px; line-height: 1.4; background: #fff; color: #000; }
           #agri-fit { width: 100%; }
-          /* Fill the full printable A4 width — drop the on-screen max-width
-             centering so the document uses the whole page, never a half page. */
+          /* Fill the full printable width — drop the on-screen max-width centering
+             so the document uses the whole landscape page, never a half page. */
           body .agri-doc { width: 100%; max-width: 100%; margin: 0; box-sizing: border-box; }
           body .agri-doc > div {
             width: 100% !important; max-width: 100% !important; margin: 0 !important; box-sizing: border-box;
             min-height: ${printH}; display: flex; flex-direction: column;
           }
           body .agri-doc > div > .agri-ftr { margin-top: auto !important; }
-          /* Tables span the full page width and never overflow it; long unbroken
-             values wrap instead of pushing the table past the page edge. */
-          .agri-doc table { max-width: 100%; }
-          .agri-doc td, .agri-doc th { overflow-wrap: break-word; word-break: break-word; }
+          /* Tables: full width, never overflow the page, compact padding to help
+             fit one page WITHOUT shrinking text, and long values wrap instead of
+             pushing past the page edge. Column layout is CONTENT-sized (auto):
+             these documents are built from nested layout tables + item tables
+             with uneven columns, so a fixed/equal layout starves the wide
+             Description column (excessive wrapping → many extra pages). Auto
+             layout gives each column a sensible width and keeps docs to one page
+             where they fit; overflow-wrap still prevents any overflow. */
+          .agri-doc table { width: 100%; max-width: 100%; border-collapse: collapse; }
+          .agri-doc td, .agri-doc th { padding: 3px 5px; line-height: 1.35; vertical-align: top; overflow-wrap: anywhere; word-break: normal; }
           /* Multi-page documents: repeat table headers (and footers/totals) on
              every A4 page and never split a row across a page break. */
           .agri-doc thead { display: table-header-group; }
@@ -1873,7 +1879,7 @@ function buildDocHtml(editedHtml, docType, title, { autoPrint }) {
           .agri-doc img { max-width: 100%; height: auto; }
           .no-print { display: none !important; }
           @media print {
-            html, body { margin: 0; padding: 0; width: ${printW}; }
+            html, body { margin: 0; padding: 0; width: ${printW}; font-size: 12px; overflow: visible !important; }
             body .agri-doc, body .agri-doc > div { width: 100% !important; max-width: 100% !important; margin: 0 !important; box-sizing: border-box; }
             .no-print { display: none !important; }
           }
@@ -1884,31 +1890,19 @@ function buildDocHtml(editedHtml, docType, title, { autoPrint }) {
         <script>
           window.onload = function() {
             try {
+              // NO shrink-to-fit: text must stay at its (≥12px) size. A short
+              // document pins its footer to the page bottom via the flex fill; a
+              // document too tall for one page flows onto additional A4 landscape
+              // pages (headers repeat) rather than being scaled down. The
+              // per-customer font zoom on .agri-doc is divided out of the fill so
+              // the page still fills to the bottom at any customer scale.
               var el = document.getElementById('agri-fit');
               var page = ${pageHpx};
-              // The per-customer font scale is applied as zoom on .agri-doc, which
-              // ALSO scales the page-fill min-height below — so a <1 scale would
-              // leave blank space at the bottom of the page. Read that zoom and
-              // divide it out of the fill height so the doc fills A4 at any scale.
               var agri = el.querySelector('.agri-doc');
               var az = agri ? (parseFloat(getComputedStyle(agri).zoom) || parseFloat(agri.style.zoom) || 1) : 1;
               if (!(az > 0)) az = 1;
-              var h = el.scrollHeight;
-              var z = 1;
-              // Only shrink when the content is a LITTLE over one page (≤ ~1.45
-              // pages) — so a document that would spill a few lines onto a second,
-              // near-empty page fits on one instead. A document that already fits
-              // is never shrunk; a genuinely long one flows to multiple pages.
-              // Widen by 1/z as we zoom so the page keeps its FULL width (uniform
-              // zoom alone would leave side margins). Kept in sync with the
-              // server PDF service (pdf.service.js) so print and PDF agree.
-              if (h > page && h <= page * 1.45) {
-                z = Math.max(0.6, (page - 2) / h);
-                el.style.zoom = z;
-                el.style.width = (100 / z) + '%';
-              }
               var body = el.querySelector('.agri-doc > div');
-              if (body) body.style.minHeight = (page / (z * az)) + 'px';
+              if (body) body.style.minHeight = (page / az) + 'px';
             } catch (e) { /* fall back to native pagination */ }
             ${autoPrint ? 'window.print();' : ''}
           };
@@ -2490,7 +2484,7 @@ export default function DocumentCenter({ order }) {
               ref={printRef}
               contentEditable
               suppressContentEditableWarning
-              className={`doc-a4-preview${previewKey === 'proforma-invoice' ? ' doc-a4-preview-landscape' : ''} border border-gray-200 rounded-lg overflow-auto max-h-[70vh] focus:outline-none focus:ring-2 focus:ring-blue-200`}
+              className="doc-a4-preview border border-gray-200 rounded-lg overflow-auto max-h-[70vh] focus:outline-none focus:ring-2 focus:ring-blue-200"
               dangerouslySetInnerHTML={{ __html: previewHtml }}
             />
           </div>
