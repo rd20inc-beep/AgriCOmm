@@ -112,8 +112,8 @@ export default function FinanceTable({
         </div>
       )}
 
-      {/* Table */}
-      <div className="overflow-x-auto">
+      {/* Table — reflows to stacked cards ≤767px (mobile-cards); desktop unchanged */}
+      <div className="overflow-x-auto mobile-cards">
         <table className="w-full">
           <thead>
             <tr className="border-b border-gray-100">
@@ -151,14 +151,16 @@ export default function FinanceTable({
                 } ${row._highlight === 'danger' ? 'bg-red-50/40' : row._highlight === 'warning' ? 'bg-amber-50/30' : ''}`}
               >
                 {columns.map(col => (
-                  <td key={col.key} className={`px-4 py-3 text-sm ${col.align === 'right' ? 'text-right tabular-nums' : ''}`}>
+                  // data-label drives the ≤767px card layout; col.mobHide lets a
+                  // page drop a secondary column from the phone card (opt-in).
+                  <td key={col.key} data-label={col.label} className={`px-4 py-3 text-sm ${col.mobHide ? 'mob-hide ' : ''}${col.align === 'right' ? 'text-right tabular-nums' : ''}`}>
                     {col.render ? col.render(row[col.key], row) : (
                       col.key === 'status' ? <StatusBadge status={row[col.key]} /> : (row[col.key] ?? '—')
                     )}
                   </td>
                 ))}
                 {actions && (
-                  <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
+                  <td data-label="Actions" className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
                     {actions(row)}
                   </td>
                 )}

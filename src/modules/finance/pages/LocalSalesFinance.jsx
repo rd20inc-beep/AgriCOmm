@@ -200,7 +200,7 @@ export default function LocalSalesFinance() {
 
       {/* ─── Table ────────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr className="text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
@@ -227,29 +227,29 @@ export default function LocalSalesFinance() {
                 const tone = STATUS_TONE[s.paymentStatus] || STATUS_TONE.Pending;
                 return (
                   <tr key={s.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-2.5 font-medium text-gray-900">
+                    <td data-label="Sale" className="px-4 py-2.5 font-medium text-gray-900">
                       <Link to={`/local-sales/${s.id}`} className="text-blue-600 hover:underline">{s.saleNo}</Link>
                     </td>
-                    <td className="px-4 py-2.5 text-gray-700 whitespace-nowrap">{fmtDate(s.saleDate)}</td>
-                    <td className="px-4 py-2.5 text-gray-700 truncate max-w-[180px]">{s.buyerName || '—'}</td>
-                    <td className="px-4 py-2.5 text-xs">
+                    <td data-label="Date" className="mob-hide px-4 py-2.5 text-gray-700 whitespace-nowrap">{fmtDate(s.saleDate)}</td>
+                    <td data-label="Buyer" className="px-4 py-2.5 text-gray-700 truncate max-w-[180px]">{s.buyerName || '—'}</td>
+                    <td data-label="Item / Lot" className="px-4 py-2.5 text-xs">
                       <div className="font-medium text-gray-900">{s.itemName || '—'}</div>
                       {s.lotNo && <div className="text-gray-400">{s.lotNo}</div>}
                     </td>
-                    <td className="px-4 py-2.5 text-right tabular-nums text-gray-700">{Math.round(parseFloat(s.quantityKg) || 0).toLocaleString()}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums font-medium text-gray-900">{fmtFull(s.totalAmount)}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums text-emerald-700">{fmtFull(s.paidAmount)}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums">
+                    <td data-label="Qty (kg)" className="mob-hide px-4 py-2.5 text-right tabular-nums text-gray-700">{Math.round(parseFloat(s.quantityKg) || 0).toLocaleString()}</td>
+                    <td data-label="Revenue" className="px-4 py-2.5 text-right tabular-nums font-medium text-gray-900">{fmtFull(s.totalAmount)}</td>
+                    <td data-label="Collected" className="mob-hide px-4 py-2.5 text-right tabular-nums text-emerald-700">{fmtFull(s.paidAmount)}</td>
+                    <td data-label="Profit" className="mob-hide px-4 py-2.5 text-right tabular-nums">
                       <span className={(parseFloat(s.grossProfit || s.grossProfitPkr) || 0) >= 0 ? 'text-emerald-600 font-medium' : 'text-red-600 font-medium'}>
                         {fmtFull(s.grossProfit || s.grossProfitPkr)}
                       </span>
                     </td>
-                    <td className="px-4 py-2.5">
+                    <td data-label="Status" className="px-4 py-2.5">
                       <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border ${tone}`}>
                         {s.paymentStatus || 'Pending'}
                       </span>
                     </td>
-                    <td className="px-4 py-2.5 text-center">
+                    <td data-label="Actions" className="px-4 py-2.5 text-center">
                       <button onClick={() => openDetail(s)} className="text-blue-600 hover:text-blue-800" title="View details">
                         <Eye size={15} />
                       </button>

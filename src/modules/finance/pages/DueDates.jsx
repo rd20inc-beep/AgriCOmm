@@ -24,7 +24,7 @@ function List({ title, icon: Icon, tone, items, total, onClear, clearing }) {
       {items.length === 0 ? (
         <p className="text-sm text-gray-400 text-center py-10">Nothing upcoming.</p>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead><tr className="text-left text-[11px] text-gray-500 uppercase border-b border-gray-100">
               <th className="py-2 px-4">Due</th><th className="py-2 px-4">Party</th>
@@ -33,25 +33,25 @@ function List({ title, icon: Icon, tone, items, total, onClear, clearing }) {
             <tbody className="divide-y divide-gray-50">
               {items.map((x, i) => (
                 <tr key={i} className={`hover:bg-gray-50 ${isOverdue(x.dueDate) ? 'bg-red-50/40' : ''}`}>
-                  <td className="py-2 px-4 whitespace-nowrap">
+                  <td data-label="Due" className="py-2 px-4 whitespace-nowrap">
                     <span className={isOverdue(x.dueDate) ? 'text-red-600 font-medium' : 'text-gray-700'}>{fmtDate(x.dueDate)}</span>
                     {isOverdue(x.dueDate) && <span className="ml-1.5 text-[10px] text-red-500 inline-flex items-center gap-0.5"><AlertTriangle size={10} /> overdue</span>}
                   </td>
-                  <td className="py-2 px-4 text-gray-900">
+                  <td data-label="Party" className="py-2 px-4 text-gray-900">
                     {x.partyId ? (
                       <Link to={`/finance/statements?type=${x.partyType}&id=${x.partyId}`}
                         className="text-blue-600 hover:underline font-medium">{x.party}</Link>
                     ) : x.party}
                   </td>
-                  <td className="py-2 px-4">
+                  <td data-label="Type" className="py-2 px-4">
                     <span className={`text-[11px] px-2 py-0.5 rounded-full ${x.kind === 'cheque' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>{x.label}</span>
                     {x.reference && <span className="ml-1.5 text-[11px] text-gray-400 font-mono">{x.reference}</span>}
                   </td>
-                  <td className="py-2 px-4 text-right tabular-nums font-medium text-gray-900">
+                  <td data-label="Amount" className="py-2 px-4 text-right tabular-nums font-medium text-gray-900">
                     {fmtMoney(x.amount, x.currency)}
                     {x.currency && x.currency !== 'PKR' && x.amountPkr ? <span className="block text-[10px] text-gray-400 font-normal">≈ {fmtPKR(x.amountPkr)}</span> : null}
                   </td>
-                  <td className="py-2 px-4 text-right">
+                  <td data-label="" className="py-2 px-4 text-right">
                     {x.paymentId && (
                       <button onClick={() => onClear(x)} disabled={clearing}
                         className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-emerald-700 bg-emerald-50 rounded hover:bg-emerald-100 disabled:opacity-50">

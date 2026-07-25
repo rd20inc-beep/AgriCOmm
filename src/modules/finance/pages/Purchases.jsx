@@ -357,7 +357,7 @@ export default function Purchases() {
 
       {/* Table */}
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr className="text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
@@ -401,25 +401,25 @@ export default function Purchases() {
                 const SrcIcon = meta?.icon || Receipt;
                 return (
                   <tr key={`${p.source}-${p.refId}`} className="hover:bg-gray-50">
-                    <td className="px-4 py-2.5 text-gray-700 whitespace-nowrap">{p.date ? new Date(p.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '—'}</td>
-                    <td className="px-4 py-2.5 font-medium text-gray-900">
+                    <td data-label="Date" className="mob-hide px-4 py-2.5 text-gray-700 whitespace-nowrap">{p.date ? new Date(p.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '—'}</td>
+                    <td data-label="Ref" className="px-4 py-2.5 font-medium text-gray-900">
                       <RefLink p={p} />
                     </td>
-                    <td className="px-4 py-2.5">
+                    <td data-label="Source" className="mob-hide px-4 py-2.5">
                       <span className="inline-flex items-center gap-1 text-xs text-gray-600">
                         <SrcIcon size={12} className="text-gray-400" />
                         {meta?.label || p.source}
                       </span>
                     </td>
-                    <td className="px-4 py-2.5 text-gray-700 truncate max-w-[180px]"><PartyLink type="supplier" id={p.supplierId} name={p.supplierName} /></td>
-                    <td className="px-4 py-2.5 text-gray-600 capitalize text-xs">{p.category ? String(p.category).replace(/_/g, ' ') : '—'}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums">
+                    <td data-label="Supplier" className="px-4 py-2.5 text-gray-700 truncate max-w-[180px]"><PartyLink type="supplier" id={p.supplierId} name={p.supplierName} /></td>
+                    <td data-label="Category" className="mob-hide px-4 py-2.5 text-gray-600 capitalize text-xs">{p.category ? String(p.category).replace(/_/g, ' ') : '—'}</td>
+                    <td data-label="Amount" className="px-4 py-2.5 text-right tabular-nums">
                       <span className="font-medium text-gray-900">{fmtFull(p.amountPkr)}</span>
                       {(p.currency || 'PKR') !== 'PKR' && parseFloat(p.amount) > 0 && (
                         <div className="text-[10px] text-gray-400">{p.currency} {Math.round(parseFloat(p.amount)).toLocaleString()}</div>
                       )}
                     </td>
-                    <td className="px-4 py-2.5">
+                    <td data-label="Status" className="px-4 py-2.5">
                       {String(p.paymentStatus || 'pending').toLowerCase() === 'paid' ? (
                         <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border ${statusTone(p.paymentStatus)}`}>
                           {String(p.paymentStatus)}
@@ -434,8 +434,8 @@ export default function Purchases() {
                         </button>
                       )}
                     </td>
-                    <td className="px-4 py-2.5 text-gray-600 text-xs truncate max-w-[140px]">{p.createdByName || '—'}</td>
-                    <td className="px-4 py-2.5 text-gray-600 text-xs truncate max-w-[140px]">
+                    <td data-label="Created" className="mob-hide px-4 py-2.5 text-gray-600 text-xs truncate max-w-[140px]">{p.createdByName || '—'}</td>
+                    <td data-label="Approved" className="mob-hide px-4 py-2.5 text-gray-600 text-xs truncate max-w-[140px]">
                       {p.approvedByName ? (
                         <span className="inline-flex items-center gap-1 text-emerald-700">
                           <CheckCircle size={11} /> {p.approvedByName}
@@ -448,7 +448,7 @@ export default function Purchases() {
                         <span className="text-gray-300">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-2.5 text-center">
+                    <td data-label="Actions" className="px-4 py-2.5 text-center">
                       <div className="inline-flex items-center gap-1.5">
                         {String(p.paymentStatus || 'pending').toLowerCase() !== 'paid' && (
                           <button onClick={() => setPayTarget(p)}

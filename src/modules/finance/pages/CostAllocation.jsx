@@ -413,7 +413,7 @@ export default function CostAllocation() {
           </h2>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
@@ -443,33 +443,33 @@ export default function CostAllocation() {
                       }`}
                       onClick={() => handleToggleRow(cost.id)}
                     >
-                      <td className="px-2 py-2.5">
+                      <td data-label="" className="mob-hide px-2 py-2.5">
                         {isExpanded ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
                       </td>
-                      <td className="px-2 py-2.5 font-medium text-blue-600 whitespace-nowrap">{cost.id}</td>
-                      <td className="px-2 py-2.5 text-gray-500 whitespace-nowrap">{cost.date}</td>
-                      <td className="px-2 py-2.5">
+                      <td data-label="Cost No" className="px-2 py-2.5 font-medium text-blue-600 whitespace-nowrap">{cost.id}</td>
+                      <td data-label="Date" className="mob-hide px-2 py-2.5 text-gray-500 whitespace-nowrap">{cost.date}</td>
+                      <td data-label="Entity" className="mob-hide px-2 py-2.5">
                         <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${entityColors[cost.entity] || 'bg-gray-100 text-gray-700'}`}>
                           {cost.entity}
                         </span>
                       </td>
-                      <td className="px-2 py-2.5 text-gray-700 whitespace-nowrap">{cost.category}</td>
-                      <td className="px-2 py-2.5 text-gray-600 truncate max-w-[140px]">{cost.vendor}</td>
-                      <td className="px-2 py-2.5 text-right font-medium text-gray-900 whitespace-nowrap">
+                      <td data-label="Category" className="px-2 py-2.5 text-gray-700 whitespace-nowrap">{cost.category}</td>
+                      <td data-label="Vendor" className="mob-hide px-2 py-2.5 text-gray-600 truncate max-w-[140px]">{cost.vendor}</td>
+                      <td data-label="Gross Amt" className="px-2 py-2.5 text-right font-medium text-gray-900 whitespace-nowrap">
                         {formatAmount(cost.grossAmount, cost.currency)}
                       </td>
-                      <td className="px-2 py-2.5 text-right font-medium text-emerald-600 whitespace-nowrap">
+                      <td data-label="Allocated" className="px-2 py-2.5 text-right font-medium text-emerald-600 whitespace-nowrap">
                         {formatAmount(allocated, cost.currency)}
                       </td>
-                      <td className={`px-2 py-2.5 text-right font-bold whitespace-nowrap ${unallocated > 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                      <td data-label="Unalloc." className={`px-2 py-2.5 text-right font-bold whitespace-nowrap ${unallocated > 0 ? 'text-red-600' : 'text-gray-400'}`}>
                         {unallocated > 0 ? formatAmount(unallocated, cost.currency) : '—'}
                       </td>
-                      <td className="px-2 py-2.5 text-center">
+                      <td data-label="Status" className="px-2 py-2.5 text-center">
                         <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${statusColors[cost.status]}`}>
                           {cost.status}
                         </span>
                       </td>
-                      <td className="px-2 py-2.5 text-center">
+                      <td data-label="Action" className="px-2 py-2.5 text-center">
                         <button
                           onClick={(e) => { e.stopPropagation(); handleToggleRow(cost.id); }}
                           className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-medium text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded transition-colors"
@@ -483,7 +483,7 @@ export default function CostAllocation() {
                     {/* Expanded Allocation Panel */}
                     {isExpanded && (
                       <tr>
-                        <td colSpan={11} className="px-0 py-0">
+                        <td colSpan={11} className="mob-full px-0 py-0">
                           <div className="bg-gray-50 border-t border-b border-gray-200 px-6 py-5">
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                               {/* Current Allocations */}
@@ -510,7 +510,7 @@ export default function CostAllocation() {
                                       <tbody className="divide-y divide-gray-100">
                                         {cost.allocations.map((alloc, idx) => (
                                           <tr key={idx} className="hover:bg-gray-50">
-                                            <td className="px-3 py-2">
+                                            <td data-label="Target" className="px-3 py-2">
                                               <div className="flex items-center gap-2">
                                                 <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${
                                                   alloc.targetType === 'Export Order'
@@ -522,13 +522,13 @@ export default function CostAllocation() {
                                                 <span className="font-medium text-gray-900">{alloc.targetId}</span>
                                               </div>
                                             </td>
-                                            <td className="px-3 py-2 text-right font-medium text-gray-900">
+                                            <td data-label="Amount" className="px-3 py-2 text-right font-medium text-gray-900">
                                               {formatAmount(alloc.amount, cost.currency)}
                                             </td>
-                                            <td className="px-3 py-2 text-right text-gray-600">
+                                            <td data-label="% of Total" className="px-3 py-2 text-right text-gray-600">
                                               {alloc.pct}%
                                             </td>
-                                            <td className="px-3 py-2 text-center">
+                                            <td data-label="" className="px-3 py-2 text-center">
                                               <button
                                                 onClick={(e) => {
                                                   e.stopPropagation();
