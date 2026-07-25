@@ -145,7 +145,7 @@ export default function LocalSaleDetail() {
               : 'No payments recorded against this sale yet.'}
           </p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto mobile-cards">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider border-b border-gray-200">
@@ -158,10 +158,10 @@ export default function LocalSaleDetail() {
               <tbody className="divide-y divide-gray-100">
                 {payments.map(p => (
                   <tr key={p.id}>
-                    <td className="px-3 py-2 text-gray-700 whitespace-nowrap">{fmtDate(p.paymentDate || p.createdAt)}</td>
-                    <td className="px-3 py-2 text-gray-700 capitalize">{(p.paymentMethod || '—').replace(/_/g, ' ')}</td>
-                    <td className="px-3 py-2 text-gray-500 text-xs">{p.reference || p.notes || '—'}</td>
-                    <td className="px-3 py-2 text-right font-medium text-emerald-700">{fmtPkr(p.amount)}</td>
+                    <td data-label="Date" className="px-3 py-2 text-gray-700 whitespace-nowrap">{fmtDate(p.paymentDate || p.createdAt)}</td>
+                    <td data-label="Method" className="px-3 py-2 text-gray-700 capitalize">{(p.paymentMethod || '—').replace(/_/g, ' ')}</td>
+                    <td data-label="Reference" className="mob-hide px-3 py-2 text-gray-500 text-xs">{p.reference || p.notes || '—'}</td>
+                    <td data-label="Amount" className="px-3 py-2 text-right font-medium text-emerald-700">{fmtPkr(p.amount)}</td>
                   </tr>
                 ))}
               </tbody>

@@ -108,16 +108,16 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
           {katta.bySize?.length > 0 && (
             <div className="mt-3 pt-3 border-t border-amber-200">
               <p className="text-[11px] uppercase tracking-wide text-amber-700 mb-1.5">By size</p>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto mobile-cards">
                 <table className="w-full text-xs">
                   <thead><tr className="text-amber-700 text-left"><th className="py-1 pr-3 font-medium">Katta</th><th className="py-1 px-2 text-right font-medium">Freed</th><th className="py-1 px-2 text-right font-medium">Packed</th><th className="py-1 pl-2 text-right font-medium">In store</th></tr></thead>
                   <tbody>
                     {katta.bySize.map((s, i) => (
                       <tr key={i} className="border-t border-amber-100">
-                        <td className="py-1 pr-3 font-medium text-gray-800">{s.size} kg</td>
-                        <td className="py-1 px-2 text-right text-emerald-700">+{num(s.freed).toLocaleString()}</td>
-                        <td className="py-1 px-2 text-right text-red-600">{s.packed > 0 ? `−${num(s.packed).toLocaleString()}` : '—'}</td>
-                        <td className="py-1 pl-2 text-right font-semibold text-gray-900">{num(s.net).toLocaleString()}</td>
+                        <td data-label="Katta" className="py-1 pr-3 font-medium text-gray-800">{s.size} kg</td>
+                        <td data-label="Freed" className="py-1 px-2 text-right text-emerald-700">+{num(s.freed).toLocaleString()}</td>
+                        <td data-label="Packed" className="py-1 px-2 text-right text-red-600">{s.packed > 0 ? `−${num(s.packed).toLocaleString()}` : '—'}</td>
+                        <td data-label="In store" className="py-1 pl-2 text-right font-semibold text-gray-900">{num(s.net).toLocaleString()}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -162,7 +162,7 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
               <p className="text-xs text-blue-800 mb-2">Receiving: <b className="capitalize">{recv || '—'}</b>{exportOrder.totalBags ? ` · ${Number(exportOrder.totalBags).toLocaleString()} bags` : ''}</p>
             )}
             {multi ? (
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto mobile-cards">
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="text-left text-blue-700/70 uppercase">
@@ -179,10 +179,10 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
                       const q = it.qtyMT || it.qty_mt;
                       return (
                         <tr key={it.id || i} className="border-t border-blue-100">
-                          <td className="py-1 pr-3 font-medium text-blue-900">{it.productName || it.product_name || '—'}</td>
-                          <td className="py-1 pr-3">{t || '—'}</td>
-                          <td className="py-1 pr-3 text-right">{s ? `${s} kg` : '—'}</td>
-                          <td className="py-1 pr-3 text-right">{q ? `${q} MT` : '—'}</td>
+                          <td data-label="Product" className="py-1 pr-3 font-medium text-blue-900">{it.productName || it.product_name || '—'}</td>
+                          <td data-label="Bag Type" className="py-1 pr-3">{t || '—'}</td>
+                          <td data-label="Bag Size" className="py-1 pr-3 text-right">{s ? `${s} kg` : '—'}</td>
+                          <td data-label="Qty" className="py-1 pr-3 text-right">{q ? `${q} MT` : '—'}</td>
                         </tr>
                       );
                     })}
@@ -337,7 +337,7 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
         {logs.length === 0 ? (
           <p className="text-sm text-gray-400 py-4 text-center">No packing recorded yet.</p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto mobile-cards">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 text-xs text-gray-500 uppercase">
@@ -353,8 +353,8 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
               <tbody className="divide-y divide-gray-100">
                 {logs.map((l) => (
                   <tr key={l.id} className="hover:bg-gray-50">
-                    <td className="py-2 px-3 text-gray-600">{l.created_at ? new Date(l.created_at).toLocaleDateString() : '—'}</td>
-                    <td className="py-2 px-3 text-gray-900">
+                    <td data-label="Date" className="py-2 px-3 text-gray-600">{l.created_at ? new Date(l.created_at).toLocaleDateString() : '—'}</td>
+                    <td data-label="Bag" className="py-2 px-3 text-gray-900">
                       <span className="inline-flex items-center gap-1.5"><Package size={13} className="text-gray-400" />{l.bag_item_name || l.bag_item_code || '—'}</span>
                       {(num(l.master_bags_count) > 0 || num(l.poly_count) > 0) && (
                         <div className="text-[11px] text-gray-400 mt-0.5">
@@ -364,11 +364,11 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
                         </div>
                       )}
                     </td>
-                    <td className="py-2 px-3 text-right font-medium">{num(l.bags_count)}</td>
-                    <td className="py-2 px-3 text-right">{fmtKg(l.packed_weight_kg)}</td>
-                    <td className="py-2 px-3 text-right text-gray-500">{fmtKg(l.tare_weight_kg)}</td>
-                    <td className="py-2 px-3 text-right font-medium">{fmtKg(l.gross_weight_kg)}</td>
-                    <td className="py-2 px-3 text-gray-600">{l.packed_by_name || '—'}</td>
+                    <td data-label="Bags" className="py-2 px-3 text-right font-medium">{num(l.bags_count)}</td>
+                    <td data-label="Net" className="py-2 px-3 text-right">{fmtKg(l.packed_weight_kg)}</td>
+                    <td data-label="Tare" className="mob-hide py-2 px-3 text-right text-gray-500">{fmtKg(l.tare_weight_kg)}</td>
+                    <td data-label="Gross" className="py-2 px-3 text-right font-medium">{fmtKg(l.gross_weight_kg)}</td>
+                    <td data-label="By" className="mob-hide py-2 px-3 text-gray-600">{l.packed_by_name || '—'}</td>
                   </tr>
                 ))}
               </tbody>

@@ -86,7 +86,7 @@ export default function ConsumptionPanel({ batchId, batchStatus, addToast }) {
         ) : logs.length === 0 ? (
           <p className="text-sm text-gray-400 py-4 text-center">No consumption recorded yet.</p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto mobile-cards">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-gray-200">
@@ -101,15 +101,15 @@ export default function ConsumptionPanel({ batchId, batchStatus, addToast }) {
               <tbody className="divide-y divide-gray-100">
                 {logs.map(l => (
                   <tr key={l.id} className="hover:bg-gray-50">
-                    <td className="py-1.5 px-2">
+                    <td data-label="Item" className="py-1.5 px-2">
                       <span className="font-medium text-gray-900">{l.item_name}</span>
                       <span className="ml-1 text-gray-400 font-mono">{l.item_code}</span>
                     </td>
-                    <td className="py-1.5 px-2 capitalize text-gray-500">{l.category}</td>
-                    <td className="py-1.5 px-2 text-right">{Number(l.quantity_used)} {l.unit}</td>
-                    <td className="py-1.5 px-2 text-right">{formatPKR(l.cost_per_unit)}</td>
-                    <td className="py-1.5 px-2 text-right font-medium">{formatPKR(l.total_cost)}</td>
-                    <td className="py-1.5 px-2 text-right text-gray-500">{l.used_by_name || '—'}</td>
+                    <td data-label="Category" className="mob-hide py-1.5 px-2 capitalize text-gray-500">{l.category}</td>
+                    <td data-label="Qty" className="py-1.5 px-2 text-right">{Number(l.quantity_used)} {l.unit}</td>
+                    <td data-label="Cost/unit" className="mob-hide py-1.5 px-2 text-right">{formatPKR(l.cost_per_unit)}</td>
+                    <td data-label="Total" className="py-1.5 px-2 text-right font-medium">{formatPKR(l.total_cost)}</td>
+                    <td data-label="By" className="mob-hide py-1.5 px-2 text-right text-gray-500">{l.used_by_name || '—'}</td>
                   </tr>
                 ))}
               </tbody>
