@@ -1833,11 +1833,17 @@ function renderDocument(doc, style) {
 // a window and prints) and Send (autoPrint:false, posted to the server which
 // renders it to a PDF with the identical layout).
 function buildDocHtml(editedHtml, docType, title, { autoPrint }) {
+  // Proforma is the only landscape document; every other export document is A4
+  // portrait. Uniform 10mm margins on all four sides (matches the PDF service).
   const landscape = docType === 'proforma-invoice';
-  const pageRule = landscape ? '@page { size: A4 landscape; margin: 10mm; }' : '@page { size: A4; margin: 12mm; }';
-  const printW = landscape ? '277mm' : '186mm';
-  const printH = landscape ? '190mm' : '273mm';
-  const pageHpx = Math.round((landscape ? (210 - 20) : (297 - 24)) * 96 / 25.4);
+  const pageRule = landscape ? '@page { size: A4 landscape; margin: 10mm; }' : '@page { size: A4 portrait; margin: 10mm; }';
+  // Printable area = A4 (210×297) minus 2×10mm margins → 190×277 (portrait),
+  // 277×190 (landscape). The body is pinned to the printable WIDTH so the print
+  // layout matches A4 regardless of the (print-)window width — otherwise the
+  // browser lays out at the window width and shrinks/offsets the page.
+  const printW = landscape ? '277mm' : '190mm';
+  const printH = landscape ? '190mm' : '277mm';
+  const pageHpx = Math.round((landscape ? (210 - 20) : (297 - 20)) * 96 / 25.4);
   return `<!doctype html>
     <html>
       <head>
@@ -1847,15 +1853,29 @@ function buildDocHtml(editedHtml, docType, title, { autoPrint }) {
           ${pageRule}
           html, body { margin: 0; padding: 0; width: ${printW}; }
           #agri-fit { width: 100%; }
+          /* Fill the full printable A4 width — drop the on-screen max-width
+             centering so the document uses the whole page, never a half page. */
           body .agri-doc { width: 100%; max-width: 100%; margin: 0; box-sizing: border-box; }
           body .agri-doc > div {
             width: 100% !important; max-width: 100% !important; margin: 0 !important; box-sizing: border-box;
             min-height: ${printH}; display: flex; flex-direction: column;
           }
           body .agri-doc > div > .agri-ftr { margin-top: auto !important; }
+          /* Tables span the full page width and never overflow it; long unbroken
+             values wrap instead of pushing the table past the page edge. */
+          .agri-doc table { max-width: 100%; }
+          .agri-doc td, .agri-doc th { overflow-wrap: break-word; word-break: break-word; }
+          /* Multi-page documents: repeat table headers (and footers/totals) on
+             every A4 page and never split a row across a page break. */
+          .agri-doc thead { display: table-header-group; }
+          .agri-doc tfoot { display: table-footer-group; }
+          .agri-doc tr, .agri-doc td, .agri-doc th { break-inside: avoid; page-break-inside: avoid; }
+          .agri-doc img { max-width: 100%; height: auto; }
+          .no-print { display: none !important; }
           @media print {
             html, body { margin: 0; padding: 0; width: ${printW}; }
             body .agri-doc, body .agri-doc > div { width: 100% !important; max-width: 100% !important; margin: 0 !important; box-sizing: border-box; }
+            .no-print { display: none !important; }
           }
         </style>
       </head>
@@ -1875,8 +1895,15 @@ function buildDocHtml(editedHtml, docType, title, { autoPrint }) {
               if (!(az > 0)) az = 1;
               var h = el.scrollHeight;
               var z = 1;
-              if (h > page && h <= page * 1.35) {
-                z = Math.max(0.72, (page - 2) / h);
+              // Only shrink when the content is a LITTLE over one page (≤ ~1.45
+              // pages) — so a document that would spill a few lines onto a second,
+              // near-empty page fits on one instead. A document that already fits
+              // is never shrunk; a genuinely long one flows to multiple pages.
+              // Widen by 1/z as we zoom so the page keeps its FULL width (uniform
+              // zoom alone would leave side margins). Kept in sync with the
+              // server PDF service (pdf.service.js) so print and PDF agree.
+              if (h > page && h <= page * 1.45) {
+                z = Math.max(0.6, (page - 2) / h);
                 el.style.zoom = z;
                 el.style.width = (100 / z) + '%';
               }
@@ -2463,7 +2490,7 @@ export default function DocumentCenter({ order }) {
               ref={printRef}
               contentEditable
               suppressContentEditableWarning
-              className="bg-white border border-gray-200 rounded-lg overflow-auto max-h-[70vh] p-2 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              className={`doc-a4-preview${previewKey === 'proforma-invoice' ? ' doc-a4-preview-landscape' : ''} border border-gray-200 rounded-lg overflow-auto max-h-[70vh] focus:outline-none focus:ring-2 focus:ring-blue-200`}
               dangerouslySetInnerHTML={{ __html: previewHtml }}
             />
           </div>

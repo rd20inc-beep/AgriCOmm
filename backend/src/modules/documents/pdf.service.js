@@ -71,8 +71,18 @@ async function htmlToPdf(html) {
     // full width AND one page height. Widening reduces height (less wrapping), so
     // iterate to converge. Short docs pin the footer to the page bottom via the
     // flex fill; genuinely multi-page docs (> ~1.45 pages) flow normally.
-    const A4_H_PX = Math.round((297 - 24) * 96 / 25.4); // printable height (− 12mm margins)
-    const A4_W_MM = 186;                                // printable width  (210 − 2×12mm)
+    //
+    // Derive the printable area from the document's OWN @page rule so the fit
+    // math is correct for any caller (export docs use 10mm margins; other doc
+    // types may differ). Orientation from `@page ... landscape`; margin from
+    // `@page ... margin: Nmm`. Falls back to A4 portrait / 10mm.
+    const pageBlock = (String(html || '').match(/@page[^{]*\{[^}]*\}/i) || [''])[0];
+    const landscape = /landscape/i.test(pageBlock);
+    const marginMm = (() => { const m = pageBlock.match(/margin:\s*([\d.]+)mm/i); return m ? parseFloat(m[1]) : 10; })();
+    const pageWmm = landscape ? 297 : 210;
+    const pageHmm = landscape ? 210 : 297;
+    const A4_H_PX = Math.round((pageHmm - 2 * marginMm) * 96 / 25.4); // printable height
+    const A4_W_MM = pageWmm - 2 * marginMm;                           // printable width
     let scale = 1;
     try {
       let h = await page.evaluate(() => {

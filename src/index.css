@@ -626,3 +626,22 @@ input, select, textarea { font-size: 14px; }
 .sidebar-scroll::-webkit-scrollbar-track { background: transparent; }
 .sidebar-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 999px; }
 .sidebar-scroll:hover::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.32); }
+
+/* ===== EXPORT DOCUMENT A4 PREVIEW ===== */
+/* Frame the editable export-document preview (DocumentCenter) as an A4 sheet so
+   what's on screen reads like the printed/PDF page: a centred white page at the
+   A4 printable width on a subtle backdrop. The doc's own inline max-width
+   (~A4) is respected; this only adds the page framing + fills to full width so
+   the preview matches the server-rendered A4 PDF. Portrait by default;
+   .doc-a4-preview-landscape widens the sheet for the Proforma (landscape). */
+.doc-a4-preview { background: #eef0f3; padding: 16px; }
+.doc-a4-preview .agri-doc { max-width: 100%; margin: 0 auto; }
+.doc-a4-preview .agri-doc > div {
+  width: 190mm;
+  max-width: 100%;
+  margin: 0 auto !important;
+  background: #fff;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.15);
+  box-sizing: border-box;
+}
+.doc-a4-preview-landscape .agri-doc > div { width: 277mm; }
