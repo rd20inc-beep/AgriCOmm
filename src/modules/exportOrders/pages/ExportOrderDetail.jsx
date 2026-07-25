@@ -254,7 +254,8 @@ export default function ExportOrderDetail() {
     setAdvanceAmount(Math.max(0, (order.advanceExpected || 0) - (order.advanceReceived || 0)));
     setAdvanceDate(today());
     setAdvanceMethod('bank_transfer');
-    setAdvanceBankAccountId('');
+    // #6 — preselect the order's bank account (still changeable per-payment).
+    setAdvanceBankAccountId(order.bankAccountId ? String(order.bankAccountId) : '');
     setAdvanceBankRef('');
     setAdvanceNotes('');
     // Pre-fill FX rate from the order's booked rate so the user just
@@ -267,7 +268,8 @@ export default function ExportOrderDetail() {
     setBalanceAmount(Math.max(0, (order.balanceExpected || 0) - (order.balanceReceived || 0)));
     setBalanceDate(today());
     setBalanceMethod('bank_transfer');
-    setBalanceBankAccountId('');
+    // #6 — preselect the order's bank account (still changeable per-payment).
+    setBalanceBankAccountId(order.bankAccountId ? String(order.bankAccountId) : '');
     setBalanceBankRef('');
     setBalanceNotes('');
     setShowBalanceModal(true);
