@@ -148,7 +148,7 @@ function ProfitabilityTab() {
       </div>
 
       {/* Customer Profitability Table */}
-      <div className="table-container">
+      <div className="table-container mobile-cards">
         <div className="px-5 py-3 border-b border-gray-200"><h3 className="text-sm font-semibold text-gray-700 uppercase">Top Customers by Profit</h3></div>
         <div className="table-scroll">
           <table className="w-full">
@@ -158,12 +158,12 @@ function ProfitabilityTab() {
                 const margin = c.revenue > 0 ? (((parseFloat(c.profit) || 0) / c.revenue) * 100).toFixed(1) : '0.0';
                 return (
                   <tr key={c.name}>
-                    <td className="font-medium text-gray-900">{c.name}</td>
-                    <td className="text-right">{c.orders}</td>
-                    <td className="text-right">{formatCurrency(c.revenue)}</td>
-                    <td className="text-right">{formatCurrency(c.costs)}</td>
-                    <td className={`text-right font-semibold ${c.profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{formatCurrency(c.profit)}</td>
-                    <td className={`text-right font-bold ${parseFloat(margin) < 5 ? 'text-red-600' : parseFloat(margin) < 15 ? 'text-amber-600' : 'text-emerald-600'}`}>{margin}%</td>
+                    <td data-label="Customer" className="font-medium text-gray-900">{c.name}</td>
+                    <td data-label="Orders" className="mob-hide text-right">{c.orders}</td>
+                    <td data-label="Revenue" className="text-right">{formatCurrency(c.revenue)}</td>
+                    <td data-label="Costs" className="mob-hide text-right">{formatCurrency(c.costs)}</td>
+                    <td data-label="Profit" className={`text-right font-semibold ${c.profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{formatCurrency(c.profit)}</td>
+                    <td data-label="Margin %" className={`text-right font-bold ${parseFloat(margin) < 5 ? 'text-red-600' : parseFloat(margin) < 15 ? 'text-amber-600' : 'text-emerald-600'}`}>{margin}%</td>
                   </tr>
                 );
               })}
@@ -321,7 +321,7 @@ function RiskMonitorTab() {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="table-container">
+        <div className="table-container mobile-cards">
           <div className="px-5 py-3 border-b border-gray-200 flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-red-500" />
             <h3 className="text-sm font-semibold text-gray-700 uppercase">Top Risk Orders</h3>
@@ -332,17 +332,17 @@ function RiskMonitorTab() {
               <tbody>
                 {topOrders.length > 0 ? topOrders.map(o => (
                   <tr key={o.entityId || o.id}>
-                    <td><Link to={`/export/${o.entityRef || o.entityId}`} className="text-blue-600 hover:text-blue-800 font-medium">{o.entityRef || o.entityId}</Link></td>
-                    <td className="text-right font-bold">{o.riskScore || o.score}</td>
-                    <td><span className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold ${(o.riskLevel || o.level) === 'Critical' ? 'bg-red-50 text-red-700' : (o.riskLevel || o.level) === 'High' ? 'bg-amber-50 text-amber-700' : 'bg-amber-50 text-amber-700'}`}>{o.riskLevel || o.level}</span></td>
-                    <td className="text-right font-medium text-red-600">{formatCurrency(o.financialExposure || o.exposure)}</td>
+                    <td data-label="Order"><Link to={`/export/${o.entityRef || o.entityId}`} className="text-blue-600 hover:text-blue-800 font-medium">{o.entityRef || o.entityId}</Link></td>
+                    <td data-label="Score" className="text-right font-bold">{o.riskScore || o.score}</td>
+                    <td data-label="Level"><span className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold ${(o.riskLevel || o.level) === 'Critical' ? 'bg-red-50 text-red-700' : (o.riskLevel || o.level) === 'High' ? 'bg-amber-50 text-amber-700' : 'bg-amber-50 text-amber-700'}`}>{o.riskLevel || o.level}</span></td>
+                    <td data-label="Exposure" className="text-right font-medium text-red-600">{formatCurrency(o.financialExposure || o.exposure)}</td>
                   </tr>
                 )) : <tr><td colSpan={4} className="text-center py-8 text-gray-400">No risk data. Run exception scan first.</td></tr>}
               </tbody>
             </table>
           </div>
         </div>
-        <div className="table-container">
+        <div className="table-container mobile-cards">
           <div className="px-5 py-3 border-b border-gray-200 flex items-center gap-2">
             <Users className="w-4 h-4 text-amber-500" />
             <h3 className="text-sm font-semibold text-gray-700 uppercase">Top Risk Customers</h3>
@@ -353,10 +353,10 @@ function RiskMonitorTab() {
               <tbody>
                 {topCustomers.length > 0 ? topCustomers.map(c => (
                   <tr key={c.entityId || c.id}>
-                    <td className="font-medium text-gray-900">{c.entityRef || c.name || c.entityId}</td>
-                    <td className="text-right font-bold">{c.riskScore || c.score}</td>
-                    <td><span className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold ${(c.riskLevel || c.level) === 'Critical' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}`}>{c.riskLevel || c.level}</span></td>
-                    <td className="text-right font-medium text-red-600">{formatCurrency(c.financialExposure || c.exposure)}</td>
+                    <td data-label="Customer" className="font-medium text-gray-900">{c.entityRef || c.name || c.entityId}</td>
+                    <td data-label="Score" className="text-right font-bold">{c.riskScore || c.score}</td>
+                    <td data-label="Level"><span className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold ${(c.riskLevel || c.level) === 'Critical' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}`}>{c.riskLevel || c.level}</span></td>
+                    <td data-label="Exposure" className="text-right font-medium text-red-600">{formatCurrency(c.financialExposure || c.exposure)}</td>
                   </tr>
                 )) : <tr><td colSpan={4} className="text-center py-8 text-gray-400">No customer risk data.</td></tr>}
               </tbody>

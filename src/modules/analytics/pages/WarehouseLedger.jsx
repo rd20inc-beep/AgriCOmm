@@ -48,7 +48,7 @@ function WarehousePicker() {
           className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100" />
       </div>
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-500 text-xs">
               <tr>
@@ -68,13 +68,13 @@ function WarehousePicker() {
                   ? <tr><td colSpan={7} className="px-3 py-6 text-center text-gray-400">No warehouses.</td></tr>
                   : rows.map(r => (
                     <tr key={r.warehouseId} className="hover:bg-gray-50 cursor-pointer" onClick={() => navigate(`/reports/warehouse-ledger/${r.warehouseId}`)}>
-                      <td className="px-3 py-2"><span className="font-medium text-blue-600">{r.warehouse}</span>{r.type ? <span className="text-gray-400"> · {r.type}</span> : ''}</td>
-                      <td className="px-3 py-2"><span className={`inline-flex px-1.5 py-0.5 rounded text-[11px] font-medium ${r.entity === 'export' ? 'bg-violet-50 text-violet-700' : 'bg-sky-50 text-sky-700'}`}>{r.entity}</span></td>
-                      <td className="px-3 py-2 text-right tabular-nums">{r.lotCount}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{kg(r.onHandKg)}</td>
-                      <td className={`px-3 py-2 text-right tabular-nums ${r.reservedKg > 0 ? 'text-red-600' : ''}`}>{kg(r.reservedKg)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{kg(r.availableKg)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{pkr(r.stockValue)}</td>
+                      <td data-label="Warehouse" className="px-3 py-2"><span className="font-medium text-blue-600">{r.warehouse}</span>{r.type ? <span className="text-gray-400"> · {r.type}</span> : ''}</td>
+                      <td data-label="Entity" className="mob-hide px-3 py-2"><span className={`inline-flex px-1.5 py-0.5 rounded text-[11px] font-medium ${r.entity === 'export' ? 'bg-violet-50 text-violet-700' : 'bg-sky-50 text-sky-700'}`}>{r.entity}</span></td>
+                      <td data-label="Lots" className="mob-hide px-3 py-2 text-right tabular-nums">{r.lotCount}</td>
+                      <td data-label="On hand" className="px-3 py-2 text-right tabular-nums">{kg(r.onHandKg)}</td>
+                      <td data-label="Reserved" className={`px-3 py-2 text-right tabular-nums ${r.reservedKg > 0 ? 'text-red-600' : ''}`}>{kg(r.reservedKg)}</td>
+                      <td data-label="Available" className="px-3 py-2 text-right tabular-nums text-emerald-700">{kg(r.availableKg)}</td>
+                      <td data-label="Stock value" className="px-3 py-2 text-right tabular-nums">{pkr(r.stockValue)}</td>
                     </tr>
                   ))}
             </tbody>
@@ -177,7 +177,7 @@ function WarehouseDetail({ id }) {
 
       {/* By rice type */}
       <Section icon={Layers} title="By rice type">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-500 text-xs"><tr>
               <th className="px-3 py-2 text-left font-medium">Rice type</th>
@@ -191,11 +191,11 @@ function WarehouseDetail({ id }) {
                 ? <tr><td colSpan={5} className="px-3 py-5 text-center text-gray-400">No on-hand stock.</td></tr>
                 : byRiceType.map((r, i) => (
                   <tr key={i} className="hover:bg-gray-50">
-                    <td className="px-3 py-2">{r.riceType}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{r.lots}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{kg(r.onHandKg)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{kg(r.reservedKg)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{pkr(r.value)}</td>
+                    <td data-label="Rice type" className="px-3 py-2">{r.riceType}</td>
+                    <td data-label="Lots" className="mob-hide px-3 py-2 text-right tabular-nums">{r.lots}</td>
+                    <td data-label="On hand" className="px-3 py-2 text-right tabular-nums">{kg(r.onHandKg)}</td>
+                    <td data-label="Reserved" className="mob-hide px-3 py-2 text-right tabular-nums">{kg(r.reservedKg)}</td>
+                    <td data-label="Value" className="px-3 py-2 text-right tabular-nums">{pkr(r.value)}</td>
                   </tr>
                 ))}
             </tbody>
@@ -205,7 +205,7 @@ function WarehouseDetail({ id }) {
 
       {/* Per-lot roll-forward */}
       <Section icon={Warehouse} title="Lots in this warehouse">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-500 text-xs">
               <tr>
@@ -226,19 +226,19 @@ function WarehouseDetail({ id }) {
                 ? <tr><td colSpan={10} className="px-3 py-6 text-center text-gray-400">No on-hand lots in this warehouse.</td></tr>
                 : lots.map(l => (
                   <tr key={l.lotId} className="hover:bg-gray-50">
-                    <td className="px-3 py-2">
+                    <td data-label="Lot" className="px-3 py-2">
                       <Link to={l.href} className="font-mono text-blue-600 hover:underline">{l.lotNo}</Link>
                       {l.isServiceMilling && <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 align-middle">Service Milling</span>}
                     </td>
-                    <td className="px-3 py-2">{l.riceType || '—'}{l.label && l.label !== l.riceType ? <span className="text-gray-400"> · {l.label}</span> : ''}</td>
-                    <td className="px-3 py-2">{typeLabel(l.type)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{kg(l.inKg)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-red-600">{l.outKg ? kg(l.outKg) : '—'}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{l.reservedKg ? kg(l.reservedKg) : '—'}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{kg(l.availableKg)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{kg(l.closingKg)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{l.costPerKg ? pkr(l.costPerKg) : '—'}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{pkr(l.value)}</td>
+                    <td data-label="Rice type" className="px-3 py-2">{l.riceType || '—'}{l.label && l.label !== l.riceType ? <span className="text-gray-400"> · {l.label}</span> : ''}</td>
+                    <td data-label="Type" className="mob-hide px-3 py-2">{typeLabel(l.type)}</td>
+                    <td data-label="In" className="px-3 py-2 text-right tabular-nums">{kg(l.inKg)}</td>
+                    <td data-label="Out" className="px-3 py-2 text-right tabular-nums text-red-600">{l.outKg ? kg(l.outKg) : '—'}</td>
+                    <td data-label="Reserved" className="mob-hide px-3 py-2 text-right tabular-nums">{l.reservedKg ? kg(l.reservedKg) : '—'}</td>
+                    <td data-label="Available" className="px-3 py-2 text-right tabular-nums">{kg(l.availableKg)}</td>
+                    <td data-label="Closing" className="px-3 py-2 text-right tabular-nums text-emerald-700">{kg(l.closingKg)}</td>
+                    <td data-label="Cost/kg" className="mob-hide px-3 py-2 text-right tabular-nums">{l.costPerKg ? pkr(l.costPerKg) : '—'}</td>
+                    <td data-label="Value" className="px-3 py-2 text-right tabular-nums">{pkr(l.value)}</td>
                   </tr>
                 ))}
             </tbody>

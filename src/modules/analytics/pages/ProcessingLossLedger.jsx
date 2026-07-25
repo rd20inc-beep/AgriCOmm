@@ -77,7 +77,7 @@ export default function ProcessingLossLedger() {
   );
   const Breakdown = ({ icon, title, rows }) => (
     <Section icon={icon} title={title}>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto mobile-cards">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-gray-500 text-xs"><tr>
             <th className="px-3 py-2 text-left font-medium">{title.replace('By ', '')}</th>
@@ -92,12 +92,12 @@ export default function ProcessingLossLedger() {
               ? <tr><td colSpan={6} className="px-3 py-5 text-center text-gray-400">No data.</td></tr>
               : rows.map((r, i) => (
                 <tr key={i} className="hover:bg-gray-50">
-                  <td className="px-3 py-2">{r.key}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{r.batches}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{kgMt(r.inputKg)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{kgMt(r.outputKg)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-red-600">{kgMt(r.lossKg)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{pc(r.lossPct)}</td>
+                  <td data-label="Group" className="px-3 py-2">{r.key}</td>
+                  <td data-label="Batches" className="mob-hide px-3 py-2 text-right tabular-nums">{r.batches}</td>
+                  <td data-label="Input" className="px-3 py-2 text-right tabular-nums">{kgMt(r.inputKg)}</td>
+                  <td data-label="Output" className="px-3 py-2 text-right tabular-nums">{kgMt(r.outputKg)}</td>
+                  <td data-label="Loss" className="px-3 py-2 text-right tabular-nums text-red-600">{kgMt(r.lossKg)}</td>
+                  <td data-label="Loss %" className="px-3 py-2 text-right tabular-nums">{pc(r.lossPct)}</td>
                 </tr>
               ))}
           </tbody>
@@ -159,7 +159,7 @@ export default function ProcessingLossLedger() {
 
               {/* Per-batch table */}
               <Section icon={Scale} title="Batches">
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto mobile-cards">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 text-gray-500 text-xs">
                       <tr>
@@ -179,15 +179,15 @@ export default function ProcessingLossLedger() {
                         ? <tr><td colSpan={9} className="px-3 py-6 text-center text-gray-400">No milled batches in this range.</td></tr>
                         : batches.map(b => (
                           <tr key={b.batchId} className="hover:bg-gray-50">
-                            <td className="px-3 py-2 whitespace-nowrap">{dt(b.date)}</td>
-                            <td className="px-3 py-2"><Link to={b.href} className="font-mono text-blue-600 hover:underline">{b.batchNo}</Link>{b.isBlend && <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-violet-50 text-violet-700">blend</span>}</td>
-                            <td className="px-3 py-2">{b.riceType}</td>
-                            <td className="px-3 py-2">{b.supplier}</td>
-                            <td className="px-3 py-2">{b.operator}</td>
-                            <td className="px-3 py-2 text-right tabular-nums">{kgMt(b.inputKg)}</td>
-                            <td className="px-3 py-2 text-right tabular-nums">{kgMt(b.outputKg)}</td>
-                            <td className="px-3 py-2 text-right tabular-nums text-red-600">{kgMt(b.lossKg)}</td>
-                            <td className={`px-3 py-2 text-right tabular-nums ${b.lossPct > 10 ? 'text-red-600 font-medium' : ''}`}>{pc(b.lossPct)}</td>
+                            <td data-label="Date" className="px-3 py-2 whitespace-nowrap">{dt(b.date)}</td>
+                            <td data-label="Batch" className="px-3 py-2"><Link to={b.href} className="font-mono text-blue-600 hover:underline">{b.batchNo}</Link>{b.isBlend && <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-violet-50 text-violet-700">blend</span>}</td>
+                            <td data-label="Rice type" className="mob-hide px-3 py-2">{b.riceType}</td>
+                            <td data-label="Supplier" className="mob-hide px-3 py-2">{b.supplier}</td>
+                            <td data-label="Operator" className="mob-hide px-3 py-2">{b.operator}</td>
+                            <td data-label="Input" className="px-3 py-2 text-right tabular-nums">{kgMt(b.inputKg)}</td>
+                            <td data-label="Output" className="px-3 py-2 text-right tabular-nums">{kgMt(b.outputKg)}</td>
+                            <td data-label="Loss" className="px-3 py-2 text-right tabular-nums text-red-600">{kgMt(b.lossKg)}</td>
+                            <td data-label="Loss %" className={`px-3 py-2 text-right tabular-nums ${b.lossPct > 10 ? 'text-red-600 font-medium' : ''}`}>{pc(b.lossPct)}</td>
                           </tr>
                         ))}
                     </tbody>
