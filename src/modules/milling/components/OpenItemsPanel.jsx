@@ -31,7 +31,7 @@ export default function OpenItemsPanel({ items, partyType }) {
       <p className="px-4 pt-2 text-[11px] text-gray-400">
         From the {isCustomer ? 'receivables' : 'payables'} sub-ledger — a ledger entry posts when {isCustomer ? 'an advance is received or the order ships' : 'the bill is recorded'}.
       </p>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto mobile-cards">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-[11px] uppercase tracking-wide text-gray-500">
@@ -47,7 +47,7 @@ export default function OpenItemsPanel({ items, partyType }) {
               const partial = (parseFloat(i.received) || 0) > 0;
               return (
                 <tr key={idx} className={partial ? 'bg-amber-50' : 'bg-red-50'}>
-                  <td className="px-4 py-2 font-medium text-gray-800 max-w-[420px]">
+                  <td data-label="Reference" className="px-4 py-2 font-medium text-gray-800 max-w-[420px]">
                     <span>
                       {i.ref}
                       <span className={`ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold ${partial ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>{partial ? 'Partial' : 'Unpaid'}</span>
@@ -55,12 +55,12 @@ export default function OpenItemsPanel({ items, partyType }) {
                     </span>
                     {i.detail && <span className="block text-[11px] text-gray-500 font-normal whitespace-normal break-words">{i.detail}</span>}
                   </td>
-                  <td className="px-4 py-2 text-gray-600 capitalize">{String(i.label || '').replace(/_/g, ' ')}</td>
-                  <td className="px-4 py-2 whitespace-nowrap">
+                  <td data-label="Type" className="mob-hide px-4 py-2 text-gray-600 capitalize">{String(i.label || '').replace(/_/g, ' ')}</td>
+                  <td data-label="Due" className="px-4 py-2 whitespace-nowrap">
                     <span className={isOverdue(i.due_date) ? 'text-red-600 font-medium' : 'text-gray-600'}>{fmtDate(i.due_date)}</span>
                     {isOverdue(i.due_date) && <span className="ml-1 text-[10px] text-red-500 inline-flex items-center gap-0.5"><AlertTriangle size={10} /> overdue</span>}
                   </td>
-                  <td className={`px-4 py-2 text-right tabular-nums font-medium ${partial ? 'text-amber-700' : 'text-red-700'}`}>{fmt(i.outstanding, i.currency)}</td>
+                  <td data-label="Outstanding" className={`px-4 py-2 text-right tabular-nums font-medium ${partial ? 'text-amber-700' : 'text-red-700'}`}>{fmt(i.outstanding, i.currency)}</td>
                 </tr>
               );
             })}

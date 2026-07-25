@@ -1224,7 +1224,7 @@ export default function MillingBatchDetail() {
                     </button>
                   )}
                 </div>
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto mobile-cards">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-gray-200 text-left text-xs uppercase text-gray-500">
@@ -1240,19 +1240,19 @@ export default function MillingBatchDetail() {
                         const price = q.pricePerMt ?? q.price_per_mt ?? q.pricePerMT;
                         return (
                           <tr key={v.id || i} className="border-b border-gray-100 last:border-0">
-                            <td className="py-2 pr-3 font-mono font-medium text-gray-900 whitespace-nowrap">{v.vehicleNo}{v.driverName && <span className="text-gray-400 font-sans ml-1.5">({v.driverName})</span>}</td>
-                            <td className="py-2 pr-3 text-right tabular-nums">{Math.round(parseFloat(v.weight_kg) || 0).toLocaleString()} kg</td>
-                            {qualityParams.slice(0, 5).map(p => { const val = qGet(q, p); return <td key={p.key} className="py-2 pr-3 text-right tabular-nums">{val == null ? '—' : `${val}%`}</td>; })}
-                            <td className="py-2 pl-3 text-right tabular-nums">{price ? `Rs ${(Number(price) / 1000).toFixed(2)}` : '—'}</td>
+                            <td data-label="Vehicle" className="py-2 pr-3 font-mono font-medium text-gray-900 whitespace-nowrap">{v.vehicleNo}{v.driverName && <span className="text-gray-400 font-sans ml-1.5">({v.driverName})</span>}</td>
+                            <td data-label="Weight" className="py-2 pr-3 text-right tabular-nums">{Math.round(parseFloat(v.weight_kg) || 0).toLocaleString()} kg</td>
+                            {qualityParams.slice(0, 5).map(p => { const val = qGet(q, p); return <td data-label={p.label} key={p.key} className="py-2 pr-3 text-right tabular-nums">{val == null ? '—' : `${val}%`}</td>; })}
+                            <td data-label="Price /kg" className="py-2 pl-3 text-right tabular-nums">{price ? `Rs ${(Number(price) / 1000).toFixed(2)}` : '—'}</td>
                           </tr>
                         );
                       })}
                       {vehiclesWithQuality.length > 1 && vehicleQualityAgg && (
                         <tr className="border-t-2 border-gray-200 bg-gray-50 font-semibold">
-                          <td className="py-2 pr-3 text-xs uppercase text-gray-500">Weighted avg</td>
+                          <td className="mob-full py-2 pr-3 text-xs uppercase text-gray-500">Weighted avg</td>
                           <td className="py-2 pr-3"></td>
-                          {qualityParams.slice(0, 5).map(p => <td key={p.key} className="py-2 pr-3 text-right tabular-nums">{vehicleQualityAgg[p.key] === '' ? '—' : `${vehicleQualityAgg[p.key]}%`}</td>)}
-                          <td className="py-2 pl-3 text-right tabular-nums">{vehicleQualityAgg.pricePerMT ? `Rs ${(Number(vehicleQualityAgg.pricePerMT) / 1000).toFixed(2)}` : '—'}</td>
+                          {qualityParams.slice(0, 5).map(p => <td data-label={p.label} key={p.key} className="py-2 pr-3 text-right tabular-nums">{vehicleQualityAgg[p.key] === '' ? '—' : `${vehicleQualityAgg[p.key]}%`}</td>)}
+                          <td data-label="Price /kg" className="py-2 pl-3 text-right tabular-nums">{vehicleQualityAgg.pricePerMT ? `Rs ${(Number(vehicleQualityAgg.pricePerMT) / 1000).toFixed(2)}` : '—'}</td>
                         </tr>
                       )}
                     </tbody>
@@ -1286,7 +1286,7 @@ export default function MillingBatchDetail() {
                 </div>
               </div>
               {sampleForDisplay || safeArrival ? (
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto mobile-cards">
                   {sampleIsAuto && (
                     <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
                       Sample values shown below are <strong>autofilled from the per-truck quality</strong> you entered on the vehicles. Click <strong>Enter Sample</strong> to confirm/save them as the batch Sample Analysis.
@@ -1326,13 +1326,13 @@ export default function MillingBatchDetail() {
                             key={param.key}
                             className={`border-b border-gray-50 ${isHigh ? 'bg-red-50' : ''}`}
                           >
-                            <td className="py-2.5 px-3 font-medium text-gray-900">{param.label}</td>
-                            <td className="py-2.5 px-3 text-right text-gray-600">{sampleVal != null ? `${sampleVal}${param.unit}` : '—'}</td>
-                            <td className="py-2.5 px-3 text-right text-gray-600">{arrivalVal != null ? `${arrivalVal}${param.unit}` : '—'}</td>
-                            <td className={`py-2.5 px-3 text-right font-medium ${isHigh ? 'text-red-600' : 'text-gray-600'}`}>
+                            <td data-label="Parameter" className="py-2.5 px-3 font-medium text-gray-900">{param.label}</td>
+                            <td data-label="Sample" className="py-2.5 px-3 text-right text-gray-600">{sampleVal != null ? `${sampleVal}${param.unit}` : '—'}</td>
+                            <td data-label="Arrival" className="py-2.5 px-3 text-right text-gray-600">{arrivalVal != null ? `${arrivalVal}${param.unit}` : '—'}</td>
+                            <td data-label="Variance" className={`py-2.5 px-3 text-right font-medium ${isHigh ? 'text-red-600' : 'text-gray-600'}`}>
                               {variance !== null ? `${variance}${param.unit}` : '—'}
                             </td>
-                            <td className="py-2.5 px-3 text-center">
+                            <td data-label="Status" className="py-2.5 px-3 text-center">
                               {variance === null ? (
                                 <span className="text-xs text-gray-400">—</span>
                               ) : isHigh ? (
@@ -1682,7 +1682,7 @@ export default function MillingBatchDetail() {
               return (
                 <div className="bg-amber-50 rounded-xl border border-amber-200 p-4">
                   <p className="text-xs font-semibold text-amber-700 uppercase mb-2">Raw Material Cost — Blended Lots</p>
-                  <table className="w-full text-sm">
+                  <table className="w-full text-sm mobile-cards">
                     <thead>
                       <tr className="text-[11px] text-amber-700 uppercase">
                         <th className="text-left font-medium py-1">Lot / Supplier</th>
@@ -1696,23 +1696,23 @@ export default function MillingBatchDetail() {
                         const perKg = parseFloat(l.unit_cost_pkr || l.landed_cost_per_kg) || 0;
                         return (
                           <tr key={l.id} className="border-t border-amber-100">
-                            <td className="py-1.5">
+                            <td data-label="Lot / Supplier" className="py-1.5">
                               <span className="font-mono text-gray-800">{l.lot_no}</span>
                               {l.supplier_name && <span className="text-[10px] text-gray-500 ml-1.5">{l.supplier_name}</span>}
                             </td>
-                            <td className="text-right tabular-nums">{Math.round(parseFloat(l.qty_kg) || 0).toLocaleString()} kg</td>
-                            <td className="text-right tabular-nums font-medium">{fmtPKR2(perKg)}</td>
-                            <td className="text-right tabular-nums">{fmtPKR2(parseFloat(l.cost_total_pkr) || 0)}</td>
+                            <td data-label="Qty" className="text-right tabular-nums">{Math.round(parseFloat(l.qty_kg) || 0).toLocaleString()} kg</td>
+                            <td data-label="Agreed Price /kg" className="text-right tabular-nums font-medium">{fmtPKR2(perKg)}</td>
+                            <td data-label="Total" className="text-right tabular-nums">{fmtPKR2(parseFloat(l.cost_total_pkr) || 0)}</td>
                           </tr>
                         );
                       })}
                     </tbody>
                     <tfoot>
                       <tr className="border-t-2 border-amber-300 font-bold text-gray-900">
-                        <td className="py-1.5">Blended average</td>
-                        <td className="text-right tabular-nums">{Math.round(batch.rawQtyKg).toLocaleString()} kg</td>
-                        <td className="text-right tabular-nums text-blue-900">{formatPKR(blendAvgPerMt / 1000)} /kg</td>
-                        <td className="text-right tabular-nums">{formatPKR(effectiveRawCost)}</td>
+                        <td className="mob-full py-1.5">Blended average</td>
+                        <td data-label="Qty" className="text-right tabular-nums">{Math.round(batch.rawQtyKg).toLocaleString()} kg</td>
+                        <td data-label="Blended avg /kg" className="text-right tabular-nums text-blue-900">{formatPKR(blendAvgPerMt / 1000)} /kg</td>
+                        <td data-label="Total" className="text-right tabular-nums">{formatPKR(effectiveRawCost)}</td>
                       </tr>
                     </tfoot>
                   </table>
@@ -1744,7 +1744,7 @@ export default function MillingBatchDetail() {
                   </button>
                 </div>
               </div>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto mobile-cards">
                 <table className="w-full text-sm">
                   <thead><tr className="border-b border-gray-200">
                     <th className="text-left py-2 px-3 text-xs font-medium text-gray-500 uppercase">Cost Item</th>
@@ -1789,17 +1789,17 @@ export default function MillingBatchDetail() {
                         ].filter(r => r.val > 0) : [];
                         return [
                           <tr key={cat.key} className={`border-b border-gray-50 hover:bg-gray-50 ${isRaw ? 'bg-amber-50/50' : ''}`}>
-                            <td className="py-2 px-3 font-medium text-gray-900">{cat.label}{isRaw && value === 0 && rawMaterialCostFromQuality > 0 ? <span className="text-xs text-amber-600 ml-1">(auto)</span> : ''}</td>
-                            <td className="py-2 px-3 text-right text-gray-700">{formatPKR(displayValue)}</td>
-                            <td className="py-2 px-3 text-right text-gray-500">{batch.rawQtyKg > 0 ? formatPKR(displayValue / batch.rawQtyKg) : '—'}</td>
-                            <td className="py-2 px-3 text-right text-gray-500">{total > 0 ? ((displayValue / total) * 100).toFixed(1) + '%' : '—'}</td>
+                            <td data-label="Cost Item" className="py-2 px-3 font-medium text-gray-900">{cat.label}{isRaw && value === 0 && rawMaterialCostFromQuality > 0 ? <span className="text-xs text-amber-600 ml-1">(auto)</span> : ''}</td>
+                            <td data-label="Amount (PKR)" className="py-2 px-3 text-right text-gray-700">{formatPKR(displayValue)}</td>
+                            <td data-label="Per kg" className="py-2 px-3 text-right text-gray-500">{batch.rawQtyKg > 0 ? formatPKR(displayValue / batch.rawQtyKg) : '—'}</td>
+                            <td data-label="%" className="py-2 px-3 text-right text-gray-500">{total > 0 ? ((displayValue / total) * 100).toFixed(1) + '%' : '—'}</td>
                           </tr>,
                           ...subRows.map((r, i) => (
                             <tr key={`${cat.key}-pb-${i}`} className="border-b border-gray-50 text-xs text-gray-500">
-                              <td className="py-1 px-3 pl-8">↳ {r.label}</td>
-                              <td className="py-1 px-3 text-right">{formatPKR(r.val)}</td>
-                              <td className="py-1 px-3 text-right">{batch.rawQtyKg > 0 ? formatPKR(r.val / batch.rawQtyKg) : '—'}</td>
-                              <td className="py-1 px-3 text-right">{total > 0 ? ((r.val / total) * 100).toFixed(1) + '%' : '—'}</td>
+                              <td data-label="Cost Item" className="py-1 px-3 pl-8">↳ {r.label}</td>
+                              <td data-label="Amount (PKR)" className="py-1 px-3 text-right">{formatPKR(r.val)}</td>
+                              <td data-label="Per kg" className="py-1 px-3 text-right">{batch.rawQtyKg > 0 ? formatPKR(r.val / batch.rawQtyKg) : '—'}</td>
+                              <td data-label="%" className="py-1 px-3 text-right">{total > 0 ? ((r.val / total) * 100).toFixed(1) + '%' : '—'}</td>
                             </tr>
                           )),
                         ];
@@ -1808,23 +1808,23 @@ export default function MillingBatchDetail() {
                   </tbody>
                   <tfoot>
                     <tr className="border-t-2 border-gray-300 bg-gray-50">
-                      <td className="py-2.5 px-3 font-bold text-gray-900">Total Batch Cost</td>
-                      <td className="py-2.5 px-3 text-right font-bold text-gray-900">{formatPKR(totalCosts > 0 ? totalCosts : effectiveRawCost)}</td>
-                      <td className="py-2.5 px-3 text-right font-semibold text-gray-700">{batch.rawQtyKg > 0 ? formatPKR((totalCosts > 0 ? totalCosts : effectiveRawCost) / batch.rawQtyKg) : '—'} /kg</td>
-                      <td className="py-2.5 px-3 text-right font-bold">100%</td>
+                      <td data-label="Cost Item" className="py-2.5 px-3 font-bold text-gray-900">Total Batch Cost</td>
+                      <td data-label="Total amount" className="py-2.5 px-3 text-right font-bold text-gray-900">{formatPKR(totalCosts > 0 ? totalCosts : effectiveRawCost)}</td>
+                      <td data-label="Per kg" className="py-2.5 px-3 text-right font-semibold text-gray-700">{batch.rawQtyKg > 0 ? formatPKR((totalCosts > 0 ? totalCosts : effectiveRawCost) / batch.rawQtyKg) : '—'} /kg</td>
+                      <td data-label="%" className="py-2.5 px-3 text-right font-bold">100%</td>
                     </tr>
                     {bpValue > 0 && (
                       <>
                         <tr className="bg-emerald-50">
-                          <td className="py-2 px-3 text-emerald-700 font-medium">Less: By-Product Recovery</td>
-                          <td className="py-2 px-3 text-right text-emerald-700 font-bold">- {formatPKR(bpValue)}</td>
+                          <td data-label="Cost Item" className="py-2 px-3 text-emerald-700 font-medium">Less: By-Product Recovery</td>
+                          <td data-label="By-product recovery" className="py-2 px-3 text-right text-emerald-700 font-bold">- {formatPKR(bpValue)}</td>
                           <td colSpan={2}></td>
                         </tr>
                         <tr className="bg-blue-50 border-t border-blue-200">
-                          <td className="py-2.5 px-3 font-bold text-blue-900">Net Cost (Finished Rice)</td>
-                          <td className="py-2.5 px-3 text-right font-bold text-blue-900">{formatPKR(readyRiceCost)}</td>
-                          <td className="py-2.5 px-3 text-right font-semibold text-blue-700">{formatPKR(netCostPerKG)} /KG</td>
-                          <td className="py-2.5 px-3 text-right font-semibold text-blue-700">{formatPKR(netCostPerKG * 40)} /Md</td>
+                          <td data-label="Cost Item" className="py-2.5 px-3 font-bold text-blue-900">Net Cost (Finished Rice)</td>
+                          <td data-label="Net amount" className="py-2.5 px-3 text-right font-bold text-blue-900">{formatPKR(readyRiceCost)}</td>
+                          <td data-label="Per kg" className="py-2.5 px-3 text-right font-semibold text-blue-700">{formatPKR(netCostPerKG)} /KG</td>
+                          <td data-label="Per Md" className="py-2.5 px-3 text-right font-semibold text-blue-700">{formatPKR(netCostPerKG * 40)} /Md</td>
                         </tr>
                       </>
                     )}
@@ -1842,7 +1842,7 @@ export default function MillingBatchDetail() {
             <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4">
               Internal Transfers
             </h3>
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto mobile-cards">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100">
@@ -1857,12 +1857,12 @@ export default function MillingBatchDetail() {
               <tbody>
                 {transfers.map((t) => (
                   <tr key={t.id} className="border-b border-gray-50 hover:bg-gray-50">
-                    <td className="py-2.5 px-3 text-gray-600">{t.date}</td>
-                    <td className="py-2.5 px-3 text-gray-900">{t.from}</td>
-                    <td className="py-2.5 px-3 text-gray-900">{t.to}</td>
-                    <td className="py-2.5 px-3 text-right font-medium text-gray-900">{t.qty}</td>
-                    <td className="py-2.5 px-3 text-gray-600">{t.type}</td>
-                    <td className="py-2.5 px-3">
+                    <td data-label="Date" className="py-2.5 px-3 text-gray-600">{t.date}</td>
+                    <td data-label="From" className="py-2.5 px-3 text-gray-900">{t.from}</td>
+                    <td data-label="To" className="py-2.5 px-3 text-gray-900">{t.to}</td>
+                    <td data-label="Qty" className="py-2.5 px-3 text-right font-medium text-gray-900">{t.qty}</td>
+                    <td data-label="Type" className="py-2.5 px-3 text-gray-600">{t.type}</td>
+                    <td data-label="Status" className="py-2.5 px-3">
                       <StatusBadge status={t.status} />
                     </td>
                   </tr>
