@@ -209,7 +209,7 @@ export default function LotCostSheet({ lot, companyProfile, linkedBatch, transac
         </div>
 
         {/* ===== COST BREAKDOWN TABLE ===== */}
-        <div className="border-x border-gray-200">
+        <div className="border-x border-gray-200 mobile-cards">
           <table className="w-full text-sm">
             <thead>
               <tr style={{ backgroundColor: '#1e3a5f' }}>
@@ -222,19 +222,19 @@ export default function LotCostSheet({ lot, companyProfile, linkedBatch, transac
             <tbody>
               {costItems.map((item, idx) => (
                 <tr key={item.label} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                  <td className="px-6 py-2 font-medium text-gray-900">{item.label}</td>
-                  <td className="px-6 py-2 text-right text-gray-700">{fmtPKR(item.value)}</td>
-                  <td className="px-6 py-2 text-right text-gray-500">{netKg > 0 ? fmtPKR(item.value / netKg) : '—'}</td>
-                  <td className="px-6 py-2 text-right text-gray-500">{totalDirectCosts > 0 ? ((item.value / totalDirectCosts) * 100).toFixed(1) : '0.0'}%</td>
+                  <td data-label="Cost Item" className="px-6 py-2 font-medium text-gray-900">{item.label}</td>
+                  <td data-label="Amount (PKR)" className="px-6 py-2 text-right text-gray-700">{fmtPKR(item.value)}</td>
+                  <td data-label="Per KG" className="px-6 py-2 text-right text-gray-500">{netKg > 0 ? fmtPKR(item.value / netKg) : '—'}</td>
+                  <td data-label="% of Total" className="px-6 py-2 text-right text-gray-500">{totalDirectCosts > 0 ? ((item.value / totalDirectCosts) * 100).toFixed(1) : '0.0'}%</td>
                 </tr>
               ))}
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-gray-300 bg-gray-100">
-                <td className="px-6 py-2.5 font-bold text-gray-900">Total Landed Cost</td>
-                <td className="px-6 py-2.5 text-right font-bold text-gray-900">{fmtPKR(landedTotal || totalDirectCosts)}</td>
-                <td className="px-6 py-2.5 text-right font-bold text-gray-900">{fmtPKR(landedKg)}</td>
-                <td className="px-6 py-2.5 text-right font-bold text-gray-900">100%</td>
+                <td className="mob-full px-6 py-2.5 font-bold text-gray-900">Total Landed Cost</td>
+                <td data-label="Total amount" className="px-6 py-2.5 text-right font-bold text-gray-900">{fmtPKR(landedTotal || totalDirectCosts)}</td>
+                <td data-label="Per KG" className="px-6 py-2.5 text-right font-bold text-gray-900">{fmtPKR(landedKg)}</td>
+                <td data-label="% of Total" className="px-6 py-2.5 text-right font-bold text-gray-900">100%</td>
               </tr>
             </tfoot>
           </table>
@@ -255,7 +255,7 @@ export default function LotCostSheet({ lot, companyProfile, linkedBatch, transac
 
         {/* ===== VEHICLE ARRIVALS ===== */}
         {vehicles.length > 0 && (
-          <div className="border-x border-t border-gray-200 px-6 py-3 bg-white">
+          <div className="border-x border-t border-gray-200 px-6 py-3 bg-white mobile-cards">
             <p className="text-[10px] font-semibold text-gray-500 uppercase mb-2">Vehicle Arrivals ({vehicles.length})</p>
             <table className="w-full text-xs">
               <thead>
@@ -269,17 +269,17 @@ export default function LotCostSheet({ lot, companyProfile, linkedBatch, transac
               <tbody>
                 {vehicles.map((v, i) => (
                   <tr key={v.id || i} className={i % 2 === 0 ? '' : 'bg-gray-50'}>
-                    <td className="py-1.5 font-mono font-bold text-gray-900">{v.vehicleNo}</td>
-                    <td className="py-1.5 text-gray-600">{v.driverName || '—'}</td>
-                    <td className="py-1.5 text-right text-gray-900">{v.weight_kg ? Math.round(parseFloat(v.weight_kg)).toLocaleString() : '—'}</td>
-                    <td className="py-1.5 text-gray-600">{fmtDate(v.arrivalDate)}</td>
+                    <td data-label="Vehicle No" className="py-1.5 font-mono font-bold text-gray-900">{v.vehicleNo}</td>
+                    <td data-label="Driver" className="py-1.5 text-gray-600">{v.driverName || '—'}</td>
+                    <td data-label="Weight (kg)" className="py-1.5 text-right text-gray-900">{v.weight_kg ? Math.round(parseFloat(v.weight_kg)).toLocaleString() : '—'}</td>
+                    <td data-label="Date" className="py-1.5 text-gray-600">{fmtDate(v.arrivalDate)}</td>
                   </tr>
                 ))}
               </tbody>
               <tfoot>
                 <tr className="border-t border-gray-200">
-                  <td className="py-1.5 font-bold text-gray-900" colSpan={2}>Total</td>
-                  <td className="py-1.5 text-right font-bold text-gray-900">{Math.round(vehicles.reduce((s, v) => s + (parseFloat(v.weight_kg) || 0), 0)).toLocaleString()} kg</td>
+                  <td className="mob-full py-1.5 font-bold text-gray-900" colSpan={2}>Total</td>
+                  <td data-label="Total weight" className="py-1.5 text-right font-bold text-gray-900">{Math.round(vehicles.reduce((s, v) => s + (parseFloat(v.weight_kg) || 0), 0)).toLocaleString()} kg</td>
                   <td></td>
                 </tr>
               </tfoot>
@@ -319,7 +319,7 @@ export default function LotCostSheet({ lot, companyProfile, linkedBatch, transac
 
           return (
             <>
-              <div className="border-x border-t border-gray-200 px-6 py-3 bg-white">
+              <div className="border-x border-t border-gray-200 px-6 py-3 bg-white mobile-cards">
                 <p className="text-[10px] font-semibold text-gray-500 uppercase mb-2">Sales Revenue</p>
                 {hasSales ? (
                   <>
@@ -339,14 +339,14 @@ export default function LotCostSheet({ lot, companyProfile, linkedBatch, transac
                       <tbody>
                         {sales.map((sale, i) => (
                           <tr key={sale.id || i} className={i % 2 === 0 ? '' : 'bg-gray-50'}>
-                            <td className="py-1.5 font-mono font-bold text-gray-900">{sale.sale_no || sale.saleNo}</td>
-                            <td className="py-1.5 text-gray-600">{sale.customer_name || sale.customerName || sale.buyer_name || sale.buyerName || '—'}</td>
-                            <td className="py-1.5 text-gray-600">{fmtDate(sale.sale_date || sale.saleDate)}</td>
-                            <td className="py-1.5 text-right text-gray-900">{Math.round(parseFloat(sale.quantity_kg || sale.quantityKg) || 0).toLocaleString()}</td>
-                            <td className="py-1.5 text-right text-gray-900">{fmtPKR(sale.rate_per_kg || sale.ratePerKg)}</td>
-                            <td className="py-1.5 text-right font-medium text-gray-900">{fmtPKR(sale.total_amount || sale.totalAmount)}</td>
-                            <td className="py-1.5 text-right text-gray-600">{fmtPKR(sale.landed_cost_total || sale.landedCostTotal)}</td>
-                            <td className={`py-1.5 text-right font-bold ${(parseFloat(sale.gross_profit || sale.grossProfit) || 0) >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                            <td data-label="Sale No" className="py-1.5 font-mono font-bold text-gray-900">{sale.sale_no || sale.saleNo}</td>
+                            <td data-label="Buyer" className="py-1.5 text-gray-600">{sale.customer_name || sale.customerName || sale.buyer_name || sale.buyerName || '—'}</td>
+                            <td data-label="Date" className="mob-hide py-1.5 text-gray-600">{fmtDate(sale.sale_date || sale.saleDate)}</td>
+                            <td data-label="Qty (KG)" className="py-1.5 text-right text-gray-900">{Math.round(parseFloat(sale.quantity_kg || sale.quantityKg) || 0).toLocaleString()}</td>
+                            <td data-label="Rate/KG" className="mob-hide py-1.5 text-right text-gray-900">{fmtPKR(sale.rate_per_kg || sale.ratePerKg)}</td>
+                            <td data-label="Revenue" className="py-1.5 text-right font-medium text-gray-900">{fmtPKR(sale.total_amount || sale.totalAmount)}</td>
+                            <td data-label="Cost" className="mob-hide py-1.5 text-right text-gray-600">{fmtPKR(sale.landed_cost_total || sale.landedCostTotal)}</td>
+                            <td data-label="Profit" className={`py-1.5 text-right font-bold ${(parseFloat(sale.gross_profit || sale.grossProfit) || 0) >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                               {fmtPKR(sale.gross_profit || sale.grossProfit)}
                             </td>
                           </tr>
@@ -354,12 +354,12 @@ export default function LotCostSheet({ lot, companyProfile, linkedBatch, transac
                       </tbody>
                       <tfoot>
                         <tr className="border-t border-gray-200">
-                          <td colSpan={3} className="py-1.5 font-bold text-gray-900">Total</td>
-                          <td className="py-1.5 text-right font-bold">{Math.round(totalSaleKg).toLocaleString()}</td>
-                          <td className="py-1.5 text-right font-bold">{fmtPKR(avgSaleRate)}</td>
-                          <td className="py-1.5 text-right font-bold">{fmtPKR(totalSaleRevenue)}</td>
-                          <td className="py-1.5 text-right font-bold">{fmtPKR(totalSaleCost)}</td>
-                          <td className={`py-1.5 text-right font-bold ${totalSaleProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{fmtPKR(totalSaleProfit)}</td>
+                          <td colSpan={3} className="mob-full py-1.5 font-bold text-gray-900">Total</td>
+                          <td data-label="Total qty" className="py-1.5 text-right font-bold">{Math.round(totalSaleKg).toLocaleString()}</td>
+                          <td data-label="Avg rate" className="py-1.5 text-right font-bold">{fmtPKR(avgSaleRate)}</td>
+                          <td data-label="Total revenue" className="py-1.5 text-right font-bold">{fmtPKR(totalSaleRevenue)}</td>
+                          <td data-label="Total cost" className="py-1.5 text-right font-bold">{fmtPKR(totalSaleCost)}</td>
+                          <td data-label="Total profit" className={`py-1.5 text-right font-bold ${totalSaleProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{fmtPKR(totalSaleProfit)}</td>
                         </tr>
                       </tfoot>
                     </table>

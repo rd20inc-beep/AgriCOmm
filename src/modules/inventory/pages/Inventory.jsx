@@ -187,7 +187,7 @@ export default function Inventory() {
       </div>
 
       {/* Lots Table */}
-      <div className="table-container">
+      <div className="table-container mobile-cards">
         <div className="table-scroll">
           <table className="w-full">
             <thead>
@@ -213,11 +213,11 @@ export default function Inventory() {
                   const groupValue = g.lots.reduce((s, l) => s + (parseFloat(l.landedCostTotal) || parseFloat(l.totalValue) || 0), 0);
                   return (
                     <tr key={`g-${g.key}`} className="bg-gradient-to-r from-emerald-50 to-blue-50 border-y border-emerald-100">
-                      <td colSpan={5} className="px-3 py-2 font-bold text-emerald-800 text-xs uppercase tracking-wider">
+                      <td colSpan={5} className="mob-full px-3 py-2 font-bold text-emerald-800 text-xs uppercase tracking-wider">
                         {g.label} <span className="text-gray-500 font-normal ml-2">· {g.lots.length} lot(s)</span>
                       </td>
-                      <td className="text-right tabular-nums font-bold text-emerald-800">{(fromKg(groupNetKg, displayUnit, 50) || 0).toLocaleString()}</td>
-                      <td colSpan={2} className="text-right tabular-nums text-emerald-800 font-semibold text-xs">{fmtPKR(groupValue)}</td>
+                      <td data-label="Group stock" className="text-right tabular-nums font-bold text-emerald-800">{(fromKg(groupNetKg, displayUnit, 50) || 0).toLocaleString()}</td>
+                      <td data-label="Group value" colSpan={2} className="text-right tabular-nums text-emerald-800 font-semibold text-xs">{fmtPKR(groupValue)}</td>
                       <td colSpan={3}></td>
                     </tr>
                   );
@@ -228,30 +228,30 @@ export default function Inventory() {
                 const bw = parseFloat(lot.bagWeightKg) || 50;
                 return (
                   <tr key={lot.id || idx}>
-                    <td><Link to={`/lot-inventory/${lot.lotNo || lot.id}`} className="font-medium text-blue-600 hover:text-blue-800">{lot.lotNo}</Link></td>
-                    <td>
+                    <td data-label="Lot No"><Link to={`/lot-inventory/${lot.lotNo || lot.id}`} className="font-medium text-blue-600 hover:text-blue-800">{lot.lotNo}</Link></td>
+                    <td data-label="Item / Variety">
                       <div className="text-gray-900 font-medium">{lot.itemName}</div>
                       {lot.variety && <div className="text-xs text-gray-400">{lot.variety}{lot.grade ? ` (${lot.grade})` : ''}</div>}
                       {lot.categoryName && <div className="text-[10px] text-emerald-600 font-medium uppercase tracking-wide">{lot.categoryName}</div>}
                     </td>
-                    <td className="text-gray-600 text-xs"><PartyLink type="supplier" id={lot.supplierId} name={lot.supplierName} /></td>
-                    <td className="text-gray-600 text-xs">{lot.warehouseName || '—'}</td>
-                    <td className="text-center">
+                    <td data-label="Supplier" className="text-gray-600 text-xs"><PartyLink type="supplier" id={lot.supplierId} name={lot.supplierName} /></td>
+                    <td data-label="Warehouse" className="mob-hide text-gray-600 text-xs">{lot.warehouseName || '—'}</td>
+                    <td data-label="Entity" className="mob-hide text-center">
                       <span className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold ${lot.entity === 'mill' ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'}`}>
                         {lot.entity === 'mill' ? 'Mill' : 'Export'}
                       </span>
                     </td>
-                    <td className="text-right tabular-nums font-medium">{(fromKg(netKg, displayUnit, bw) || 0).toLocaleString()}</td>
-                    <td className="text-right tabular-nums text-emerald-600 font-medium">{(fromKg(availKg, displayUnit, bw) || 0).toLocaleString()}</td>
-                    <td className="text-right tabular-nums text-xs">{fmtPKR(lot.landedCostTotal || lot.totalValue)}</td>
-                    <td className="text-center">
+                    <td data-label="Stock" className="text-right tabular-nums font-medium">{(fromKg(netKg, displayUnit, bw) || 0).toLocaleString()}</td>
+                    <td data-label="Available" className="text-right tabular-nums text-emerald-600 font-medium">{(fromKg(availKg, displayUnit, bw) || 0).toLocaleString()}</td>
+                    <td data-label="Value" className="text-right tabular-nums text-xs">{fmtPKR(lot.landedCostTotal || lot.totalValue)}</td>
+                    <td data-label="Quality" className="mob-hide text-center">
                       <div className="flex items-center justify-center gap-1 text-xs">
                         {lot.moisturePct && <span className="text-blue-600" title="Moisture">{lot.moisturePct}%M</span>}
                         {lot.brokenPct && <span className="text-amber-600" title="Broken">{lot.brokenPct}%B</span>}
                       </div>
                     </td>
-                    <td className="text-center"><StatusBadge status={lot.status} /></td>
-                    <td className="text-center">
+                    <td data-label="Status" className="text-center"><StatusBadge status={lot.status} /></td>
+                    <td data-label="Detail" className="text-center">
                       <Link to={`/lot-inventory/${lot.lotNo || lot.id}`} className="btn btn-ghost btn-sm"><Eye className="w-4 h-4" /></Link>
                     </td>
                   </tr>

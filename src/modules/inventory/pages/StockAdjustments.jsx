@@ -185,7 +185,7 @@ export default function StockAdjustments() {
             <span className="text-red-600">Discrepancies: <strong>{reconciliation.discrepancies?.length || 0}</strong></span>
           </div>
           {reconciliation.discrepancies?.length > 0 && (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto mobile-cards">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-xs uppercase text-gray-500">
@@ -198,10 +198,10 @@ export default function StockAdjustments() {
                 <tbody>
                   {reconciliation.discrepancies.map((d) => (
                     <tr key={d.lotId} className="border-b border-gray-100 hover:bg-red-50">
-                      <td className="py-2 font-medium text-blue-600">{d.lotNo}</td>
-                      <td className="py-2 text-right">{Math.round((d.systemQtyMT || 0) * 1000).toLocaleString()} kg</td>
-                      <td className="py-2 text-right">{d.ledgerQtyKg?.toFixed(0)} KG</td>
-                      <td className="py-2 text-right text-red-600 font-medium">{d.discrepancyKg?.toFixed(0)} KG</td>
+                      <td data-label="Lot" className="py-2 font-medium text-blue-600">{d.lotNo}</td>
+                      <td data-label="System (kg)" className="py-2 text-right">{Math.round((d.systemQtyMT || 0) * 1000).toLocaleString()} kg</td>
+                      <td data-label="Ledger (KG)" className="py-2 text-right">{d.ledgerQtyKg?.toFixed(0)} KG</td>
+                      <td data-label="Discrepancy" className="py-2 text-right text-red-600 font-medium">{d.discrepancyKg?.toFixed(0)} KG</td>
                     </tr>
                   ))}
                 </tbody>
@@ -220,7 +220,7 @@ export default function StockAdjustments() {
       />
 
       {/* Adjustments table */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mobile-cards">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-50 border-b text-xs uppercase tracking-wide text-gray-500">
@@ -248,14 +248,14 @@ export default function StockAdjustments() {
                   key={a.id}
                   className={`hover:bg-gray-50 ${isPending ? t.rowTint : ''}`}
                 >
-                  <td className="px-4 py-3 font-medium text-blue-600 align-top">{a.lot_no || `LOT-${a.lot_id}`}</td>
-                  <td className="px-4 py-3 align-top">
+                  <td data-label="Lot" className="px-4 py-3 font-medium text-blue-600 align-top">{a.lot_no || `LOT-${a.lot_id}`}</td>
+                  <td data-label="Type" className="px-4 py-3 align-top">
                     <AdjustmentTypeChip type={type} />
                   </td>
-                  <td className="px-4 py-3 text-right font-medium align-top">
+                  <td data-label="Qty (KG)" className="px-4 py-3 text-right font-medium align-top">
                     {parseFloat(a.quantity_kg)?.toLocaleString()} KG
                   </td>
-                  <td className="px-4 py-3 text-gray-600 max-w-[260px] align-top">
+                  <td data-label="Reason" className="mob-hide px-4 py-3 text-gray-600 max-w-[260px] align-top">
                     {a.reason ? (
                       <button
                         type="button"
@@ -273,16 +273,16 @@ export default function StockAdjustments() {
                       </button>
                     ) : '—'}
                   </td>
-                  <td className="px-4 py-3 text-right align-top">
+                  <td data-label="Cost Impact" className="mob-hide px-4 py-3 text-right align-top">
                     <span className={(parseFloat(a.total_cost_impact) || 0) > 0 ? 'text-red-600 font-medium' : 'text-gray-700'}>
                       {PKR(a.total_cost_impact)}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-gray-600 align-top">{a.requested_by_name || '—'}</td>
-                  <td className="px-4 py-3 text-center align-top">
+                  <td data-label="Requested By" className="mob-hide px-4 py-3 text-gray-600 align-top">{a.requested_by_name || '—'}</td>
+                  <td data-label="Status" className="px-4 py-3 text-center align-top">
                     <StatusBadge status={a.approval_status?.replace('_', ' ')} />
                   </td>
-                  <td className="px-4 py-3 text-center align-top">
+                  <td data-label="Actions" className="px-4 py-3 text-center align-top">
                     {isPending && (
                       <div className="flex gap-1 justify-center">
                         <button onClick={() => handleApprove(a.id)} className="p-1.5 text-emerald-600 bg-emerald-50 rounded hover:bg-emerald-100" title="Approve">
