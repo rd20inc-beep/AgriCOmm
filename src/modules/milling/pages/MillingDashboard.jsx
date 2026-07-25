@@ -690,7 +690,7 @@ export default function MillingDashboard() {
               {completed.length > 0 && (
                 <details className="mt-2">
                   <summary className="text-xs font-medium text-blue-600 cursor-pointer hover:text-blue-800">View batch-by-batch breakdown ({completed.length} batches)</summary>
-                  <div className="mt-3 overflow-x-auto">
+                  <div className="mt-3 overflow-x-auto mobile-cards">
                     <table className="w-full text-xs">
                       <thead><tr className="border-b border-gray-200">
                         <th className="text-left py-2 px-2 font-semibold text-gray-600">Batch</th>
@@ -710,14 +710,14 @@ export default function MillingDashboard() {
                           const bProfit = sb.profit != null ? sb.profit : (bRevenue - bCost);
                           return (
                             <tr key={b.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => navigate(`/milling/${b.id}`)}>
-                              <td className="py-2 px-2 font-medium text-blue-600">{b.id}{b.batchName && <span className="text-gray-400"> · {b.batchName}</span>}</td>
-                              <td className="py-2 px-2 text-right">{Math.round(b.rawQtyKg).toLocaleString()}</td>
-                              <td className="py-2 px-2 text-right">{Math.round(b.actualFinishedKg).toLocaleString()}</td>
-                              <td className="py-2 px-2 text-right">{b.yieldPct}%</td>
-                              <td className="py-2 px-2 text-right">{formatPKR(bCost)}</td>
-                              <td className="py-2 px-2 text-right">{b.totalCostPerKgFinished ? `Rs ${b.totalCostPerKgFinished.toFixed(2)}` : '—'}</td>
-                              <td className="py-2 px-2 text-right">{formatPKR(bRevenue)}</td>
-                              <td className={`py-2 px-2 text-right font-medium ${bProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{formatPKR(bProfit)}</td>
+                              <td data-label="Batch" className="py-2 px-2 font-medium text-blue-600">{b.id}{b.batchName && <span className="text-gray-400"> · {b.batchName}</span>}</td>
+                              <td data-label="Raw kg" className="mob-hide py-2 px-2 text-right">{Math.round(b.rawQtyKg).toLocaleString()}</td>
+                              <td data-label="Finished kg" className="py-2 px-2 text-right">{Math.round(b.actualFinishedKg).toLocaleString()}</td>
+                              <td data-label="Yield %" className="py-2 px-2 text-right">{b.yieldPct}%</td>
+                              <td data-label="Raw Cost" className="mob-hide py-2 px-2 text-right">{formatPKR(bCost)}</td>
+                              <td data-label="Cost/KG" className="mob-hide py-2 px-2 text-right">{b.totalCostPerKgFinished ? `Rs ${b.totalCostPerKgFinished.toFixed(2)}` : '—'}</td>
+                              <td data-label="Revenue" className="py-2 px-2 text-right">{formatPKR(bRevenue)}</td>
+                              <td data-label="Profit" className={`py-2 px-2 text-right font-medium ${bProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{formatPKR(bProfit)}</td>
                             </tr>
                           );
                         })}
@@ -731,7 +731,7 @@ export default function MillingDashboard() {
               {millExpenses.length > 0 && (
                 <details className="mt-3">
                   <summary className="text-xs font-medium text-amber-600 cursor-pointer hover:text-amber-800">View overhead expenses ({millExpenses.length} entries)</summary>
-                  <div className="mt-3 overflow-x-auto">
+                  <div className="mt-3 overflow-x-auto mobile-cards">
                     <table className="w-full text-xs">
                       <thead><tr className="border-b border-gray-200">
                         <th className="text-left py-2 px-2 font-semibold text-gray-600">Date</th>
@@ -742,10 +742,10 @@ export default function MillingDashboard() {
                       <tbody className="divide-y divide-gray-100">
                         {millExpenses.slice(0, 20).map(e => (
                           <tr key={e.id} className="hover:bg-gray-50">
-                            <td className="py-2 px-2">{e.expenseDate}</td>
-                            <td className="py-2 px-2 capitalize">{e.category}</td>
-                            <td className="py-2 px-2 text-gray-600">{e.description || '—'}</td>
-                            <td className="py-2 px-2 text-right font-medium">{formatPKR(parseFloat(e.amount))}</td>
+                            <td data-label="Date" className="py-2 px-2">{e.expenseDate}</td>
+                            <td data-label="Category" className="py-2 px-2 capitalize">{e.category}</td>
+                            <td data-label="Description" className="mob-hide py-2 px-2 text-gray-600">{e.description || '—'}</td>
+                            <td data-label="Amount" className="py-2 px-2 text-right font-medium">{formatPKR(parseFloat(e.amount))}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -762,7 +762,7 @@ export default function MillingDashboard() {
       {finishedAll.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4">Finished Rice — Stock Location</h2>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto mobile-cards">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200">
@@ -783,26 +783,26 @@ export default function MillingDashboard() {
                   const isAtExport = lot.entity === 'export';
                   return (
                     <tr key={lot.id || lot.lotNo} className="hover:bg-gray-50 cursor-pointer" onClick={() => navigate(`/lot-inventory/${lot.lotNo || lot.id}`)}>
-                      <td className="py-2 px-3">
+                      <td data-label="Lot" className="py-2 px-3">
                         <Link to={`/lot-inventory/${lot.lotNo || lot.id}`} className="font-medium text-blue-600 hover:underline">
                           {lot.lotNo}
                         </Link>
                       </td>
-                      <td className="py-2 px-3 text-gray-700">{lot.itemName || lot.productName || '—'}</td>
-                      <td className="py-2 px-3 text-gray-600"><PartyLink type="supplier" id={lot.supplierId} name={lot.supplierName} /></td>
-                      <td className="py-2 px-3 text-right font-medium">{Math.round(parseFloat(lot.qty) || 0).toLocaleString()} kg</td>
-                      <td className="py-2 px-3 text-right">
+                      <td data-label="Product" className="py-2 px-3 text-gray-700">{lot.itemName || lot.productName || '—'}</td>
+                      <td data-label="Supplier" className="mob-hide py-2 px-3 text-gray-600"><PartyLink type="supplier" id={lot.supplierId} name={lot.supplierName} /></td>
+                      <td data-label="Total" className="py-2 px-3 text-right font-medium">{Math.round(parseFloat(lot.qty) || 0).toLocaleString()} kg</td>
+                      <td data-label="In Mill" className="py-2 px-3 text-right">
                         {!isAtExport ? <span className="text-emerald-700 font-medium">{Math.round(avail).toLocaleString()} kg</span> : <span className="text-gray-400">—</span>}
                       </td>
-                      <td className="py-2 px-3 text-right">
+                      <td data-label="Reserved" className="mob-hide py-2 px-3 text-right">
                         {reserved > 0 ? <span className="text-amber-700 font-medium">{Math.round(reserved).toLocaleString()} kg</span> : <span className="text-gray-400">—</span>}
                       </td>
-                      <td className="py-2 px-3">
+                      <td data-label="Reserved For" className="mob-hide py-2 px-3">
                         {lot.reservedAgainst ? (
                           <OrderRefLink to={`/export/${lot.reservedAgainst}`} module="export_orders" className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded" plainClassName="text-xs font-medium text-gray-600 bg-gray-100 px-2 py-1 rounded">{lot.reservedAgainst}</OrderRefLink>
                         ) : <span className="text-gray-400">—</span>}
                       </td>
-                      <td className="py-2 px-3">
+                      <td data-label="Location" className="mob-hide py-2 px-3">
                         <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
                           isAtExport ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'
                         }`}>
@@ -866,7 +866,7 @@ export default function MillingDashboard() {
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4">
             Incoming Lots
           </h2>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto mobile-cards">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100">
@@ -883,30 +883,30 @@ export default function MillingDashboard() {
               <tbody>
                 {incomingLots.map((batch) => (
                   <tr key={batch.id} className="border-b border-gray-50 hover:bg-gray-50">
-                    <td className="py-2.5 px-2 font-medium text-gray-900">{batch.id}</td>
-                    <td className="py-2.5 px-2 text-gray-600 font-mono text-xs">{`TRK-${batch.id.replace('M-','')}`}</td>
-                    <td className="py-2.5 px-2 text-gray-600"><PartyLink type="supplier" id={batch.supplierId} name={batch.supplierName} /></td>
-                    <td className="py-2.5 px-2">
+                    <td data-label="Lot" className="py-2.5 px-2 font-medium text-gray-900">{batch.id}</td>
+                    <td data-label="Truck No" className="mob-hide py-2.5 px-2 text-gray-600 font-mono text-xs">{`TRK-${batch.id.replace('M-','')}`}</td>
+                    <td data-label="Supplier" className="py-2.5 px-2 text-gray-600"><PartyLink type="supplier" id={batch.supplierId} name={batch.supplierName} /></td>
+                    <td data-label="Sample" className="mob-hide py-2.5 px-2">
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
                         Approved
                       </span>
                     </td>
-                    <td className="py-2.5 px-2">
+                    <td data-label="Arrival" className="mob-hide py-2.5 px-2">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                         batch.arrivalAnalysis ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
                       }`}>
                         {batch.arrivalAnalysis ? 'Received' : 'Pending'}
                       </span>
                     </td>
-                    <td className={`py-2.5 px-2 text-right font-medium ${
+                    <td data-label="Var%" className={`py-2.5 px-2 text-right font-medium ${
                       batch.variancePct !== null && batch.variancePct > 1.0 ? 'text-red-600' : 'text-gray-600'
                     }`}>
                       {batch.variancePct !== null ? `${batch.variancePct}%` : '—'}
                     </td>
-                    <td className="py-2.5 px-2">
+                    <td data-label="Status" className="py-2.5 px-2">
                       <StatusBadge status={batch.varianceStatus || batch.status} />
                     </td>
-                    <td className="py-2.5 px-2">
+                    <td data-label="" className="py-2.5 px-2">
                       <Link
                         to={`/milling/${batch.id}`}
                         className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 text-xs font-medium"
@@ -927,7 +927,7 @@ export default function MillingDashboard() {
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4">
             Batch Production
           </h2>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto mobile-cards">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100">
@@ -945,20 +945,20 @@ export default function MillingDashboard() {
                     key={batch.id}
                     className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer"
                   >
-                    <td className="py-2.5 px-2">
+                    <td data-label="Batch" className="py-2.5 px-2">
                       <Link to={`/milling/${batch.id}`} className="font-medium text-blue-600 hover:text-blue-800">
                         {batch.id}
                       </Link>{batch.batchName && <span className="text-gray-400"> · {batch.batchName}</span>}
                     </td>
-                    <td className="py-2.5 px-2 text-right text-gray-600">{Math.round(batch.rawQtyKg).toLocaleString()}</td>
-                    <td className="py-2.5 px-2 text-right text-gray-600">{Math.round(batch.actualFinishedKg).toLocaleString()}</td>
-                    <td className="py-2.5 px-2 text-right text-gray-600">{Math.round(batch.brokenKg).toLocaleString()}</td>
-                    <td className={`py-2.5 px-2 text-right font-medium ${
+                    <td data-label="Raw kg" className="py-2.5 px-2 text-right text-gray-600">{Math.round(batch.rawQtyKg).toLocaleString()}</td>
+                    <td data-label="Finished kg" className="py-2.5 px-2 text-right text-gray-600">{Math.round(batch.actualFinishedKg).toLocaleString()}</td>
+                    <td data-label="Broken kg" className="mob-hide py-2.5 px-2 text-right text-gray-600">{Math.round(batch.brokenKg).toLocaleString()}</td>
+                    <td data-label="Yield%" className={`py-2.5 px-2 text-right font-medium ${
                       batch.yieldPct >= 75 ? 'text-emerald-600' : batch.yieldPct > 0 ? 'text-amber-600' : 'text-gray-400'
                     }`}>
                       {batch.yieldPct > 0 ? `${batch.yieldPct}%` : '—'}
                     </td>
-                    <td className="py-2.5 px-2">
+                    <td data-label="Status" className="py-2.5 px-2">
                       <StatusBadge status={batch.status} />
                     </td>
                   </tr>
