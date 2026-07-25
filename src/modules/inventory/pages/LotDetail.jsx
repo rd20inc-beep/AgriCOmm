@@ -961,7 +961,7 @@ export default function LotDetail() {
               <Link to="/local-sales" className="text-blue-600 hover:text-blue-800 text-sm mt-2 inline-block">Go to Local Sales</Link>
             </div>
           ) : (
-            <div className="table-container">
+            <div className="table-container mobile-cards">
               <div className="px-5 py-3 border-b border-gray-200">
                 <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">Sales from this Lot</h3>
               </div>
@@ -985,28 +985,28 @@ export default function LotDetail() {
                       const sm = parseFloat(sale.margin_pct) || 0;
                       return (
                         <tr key={sale.id}>
-                          <td className="font-medium text-blue-600">{sale.sale_no}</td>
-                          <td className="text-gray-600 text-xs">{sale.sale_date ? new Date(sale.sale_date).toLocaleDateString('en-GB', {day:'2-digit',month:'short',year:'numeric'}) : '—'}</td>
-                          <td className="text-gray-900">{sale.customer_name || sale.buyer_name || '—'}</td>
-                          <td className="text-right tabular-nums">{dv(parseFloat(sale.quantity_kg) || 0).toLocaleString()} {ul()}</td>
-                          <td className="text-right tabular-nums text-xs">{fmtPKR(sale.rate_per_kg)}</td>
-                          <td className="text-right tabular-nums text-xs">{parseFloat(sale.cost_per_kg) > 0 ? fmtPKR(sale.cost_per_kg) : '—'}</td>
-                          <td className="text-right tabular-nums font-medium">{fmtPKR(sale.total_amount)}</td>
-                          <td className="text-right tabular-nums">{parseFloat(sale.landed_cost_total) > 0 ? fmtPKR(sale.landed_cost_total) : '—'}</td>
-                          <td className={`text-right tabular-nums font-bold ${sp >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{parseFloat(sale.cost_per_kg) > 0 ? fmtPKR(sp) : '—'}</td>
-                          <td className={`text-right tabular-nums font-semibold text-xs ${sm >= 10 ? 'text-emerald-600' : sm >= 0 ? 'text-amber-600' : 'text-red-600'}`}>{parseFloat(sale.cost_per_kg) > 0 ? `${sm}%` : '—'}</td>
+                          <td data-label="Sale No" className="font-medium text-blue-600">{sale.sale_no}</td>
+                          <td data-label="Date" className="mob-hide text-gray-600 text-xs">{sale.sale_date ? new Date(sale.sale_date).toLocaleDateString('en-GB', {day:'2-digit',month:'short',year:'numeric'}) : '—'}</td>
+                          <td data-label="Buyer" className="text-gray-900">{sale.customer_name || sale.buyer_name || '—'}</td>
+                          <td data-label="Qty" className="text-right tabular-nums">{dv(parseFloat(sale.quantity_kg) || 0).toLocaleString()} {ul()}</td>
+                          <td data-label="Sale Rate/KG" className="mob-hide text-right tabular-nums text-xs">{fmtPKR(sale.rate_per_kg)}</td>
+                          <td data-label="Cost/KG" className="mob-hide text-right tabular-nums text-xs">{parseFloat(sale.cost_per_kg) > 0 ? fmtPKR(sale.cost_per_kg) : '—'}</td>
+                          <td data-label="Revenue" className="text-right tabular-nums font-medium">{fmtPKR(sale.total_amount)}</td>
+                          <td data-label="Cost" className="mob-hide text-right tabular-nums">{parseFloat(sale.landed_cost_total) > 0 ? fmtPKR(sale.landed_cost_total) : '—'}</td>
+                          <td data-label="Profit" className={`text-right tabular-nums font-bold ${sp >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{parseFloat(sale.cost_per_kg) > 0 ? fmtPKR(sp) : '—'}</td>
+                          <td data-label="Margin" className={`text-right tabular-nums font-semibold text-xs ${sm >= 10 ? 'text-emerald-600' : sm >= 0 ? 'text-amber-600' : 'text-red-600'}`}>{parseFloat(sale.cost_per_kg) > 0 ? `${sm}%` : '—'}</td>
                         </tr>
                       );
                     })}
                   </tbody>
                   <tfoot>
                     <tr className="border-t-2 border-gray-300 bg-gray-50">
-                      <td colSpan={3} className="font-bold text-gray-900">Total</td>
-                      <td className="text-right font-bold">{dv(totalSaleKg).toLocaleString()}</td>
+                      <td colSpan={3} className="mob-full font-bold text-gray-900">Total</td>
+                      <td data-label="Total qty" className="text-right font-bold">{dv(totalSaleKg).toLocaleString()}</td>
                       <td></td><td></td>
-                      <td className="text-right font-bold">{fmtPKR(totalSaleRevenue)}</td>
-                      <td className="text-right font-bold">{fmtPKR(totalSaleCost)}</td>
-                      <td className={`text-right font-bold ${totalSaleProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{fmtPKR(totalSaleProfit)}</td>
+                      <td data-label="Total revenue" className="text-right font-bold">{fmtPKR(totalSaleRevenue)}</td>
+                      <td data-label="Total cost" className="text-right font-bold">{fmtPKR(totalSaleCost)}</td>
+                      <td data-label="Total profit" className={`text-right font-bold ${totalSaleProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{fmtPKR(totalSaleProfit)}</td>
                       <td></td>
                     </tr>
                   </tfoot>
@@ -1185,7 +1185,7 @@ export default function LotDetail() {
           <div className="flex justify-end">
             <button onClick={() => setShowTxnModal(true)} className="btn btn-primary"><Plus className="w-4 h-4" /> Record Transaction</button>
           </div>
-          <div className="table-container">
+          <div className="table-container mobile-cards">
             <div className="table-scroll">
               <table className="w-full">
                 <thead>
@@ -1206,15 +1206,15 @@ export default function LotDetail() {
                     <tr><td colSpan={9} className="text-center py-8 text-gray-400">No transactions recorded</td></tr>
                   ) : transactions.map(t => (
                     <tr key={t.id}>
-                      <td className="text-gray-600 text-xs">{fmtDate(t.transactionDate)}</td>
-                      <td className="font-mono text-xs text-gray-500">{t.transactionNo}</td>
-                      <td><span className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold ${parseFloat(t.quantityKg) >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>{(t.transactionType || '').replace(/_/g, ' ')}</span></td>
-                      <td className="text-xs text-gray-500">{t.referenceNo || t.referenceModule || '—'}</td>
-                      <td className="text-right text-xs tabular-nums">{t.inputQty} {t.inputUnit}</td>
-                      <td className={`text-right font-medium tabular-nums ${parseFloat(t.quantityKg) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{parseFloat(t.quantityKg || 0).toLocaleString()}</td>
-                      <td className="text-right tabular-nums">{parseFloat(t.balanceKg || 0).toLocaleString()}</td>
-                      <td className="text-right tabular-nums text-xs">{t.costImpact ? fmtPKR(t.costImpact) : '—'}</td>
-                      <td className="text-xs text-gray-500 max-w-[200px] truncate">{t.remarks || '—'}</td>
+                      <td data-label="Date" className="text-gray-600 text-xs">{fmtDate(t.transactionDate)}</td>
+                      <td data-label="Txn No" className="mob-hide font-mono text-xs text-gray-500">{t.transactionNo}</td>
+                      <td data-label="Type"><span className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold ${parseFloat(t.quantityKg) >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>{(t.transactionType || '').replace(/_/g, ' ')}</span></td>
+                      <td data-label="Reference" className="mob-hide text-xs text-gray-500">{t.referenceNo || t.referenceModule || '—'}</td>
+                      <td data-label="Qty (input)" className="mob-hide text-right text-xs tabular-nums">{t.inputQty} {t.inputUnit}</td>
+                      <td data-label="Qty KG" className={`text-right font-medium tabular-nums ${parseFloat(t.quantityKg) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{parseFloat(t.quantityKg || 0).toLocaleString()}</td>
+                      <td data-label="Balance KG" className="text-right tabular-nums">{parseFloat(t.balanceKg || 0).toLocaleString()}</td>
+                      <td data-label="Cost Impact" className="mob-hide text-right tabular-nums text-xs">{t.costImpact ? fmtPKR(t.costImpact) : '—'}</td>
+                      <td data-label="Remarks" className="mob-hide text-xs text-gray-500 max-w-[200px] truncate">{t.remarks || '—'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -2008,7 +2008,7 @@ function LotVehiclesPanel({ lot, vehicles, onAdd, onRefresh, addToast }) {
           No vehicles recorded for this lot yet.
         </div>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead className="border-b border-gray-200">
               <tr className="text-left text-[11px] font-semibold text-gray-500 uppercase">
@@ -2024,22 +2024,22 @@ function LotVehiclesPanel({ lot, vehicles, onAdd, onRefresh, addToast }) {
             <tbody className="divide-y divide-gray-100">
               {safe.map(v => (
                 <tr key={v.id} className="hover:bg-gray-50">
-                  <td className="py-2 font-mono font-medium text-gray-900">{v.vehicle_no || '—'}</td>
-                  <td className="py-2 text-gray-700">
+                  <td data-label="Vehicle" className="py-2 font-mono font-medium text-gray-900">{v.vehicle_no || '—'}</td>
+                  <td data-label="Driver" className="mob-hide py-2 text-gray-700">
                     {v.driver_name || '—'}
                     {v.driver_phone && <span className="text-xs text-gray-400 ml-1">· {v.driver_phone}</span>}
                   </td>
-                  <td className="py-2 text-right tabular-nums font-medium">{Math.round(parseFloat(v.weight_kg) || 0).toLocaleString()}</td>
-                  <td className="py-2 text-right tabular-nums">{v.total_bags || '—'}</td>
-                  <td className="py-2 text-gray-600">{fmtDate(v.arrival_date)}</td>
-                  <td className="py-2 text-center">
+                  <td data-label="Weight (kg)" className="py-2 text-right tabular-nums font-medium">{Math.round(parseFloat(v.weight_kg) || 0).toLocaleString()}</td>
+                  <td data-label="Bags" className="py-2 text-right tabular-nums">{v.total_bags || '—'}</td>
+                  <td data-label="Date" className="mob-hide py-2 text-gray-600">{fmtDate(v.arrival_date)}</td>
+                  <td data-label="Status" className="py-2 text-center">
                     {v.batch_id ? (
                       <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700">In Batch</span>
                     ) : (
                       <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700">Pre-batch</span>
                     )}
                   </td>
-                  <td className="py-2 text-right">
+                  <td data-label="Actions" className="py-2 text-right">
                     {!v.batch_id && (
                       <button onClick={() => handleDelete(v)} className="text-red-600 hover:text-red-700" title="Remove">
                         <Trash2 className="w-3.5 h-3.5" />

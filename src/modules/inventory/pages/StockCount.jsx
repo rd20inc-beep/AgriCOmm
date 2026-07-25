@@ -63,7 +63,7 @@ export default function StockCount() {
         ) : counts.length === 0 ? (
           <p className="text-sm text-gray-400 py-16 text-center">No stock counts yet. Start one to reconcile your inventory.</p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto mobile-cards">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 text-left text-xs uppercase text-gray-500 bg-gray-50">
@@ -78,12 +78,12 @@ export default function StockCount() {
               <tbody>
                 {counts.map((c) => (
                   <tr key={c.id} onClick={() => setOpenId(c.id)} className="border-b border-gray-50 last:border-0 hover:bg-blue-50/50 cursor-pointer">
-                    <td className="px-4 py-2.5 font-medium text-gray-900">{c.count_no}</td>
-                    <td className="px-4 py-2.5 text-gray-600">{TYPE_LABEL[c.count_type] || c.count_type}</td>
-                    <td className="px-4 py-2.5 text-gray-600">{c.warehouse_name || 'All warehouses'}</td>
-                    <td className="px-4 py-2.5"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[c.status] || 'bg-gray-100 text-gray-600'}`}>{c.status}</span></td>
-                    <td className="px-4 py-2.5 text-gray-500">{c.counted_by_name || '—'}</td>
-                    <td className="px-4 py-2.5 text-right text-blue-600 text-xs font-medium">Open →</td>
+                    <td data-label="Count" className="px-4 py-2.5 font-medium text-gray-900">{c.count_no}</td>
+                    <td data-label="Type" className="mob-hide px-4 py-2.5 text-gray-600">{TYPE_LABEL[c.count_type] || c.count_type}</td>
+                    <td data-label="Warehouse" className="px-4 py-2.5 text-gray-600">{c.warehouse_name || 'All warehouses'}</td>
+                    <td data-label="Status" className="px-4 py-2.5"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[c.status] || 'bg-gray-100 text-gray-600'}`}>{c.status}</span></td>
+                    <td data-label="Counted by" className="mob-hide px-4 py-2.5 text-gray-500">{c.counted_by_name || '—'}</td>
+                    <td data-label="" className="px-4 py-2.5 text-right text-blue-600 text-xs font-medium">Open →</td>
                   </tr>
                 ))}
               </tbody>
@@ -207,7 +207,7 @@ function CountDetailDrawer({ countId, onClose, onChanged }) {
             </p>
           )}
 
-          <div className="border border-gray-200 rounded-lg overflow-hidden">
+          <div className="border border-gray-200 rounded-lg overflow-hidden mobile-cards">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 text-left text-xs uppercase text-gray-500 bg-gray-50">
@@ -226,20 +226,20 @@ function CountDetailDrawer({ countId, onClose, onChanged }) {
                   const busy = record.isPending && record.variables?.itemId === it.id;
                   return (
                     <tr key={it.id} className="border-b border-gray-50 last:border-0">
-                      <td className="px-3 py-2">
+                      <td data-label="Item" className="px-3 py-2">
                         <div className="font-medium text-gray-800">{it.item_name || it.lot_no || `Lot ${it.lot_id}`}</div>
                         {it.lot_no && it.item_name && <div className="text-[11px] text-gray-400">{it.lot_no}</div>}
                       </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-gray-600">{fmtMT(it.system_qty)}</td>
-                      <td className="px-3 py-2 text-right">
+                      <td data-label="On record" className="px-3 py-2 text-right tabular-nums text-gray-600">{fmtMT(it.system_qty)}</td>
+                      <td data-label="You counted" className="px-3 py-2 text-right">
                         <input type="number" step="0.001" disabled={completed} value={counted}
                           onChange={(e) => setDrafts((d) => ({ ...d, [it.id]: e.target.value }))}
                           className="w-24 border border-gray-300 rounded-md px-2 py-1 text-right text-sm disabled:bg-gray-50 disabled:text-gray-500" />
                       </td>
-                      <td className={`px-3 py-2 text-right tabular-nums font-medium ${variance == null ? 'text-gray-300' : variance === 0 ? 'text-gray-400' : variance > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                      <td data-label="Difference" className={`px-3 py-2 text-right tabular-nums font-medium ${variance == null ? 'text-gray-300' : variance === 0 ? 'text-gray-400' : variance > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                         {variance == null ? '—' : `${variance > 0 ? '+' : ''}${variance.toFixed(3)}`}
                       </td>
-                      <td className="px-3 py-2">
+                      <td data-label="" className="px-3 py-2">
                         {(() => {
                           // Review acts on the SAVED count (server variance), not the live draft.
                           const recordedVariance = n(it.variance_qty);
