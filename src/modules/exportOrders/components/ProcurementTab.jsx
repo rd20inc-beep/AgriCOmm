@@ -256,7 +256,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
             </span>
           )}
         </div>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-200">
@@ -279,7 +279,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
 
                   return (
                     <tr key={lot.id || idx} className="border-b border-gray-100 hover:bg-gray-50">
-                      <td className="py-2.5">
+                      <td data-label="Lot ID" className="py-2.5">
                         <Link
                           to={`/lot-inventory/${lot.lot_no || lot.id}`}
                           className="font-medium text-blue-600 hover:text-blue-800 hover:underline"
@@ -290,13 +290,13 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
                           <p className="text-xs text-gray-400 mt-0.5">{lot.variety} {lot.grade ? `(${lot.grade})` : ''}</p>
                         )}
                       </td>
-                      <td className="py-2.5 text-gray-700">{lot.product_name || lot.item_name || '\u2014'}</td>
-                      <td className="py-2.5 text-gray-700">{lot.supplier_name || lot.supplier_code || '\u2014'}</td>
-                      <td className="py-2.5 text-right font-medium text-gray-900">{Math.round(allocKg).toLocaleString()} kg</td>
-                      <td className="py-2.5 text-right text-gray-700">
+                      <td data-label="Product" className="py-2.5 text-gray-700">{lot.product_name || lot.item_name || '\u2014'}</td>
+                      <td data-label="Supplier" className="mob-hide py-2.5 text-gray-700">{lot.supplier_name || lot.supplier_code || '\u2014'}</td>
+                      <td data-label="Allocated" className="py-2.5 text-right font-medium text-gray-900">{Math.round(allocKg).toLocaleString()} kg</td>
+                      <td data-label="Rate/kg" className="mob-hide py-2.5 text-right text-gray-700">
                         {ratePerKg > 0 ? `PKR ${ratePerKgDisplay}` : '\u2014'}
                       </td>
-                      <td className="py-2.5 text-gray-700">
+                      <td data-label="Warehouse" className="mob-hide py-2.5 text-gray-700">
                         {lot.warehouse_name ? (
                           <span className="inline-flex items-center gap-1">
                             <Warehouse className="w-3 h-3 text-gray-400" />
@@ -304,7 +304,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
                           </span>
                         ) : '\u2014'}
                       </td>
-                      <td className="py-2.5 text-center">
+                      <td data-label="Status" className="py-2.5 text-center">
                         <StatusBadge status={lot.status} />
                       </td>
                     </tr>
@@ -335,7 +335,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
       {byproductLots.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Milling Byproducts</h3>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto mobile-cards">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200">
@@ -349,15 +349,15 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
               <tbody>
                 {byproductLots.map((lot, idx) => (
                   <tr key={lot.id || idx} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="py-2">
+                    <td data-label="Lot ID" className="py-2">
                       <Link to={`/lot-inventory/${lot.lot_no || lot.id}`} className="font-medium text-blue-600 hover:underline">
                         {lot.lot_no}
                       </Link>
                     </td>
-                    <td className="py-2 text-gray-700">{lot.product_name || lot.item_name}</td>
-                    <td className="py-2 text-right text-gray-900">{Math.round(parseFloat(lot.qty) || 0).toLocaleString()}</td>
-                    <td className="py-2 text-gray-700">{lot.warehouse_name || '\u2014'}</td>
-                    <td className="py-2 text-center"><StatusBadge status={lot.status} /></td>
+                    <td data-label="Product" className="py-2 text-gray-700">{lot.product_name || lot.item_name}</td>
+                    <td data-label="Qty kg" className="py-2 text-right text-gray-900">{Math.round(parseFloat(lot.qty) || 0).toLocaleString()}</td>
+                    <td data-label="Warehouse" className="mob-hide py-2 text-gray-700">{lot.warehouse_name || '\u2014'}</td>
+                    <td data-label="Status" className="py-2 text-center"><StatusBadge status={lot.status} /></td>
                   </tr>
                 ))}
               </tbody>

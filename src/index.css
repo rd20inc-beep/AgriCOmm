@@ -270,6 +270,13 @@ input, select, textarea { font-size: 14px; }
     min-width: 0;
     width: 100%;
   }
+  /* Allow `mobile-cards` directly ON a <table> (for bare tables with no wrapper
+     div). The descendant rules below still target thead/tbody/tr/td inside it. */
+  table.mobile-cards {
+    display: block;
+    min-width: 0;
+    width: 100%;
+  }
   .mobile-cards .table-scroll {
     overflow-x: visible;
   }

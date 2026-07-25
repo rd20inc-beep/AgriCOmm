@@ -307,7 +307,7 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Line Items ({order.items.length})</h3>
           </div>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto mobile-cards">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 text-left text-xs uppercase text-gray-500">
@@ -325,16 +325,16 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
               <tbody>
                 {order.items.map((it) => (
                   <tr key={it.id || it.lineNo} className="border-b border-gray-100 last:border-0">
-                    <td className="py-2 pr-3 text-gray-500">{it.lineNo}</td>
-                    <td className="py-2 pr-3 font-medium text-gray-900">{it.productName || '—'}</td>
-                    <td className="py-2 pr-3 text-gray-700">{it.bagBrand || order.bagBrand || '—'}</td>
-                    <td className="py-2 pr-3 text-gray-700">{it.hsCode || '—'}</td>
-                    <td className="py-2 pr-3 text-gray-700">{it.packing || '—'}</td>
+                    <td data-label="#" className="mob-hide py-2 pr-3 text-gray-500">{it.lineNo}</td>
+                    <td data-label="Product" className="py-2 pr-3 font-medium text-gray-900">{it.productName || '—'}</td>
+                    <td data-label="Brand" className="mob-hide py-2 pr-3 text-gray-700">{it.bagBrand || order.bagBrand || '—'}</td>
+                    <td data-label="HS Code" className="mob-hide py-2 pr-3 text-gray-700">{it.hsCode || '—'}</td>
+                    <td data-label="Packing" className="mob-hide py-2 pr-3 text-gray-700">{it.packing || '—'}</td>
                     {(() => {
                       const bagType = it.bagType || it.bag_type || order.bagType || order.bag_type;
                       const bagSize = it.bagSizeKg || it.bag_size_kg;
                       return (
-                        <td className="py-2 pr-3 text-gray-700 whitespace-nowrap">
+                        <td data-label="Bag Type / Size" className="mob-hide py-2 pr-3 text-gray-700 whitespace-nowrap">
                           {bagType && <span className="font-medium text-gray-900">{bagType}</span>}
                           {bagType && bagSize ? ' · ' : ''}
                           {bagSize ? `${bagSize} kg` : (!bagType ? '—' : '')}
@@ -342,18 +342,18 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
                         </td>
                       );
                     })()}
-                    <td className="py-2 pr-3 text-right text-gray-900">{it.qtyMT.toLocaleString(undefined, { maximumFractionDigits: 3 })}</td>
-                    <td className="py-2 pr-3 text-right text-gray-900">{formatCurrency(it.pricePerMT)}</td>
-                    <td className="py-2 pl-3 text-right font-semibold text-gray-900">{formatCurrency(it.lineTotal)}</td>
+                    <td data-label="Qty (MT)" className="py-2 pr-3 text-right text-gray-900">{it.qtyMT.toLocaleString(undefined, { maximumFractionDigits: 3 })}</td>
+                    <td data-label="Rate / MT" className="py-2 pr-3 text-right text-gray-900">{formatCurrency(it.pricePerMT)}</td>
+                    <td data-label="Line Total" className="py-2 pl-3 text-right font-semibold text-gray-900">{formatCurrency(it.lineTotal)}</td>
                   </tr>
                 ))}
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-gray-200">
-                  <td colSpan={6} className="py-2 pr-3 text-right text-xs uppercase text-gray-500 font-semibold">Total</td>
-                  <td className="py-2 pr-3 text-right font-bold text-gray-900">{order.qtyMT.toLocaleString(undefined, { maximumFractionDigits: 3 })}</td>
+                  <td colSpan={6} className="mob-full py-2 pr-3 text-right text-xs uppercase text-gray-500 font-semibold">Total</td>
+                  <td data-label="Total qty" className="py-2 pr-3 text-right font-bold text-gray-900">{order.qtyMT.toLocaleString(undefined, { maximumFractionDigits: 3 })}</td>
                   <td className="py-2 pr-3"></td>
-                  <td className="py-2 pl-3 text-right font-bold text-gray-900">{formatCurrency(order.contractValue)}</td>
+                  <td data-label="Contract value" className="py-2 pl-3 text-right font-bold text-gray-900">{formatCurrency(order.contractValue)}</td>
                 </tr>
               </tfoot>
             </table>
@@ -492,7 +492,7 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
       {/* Expected vs Actual Cost Snapshot */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Cost Snapshot (PKR)</h3>
-        <table className="w-full text-sm">
+        <table className="w-full text-sm mobile-cards">
           <thead>
             <tr className="border-b border-gray-200">
               <th className="text-left pb-2 font-semibold text-gray-600">Item</th>
@@ -514,15 +514,15 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
                 <>
                   {exportCostCategories.map(cat => (
                     <tr key={cat.key}>
-                      <td className="py-2 text-gray-600">{cat.label}</td>
-                      <td className="py-2 text-right text-gray-900">{est[cat.key] != null ? formatCost(est[cat.key]) : '\u2014'}</td>
-                      <td className="py-2 text-right text-gray-900">{formatCost(order.costs[cat.key] || 0)}</td>
+                      <td data-label="Item" className="py-2 text-gray-600">{cat.label}</td>
+                      <td data-label="Expected" className="py-2 text-right text-gray-900">{est[cat.key] != null ? formatCost(est[cat.key]) : '\u2014'}</td>
+                      <td data-label="Actual" className="py-2 text-right text-gray-900">{formatCost(order.costs[cat.key] || 0)}</td>
                     </tr>
                   ))}
                   <tr className="border-t-2 border-gray-300">
-                    <td className="py-2 font-semibold text-gray-900">Total</td>
-                    <td className="py-2 text-right font-semibold text-gray-900">{formatCost(estTotal)}</td>
-                    <td className="py-2 text-right font-semibold text-gray-900">{formatCost(totalCosts)}</td>
+                    <td data-label="Item" className="py-2 font-semibold text-gray-900">Total</td>
+                    <td data-label="Expected" className="py-2 text-right font-semibold text-gray-900">{formatCost(estTotal)}</td>
+                    <td data-label="Actual" className="py-2 text-right font-semibold text-gray-900">{formatCost(totalCosts)}</td>
                   </tr>
                 </>
               );
