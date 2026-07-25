@@ -96,7 +96,7 @@ export default function ServiceMillingPendingDispatch() {
               </div>
 
               <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto mobile-cards">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 text-gray-500 text-xs">
                       <tr>
@@ -113,9 +113,9 @@ export default function ServiceMillingPendingDispatch() {
                         ))}
                       {rows.length > 0 && (
                         <tr className="bg-gray-100 font-semibold text-gray-800">
-                          <td className="px-3 py-2">Total</td>
+                          <td className="mob-full px-3 py-2">Total</td>
                           <td className="px-3 py-2"></td>
-                          <td className="px-3 py-2 text-right tabular-nums text-amber-700">{kg(grand.pendingKg)}</td>
+                          <td data-label="Pending" className="px-3 py-2 text-right tabular-nums text-amber-700">{kg(grand.pendingKg)}</td>
                         </tr>
                       )}
                     </tbody>
@@ -133,23 +133,23 @@ function PendGroup({ r, open, toggle }) {
   return (
     <>
       <tr className="hover:bg-gray-50 cursor-pointer" onClick={toggle}>
-        <td className="px-3 py-2 font-medium text-gray-800">
+        <td data-label="Client" className="px-3 py-2 font-medium text-gray-800">
           <ChevronRight size={13} className={`inline transition-transform mr-1 text-gray-400 ${open ? 'rotate-90' : ''}`} />
           {r.key}<span className="text-gray-400 font-normal"> · {r.lots.length} lot{r.lots.length === 1 ? '' : 's'}</span>
         </td>
         <td className="px-3 py-2"></td>
-        <td className="px-3 py-2 text-right tabular-nums font-medium text-amber-700">{kg(r.pendingKg)}</td>
+        <td data-label="Pending" className="px-3 py-2 text-right tabular-nums font-medium text-amber-700">{kg(r.pendingKg)}</td>
       </tr>
       {open && r.lots.map(l => (
         <tr key={l.lotId} className="bg-gray-50/50 text-xs">
-          <td className="px-3 py-1.5 pl-8">
+          <td data-label="Lot" className="px-3 py-1.5 pl-8">
             <Link to={l.href} className="font-mono text-blue-600 hover:underline">{l.lotNo}</Link>
             {l.batchNo ? <span className="text-gray-400"> · {l.batchNo}</span> : ''}
             <span className="text-gray-400"> · {l.item}</span>
             {l.warehouseName ? <span className="text-gray-400"> · {l.warehouseName}</span> : ''}
           </td>
-          <td className={`px-3 py-1.5 text-right tabular-nums ${l.ageDays > 90 ? 'text-red-600 font-medium' : 'text-gray-500'}`}>{l.ageDays}</td>
-          <td className="px-3 py-1.5 text-right tabular-nums text-amber-700">{kg(l.pendingKg)}</td>
+          <td data-label="Age (days)" className={`px-3 py-1.5 text-right tabular-nums ${l.ageDays > 90 ? 'text-red-600 font-medium' : 'text-gray-500'}`}>{l.ageDays}</td>
+          <td data-label="Pending" className="px-3 py-1.5 text-right tabular-nums text-amber-700">{kg(l.pendingKg)}</td>
         </tr>
       ))}
     </>

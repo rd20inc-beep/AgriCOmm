@@ -69,7 +69,7 @@ export default function StockLedger() {
         </div>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-x-auto">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-x-auto mobile-cards">
         {isLoading ? (
           <div className="p-8 text-center text-gray-400 text-sm">Loading ledger…</div>
         ) : isError ? (
@@ -96,17 +96,17 @@ export default function StockLedger() {
             <tbody>
               {rows.map((r, i) => (
                 <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
-                  <td className="py-2 px-3 text-gray-600 whitespace-nowrap">{dt(r.date)}</td>
-                  <td className="py-2 px-3">{r.href ? <Link to={r.href} className="text-blue-600 hover:underline">{r.lotNo || '—'}</Link> : (r.lotNo || '—')}</td>
-                  <td className="py-2 px-3 text-gray-700">{r.label}</td>
-                  <td className="py-2 px-3 text-right tabular-nums text-emerald-700">{r.bucket === 'inward' ? n0(r.inKg) : '—'}</td>
-                  <td className="py-2 px-3 text-right tabular-nums text-gray-700">{r.bucket === 'outward' ? n0(r.outKg) : '—'}</td>
-                  <td className="py-2 px-3 text-right tabular-nums text-blue-700">{r.bucket === 'packing' ? n0(r.packedKg) : '—'}</td>
-                  <td className="py-2 px-3 text-right tabular-nums text-gray-700">{r.bucket === 'transfer' ? `${r.inKg > 0 ? '+' : '−'}${n0(r.inKg || r.outKg)}` : '—'}</td>
-                  <td className="py-2 px-3 text-right tabular-nums text-amber-700">{r.bucket === 'sales' ? n0(r.outKg) : '—'}</td>
-                  <td className="py-2 px-3 text-right tabular-nums font-medium text-gray-900">{n0(r.balanceKg)}</td>
-                  <td className="py-2 px-3 text-gray-500">{r.user || '—'}</td>
-                  <td className="py-2 px-3 text-gray-500">{r.reference || '—'}</td>
+                  <td data-label="Date" className="py-2 px-3 text-gray-600 whitespace-nowrap">{dt(r.date)}</td>
+                  <td data-label="Source Lot" className="py-2 px-3">{r.href ? <Link to={r.href} className="text-blue-600 hover:underline">{r.lotNo || '—'}</Link> : (r.lotNo || '—')}</td>
+                  <td data-label="Movement" className="py-2 px-3 text-gray-700">{r.label}</td>
+                  <td data-label="Inward" className="py-2 px-3 text-right tabular-nums text-emerald-700">{r.bucket === 'inward' ? n0(r.inKg) : '—'}</td>
+                  <td data-label="Outward" className="py-2 px-3 text-right tabular-nums text-gray-700">{r.bucket === 'outward' ? n0(r.outKg) : '—'}</td>
+                  <td data-label="Packing" className="mob-hide py-2 px-3 text-right tabular-nums text-blue-700">{r.bucket === 'packing' ? n0(r.packedKg) : '—'}</td>
+                  <td data-label="Transfer" className="mob-hide py-2 px-3 text-right tabular-nums text-gray-700">{r.bucket === 'transfer' ? `${r.inKg > 0 ? '+' : '−'}${n0(r.inKg || r.outKg)}` : '—'}</td>
+                  <td data-label="Sales" className="py-2 px-3 text-right tabular-nums text-amber-700">{r.bucket === 'sales' ? n0(r.outKg) : '—'}</td>
+                  <td data-label="Balance" className="py-2 px-3 text-right tabular-nums font-medium text-gray-900">{n0(r.balanceKg)}</td>
+                  <td data-label="User" className="mob-hide py-2 px-3 text-gray-500">{r.user || '—'}</td>
+                  <td data-label="Reference" className="mob-hide py-2 px-3 text-gray-500">{r.reference || '—'}</td>
                 </tr>
               ))}
             </tbody>

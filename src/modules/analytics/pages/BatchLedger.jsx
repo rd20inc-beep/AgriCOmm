@@ -184,7 +184,7 @@ export default function BatchLedger() {
 
 function Tbl({ head, rows, empty }) {
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto mobile-cards">
       <table className="w-full text-sm">
         <thead className="bg-gray-50 text-gray-500 text-xs">
           <tr>{head.map((h, i) => <th key={i} className={`px-3 py-2 font-medium ${h.r ? 'text-right' : 'text-left'}`}>{h.t || h}</th>)}</tr>
@@ -192,7 +192,7 @@ function Tbl({ head, rows, empty }) {
         <tbody className="divide-y divide-gray-100">
           {rows.length === 0
             ? <tr><td colSpan={head.length} className="px-3 py-6 text-center text-gray-400">{empty}</td></tr>
-            : rows.map((r, ri) => <tr key={ri} className="hover:bg-gray-50">{r.map((c, ci) => <td key={ci} className={`px-3 py-2 ${head[ci] && head[ci].r ? 'text-right tabular-nums' : ''}`}>{c}</td>)}</tr>)}
+            : rows.map((r, ri) => <tr key={ri} className="hover:bg-gray-50">{r.map((c, ci) => <td data-label={typeof head[ci]==='object'?(head[ci].t||''):head[ci]} key={ci} className={`px-3 py-2 ${head[ci] && head[ci].r ? 'text-right tabular-nums' : ''}`}>{c}</td>)}</tr>)}
         </tbody>
       </table>
     </div>

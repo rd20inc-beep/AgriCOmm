@@ -101,7 +101,7 @@ export default function ServiceMillingReconciliation() {
               </div>
 
               <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto mobile-cards">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 text-gray-500 text-xs">
                       <tr>
@@ -121,19 +121,19 @@ export default function ServiceMillingReconciliation() {
                         ? <tr><td colSpan={9} className="px-3 py-6 text-center text-gray-400">No service-milling batches yet.</td></tr>
                         : rows.map(r => (
                           <tr key={r.batchId} className={r.reconciled ? '' : 'bg-red-50/50'}>
-                            <td className="px-3 py-2">
+                            <td data-label="Batch / Client" className="px-3 py-2">
                               <Link to={r.href} className="font-medium text-blue-600 hover:underline">{r.batchNo}</Link>
                               {r.batchName ? <span className="text-gray-500"> — {r.batchName}</span> : ''}
                               <div className="text-[11px] text-gray-400">{r.clientName}</div>
                             </td>
-                            <td className="px-3 py-2 text-right tabular-nums">{kg(r.rawKg)}</td>
-                            <td className="px-3 py-2 text-right tabular-nums">{kg(r.milledKg)}</td>
-                            <td className="px-3 py-2 text-right tabular-nums">{kg(r.producedKg)}</td>
-                            <td className="px-3 py-2 text-right tabular-nums text-slate-600">{kg(r.dispatchedKg)}</td>
-                            <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{kg(r.onHandKg)}</td>
-                            <td className="px-3 py-2 text-right tabular-nums text-gray-500">{kg(r.millingLossKg)}</td>
-                            <td className={`px-3 py-2 text-right tabular-nums ${r.reconciled ? 'text-gray-400' : 'text-red-600 font-semibold'}`}>{kg(r.balanceKg)}</td>
-                            <td className="px-3 py-2 text-center">
+                            <td data-label="Raw" className="px-3 py-2 text-right tabular-nums">{kg(r.rawKg)}</td>
+                            <td data-label="Milled" className="px-3 py-2 text-right tabular-nums">{kg(r.milledKg)}</td>
+                            <td data-label="Produced" className="px-3 py-2 text-right tabular-nums">{kg(r.producedKg)}</td>
+                            <td data-label="Dispatched" className="px-3 py-2 text-right tabular-nums text-slate-600">{kg(r.dispatchedKg)}</td>
+                            <td data-label="On hand" className="px-3 py-2 text-right tabular-nums text-emerald-700">{kg(r.onHandKg)}</td>
+                            <td data-label="Mill loss" className="px-3 py-2 text-right tabular-nums text-gray-500">{kg(r.millingLossKg)}</td>
+                            <td data-label="Balance" className={`px-3 py-2 text-right tabular-nums ${r.reconciled ? 'text-gray-400' : 'text-red-600 font-semibold'}`}>{kg(r.balanceKg)}</td>
+                            <td data-label="Status" className="px-3 py-2 text-center">
                               {r.reconciled
                                 ? <CheckCircle size={15} className="inline text-emerald-500" />
                                 : <span className="inline-flex items-center gap-1 text-red-600 text-xs font-medium"><AlertTriangle size={13} /> Check</span>}
@@ -142,15 +142,15 @@ export default function ServiceMillingReconciliation() {
                         ))}
                       {rows.length > 0 && (
                         <tr className="bg-gray-100 font-semibold text-gray-800">
-                          <td className="px-3 py-2">Total</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{kg(grand.rawKg)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{kg(grand.milledKg)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{kg(grand.producedKg)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{kg(grand.dispatchedKg)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{kg(grand.onHandKg)}</td>
+                          <td className="mob-full px-3 py-2">Total</td>
+                          <td data-label="Raw" className="px-3 py-2 text-right tabular-nums">{kg(grand.rawKg)}</td>
+                          <td data-label="Milled" className="px-3 py-2 text-right tabular-nums">{kg(grand.milledKg)}</td>
+                          <td data-label="Produced" className="px-3 py-2 text-right tabular-nums">{kg(grand.producedKg)}</td>
+                          <td data-label="Dispatched" className="px-3 py-2 text-right tabular-nums">{kg(grand.dispatchedKg)}</td>
+                          <td data-label="On hand" className="px-3 py-2 text-right tabular-nums text-emerald-700">{kg(grand.onHandKg)}</td>
                           <td className="px-3 py-2"></td>
                           <td className="px-3 py-2"></td>
-                          <td className="px-3 py-2 text-center text-xs">{grand.unreconciled || 0} to check</td>
+                          <td data-label="Status" className="px-3 py-2 text-center text-xs">{grand.unreconciled || 0} to check</td>
                         </tr>
                       )}
                     </tbody>

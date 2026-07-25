@@ -120,7 +120,7 @@ export default function ServiceMillingStock() {
               </div>
 
               <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto mobile-cards">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 text-gray-500 text-xs">
                       <tr>
@@ -138,10 +138,10 @@ export default function ServiceMillingStock() {
                         ))}
                       {rows.length > 0 && (
                         <tr className="bg-gray-100 font-semibold text-gray-800">
-                          <td className="px-3 py-2">Total</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{kg(grand.producedKg)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{kg(grand.dispatchedKg)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{kg(grand.onHandKg)}</td>
+                          <td className="mob-full px-3 py-2">Total</td>
+                          <td data-label="Produced" className="px-3 py-2 text-right tabular-nums">{kg(grand.producedKg)}</td>
+                          <td data-label="Dispatched" className="px-3 py-2 text-right tabular-nums">{kg(grand.dispatchedKg)}</td>
+                          <td data-label="On hand" className="px-3 py-2 text-right tabular-nums text-emerald-700">{kg(grand.onHandKg)}</td>
                         </tr>
                       )}
                     </tbody>
@@ -159,24 +159,24 @@ function SmGroup({ r, open, toggle }) {
   return (
     <>
       <tr className="hover:bg-gray-50 cursor-pointer" onClick={toggle}>
-        <td className="px-3 py-2 font-medium text-gray-800">
+        <td data-label="Group" className="px-3 py-2 font-medium text-gray-800">
           <ChevronRight size={13} className={`inline transition-transform mr-1 text-gray-400 ${open ? 'rotate-90' : ''}`} />
           {r.key}<span className="text-gray-400 font-normal"> · {r.lots.length} lot{r.lots.length === 1 ? '' : 's'}</span>
         </td>
-        <td className="px-3 py-2 text-right tabular-nums">{kg(r.producedKg)}</td>
-        <td className="px-3 py-2 text-right tabular-nums text-slate-600">{kg(r.dispatchedKg)}</td>
-        <td className="px-3 py-2 text-right tabular-nums font-medium text-emerald-700">{kg(r.onHandKg)}</td>
+        <td data-label="Produced" className="px-3 py-2 text-right tabular-nums">{kg(r.producedKg)}</td>
+        <td data-label="Dispatched" className="px-3 py-2 text-right tabular-nums text-slate-600">{kg(r.dispatchedKg)}</td>
+        <td data-label="On hand" className="px-3 py-2 text-right tabular-nums font-medium text-emerald-700">{kg(r.onHandKg)}</td>
       </tr>
       {open && r.lots.map(l => (
         <tr key={l.lotId} className="bg-gray-50/50 text-xs">
-          <td className="px-3 py-1.5 pl-8">
+          <td data-label="Lot" className="px-3 py-1.5 pl-8">
             <Link to={l.href} className="font-mono text-blue-600 hover:underline">{l.lotNo}</Link>
             {l.batchNo ? <span className="text-gray-400"> · {l.batchNo}</span> : ''}
             <span className="text-gray-400"> · {l.item}{l.type === 'byproduct' ? ' (by-product)' : ''}</span>
           </td>
-          <td className="px-3 py-1.5 text-right tabular-nums">{kg(l.producedKg)}</td>
-          <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{kg(l.dispatchedKg)}</td>
-          <td className="px-3 py-1.5 text-right tabular-nums text-emerald-700">{kg(l.onHandKg)}</td>
+          <td data-label="Produced" className="px-3 py-1.5 text-right tabular-nums">{kg(l.producedKg)}</td>
+          <td data-label="Dispatched" className="px-3 py-1.5 text-right tabular-nums text-slate-600">{kg(l.dispatchedKg)}</td>
+          <td data-label="On hand" className="px-3 py-1.5 text-right tabular-nums text-emerald-700">{kg(l.onHandKg)}</td>
         </tr>
       ))}
     </>
