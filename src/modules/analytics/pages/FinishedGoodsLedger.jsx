@@ -118,7 +118,7 @@ export default function FinishedGoodsLedger() {
 
               {/* Grouped register */}
               <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto mobile-cards">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 text-gray-500 text-xs">
                       <tr>
@@ -138,12 +138,12 @@ export default function FinishedGoodsLedger() {
                         ))}
                       {rows.length > 0 && (
                         <tr className="bg-gray-100 font-semibold text-gray-800">
-                          <td className="px-3 py-2">Total</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{kg(grand.producedKg)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{kg(grand.soldKg)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{kg(grand.onHandKg)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums text-amber-600">{kg(grand.reservedKg)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{pkr(grand.valuePkr)}</td>
+                          <td className="mob-full px-3 py-2">Total</td>
+                          <td data-label="Produced" className="px-3 py-2 text-right tabular-nums">{kg(grand.producedKg)}</td>
+                          <td data-label="Sold" className="px-3 py-2 text-right tabular-nums">{kg(grand.soldKg)}</td>
+                          <td data-label="On hand" className="px-3 py-2 text-right tabular-nums text-emerald-700">{kg(grand.onHandKg)}</td>
+                          <td data-label="Reserved" className="px-3 py-2 text-right tabular-nums text-amber-600">{kg(grand.reservedKg)}</td>
+                          <td data-label="Value" className="px-3 py-2 text-right tabular-nums">{pkr(grand.valuePkr)}</td>
                         </tr>
                       )}
                     </tbody>
@@ -161,24 +161,24 @@ function FgGroup({ r, open, toggle }) {
   return (
     <>
       <tr className="hover:bg-gray-50 cursor-pointer" onClick={toggle}>
-        <td className="px-3 py-2 font-medium text-gray-800">
+        <td data-label="Output" className="px-3 py-2 font-medium text-gray-800">
           <ChevronRight size={13} className={`inline transition-transform mr-1 text-gray-400 ${open ? 'rotate-90' : ''}`} />
           {r.key}<span className="text-gray-400 font-normal"> · {r.type === 'byproduct' ? 'by-product' : 'finished'} · {r.lots.length} lot{r.lots.length === 1 ? '' : 's'}</span>
         </td>
-        <td className="px-3 py-2 text-right tabular-nums">{kg(r.producedKg)}</td>
-        <td className="px-3 py-2 text-right tabular-nums text-slate-600">{kg(r.soldKg)}</td>
-        <td className="px-3 py-2 text-right tabular-nums font-medium text-emerald-700">{kg(r.onHandKg)}</td>
-        <td className="px-3 py-2 text-right tabular-nums text-amber-600">{r.reservedKg > 0 ? kg(r.reservedKg) : '—'}</td>
-        <td className="px-3 py-2 text-right tabular-nums">{pkr(r.valuePkr)}</td>
+        <td data-label="Produced" className="px-3 py-2 text-right tabular-nums">{kg(r.producedKg)}</td>
+        <td data-label="Sold" className="px-3 py-2 text-right tabular-nums text-slate-600">{kg(r.soldKg)}</td>
+        <td data-label="On hand" className="px-3 py-2 text-right tabular-nums font-medium text-emerald-700">{kg(r.onHandKg)}</td>
+        <td data-label="Reserved" className="px-3 py-2 text-right tabular-nums text-amber-600">{r.reservedKg > 0 ? kg(r.reservedKg) : '—'}</td>
+        <td data-label="Value" className="px-3 py-2 text-right tabular-nums">{pkr(r.valuePkr)}</td>
       </tr>
       {open && r.lots.map(l => (
         <tr key={l.lotId} className="bg-gray-50/50 text-xs">
-          <td className="px-3 py-1.5 pl-8"><Link to={l.href} className="font-mono text-blue-600 hover:underline">{l.lotNo}</Link>{l.isBlend ? <span className="text-gray-400"> · blend</span> : ''}{l.variety ? <span className="text-gray-400"> · {l.variety}</span> : ''}</td>
-          <td className="px-3 py-1.5 text-right tabular-nums">{kg(l.producedKg)}</td>
-          <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{kg(l.soldKg)}</td>
-          <td className="px-3 py-1.5 text-right tabular-nums text-emerald-700">{kg(l.onHandKg)}</td>
-          <td className="px-3 py-1.5 text-right tabular-nums text-amber-600">{l.reservedKg > 0 ? kg(l.reservedKg) : '—'}</td>
-          <td className="px-3 py-1.5 text-right tabular-nums">{pkr(l.valuePkr)}</td>
+          <td data-label="Lot" className="px-3 py-1.5 pl-8"><Link to={l.href} className="font-mono text-blue-600 hover:underline">{l.lotNo}</Link>{l.isBlend ? <span className="text-gray-400"> · blend</span> : ''}{l.variety ? <span className="text-gray-400"> · {l.variety}</span> : ''}</td>
+          <td data-label="Produced" className="px-3 py-1.5 text-right tabular-nums">{kg(l.producedKg)}</td>
+          <td data-label="Sold" className="px-3 py-1.5 text-right tabular-nums text-slate-600">{kg(l.soldKg)}</td>
+          <td data-label="On hand" className="px-3 py-1.5 text-right tabular-nums text-emerald-700">{kg(l.onHandKg)}</td>
+          <td data-label="Reserved" className="px-3 py-1.5 text-right tabular-nums text-amber-600">{l.reservedKg > 0 ? kg(l.reservedKg) : '—'}</td>
+          <td data-label="Value" className="px-3 py-1.5 text-right tabular-nums">{pkr(l.valuePkr)}</td>
         </tr>
       ))}
     </>

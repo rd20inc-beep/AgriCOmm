@@ -106,7 +106,7 @@ export default function PayrollLedger() {
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
+      <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto mobile-cards">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-gray-500 text-xs">
             <tr>
@@ -129,16 +129,16 @@ export default function PayrollLedger() {
               <tr><td colSpan={10} className="px-3 py-8 text-center text-gray-400">No payroll lines match.</td></tr>
             ) : rows.map((r) => (
               <tr key={r.id} className="hover:bg-blue-50/40">
-                <td className="px-3 py-2 whitespace-nowrap text-gray-600">{dt(r.date)}</td>
-                <td className="px-3 py-2 text-gray-600">{r.period}</td>
-                <td className="px-3 py-2">{r.employeeHref ? <Link to={r.employeeHref} className="text-blue-600 hover:underline">{r.employee}</Link> : r.employee}</td>
-                <td className="px-3 py-2 text-gray-600">{r.role}</td>
-                <td className="px-3 py-2 text-gray-600">{r.department}</td>
-                <td className="px-3 py-2 text-right tabular-nums">{pkr(r.gross)}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-amber-700">{r.advanceDeducted ? pkr(r.advanceDeducted) : '—'}</td>
-                <td className="px-3 py-2 text-right tabular-nums font-medium">{pkr(r.net)}</td>
-                <td className="px-3 py-2 text-gray-600 capitalize">{r.payMethod}</td>
-                <td className="px-3 py-2"><span className="text-xs px-2 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-700">{r.status}</span></td>
+                <td data-label="Date" className="mob-hide px-3 py-2 whitespace-nowrap text-gray-600">{dt(r.date)}</td>
+                <td data-label="Month" className="px-3 py-2 text-gray-600">{r.period}</td>
+                <td data-label="Employee" className="px-3 py-2">{r.employeeHref ? <Link to={r.employeeHref} className="text-blue-600 hover:underline">{r.employee}</Link> : r.employee}</td>
+                <td data-label="Role" className="mob-hide px-3 py-2 text-gray-600">{r.role}</td>
+                <td data-label="Department" className="mob-hide px-3 py-2 text-gray-600">{r.department}</td>
+                <td data-label="Gross" className="px-3 py-2 text-right tabular-nums">{pkr(r.gross)}</td>
+                <td data-label="Advance ded." className="mob-hide px-3 py-2 text-right tabular-nums text-amber-700">{r.advanceDeducted ? pkr(r.advanceDeducted) : '—'}</td>
+                <td data-label="Net pay" className="px-3 py-2 text-right tabular-nums font-medium">{pkr(r.net)}</td>
+                <td data-label="Mode" className="mob-hide px-3 py-2 text-gray-600 capitalize">{r.payMethod}</td>
+                <td data-label="Status" className="px-3 py-2"><span className="text-xs px-2 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-700">{r.status}</span></td>
               </tr>
             ))}
           </tbody>
