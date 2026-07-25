@@ -213,6 +213,12 @@ export default function CreateExportOrder() {
     const { valid, errors } = validateForm(form, rules);
     setFormErrors(errors);
 
+    // #6 — a bank account is mandatory to create an export order (draft or not).
+    if (!form.bankAccountId) {
+      addToast('Select a company bank account for this order', 'error');
+      return false;
+    }
+
     if (!isDraft) {
       const itemsValid = items.length > 0 && items.every(it =>
         it.productId && itemQtyMT(it) > 0 && itemPrice(it) > 0
@@ -616,9 +622,9 @@ export default function CreateExportOrder() {
             </select>
           </div>
           <div className="form-group">
-            <label className="form-label">Company Bank Account <span className="text-gray-400 font-normal text-xs">— on documents</span></label>
-            <select value={form.bankAccountId || ''} onChange={e => set('bankAccountId', e.target.value)} className="form-input">
-              <option value="">Use export default</option>
+            <label className="form-label">Company Bank Account <span className="text-red-500">*</span> <span className="text-gray-400 font-normal text-xs">— on documents &amp; payments</span></label>
+            <select value={form.bankAccountId || ''} onChange={e => set('bankAccountId', e.target.value)} required className="form-input">
+              <option value="">Select a bank account…</option>
               {(bankAccountsList || []).filter(b => b.type !== 'cash').map(b => (
                 <option key={b.id} value={b.id}>{b.name}{b.bankName ? ` — ${b.bankName}` : ''}</option>
               ))}

@@ -361,6 +361,7 @@ async function createAwaitingAdvanceOrder() {
       shipment_eta: '2026-04-20',
       source: 'Internal Mill',
       status: 'Awaiting Advance',
+      bank_account_id: 1, // #6 — bank account is mandatory at creation
     },
   });
   const res = makeRes();

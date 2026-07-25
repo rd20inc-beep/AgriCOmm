@@ -147,12 +147,15 @@ export default function FinanceConfirmations() {
     const expectedAmount = type === 'advance'
       ? order.advanceExpected - order.advanceReceived
       : order.balanceExpected - order.balanceReceived;
+    // #6 — preselect the order's bank account (still changeable per-payment).
+    const preBank = order.bankAccountId || order.bank_account_id || '';
+    const preAcct = (bankAccountsList || []).find(a => String(a.id) === String(preBank));
     setFormData({
       receivedAmount: Math.max(0, expectedAmount),
       date: new Date().toISOString().split('T')[0],
       paymentMethod: 'Bank Transfer',
-      bankAccount: '',
-      bankAccountId: '',
+      bankAccount: preAcct ? preAcct.name : '',
+      bankAccountId: preBank ? String(preBank) : '',
       bankReference: '',
       notes: '',
     });

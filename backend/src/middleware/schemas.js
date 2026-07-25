@@ -57,8 +57,9 @@ const createExportOrder = Joi.object({
   packing_type: Joi.string().valid('retail', 'jumbo', 'container').default('retail'),
   palletized: Joi.boolean().default(false),
   payment_terms: Joi.string().allow('', null),
-  // Company bank account whose details print on this order's documents.
-  bank_account_id: Joi.number().integer().positive().allow(null),
+  // #6 — Company bank account whose details print on this order's documents and
+  // which its payments settle into. Mandatory at creation.
+  bank_account_id: Joi.number().integer().positive().required(),
   // Optional manual FX rate at creation (controller sets fx_rate_source='manual').
   booked_fx_rate: Joi.number().positive().allow(null),
   // Packing / receiving mode

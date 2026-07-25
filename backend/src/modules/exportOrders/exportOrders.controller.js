@@ -777,6 +777,15 @@ const exportOrderController = {
         });
       }
 
+      // #6 — the receiving bank account is mandatory at creation so every export
+      // order (and its payment documents) has a settlement account from the start.
+      if (!req.body.bank_account_id) {
+        return res.status(400).json({
+          success: false,
+          message: 'A bank account is required to create an export order.',
+        });
+      }
+
       // Batch 7 — container-capacity rule (only an explicit single bulk container).
       const capacityError = packingCapacityError(effectiveQtyMt, palletized, packing_type);
       if (capacityError) return res.status(400).json({ success: false, message: capacityError });
@@ -2022,6 +2031,9 @@ const exportOrderController = {
         }
 
         const advPayNo = await generatePaymentNo(trx, 'PAY');
+        // #6 — the receipt settles into the bank chosen for this payment; if none
+        // was supplied it defaults to the order's bank account (preselected).
+        const advBankId = bank_account_id || order.bank_account_id || null;
         await trx('payments').insert({
           payment_no: advPayNo,
           type: 'receipt',
@@ -2031,7 +2043,8 @@ const exportOrderController = {
           fx_rate: effectiveFxRate,
           base_amount_pkr: advancePkr,
           payment_method: payment_method ? payment_method.toLowerCase().replace(/\s+/g, '_') : null,
-          bank_account_id: bank_account_id || null,
+          // #6 — settle into the payment's chosen bank, defaulting to the order's.
+          bank_account_id: advBankId,
           bank_reference: bankRef,
           payment_date: payment_date || trx.fn.now(),
           notes: notes || `Advance payment for ${order.order_no}`,
@@ -2054,11 +2067,11 @@ const exportOrderController = {
         // Use the amount in the account's currency: PKR accounts get
         // the converted PKR amount; foreign-currency accounts that
         // match the order currency get the original amount.
-        if (bank_account_id) {
-          const bank = await trx('bank_accounts').where({ id: bank_account_id }).first();
+        if (advBankId) {
+          const bank = await trx('bank_accounts').where({ id: advBankId }).first();
           const credit = bank && bank.currency === orderCurrency ? confirmedAmount : advancePkr;
           await trx('bank_accounts')
-            .where({ id: bank_account_id })
+            .where({ id: advBankId })
             .increment('current_balance', credit);
         }
 
@@ -2243,6 +2256,8 @@ const exportOrderController = {
         }
 
         const balPayNo = await generatePaymentNo(trx, 'PAY');
+        // #6 — default the receipt's bank to the order's when not overridden.
+        const balBankId = bank_account_id || order.bank_account_id || null;
         await trx('payments').insert({
           payment_no: balPayNo,
           type: 'receipt',
@@ -2252,7 +2267,7 @@ const exportOrderController = {
           fx_rate: effectiveBalanceFxRate,
           base_amount_pkr: balancePkr,
           payment_method: payment_method ? payment_method.toLowerCase().replace(/\s+/g, '_') : null,
-          bank_account_id: bank_account_id || null,
+          bank_account_id: balBankId,
           bank_reference: bankRef,
           payment_date: payment_date || trx.fn.now(),
           notes: notes || `Balance payment for ${order.order_no}`,
@@ -2272,9 +2287,9 @@ const exportOrderController = {
         }
 
         // Credit bank account balance if a bank account was selected
-        if (bank_account_id) {
+        if (balBankId) {
           await trx('bank_accounts')
-            .where({ id: bank_account_id })
+            .where({ id: balBankId })
             .increment('current_balance', confirmedAmount);
         }
 
@@ -2386,7 +2401,8 @@ const exportOrderController = {
           fx_rate: fxEst || null,
           base_amount_pkr: settledAmount(amt * fxEst),
           payment_method: payment_method ? String(payment_method).toLowerCase().replace(/\s+/g, '_') : null,
-          bank_account_id: bank_account_id || null,
+          // #6 — default to the order's bank account when the recorder didn't pick one.
+          bank_account_id: bank_account_id || order.bank_account_id || null,
           payment_date: payment_date || trx.fn.now(),
           notes: notes || `${isAdvance ? 'Advance' : 'Balance'} receipt for ${order.order_no} — pending Finance confirmation`,
           created_by: req.user?.id || null,
