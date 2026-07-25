@@ -372,14 +372,14 @@ function AiAnalystDrawer() {
         <div className="rounded-lg border border-gray-200 overflow-hidden">
           {res.explanation && <p className="px-3 py-2 text-sm text-gray-700 border-b border-gray-100 bg-gray-50">{res.explanation}</p>}
           <div className="overflow-x-auto max-h-[50vh]">
-            <table className="w-full text-xs">
+            <table className="w-full text-xs mobile-cards">
               <thead className="bg-gray-50 text-gray-500 sticky top-0">
                 <tr>{(res.columns || []).map(c => <th key={c} className="px-2 py-1.5 text-left font-medium whitespace-nowrap">{c}</th>)}</tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {(res.rows || []).map((row, i) => (
                   <tr key={i} className="hover:bg-gray-50">
-                    {(res.columns || []).map(c => <td key={c} className="px-2 py-1.5 whitespace-nowrap">{row[c] == null ? '—' : String(row[c])}</td>)}
+                    {(res.columns || []).map(c => <td data-label={c} key={c} className="px-2 py-1.5 whitespace-nowrap">{row[c] == null ? '—' : String(row[c])}</td>)}
                   </tr>
                 ))}
                 {(res.rows || []).length === 0 && <tr><td colSpan={(res.columns || []).length || 1} className="px-2 py-6 text-center text-gray-400">No rows.</td></tr>}
@@ -577,14 +577,14 @@ function ReportBuilderDrawer() {
       {/* Preview */}
       {loading ? <Skeleton /> : (
         <div className="rounded-lg border border-gray-200 overflow-x-auto">
-          <table className="w-full text-xs">
+          <table className="w-full text-xs mobile-cards">
             <thead className="bg-gray-50 text-gray-500 sticky top-0">
               <tr>{cols.map(c => <th key={c.key} className={`px-2 py-1.5 font-medium ${c.align === 'right' ? 'text-right' : 'text-left'}`}>{c.label}</th>)}</tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {view.slice(0, 300).map((row, i) => (
                 <tr key={i} className="hover:bg-gray-50">
-                  {cols.map(c => <td key={c.key} className={`px-2 py-1.5 whitespace-nowrap ${c.align === 'right' ? 'text-right tabular-nums' : ''}`}>{c.accessor(row) || '—'}</td>)}
+                  {cols.map(c => <td data-label={c.label} key={c.key} className={`px-2 py-1.5 whitespace-nowrap ${c.align === 'right' ? 'text-right tabular-nums' : ''}`}>{c.accessor(row) || '—'}</td>)}
                 </tr>
               ))}
               {view.length === 0 && <tr><td colSpan={cols.length || 1} className="px-2 py-6 text-center text-gray-400">No rows.</td></tr>}
@@ -1263,13 +1263,13 @@ function SaleDetailSection({ saleId }) {
               fileBase={`sale-${data.sale?.saleNo || saleId}`} rows={items} columns={SALE_ITEM_COLS} />
           </div>
           <div className="rounded-lg border border-gray-200 overflow-x-auto">
-            <table className="w-full text-xs">
+            <table className="w-full text-xs mobile-cards">
               <thead className="bg-gray-50 text-gray-500"><tr><th className="px-2 py-1.5 text-left font-medium">Item</th><th className="px-2 py-1.5 text-left font-medium">Lot</th><th className="px-2 py-1.5 text-right font-medium">kg</th><th className="px-2 py-1.5 text-right font-medium">Rate/kg</th><th className="px-2 py-1.5 text-right font-medium">Value</th></tr></thead>
               <tbody className="divide-y divide-gray-100">
                 {items.map(it => (
-                  <tr key={it.id}><td className="px-2 py-1.5">{it.item || '—'}</td><td className="px-2 py-1.5">{it.href ? <Link to={it.href} className="font-mono text-blue-600 hover:underline">{it.lotNo}</Link> : (it.lotNo || '—')}</td><td className="px-2 py-1.5 text-right tabular-nums">{(it.quantityKg).toLocaleString()}</td><td className="px-2 py-1.5 text-right tabular-nums">{it.ratePerKg > 0 ? `Rs ${(it.ratePerKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td><td className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(it.totalAmount)}</td></tr>
+                  <tr key={it.id}><td data-label="Value" data-label="Rate/kg" data-label="kg" data-label="Lot" data-label="Item" className="px-2 py-1.5">{it.item || '—'}</td><td className="px-2 py-1.5">{it.href ? <Link to={it.href} className="font-mono text-blue-600 hover:underline">{it.lotNo}</Link> : (it.lotNo || '—')}</td><td className="px-2 py-1.5 text-right tabular-nums">{(it.quantityKg).toLocaleString()}</td><td className="px-2 py-1.5 text-right tabular-nums">{it.ratePerKg > 0 ? `Rs ${(it.ratePerKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td><td className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(it.totalAmount)}</td></tr>
                 ))}
-                <tr className="bg-gray-50 font-semibold"><td className="px-2 py-1.5" colSpan={2}>Total</td><td className="px-2 py-1.5 text-right tabular-nums">{Math.round(t.quantityKg).toLocaleString()}</td><td className="px-2 py-1.5" /><td className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(t.totalAmount)}</td></tr>
+                <tr className="mob-full bg-gray-50 font-semibold"><td className="px-2 py-1.5" colSpan={2}>Total</td><td className="px-2 py-1.5 text-right tabular-nums">{Math.round(t.quantityKg).toLocaleString()}</td><td className="px-2 py-1.5" /><td className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(t.totalAmount)}</td></tr>
               </tbody>
             </table>
           </div>
@@ -1331,7 +1331,7 @@ function PurchasesTab({ params, statementHref, openDoc }) {
         <SummaryCell label="Suppliers" value={String(new Set(rows.map(r => r.supplierName).filter(Boolean)).size)} />
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-sm mobile-cards">
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-600 uppercase tracking-wider">
               <th className="w-8 py-2.5 px-3" />
@@ -1352,13 +1352,13 @@ function PurchasesTab({ params, statementHref, openDoc }) {
               return (
                 <Fragment key={k}>
                   <tr onClick={() => setOpen(isOpen ? null : k)} className="hover:bg-gray-50 cursor-pointer">
-                    <td className="py-2.5 px-3 text-gray-400">{isOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}</td>
-                    <td className="py-2.5 px-3">{r.date ? new Date(r.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—'}</td>
-                    <td className="py-2.5 px-3 font-mono text-xs">{r.ref}</td>
-                    <td className="py-2.5 px-3">{href ? <Link to={href} onClick={(e) => e.stopPropagation()} className="font-medium text-blue-600 hover:underline">{sup}</Link> : <span className="font-medium">{sup}</span>}</td>
-                    <td className="py-2.5 px-3 text-xs text-gray-600 capitalize">{r.category || r.source}</td>
-                    <td className="py-2.5 px-3 text-right font-semibold text-gray-900">{fmtPKR(r.amountPkr)}</td>
-                    <td className="py-2.5 px-3"><StatusChip s={r.paymentStatus} /></td>
+                    <td data-label="" className="mob-hide py-2.5 px-3 text-gray-400">{isOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}</td>
+                    <td data-label="Date" className="py-2.5 px-3">{r.date ? new Date(r.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—'}</td>
+                    <td data-label="Ref" className="py-2.5 px-3 font-mono text-xs">{r.ref}</td>
+                    <td data-label="Supplier" className="py-2.5 px-3">{href ? <Link to={href} onClick={(e) => e.stopPropagation()} className="font-medium text-blue-600 hover:underline">{sup}</Link> : <span className="font-medium">{sup}</span>}</td>
+                    <td data-label="Category" className="mob-hide py-2.5 px-3 text-xs text-gray-600 capitalize">{r.category || r.source}</td>
+                    <td data-label="Amount" className="py-2.5 px-3 text-right font-semibold text-gray-900">{fmtPKR(r.amountPkr)}</td>
+                    <td data-label="Status" className="py-2.5 px-3"><StatusChip s={r.paymentStatus} /></td>
                   </tr>
                   {isOpen && (
                     <tr className="bg-gray-50/60">
@@ -1669,7 +1669,7 @@ function BatchMarginBreakdown({ b }) {
         <div className="space-y-1.5">
           <h4 className="text-sm font-semibold text-gray-700">By-product recovery by grade</h4>
           <div className="rounded-lg border border-gray-200 overflow-hidden">
-            <table className="w-full text-xs">
+            <table className="w-full text-xs mobile-cards">
               <thead>
                 <tr className="bg-gray-50 text-[10px] uppercase text-gray-500">
                   <th className="text-left px-2 py-1.5">Grade</th>
@@ -1686,20 +1686,20 @@ function BatchMarginBreakdown({ b }) {
                   const m = parseFloat(g.margin) || 0;
                   return (
                     <tr key={i}>
-                      <td className="px-2 py-1.5 font-medium text-gray-800">{gradeLabel(g.grade)}</td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">{Math.round(parseFloat(g.producedKg) || 0).toLocaleString()} kg</td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">Rs {(parseFloat(g.valuationPerKg) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                      <td className="px-2 py-1.5 text-right tabular-nums font-medium">{fmtPKR(g.valuationValue)}</td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">{soldV > 0 ? fmtPKR(soldV) : '—'}</td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">{soldV > 0 ? <span className={m >= 0 ? 'text-emerald-700' : 'text-red-700'}>{fmtPKR(m)}</span> : '—'}</td>
+                      <td data-label="Grade" className="px-2 py-1.5 font-medium text-gray-800">{gradeLabel(g.grade)}</td>
+                      <td data-label="Produced" className="px-2 py-1.5 text-right tabular-nums">{Math.round(parseFloat(g.producedKg) || 0).toLocaleString()} kg</td>
+                      <td data-label="Price/kg" className="mob-hide px-2 py-1.5 text-right tabular-nums">Rs {(parseFloat(g.valuationPerKg) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      <td data-label="Value" className="px-2 py-1.5 text-right tabular-nums font-medium">{fmtPKR(g.valuationValue)}</td>
+                      <td data-label="Sold" className="px-2 py-1.5 text-right tabular-nums">{soldV > 0 ? fmtPKR(soldV) : '—'}</td>
+                      <td data-label="Margin" className="px-2 py-1.5 text-right tabular-nums">{soldV > 0 ? <span className={m >= 0 ? 'text-emerald-700' : 'text-red-700'}>{fmtPKR(m)}</span> : '—'}</td>
                     </tr>
                   );
                 })}
                 <tr className="bg-gray-50 font-semibold text-gray-800">
-                  <td className="px-2 py-1.5">Total recovery</td>
+                  <td className="mob-full px-2 py-1.5">Total recovery</td>
                   <td className="px-2 py-1.5" />
                   <td className="px-2 py-1.5" />
-                  <td className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(b.byproductRecovery)}</td>
+                  <td data-label="By-product recovery" className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(b.byproductRecovery)}</td>
                   <td className="px-2 py-1.5" colSpan={2} />
                 </tr>
               </tbody>
@@ -1774,11 +1774,11 @@ function BatchLedgerSection({ batchId }) {
           <div>
             <p className="text-xs font-semibold text-gray-600 mb-1">Inputs — source rice lots</p>
             <div className="rounded-lg border border-gray-200 overflow-x-auto">
-              <table className="w-full text-xs">
+              <table className="w-full text-xs mobile-cards">
                 <thead className="bg-gray-50 text-gray-500"><tr><th className="px-2 py-1.5 text-left font-medium">Lot</th><th className="px-2 py-1.5 text-left font-medium">Rice</th><th className="px-2 py-1.5 text-left font-medium">Supplier</th><th className="px-2 py-1.5 text-right font-medium">MT</th><th className="px-2 py-1.5 text-right font-medium">Cost</th></tr></thead>
                 <tbody className="divide-y divide-gray-100">
                   {inputs.map((r, i) => (
-                    <tr key={i}><td className="px-2 py-1.5 font-mono">{r.href ? <Link to={r.href} className="text-blue-600 hover:underline">{r.lotNo}</Link> : r.lotNo}</td><td className="px-2 py-1.5">{r.item}{r.variety ? ` · ${r.variety}` : ''}</td><td className="px-2 py-1.5 text-gray-600">{r.supplier}</td><td className="px-2 py-1.5 text-right tabular-nums">{r.qtyMt.toFixed(2)}</td><td className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(r.costTotalPkr)}</td></tr>
+                    <tr key={i}><td data-label="Cost" data-label="MT" data-label="Supplier" data-label="Rice" data-label="Lot" className="px-2 py-1.5 font-mono">{r.href ? <Link to={r.href} className="text-blue-600 hover:underline">{r.lotNo}</Link> : r.lotNo}</td><td className="px-2 py-1.5">{r.item}{r.variety ? ` · ${r.variety}` : ''}</td><td className="px-2 py-1.5 text-gray-600">{r.supplier}</td><td className="px-2 py-1.5 text-right tabular-nums">{r.qtyMt.toFixed(2)}</td><td className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(r.costTotalPkr)}</td></tr>
                   ))}
                   {inputs.length === 0 && <tr><td colSpan={5} className="px-2 py-1.5 text-gray-400">No source lots recorded.</td></tr>}
                 </tbody>
@@ -1800,11 +1800,11 @@ function BatchLedgerSection({ batchId }) {
           <div>
             <p className="text-xs font-semibold text-gray-600 mb-1">Outputs — finished &amp; by-product</p>
             <div className="rounded-lg border border-gray-200 overflow-x-auto">
-              <table className="w-full text-xs">
+              <table className="w-full text-xs mobile-cards">
                 <thead className="bg-gray-50 text-gray-500"><tr><th className="px-2 py-1.5 text-left font-medium">Lot</th><th className="px-2 py-1.5 text-left font-medium">Output</th><th className="px-2 py-1.5 text-right font-medium">kg</th><th className="px-2 py-1.5 text-right font-medium">Cost/kg</th><th className="px-2 py-1.5 text-right font-medium">Value</th></tr></thead>
                 <tbody className="divide-y divide-gray-100">
                   {outputs.map((o, i) => (
-                    <tr key={i}><td className="px-2 py-1.5 font-mono">{o.href ? <Link to={o.href} className="text-blue-600 hover:underline">{o.lotNo}</Link> : o.lotNo}</td><td className="px-2 py-1.5">{o.item}<span className="text-gray-400"> · {o.type === 'byproduct' ? 'by-product' : 'finished'}</span></td><td className="px-2 py-1.5 text-right tabular-nums">{(o.kg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td><td className="px-2 py-1.5 text-right tabular-nums">{o.costPerKg > 0 ? `Rs ${(o.costPerKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td><td className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(o.valuePkr)}</td></tr>
+                    <tr key={i}><td data-label="Value" data-label="Cost/kg" data-label="kg" data-label="Output" data-label="Lot" className="px-2 py-1.5 font-mono">{o.href ? <Link to={o.href} className="text-blue-600 hover:underline">{o.lotNo}</Link> : o.lotNo}</td><td className="px-2 py-1.5">{o.item}<span className="text-gray-400"> · {o.type === 'byproduct' ? 'by-product' : 'finished'}</span></td><td className="px-2 py-1.5 text-right tabular-nums">{(o.kg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td><td className="px-2 py-1.5 text-right tabular-nums">{o.costPerKg > 0 ? `Rs ${(o.costPerKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td><td className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(o.valuePkr)}</td></tr>
                   ))}
                   {outputs.length === 0 && <tr><td colSpan={5} className="px-2 py-1.5 text-gray-400">No output lots yet.</td></tr>}
                 </tbody>
@@ -2062,7 +2062,7 @@ function LotLedgerSection({ lotId }) {
             footerNote="Running balance is the lot's net weight after each movement. Source: lot_transactions."
           />
           <div className="rounded-lg border border-gray-200 overflow-x-auto">
-            <table className="w-full text-xs">
+            <table className="w-full text-xs mobile-cards">
               <thead className="bg-gray-50 text-gray-500">
                 <tr>
                   <th className="px-2 py-1.5 text-left font-medium">Date</th>
@@ -2076,12 +2076,12 @@ function LotLedgerSection({ lotId }) {
               <tbody className="divide-y divide-gray-100">
                 {events.map(e => (
                   <tr key={e.id} className="hover:bg-gray-50">
-                    <td className="px-2 py-1.5 whitespace-nowrap text-gray-600">{e.date ? new Date(e.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—'}</td>
-                    <td className="px-2 py-1.5 font-medium text-gray-800">{e.label}</td>
-                    <td className="px-2 py-1.5 text-gray-600 max-w-[10rem] truncate">{e.href ? <Link to={e.href} className="text-blue-600 hover:underline">{e.counterparty || '—'}</Link> : (e.counterparty || '—')}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums text-emerald-700">{e.inKg ? Math.round(e.inKg).toLocaleString() : ''}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums text-red-700">{e.outKg ? Math.round(e.outKg).toLocaleString() : ''}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums font-medium">{Math.round(e.balanceKg).toLocaleString()}</td>
+                    <td data-label="Date" className="px-2 py-1.5 whitespace-nowrap text-gray-600">{e.date ? new Date(e.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—'}</td>
+                    <td data-label="Activity" className="px-2 py-1.5 font-medium text-gray-800">{e.label}</td>
+                    <td data-label="Counterparty" className="mob-hide px-2 py-1.5 text-gray-600 max-w-[10rem] truncate">{e.href ? <Link to={e.href} className="text-blue-600 hover:underline">{e.counterparty || '—'}</Link> : (e.counterparty || '—')}</td>
+                    <td data-label="In (kg)" className="px-2 py-1.5 text-right tabular-nums text-emerald-700">{e.inKg ? Math.round(e.inKg).toLocaleString() : ''}</td>
+                    <td data-label="Out (kg)" className="px-2 py-1.5 text-right tabular-nums text-red-700">{e.outKg ? Math.round(e.outKg).toLocaleString() : ''}</td>
+                    <td data-label="Balance" className="px-2 py-1.5 text-right tabular-nums font-medium">{Math.round(e.balanceKg).toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>
@@ -2675,7 +2675,7 @@ function FinishedGoodsLedgerSection({ entity, hideValue }) {
       </div>
       {rows.length === 0 ? <Empty msg="No outputs match this filter." /> : (
       <div className="rounded-lg border border-gray-200 overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-sm mobile-cards">
           <thead className="bg-gray-50 text-gray-500 text-xs">
             <tr><th className="px-3 py-2 text-left font-medium">Output</th><th className="px-3 py-2 text-right font-medium">Produced</th><th className="px-3 py-2 text-right font-medium">Sold</th><th className="px-3 py-2 text-right font-medium">On hand</th><th className="px-3 py-2 text-right font-medium">Reserved</th>{!hideValue && <th className="px-3 py-2 text-right font-medium">Value</th>}</tr>
           </thead>
@@ -2683,32 +2683,32 @@ function FinishedGoodsLedgerSection({ entity, hideValue }) {
             {rows.map((r) => (
               <Fragment key={r.key}>
                 <tr className="hover:bg-gray-50 cursor-pointer" onClick={() => setExp(e => ({ ...e, [r.key]: !e[r.key] }))}>
-                  <td className="px-3 py-2 font-medium text-gray-800"><ChevronRight size={13} className={`inline transition-transform mr-1 text-gray-400 ${exp[r.key] ? 'rotate-90' : ''}`} />{gradeLabel(r.key)}<span className="text-gray-400 font-normal"> · {r.type === 'byproduct' ? 'by-product' : 'finished'} · {r.lots.length} lot{r.lots.length === 1 ? '' : 's'}</span></td>
-                  <td className="px-3 py-2 text-right tabular-nums">{kg(r.producedKg)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-600">{kg(r.soldKg)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums font-medium text-emerald-700">{kg(r.onHandKg)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-amber-600">{r.reservedKg > 0 ? kg(r.reservedKg) : '—'}</td>
-                  {!hideValue && <td className="px-3 py-2 text-right tabular-nums">{fmtPKR(r.valuePkr)}</td>}
+                  <td data-label="Output" className="px-3 py-2 font-medium text-gray-800"><ChevronRight size={13} className={`inline transition-transform mr-1 text-gray-400 ${exp[r.key] ? 'rotate-90' : ''}`} />{gradeLabel(r.key)}<span className="text-gray-400 font-normal"> · {r.type === 'byproduct' ? 'by-product' : 'finished'} · {r.lots.length} lot{r.lots.length === 1 ? '' : 's'}</span></td>
+                  <td data-label="Produced" className="px-3 py-2 text-right tabular-nums">{kg(r.producedKg)}</td>
+                  <td data-label="Sold" className="px-3 py-2 text-right tabular-nums text-slate-600">{kg(r.soldKg)}</td>
+                  <td data-label="On hand" className="px-3 py-2 text-right tabular-nums font-medium text-emerald-700">{kg(r.onHandKg)}</td>
+                  <td data-label="Reserved" className="mob-hide px-3 py-2 text-right tabular-nums text-amber-600">{r.reservedKg > 0 ? kg(r.reservedKg) : '—'}</td>
+                  {!hideValue && <td data-label="Value" className="px-3 py-2 text-right tabular-nums">{fmtPKR(r.valuePkr)}</td>}
                 </tr>
                 {exp[r.key] && r.lots.map(l => (
                   <tr key={l.lotId} className="bg-gray-50/50 text-xs">
-                    <td className="px-3 py-1.5 pl-8"><Link to={l.href} className="font-mono text-blue-600 hover:underline">{l.lotNo}</Link>{l.isBlend ? <span className="text-gray-400"> · blend</span> : ''}{l.variety ? <span className="text-gray-400"> · {l.variety}</span> : ''}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{kg(l.producedKg)}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{kg(l.soldKg)}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-emerald-700">{kg(l.onHandKg)}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-amber-600">{l.reservedKg > 0 ? kg(l.reservedKg) : '—'}</td>
-                    {!hideValue && <td className="px-3 py-1.5 text-right tabular-nums">{fmtPKR(l.valuePkr)}</td>}
+                    <td data-label="Lot" className="px-3 py-1.5 pl-8"><Link to={l.href} className="font-mono text-blue-600 hover:underline">{l.lotNo}</Link>{l.isBlend ? <span className="text-gray-400"> · blend</span> : ''}{l.variety ? <span className="text-gray-400"> · {l.variety}</span> : ''}</td>
+                    <td data-label="Produced" className="px-3 py-1.5 text-right tabular-nums">{kg(l.producedKg)}</td>
+                    <td data-label="Sold" className="px-3 py-1.5 text-right tabular-nums text-slate-600">{kg(l.soldKg)}</td>
+                    <td data-label="On hand" className="px-3 py-1.5 text-right tabular-nums text-emerald-700">{kg(l.onHandKg)}</td>
+                    <td data-label="Reserved" className="mob-hide px-3 py-1.5 text-right tabular-nums text-amber-600">{l.reservedKg > 0 ? kg(l.reservedKg) : '—'}</td>
+                    {!hideValue && <td data-label="Value" className="px-3 py-1.5 text-right tabular-nums">{fmtPKR(l.valuePkr)}</td>}
                   </tr>
                 ))}
               </Fragment>
             ))}
             <tr className="bg-gray-100 font-semibold text-gray-800">
-              <td className="px-3 py-2">Total</td>
-              <td className="px-3 py-2 text-right tabular-nums">{kg(g.producedKg)}</td>
-              <td className="px-3 py-2 text-right tabular-nums">{kg(g.soldKg)}</td>
-              <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{kg(g.onHandKg)}</td>
-              <td className="px-3 py-2 text-right tabular-nums text-amber-600">{kg(g.reservedKg)}</td>
-              {!hideValue && <td className="px-3 py-2 text-right tabular-nums">{fmtPKR(g.valuePkr)}</td>}
+              <td className="mob-full px-3 py-2">Total</td>
+              <td data-label="Produced" className="px-3 py-2 text-right tabular-nums">{kg(g.producedKg)}</td>
+              <td data-label="Sold" className="px-3 py-2 text-right tabular-nums">{kg(g.soldKg)}</td>
+              <td data-label="On hand" className="px-3 py-2 text-right tabular-nums text-emerald-700">{kg(g.onHandKg)}</td>
+              <td data-label="Reserved" className="px-3 py-2 text-right tabular-nums text-amber-600">{kg(g.reservedKg)}</td>
+              {!hideValue && <td data-label="Value" className="px-3 py-2 text-right tabular-nums">{fmtPKR(g.valuePkr)}</td>}
             </tr>
           </tbody>
         </table>
@@ -2765,19 +2765,19 @@ function InventoryMovementLedgerSection({ entity, hideValue }) {
       </div>
       {loading ? <Skeleton /> : rows.length === 0 ? <Empty msg="No movements recorded for this filter." /> : (
         <div className="rounded-lg border border-gray-200 overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm mobile-cards">
             <thead className="bg-gray-50 text-gray-500 text-xs">
               <tr><th className="px-3 py-2 text-left font-medium">Date</th><th className="px-3 py-2 text-left font-medium">Movement</th><th className="px-3 py-2 text-left font-medium">Lot</th><th className="px-3 py-2 text-left font-medium">Where</th><th className="px-3 py-2 text-right font-medium">Qty (kg)</th>{!hideValue && <th className="px-3 py-2 text-right font-medium">Cost</th>}</tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {rows.map(r => (
                 <tr key={r.id} className="hover:bg-gray-50">
-                  <td className="px-3 py-1.5 whitespace-nowrap text-gray-600">{r.date ? new Date(r.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—'}</td>
-                  <td className="px-3 py-1.5 font-medium text-gray-800">{r.label}</td>
-                  <td className="px-3 py-1.5">{r.lotId ? <Link to={r.href || `/lot-inventory/${r.lotId}`} className="font-mono text-blue-600 hover:underline">{r.lotNo || `#${r.lotId}`}</Link> : (r.batchNo ? <Link to={r.href} className="text-blue-600 hover:underline">{r.batchNo}</Link> : '—')}</td>
-                  <td className="px-3 py-1.5 text-gray-500 text-xs">{[r.fromWh, r.toWh].filter(Boolean).join(' → ') || r.reference || '—'}</td>
-                  <td className={`px-3 py-1.5 text-right tabular-nums ${r.direction === 'out' ? 'text-red-700' : 'text-emerald-700'}`}>{r.direction === 'out' ? '−' : '+'}{Math.round(r.qtyKg).toLocaleString()}</td>
-                  {!hideValue && <td className="px-3 py-1.5 text-right tabular-nums text-gray-600">{r.costPkr > 0 ? fmtPKR(r.costPkr) : '—'}</td>}
+                  <td data-label="Date" className="px-3 py-1.5 whitespace-nowrap text-gray-600">{r.date ? new Date(r.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—'}</td>
+                  <td data-label="Movement" className="px-3 py-1.5 font-medium text-gray-800">{r.label}</td>
+                  <td data-label="Lot" className="px-3 py-1.5">{r.lotId ? <Link to={r.href || `/lot-inventory/${r.lotId}`} className="font-mono text-blue-600 hover:underline">{r.lotNo || `#${r.lotId}`}</Link> : (r.batchNo ? <Link to={r.href} className="text-blue-600 hover:underline">{r.batchNo}</Link> : '—')}</td>
+                  <td data-label="Where" className="mob-hide px-3 py-1.5 text-gray-500 text-xs">{[r.fromWh, r.toWh].filter(Boolean).join(' → ') || r.reference || '—'}</td>
+                  <td data-label="Qty (kg)" className={`px-3 py-1.5 text-right tabular-nums ${r.direction === 'out' ? 'text-red-700' : 'text-emerald-700'}`}>{r.direction === 'out' ? '−' : '+'}{Math.round(r.qtyKg).toLocaleString()}</td>
+                  {!hideValue && <td data-label="Cost" className="px-3 py-1.5 text-right tabular-nums text-gray-600">{r.costPkr > 0 ? fmtPKR(r.costPkr) : '—'}</td>}
                 </tr>
               ))}
             </tbody>
@@ -2957,7 +2957,7 @@ function Table({ head, align = [], rows, rowClick }) {
   if (!rows || rows.length === 0) return <Empty msg="No rows." />;
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-sm">
+      <table className="w-full text-sm mobile-cards">
         <thead>
           <tr className="border-b border-gray-200 bg-gray-50">
             {head.map((h, i) => (
@@ -2972,7 +2972,7 @@ function Table({ head, align = [], rows, rowClick }) {
               <tr key={ri} onClick={onClick}
                 className={`hover:bg-gray-50 ${onClick ? 'cursor-pointer' : ''}`}>
                 {row.map((cell, ci) => (
-                  <td key={ci} className={`text-${align[ci] || 'left'} py-2.5 px-3 text-gray-800`}>{cell}</td>
+                  <td data-label={head[ci]} key={ci} className={`text-${align[ci] || 'left'} py-2.5 px-3 text-gray-800`}>{cell}</td>
                 ))}
               </tr>
             );
