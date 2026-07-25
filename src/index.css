@@ -628,20 +628,20 @@ input, select, textarea { font-size: 14px; }
 .sidebar-scroll:hover::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.32); }
 
 /* ===== EXPORT DOCUMENT A4 PREVIEW ===== */
-/* Frame the editable export-document preview (DocumentCenter) as an A4 sheet so
-   what's on screen reads like the printed/PDF page: a centred white page at the
-   A4 printable width on a subtle backdrop. The doc's own inline max-width
-   (~A4) is respected; this only adds the page framing + fills to full width so
-   the preview matches the server-rendered A4 PDF. Portrait by default;
-   .doc-a4-preview-landscape widens the sheet for the Proforma (landscape). */
+/* Frame the editable export-document preview (DocumentCenter) as the printed
+   page: a centred white A4 LANDSCAPE sheet (281mm printable width) on a subtle
+   backdrop, full-width tables, 12px readable floor — so on-screen matches the
+   server-rendered A4 landscape PDF. Shrinks to the panel width on narrow
+   screens (max-width:100%) so there is no horizontal scroll. */
 .doc-a4-preview { background: #eef0f3; padding: 16px; }
-.doc-a4-preview .agri-doc { max-width: 100%; margin: 0 auto; }
+.doc-a4-preview .agri-doc { max-width: 100%; margin: 0 auto; font-size: 12px; }
 .doc-a4-preview .agri-doc > div {
-  width: 190mm;
+  width: 281mm;
   max-width: 100%;
   margin: 0 auto !important;
   background: #fff;
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.15);
   box-sizing: border-box;
 }
-.doc-a4-preview-landscape .agri-doc > div { width: 277mm; }
+.doc-a4-preview .agri-doc table { width: 100%; max-width: 100%; }
+.doc-a4-preview .agri-doc td, .doc-a4-preview .agri-doc th { overflow-wrap: anywhere; }

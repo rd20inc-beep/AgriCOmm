@@ -62,57 +62,46 @@ async function htmlToPdf(html) {
     // Let the on-load fit script settle before capturing.
     await page.evaluate(() => new Promise((r) => setTimeout(r, 200)));
 
-    // Fit-to-one-page. The frontend print HTML tries to fit oversized content
-    // with CSS `zoom`, but page.pdf() does NOT honour `zoom` in pagination — the
-    // result is shrunk text + blank space / overflow (the "not A4-appropriate"
-    // bug). So neutralise that and use puppeteer's NATIVE `scale`, which IS
-    // honoured. To also fill the WIDTH (uniform scale alone would leave side
-    // margins), widen the layout by 1/scale first, so after scaling it lands at
-    // full width AND one page height. Widening reduces height (less wrapping), so
-    // iterate to converge. Short docs pin the footer to the page bottom via the
-    // flex fill; genuinely multi-page docs (> ~1.45 pages) flow normally.
+    // Page fitting — NO down-scaling. The document must print at its real size
+    // (≥12px text); shrinking to force one page is forbidden. Render at scale 1:
+    // a short document has its footer pinned to the page bottom (fill the
+    // printable height); a document taller than one page flows onto additional
+    // A4 pages (table headers repeat) instead of being scaled down.
     //
-    // Derive the printable area from the document's OWN @page rule so the fit
-    // math is correct for any caller (export docs use 10mm margins; other doc
-    // types may differ). Orientation from `@page ... landscape`; margin from
-    // `@page ... margin: Nmm`. Falls back to A4 portrait / 10mm.
+    // Printable height derived from the document's OWN @page rule (orientation +
+    // margin) so it is correct for the landscape export docs and any other
+    // caller. Must match buildDocHtml.
     const pageBlock = (String(html || '').match(/@page[^{]*\{[^}]*\}/i) || [''])[0];
     const landscape = /landscape/i.test(pageBlock);
-    const marginMm = (() => { const m = pageBlock.match(/margin:\s*([\d.]+)mm/i); return m ? parseFloat(m[1]) : 10; })();
-    const pageWmm = landscape ? 297 : 210;
+    const marginMm = (() => { const m = pageBlock.match(/margin:\s*([\d.]+)mm/i); return m ? parseFloat(m[1]) : 8; })();
     const pageHmm = landscape ? 210 : 297;
     const A4_H_PX = Math.round((pageHmm - 2 * marginMm) * 96 / 25.4); // printable height
-    const A4_W_MM = pageWmm - 2 * marginMm;                           // printable width
-    let scale = 1;
     try {
-      let h = await page.evaluate(() => {
+      const h = await page.evaluate(() => {
         const fit = document.getElementById('agri-fit'); if (fit) { fit.style.zoom = '1'; fit.style.width = '100%'; }
         const doc = document.querySelector('.agri-doc > div'); if (doc) doc.style.minHeight = '';
         return (fit || document.body).scrollHeight;
       });
-      if (h > A4_H_PX && h <= A4_H_PX * 1.45) {
-        let s = 1;
-        for (let i = 0; i < 6; i++) {
-          h = await page.evaluate((sc, mm) => {
-            const w = (mm / sc) + 'mm';
-            document.documentElement.style.width = w; document.body.style.width = w;
-            const fit = document.getElementById('agri-fit'); if (fit) { fit.style.zoom = '1'; fit.style.width = '100%'; }
-            const doc = document.querySelector('.agri-doc > div'); if (doc) doc.style.minHeight = '';
-            return (fit || document.body).scrollHeight;
-          }, s, A4_W_MM);
-          const ns = Math.max(0.55, Math.min(1, (A4_H_PX - 8) / h)); // 8px safety vs a 2nd page
-          if (Math.abs(ns - s) < 0.004) { s = ns; break; }
-          s = ns;
-        }
-        scale = s;
-      } else if (h <= A4_H_PX) {
+      if (h <= A4_H_PX) {
+        // Short doc — fill the page so the footer sits at the bottom.
         await page.evaluate((pagePx) => {
           const doc = document.querySelector('.agri-doc > div'); if (doc) doc.style.minHeight = pagePx + 'px';
         }, A4_H_PX);
       }
-    } catch (_) { /* fall back to unscaled */ }
+      // Taller than one page → flow onto additional pages (no scaling).
+    } catch (_) { /* fall back to native pagination */ }
 
-    const pdf = await page.pdf({ preferCSSPageSize: true, printBackground: true, scale });
+    // Explicit A4 landscape + CSS page size + backgrounds, native scale 1 (never
+    // shrink). preferCSSPageSize honours the document's @page (A4 landscape 8mm);
+    // format/landscape/margin are declared too as an explicit, safe fallback.
+    const pdf = await page.pdf({
+      format: 'A4',
+      landscape,
+      printBackground: true,
+      preferCSSPageSize: true,
+      scale: 1,
+      margin: { top: `${marginMm}mm`, right: `${marginMm}mm`, bottom: `${marginMm}mm`, left: `${marginMm}mm` },
+    });
     return pdf;
   } finally {
     await browser.close().catch(() => {});
